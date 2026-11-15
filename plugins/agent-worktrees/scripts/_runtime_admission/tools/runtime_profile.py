@@ -14,12 +14,12 @@ from pathlib import Path
 import re
 import sys
 import time
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, cast
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.tags import parse_tag
-from packaging.utils import canonicalize_name, parse_wheel_filename
+from packaging.tags import Tag, parse_tag
+from packaging.utils import canonicalize_name, parse_wheel_filename as parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
@@ -40,7 +40,7 @@ _TARGET_FAMILY = (
 )
 
 
-def _fields(value: Any, keys: set[str], label: str) -> dict:
+def _fields(value: Any, keys: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or value.keys() != keys:
         raise ProfileError(f"{label}: expected exactly {sorted(keys)}")
     return value
@@ -55,13 +55,13 @@ def _text(value: Any, label: str) -> str:
 def _reference(value: Any, label: str) -> str:
     if not _REFERENCE.fullmatch(_text(value, label)):
         raise ProfileError(f"{label}: expected an opaque reference, not a URL/path")
-    return value
+    return cast(str, value)
 
 
 def _digest(value: Any, label: str) -> str:
     if not _HASH.fullmatch(_text(value, label)):
         raise ProfileError(f"{label}: expected a SHA-256 content identity")
-    return value
+    return cast(str, value)
 
 
 def _strings(value: Any, label: str, deadline: float, *, unique: bool = True) -> list[str]:
@@ -79,7 +79,7 @@ def _strings(value: Any, label: str, deadline: float, *, unique: bool = True) ->
 
 def _extras(value: Any, label: str, deadline: float) -> set[str]:
     items = _strings(value, label, deadline)
-    normalized = set()
+    normalized: set[str] = set()
     for item in items:
         _check_deadline(deadline)
         normalized.add(canonicalize_name(item, validate=True))
@@ -101,7 +101,7 @@ def _requirement(text: str, deadline: float) -> Requirement:
     return requirement
 
 
-def _tag(text: str, max_tags: int, deadline: float):
+def _tag(text: str, max_tags: int, deadline: float) -> frozenset[Tag]:
     canonical, _ = bounded_tag(text, limit=max_tags, deadline=deadline)
     result = parse_tag(canonical)
     _check_deadline(deadline)
@@ -126,7 +126,7 @@ def _target(value: Any, max_tags: int, deadline: float) -> None:
     _reference(value["device"], "target device")
 
 
-def _wheel_filename(filename: str, max_tags: int, deadline: float):
+def _wheel_filename(filename: str, max_tags: int, deadline: float) -> tuple[str, Version, tuple[()] | tuple[int, str], frozenset[Tag]]:
     if not filename.endswith(".whl") or "/" in filename or "\\" in filename:
         raise ProfileError("wheel filename must be a .whl basename")
     prefix, python, abi, platform = filename[:-4].rsplit("-", 3)
@@ -136,11 +136,11 @@ def _wheel_filename(filename: str, max_tags: int, deadline: float):
     return parse_wheel_filename(prefix + "-" + canonical + ".whl")
 
 
-def _closure(record: dict, max_tags: int, deadline: float) -> None:
+def _closure(record: dict[str, Any], max_tags: int, deadline: float) -> None:
     entries = record["wheels"]
     if not isinstance(entries, list) or not entries:
         raise ProfileError("closure: expected at least one wheel")
-    wheels: dict[str, tuple[dict, list[Requirement]]] = {}
+    wheels: dict[str, tuple[dict[str, Any], list[Requirement]]] = {}
     target = record["target"]
     compatible = {tag for text in target["tags"] for tag in _tag(text, max_tags, deadline)}
     for entry in entries:
@@ -149,7 +149,7 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
             "name", "version", "filename", "sha256", "requires_python",
             "provides_extras", "selected_extras", "requires_dist",
         }, "wheel")
-        name = canonicalize_name(_text(entry["name"], "name"), validate=True)
+        name: str = canonicalize_name(_text(entry["name"], "name"), validate=True)
         if name in wheels:
             raise ProfileError(f"duplicate normalized distribution: {name}")
         version = Version(_text(entry["version"], "version"))
@@ -183,13 +183,16 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
             raise ProfileError(f"{name}: selected extras do not match full root closure")
 
 
-def _reachable(wheels: dict, roots: list[str], environment: dict, deadline: float) -> dict[str, set[str]]:
+def _reachable(
+    wheels: dict[str, tuple[dict[str, Any], list[Requirement]]],
+    roots: list[str], environment: dict[str, str], deadline: float,
+) -> dict[str, set[str]]:
     """Traverse inspected metadata and exact versions, never resolve packages."""
-    roots = [_requirement(text, deadline) for text in _strings(roots, "roots", deadline)]
-    if not roots:
+    requirements = [_requirement(text, deadline) for text in _strings(roots, "roots", deadline)]
+    if not requirements:
         raise ProfileError("closure: roots cannot be empty")
     wanted: dict[str, set[str]] = {}
-    pending = [(requirement, {""}) for requirement in roots]
+    pending = [(requirement, {""}) for requirement in requirements]
     while pending:
         _check_deadline(deadline)
         requirement, parent_extras = pending.pop()
@@ -233,12 +236,13 @@ class RuntimeProfile:
     def lock_id(self) -> str:
         return "sha256:" + hashlib.sha256(self.canonical).hexdigest()
 
-    def record(self) -> dict:
-        return json.loads(self.canonical)
+    def record(self) -> dict[str, Any]:
+        record: dict[str, Any] = json.loads(self.canonical)
+        return record
 
 
 def validate_profile(
-    record: dict, *, max_tags: int = 10_000, deadline: float | None = None,
+    record: dict[str, Any], *, max_tags: int = 10_000, deadline: float | None = None,
 ) -> RuntimeProfile:
     """Freeze a complete asserted record, without attesting its origin/bytes."""
     try:
@@ -297,7 +301,7 @@ def validate_profile_preference(preference: tuple[str, ...]) -> None:
         raise ProfileError("duplicate profile preference")
 
 
-def _compatible_target(profile: RuntimeProfile, target: dict) -> bool:
+def _compatible_target(profile: RuntimeProfile, target: dict[str, Any]) -> bool:
     """Recheck a frozen closure against an independently selected target."""
     deadline = time.monotonic() + 120
     try:
@@ -320,8 +324,8 @@ def _compatible_target(profile: RuntimeProfile, target: dict) -> bool:
 
 
 def select_profile(
-    candidates: Iterable[dict], *, approvals: Mapping[str, str],
-    release: dict, target: dict, component: str, roots: list[str], mode: str,
+    candidates: Iterable[dict[str, Any]], *, approvals: Mapping[str, str],
+    release: dict[str, Any], target: dict[str, Any], component: str, roots: list[str], mode: str,
     backend: str | None = None, retained_backend: str | None = None,
     existing_installation: bool = False, preference: tuple[str, ...] = (),
     allow_compatible_target: bool = False,

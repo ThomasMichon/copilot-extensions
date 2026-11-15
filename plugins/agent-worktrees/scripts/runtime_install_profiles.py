@@ -4,9 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from versioned_runtime_source import SourceIdentity
 
 
-def runtime_profile_policy(receipt: dict, source) -> dict | None:
+def runtime_profile_policy(receipt: dict[str, Any], source: SourceIdentity) -> dict[str, Any] | None:
     binding = receipt["binding"]
     if binding.get("schema") != "copilot-extensions.artifact-runtime-inputs":
         return source_profile_policy(receipt, source)
@@ -80,10 +84,10 @@ def runtime_profile_policy(receipt: dict, source) -> dict | None:
             raise ValueError("Worktrees artifact dependencies lack exact native feed evidence")
     elif acquisition is not None:
         raise ValueError("Worktrees first-party-only artifact must not assert feed acquisition")
-    return policy
+    return cast(dict[str, Any], policy)
 
 
-def source_profile_policy(receipt: dict, source) -> dict | None:
+def source_profile_policy(receipt: dict[str, Any], source: SourceIdentity) -> dict[str, Any] | None:
     """Keep the complete construction binding; return only its policy snapshot.
 
     The producer owns source authentication, resolution and acquisition. This

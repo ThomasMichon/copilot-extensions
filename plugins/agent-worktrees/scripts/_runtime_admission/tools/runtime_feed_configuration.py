@@ -1,7 +1,7 @@
 """Installation profile policy composed with the stdlib native feed owner."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,10 +12,11 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from typing import Any, cast
 
 from build_toolchain_lock import _MARKER_ENV_QUERY_SCRIPT, sanitize_subprocess_env
-from governed_feed_trust import _opaque_index_identity
-from runtime_profile import ProfileError, ProfileUnavailable, validate_profile
+from governed_feed_trust import _opaque_index_identity as _opaque_index_identity
+from runtime_profile import ProfileError, ProfileUnavailable, RuntimeProfile, validate_profile
 from runtime_profile_policy import InstallationProfilePlan
 from runtime_source_lock import SourceLockCandidate
 
@@ -23,8 +24,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "installation-context"))
 import installer_dependency_policy as dependencies
-from installer_native_feed import NativeFeedError, NativeFeedInputs, capture_native_feed_inputs  # noqa: F401
-from installer_native_feed import _basic  # noqa: F401 -- compatibility for existing byte-construction controls
+from installer_native_feed import NativeFeedError, NativeFeedInputs as NativeFeedInputs, capture_native_feed_inputs  # noqa: F401
+from installer_native_feed import _basic as _basic  # noqa: F401 -- compatibility for existing byte-construction controls
 from installer_native_feed import recheck_native_feed_inputs
 from installer_wheel_inputs import _check_deadline
 from installation_context import resolve_runtime_profile_policy
@@ -39,16 +40,17 @@ class RetainedNativeFeedInputs(NativeFeedInputs):
 
 
 def _capture(
-    transaction, projection, original, profile, policy, uv, deadline, *,
-    source_lock=None, source_resolution=False,
-):
+    transaction: dependencies.RetainedUVInstall, projection: str, original: str,
+    profile: RuntimeProfile | None, policy: dict[str, Any], uv: str, deadline: float, *,
+    source_lock: SourceLockCandidate | None = None, source_resolution: bool = False,
+) -> NativeFeedInputs:
     if source_resolution:
         if profile is not None or source_lock is not None:
             raise ProfileError("source resolution preflight cannot carry an artifact or lock")
         wheels, profile_policy = None, "source-resolution"
     elif source_lock is None:
-        wheels = profile.record()["wheels"]
-        profile_policy = profile.record()["acquisition_policy"]
+        wheels = cast(RuntimeProfile, profile).record()["wheels"]
+        profile_policy = cast(RuntimeProfile, profile).record()["acquisition_policy"]
     else:
         if profile is not None:
             raise ProfileError("source feed capture must not carry an artifact profile")
@@ -65,9 +67,9 @@ def _capture(
 
 @contextmanager
 def retain_native_feed_inputs(
-    plan: InstallationProfilePlan, *, installation: dict, uv: str, python: Path,
+    plan: InstallationProfilePlan, *, installation: Mapping[str, Any], uv: str, python: Path,
     deadline: float, env: dict[str, str] | None = None,
-):
+) -> Iterator[RetainedNativeFeedInputs]:
     """Read actual owner policy and native settings without resolving/installing."""
     _check_deadline(deadline)
     current = resolve_runtime_profile_policy(
@@ -87,7 +89,7 @@ def retain_native_feed_inputs(
             [str(python), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT],
             env=sanitize_subprocess_env(environment), capture_output=True, text=True,
             timeout=deadline - time.monotonic(),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         _check_deadline(deadline)
         actual, expected = json.loads(observed.stdout), profile.record()["target"]["environment"]
@@ -110,7 +112,7 @@ def retain_native_feed_inputs(
             profile.record()["target"]["environment"]["python_full_version"],
         ]
         instant = datetime.now(timezone.utc)
-        projection = []
+        projection: list[str] = []
         with dependencies.retain_uv_compile(
             uv, arguments, now=instant,
             env=environment, cwd=cwd, trusted_source_roots=(root, cwd),
@@ -124,7 +126,7 @@ def retain_native_feed_inputs(
             )
             active = True
 
-            def verify():
+            def verify() -> None:
                 if not active:
                     raise ProfileError("native artifact feed custody is closed")
                 _check_deadline(deadline)
@@ -133,7 +135,7 @@ def retain_native_feed_inputs(
                 )["runtimeProfiles"]
                 if observed != current:
                     raise ProfileError("native acquisition policy changed during consumption")
-                live_projection = []
+                live_projection: list[str] = []
                 dependencies.prepare_uv_compile(
                     uv, arguments, now=instant, env=environment, cwd=cwd,
                     trusted_source_roots=(root, cwd), deadline=deadline,
@@ -166,7 +168,7 @@ def retain_native_feed_inputs(
                 active = False
 
 
-def _source_policy(plan: InstallationProfilePlan, installation: dict) -> dict:
+def _source_policy(plan: InstallationProfilePlan, installation: Mapping[str, Any]) -> dict[str, Any]:
     current = resolve_runtime_profile_policy(**installation)["runtimeProfiles"]
     if (
         current.get("status") != "ready" or current != plan.policy()
@@ -177,11 +179,12 @@ def _source_policy(plan: InstallationProfilePlan, installation: dict) -> dict:
         or not current["selection"]["allowSourceFallback"]
     ):
         raise ProfileError("source feed capture lacks its actual owner")
-    return current
+    return cast(dict[str, Any], current)
 
 
 def validate_source_resolution_inputs(
-    plan: InstallationProfilePlan, *, installation: dict, transaction, projections: list[str],
+    plan: InstallationProfilePlan, *, installation: Mapping[str, Any],
+    transaction: dependencies.RetainedUVInstall, projections: list[str],
     deadline: float,
 ) -> str:
     """Validate the held native settings before the compiler can request packages."""
@@ -201,8 +204,8 @@ def validate_source_resolution_inputs(
 
 @contextmanager
 def retain_source_feed_inputs(
-    plan: InstallationProfilePlan, source_lock: SourceLockCandidate, *, installation: dict, deadline: float,
-):
+    plan: InstallationProfilePlan, source_lock: SourceLockCandidate, *, installation: Mapping[str, Any], deadline: float,
+) -> Iterator[NativeFeedInputs]:
     """Reuse the source compiler's held native configuration, never re-resolve it."""
     _check_deadline(deadline)
     current = _source_policy(plan, installation)

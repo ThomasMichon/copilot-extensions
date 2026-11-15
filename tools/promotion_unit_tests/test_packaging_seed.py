@@ -1,8 +1,16 @@
 """Byte-only seed controls; native compiler/constructor proof stays in tools."""
+
+from typing import cast
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import Any, Callable, Mapping, Protocol
+    class _LegacyWheelBytes(Protocol):
+        def __call__(self, *, metadata: bytes | None = None, wheel: bytes | None = None, extra: Mapping[str, bytes] | None = None, record_mutator: Callable[[list[list[str]]], object] | None = None, compression: int = ..., prefix: str = "demo_pkg-1.0.dist-info/", name: str = "demo_pkg") -> bytes: ...
 import io
 from pathlib import Path
 import sys
 import time
+from typing import Any
 
 import pytest
 
@@ -19,7 +27,7 @@ SELECTED = {
 }
 
 
-def native_lock():
+def native_lock() -> bytes:
     return (
         'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.11"\n'
         '[[packages]]\nname = "packaging"\nversion = "25.0"\n'
@@ -32,7 +40,7 @@ def native_lock():
     "valid", "extra-package", "dependency", "multiple-wheels", "source", "hash",
     "public-url", "filename", "version", "unknown",
 ])
-def test_seed_reads_only_one_exact_native_witness(kind):
+def test_seed_reads_only_one_exact_native_witness(kind: str) -> None:
     content = native_lock()
     if kind == "extra-package":
         content += b'\n[[packages]]\nname="helper"\nversion="1"\n'
@@ -65,7 +73,7 @@ def test_seed_reads_only_one_exact_native_witness(kind):
     ('md5 = 1', False),
     ('unknown = "' + "b" * 32 + '"', False),
 ])
-def test_seed_keeps_sha256_authority_with_native_auxiliary_hash(auxiliary, admitted):
+def test_seed_keeps_sha256_authority_with_native_auxiliary_hash(auxiliary: str, admitted: bool) -> None:
     content = native_lock().replace(b'hashes = {', ("hashes = {" + auxiliary + ", ").encode())
     if admitted:
         assert seed._selected_wheel(content, deadline=time.monotonic() + 2) == SELECTED
@@ -78,7 +86,7 @@ def test_seed_keeps_sha256_authority_with_native_auxiliary_hash(auxiliary, admit
     "valid", "dependency", "extra", "pth", "data", "entry-point", "entry-point-case", "binary",
     "identity", "version", "purelib", "tag", "record", "budget",
 ])
-def test_actual_seed_bytes_reject_installation_escape_before_execution(kind):
+def test_actual_seed_bytes_reject_installation_escape_before_execution(kind: str) -> None:
     metadata = "Metadata-Version: 2.4\nName: packaging\nVersion: 25.0\nRequires-Python: >=3.9\n"
     extra = {}
     wheel = "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n"
@@ -104,8 +112,8 @@ def test_actual_seed_bytes_reject_installation_escape_before_execution(kind):
         wheel = wheel.replace("true", "false")
     elif kind == "tag":
         wheel = wheel.replace("py3-none-any", "cp311-cp311-win_amd64")
-    options = {"record_mutator": lambda rows: rows.pop(0)} if kind == "record" else {}
-    data = wheel_bytes(
+    options: dict[str, Any] = {"record_mutator": lambda rows: rows.pop(0)} if kind == "record" else {}
+    data = cast("_LegacyWheelBytes", wheel_bytes)(
         name="packaging", prefix="packaging-25.0.dist-info/",
         metadata=(metadata + "\n").encode(), wheel=wheel.encode(), extra=extra, **options,
     )

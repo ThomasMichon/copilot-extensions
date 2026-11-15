@@ -22,19 +22,34 @@ import shutil
 import stat
 import sys
 import time
-import tomllib
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    from installer_dependency_policy import _toml_parser
+    tomllib = _toml_parser()
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, BinaryIO, cast
+import subprocess
 
 from installer_dependency_policy import (
+    RetainedUVInstall,
     _argument_pairs, _native_retained_path, _private_retained_root, _temporary_inputs,
     _write_toml, retain_uv_install,
 )
 from installer_source_wheel_cache import cached_source_wheel
 from installer_wheel_inputs import (
     WheelDeadlineError, WheelError, WheelLimits, _check_deadline, inspect_archive,
+    _ordinary,
 )
-from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _ordinary, _unchanged
+from installer_wheel_snapshot import (
+    WheelInstallInputs, WheelReuseInputs, _digest as _snapshot_digest,
+    _open as _snapshot_open, _unchanged as _snapshot_unchanged,
+)
+
+_open = cast(Callable[[Path], BinaryIO], _snapshot_open)
+_unchanged = cast(Callable[..., os.stat_result], _snapshot_unchanged)
+_digest = cast(Callable[..., tuple[str, int]], _snapshot_digest)
+_Tree = dict[str, tuple[str, int]]
 
 if TYPE_CHECKING:
     from installer_engine import FrozenInputs
@@ -49,7 +64,7 @@ def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | Whee
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def _build_tools_root(reported, tooling):
+def _build_tools_root(reported: str, tooling: Path) -> Path:
     """Compare physical containment without changing the native I/O spelling."""
     from versioned_runtime import _normalize_windows_extended_path
 
@@ -141,7 +156,7 @@ def retained_input_graph(
                 )
                 return
             with engine.retain_closed_wheel_install(
-                str(uv), inputs.wheel_inputs.snapshot, python=python,
+                str(uv), cast(WheelInstallInputs, inputs.wheel_inputs).snapshot, python=python,
             ) as transaction:
                 yield engine.FrozenInputs(
                     frozen.plugin, frozen.packages, inputs.payload_hash, transaction,
@@ -234,8 +249,8 @@ class SourceWheelInputs:
     archives: tuple[Path, ...]
     io_timeout: float
 
-    def receipt(self) -> dict:
-        return json.loads(self.canonical)
+    def receipt(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.canonical))
 
     def verify(self, *, deadline: float | _SourceProgress | None = None) -> None:
         started = time.monotonic()
@@ -254,7 +269,7 @@ class SourceWheelInputs:
                 raise WheelError("retained source wheel changed during installation")
             progress.renew()
 
-    def origins(self) -> dict:
+    def origins(self) -> dict[str, str]:
         paths = {path.name: path for path in self.archives}
         return {
             name: paths[record["filename"]].as_uri() + "#"
@@ -263,7 +278,7 @@ class SourceWheelInputs:
         }
 
 
-def _canonical(value) -> bytes:
+def _canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
@@ -301,7 +316,9 @@ def _source_progress(deadline: float | _SourceProgress) -> None:
         deadline.renew()
 
 
-def _digest_file(path: Path, limit: int, deadline: float | _SourceProgress, *, before=None) -> str:
+def _digest_file(
+    path: Path, limit: int, deadline: float | _SourceProgress, *, before: os.stat_result | None = None,
+) -> str:
     if before is None:
         before = _ordinary(path)
     with _open(path) as stream:
@@ -319,7 +336,9 @@ def _ignored_source(relative: Path, excluded: set[str]) -> bool:
     } or name.endswith((".egg-info", ".dist-info", ".pyc", ".pyo"))
 
 
-def _manifest_digest(path: Path, limit: int, deadline: float | _SourceProgress, *, before=None) -> str:
+def _manifest_digest(
+    path: Path, limit: int, deadline: float | _SourceProgress, *, before: os.stat_result | None = None,
+) -> str:
     if before is None:
         before = _ordinary(path)
     if before.st_size > limit:
@@ -337,9 +356,10 @@ def _manifest_digest(path: Path, limit: int, deadline: float | _SourceProgress, 
 def _tree(
     root: Path, deadline: float | _SourceProgress, *,
     installed: bool = False, excluded: set[str] | None = None,
-) -> dict:
+) -> _Tree:
     excluded = excluded or set()
-    files, total = [], 0
+    files: list[tuple[Path, Path, os.stat_result]] = []
+    total = 0
     for directory, children, names in os.walk(root, followlinks=False):
         for name in list(children):
             path = Path(directory) / name
@@ -369,7 +389,7 @@ def _tree(
             total += info.st_size
             _source_progress(deadline)
 
-    def read(item):
+    def read(item: tuple[Path, Path, os.stat_result]) -> tuple[str, tuple[str, int]]:
         path, relative, info = item
         digest = (
             _manifest_digest(path, info.st_size, deadline, before=info)
@@ -378,7 +398,7 @@ def _tree(
         )
         return relative.as_posix(), (digest, stat.S_IMODE(info.st_mode))
 
-    result = {}
+    result: _Tree = {}
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="source-wheel-input") as pool:
         for offset in range(0, len(files), 4):
             _source_deadline(deadline)
@@ -406,8 +426,8 @@ def _static_setup(package: Path) -> bool:
     ))
 
 
-def _eligibility(inputs) -> tuple[list[dict], str | None]:
-    transaction = inputs.transaction
+def _eligibility(inputs: FrozenInputs) -> tuple[list[dict[str, Any]], str | None]:
+    transaction = cast(RetainedUVInstall, inputs.transaction)
     environment = transaction.environment
     if any(
         name.upper().startswith(("UV_BUILD_", "UV_NO_BUILD", "UV_NO_BINARY", "UV_CONFIG_SETTINGS"))
@@ -458,7 +478,7 @@ def _eligibility(inputs) -> tuple[list[dict], str | None]:
 
 def _compact(
     package: Path, packages: tuple[Path, ...], output: Path, deadline: float | _SourceProgress,
-) -> dict:
+) -> _Tree:
     """Remove nested vendored projects, not files belonging to this project."""
     excluded = {
         path.relative_to(package).as_posix()
@@ -467,7 +487,7 @@ def _compact(
     native_package = Path(_native_retained_path(package))
     count, total = 0, 0
 
-    def ignore(directory, names):
+    def ignore(directory: str, names: list[str]) -> list[str]:
         ignored = []
         for name in names:
             path = Path(directory) / name
@@ -477,7 +497,7 @@ def _compact(
                 raise WheelError("compact source inputs must not be linked")
         return ignored
 
-    def copy(source, destination):
+    def copy(source: str, destination: str) -> str:
         nonlocal count, total
         path = Path(source)
         before = _ordinary(path)
@@ -508,11 +528,11 @@ def _compact(
     return _tree(output, deadline)
 
 
-def _tool_tree(root: Path, deadline: float | _SourceProgress) -> dict:
+def _tool_tree(root: Path, deadline: float | _SourceProgress) -> _Tree:
     return _tree(root, deadline, installed=True)
 
 
-def _wheel_record(path: Path, name: str, deadline: float | _SourceProgress) -> dict:
+def _wheel_record(path: Path, name: str, deadline: float | _SourceProgress) -> dict[str, Any]:
     with _open(path) as stream:
         facts = inspect_archive(stream, limits=_LIMITS, deadline=_source_deadline(deadline))
     if (
@@ -534,7 +554,9 @@ def _wheel_record(path: Path, name: str, deadline: float | _SourceProgress) -> d
 
 
 @contextmanager
-def _source_phase(name: str, timeout: float, elapsed: dict[str, float]):
+def _source_phase(
+    name: str, timeout: float, elapsed: dict[str, float],
+) -> Iterator[_SourceProgress]:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise WheelError(f"source wheel phase={name} requires a positive finite process allowance")
     started = time.monotonic()
@@ -560,7 +582,10 @@ def _source_phase(name: str, timeout: float, elapsed: dict[str, float]):
 
 
 @contextmanager
-def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, run, timeout: float):
+def retained_source_wheels(
+    inputs: FrozenInputs, root: Path, uv: Path, base_python: Path, *,
+    run: Callable[..., subprocess.CompletedProcess[str]], timeout: float,
+) -> Iterator[FrozenInputs]:
     """Substitute only fully built, content-bound local archives in a held install.
 
     ``run`` is the constructor's owned-child runner, already bound to its
@@ -578,7 +603,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         return
     runner = run
 
-    def run(argv, **options):
+    def run_with_progress(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         result = runner(
             argv, timeout=_source_deadline(progress) - time.monotonic(),
             on_progress=progress.renew, **options,
@@ -586,7 +611,8 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         progress.renew()
         return result
 
-    transaction = inputs.transaction
+    run = run_with_progress
+    transaction = cast(RetainedUVInstall, inputs.transaction)
     uv = Path(transaction.argv[0]).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
     builder = Path(__file__).resolve(strict=True)
@@ -597,7 +623,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         )
         yield inputs
         return
-    elapsed = {}
+    elapsed: dict[str, float] = {}
     with _source_phase("preparation", timeout, elapsed) as progress:
         cache_arguments = [
             argument for option, value in _argument_pairs(transaction.argv[3:])
@@ -629,10 +655,10 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             "UV_NO_CONFIG": "1", "UV_OFFLINE": "1", "UV_CACHE_DIR": cache,
             "PYTHONDONTWRITEBYTECODE": "1",
         })
-        tool_sets = {}
+        tool_sets: dict[tuple[str, ...], tuple[Path, Path, _Tree, dict[str, Any]]] = {}
         tools_seconds = 0.0
 
-        def acquire_tools(requirements):
+        def acquire_tools(requirements: tuple[str, ...]) -> tuple[Path, Path, dict[str, Any]]:
             nonlocal tools_seconds
             tools_started = time.monotonic()
             tooling = workspace / ("tools-" + str(len(acquired)))
@@ -660,7 +686,8 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             return python, tools_root, target
 
         built = 0
-        archives, records = {}, {}
+        archives: dict[Path, Path] = {}
+        records: dict[str, Any] = {}
         selected = tuple(package for package, data in zip(inputs.packages, manifests) if (
             inputs.local_packages is None
             or re.sub(r"[-_.]+", "-", data["project"]["name"]).lower() in inputs.local_packages
@@ -670,7 +697,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             for package in selected
         }
         requirement_groups = dict.fromkeys(requirements_by_package.values())
-        acquired = {}
+        acquired: dict[tuple[str, ...], tuple[Path, Path, dict[str, Any]]] = {}
         with _source_phase("acquisition", timeout, elapsed) as progress:
             for requirements in requirement_groups:
                 acquired[requirements] = acquire_tools(requirements)
@@ -689,7 +716,9 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                     })).hexdigest(),
                 }
 
-                def build_tools(requirements):
+                def build_tools(
+                    requirements: tuple[str, ...],
+                ) -> tuple[Path, Path, _Tree, dict[str, Any]]:
                     nonlocal tools_seconds
                     tools_started = time.monotonic()
                     python, tools_root, target = acquired[requirements]
@@ -709,11 +738,11 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                     })
                     name = re.sub(r"[-_.]+", "-", manifests[inputs.packages.index(package)]["project"]["name"]).lower()
 
-                    def verify_source():
+                    def verify_source() -> None:
                         if _tree(compact, progress) != source or _tool_tree(tools_root, progress) != tool_content:
                             raise WheelError("source or installed build tools changed before wheel cache publication")
 
-                    def build(output):
+                    def build(output: Path) -> Path:
                         nonlocal built
                         if _compact(package, inputs.packages, compact, progress) != source:
                             raise WheelError("source changed before its wheel build")
@@ -749,9 +778,9 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                         target = output / wheels[0].name
                         shutil.copyfile(wheels[0], target)
                         built += 1
-                        return target
+                        return cast(Path, target)
 
-                    def validate(path):
+                    def validate(path: Path) -> None:
                         _wheel_record(path, name, progress)
                         verify_source()
 
@@ -765,7 +794,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                 for _python, tools_root, tool_content, _common in tool_sets.values():
                     if _tool_tree(tools_root, progress) != tool_content:
                         raise WheelError("installed build tools changed during source construction")
-                arguments = []
+                arguments: list[str] = []
                 selected_manifests = {package / "pyproject.toml" for package in selected}
                 for option, value in _argument_pairs(transaction.argv[3:]):
                     if option in ("-r", "--requirements") and Path(value) in selected_manifests:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import dataclass, field, replace
+from functools import partial
 import hashlib
 from itertools import product
 import json
@@ -26,7 +27,7 @@ from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
 from tools import plugin_test_resources  # noqa: E402
 from tools.typecheck_source_views import (  # noqa: E402
     GUARD_ENTRY, GUARD_MODULE, INSTALLATION_ENTRY, SourceView, SourceViewError,
-    _write_view, guard_alias_view, installation_view,
+    _write_view, guard_alias_view, installation_view, setup_program_view,
     HARNESS_PREFIX, HarnessProgramView, harness_emitted_inputs, harness_emitted_views,
 )
 from tools.typecheck_catalog_views import (  # noqa: E402
@@ -811,6 +812,30 @@ def _check_program(
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
                 files = (*tuple(file for file in files if file not in members), str(view.output))
             ordered_imports.insert(0, str(view.output.parent))
+        for entry in tuple(file for file in files if file.endswith((
+            "/installation_context.py", "/_installation_context.py",
+        )) and file in all_paths):
+            if entry == INSTALLATION_ENTRY:
+                continue
+            prefix = entry.rsplit("/", 1)[0] + "/"
+            copy_members = tuple(file for file in files if file == entry or (
+                file.startswith(prefix + "_installation_context_")
+                and "/" not in file[len(prefix):]
+                and not file.endswith("_installation_context_worker.py")
+            ))
+            view = views.add(
+                partial(installation_view, entry_path=entry), all_paths, copy_members,
+                "installation_context_" + hashlib.sha256(entry.encode()).hexdigest()[:16] + ".py",
+            )
+            files = (*tuple(file for file in files if file not in copy_members), str(view.output))
+        setups = tuple(file for file in files if file.endswith("/setup.py"))
+        if len(setups) > 1:
+            for entry in setups:
+                view = views.add(
+                    setup_program_view, (entry,), (entry,),
+                    "setup_" + hashlib.sha256(entry.encode()).hexdigest()[:16] + ".py",
+                )
+                files = tuple(str(view.output) if file == entry else file for file in files)
         if guard:
             view = views.add(guard_alias_view, files, (GUARD_ENTRY,), GUARD_MODULE + ".py")
             files = tuple(str(view.output) if file == GUARD_ENTRY else file for file in files)

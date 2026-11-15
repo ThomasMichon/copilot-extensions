@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -53,8 +53,9 @@ def fingerprint_entries(
     parallel = on_file is None and len(ordered) > 1
     digest = hashlib.sha256()
     with ThreadPoolExecutor(max_workers=4) if parallel else nullcontext() as readers:
-        def submit(entry):
-            return readers.submit(io_path(entry).read_bytes) if entries[entry] != "symlink" else None
+        def submit(entry: Path) -> Future[bytes] | None:
+            return (cast(ThreadPoolExecutor, readers).submit(io_path(entry).read_bytes)
+                    if entries[entry] != "symlink" else None)
 
         pending = {entry: submit(entry) for entry in ordered[:4]} if readers is not None else {}
         for index, entry in enumerate(ordered):
@@ -403,8 +404,7 @@ def package_version(slot_name: str) -> str:
 
 
 def version_key(version: str) -> (
-    tuple[int, int, int, int, int, int, str, str]
-    | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
+    tuple[int, int, int, int, int, int, str, str] | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
 ):
     """Order package releases and profiles before generated identities."""
     supported = re.fullmatch(

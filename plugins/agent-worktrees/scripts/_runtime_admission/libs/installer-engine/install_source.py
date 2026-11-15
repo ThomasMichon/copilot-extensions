@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
+from collections.abc import Iterator
 import argparse
 from dataclasses import dataclass
 import hashlib
@@ -13,7 +14,7 @@ import re
 import sys
 import time
 from types import ModuleType
-from typing import Any, Iterator, cast
+from typing import Any, cast
 import uuid
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -23,7 +24,9 @@ sys.path.insert(0, str(_SCRIPTS))
 import installer_engine as _engine_module
 from installer_wheel_inputs import WheelLimits, inspect_archive
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, retain_wheel_inputs
-import versioned_runtime_source as sources
+import versioned_runtime_source as _sources_module
+sources = _sources_module
+versioned_runtime_source = _sources_module
 
 engine: ModuleType = _engine_module
 
@@ -182,7 +185,8 @@ def wheel_inputs(
     rows = profile.get("wheels")
     if not isinstance(rows, list) or not rows or len(rows) > 256:
         raise ValueError("project requires a complete bounded wheel profile")
-    archives, expected = {}, {}
+    archives: dict[str, Path] = {}
+    expected: dict[str, str] = {}
     for row in rows:
         if not isinstance(row, dict) or row.get("filename") in archives:
             raise ValueError("project wheel profile has invalid or duplicate inputs")
@@ -204,7 +208,7 @@ def wheel_inputs(
         max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
         **({"retention_deadline": retention_deadline} if retention_deadline is not None else {}),
     ) as retained:
-        distributions = []
+        distributions: list[tuple[str, str, str, str]] = []
         expanded = 0
         for row in rows:
             facts = inspect_archive(
@@ -224,7 +228,7 @@ def wheel_inputs(
             distributions.append((
                 row["name"], row["version"], row["filename"], row["sha256"],
             ))
-        inputs = engine.WheelInstallInputs(
+        inputs: WheelInstallInputs = engine.WheelInstallInputs(
             retained, json.dumps(profile, sort_keys=True, separators=(",", ":"), allow_nan=False),
             tuple(distributions),
         )

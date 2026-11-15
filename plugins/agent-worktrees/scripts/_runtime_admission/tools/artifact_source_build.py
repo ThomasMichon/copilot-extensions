@@ -2,29 +2,44 @@
 from __future__ import annotations
 
 import importlib.machinery
-import os
+import os as os
 import re
 import sys
 from collections import Counter
 from email.message import Message
 from pathlib import Path
+from collections.abc import Callable, Sequence
+from typing import Any, Protocol, TYPE_CHECKING
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+else:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
 
 class PromotionArtifactError(RuntimeError):
     pass
 
 
-def payload_hash_directories(directories, *, root, directory_hash, hash_fields, workers=1):
+class HashFields(Protocol):
+    def __call__(self, *fields: str) -> str: ...
+
+
+def payload_hash_directories(
+    directories: Sequence[Path], *, root: Path,
+    directory_hash: Callable[[Path], str], hash_fields: HashFields, workers: int = 1,
+) -> str:
     """Hash the same directory identities with bounded, fully settled workers."""
     if type(workers) is not int or not 1 <= workers <= 4:
         raise ValueError("payload hashing requires between one and four workers")
 
-    def item(directory):
+    def item(directory: Path) -> tuple[str, str]:
         return directory.resolve().relative_to(root).as_posix(), directory_hash(directory)
 
     if workers == 1 or len(directories) < 2:
@@ -114,7 +129,7 @@ def parse_wheel_identity(
     }
 
 
-def validate_runtime_metadata(project: dict, metadata: Message) -> None:
+def validate_runtime_metadata(project: dict[str, Any], metadata: Message) -> None:
     """Compare runtime declarations using the standard PEP 440/508 parser."""
     try:
         from packaging.markers import Marker
@@ -137,7 +152,7 @@ def validate_runtime_metadata(project: dict, metadata: Message) -> None:
     ):
         raise PromotionArtifactError("invalid candidate runtime dependency declarations")
 
-    def requirement_key(value: str, extra: str | None = None) -> tuple:
+    def requirement_key(value: str, extra: str | None = None) -> tuple[str, tuple[str, ...], SpecifierSet, str | None]:
         if not isinstance(value, str):
             raise PromotionArtifactError("runtime requirements must be strings")
         requirement = Requirement(value)
@@ -177,7 +192,7 @@ def validate_runtime_metadata(project: dict, metadata: Message) -> None:
         raise PromotionArtifactError("wheel Python requirement differs from candidate")
 
 
-def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = None) -> dict:
+def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = None) -> dict[str, Any]:
     """Authenticate the setuptools contract before building or source mapping."""
     try:
         data = tomllib.loads((source_dir / "pyproject.toml").read_text(encoding="utf-8"))

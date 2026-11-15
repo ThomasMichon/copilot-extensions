@@ -1,6 +1,35 @@
 """Actual configured-source acquisition composed with installation-owned intent."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Protocol, Sequence
+    class _LegacyProfileRecord(Protocol):
+        def __call__(self) -> dict[str, Any]: ...
+    class _LegacySourceProject(Protocol):
+        def __call__(self, path: Path, name: str = "fixture-source", sources: str = "", dependencies: str = "", module_code: str | None = None) -> Path: ...
+    class _LegacyWheelRecord(Protocol):
+        def __call__(self, name: str = "engine", version: str = "1.0", dependencies: Sequence[str] = (), extras: Sequence[str] = (), selected: Sequence[str] = ()) -> dict[str, Any]: ...
+
+
+if TYPE_CHECKING:
+    from runtime_profile_release import ReleaseSelection
+
+from typing import cast
+
+from typing import ContextManager, Iterator
+
+if TYPE_CHECKING:
+    from runtime_source_authentication import AuthenticatedSource
+    from worktree_manager.runtime_source import ResolvedSource
+
+from typing import Any, Callable
+
+if TYPE_CHECKING:
+    from test_runtime_profile_policy import _Adopter
+    from worktree_manager.runtime_source_config import RuntimeSource
+
 from contextlib import contextmanager
 import hashlib
 import json
@@ -22,25 +51,25 @@ from test_installer_wheel_acquisition import feeds as feeds
 from worktree_manager import runtime_source, runtime_source_config, source_config
 
 
-def git(path, *arguments):
+def git(path: Path, *arguments: str) -> str:
     environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
     result = subprocess.run(
         ["git", "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-C", str(path), *arguments],
         capture_output=True, text=True, env=environment, check=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     return result.stdout.strip()
 
 
 @pytest.fixture
-def configured_source(tmp_path, monkeypatch):
+def configured_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str, RuntimeSource]:
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     repository = tmp_path / "upstream"
     repository.mkdir()
     git(repository, "init", "-q", "-b", "main")
-    project = source_project(repository / "plugins" / "agent-example", name="agent-example")
+    project = cast("_LegacySourceProject", source_project)(repository / "plugins" / "agent-example", name="agent-example")
     manifest = project / "pyproject.toml"
     manifest.write_text(manifest.read_text().replace('version="1.0"', 'version="1.0.0"'))
     (project / "plugin.json").write_text(json.dumps({"name": "agent-example", "version": "1.0.0"}))
@@ -53,7 +82,7 @@ def configured_source(tmp_path, monkeypatch):
     return root, repository, commit, selection
 
 
-def retain(adopter, **options):
+def retain(adopter: _Adopter, **options: Any) -> ContextManager[AuthenticatedSource]:
     return authentication.retain_authenticated_source(
         plan(adopter), installation=adopter[1], **({"deadline": time.monotonic() + 60} | options),
     )
@@ -61,8 +90,8 @@ def retain(adopter, **options):
 
 @pytest.mark.parametrize("with_dependency", [False, True])
 def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
-    adopter, configured_source, tmp_path, monkeypatch, feeds, with_dependency,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, feeds: Callable[..., dict[str, Any]], with_dependency: bool,
+) -> None:
     import importlib.util
     import zipfile
 
@@ -86,7 +115,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
     native_environment = environment(adopter, state, tmp_path)
     dependency_bytes = _wheel_bytes("external_demo", "1.0")
     dependency = {
-        **_wheel("external-demo"), "filename": "external_demo-1.0-py3-none-any.whl",
+        **cast("_LegacyWheelRecord", _wheel)("external-demo"), "filename": "external_demo-1.0-py3-none-any.whl",
         "sha256": "sha256:" + hashlib.sha256(dependency_bytes).hexdigest(),
         "requires_python": "",
     }
@@ -152,7 +181,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
     assert spec and spec.loader
     isolated = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(isolated)
-    isolated.REPO = repository
+    setattr(isolated, "REPO", repository)
     manifest = _complete_manifest({
         "schema": "copilot-extensions.python-artifact-manifest", "schema_version": 3,
         "plugin": "agent-example", "version": "1.0.0",
@@ -165,7 +194,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
     bundle = (exported / entry["filename"]).read_bytes()
     with zipfile.ZipFile(exported / entry["filename"]) as archive:
         manifest_digest = "sha256:" + hashlib.sha256(archive.read("manifest.json")).hexdigest()
-    profile = _record()
+    profile = cast("_LegacyProfileRecord", _record)()
     profile.update(
         release={"identity": "agent-example:1.0.0", "sha256": manifest["payload_hash"]},
         component="agent-example", roots=["agent-example==1.0.0"], mode="artifact",
@@ -173,7 +202,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
         approval_source=APPROVAL_SOURCE,
         target={"environment": default_environment(), "tags": ["py3-none-any"], "device": "cpu"},
         wheels=[{
-            **_wheel("agent-example", "1.0.0"), "filename": wheel.name,
+            **cast("_LegacyWheelRecord", _wheel)("agent-example", "1.0.0"), "filename": wheel.name,
             "sha256": manifest["wheels"][0]["sha256"], "requires_python": "",
             "requires_dist": ["external-demo==1.0"] if with_dependency else [],
         }, *([dependency] if with_dependency else [])],
@@ -186,7 +215,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
     }
     mode, calls = "available", []
 
-    def runner(argv, **options):
+    def runner(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         calls.append(argv)
         current = json.loads(json.dumps(index))
         if mode == "no-profile":
@@ -216,7 +245,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
                 return subprocess.CompletedProcess(
                     argv, 1, "", f"gh: refused (HTTP {404 if mode == 'absent' else 403})",
                 )
-            result = {"id": 1, "tag_name": "python-artifacts-" + dev,
+            result: object = {"id": 1, "tag_name": "python-artifacts-" + dev,
                       "draft": False, "prerelease": True, "assets": assets}
         elif endpoint.endswith("/git/ref/tags/python-artifacts-" + dev):
             result = {"object": {"type": "commit", "sha": dev}}
@@ -237,9 +266,9 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
         for mode in ("available", "no-profile", "absent", "permission", "forged-binding"):
             directory = tmp_path / ("discovered-" + mode)
             directory.mkdir()
-            arguments = dict(
+            arguments: dict[str, Any] = dict(
                 installation=adopter[1], repository="example/plugins",
-                source_checkout=origin.acquired.checkout, main_commit=origin.acquired.commit,
+                source_checkout=cast("ResolvedSource", origin.acquired).checkout, main_commit=cast("ResolvedSource", origin.acquired).commit,
                 target=profile["target"], component="agent-example", roots=profile["roots"],
                 max_subject_bytes=1 << 20, deadline=time.monotonic() + 30, runner=runner,
             )
@@ -249,12 +278,12 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
                 continue
             selected = planner.plan_discovered_installation_profile(directory, origin, **arguments)
             if mode == "available":
-                assert selected.release_selection.selected.profile.record() == profile
+                assert cast("ReleaseSelection", selected.release_selection).selected.profile.record() == profile
                 assert selected.source_trigger is None
-                revoked = frozenset()
+                revoked: frozenset[str] = frozenset()
                 with retain_artifact_runtime_inputs(
                     selected, origin, directory, installation=adopter[1],
-                    source_checkout=origin.acquired.checkout, uv="uv", python=Path(sys.executable),
+                    source_checkout=cast("ResolvedSource", origin.acquired).checkout, uv="uv", python=Path(sys.executable),
                     procutil=worker_procutil(), acquisition_limits=limits(max_closure_bytes=1 << 20),
                     wheel_limits=WheelLimits(
                         1 << 20, 8 << 20, 1 << 20, 1 << 20, 1000, 1000, 1 << 20,
@@ -278,7 +307,7 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
                     with pytest.raises(RevocationError, match="revoked"):
                         inputs.verify()
                     revoked = frozenset()
-                    source = origin.acquired.checkout / "plugins" / "agent-example" / "src" / "agent_example" / "__init__.py"
+                    source = cast("ResolvedSource", origin.acquired).checkout / "plugins" / "agent-example" / "src" / "agent_example" / "__init__.py"
                     original = source.read_bytes()
                     source.write_bytes(b"CHANGED = True\n")
                     with pytest.raises((ProfileError, artifacts.PromotionArtifactError, RuntimeError)):
@@ -310,14 +339,14 @@ def test_real_origin_discovery_plans_actual_artifact_and_only_observed_absence(
                     "approved-profile-unavailable" if mode == "no-profile" else "release-index-unavailable"
                 )
             assert origin.record()["mode"] == "origin" and origin.record()["trigger"] is None
-        assert origin.identity.source_commit == main and origin.acquired.commit == main
+        assert origin.identity.source_commit == main and cast("ResolvedSource", origin.acquired).commit == main
     assert sum(argv[0] == "attestation" for argv in calls) == 10
     assert not (adopter[1]["legacy_root"] / "current-version").exists()
 
 
 def test_actual_owned_source_is_authenticated_without_an_artifact_or_self_claim(
-    adopter, configured_source,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource],
+) -> None:
     root, repository, commit, selection = configured_source
     with retain(adopter) as selected:
         record = selected.record()
@@ -343,15 +372,15 @@ def test_actual_owned_source_is_authenticated_without_an_artifact_or_self_claim(
 
 
 def test_source_origin_precedes_fallback_and_keeps_the_same_acquisition_owner(
-    adopter, configured_source,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource],
+) -> None:
     with authentication.retain_installation_origin(
         installation=adopter[1], deadline=time.monotonic() + 60,
     ) as origin:
         assert origin.record()["mode"] == "origin"
         assert origin.record()["trigger"] is None
-        assert origin.acquired.commit == configured_source[2]
-        assert origin.acquired.tree == origin.identity.source_tree
+        assert cast("ResolvedSource", origin.acquired).commit == configured_source[2]
+        assert cast("ResolvedSource", origin.acquired).tree == origin.identity.source_tree
         selected = origin.for_plan(plan(adopter), installation=adopter[1])
         assert selected.acquired is origin.acquired
         assert selected.payload == origin.payload
@@ -372,7 +401,7 @@ def test_source_origin_precedes_fallback_and_keeps_the_same_acquisition_owner(
                 policy_path.write_bytes(policy_before)
 
 
-def test_source_origin_does_not_authorize_disabled_fallback(adopter, configured_source):
+def test_source_origin_does_not_authorize_disabled_fallback(adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource]) -> None:
     owned_policy(adopter[0], adopter[1], allowSourceFallback=False)
     with authentication.retain_installation_origin(
         installation=adopter[1], deadline=time.monotonic() + 60,
@@ -383,7 +412,7 @@ def test_source_origin_does_not_authorize_disabled_fallback(adopter, configured_
         assert not (adopter[1]["legacy_root"] / "versions").exists()
 
 
-def test_manager_self_update_preferences_do_not_authorize_runtime_source(adopter, tmp_path, monkeypatch):
+def test_manager_self_update_preferences_do_not_authorize_runtime_source(adopter: _Adopter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     source_config.set_source(repo="https://example.invalid/self-update.git", ref="dev", root=root)
@@ -396,9 +425,9 @@ def test_manager_self_update_preferences_do_not_authorize_runtime_source(adopter
 
 @pytest.mark.parametrize("phase", ["before", "consumption"])
 def test_source_authentication_rechecks_actual_installation_policy(
-    adopter, configured_source, phase,
-):
-    def change():
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], phase: str,
+) -> None:
+    def change() -> None:
         owned_policy(adopter[0], adopter[1], allowSourceFallback=False)
 
     selected_plan = plan(adopter)
@@ -413,14 +442,14 @@ def test_source_authentication_rechecks_actual_installation_policy(
 
 @pytest.mark.parametrize("phase", ["acquisition", "consumption"])
 def test_source_policy_is_rechecked_without_silently_reselecting(
-    adopter, configured_source, monkeypatch, phase,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
     root = configured_source[0]
     if phase == "acquisition":
         actual = runtime_source.acquire
 
         @contextmanager
-        def changed(*args, **options):
+        def changed(*args: RuntimeSource, **options: Any) -> Iterator[ResolvedSource]:
             with actual(*args, **options) as acquired:
                 runtime_source_config.set_source(runtime_source_config.RuntimeSource(), root=root)
                 yield acquired
@@ -431,7 +460,7 @@ def test_source_policy_is_rechecked_without_silently_reselecting(
             runtime_source_config.set_source(runtime_source_config.RuntimeSource(), root=root)
 
 
-def test_changed_prepared_source_is_not_authenticated_by_its_restored_receipt(adopter, configured_source):
+def test_changed_prepared_source_is_not_authenticated_by_its_restored_receipt(adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource]) -> None:
     with pytest.raises(ValueError, match="bytes"):
         with retain(adopter) as selected:
             payload = selected.payload
@@ -440,8 +469,8 @@ def test_changed_prepared_source_is_not_authenticated_by_its_restored_receipt(ad
 
 
 def test_source_owner_root_cannot_change_during_consumption(
-    adopter, configured_source, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     with pytest.raises(ProfileError, match="configured runtime source changed"):
         with retain(adopter):
             monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "another-owner"))
@@ -449,8 +478,8 @@ def test_source_owner_root_cannot_change_during_consumption(
 
 @pytest.mark.parametrize("corruption", ["origin", "owner", "untracked"])
 def test_corrupt_owned_checkout_does_not_fall_back_to_supplied_source(
-    adopter, configured_source, corruption,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], corruption: str,
+) -> None:
     root = configured_source[0]
     with retain(adopter):
         pass
@@ -469,7 +498,7 @@ def test_corrupt_owned_checkout_does_not_fall_back_to_supplied_source(
             pytest.fail("corrupt source checkout was authenticated")
 
 
-def test_unmerged_exact_selection_refuses_instead_of_substituting_main(adopter, configured_source):
+def test_unmerged_exact_selection_refuses_instead_of_substituting_main(adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource]) -> None:
     root, repository, _, _ = configured_source
     git(repository, "switch", "-qc", "dev")
     (repository / "extra.txt").write_text("unmerged")
@@ -486,7 +515,7 @@ def test_unmerged_exact_selection_refuses_instead_of_substituting_main(adopter, 
             pytest.fail("unmerged source was substituted with main")
 
 
-def test_deadline_refuses_before_source_side_effects(adopter, configured_source, monkeypatch):
+def test_deadline_refuses_before_source_side_effects(adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_source, "acquire", lambda *args, **options: pytest.fail("expired source acquired"))
     with pytest.raises(ValueError, match="deadline"):
         with authentication.retain_authenticated_source(

@@ -15,16 +15,21 @@ import ssl
 import subprocess
 import sys
 import time
+from typing import Any, BinaryIO, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
 from typing import Any, cast
 
 import installer_dependency_policy as dependencies
 from installer_feed_policy import _is_public_pypi_url
 from installer_wheel_acquisition import (
-    DELIVERY_POLICY, AcquisitionUnavailable, WheelFeed, _name, _tls_record, _url,
+    DELIVERY_POLICY as DELIVERY_POLICY, AcquisitionUnavailable, WheelFeed, _name,
+    _tls_record as _tls_record, _url,
 )
 from installer_wheel_inputs import _check_deadline, _ordinary
-from installer_wheel_snapshot import _open, _unchanged
+from installer_wheel_snapshot import _open as _snapshot_open, _unchanged as _snapshot_unchanged
+
+_open = cast(Callable[[Path], BinaryIO], _snapshot_open)
+_unchanged = cast(Callable[..., os.stat_result], _snapshot_unchanged)
 
 
 class NativeFeedError(ValueError):
@@ -39,7 +44,7 @@ def _body(value: str, prefix: str, opening: str = "{", closing: str = "}") -> st
     body, end = dependencies._balanced(value, position, opening, closing)
     if value[end:].strip().strip(","):
         raise NativeFeedError("native feed projection has trailing data")
-    return body
+    return cast(str, body)
 
 
 def _fields(body: str) -> dict[str, str]:
@@ -193,7 +198,7 @@ def _netrc(environment: dict[str, str], host: str, username: str) -> tuple[str, 
 
 
 def _credentials(
-    index: dict[str, Any], transaction: dependencies.RetainedUVInstall,
+    index: dict[str, str | None], transaction: dependencies.RetainedUVInstall,
     location: str, username: str, password_present: bool,
     raw: list[tuple[str | None, str]], uv: str, deadline: float,
 ) -> tuple[tuple[str, str], ...]:
@@ -557,9 +562,9 @@ def capture_native_feed_inputs(
     }, sort_keys=True, separators=(",", ":")))
     proxies = {}
     for key in ("http_proxy", "https_proxy"):
-        value = _optional(network.get(key, "None"))
-        if value is not None:
-            proxies[key.removesuffix("_proxy")] = value
+        proxy_value = _optional(network.get(key, "None"))
+        if proxy_value is not None:
+            proxies[key.removesuffix("_proxy")] = proxy_value
     _check_deadline(deadline)
     return NativeFeedInputs(
         profile, feeds, cutoffs, identity, origins, context, proxies,
@@ -567,8 +572,9 @@ def capture_native_feed_inputs(
 
 
 def recheck_native_feed_inputs(
-    transaction, projection: str, original: str, profile, policy: dict, uv: str,
-    deadline: float, **options,
+    transaction: dependencies.RetainedUVInstall, projection: str, original: str,
+    profile: object, policy: dict[str, Any], uv: str,
+    deadline: float, **options: Any,
 ) -> NativeFeedInputs:
     """Recheck the held compiler's settings without resolving dependencies."""
     expected = capture_native_feed_inputs(
@@ -580,7 +586,7 @@ def recheck_native_feed_inputs(
             [*transaction.argv, "--show-settings"],
             env=transaction.environment, cwd=transaction.cwd, capture_output=True, text=True,
             timeout=min(30, deadline - time.monotonic()),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise NativeFeedError("held native feed configuration probe failed or timed out") from None

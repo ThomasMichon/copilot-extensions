@@ -9,6 +9,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from collections.abc import Callable
+from types import ModuleType, TracebackType
+from typing import Any, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -20,11 +23,11 @@ from worktree_manager.__main__ import main
 
 
 @pytest.fixture
-def tmp_path(tmp_path_factory):
+def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("src")
 
 
-def test_acquisition_lease_and_refusal_need_no_manager_installer(tmp_path):
+def test_acquisition_lease_and_refusal_need_no_manager_installer(tmp_path: Path) -> None:
     script = """
 import importlib.abc, pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -59,8 +62,8 @@ print("acquisition-lease-without-installer-ok")
 
 @pytest.mark.parametrize("layout", ["retained-payload", "wheel-resources"])
 def test_installed_source_acquisition_uses_its_own_runtime_resources(
-    repository, tmp_path, layout,
-):
+    repository: tuple[Path, str, str], tmp_path: Path, layout: str,
+) -> None:
     repo, release, _development = repository
     root = Path(__file__).resolve().parents[2]
     slot = tmp_path / "installation" / "versions" / "1"
@@ -135,7 +138,7 @@ def git(path: Path, *arguments: str) -> str:
         capture_output=True, text=True, check=False, env=environment, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
+    return cast(str, result.stdout.strip())
 
 
 def commit(path: Path, text: str) -> str:
@@ -147,7 +150,7 @@ def commit(path: Path, text: str) -> str:
 
 
 @pytest.fixture
-def repository(tmp_path):
+def repository(tmp_path: Path) -> tuple[Path, str, str]:
     repo = tmp_path / "upstream"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
@@ -162,8 +165,9 @@ def repository(tmp_path):
 
 @pytest.mark.parametrize("after_denial", ["released", "changed", "destination"])
 def test_checkout_publication_retries_only_unchanged_owned_source(
-    tmp_path, monkeypatch, repository, after_denial,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    repository: tuple[Path, str, str], after_denial: str,
+) -> None:
     from types import SimpleNamespace
 
     # Emulate the retry gate without changing pathlib or the native Git platform.
@@ -172,9 +176,9 @@ def test_checkout_publication_retries_only_unchanged_owned_source(
     selection = config.RuntimeSource("main", str(repo))
     original = Path.rename
     attempts = []
-    destination = []
+    destination: list[Path] = []
 
-    def denied_once(path, target):
+    def denied_once(path: Path, target: Path) -> Path:
         if path.name == "checkout" and path.parent.name.startswith(".acquire-"):
             attempts.append(path)
             destination[:] = [target]
@@ -185,12 +189,12 @@ def test_checkout_publication_retries_only_unchanged_owned_source(
                     target.mkdir()
                     (target / "foreign.txt").write_text("preserve", encoding="utf-8")
                 error = PermissionError("synthetic Windows directory share lock")
-                error.winerror = 5
+                setattr(error, "winerror", 5)
                 raise error
         return original(path, target)
 
     monkeypatch.setattr(Path, "rename", denied_once)
-    monkeypatch.setattr(source.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
     if after_denial == "released":
         with source.acquire(selection, root=tmp_path / "manager") as resolved:
             assert resolved.commit == first
@@ -206,7 +210,7 @@ def test_checkout_publication_retries_only_unchanged_owned_source(
     assert not git(repo, "status", "--porcelain")
 
 
-def test_policy_defaults_do_not_inherit_manager_source(tmp_path):
+def test_policy_defaults_do_not_inherit_manager_source(tmp_path: Path) -> None:
     root = tmp_path / "manager"
     source_config.set_source(repo="https://example.invalid/manager.git", ref="canary", root=root)
     assert config.configured_source(root) == config.RuntimeSource()
@@ -217,7 +221,7 @@ def test_policy_defaults_do_not_inherit_manager_source(tmp_path):
     assert config.configured_source(root).channel == "dev"
 
 
-def test_policy_roundtrip_preserves_other_manager_tables(tmp_path):
+def test_policy_roundtrip_preserves_other_manager_tables(tmp_path: Path) -> None:
     root = tmp_path / "manager"
     root.mkdir()
     path = root / "config.toml"
@@ -227,7 +231,7 @@ def test_policy_roundtrip_preserves_other_manager_tables(tmp_path):
     assert config.configured_source(root) == selection
     config.set_source(config.RuntimeSource(), root=root)
     assert config.configured_source(root).channel == "marketplace"
-    assert source_config.tomllib.loads(path.read_text(encoding="utf-8"))["maintenance"] == {
+    assert getattr(source_config, "tomllib").loads(path.read_text(encoding="utf-8"))["maintenance"] == {
         "enabled": False,
     }
     assert not list(root.glob(".runtime-source-*.toml"))
@@ -244,7 +248,7 @@ def test_policy_roundtrip_preserves_other_manager_tables(tmp_path):
     {"repo": "ext::arbitrary-helper"},
     {"repo": "../ambient-checkout"},
 ])
-def test_invalid_policy_is_refused(arguments):
+def test_invalid_policy_is_refused(arguments: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         config.RuntimeSource(**arguments)
 
@@ -253,11 +257,11 @@ def test_invalid_policy_is_refused(arguments):
     "https://[2001:db8::1]/tools.git",
     "ssh://git@[2001:db8::1]/tools.git",
 ])
-def test_ipv6_source_locator_is_not_a_git_remote_helper(repo):
+def test_ipv6_source_locator_is_not_a_git_remote_helper(repo: str) -> None:
     assert config.RuntimeSource("main", repo).repo == repo
 
 
-def test_credential_refusal_uses_real_url_password_not_a_masked_placeholder():
+def test_credential_refusal_uses_real_url_password_not_a_masked_placeholder() -> None:
     from urllib.parse import urlsplit
 
     credentials = "sample-user" + ":" + "sample-password"
@@ -268,7 +272,7 @@ def test_credential_refusal_uses_real_url_password_not_a_masked_placeholder():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows drive-relative locator")
-def test_windows_drive_relative_source_is_not_an_absolute_local_repository():
+def test_windows_drive_relative_source_is_not_an_absolute_local_repository() -> None:
     with pytest.raises(ValueError, match="absolute path"):
         config.RuntimeSource(repo="C:relative")
 
@@ -278,7 +282,7 @@ def test_windows_drive_relative_source_is_not_an_absolute_local_repository():
     '[runtime_source]\nchannel = "dev"\n',
     '[runtime_source]\nunknown = true\n',
 ])
-def test_bad_config_is_not_silently_replaced_with_marketplace(tmp_path, body):
+def test_bad_config_is_not_silently_replaced_with_marketplace(tmp_path: Path, body: str) -> None:
     path = tmp_path / "config.toml"
     path.write_text(body, encoding="utf-8")
     with pytest.raises(ValueError):
@@ -286,7 +290,9 @@ def test_bad_config_is_not_silently_replaced_with_marketplace(tmp_path, body):
     assert path.read_text(encoding="utf-8") == body
 
 
-def test_main_dev_exact_and_tag_resolve_without_moving_source_files(repository, tmp_path):
+def test_main_dev_exact_and_tag_resolve_without_moving_source_files(
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
     repo, release, development = repository
     root = tmp_path / "manager"
     baseline = None
@@ -313,7 +319,9 @@ def test_main_dev_exact_and_tag_resolve_without_moving_source_files(repository, 
     assert not (root / "config.toml").exists()
 
 
-def test_advancing_branch_is_resolved_once_and_source_head_stays_fixed(repository, tmp_path):
+def test_advancing_branch_is_resolved_once_and_source_head_stays_fixed(
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
     repo, release, _development = repository
     selection = config.RuntimeSource("main", str(repo))
     with source.acquire(selection, root=tmp_path / "manager") as first:
@@ -326,8 +334,8 @@ def test_advancing_branch_is_resolved_once_and_source_head_stays_fixed(repositor
 
 
 def test_unchanged_dev_keeps_frozen_main_seed_and_acquires_fresh_main_without_checkout_changes(
-    repository, tmp_path,
-):
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
     repo, release, development = repository
     root = tmp_path / "manager"
     selection = config.RuntimeSource("dev", str(repo), allow_dev=True)
@@ -365,8 +373,8 @@ def test_unchanged_dev_keeps_frozen_main_seed_and_acquires_fresh_main_without_ch
 
 
 def test_dev_acquisition_refuses_unavailable_main_instead_of_reusing_stale_seed(
-    repository, tmp_path,
-):
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
     repo, release, _development = repository
     selection = config.RuntimeSource("dev", str(repo), allow_dev=True)
     with source.acquire(selection, root=tmp_path / "manager") as first:
@@ -383,7 +391,9 @@ def test_dev_acquisition_refuses_unavailable_main_instead_of_reusing_stale_seed(
 
 
 @pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "origin", "owner"])
-def test_invalid_incumbent_source_is_refused_without_repair(repository, tmp_path, kind):
+def test_invalid_incumbent_source_is_refused_without_repair(
+    repository: tuple[Path, str, str], tmp_path: Path, kind: str,
+) -> None:
     repo, _release, _development = repository
     selection = config.RuntimeSource("main", str(repo))
     with source.acquire(selection, root=tmp_path / "manager") as resolved:
@@ -404,7 +414,9 @@ def test_invalid_incumbent_source_is_refused_without_repair(repository, tmp_path
     assert not (tmp_path / "manager" / "current-version").exists()
 
 
-def test_exact_unmerged_commit_has_no_main_fallback(repository, tmp_path):
+def test_exact_unmerged_commit_has_no_main_fallback(
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
     repo, _release, development = repository
     selection = config.RuntimeSource("exact", str(repo), development)
     with pytest.raises(source.SourceAcquisitionError, match="not merged"):
@@ -412,14 +424,16 @@ def test_exact_unmerged_commit_has_no_main_fallback(repository, tmp_path):
             pytest.fail("unmerged commit must not be admitted")
 
 
-def test_consumer_mutation_is_reported(repository, tmp_path):
+def test_consumer_mutation_is_reported(
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
     repo, _release, _development = repository
     with pytest.raises(source.SourceAcquisitionError, match="modified"):
         with source.acquire(config.RuntimeSource("main", str(repo)), root=tmp_path / "manager") as resolved:
             (resolved.checkout / "payload.txt").write_text("changed", encoding="utf-8")
 
 
-def test_marketplace_never_acquires_or_creates_source_state(tmp_path):
+def test_marketplace_never_acquires_or_creates_source_state(tmp_path: Path) -> None:
     with pytest.raises(source.SourceAcquisitionError, match="Marketplace"):
         with source.acquire(config.RuntimeSource(), root=tmp_path / "manager"):
             pytest.fail("marketplace has no source checkout")
@@ -427,7 +441,9 @@ def test_marketplace_never_acquires_or_creates_source_state(tmp_path):
 
 
 @pytest.mark.parametrize("deadline", [True, 0, float("nan"), float("inf")])
-def test_source_deadline_refuses_before_git_or_state_writes(tmp_path, monkeypatch, deadline):
+def test_source_deadline_refuses_before_git_or_state_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deadline: float,
+) -> None:
     monkeypatch.setattr(source, "_git", lambda *args, **options: pytest.fail("invalid deadline ran Git"))
     with pytest.raises(source.SourceAcquisitionError, match="deadline"):
         with source.acquire(
@@ -438,36 +454,38 @@ def test_source_deadline_refuses_before_git_or_state_writes(tmp_path, monkeypatc
     assert not (tmp_path / "manager").exists()
 
 
-def test_source_git_child_uses_original_shared_deadline(repository, monkeypatch):
-    actual = source.subprocess.run
+def test_source_git_child_uses_original_shared_deadline(
+    repository: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual = subprocess.run
     deadline = time.monotonic() + 5
     timeouts = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         timeouts.append(options["timeout"])
-        return actual(command, **options)
+        return cast(subprocess.CompletedProcess[str], actual(command, **options))
 
-    monkeypatch.setattr(source.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert source._git(repository[0], "rev-parse", "HEAD", deadline=deadline) == repository[1]
     assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
 
 
 def test_acquisition_threads_child_auth_environment_and_scrubs_routing(
-    repository, tmp_path, monkeypatch,
-):
+    repository: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, _release, development = repository
     environment = dict(os.environ, GIT_DIR=str(tmp_path / "hostile"), APPROVED_AUTH="fixture")
-    original = source.subprocess.run
+    original = subprocess.run
     observed = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         child = options["env"]
         assert child["APPROVED_AUTH"] == "fixture" and "GIT_DIR" not in child
         assert child["GIT_TERMINAL_PROMPT"] == "0"
         observed.append(command)
-        return original(command, **options)
+        return cast(subprocess.CompletedProcess[str], original(command, **options))
 
-    monkeypatch.setattr(source.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with source.acquire(
         config.RuntimeSource("dev", str(repo), allow_dev=True),
         root=tmp_path / "manager", environment=environment,
@@ -475,7 +493,9 @@ def test_acquisition_threads_child_auth_environment_and_scrubs_routing(
         assert resolved.commit == development
     assert observed and environment["GIT_DIR"] == str(tmp_path / "hostile")
     assert os.environ.get("APPROVED_AUTH") != "fixture"
-def test_unavailable_configured_source_does_not_fall_back_to_cwd(repository, tmp_path, monkeypatch):
+def test_unavailable_configured_source_does_not_fall_back_to_cwd(
+    repository: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, _release, _development = repository
     monkeypatch.chdir(repo)
     with pytest.raises(source.SourceAcquisitionError, match="Git operation failed"):
@@ -487,19 +507,22 @@ def test_unavailable_configured_source_does_not_fall_back_to_cwd(repository, tmp
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows source-acquisition sharing retry")
 @pytest.mark.parametrize("change", ["head", "owner", "appeared", "unsafe", "cap", "deadline"])
-def test_acquisition_retry_refuses_drift_and_expiry(repository, tmp_path, monkeypatch, change):
+def test_acquisition_retry_refuses_drift_and_expiry(
+    repository: tuple[Path, str, str], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     repo, _release, development = repository
     clock = [time.monotonic()]
-    monkeypatch.setattr(source.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(source.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
     rename, is_symlink = Path.rename, Path.is_symlink
     calls = []
-    target = []
+    target: list[Path] = []
 
-    def linked(path):
+    def linked(path: Path) -> bool:
         return bool(target and change == "unsafe" and path == target[0]) or is_symlink(path)
 
-    def blocked(path, destination):
+    def blocked(path: Path, destination: Path) -> Path:
         if not path.parent.name.startswith(".acquire-"):
             return rename(path, destination)
         calls.append(path)
@@ -521,7 +544,7 @@ def test_acquisition_retry_refuses_drift_and_expiry(repository, tmp_path, monkey
         elif change == "deadline":
             clock[0] += 6
         error = PermissionError("controlled sharing failure")
-        error.winerror = 32
+        setattr(error, "winerror", 32)
         raise error
 
     monkeypatch.setattr(Path, "rename", blocked)
@@ -544,7 +567,7 @@ def test_acquisition_retry_refuses_drift_and_expiry(repository, tmp_path, monkey
         assert not target[0].exists()
 
 
-def test_worktree_cannot_replace_owned_checkout(repository):
+def test_worktree_cannot_replace_owned_checkout(repository: tuple[Path, str, str]) -> None:
     repo, _release, _development = repository
     selection = config.RuntimeSource("main", str(repo))
     # Git for Windows' worktree creator has a separate fixed-size GIT_DIR limit.
@@ -560,7 +583,10 @@ def test_worktree_cannot_replace_owned_checkout(repository):
                 pytest.fail("a developer worktree cannot become the maintained source")
 
 
-def test_cli_resolve_reports_exact_source_without_installing(repository, tmp_path, monkeypatch, capsys):
+def test_cli_resolve_reports_exact_source_without_installing(
+    repository: tuple[Path, str, str], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     repo, release, development = repository
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
@@ -575,7 +601,9 @@ def test_cli_resolve_reports_exact_source_without_installing(repository, tmp_pat
     assert not (root / "current-version").exists()
 
 
-def test_cli_is_default_off_and_dev_requires_consent(tmp_path, monkeypatch, capsys):
+def test_cli_is_default_off_and_dev_requires_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     assert main(["runtime-source"]) == 0
@@ -591,8 +619,8 @@ def test_cli_is_default_off_and_dev_requires_consent(tmp_path, monkeypatch, caps
 
 
 def test_invalid_update_policy_precedes_engine_repair_without_aggregate_telemetry(
-    tmp_path, monkeypatch, capsys,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from worktree_manager import __main__ as manager
     from worktree_manager import update_bootstrap, update_events
 
@@ -615,8 +643,9 @@ def test_invalid_update_policy_precedes_engine_repair_without_aggregate_telemetr
 
 @pytest.mark.parametrize("target", [[], ["--target", "agent-worktrees"]])
 def test_nonrepair_bootstrap_update_policy_precedes_manager_self_install(
-    tmp_path, monkeypatch, capsys, target,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], target: list[str],
+) -> None:
     import sys
     from types import SimpleNamespace
 
@@ -625,7 +654,7 @@ def test_nonrepair_bootstrap_update_policy_precedes_manager_self_install(
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
-    installer = self_install._runtime_installer()
+    installer = cast(Callable[[], ModuleType], self_install._runtime_installer)()
     payload = Path(__file__).resolve().parents[1]
     monkeypatch.setattr(installer, "SCRIPTS", payload / "scripts")
     monkeypatch.syspath_prepend(str(payload / "scripts"))
@@ -643,7 +672,9 @@ def test_nonrepair_bootstrap_update_policy_precedes_manager_self_install(
     assert "No update was run" in capsys.readouterr().err
 
 
-def test_real_update_error_record_requires_explicit_missing_argument(tmp_path, monkeypatch):
+def test_real_update_error_record_requires_explicit_missing_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import update_events, update_orchestration
 
     root = tmp_path / "manager"
@@ -657,8 +688,8 @@ def test_real_update_error_record_requires_explicit_missing_argument(tmp_path, m
 
 
 def test_git_keeps_approved_global_and_scoped_auth_without_repository_override(
-    repository, tmp_path, monkeypatch,
-):
+    repository: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, release, _development = repository
     global_config = tmp_path / "gitconfig"
     global_config.write_text('[credential]\nhelper = approved-global-helper\n', encoding="utf-8")
@@ -675,7 +706,9 @@ def test_git_keeps_approved_global_and_scoped_auth_without_repository_override(
     assert source._git(repo, "rev-parse", "HEAD") == release
 
 
-def test_clone_pins_origin_despite_user_default_remote(repository, tmp_path, monkeypatch):
+def test_clone_pins_origin_despite_user_default_remote(
+    repository: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, release, _development = repository
     global_config = tmp_path / "gitconfig"
     global_config.write_text('[clone]\ndefaultRemoteName = upstream\n', encoding="utf-8")
@@ -685,12 +718,14 @@ def test_clone_pins_origin_despite_user_default_remote(repository, tmp_path, mon
         assert source._git(selected.checkout, "remote") == "origin"
 
 
-def test_failed_initial_checkout_does_not_poison_retry(repository, tmp_path, monkeypatch):
+def test_failed_initial_checkout_does_not_poison_retry(
+    repository: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, release, _development = repository
     selection = config.RuntimeSource("main", str(repo))
     original = source._git
 
-    def failed_checkout(path, *arguments):
+    def failed_checkout(path: Path, *arguments: str) -> str:
         if arguments[:1] == ("checkout",):
             raise source.SourceAcquisitionError("synthetic checkout interruption")
         return original(path, *arguments)
@@ -705,7 +740,9 @@ def test_failed_initial_checkout_does_not_poison_retry(repository, tmp_path, mon
         assert not list(selected.checkout.parent.glob(".acquire-*"))
 
 
-def test_queued_source_choice_cannot_change_before_participant_execution(tmp_path, monkeypatch, capsys):
+def test_queued_source_choice_cannot_change_before_participant_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from types import SimpleNamespace
     import update_driver
 
@@ -726,13 +763,16 @@ def test_queued_source_choice_cannot_change_before_participant_execution(tmp_pat
         request_id = "synthetic-request"
         root = tmp_path
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(
+            self, _type: type[BaseException] | None, _value: BaseException | None,
+            _traceback: TracebackType | None,
+        ) -> None:
             pass
 
-        def assert_owned(self):
+        def assert_owned(self) -> None:
             pytest.fail("changed source must be rejected before executing the participant")
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)

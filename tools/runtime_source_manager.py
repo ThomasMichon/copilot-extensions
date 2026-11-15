@@ -4,16 +4,31 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 import shutil
+from collections.abc import Callable, Iterator
+from types import ModuleType
+from typing import Any, TYPE_CHECKING, TypedDict, cast
 
 from build_toolchain_lock import _query_marker_environment
-from runtime_profile import ProfileError
-from runtime_source_build import engine, retain_source_runtime_inputs
+from runtime_profile import ProfileError as ProfileError
+from runtime_source_build import SourceRuntimeInputs, engine as engine, retain_source_runtime_inputs
 from runtime_source_authentication import retain_installation_source as retain_authenticated_source
-from runtime_source_lock import dependencies, retain_source_configuration
+from runtime_source_lock import dependencies as dependencies, retain_source_configuration
+from runtime_profile_policy import InstallationProfilePlan
+
+if TYPE_CHECKING:
+    from runtime_source_reuse import SourceReuseInputs
+    from worktree_manager.self_install import SelfInstallResult
+
+
+class _RevocationOptions(TypedDict, total=False):
+    revoked_inputs: Callable[[], frozenset[str]]
 
 
 @contextmanager
-def _manager_source_inputs(plan, *, revoked_inputs, **options):
+def _manager_source_inputs(
+    plan: InstallationProfilePlan, *, revoked_inputs: Callable[[], frozenset[str]] | None,
+    **options: Any,
+) -> Iterator[SourceRuntimeInputs | SourceReuseInputs]:
     from runtime_source_reuse import retain_source_runtime_reuse, selected_generation
 
     root = Path(plan.policy()["owner"]["runtimeRoot"])
@@ -36,12 +51,15 @@ def _manager_source_inputs(plan, *, revoked_inputs, **options):
                 yield existing
                 return
     with retain_source_runtime_inputs(
-        plan, **options, **({"revoked_inputs": revoked_inputs} if revoked_inputs is not None else {}),
+        plan, **options, **cast(_RevocationOptions, {"revoked_inputs": revoked_inputs} if revoked_inputs is not None else {}),
     ) as source:
         yield source
 
 
-def install_manager_source_runtime(plan, *, revoked_inputs=None, **options):
+def install_manager_source_runtime(
+    plan: InstallationProfilePlan, *, revoked_inputs: Callable[[], frozenset[str]] | None = None,
+    **options: Any,
+) -> SelfInstallResult:
     """Keep authenticated inputs alive through the actual Manager lifecycle."""
     from worktree_manager import self_install
 
@@ -63,7 +81,7 @@ def install_manager_source_runtime(plan, *, revoked_inputs=None, **options):
                 raise
     # A stored receipt cannot build its own repair.
     with retain_source_runtime_inputs(
-        plan, **options, **({"revoked_inputs": revoked_inputs} if revoked_inputs is not None else {}),
+        plan, **options, **cast(_RevocationOptions, {"revoked_inputs": revoked_inputs} if revoked_inputs is not None else {}),
     ) as source:
         return _install_manager_inputs(
             source, root, self_install, revoked_inputs, options.get("deadline"), options.get("python"),
@@ -71,18 +89,22 @@ def install_manager_source_runtime(plan, *, revoked_inputs=None, **options):
         )
 
 
-def _install_manager_inputs(source, root, self_install, revoked_inputs, deadline, python, uv):
+def _install_manager_inputs(
+    source: SourceRuntimeInputs | SourceReuseInputs, root: Path, self_install: ModuleType,
+    revoked_inputs: Callable[[], frozenset[str]] | None, deadline: float | None,
+    python: Path | None, uv: str | None,
+) -> SelfInstallResult:
     if source.identity.plugin != "worktree-manager":
         raise ProfileError("Manager source installation has a foreign source identity")
 
-    def verify():
+    def verify() -> None:
         source.verify()
         if revoked_inputs is not None:
             from runtime_source_reuse import verify_not_revoked
 
             verify_not_revoked(source.wheels.receipt(), revoked_inputs)
 
-    def validate(slot):
+    def validate(slot: Path) -> None:
         verify()
         python = engine.runtime.slot_python(root, slot.name)
         if python is None or _query_marker_environment(python, deadline=deadline) != (
@@ -100,4 +122,4 @@ def _install_manager_inputs(source, root, self_install, revoked_inputs, deadline
         **({"_uv": Path(uv)} if uv is not None else {}),
     )
     verify()
-    return result
+    return cast("SelfInstallResult", result)

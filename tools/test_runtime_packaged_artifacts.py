@@ -1,6 +1,17 @@
 """Canonical build resources survive the shipped validators' isolation boundary."""
 from __future__ import annotations
 
+from typing import cast
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import Any, Protocol
+    class _LegacyCoreBuild(Protocol):
+        def __call__(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, Any], list[Path]]: ...
+
+
+
+
+
 import json
 import os
 from pathlib import Path
@@ -17,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("kind", ["worktrees", "core"])
-def test_copied_toolkit_validates_resource_bearing_artifacts(tmp_path, monkeypatch, kind):
+def test_copied_toolkit_validates_resource_bearing_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     import build_python_artifacts as builder
     import promotion_python_artifacts as artifacts
 
@@ -26,7 +37,7 @@ def test_copied_toolkit_validates_resource_bearing_artifacts(tmp_path, monkeypat
     if kind == "core":
         from test_core_python_artifacts import _build
 
-        wheels, manifest, _calls = _build(candidate, monkeypatch)
+        wheels, manifest, _calls = cast("_LegacyCoreBuild", _build)(candidate, monkeypatch)
     else:
         from plugin_runtime_resources import build_inputs
         from test_promotion_python_artifacts import _STATIC_BUILD, _wheel_bytes
@@ -51,7 +62,7 @@ def test_copied_toolkit_validates_resource_bearing_artifacts(tmp_path, monkeypat
         monkeypatch.setattr(builder, "PLUGINS_DIR", candidate / "plugins")
         monkeypatch.setattr(builder, "LIBS_DIR", candidate / "libs")
 
-        def build(source_dir, out_dir, **_options):
+        def build(source_dir: Path, out_dir: Path, **_options: object) -> Path:
             _metadata, resources = build_inputs(source_dir, root=candidate)
             out_dir.mkdir(parents=True, exist_ok=True)
             wheel = out_dir / "agent_worktrees-1.0-py3-none-any.whl"
@@ -91,15 +102,15 @@ print("isolated-resource-bundle-ok")
         [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(candidate),
          str(bundles / entry["filename"]), json.dumps(entry), json.dumps(manifest)],
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert observed.returncode == 0, observed.stdout + observed.stderr
     assert observed.stdout.strip() == "isolated-resource-bundle-ok"
 
 
 def test_copied_manager_provider_prepares_embedded_first_party_inputs(
-    tmp_path, embedded_profile_source,
-):
+    tmp_path: Path, embedded_profile_source: Path,
+) -> None:
     from materialize_launch_wrapper_assets import materialize_into
 
     package = tmp_path / "package"
@@ -147,7 +158,7 @@ print("isolated-manager-first-party-preparation-ok")
         [sys.executable, "-I", "-B", "-c", script, str(provider),
          str(embedded_profile_source), str(tmp_path / "prepared")],
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert observed.returncode == 0, observed.stdout + observed.stderr
     assert observed.stdout.strip() == "isolated-manager-first-party-preparation-ok"

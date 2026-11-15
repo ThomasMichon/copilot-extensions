@@ -8,7 +8,9 @@ import os
 import sys
 import time
 from contextlib import ExitStack, contextmanager
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any, Protocol, TypedDict, cast
 import runtime_input_verifier
 
 
@@ -19,14 +21,42 @@ class InstallationRefused(RuntimeError):
     """Installation authority or a completed transition could not be proved."""
 
 
+class PublicationLock(Protocol):
+    def assert_owned(self) -> None: ...
+    def _owner(self) -> dict[str, Any]: ...
+
+
+class SourceDescriptorOptions(TypedDict, total=False):
+    source_descriptor: dict[str, Any]
+
+
+class RuntimeProfilePolicyOptions(TypedDict, total=False):
+    runtime_profile_policy: dict[str, Any]
+
+
+class RuntimeProfileModeOptions(TypedDict, total=False):
+    runtime_profile_mode: str
+
+
+class RuntimeProfileOptions(RuntimeProfilePolicyOptions, RuntimeProfileModeOptions):
+    pass
+
+
+class InputVerificationOptions(TypedDict, total=False):
+    runtime_input_verification: runtime_input_verifier.VerifierIdentity
+    verify_inputs: Callable[[], None]
+    prepare_only: bool
+
+
 class Governance:
     def __init__(
-        self, root: Path, payload: Path, *, source_descriptor: dict | None = None,
-        runtime_profile_policy: dict | None = None,
+        self, root: Path, payload: Path, *, source_descriptor: dict[str, Any] | None = None,
+        runtime_profile_policy: dict[str, Any] | None = None,
         runtime_profile_mode: str = "source",
-        runtime_input_verification: dict | None = None, verify_inputs=None,
+        runtime_input_verification: runtime_input_verifier.VerifierIdentity | None = None,
+        verify_inputs: Callable[[], None] | None = None,
         prepare_only: bool = False,
-    ):
+    ) -> None:
         self.root = root.resolve()
         self.payload = payload.resolve(strict=True)
         helper = SCRIPTS / "installation-context" / "installation_context.py"
@@ -42,7 +72,7 @@ class Governance:
                 "kind": normalized.kind, "canonical": normalized.canonical, "ref": normalized.ref,
             }
         self.source_descriptor = source_descriptor
-        self.runtime_profile_policy = (
+        self.runtime_profile_policy: dict[str, Any] | None = (
             json.loads(json.dumps(runtime_profile_policy, allow_nan=False))
             if runtime_profile_policy is not None else None
         )
@@ -59,7 +89,7 @@ class Governance:
             self.verify_inputs = runtime_input_verifier.current_client(
                 self.runtime_input_verification,
             ).check
-        self.binding_options = (
+        self.binding_options: dict[str, Any] = (
             {"mode_arguments": {"source_descriptor": source_descriptor}}
             if source_descriptor is not None else {}
         )
@@ -76,12 +106,12 @@ class Governance:
             / ".copilot-extensions"
         )
         self.initial = self.read()
-        self.publication_locks = ()
-        self.command_lock = None
-        self.retained_binding = None
+        self.publication_locks: tuple[PublicationLock, ...] = ()
+        self.command_lock: PublicationLock | None = None
+        self.retained_binding: dict[str, Any] | None = None
 
-    def read(self) -> tuple[dict, dict | None]:
-        arguments = {
+    def read(self) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        arguments: dict[str, Any] = {
             "legacy_root": self.root if not self.context else Path.home() / ".agent-worktrees",
             "payload_root": self.payload,
             "plugin_id": "agent-worktrees",
@@ -115,7 +145,7 @@ class Governance:
         self._publication({**arguments, "context": self.context})
         return state, receipt
 
-    def _publication(self, arguments: dict) -> None:
+    def _publication(self, arguments: dict[str, Any]) -> None:
         if not self.prepare_only:
             self._verify_inputs()
         self._profile_policy(arguments)
@@ -153,7 +183,7 @@ class Governance:
             f"{policy['diagnostic'] or ''} {policy['recovery'] or ''}".strip()
         )
 
-    def _profile_policy(self, arguments: dict) -> None:
+    def _profile_policy(self, arguments: dict[str, Any]) -> None:
         expected = self.runtime_profile_policy
         if expected is None:
             return
@@ -171,7 +201,7 @@ class Governance:
         ):
             raise InstallationRefused("Worktrees runtime profile policy changed or names another owner")
 
-    def bind_runtime_profile(self, policy: dict) -> None:
+    def bind_runtime_profile(self, policy: dict[str, Any]) -> None:
         """Bind producer evidence only after checking this actual installation."""
         self.runtime_profile_policy = json.loads(json.dumps(policy, allow_nan=False))
         if self.runtime_profile_policy is not None:
@@ -189,12 +219,12 @@ class Governance:
         if any(state.get(key) != previous.get(key) for key in keys):
             raise InstallationRefused("Installation governance changed during construction")
         if receipt is not None and any(
-            receipt[key] != previous_receipt[key]
+            receipt[key] != cast(dict[str, Any], previous_receipt)[key]
             for key in ("marketplaceId", "namespaceGeneration", "generation", "pluginRoot")
         ):
             raise InstallationRefused("Installation receipt changed during construction")
 
-    def signature(self) -> dict:
+    def signature(self) -> dict[str, Any]:
         state, receipt = self.initial
         return {
             "state": {key: state.get(key) for key in (
@@ -221,7 +251,7 @@ class Governance:
             self.verify_inputs()
 
     @contextmanager
-    def _legacy_profile_authority(self):
+    def _legacy_profile_authority(self) -> Iterator[None]:
         if self.context or self.runtime_profile_policy is None:
             yield
             return
@@ -248,7 +278,7 @@ class Governance:
             yield
 
     @contextmanager
-    def manifest_publication(self, content: bytes):
+    def manifest_publication(self, content: bytes) -> Iterator[bytes]:
         if getattr(self, "prepare_only", False):
             raise InstallationRefused("Helper preparation cannot publish a runtime manifest")
         self._verify_inputs()
@@ -278,7 +308,7 @@ class Governance:
                 if self.runtime_profile_policy is not None:
                     self.recheck()
                 yield (json.dumps({**manifest, **ownership}, indent=2) + "\n").encode("utf-8")
-                self.command_lock.assert_owned()
+                cast(PublicationLock, self.command_lock).assert_owned()
                 return
             with binding.legacy_manifest_publication(
                 self.helper, json.loads(content), payload_root=self.payload,
@@ -311,7 +341,7 @@ class Governance:
         return environment
 
     @contextmanager
-    def held(self, *, timeout: float = 180):
+    def held(self, *, timeout: float = 180) -> Iterator[None]:
         if getattr(self, "prepare_only", False):
             raise InstallationRefused("Helper preparation cannot acquire publication custody")
         if self.publication_locks or self.command_lock is not None:
@@ -325,8 +355,8 @@ class Governance:
         deadline = time.monotonic() + timeout
         with ExitStack() as stack:
             stack.enter_context(self._legacy_profile_authority())
-            locks = []
-            command_lock = None
+            locks: list[PublicationLock] = []
+            command_lock: PublicationLock | None = None
             receipt = self.initial[1]
             retained = self._retained_bootstrap()
             if retained:

@@ -15,20 +15,23 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 
-def _fixture_runtime(tmp_path):
+def _fixture_runtime(tmp_path: Path) -> ModuleType:
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("versioned_runtime.py", "versioned_runtime_source.py", "versioned_runtime_leases.py"):
         shutil.copyfile(scripts / name, tmp_path / name)
     spec = importlib.util.spec_from_file_location(
         "fingerprint_components_fixture", tmp_path / "versioned_runtime.py",
     )
+    assert spec is not None and spec.loader is not None
     runtime = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = runtime
     spec.loader.exec_module(runtime)
     return runtime
 
 
-def test_fingerprint_component_load_does_not_write_into_its_declared_input(tmp_path, monkeypatch):
+def test_fingerprint_component_load_does_not_write_into_its_declared_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(sys, "dont_write_bytecode", False)
     runtime = _fixture_runtime(tmp_path)
     before = {path.relative_to(tmp_path) for path in tmp_path.rglob("*")}
@@ -37,12 +40,18 @@ def test_fingerprint_component_load_does_not_write_into_its_declared_input(tmp_p
     assert runtime.fingerprint_source([tmp_path]) == first
 
 
-def test_first_concurrent_fingerprints_initialize_the_component_once(tmp_path, monkeypatch):
+def test_first_concurrent_fingerprints_initialize_the_component_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = _fixture_runtime(tmp_path)
     payload = tmp_path / "payload"
     payload.write_bytes(b"payload")
     gate = ModuleType("fingerprint_component_gate")
-    gate.entered, gate.release, gate.calls = threading.Event(), threading.Event(), []
+    entered, release = threading.Event(), threading.Event()
+    calls: list[int] = []
+    setattr(gate, "entered", entered)
+    setattr(gate, "release", release)
+    setattr(gate, "calls", calls)
     monkeypatch.setitem(sys.modules, gate.__name__, gate)
     source = tmp_path / "versioned_runtime_source.py"
     source.write_text(source.read_text(encoding="utf-8").replace(
@@ -56,19 +65,21 @@ def test_first_concurrent_fingerprints_initialize_the_component_once(tmp_path, m
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(runtime.fingerprint_source, [payload])
         try:
-            assert gate.entered.wait(3)
+            assert entered.wait(3)
             acquired = runtime._runtime_components_lock.acquire(blocking=False)
             if acquired:
                 runtime._runtime_components_lock.release()
             assert not acquired, "component initialization was not serialized"
             second = executor.submit(runtime.fingerprint_source, [payload])
         finally:
-            gate.release.set()
+            release.set()
         assert first.result(timeout=3) == second.result(timeout=3)
-    assert gate.calls == [1]
+    assert calls == [1]
 
 
-def test_windows_read_only_fingerprint_batches_preserve_exact_framing(tmp_path, monkeypatch):
+def test_windows_read_only_fingerprint_batches_preserve_exact_framing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import hashlib
 
     runtime = _fixture_runtime(tmp_path)
@@ -88,7 +99,7 @@ def test_windows_read_only_fingerprint_batches_preserve_exact_framing(tmp_path, 
     active = peak = 0
     read_bytes = Path.read_bytes
 
-    def read(path):
+    def read(path: Path) -> bytes:
         nonlocal active, peak
         assert threading.get_ident() != caller
         with lock:
@@ -102,7 +113,7 @@ def test_windows_read_only_fingerprint_batches_preserve_exact_framing(tmp_path, 
                 active -= 1
 
     monkeypatch.setattr(Path, "read_bytes", read)
-    observed = {}
+    observed: dict[Path, str] = {}
     result = source.fingerprint_entries(
         entries, label=lambda path: path.name, root_label=str, roots=[tmp_path],
         normalize_link=lambda value: value, path_type=Path,
@@ -112,18 +123,21 @@ def test_windows_read_only_fingerprint_batches_preserve_exact_framing(tmp_path, 
     assert active == 0 and peak == 4
 
 
-def test_fingerprint_read_window_advances_without_waiting_for_a_batch(tmp_path, monkeypatch):
+def test_fingerprint_read_window_advances_without_waiting_for_a_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = _fixture_runtime(tmp_path)
     source = runtime._runtime_component("versioned_runtime_source")
     entries = {tmp_path / f"input-{index}": "file" for index in range(8)}
     for path in entries:
         path.write_bytes(path.name.encode())
     following_started = threading.Event()
-    reads, labels = [], []
+    reads: list[Path] = []
+    labels: list[Path] = []
     lock = threading.Lock()
     read_bytes = Path.read_bytes
 
-    def read(path):
+    def read(path: Path) -> bytes:
         if path.name == "input-3":
             assert following_started.wait(3), "file reads waited for the whole batch"
         elif path.name == "input-4":
@@ -132,7 +146,7 @@ def test_fingerprint_read_window_advances_without_waiting_for_a_batch(tmp_path, 
             reads.append(path)
         return read_bytes(path)
 
-    def label(path):
+    def label(path: Path) -> str:
         labels.append(path)
         return path.name
 
@@ -153,7 +167,9 @@ def test_fingerprint_read_window_advances_without_waiting_for_a_batch(tmp_path, 
 
 
 @pytest.mark.parametrize("error", [PermissionError("denied"), FileNotFoundError("missing")])
-def test_windows_fingerprint_worker_read_failures_remain_explicit(tmp_path, monkeypatch, error):
+def test_windows_fingerprint_worker_read_failures_remain_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError,
+) -> None:
     runtime = _fixture_runtime(tmp_path)
     source = runtime._runtime_component("versioned_runtime_source")
     monkeypatch.setattr(source, "os", SimpleNamespace(name="nt"))
@@ -162,7 +178,7 @@ def test_windows_fingerprint_worker_read_failures_remain_explicit(tmp_path, monk
         path.write_bytes(b"content")
     read_bytes = Path.read_bytes
 
-    def read(path):
+    def read(path: Path) -> bytes:
         if path.name == "input-2":
             raise error
         return read_bytes(path)
@@ -177,7 +193,9 @@ def test_windows_fingerprint_worker_read_failures_remain_explicit(tmp_path, monk
     assert raised.value.__cause__ is error
 
 
-def test_windows_fingerprint_callbacks_keep_sequential_reads_on_the_caller(tmp_path, monkeypatch):
+def test_windows_fingerprint_callbacks_keep_sequential_reads_on_the_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = _fixture_runtime(tmp_path)
     source = runtime._runtime_component("versioned_runtime_source")
     monkeypatch.setattr(source, "os", SimpleNamespace(name="nt"))
@@ -189,10 +207,10 @@ def test_windows_fingerprint_callbacks_keep_sequential_reads_on_the_caller(tmp_p
     for path in entries:
         path.write_bytes(b"original")
     last = next(reversed(entries))
-    observed = []
+    observed: list[tuple[Path, bytes]] = []
     caller = threading.get_ident()
 
-    def retain(path, data):
+    def retain(path: Path, data: bytes) -> None:
         assert threading.get_ident() == caller
         observed.append((path, data))
         last.write_bytes(b"changed")
@@ -207,7 +225,7 @@ def test_windows_fingerprint_callbacks_keep_sequential_reads_on_the_caller(tmp_p
 
 
 @pytest.mark.skipif(os.name != "posix", reason="native fork while component initialization is active")
-def test_fork_reinitializes_the_component_lock_before_child_fingerprinting(tmp_path):
+def test_fork_reinitializes_the_component_lock_before_child_fingerprinting(tmp_path: Path) -> None:
     _fixture_runtime(tmp_path)
     code = """
 import importlib.util,os,signal,sys,threading,types

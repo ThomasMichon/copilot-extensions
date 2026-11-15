@@ -7,11 +7,16 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from typing import Any, Literal, Protocol, TYPE_CHECKING, cast, overload
 
 from artifact_attestation import (
-    INDEX_LIMIT, INDEX_NAME, INDEX_SCHEMA, PromotionArtifactError,
+    INDEX_LIMIT, INDEX_NAME as INDEX_NAME, INDEX_SCHEMA as INDEX_SCHEMA,
     _check, _gh, verify_attestation_subject,
 )
+if TYPE_CHECKING:
+    from artifact_source_build import PromotionArtifactError
+else:
+    from artifact_attestation import PromotionArtifactError
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES
 from promotion_source_history import is_ancestor, read_promoted_source
 
@@ -25,7 +30,28 @@ EVIDENCE_PREFIXES = (
 )
 
 
-def supplementary_evidence_asset(asset: dict, dev_sha: str) -> bool:
+class ReleaseRunner(Protocol):
+    @overload
+    def __call__(
+        self, argv: list[str], *, verification: bool = False,
+        binary: Literal[False] = False, timeout: float = 120,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+    @overload
+    def __call__(
+        self, argv: list[str], *, verification: bool = False,
+        binary: Literal[True], timeout: float = 120,
+    ) -> subprocess.CompletedProcess[bytes]: ...
+
+
+class SubjectVerifier(Protocol):
+    def __call__(
+        self, path: Path, *, repository: str, signer_digest: str,
+        source_digest: str, source_ref: str,
+    ) -> None: ...
+
+
+def supplementary_evidence_asset(asset: dict[str, Any], dev_sha: str) -> bool:
     """Admit only bounded auxiliary data, never executable artifacts."""
     name = asset.get("name")
     match = re.fullmatch(
@@ -46,14 +72,14 @@ def supplementary_evidence_asset(asset: dict, dev_sha: str) -> bool:
     )
 
 
-def is_not_found(result: subprocess.CompletedProcess) -> bool:
+def is_not_found(result: subprocess.CompletedProcess[str]) -> bool:
     return result.returncode != 0 and re.fullmatch(
         r"(?:gh:\s+[^\r\n]*\(HTTP[ \t]+404\)|\(HTTP[ \t]+404\)|(?:gh:[ \t]+)?HTTP[ \t]+404(?::[^\r\n]*)?)",
         result.stderr.strip(),
     ) is not None
 
 
-def tag_commit(repository: str, tag: str, *, runner=None) -> str | None:
+def tag_commit(repository: str, tag: str, *, runner: ReleaseRunner | None = None) -> str | None:
     invoke = runner or _gh
     result = invoke(["api", f"repos/{repository}/git/ref/tags/{tag}"])
     if result.returncode:
@@ -78,7 +104,7 @@ def tag_commit(repository: str, tag: str, *, runner=None) -> str | None:
     raise PromotionArtifactError(f"{tag}: annotated tag chain exceeds validation limit")
 
 
-def read_release(repository: str, tag: str, *, runner=None) -> dict | None:
+def read_release(repository: str, tag: str, *, runner: ReleaseRunner | None = None) -> dict[str, Any] | None:
     result = (runner or _gh)(
         ["api", f"repos/{repository}/releases/tags/{tag}"],
         verification=True, timeout=120,
@@ -98,12 +124,12 @@ def read_release(repository: str, tag: str, *, runner=None) -> dict | None:
         or type(release.get("id")) is not int or release["id"] <= 0
     ):
         raise PromotionArtifactError(f"{tag}: invalid candidate release")
-    return release
+    return cast(dict[str, Any], release)
 
 
 def download(
-    directory: Path, *, repository: str, tag: str, name: str, asset: dict, limit: int,
-    runner=None,
+    directory: Path, *, repository: str, tag: str, name: str, asset: dict[str, Any], limit: int,
+    runner: ReleaseRunner | None = None,
 ) -> None:
     if type(asset.get("size")) is int and asset["size"] > limit:
         raise PromotionArtifactError(f"{tag}: source artifact exceeds its size limit")
@@ -124,8 +150,8 @@ def download(
 def read_admitted_source_index(
     directory: Path, *, repository: str, dev_head: str, main_before: str,
     content_tree: str, is_ancestor: Callable[[str, str], bool],
-    runner=None, verify_subject=None,
-) -> tuple[dict, dict[str, dict]] | None:
+    runner: ReleaseRunner | None = None, verify_subject: SubjectVerifier | None = None,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]] | None:
     """Authenticate discovery against facts retained by the existing source owner.
 
     Only an actual channel 404 returns None. The source owner supplies ancestry
@@ -157,7 +183,7 @@ def read_admitted_source_index(
         for page in pages
     ):
         raise PromotionArtifactError(f"{tag}: invalid source artifact pages")
-    assets: dict[str, dict] = {}
+    assets: dict[str, dict[str, Any]] = {}
     seen, evidence_count = set(), 0
     for page in pages:
         for asset in page:
@@ -231,8 +257,8 @@ def read_admitted_source_index(
 
 def discover_promoted_source(
     directory: Path, *, repository: str, repo: Path, main_commit: str,
-    deadline: float, runner=None, verify_subject=None,
-) -> tuple[dict, dict[str, dict]] | None:
+    deadline: float, runner: ReleaseRunner | None = None, verify_subject: SubjectVerifier | None = None,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]] | None:
     """Discover the actual channel selected by the retained source provider."""
     selected = read_promoted_source(repo, main_commit, deadline=deadline)
     return read_admitted_source_index(
@@ -246,9 +272,10 @@ def discover_promoted_source(
 
 
 def read_selected_source_artifact(
-    directory: Path, *, index: dict, assets: dict[str, dict], repository: str,
-    component: str, version: str, candidate_root: Path, runner=None, verify_subject=None,
-) -> tuple[dict, str] | None:
+    directory: Path, *, index: dict[str, Any], assets: dict[str, dict[str, Any]], repository: str,
+    component: str, version: str, candidate_root: Path, runner: ReleaseRunner | None = None,
+    verify_subject: SubjectVerifier | None = None,
+) -> tuple[dict[str, Any], str] | None:
     """Validate the actual selected bundle before it can bind a runtime profile.
 
     The source owner first authenticates this index through discovery. A missing

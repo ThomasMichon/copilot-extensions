@@ -1,7 +1,7 @@
 """Read-only admission of an existing source runtime under its current owner."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 import hashlib
@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 import time
+from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[1]
 for _library in ("installer-engine", "versioned-runtime"):
@@ -26,7 +27,7 @@ from runtime_source_wheels import _selected_projects
 from versioned_runtime_source import SourceIdentity
 
 
-def _canonical(record) -> str:
+def _canonical(record: object) -> str:
     return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
@@ -52,7 +53,10 @@ class SourceReuseInputs:
         self._verification()
 
 
-def _admit(receipt, configuration, authenticated, *, max_tags, deadline):
+def _admit(
+    receipt: dict[str, Any], configuration: SourceConfiguration,
+    authenticated: AuthenticatedSource, *, max_tags: int, deadline: float,
+) -> RuntimeProfile | None:
     binding = receipt["binding"]
     if set(binding) != {"profile", "source_lock", "build_toolchain", "build_profile"}:
         raise ProfileError("existing source runtime has incomplete construction evidence")
@@ -114,7 +118,7 @@ def retain_source_runtime_reuse(
     authenticated: AuthenticatedSource, configuration: SourceConfiguration, *,
     max_receipt_bytes: int, max_tags: int, deadline: float,
     revoked_inputs: Callable[[], frozenset[str]] | None = None,
-):
+) -> Iterator[SourceReuseInputs | None]:
     """Borrow a completed selected generation, never create one from a receipt."""
     _check_deadline(deadline)
     if (
@@ -207,7 +211,7 @@ def retain_source_runtime_reuse(
         ):
             raise ProfileError("existing source runtime differs from its current local-package selection")
 
-        def verify():
+        def verify() -> None:
             _check_deadline(deadline)
             authenticated.verify()
             configuration.verify()

@@ -16,16 +16,16 @@ import re
 import subprocess as subprocess
 import sys
 import time
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict, cast
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
 from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
-from packaging.tags import Tag
 from packaging.utils import canonicalize_name
 from packaging.version import Version
+from packaging.tags import Tag
 
 from build_toolchain_lock import _MARKER_ENV_QUERY_SCRIPT, sanitize_subprocess_env
 from runtime_profile import ProfileError, _tag, _target, _wheel_filename
@@ -35,9 +35,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
 import installer_dependency_policy as dependencies
+installer_dependency_policy = dependencies
 from installer_dependency_policy import RetainedUVInstall
-from installer_engine import _package_roots, _source_files
-import versioned_runtime as runtime
+from installer_engine import _package_roots, _source_files, runtime as runtime
 from installer_wheel_inputs import _check_deadline
 from versioned_runtime_source import SourceIdentity, read_source_identity
 
@@ -302,7 +302,7 @@ def _source(payload: Path, expected: SourceIdentity) -> dict[str, Any]:
          and canonicalize_name(project["name"]) != canonicalize_name(expected.plugin))
             or project["version"] != expected.package_version):
         raise ProfileError("source candidate project differs from its selected identity")
-    return project
+    return cast(dict[str, Any], project)
 
 
 def _retained_source(transaction: RetainedUVInstall, payload: Path, deadline: float) -> None:
@@ -339,7 +339,7 @@ def retain_source_configuration(
     deadline: float, extras: tuple[str, ...] = (),
     env: dict[str, str] | None = None, wheel_witness: bool = False,
     include_build_tools: bool = False,
-    installation: dict[str, Any] | None = None,
+    installation: Mapping[str, Any] | None = None,
     source_verifier: Callable[[Path, SourceIdentity], None] | None = None,
     _capture_diagnostics: bool = False,
 ) -> Iterator[SourceConfiguration]:
@@ -534,8 +534,10 @@ def _retain_source_lock(
         configuration.verify()
         record = configuration.record()
         native_lock = content if wheel_witness else None
+        # Captured native selection is authoritative; tag inference is the uncaptured path.
         files = _wheel_pins(
-            content, record["target"], deadline, prefer_target_tags="build_roots" in record,
+            content, record["target"], deadline,
+            prefer_target_tags="build_roots" in record and diagnostic is None,
             diagnostic=diagnostic,
         ) if wheel_witness else None
         if files is not None:

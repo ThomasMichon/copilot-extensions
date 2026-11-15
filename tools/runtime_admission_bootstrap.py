@@ -4,6 +4,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 import inspect
 from pathlib import Path
+from collections.abc import Callable, Iterator, Mapping
+from types import ModuleType
+from typing import Any, TypedDict, cast
 
 from governed_feed_trust import _opaque_index_identity
 from runtime_input_revocation import verify_digests_not_revoked
@@ -13,14 +16,22 @@ from runtime_source_authentication import (
 )
 import installer_packaging_seed as seed
 from installer_wheel_inputs import _check_deadline
+from installer_wheel_inputs import WheelLimits
+from installer_wheel_acquisition import AcquisitionLimits
+
+
+class _OwnerArguments(TypedDict, total=False):
+    verify_owner: Callable[[tuple[dict[str, Any], ...]], dict[str, Any]]
+    source_verifier: Callable[[Path, object], None]
 
 
 @contextmanager
 def retain_origin_tooling(
-    origin: AuthenticatedSource, *, installation: dict, uv: Path, python: Path,
-    deadline: float, limits: seed.SeedLimits, acquisition_limits, wheel_limits,
-    procutil, env: dict[str, str] | None = None, revoked_inputs=None,
-):
+    origin: AuthenticatedSource, *, installation: Mapping[str, Any], uv: Path, python: Path,
+    deadline: float, limits: seed.SeedLimits, acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits,
+    procutil: ModuleType, env: dict[str, str] | None = None,
+    revoked_inputs: Callable[[], frozenset[str]] | None = None,
+) -> Iterator[seed.ReadySeed]:
     """Retain the real native compiler settings before importing Packaging.
 
     Acquisition has already selected this origin. Capturing its metadata and
@@ -31,7 +42,7 @@ def retain_origin_tooling(
         raise ProfileError("tooling bootstrap needs its retained installation origin")
     policy = origin.policy()
 
-    def verify_policy(wheels):
+    def verify_policy(wheels: tuple[dict[str, Any], ...]) -> dict[str, Any]:
         current = resolve_runtime_profile_policy(
             **installation, backend=policy["selection"]["backend"],
         )["runtimeProfiles"]
@@ -41,26 +52,26 @@ def retain_origin_tooling(
             ["sha256:" + origin.identity.assembly_hash, *(wheel["sha256"] for wheel in wheels)],
             revoked_inputs,
         )
-        return current
+        return cast(dict[str, Any], current)
 
-    def verify(wheels):
+    def verify(wheels: tuple[dict[str, Any], ...]) -> dict[str, Any]:
         origin.verify()
         return verify_policy(wheels)
 
-    def verify_source(payload, source):
+    def verify_source(payload: Path, source: object) -> None:
         if payload != origin.payload or source != origin.identity:
             raise ProfileError("tooling seed source verifier names another origin")
         origin.verify()
 
     verify(())
-    owner_arguments = {"verify_owner": verify}
+    owner_arguments: _OwnerArguments = {"verify_owner": verify}
     if "source_verifier" in inspect.signature(seed.retain_packaging_seed).parameters:
         owner_arguments = {"verify_owner": verify_policy, "source_verifier": verify_source}
     environment = dependencies._captured_environment(env)
     target = seed._target(python, environment, deadline, procutil)
     with dependencies._temporary_inputs(None) as temporary:
         temporary = dependencies._private_retained_root(Path(temporary))
-        projections = []
+        projections: list[str] = []
         with dependencies.retain_uv_source_compile(
             str(uv), [
                 str(origin.payload / "pyproject.toml"), "--python", str(python),
@@ -76,6 +87,6 @@ def retain_origin_tooling(
             opaque_identity=_opaque_index_identity,
             limits=limits, acquisition_limits=acquisition_limits, wheel_limits=wheel_limits,
             deadline=deadline, procutil=procutil,
-            transaction=transaction, projections=tuple(projections),
+            transaction=transaction, projections=cast(tuple[str, str], tuple(projections)),
         ) as ready:
             yield ready

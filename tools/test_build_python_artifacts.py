@@ -421,7 +421,7 @@ def test_resolve_vendored_libs_direct(fake_repo: Path) -> None:
 
 def test_candidate_root_is_explicit_without_rebinding_builder(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_dir = _seed_valid_lib(fake_repo, "widget")
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
@@ -4842,7 +4842,7 @@ def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path
 
 
 @pytest.mark.parametrize("applies", [False, True])
-def test_owned_build_requires_checks_actual_target_with_one_child(tmp_path, applies):
+def test_owned_build_requires_checks_actual_target_with_one_child(tmp_path: Path, applies: bool) -> None:
     source = tmp_path / "source"
     marker = 'python_version >= "3.0"' if applies else 'python_version < "3.0"'
     _write_build_system_requires(source, ["unlocked-build-dependency; " + marker])
@@ -4850,11 +4850,11 @@ def test_owned_build_requires_checks_actual_target_with_one_child(tmp_path, appl
     toolchain._marker_environment = {"python_version": "0.0"}
     calls = []
 
-    def run(argv):
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return _REAL_SUBPROCESS_RUN(
             argv, capture_output=True, text=True, check=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
         )
 
     if applies:

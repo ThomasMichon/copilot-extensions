@@ -5,17 +5,18 @@ admission. Its candidate is not a complete inspected-wheel RuntimeProfile.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import subprocess
+import subprocess as subprocess
 import sys
 import time
+from typing import Any, cast
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
@@ -24,6 +25,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
+from packaging.tags import Tag
 
 from build_toolchain_lock import _MARKER_ENV_QUERY_SCRIPT, sanitize_subprocess_env
 from runtime_profile import ProfileError, _tag, _target, _wheel_filename
@@ -32,8 +34,9 @@ from runtime_profile_policy import InstallationProfilePlan
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
-import installer_dependency_policy as dependencies
-from installer_engine import _package_roots, _source_files, runtime
+import installer_dependency_policy as installer_dependency_policy
+dependencies = installer_dependency_policy
+from installer_engine import _package_roots, _source_files, runtime as runtime
 from installer_wheel_inputs import _check_deadline
 from versioned_runtime_source import SourceIdentity, read_source_identity
 
@@ -44,7 +47,7 @@ class SourceLockCandidate:
     requirements: bytes
     payload: Path
     native_lock: bytes | None = None
-    transaction: object | None = field(default=None, repr=False, compare=False)
+    transaction: dependencies.RetainedUVInstall | None = field(default=None, repr=False, compare=False)
     projections: tuple[str, ...] = field(default=(), repr=False, compare=False)
     _verification: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
@@ -52,8 +55,8 @@ class SourceLockCandidate:
     def lock_id(self) -> str:
         return "sha256:" + hashlib.sha256(self.canonical).hexdigest()
 
-    def record(self) -> dict:
-        return json.loads(self.canonical)
+    def record(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.canonical))
 
     def verify(self, *, deadline: float) -> None:
         """Recheck the selected retained inputs before exposing constructed health."""
@@ -79,14 +82,14 @@ class SourceConfiguration:
 
     canonical: bytes
     payload: Path
-    transaction: object = field(repr=False, compare=False)
+    transaction: dependencies.RetainedUVInstall = field(repr=False, compare=False)
     projections: tuple[str, ...] = field(repr=False, compare=False)
     output: Path = field(repr=False, compare=False)
     _verification: Callable[[], None] = field(repr=False, compare=False)
     _selection_verification: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
-    def record(self) -> dict:
-        return json.loads(self.canonical)
+    def record(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.canonical))
 
     def verify(self) -> None:
         self._verification()
@@ -96,7 +99,7 @@ class SourceConfiguration:
         (self._selection_verification or self._verification)()
 
 
-def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
+def _pins(content: bytes, environment: dict[str, str], deadline: float) -> list[dict[str, Any]]:
     try:
         text = re.sub(r"\\\r?\n", " ", content.decode("utf-8"))
         result = []
@@ -129,9 +132,9 @@ def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
 
 
 def _wheel_pins(
-    content: bytes, target: dict, deadline: float, *, prefer_target_tags: bool = False,
+    content: bytes, target: dict[str, Any], deadline: float, *, prefer_target_tags: bool = False,
     local_wheels: Mapping[str, Path] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Keep remote defaults; local witnesses must match an already-held wheel set."""
     _check_deadline(deadline)
     if type(prefer_target_tags) is not bool:
@@ -150,7 +153,7 @@ def _wheel_pins(
             or not isinstance(document.get("packages", []), list)
         ):
             raise ProfileError("unsupported native source wheel-lock document")
-        priority = {}
+        priority: dict[Tag, int] = {}
         for index, text in enumerate(target["tags"]):
             for tag in _tag(text, 10_000, deadline):
                 priority.setdefault(tag, index)
@@ -241,7 +244,7 @@ def _wheel_pins(
         raise ProfileError("invalid native source wheel-lock output") from exc
 
 
-def _source(payload: Path, expected: SourceIdentity) -> dict:
+def _source(payload: Path, expected: SourceIdentity) -> dict[str, Any]:
     if read_source_identity(payload, expected.package_version, plugin=expected.plugin) != expected:
         raise ProfileError("source candidate differs from the independently selected source")
     project = dependencies._toml(payload / "pyproject.toml")["project"]
@@ -249,10 +252,10 @@ def _source(payload: Path, expected: SourceIdentity) -> dict:
          and canonicalize_name(project["name"]) != canonicalize_name(expected.plugin))
             or project["version"] != expected.package_version):
         raise ProfileError("source candidate project differs from its selected identity")
-    return project
+    return cast(dict[str, Any], project)
 
 
-def _retained_source(transaction, payload: Path, deadline: float) -> None:
+def _retained_source(transaction: dependencies.RetainedUVInstall, payload: Path, deadline: float) -> None:
     files = set(_source_files((payload,)))
     if payload not in transaction.sources or not files <= transaction.source_hashes.keys():
         raise ProfileError("retained source does not cover the independently verified payload")
@@ -282,13 +285,13 @@ def _build_roots(payload: Path, deadline: float) -> list[str]:
 @contextmanager
 def retain_source_configuration(
     plan: InstallationProfilePlan, *, payload: Path, expected_source: SourceIdentity,
-    target: dict, component: str, uv: str, python: Path,
+    target: dict[str, Any], component: str, uv: str, python: Path,
     deadline: float, extras: tuple[str, ...] = (),
     env: dict[str, str] | None = None, wheel_witness: bool = False,
     include_build_tools: bool = False,
-    installation: dict | None = None,
+    installation: Mapping[str, Any] | None = None,
     source_verifier: Callable[[Path, SourceIdentity], None] | None = None,
-):
+) -> Iterator[SourceConfiguration]:
     """Capture source/compiler settings without executing dependency resolution.
 
     The existing authority supplies the source selection and target facts.
@@ -331,7 +334,7 @@ def retain_source_configuration(
         executable=dependencies._native_retained_path(python),
         capture_output=True, text=True, env=sanitize_subprocess_env(environment),
         timeout=max(0, deadline - time.monotonic()),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     _check_deadline(deadline)
     if observed.returncode or json.loads(observed.stdout) != frozen_target["environment"]:
@@ -339,7 +342,7 @@ def retain_source_configuration(
     payload = payload.resolve(strict=True)
     project = _source(payload, expected_source)
 
-    def recheck_source():
+    def recheck_source() -> None:
         if source_verifier is None:
             _source(payload, expected_source)
         else:
@@ -365,7 +368,7 @@ def retain_source_configuration(
         output = temporary / (
             "pylock.toml" if wheel_witness else "source-lock.txt"
         )
-        projection = []
+        projection: list[str] = []
         with dependencies.retain_uv_source_compile(
             uv, [*arguments, "--output-file", str(output),
                  *(["--format", "pylock.toml"] if wheel_witness else [])],
@@ -398,7 +401,7 @@ def retain_source_configuration(
                 record["build_roots"] = build_roots
             canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
-            def verify_selection():
+            def verify_selection() -> None:
                 _check_deadline(deadline)
                 recheck_source()
                 if installation is not None:
@@ -410,7 +413,7 @@ def retain_source_configuration(
                         raise ProfileError("source configuration changed during consumption")
                 _check_deadline(deadline)
 
-            def verify():
+            def verify() -> None:
                 verify_selection()
                 progress = lambda: _check_deadline(deadline)
                 if runtime.fingerprint_source(
@@ -429,8 +432,8 @@ def retain_source_configuration(
 @contextmanager
 def _retain_source_lock(
     plan: InstallationProfilePlan, *, max_lock_bytes: int, deadline: float,
-    wheel_witness: bool = False, **options,
-):
+    wheel_witness: bool = False, **options: Any,
+) -> Iterator[SourceLockCandidate]:
     """Resolve only after the actual source/settings owner has been captured."""
     _check_deadline(deadline)
     if type(max_lock_bytes) is not int or max_lock_bytes <= 0:
@@ -443,7 +446,7 @@ def _retain_source_lock(
             list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=deadline - time.monotonic(),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         _check_deadline(deadline)
         if result.returncode:
@@ -469,7 +472,7 @@ def _retain_source_lock(
         })
         if files is not None:
             record["files"] = files
-            record["native_lock_sha256"] = "sha256:" + hashlib.sha256(native_lock).hexdigest()
+            record["native_lock_sha256"] = "sha256:" + hashlib.sha256(cast(bytes, native_lock)).hexdigest()
         canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
         _check_deadline(deadline)
         yield SourceLockCandidate(
@@ -481,11 +484,11 @@ def _retain_source_lock(
         _check_deadline(deadline)
 
 
-def retain_source_lock(plan: InstallationProfilePlan, **options):
+def retain_source_lock(plan: InstallationProfilePlan, **options: Any) -> AbstractContextManager[SourceLockCandidate]:
     """Retain the existing version/hash-set candidate without file admission."""
     return _retain_source_lock(plan, **options)
 
 
-def retain_source_wheel_lock(plan: InstallationProfilePlan, **options):
+def retain_source_wheel_lock(plan: InstallationProfilePlan, **options: Any) -> AbstractContextManager[SourceLockCandidate]:
     """Retain exact native wheel witnesses, not origin authentication or admission."""
     return _retain_source_lock(plan, **options, wheel_witness=True)

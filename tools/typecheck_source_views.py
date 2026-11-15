@@ -120,6 +120,30 @@ class GuardAliasView(SourceView):
         self._verify_bytes(root)
 
 
+@dataclass(frozen=True)
+class SetupProgramView(SourceView):
+    def verify(self, root: Path) -> None:
+        if len(self.inputs) != 1 or not self.inputs[0][0].endswith("/setup.py"):
+            raise SourceViewError("Setup view requires one complete physical program")
+        self._verify_bytes(root)
+
+
+def setup_program_view(root: Path, paths: tuple[str, ...], output: Path) -> SetupProgramView:
+    """Keep independent build entrypoints separate without rewriting their code."""
+    if len(paths) != 1 or not paths[0].endswith("/setup.py"):
+        raise SourceViewError("Setup view requires one complete physical program")
+    source = paths[0]
+    content = _read(root, source)
+    _parse(content, source)
+    _reject_directives(source, content)
+    identity = _write_view(output, content)
+    return SetupProgramView(
+        output, content, ((source, content),),
+        tuple(SourceLine(source, number) for number in range(1, len(content.splitlines()) + 1)),
+        identity,
+    )
+
+
 def _write_view(output: Path, content: bytes) -> tuple[int, int]:
     output.parent.mkdir(parents=True, exist_ok=True)
     identity: tuple[int, int] | None = None

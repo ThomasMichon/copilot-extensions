@@ -5,15 +5,15 @@ import argparse
 import json
 import os
 import re
-import shutil
+import shutil as shutil
 import subprocess
 import sys
-import tempfile
+import tempfile as tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, cast
 from artifact_bundle_validation import (
-    _artifact_label, _digest,
+    _artifact_label, _digest as _digest,
     inspect_wheel as inspect_wheel,
     validate_artifact_entry,
     validate_bundle as validate_bundle,
@@ -30,11 +30,12 @@ from artifact_source_build import (
 )
 from promotion_bundle_members import _write_bundle_members, candidate_projects as candidate_projects
 from standalone_python_artifacts import (
-    COMPONENTS as COMPONENTS, artifact_label as artifact_label, project_key,
+    COMPONENTS as COMPONENTS, artifact_label as artifact_label, project_key as project_key,
 )
 from artifact_attestation import (
-    INDEX_LIMIT as INDEX_LIMIT, INDEX_NAME as INDEX_NAME, INDEX_SCHEMA as SCHEMA,
+    INDEX_LIMIT as INDEX_LIMIT, INDEX_NAME as INDEX_NAME, INDEX_SCHEMA as INDEX_SCHEMA,
 )
+SCHEMA = INDEX_SCHEMA
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 
@@ -209,7 +210,7 @@ def export_artifacts(
             )
             if reused is not None:
                 staging.rename(out_dir)
-                return reused
+                return cast(dict[str, Any], reused)
         argv = [
             sys.executable, str(Path(__file__).resolve()),
             "--repo", str(candidate), "--out-dir", str(staging), "--toolchain-source", source_policy,

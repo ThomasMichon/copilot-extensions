@@ -1,6 +1,25 @@
 """Pure actual-byte profile checks; no package code, feed or installer actor."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, BinaryIO, Protocol
+    from pathlib import Path
+    from installer_wheel_inputs import WheelFacts, WheelLimits
+    class _WheelFactsInspector(Protocol):
+        def __call__(self, archive: BinaryIO, wheel: dict[str, Any], *, expected_generator: str | None = None, max_unpacked_bytes: int = ..., max_metadata_bytes: int = ..., max_archive_bytes: int = ..., record_algorithms: frozenset[str] = ..., limits: WheelLimits | None = None, deadline: float | None = None) -> WheelFacts: ...
+
+from typing import cast
+
+if TYPE_CHECKING:
+    from runtime_profile_release import ReleaseSelection
+
+from typing import Any, BinaryIO, Mapping
+from runtime_profile import RuntimeProfile, SelectedProfile
+from installer_wheel_inputs import WheelFacts
+from packaging.markers import Marker
+
 import base64
 from copy import deepcopy
 import csv
@@ -30,12 +49,12 @@ _ENVIRONMENT = {
 
 
 @pytest.fixture(autouse=True)
-def _synthetic_host_defaults(monkeypatch):
+def _synthetic_host_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("packaging.markers.default_environment", lambda: dict(_ENVIRONMENT))
 
 
-def _record():
-    def wheel(name, **fields):
+def _record() -> dict[str, Any]:
+    def wheel(name: str, **fields: object) -> dict[str, Any]:
         return {
             "name": name, "version": "1.0", "filename": f"{name}-1.0-py3-none-any.whl",
             "sha256": "sha256:" + "1" * 64, "requires_python": "",
@@ -60,7 +79,7 @@ def _record():
     }
 
 
-def _metadata(wheel):
+def _metadata(wheel: dict[str, Any]) -> str:
     return (
         f"Metadata-Version: 2.4\nName: {wheel['name']}\nVersion: {wheel['version']}\n"
         + (f"Requires-Python: {wheel['requires_python']}\n" if wheel["requires_python"] else "")
@@ -70,9 +89,9 @@ def _metadata(wheel):
 
 
 def _encoded(
-    wheel, *, metadata=None, wheel_header=None, extra=None, bad_record=False,
-    record_algorithm="sha256", member_comment=None,
-):
+    wheel: dict[str, Any], *, metadata: str | None=None, wheel_header: str | None=None, extra: dict[str, bytes] | None=None, bad_record: bool=False,
+    record_algorithm: str="sha256", member_comment: bytes | None=None,
+) -> bytes:
     prefix = wheel["filename"].split("-py3-")[0] + ".dist-info/"
     if metadata is None:
         metadata = _metadata(wheel)
@@ -108,7 +127,7 @@ def _encoded(
     return archive.getvalue()
 
 
-def _inputs(*, mutate=None):
+def _inputs(*, mutate: dict[str, Any] | None=None) -> tuple[RuntimeProfile, dict[str, io.BytesIO]]:
     record = _record()
     wheels = {}
     for index, wheel in enumerate(record["wheels"]):
@@ -119,14 +138,14 @@ def _inputs(*, mutate=None):
     return validate_profile(record), wheels
 
 
-def _verify(profile, wheels, **limits):
+def _verify(profile: RuntimeProfile, wheels: Mapping[str, BinaryIO], **limits: Any) -> None:
     verify_profile_wheels(profile, wheels, **{
         "max_archive_bytes": 1 << 20, "max_unpacked_bytes": 1 << 20,
         "max_metadata_bytes": 1 << 16, **limits,
     })
 
 
-def _isolated_inputs(*, manager_requires_counter=False):
+def _isolated_inputs(*, manager_requires_counter: bool=False) -> tuple[RuntimeProfile, dict[str, io.BytesIO]]:
     record = _record()
     manager = {
         "name": "copilot-extensions-worktree-manager", "version": "1.0",
@@ -147,7 +166,7 @@ def _isolated_inputs(*, manager_requires_counter=False):
     return validate_profile(record), archives
 
 
-def test_isolated_manager_layout_checks_complete_separate_closures():
+def test_isolated_manager_layout_checks_complete_separate_closures() -> None:
     profile, archives = _isolated_inputs()
     with pytest.raises(ProfileError, match="ownership collision"):
         _verify(profile, archives)
@@ -178,7 +197,7 @@ def test_isolated_manager_layout_checks_complete_separate_closures():
             )
 
 
-def test_isolated_manager_layout_refuses_a_collision_inside_manager():
+def test_isolated_manager_layout_refuses_a_collision_inside_manager() -> None:
     profile, archives = _isolated_inputs(manager_requires_counter=True)
     with pytest.raises(ProfileError, match="ownership collision"):
         verify_profile_layout(
@@ -187,7 +206,7 @@ def test_isolated_manager_layout_refuses_a_collision_inside_manager():
         )
 
 
-def test_isolated_manager_layout_shares_one_expanded_budget():
+def test_isolated_manager_layout_shares_one_expanded_budget() -> None:
     profile, archives = _isolated_inputs()
     sizes = {}
     for name, stream in archives.items():
@@ -202,7 +221,7 @@ def test_isolated_manager_layout_shares_one_expanded_budget():
         )
 
 
-def _select_for_target(records, target, **options):
+def _select_for_target(records: list[dict[str, Any]], target: dict[str, Any], **options: Any) -> SelectedProfile:
     reference = records[0]
     return select_profile(
         records, approvals={validate_profile(item).lock_id: item["approval_source"] for item in records},
@@ -211,7 +230,7 @@ def _select_for_target(records, target, **options):
     )
 
 
-def test_compatible_target_revalidates_but_preserves_the_approved_record():
+def test_compatible_target_revalidates_but_preserves_the_approved_record() -> None:
     record = _record()
     target = deepcopy(record["target"])
     target["environment"].update(
@@ -229,7 +248,7 @@ def test_compatible_target_revalidates_but_preserves_the_approved_record():
     "architecture", "device", "python-minor", "wheel-tag", "requires-python",
     "new-dependency", "new-extra",
 ])
-def test_compatible_target_refuses_changed_family_or_closure(difference):
+def test_compatible_target_refuses_changed_family_or_closure(difference: str) -> None:
     record = _record()
     target = deepcopy(record["target"])
     target["environment"].update(
@@ -257,7 +276,7 @@ def test_compatible_target_refuses_changed_family_or_closure(difference):
         _select_for_target([record], target, allow_compatible_target=True)
 
 
-def test_compatible_target_keeps_approval_and_ambiguity_gates():
+def test_compatible_target_keeps_approval_and_ambiguity_gates() -> None:
     one = _record()
     target = deepcopy(one["target"])
     target["environment"]["platform_version"] = "10.0.2"
@@ -275,10 +294,10 @@ def test_compatible_target_keeps_approval_and_ambiguity_gates():
     with pytest.raises(ProfileError, match="ambiguous"):
         _select_for_target([one, two], target, allow_compatible_target=True)
     with pytest.raises(ProfileError, match="must be explicit"):
-        _select_for_target([one], target, allow_compatible_target="yes")
+        _select_for_target([one], target, allow_compatible_target=cast(bool, "yes"))
 
 
-def test_compatible_target_release_adapter_retains_the_authenticated_profile(monkeypatch):
+def test_compatible_target_release_adapter_retains_the_authenticated_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     import runtime_profile_release as authority
 
     record = _record()
@@ -304,7 +323,7 @@ def test_compatible_target_release_adapter_retains_the_authenticated_profile(mon
     assert selected.subject_sha256 == "sha256:" + "6" * 64
 
 
-def test_compatible_target_planner_keeps_strict_default_and_refusal(monkeypatch):
+def test_compatible_target_planner_keeps_strict_default_and_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     import runtime_profile_policy as planner
     import runtime_profile_release as authority
 
@@ -323,7 +342,7 @@ def test_compatible_target_planner_keeps_strict_default_and_refusal(monkeypatch)
     })
     target = deepcopy(record["target"])
     target["environment"]["platform_version"] = "10.0.2"
-    arguments = dict(
+    arguments: dict[str, Any] = dict(
         installation={}, release_index=Path("selected-index.json"), repository="example/plugins",
         signer_digest="a" * 40, source_digest="a" * 40, source_ref="refs/heads/main",
         release=record["release"], artifact=record["artifact"], target=target,
@@ -332,18 +351,18 @@ def test_compatible_target_planner_keeps_strict_default_and_refusal(monkeypatch)
     strict = planner.plan_installation_profile(**arguments)
     assert strict.source_trigger == "approved-profile-unavailable"
     selected = planner.plan_installation_profile(**arguments, allow_compatible_target=True)
-    assert selected.release_selection.selected.profile == validate_profile(record)
+    assert cast("ReleaseSelection", selected.release_selection).selected.profile == validate_profile(record)
     target["tags"] = ["cp312-cp312-win_amd64"]
     assert planner.plan_installation_profile(
         **arguments, allow_compatible_target=True,
     ).source_trigger == "approved-profile-unavailable"
     with pytest.raises(ProfileError, match="must be explicit"):
         planner.plan_installation_profile(
-            **(arguments | {"release_index": None}), allow_compatible_target="yes",
+            **(arguments | {"release_index": None}), allow_compatible_target=cast(bool, "yes"),
         )
 
 
-def test_shared_token_parser_retains_builder_numeric_version_policy():
+def test_shared_token_parser_retains_builder_numeric_version_policy() -> None:
     from pathlib import Path
     from artifact_source_build import PromotionArtifactError, parse_wheel_identity
 
@@ -351,14 +370,14 @@ def test_shared_token_parser_retains_builder_numeric_version_policy():
     with pytest.raises(PromotionArtifactError):
         parse_wheel_identity(Path("engine-v1.0-py3-none-any.whl"), numeric_version=True)
 
-def test_byte_verification_does_not_import_builder_or_feed_machinery(monkeypatch):
+def test_byte_verification_does_not_import_builder_or_feed_machinery(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("build_python_artifacts", "build_toolchain_lock", "governed_feed_trust"):
         monkeypatch.setitem(sys.modules, name, None)
     profile, wheels = _inputs()
     _verify(profile, wheels)
 
 @pytest.mark.parametrize("name", ["example.pkg", "example-pkg", "example_pkg", "Example.Pkg"])
-def test_runtime_distribution_name_aliases_match_dotted_filename(name):
+def test_runtime_distribution_name_aliases_match_dotted_filename(name: str) -> None:
     record = _record()
     record["roots"] = ["example-pkg[metrics]==1.0"]
     wheel = record["wheels"][0]
@@ -372,7 +391,7 @@ def test_runtime_distribution_name_aliases_match_dotted_filename(name):
     _verify(validate_profile(record), streams)
 
 @pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512"])
-def test_runtime_record_strong_digests_preserve_archive_sha256(algorithm):
+def test_runtime_record_strong_digests_preserve_archive_sha256(algorithm: str) -> None:
     profile, wheels = _inputs(mutate={"record_algorithm": algorithm})
     _verify(profile, wheels)
     profile, wheels = _inputs(mutate={"record_algorithm": algorithm, "bad_record": True})
@@ -380,7 +399,7 @@ def test_runtime_record_strong_digests_preserve_archive_sha256(algorithm):
         _verify(profile, wheels)
 
 @pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512"])
-def test_record_source_facts(algorithm):
+def test_record_source_facts(algorithm: str) -> None:
     profile, wheels = _inputs(mutate={"record_algorithm": algorithm})
     stream = wheels[profile.record()["wheels"][0]["filename"]]
     limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
@@ -402,19 +421,19 @@ def test_record_source_facts(algorithm):
     ("max_archive_bytes", 1), ("max_expanded_bytes", 1), ("max_member_bytes", 1),
     ("max_metadata_bytes", 1), ("max_metadata_member_bytes", 1), ("max_members", 3),
 ])
-def test_inspector_limits(field, value):
+def test_inspector_limits(field: str, value: Any) -> None:
     profile, wheels = _inputs()
     limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
     with pytest.raises(ProfileError):
         _verify(profile, wheels, limits=replace(limits, **{field: value}))
 
 @pytest.mark.parametrize("deadline", [0, -1, True, float("nan"), float("inf")])
-def test_invalid_deadline(deadline):
+def test_invalid_deadline(deadline: Any) -> None:
     profile, wheels = _inputs()
     with pytest.raises(ProfileError):
         _verify(profile, wheels, deadline=deadline)
 
-def test_complete_profile_checks_deadline_during_archive_hashing(monkeypatch):
+def test_complete_profile_checks_deadline_during_archive_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
     import installer_wheel_inputs
 
     profile, wheels = _inputs()
@@ -422,7 +441,7 @@ def test_complete_profile_checks_deadline_during_archive_hashing(monkeypatch):
     monkeypatch.setattr(installer_wheel_inputs, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
     class ExpiringStream(io.BytesIO):
-        def read(self, size=-1):
+        def read(self, size: int | None=-1) -> bytes:
             now[0] = 2
             return super().read(size)
 
@@ -431,7 +450,7 @@ def test_complete_profile_checks_deadline_during_archive_hashing(monkeypatch):
     with pytest.raises(ProfileError):
         _verify(profile, wheels, deadline=1)
 
-def test_complete_profile_does_not_inherit_the_first_party_archive_cap(monkeypatch):
+def test_complete_profile_does_not_inherit_the_first_party_archive_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     import artifact_bundle_validation as validation
     import promotion_python_artifacts as promotion
 
@@ -444,13 +463,13 @@ def test_complete_profile_does_not_inherit_the_first_party_archive_cap(monkeypat
             wheels[wheel["filename"]], wheel | {"generator": "locked"},
         )
 
-def test_per_wheel_archive_limit_bounds_the_initial_digest_pass():
+def test_per_wheel_archive_limit_bounds_the_initial_digest_pass() -> None:
     profile, wheels = _inputs()
 
     class MeasuredStream(io.BytesIO):
         read_bytes = 0
 
-        def read(self, size=-1):
+        def read(self, size: int | None=-1) -> bytes:
             data = super().read(size)
             self.read_bytes += len(data)
             return data
@@ -465,7 +484,7 @@ def test_per_wheel_archive_limit_bounds_the_initial_digest_pass():
 
 
 @pytest.mark.parametrize("explicit_limits", [False, True])
-def test_directory_budget(explicit_limits):
+def test_directory_budget(explicit_limits: bool) -> None:
     profile, wheels = _inputs(mutate={"member_comment": b"x" * 4_000})
     limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
     options = {"limits": limits} if explicit_limits else {}
@@ -478,7 +497,7 @@ def test_directory_budget(explicit_limits):
                     limits=replace(limits, max_metadata_bytes=1_000))
 
 
-def test_final_hash_deadline(monkeypatch):
+def test_final_hash_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     import installer_wheel_inputs
     import runtime_profile_wheels
 
@@ -488,7 +507,7 @@ def test_final_hash_deadline(monkeypatch):
     monkeypatch.setattr(installer_wheel_inputs, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
     class ExpiringEOF(io.BytesIO):
-        def read(self, size=-1):
+        def read(self, size: int | None=-1) -> bytes:
             data = super().read(size)
             if final_rehash[0] and not data:
                 now[0] = 2
@@ -497,10 +516,10 @@ def test_final_hash_deadline(monkeypatch):
     filename = list(wheels)[-1]
     stream = ExpiringEOF(wheels[filename].getvalue())
     wheels[filename] = stream
-    original = runtime_profile_wheels.inspect_wheel_facts
+    original = cast("_WheelFactsInspector", getattr(runtime_profile_wheels, "inspect_wheel_facts"))
 
-    def inspection(*args, **kwargs):
-        result = original(*args, **kwargs)
+    def inspection(*args: Any, **kwargs: Any) -> WheelFacts:
+        result: WheelFacts = original(*args, **kwargs)
         if args[0] is stream:
             final_rehash[0] = True
         return result
@@ -511,7 +530,7 @@ def test_final_hash_deadline(monkeypatch):
     assert final_rehash[0] and now[0] == 2
 
 @pytest.mark.parametrize("parser", ["parse_tag", "parse_wheel_filename", "Requirement"])
-def test_validation_deadline(monkeypatch, parser):
+def test_validation_deadline(monkeypatch: pytest.MonkeyPatch, parser: str) -> None:
     import installer_wheel_inputs
     import runtime_profile
 
@@ -521,9 +540,9 @@ def test_validation_deadline(monkeypatch, parser):
     monkeypatch.setattr(installer_wheel_inputs, "time", clock)
     monkeypatch.setattr(runtime_profile, "time", clock)
     original = getattr(runtime_profile, parser)
-    calls = []
+    calls: list[tuple[object, ...]] = []
 
-    def expiring_parser(*args, **kwargs):
+    def expiring_parser(*args: object, **kwargs: object) -> Any:
         if calls:
             pytest.fail("packaging parsing continued after profile deadline")
         calls.append(args)
@@ -536,7 +555,7 @@ def test_validation_deadline(monkeypatch, parser):
         _verify(profile, wheels, deadline=1)
     assert len(calls) == 1
 
-def test_expiry_during_dependency_walk_stops_before_the_next_marker(monkeypatch):
+def test_expiry_during_dependency_walk_stops_before_the_next_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     import installer_wheel_inputs
     import runtime_profile
     from packaging.markers import Marker
@@ -547,9 +566,9 @@ def test_expiry_during_dependency_walk_stops_before_the_next_marker(monkeypatch)
     monkeypatch.setattr(installer_wheel_inputs, "time", clock)
     monkeypatch.setattr(runtime_profile, "time", clock)
     original = Marker.evaluate
-    calls = []
+    calls: list[Marker] = []
 
-    def expiring_marker(self, *args, **kwargs):
+    def expiring_marker(self: Marker, *args: Any, **kwargs: Any) -> bool:
         if calls:
             pytest.fail("dependency walk continued after profile deadline")
         calls.append(self)
@@ -563,13 +582,13 @@ def test_expiry_during_dependency_walk_stops_before_the_next_marker(monkeypatch)
     assert len(calls) == 1
 
 @pytest.mark.parametrize("algorithm", ["md5", "sha1", "sha224"])
-def test_runtime_record_weak_digests_refuse(algorithm):
+def test_runtime_record_weak_digests_refuse(algorithm: str) -> None:
     profile, wheels = _inputs(mutate={"record_algorithm": algorithm})
     with pytest.raises(ProfileError):
         _verify(profile, wheels)
 
 @pytest.mark.parametrize("algorithm", ["sha384", "sha512"])
-def test_first_party_record_policy_remains_sha256(algorithm):
+def test_first_party_record_policy_remains_sha256(algorithm: str) -> None:
     from promotion_python_artifacts import PromotionArtifactError, validate_wheel
 
     header = "Wheel-Version: 1.0\nGenerator: locked\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
@@ -580,7 +599,7 @@ def test_first_party_record_policy_remains_sha256(algorithm):
     with pytest.raises(PromotionArtifactError, match="unsupported wheel RECORD digest"):
         validate_wheel(wheels[wheel["filename"]], wheel | {"generator": "locked"})
 
-def test_runtime_version_identity_uses_pep440_without_changing_first_party_policy():
+def test_runtime_version_identity_uses_pep440_without_changing_first_party_policy() -> None:
     record = _record()
     streams = {}
     for index, wheel in enumerate(record["wheels"]):
@@ -591,14 +610,14 @@ def test_runtime_version_identity_uses_pep440_without_changing_first_party_polic
         streams[wheel["filename"]] = io.BytesIO(data)
     _verify(validate_profile(record), streams)
 
-def test_complete_actual_wheel_closure_never_executes_payload():
+def test_complete_actual_wheel_closure_never_executes_payload() -> None:
     profile, wheels = _inputs()
     _verify(profile, wheels)
     assert profile.record()["wheels"][0]["selected_extras"] == ["metrics"]
     assert all(not stream.closed for stream in wheels.values())
 
 
-def test_duplicate_requires_dist_is_preserved_and_verified_against_wheel_bytes():
+def test_duplicate_requires_dist_is_preserved_and_verified_against_wheel_bytes() -> None:
     record = _record()
     requirements = record["wheels"][0]["requires_dist"]
     requirements.append(requirements[0])
@@ -612,7 +631,7 @@ def test_duplicate_requires_dist_is_preserved_and_verified_against_wheel_bytes()
     assert profile.record()["wheels"][0]["requires_dist"] == requirements
 
 
-def test_retained_file_handles_use_the_same_complete_byte_contract(tmp_path):
+def test_retained_file_handles_use_the_same_complete_byte_contract(tmp_path: Path) -> None:
     from contextlib import ExitStack
 
     profile, wheels = _inputs()
@@ -626,7 +645,7 @@ def test_retained_file_handles_use_the_same_complete_byte_contract(tmp_path):
         assert all(not stream.closed for stream in files.values())
     assert all(stream.closed for stream in files.values())
 
-def test_no_optional_python_header_has_no_invented_constraint():
+def test_no_optional_python_header_has_no_invented_constraint() -> None:
     record = _record()
     wheels = {}
     for wheel in record["wheels"]:
@@ -649,7 +668,7 @@ def test_no_optional_python_header_has_no_invented_constraint():
     "Metadata-Version: 2.4\nName: engine\nVersion: 1.0\nRequires-Python: >=3.11\n"
     "Provides-Extra: metrics\nRequires-Dist: counter @ https://example.invalid/a.whl\n",
 ])
-def test_actual_metadata_cannot_hide_behind_matching_archive_digest(metadata):
+def test_actual_metadata_cannot_hide_behind_matching_archive_digest(metadata: str) -> None:
     profile, wheels = _inputs(mutate={"metadata": metadata})
     with pytest.raises(ProfileError):
         _verify(profile, wheels)
@@ -665,7 +684,7 @@ def test_actual_metadata_cannot_hide_behind_matching_archive_digest(metadata):
     ('sys_platform == "linux"', 'sys_platform == "win32"'),
     ("Version: 1.0\n", "Version: 1.0\nRequires-Dist: hidden>=1\n"),
 ])
-def test_each_actual_dependency_field_must_match_the_frozen_record(before, after):
+def test_each_actual_dependency_field_must_match_the_frozen_record(before: str, after: str) -> None:
     original = _metadata(_record()["wheels"][0])
     assert before in original
     profile, wheels = _inputs(mutate={"metadata": original.replace(before, after)})
@@ -678,13 +697,13 @@ def test_each_actual_dependency_field_must_match_the_frozen_record(before, after
     {"extra": {"other-1.0.dist-info/METADATA": b"foreign"}},
     {"wheel_header": "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: cp312-cp312-win_amd64\n"},
 ])
-def test_shared_archive_validation_remains_required(mutate):
+def test_shared_archive_validation_remains_required(mutate: dict[str, Any]) -> None:
     profile, wheels = _inputs(mutate=mutate)
     with pytest.raises(ProfileError):
         _verify(profile, wheels)
 
 @pytest.mark.parametrize("change", ["missing", "extra", "tampered", "not-zip"])
-def test_wrong_or_tampered_retained_set_refuses(change):
+def test_wrong_or_tampered_retained_set_refuses(change: str) -> None:
     profile, wheels = _inputs()
     name = next(iter(wheels))
     if change == "missing":
@@ -702,7 +721,7 @@ def test_wrong_or_tampered_retained_set_refuses(change):
     with pytest.raises(ProfileError):
         _verify(profile, wheels)
 
-def test_closure_budgets_are_inclusive_and_shared_not_per_wheel():
+def test_closure_budgets_are_inclusive_and_shared_not_per_wheel() -> None:
     profile, wheels = _inputs()
     compressed = sum(len(stream.getvalue()) for stream in wheels.values())
     unpacked = 0
@@ -725,12 +744,12 @@ def test_closure_budgets_are_inclusive_and_shared_not_per_wheel():
 
 @pytest.mark.parametrize("limit", ["max_archive_bytes", "max_unpacked_bytes", "max_metadata_bytes"])
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, None])
-def test_no_implicit_or_unlimited_budget(limit, value):
+def test_no_implicit_or_unlimited_budget(limit: str, value: Any) -> None:
     profile, wheels = _inputs()
     with pytest.raises(ProfileError, match="positive byte budgets"):
         _verify(profile, wheels, **{limit: value})
 
-def test_first_party_wrapper_still_requires_its_locked_generator():
+def test_first_party_wrapper_still_requires_its_locked_generator() -> None:
     from promotion_python_artifacts import PromotionArtifactError, validate_wheel
 
     profile, wheels = _inputs()
@@ -739,7 +758,7 @@ def test_first_party_wrapper_still_requires_its_locked_generator():
         with pytest.raises(PromotionArtifactError):
             validate_wheel(wheels[record["filename"]], record | {"generator": generator})
 
-def test_mutation_while_inspecting_cannot_certify_a_different_archive():
+def test_mutation_while_inspecting_cannot_certify_a_different_archive() -> None:
     profile, wheels = _inputs()
     wheel = profile.record()["wheels"][0]
     original = wheels[wheel["filename"]].getvalue()
@@ -748,7 +767,7 @@ def test_mutation_while_inspecting_cannot_certify_a_different_archive():
     class MutatingStream(io.BytesIO):
         seeks = 0
 
-        def seek(self, offset, whence=0):
+        def seek(self, offset: int, whence: int=0) -> int:
             if offset == 0 and whence == 0:
                 self.seeks += 1
                 if self.seeks == 2:

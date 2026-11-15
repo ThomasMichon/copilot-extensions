@@ -1,16 +1,17 @@
 """Current deny-only input checks, usable before semantic tooling admission."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 import hashlib
 import json
 import re
+from typing import Any
 
-from runtime_profile_errors import ProfileError
+from runtime_profile_errors import ProfileError as ProfileError
 
 
 def verify_digests_not_revoked(
-    selected, revoked_inputs: Callable[[], frozenset[str]] | None,
+    selected: Iterable[str], revoked_inputs: Callable[[], frozenset[str]] | None,
 ) -> None:
     if revoked_inputs is None:
         return
@@ -23,11 +24,11 @@ def verify_digests_not_revoked(
         raise ProfileError("selected source runtime inputs have been revoked")
 
 
-def verify_not_revoked(receipt: dict, revoked_inputs: Callable[[], frozenset[str]] | None) -> None:
+def verify_not_revoked(receipt: dict[str, Any], revoked_inputs: Callable[[], frozenset[str]] | None) -> None:
     """Consume current deny-only evidence; it cannot approve an installation."""
     if revoked_inputs is None:
         return
-    def digest(record):
+    def digest(record: object) -> str:
         return "sha256:" + hashlib.sha256(json.dumps(
             record, sort_keys=True, separators=(",", ":"), allow_nan=False,
         ).encode()).hexdigest()

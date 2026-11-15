@@ -1,6 +1,27 @@
 """Standalone release identities reuse the locked builder and source verifier."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Protocol
+    from pathlib import Path
+
+from typing import cast
+
+
+if TYPE_CHECKING:
+    from packaging.specifiers import SpecifierSet
+    from setuptools import Distribution
+
+
+if TYPE_CHECKING:
+    from build_toolchain_lock import ToolchainLock
+
+
+
+from typing import Any
+
 import io
 import json
 import hashlib
@@ -17,6 +38,28 @@ import uuid
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from typing import Callable, Protocol
+
+
+class _ResourceWheel(Protocol):
+    resource_helper: dict[str, Any]
+    bdist_dir: str
+    action: Callable[[], object]
+    _runtime_staging_root: Path | None
+
+    def run(self) -> object: ...
+
+
+class _ResourceInstall(Protocol):
+    distribution: SimpleNamespace
+    build_dir: str
+    dry_run: bool
+    exclusions: set[str]
+    copy_file: Callable[..., tuple[str, int]]
+
+    def copy_tree(self, source: str, destination: str) -> object: ...
+
+    def get_exclusions(self) -> set[str]: ...
 
 import build_python_artifacts as builder
 import promotion_python_artifacts as artifacts
@@ -33,7 +76,7 @@ LOCK = builder.ToolchainLock(Path("."), {
     "validated_index_identity": "sha256:" + "f" * 64,
 })
 
-def test_resource_inspection_imports_without_a_build_backend(tmp_path):
+def test_resource_inspection_imports_without_a_build_backend(tmp_path: Path) -> None:
     script = """
 import runpy, sys
 helper = runpy.run_path(sys.argv[1])
@@ -45,7 +88,7 @@ assert not any(name == "setuptools" or name.startswith("setuptools.") for name i
         [sys.executable, "-I", "-S", "-B", "-c", script,
          str(ROOT / "libs/versioned-runtime/standalone_build.py")],
         cwd=tmp_path, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -82,33 +125,37 @@ print("native-wheel-staging-link-copy-fallback-ordinary-ok")
 
 
 @pytest.mark.timeout(30)
-def test_native_wheel_staging_preserves_bytes_and_copy_fallback(tmp_path):
+def test_native_wheel_staging_preserves_bytes_and_copy_fallback(tmp_path: Path) -> None:
     pytest.importorskip("setuptools.command.bdist_wheel")
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", WHEEL_STAGING_NATIVE_PROBE,
          str(ROOT / "libs/versioned-runtime/standalone_build.py"), str(tmp_path)],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "native-wheel-staging-link-copy-fallback-ordinary-ok" in result.stdout
 
 
 @pytest.fixture
-def resource_build_commands(tmp_path, monkeypatch):
+def resource_build_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[_ResourceWheel, _ResourceInstall]:
     class Build:
-        def run(self):
+        def run(self) -> None:
             pass
 
     class Wheel:
-        def run(self):
+        action: Callable[[], object]
+
+        def run(self) -> object:
             return self.action()
 
     class Install:
-        def copy_tree(self, *args):
+        exclusions: set[str]
+
+        def copy_tree(self, *args: object) -> list[str]:
             return ["ordinary-copy"]
 
-        def get_exclusions(self):
+        def get_exclusions(self) -> set[str]:
             return self.exclusions
 
     for name in ("setuptools", "setuptools.command"):
@@ -123,13 +170,13 @@ def resource_build_commands(tmp_path, monkeypatch):
         monkeypatch.setitem(sys.modules, module.__name__, module)
 
     class Distribution:
-        def get_command_class(self, name):
+        def get_command_class(self, name: str) -> type[Any]:
             module = sys.modules.get("setuptools.command." + name)
             if module is None:
                 raise ImportError(name)
-            return getattr(module, name)
+            return cast(type[Any], getattr(module, name))
 
-    sys.modules["setuptools"].Distribution = Distribution
+    setattr(sys.modules["setuptools"], "Distribution", Distribution)
     helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     commands = helper["commands"](tmp_path, "fixture")
     wheel = commands["bdist_wheel"]()
@@ -143,7 +190,7 @@ def resource_build_commands(tmp_path, monkeypatch):
     return wheel, install
 
 
-def test_resource_builder_keeps_older_backend_commands(tmp_path, monkeypatch, resource_build_commands):
+def test_resource_builder_keeps_older_backend_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource_build_commands: tuple[_ResourceWheel, _ResourceInstall]) -> None:
     monkeypatch.delitem(sys.modules, "setuptools.command.bdist_wheel")
     helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     expected = {"build_py", "sdist"}
@@ -154,8 +201,8 @@ def test_resource_builder_keeps_older_backend_commands(tmp_path, monkeypatch, re
 
 @pytest.mark.parametrize("replace_parent", [False, True])
 def test_resource_collection_batches_parent_checks_and_refuses_replacement(
-    tmp_path, monkeypatch, resource_build_commands, replace_parent,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource_build_commands: tuple[_ResourceWheel, _ResourceInstall], replace_parent: bool,
+) -> None:
     wheel, _install = resource_build_commands
     helper = wheel.resource_helper
     for destination in helper["RUNTIME_RESOURCES"].values():
@@ -176,12 +223,12 @@ def test_resource_collection_batches_parent_checks_and_refuses_replacement(
     counts = []
     actual_stat, actual_read = Path.lstat, Path.read_bytes
 
-    def observe_stat(path, *args, **kwargs):
+    def observe_stat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if path == shared:
             counts.append(path)
         return actual_stat(path, *args, **kwargs)
 
-    def read(path):
+    def read(path: Path) -> bytes:
         data = actual_read(path)
         if replace_parent and path == shared / "asset2.py":
             shared.rename(tmp_path / "replaced")
@@ -202,16 +249,16 @@ def test_resource_collection_batches_parent_checks_and_refuses_replacement(
 
 @pytest.mark.parametrize("fail", [False, True])
 def test_wheel_staging_links_only_generated_output_and_clears_scope(
-    tmp_path, monkeypatch, resource_build_commands, fail,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource_build_commands: tuple[_ResourceWheel, _ResourceInstall], fail: bool,
+) -> None:
     wheel, install = resource_build_commands
     copied = []
 
-    def copy_file(source, destination, **options):
+    def copy_file(source: str, destination: str, **options: Any) -> tuple[str, bool]:
         copied.append((source, destination, options["link"]))
         return destination, True
 
-    def copy_tree(source, destination, *, copy_function, dirs_exist_ok):
+    def copy_tree(source: str, destination: str, *, copy_function: Callable[..., object], dirs_exist_ok: bool) -> None:
         assert dirs_exist_ok
         copy_function(str(Path(source) / "module.py"), str(Path(destination) / "module.py"))
         if fail:
@@ -233,8 +280,8 @@ def test_wheel_staging_links_only_generated_output_and_clears_scope(
 
 @pytest.mark.parametrize("ordinary", ["not-wheel", "namespace", "foreign-output", "traversal", "dry-run"])
 def test_wheel_staging_keeps_other_install_paths_on_standard_copy(
-    tmp_path, monkeypatch, resource_build_commands, ordinary,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource_build_commands: tuple[_ResourceWheel, _ResourceInstall], ordinary: str,
+) -> None:
     wheel, install = resource_build_commands
     if ordinary == "namespace":
         install.exclusions = {"namespace/__init__.py"}
@@ -256,14 +303,17 @@ def test_wheel_staging_keeps_other_install_paths_on_standard_copy(
 @pytest.mark.parametrize("component", [
     "chat-service", "dispatch-service", "ssh-service", "worktree-manager",
 ])
-def test_existing_core_standalone_roots_have_explicit_artifact_identities(component):
+def test_existing_core_standalone_roots_have_explicit_artifact_identities(component: str) -> None:
     assert component in standalone.COMPONENTS
     assert standalone.COMPONENTS[component] in STANDALONE_CONSUMERS
 
 
-def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(tmp_path):
+def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(tmp_path: Path) -> None:
     import re
-    import tomllib
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
     import bundle_lock
     from packaging.requirements import Requirement
     from packaging.specifiers import SpecifierSet
@@ -290,7 +340,7 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
         tmp_path, root_names=(data["project"]["name"],),
     )
 
-    def key(text):
+    def key(text: str) -> tuple[str, frozenset[str], SpecifierSet, str | None]:
         requirement = Requirement(text)
         return (
             canonicalize_name(requirement.name), frozenset(requirement.extras),
@@ -309,14 +359,14 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
         bundle_lock.collect_inputs(ROOT, root_names=(data["project"]["name"],))
 
 
-def test_standalone_embedded_helpers_preserve_closed_release_source_admission():
+def test_standalone_embedded_helpers_preserve_closed_release_source_admission() -> None:
     from promotion_release_helpers import helper_closure
 
     sources, _decisions = helper_closure(ROOT, entrypoints=("standalone_python_artifacts",))
     assert "libs/versioned-runtime/standalone_build.py" in sources
 
 
-def _embedded_source(tmp_path):
+def _embedded_source(tmp_path: Path) -> tuple[Path, Path]:
     source = _source(tmp_path, "worktree-manager")
     library = tmp_path / "libs/agent-procutil"
     (library / "src/agent_procutil").mkdir(parents=True)
@@ -337,7 +387,7 @@ def _embedded_source(tmp_path):
     return source, library
 
 
-def test_embedded_sources_remain_complete_build_resources_not_installed_distributions(tmp_path, monkeypatch):
+def test_embedded_sources_remain_complete_build_resources_not_installed_distributions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source, library = _embedded_source(tmp_path)
     monkeypatch.setattr(builder, "resolve_vendored_libs", lambda _source: [("agent-procutil", library)])
     selected, installed, resources = standalone.source_closure("worktree-manager", tmp_path, builder)
@@ -352,8 +402,8 @@ def test_embedded_sources_remain_complete_build_resources_not_installed_distribu
 
 @pytest.mark.parametrize("linked", [None, "file", "directory"])
 def test_embedded_sdist_preserves_full_inputs_and_refuses_links(
-    tmp_path, monkeypatch, native_file_symlink, linked,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_file_symlink: Callable[..., None], linked: None | str,
+) -> None:
     from setuptools import Distribution
 
     source, library = _embedded_source(tmp_path)
@@ -393,7 +443,7 @@ def test_embedded_sdist_preserves_full_inputs_and_refuses_links(
         ).read_bytes()
 
 
-def test_embedded_sdist_rebuild_prefers_archived_inputs_over_matching_neighbor(tmp_path, monkeypatch):
+def test_embedded_sdist_rebuild_prefers_archived_inputs_over_matching_neighbor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import tarfile
     import setuptools.build_meta as backend
 
@@ -420,7 +470,7 @@ def test_embedded_sdist_rebuild_prefers_archived_inputs_over_matching_neighbor(t
         assert archive.read("agent_procutil/__init__.py") == expected
 
 
-def test_embedded_editable_build_reinitializes_registered_packages(tmp_path, monkeypatch):
+def test_embedded_editable_build_reinitializes_registered_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import setuptools.build_meta as backend
 
     source, _library = _embedded_source(tmp_path)
@@ -433,7 +483,7 @@ def test_embedded_editable_build_reinitializes_registered_packages(tmp_path, mon
     assert (output / filename).is_file()
 
 
-def test_embedded_registration_still_refuses_application_package_collision(tmp_path):
+def test_embedded_registration_still_refuses_application_package_collision(tmp_path: Path) -> None:
     from setuptools import Distribution
 
     source, _library = _embedded_source(tmp_path)
@@ -448,7 +498,7 @@ def test_embedded_registration_still_refuses_application_package_collision(tmp_p
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_embedded_package_copy_is_bounded_and_settled_before_return(tmp_path, monkeypatch, fail):
+def test_embedded_package_copy_is_bounded_and_settled_before_return(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail: bool) -> None:
     import threading
     import time
     from setuptools import Distribution
@@ -469,7 +519,7 @@ def test_embedded_package_copy_is_bounded_and_settled_before_return(tmp_path, mo
     lock, entered = threading.Lock(), threading.Event()
     active, completed, peak = [], [], [0]
 
-    def copy(module, _path, package):
+    def copy(module: str, _path: str, package: str) -> None:
         with lock:
             active.append((package, module))
             peak[0] = max(peak[0], len(active))
@@ -497,7 +547,7 @@ def test_embedded_package_copy_is_bounded_and_settled_before_return(tmp_path, mo
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_embedded_install_copy_preserves_standard_files_and_settles_failure(tmp_path, monkeypatch, fail):
+def test_embedded_install_copy_preserves_standard_files_and_settles_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail: bool) -> None:
     import threading
     import time
     from setuptools import Distribution
@@ -518,14 +568,14 @@ def test_embedded_install_copy_preserves_standard_files_and_settles_failure(tmp_
     original = command.copy_file
     lock, active = threading.Lock(), []
 
-    def copy(source, destination):
+    def copy(source: str, destination: str) -> tuple[str, int]:
         with lock:
             active.append(source)
         try:
             time.sleep(0.01)
             if fail and source.endswith("module.py"):
                 raise RuntimeError("controlled install copy failure")
-            return original(source, destination)
+            return cast(tuple[str, int], original(source, destination))
         finally:
             with lock:
                 active.remove(source)
@@ -546,7 +596,7 @@ def test_embedded_install_copy_preserves_standard_files_and_settles_failure(tmp_
 
 
 @pytest.mark.parametrize("mode", ["legacy", "namespace", "dry-run"])
-def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, monkeypatch, mode):
+def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     from setuptools import Distribution
     from setuptools.command.install_lib import install_lib
 
@@ -581,7 +631,7 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, mo
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended path syntax")
-def test_native_build_paths_normalize_local_and_unc_roots():
+def test_native_build_paths_normalize_local_and_unc_roots() -> None:
     helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     native = helper["_native_build_path"]
     assert native("C:\\project", "build\\lib\\.\\pkg") == "\\\\?\\C:\\project\\build\\lib\\pkg"
@@ -592,13 +642,13 @@ def test_native_build_paths_normalize_local_and_unc_roots():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows wheel command selection")
-def test_native_metadata_loads_when_wheel_command_is_unavailable(tmp_path, monkeypatch):
+def test_native_metadata_loads_when_wheel_command_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from setuptools import Distribution
     from distutils.errors import DistutilsModuleError
 
     original = Distribution.get_command_class
 
-    def command_class(self, name):
+    def command_class(self: Distribution, name: str) -> type[Any]:
         if name == "bdist_wheel":
             raise DistutilsModuleError("wheel command unavailable")
         return original(self, name)
@@ -610,7 +660,7 @@ def test_native_metadata_loads_when_wheel_command_is_unavailable(tmp_path, monke
     assert "build_py" in classes and "sdist" in classes
 
 
-def _source(root, component):
+def _source(root: Path, component: str) -> Path:
     source = root / standalone.COMPONENTS[component]
     source.mkdir(parents=True)
     package = {
@@ -651,8 +701,8 @@ def _source(root, component):
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 @pytest.mark.parametrize("modified", [False, True])
 def test_trusted_manager_setup_accepts_git_line_endings_but_not_changed_body(
-    tmp_path, newline, modified,
-):
+    tmp_path: Path, newline: bytes, modified: bool,
+) -> None:
     from build_toolchain_lock import ArtifactBuildError
 
     source = _source(tmp_path, "worktree-manager")
@@ -668,16 +718,16 @@ def test_trusted_manager_setup_accepts_git_line_endings_but_not_changed_body(
         )["project"]["version"] == "1.0"
 
 
-def _build(tmp_path, monkeypatch, component, *, embedded=False, materialized=False):
+def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, *, embedded: bool=False, materialized: bool=False) -> tuple[Path, Path, dict[str, Any]]:
     if embedded:
         source, library = _embedded_source(tmp_path)
         if materialized:
             destination = source / "libs" / library.name
             destination.parent.mkdir()
             shutil.move(str(library), destination)
-            manifest = source / "pyproject.toml"
-            manifest.write_text(
-                manifest.read_text().replace("../libs/agent-procutil", "libs/agent-procutil")
+            project_manifest = source / "pyproject.toml"
+            project_manifest.write_text(
+                project_manifest.read_text().replace("../libs/agent-procutil", "libs/agent-procutil")
                 .replace("editable = true", "editable = false"),
                 encoding="utf-8",
             )
@@ -686,7 +736,7 @@ def _build(tmp_path, monkeypatch, component, *, embedded=False, materialized=Fal
     monkeypatch.setattr(builder, "REPO", tmp_path)
     monkeypatch.setattr(builder, "LIBS_DIR", tmp_path / "libs")
 
-    def build(source_dir, out_dir, *, toolchain, reserved_names, normalize_timestamps):
+    def build(source_dir: Path, out_dir: Path, *, toolchain: ToolchainLock, reserved_names: set[str], normalize_timestamps: bool) -> Path:
         assert toolchain is LOCK
         assert normalize_timestamps
         package = next((source_dir / "src").iterdir()).name
@@ -713,7 +763,7 @@ def _build(tmp_path, monkeypatch, component, *, embedded=False, materialized=Fal
 
 
 @pytest.mark.parametrize("component", list(standalone.COMPONENTS))
-def test_standalone_build_bundle_candidate_roundtrip(tmp_path, monkeypatch, component):
+def test_standalone_build_bundle_candidate_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str) -> None:
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, component)
     assert manifest["schema_version"] == 4 and "plugin" not in manifest
     assert manifest["component"] == component
@@ -734,11 +784,11 @@ def test_standalone_build_bundle_candidate_roundtrip(tmp_path, monkeypatch, comp
         directory, dev_head="a" * 40, content_tree="b" * 40, main_before="c" * 40,
         candidate_root=tmp_path, projects=artifacts.candidate_projects(tmp_path),
     ) == index
-    assert publisher.artifact_label(entry) == f"standalone-{component}"
+    assert cast('Callable[[dict[str, Any]], str]', getattr(publisher, 'artifact_label'))(entry) == f"standalone-{component}"
 
 
 @pytest.mark.parametrize("materialized", [False, True])
-def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path, monkeypatch, materialized):
+def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, materialized: bool) -> None:
     _source_dir, wheels, manifest = _build(
         tmp_path, monkeypatch, "worktree-manager", embedded=True, materialized=materialized,
     )
@@ -757,7 +807,7 @@ def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path, monkeypatch
     "libs/unknown", "libs/../foreign", "foreign/agent-procutil", "libs/versioned-runtime",
     "worktree-manager/libs/unknown", "services/ssh/libs/agent-procutil",
 ])
-def test_embedded_manager_resource_closure_refuses_substitution(tmp_path, monkeypatch, resource):
+def test_embedded_manager_resource_closure_refuses_substitution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource: str) -> None:
     _source_dir, _wheels, manifest = _build(tmp_path, monkeypatch, "worktree-manager", embedded=True)
     manifest["build_resources"][-1] = resource
     with pytest.raises(artifacts.PromotionArtifactError, match="resource closure"):
@@ -766,7 +816,7 @@ def test_embedded_manager_resource_closure_refuses_substitution(tmp_path, monkey
 
 
 @pytest.mark.parametrize("mutation", ["unknown", "plugin-alias", "resource-omission", "duplicate-source"])
-def test_standalone_identity_and_resource_refusals(tmp_path, monkeypatch, mutation):
+def test_standalone_identity_and_resource_refusals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "fleet-manager")
     if mutation == "unknown":
         manifest["component"] = "../fleet-manager"
@@ -782,7 +832,7 @@ def test_standalone_identity_and_resource_refusals(tmp_path, monkeypatch, mutati
 
 
 @pytest.mark.parametrize("mutation", ["source", "resource", "generator", "digest"])
-def test_standalone_changed_bytes_and_toolchain_refused(tmp_path, monkeypatch, mutation):
+def test_standalone_changed_bytes_and_toolchain_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
     source, wheels, manifest = _build(tmp_path, monkeypatch, "fleet-manager")
     if mutation == "source":
         (source / "src" / "fleet_manager" / "__init__.py").write_bytes(b"changed")
@@ -803,7 +853,7 @@ def test_standalone_changed_bytes_and_toolchain_refused(tmp_path, monkeypatch, m
     "fleet-manager", "chat-service", "index-service", "worktree-manager", "pr-service",
 ])
 @pytest.mark.parametrize("mutation", ["setup", "helper", "alternate", "included"])
-def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, component):
+def test_only_trusted_standalone_build_hook_is_admitted(tmp_path: Path, mutation: str, component: str) -> None:
     source = _source(tmp_path, component)
     target = {
         "setup": source / "setup.py",
@@ -820,14 +870,14 @@ def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, comp
 
 
 @pytest.mark.parametrize("component", ["index-service", "pr-service"])
-def test_standalone_build_selector_substitution_is_refused(tmp_path, component):
+def test_standalone_build_selector_substitution_is_refused(tmp_path: Path, component: str) -> None:
     source = _source(tmp_path, component)
     (source / "_build_runtime_resource.py").write_bytes(b"raise RuntimeError('not canonical')\n")
     with pytest.raises(builder.ArtifactBuildError, match="selector"):
         standalone.validate_build(source, component=component, root=tmp_path)
 
 
-def test_pr_release_materializes_only_the_canonical_attribution_helpers(tmp_path):
+def test_pr_release_materializes_only_the_canonical_attribution_helpers(tmp_path: Path) -> None:
     from materialize_launch_wrapper_assets import materialize_all
 
     source = ROOT / standalone.COMPONENTS["pr-service"]
@@ -847,7 +897,7 @@ def test_pr_release_materializes_only_the_canonical_attribution_helpers(tmp_path
         assert (project / "src" / member).read_bytes() == origin.read_bytes()
 
 
-def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_path, monkeypatch):
+def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "fleet-manager")
     wheel = manifest["wheels"][0]
     archive = wheels / wheel["filename"]
@@ -862,7 +912,7 @@ def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_p
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native wheel staging paths")
-def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path):
+def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path: Path) -> None:
     root = tmp_path.parent / ("d" + uuid.uuid4().hex[:8])
     padding = max(1, 105 - len(str(root)) - 3)
     project = root / ("x" * padding) / "p"
@@ -892,14 +942,14 @@ def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path):
          "import setuptools.build_meta as backend; backend.build_wheel(__import__('sys').argv[1])",
          str(archives)],
         cwd=project, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
     )
     assert result.returncode == 0, (result.stdout + result.stderr)[-6000:]
     with zipfile.ZipFile(next(archives.glob("*.whl"))) as archive:
         assert {name: archive.read(name) for name in expected} == expected
 
 
-def test_mcp_native_owner_companion_survives_wheel_and_source_distribution(tmp_path):
+def test_mcp_native_owner_companion_survives_wheel_and_source_distribution(tmp_path: Path) -> None:
     project = tmp_path / "project"
     shutil.copytree(
         ROOT / "plugins" / "agent-mcp", project,
@@ -913,7 +963,7 @@ def test_mcp_native_owner_companion_survives_wheel_and_source_distribution(tmp_p
     }
     archives = tmp_path / "archives"
     archives.mkdir()
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
     result = subprocess.run(
         [sys.executable, "-I", "-c",
          "import setuptools.build_meta as backend; out=__import__('sys').argv[1]; "
@@ -939,7 +989,7 @@ def test_mcp_native_owner_companion_survives_wheel_and_source_distribution(tmp_p
         assert {name: archive.read(name) for name in expected} == expected
 
 
-def test_manager_source_materializer_imports_from_isolated_wheel_resources(tmp_path):
+def test_manager_source_materializer_imports_from_isolated_wheel_resources(tmp_path: Path) -> None:
     from materialize_launch_wrapper_assets import materialize_into
     from plugin_runtime_resources import application_resources
 
@@ -994,7 +1044,7 @@ print("isolated-wheel-resource-materializer-ok")
          str(wheel_layout / "worktree_manager/_runtime_assets/scripts/runtime-source-tools"),
          str(candidate)],
         cwd=wheel_layout, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "isolated-wheel-resource-materializer-ok"
@@ -1004,7 +1054,7 @@ print("isolated-wheel-resource-materializer-ok")
     ("worktree-manager", "worktree_manager"),
     ("plugins/agent-worktrees", "agent_worktrees"),
 ])
-def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, relative, package):
+def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path, relative: str, package: str) -> None:
     project = tmp_path / "project"
     shutil.copytree(
         ROOT / relative, project,
@@ -1046,7 +1096,7 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
         "import setuptools.build_meta as backend; out=__import__('sys').argv[1]; "
         "backend.build_wheel(out); backend.build_sdist(out)"
     )
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
     result = subprocess.run(
         [sys.executable, "-c", program, str(archives)],
         cwd=project, capture_output=True, text=True, encoding="utf-8", timeout=90,
@@ -1060,7 +1110,10 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
         if embedded:
             from email.parser import BytesParser
             from artifact_source_build import validate_runtime_metadata
-            import tomllib
+            if sys.version_info >= (3, 11):
+                import tomllib
+            else:
+                import tomli as tomllib
 
             infos = {name.split("/")[0] for name in archive.namelist() if ".dist-info/" in name}
             assert len(infos) == 1
@@ -1147,7 +1200,7 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_standalone_signature_failure_remains_blocking(tmp_path, monkeypatch):
+def test_standalone_signature_failure_remains_blocking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "pr-service")
     directory = tmp_path / "bundles"
     directory.mkdir()
@@ -1160,7 +1213,7 @@ def test_standalone_signature_failure_remains_blocking(tmp_path, monkeypatch):
         },
     }), encoding="utf-8")
     calls = []
-    def gh(argv, **kwargs):
+    def gh(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 1 if str(argv[2]).endswith(".zip") else 0, "", "bad signature")
     monkeypatch.setattr(publisher, "_gh", gh)
@@ -1172,7 +1225,7 @@ def test_standalone_signature_failure_remains_blocking(tmp_path, monkeypatch):
     assert any(str(argv[2]).endswith(".zip") for argv in calls)
 
 
-def test_candidate_builder_uses_one_lock_for_registered_standalones(tmp_path, monkeypatch):
+def test_candidate_builder_uses_one_lock_for_registered_standalones(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import build_toolchain_lock
     import promote_release
 
@@ -1181,7 +1234,7 @@ def test_candidate_builder_uses_one_lock_for_registered_standalones(tmp_path, mo
     monkeypatch.setattr(builder, "PLUGINS_DIR", tmp_path / "plugins")
     monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
     locks = []
-    def resolve(*args, **kwargs):
+    def resolve(*args: object, **kwargs: object) -> ToolchainLock:
         locks.append(kwargs)
         return LOCK
     monkeypatch.setattr(build_toolchain_lock, "resolve_toolchain_lock", resolve)
@@ -1201,7 +1254,7 @@ def test_candidate_builder_uses_one_lock_for_registered_standalones(tmp_path, mo
         assert manifest["build_toolchain"] == LOCK.record
 
 
-def test_candidate_omission_and_same_name_plugin_substitution_refuse(tmp_path, monkeypatch):
+def test_candidate_omission_and_same_name_plugin_substitution_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "pr-service")
     directory = tmp_path / "bundles"
     directory.mkdir()
@@ -1219,14 +1272,14 @@ def test_candidate_omission_and_same_name_plugin_substitution_refuse(tmp_path, m
             )
 
 
-def test_standalone_cli_selects_explicit_builder_without_changing_plugin_default(tmp_path, monkeypatch, capsys):
+def test_standalone_cli_selects_explicit_builder_without_changing_plugin_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import artifact_builder_cli
 
     calls = []
-    def plugin(name, **kwargs):
+    def plugin(name: str, **kwargs: object) -> dict[str, Any]:
         calls.append(("plugin", name))
         return {}
-    def component(name, **kwargs):
+    def component(name: str, **kwargs: object) -> dict[str, Any]:
         calls.append(("standalone", name))
         return {}
     for standalone_flag in ([], ["--standalone"]):
@@ -1239,13 +1292,15 @@ def test_standalone_cli_selects_explicit_builder_without_changing_plugin_default
 
 
 @pytest.mark.parametrize("location", ["source", "resource"])
-def test_standalone_linked_source_or_resource_is_not_followed(tmp_path, monkeypatch, location):
+def test_standalone_linked_source_or_resource_is_not_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str) -> None:
     source = _source(tmp_path, "fleet-manager")
     path = source if location == "source" else tmp_path / "libs" / "installer-engine"
     seen = []
-    monkeypatch.setattr(builder.uer, "_find_symlinked_ancestor", lambda target, root: (
-        seen.append(target) or (target if target == path else None)
-    ))
+    def record_call(target: Path, root: Path) -> Path | None:
+        seen.append(target)
+        return target if target == path else None
+
+    monkeypatch.setattr(builder.uer, "_find_symlinked_ancestor", record_call)
     with pytest.raises(builder.ArtifactBuildError, match="missing, linked or outside"):
         standalone.source_closure("fleet-manager", tmp_path, builder)
     assert path in seen

@@ -1,6 +1,15 @@
 """Release-helper decisions using fixture bytes and actor-boundary substitutes."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import Any, Protocol
+    from pathlib import Path
+    class _CopyFile(Protocol):
+        def __call__(self, src: str | Path, dst: str | Path, *, follow_symlinks: bool = True) -> str | Path: ...
+
+from typing import Any, cast
+
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -39,24 +48,24 @@ DEV, MAIN, TREE = "d" * 40, "a" * 40, "c" * 40
 
 
 @pytest.fixture(autouse=True)
-def _no_process_actors(monkeypatch):
-    def refuse(*args, **kwargs):
+def _no_process_actors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
         pytest.fail("release decision unit reached an unmocked process actor")
 
     monkeypatch.setattr(subprocess, "run", refuse)
     monkeypatch.setattr(subprocess, "Popen", refuse)
 
 
-def _write(path, text):
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
 @pytest.mark.parametrize("case", ["same", "changed", "wrong-source", "bad-json", "git-error"])
-def test_source_tag_reuse_requires_matching_provenance_and_content(tmp_path, monkeypatch, case):
+def test_source_tag_reuse_requires_matching_provenance_and_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     calls = []
 
-    def git(argv, **kwargs):
+    def git(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         assert kwargs["cwd"] == tmp_path
         if argv[0] == "show":
@@ -68,8 +77,8 @@ def test_source_tag_reuse_requires_matching_provenance_and_content(tmp_path, mon
             )
         assert argv == [
             "diff", "--quiet", "prior", "landed", "--", ".",
-            f":(exclude){tags.PIPELINE_STATE_PATH}",
-            f":(exclude){tags.COVERAGE_BASELINES_DIR}",
+            f":(exclude){cast(str, getattr(tags, 'PIPELINE_STATE_PATH'))}",
+            f":(exclude){cast(str, getattr(tags, 'COVERAGE_BASELINES_DIR'))}",
         ]
         return subprocess.CompletedProcess(
             argv, {"changed": 1, "git-error": 128}.get(case, 0), "", "comparison failed",
@@ -85,7 +94,7 @@ def test_source_tag_reuse_requires_matching_provenance_and_content(tmp_path, mon
 
 
 @pytest.mark.parametrize("case", ["valid", "wrong-tree", "wrong-release-id", "unrelated-history"])
-def test_prior_alias_requires_frozen_source_and_main_history(tmp_path, monkeypatch, case):
+def test_prior_alias_requires_frozen_source_and_main_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     previous = {
         "dev_head": DEV, "release_id": MAIN if case == "wrong-release-id" else DEV,
         "tag": f"promote-dev-{DEV}", "main_before": MAIN,
@@ -100,7 +109,7 @@ def test_prior_alias_requires_frozen_source_and_main_history(tmp_path, monkeypat
     monkeypatch.setattr(promotion, "_git", lambda *a, **kw: TREE)
     projections = []
 
-    def project_tree(argv, **kwargs):
+    def project_tree(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         assert argv[:6] == [
             "git", "--no-replace-objects", "-c", "core.fsmonitor=false",
             "-c", "core.longpaths=true",
@@ -124,7 +133,7 @@ def test_prior_alias_requires_frozen_source_and_main_history(tmp_path, monkeypat
     cache = {("example/plugins", DEV): {
         "dev_head": DEV, "content_tree": MAIN if case == "wrong-tree" else TREE,
     }}
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         repository="example/plugins", tag_commit="prior", current_commit="current",
         current_index={"dev_head": DEV}, repo=tmp_path, cache=cache,
     )
@@ -138,20 +147,20 @@ def test_prior_alias_requires_frozen_source_and_main_history(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("case", ["valid", "digest", "oversize"])
-def test_frozen_artifact_download_checks_bytes_before_writing(tmp_path, monkeypatch, case):
+def test_frozen_artifact_download_checks_bytes_before_writing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     content = b"frozen source artifact"
     calls = []
 
-    def gh(argv, **kwargs):
+    def gh(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, content, b"")
 
-    monkeypatch.setattr(reuse.publisher, "_gh", gh)
+    monkeypatch.setattr(cast(object, getattr(reuse, "publisher")), "_gh", gh)
     asset = {
         "id": 7, "size": len(content),
         "digest": "sha256:" + hashlib.sha256(content if case != "digest" else b"other").hexdigest(),
     }
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         repository="example/plugins", tag="python-artifacts-fixture",
         name="frozen.zip", asset=asset, limit=1 if case == "oversize" else 100,
     )
@@ -170,13 +179,13 @@ def test_frozen_artifact_download_checks_bytes_before_writing(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("case", ["absent", "bad-repository", "bad-dev"])
-def test_only_genuine_source_release_absence_allows_build(tmp_path, monkeypatch, case):
+def test_only_genuine_source_release_absence_allows_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     reads = []
     monkeypatch.setattr(
-        reuse.discovery, "read_release",
+        cast(object, getattr(reuse, "discovery")), "read_release",
         lambda repository, tag, **options: reads.append((repository, tag)),
     )
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         repository="../plugins" if case == "bad-repository" else "example/plugins",
         dev_head="short" if case == "bad-dev" else DEV,
         main_before=MAIN, content_tree=TREE, candidate_root=tmp_path,
@@ -193,8 +202,8 @@ def test_only_genuine_source_release_absence_allows_build(tmp_path, monkeypatch,
 
 @pytest.mark.parametrize("case", ["valid", "wrong-tree", "foreign-main", "extra-bundle", "misbound-tag"])
 def test_frozen_source_index_requires_exact_composition_and_original_main_admission(
-    tmp_path, monkeypatch, case,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
     filename = "example-1.0-" + "b" * 64 + ".zip"
     index = {
         "schema": reuse.SCHEMA, "schema_version": 2, "dev_head": DEV,
@@ -213,14 +222,14 @@ def test_frozen_source_index_requires_exact_composition_and_original_main_admiss
             "id": 3, "name": "other-1.0-" + "e" * 64 + ".zip",
             "state": "uploaded", "size": 100, "digest": "sha256:" + "e" * 64,
         })
-    monkeypatch.setattr(reuse.discovery, "read_release", lambda *a, **kw: {"id": 10})
+    monkeypatch.setattr(cast(object, getattr(reuse, "discovery")), "read_release", lambda *a, **kw: {"id": 10})
     monkeypatch.setattr(
-        reuse.discovery, "tag_commit", lambda *a, **kw: MAIN if case == "misbound-tag" else DEV,
+        cast(object, getattr(reuse, "discovery")), "tag_commit", lambda *a, **kw: MAIN if case == "misbound-tag" else DEV,
     )
     monkeypatch.setattr(promotion, "_is_ancestor", lambda *a, **kw: case != "foreign-main")
     verified = []
 
-    def gh(argv, **kwargs):
+    def gh(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         if argv[:4] == ["api", "--paginate", "--slurp", "repos/example/plugins/releases/10/assets?per_page=100"]:
             assert kwargs == {"verification": True}
             return subprocess.CompletedProcess(argv, 0, json.dumps([inventory]), "")
@@ -238,13 +247,15 @@ def test_frozen_source_index_requires_exact_composition_and_original_main_admiss
         verified.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(reuse.publisher, "_gh", gh)
-    kwargs = dict(
+    monkeypatch.setattr(cast(object, getattr(reuse, "publisher")), "_gh", gh)
+    kwargs: dict[str, Any] = dict(
         repository="example/plugins", dev_head=DEV, main_before=MAIN,
         content_tree=TREE, repo=tmp_path,
     )
     if case == "valid":
-        admitted, admitted_assets = reuse.read_admitted_source_index(tmp_path, **kwargs)
+        admission = reuse.read_admitted_source_index(tmp_path, **kwargs)
+        assert admission is not None
+        admitted, admitted_assets = admission
         assert admitted == index
         assert set(admitted_assets) == {reuse.INDEX_NAME, filename}
         assert len(verified) == 1
@@ -259,7 +270,7 @@ def test_frozen_source_index_requires_exact_composition_and_original_main_admiss
 
 
 @pytest.mark.parametrize("case", ["plugin", "standalone", "unavailable", "age-with-governed"])
-def test_builder_cli_selects_builder_and_refuses_invalid_policy(tmp_path, monkeypatch, capsys, case):
+def test_builder_cli_selects_builder_and_refuses_invalid_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], case: str) -> None:
     argv = ["builder", "fixture", "--out-dir", str(tmp_path)]
     if case in {"standalone", "unavailable"}:
         argv.append("--standalone")
@@ -268,11 +279,11 @@ def test_builder_cli_selects_builder_and_refuses_invalid_policy(tmp_path, monkey
     monkeypatch.setattr(sys, "argv", argv)
     calls = []
 
-    def builder(name, **kwargs):
+    def builder(name: str, **kwargs: object) -> dict[str, str]:
         calls.append((name, kwargs))
         return {"kind": "plugin"}
 
-    def standalone_builder(name, **kwargs):
+    def standalone_builder(name: str, **kwargs: object) -> dict[str, str]:
         calls.append((name, kwargs))
         return {"kind": "standalone"}
 
@@ -289,7 +300,7 @@ def test_builder_cli_selects_builder_and_refuses_invalid_policy(tmp_path, monkey
 
 
 @pytest.mark.parametrize("case", ["valid", "missing-editable", "wrong-canonical"])
-def test_uv_materialization_copies_nested_closure_or_refuses_before_copy(tmp_path, case):
+def test_uv_materialization_copies_nested_closure_or_refuses_before_copy(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source, target = canonical / "plugins/example", destination / "plugins/example"
     raw = "../../plugins/core" if case == "wrong-canonical" else "../../libs/core"
@@ -324,7 +335,7 @@ def test_uv_materialization_copies_nested_closure_or_refuses_before_copy(tmp_pat
 
 
 @pytest.mark.parametrize("case", ["matching", "conflicting"])
-def test_nested_existing_library_requires_complete_canonical_match(tmp_path, case):
+def test_nested_existing_library_requires_complete_canonical_match(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     parent = destination / "plugins/example/libs/core"
     manifest = '[tool.uv.sources]\nleaf = { path = "../leaf", editable = true }\n'
@@ -348,7 +359,7 @@ def test_nested_existing_library_requires_complete_canonical_match(tmp_path, cas
 
 
 @pytest.mark.parametrize("case", ["fresh", "identical", "conflicting", "unsafe-name"])
-def test_packaged_assets_materialize_only_safe_nonconflicting_bytes(tmp_path, case):
+def test_packaged_assets_materialize_only_safe_nonconflicting_bytes(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source, target = canonical / "plugins/example", destination / "plugins/example"
     target.mkdir(parents=True)
@@ -389,7 +400,7 @@ def _nested_packaged_assets(root: Path, files: list[str]) -> Path:
     return consumer
 
 
-def test_nested_packaged_assets_preserve_explicit_layout(tmp_path):
+def test_nested_packaged_assets_preserve_explicit_layout(tmp_path: Path) -> None:
     root = tmp_path / "source"
     files = ["tools/prepare.py", "libs/example/pyproject.toml", "tools/requirements.txt"]
     consumer = _nested_packaged_assets(root, files)
@@ -407,7 +418,7 @@ def test_nested_packaged_assets_preserve_explicit_layout(tmp_path):
                   for path in packaged.rglob("*") if path.is_file()) == sorted(files)
     assert all((packaged / name).read_bytes() == (root / name).read_bytes() for name in files)
     manifest = assets.load_manifest(consumer, manifest_name=assets.PACKAGED_MANIFEST_NAME)
-    assert manifest.source_relative(files[0]) == files[0]
+    assert cast("assets.LaunchWrapperAssets", manifest).source_relative(files[0]) == files[0]
 
 
 @pytest.mark.parametrize("files", [
@@ -419,14 +430,14 @@ def test_nested_packaged_assets_preserve_explicit_layout(tmp_path):
     "traversal", "nested-traversal", "drive", "absolute", "backslash", "glob",
     "case-alias", "file-directory", "stream", "trailing-dot", "trailing-space", "device-name",
 ])
-def test_nested_packaged_assets_reject_unsafe_or_aliased_members(tmp_path, files):
+def test_nested_packaged_assets_reject_unsafe_or_aliased_members(tmp_path: Path, files: list[str]) -> None:
     consumer = _nested_packaged_assets(tmp_path, files)
     with pytest.raises(ValueError, match="files"):
         assets.load_manifest(consumer, manifest_name=assets.PACKAGED_MANIFEST_NAME)
 
 
 @pytest.mark.parametrize("failure", ["missing", "occupied", "parent-file", "source-link", "dest-link"])
-def test_nested_packaged_assets_preflight_all_members(tmp_path, failure, monkeypatch):
+def test_nested_packaged_assets_preflight_all_members(tmp_path: Path, failure: str, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "source"
     files = ["tools/first.py", "libs/example/value.py"]
     consumer = _nested_packaged_assets(root, files)
@@ -458,9 +469,10 @@ def test_nested_packaged_assets_preflight_all_members(tmp_path, failure, monkeyp
     (2, ".", "libs/example/pyproject.toml"),
 ])
 def test_standalone_packaged_sources_charge_the_declared_consumer(
-    monkeypatch, tmp_path, version, canonical, name,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, version: int, canonical: str, name: str,
+) -> None:
     spec = importlib.util.spec_from_file_location("asset_version_guard", ROOT / "tools/check-version-bump.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     root = tmp_path / "source"
@@ -478,12 +490,13 @@ def test_standalone_packaged_sources_charge_the_declared_consumer(
     assert module._plugins_needing_bump(["tools/unrelated.py"], {}) == {}
 
 
-def test_application_resource_projection_retains_companions_and_metadata_not_directories(tmp_path):
+def test_application_resource_projection_retains_companions_and_metadata_not_directories(tmp_path: Path) -> None:
     from plugin_runtime_resources import application_resources
 
     spec = importlib.util.spec_from_file_location(
         "application_resource_builder", ROOT / "libs/versioned-runtime/standalone_build.py",
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     prefix = "scripts/runtime-source-tools/fixture/"
@@ -500,7 +513,7 @@ def test_application_resource_projection_retains_companions_and_metadata_not_dir
     }
 
 
-def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path, monkeypatch):
+def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = ROOT / "worktree-manager"
     manifests = assets.load_manifest_groups(source, manifest_name=assets.PACKAGED_MANIFEST_NAME)
     destination = tmp_path / "worktree-manager"
@@ -550,9 +563,9 @@ def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path,
                 "build_python_artifacts", "standalone_python_artifacts", "source_preparation_process",
             )
         }
-        assert all(Path(module.__file__).is_relative_to(bundle) for module in modules.values())
+        assert all(Path(cast(str, module.__file__)).is_relative_to(bundle) for module in modules.values())
         permissions = modules["source_preparation_process"].procutil_module("python_cache_permissions")
-        assert Path(permissions.__file__).is_relative_to(bundle)
+        assert Path(cast(str, permissions.__file__)).is_relative_to(bundle)
         assert modules["local_install_source"].repository_source(
             tmp_path, {"source": "github", "repo": "Example/Suite"}, deadline=1,
         ) == {"kind": "github", "canonical": "github:example/suite", "ref": ""}
@@ -562,7 +575,7 @@ def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path,
         # Keep both path changes on the same undo stack.
         monkeypatch.setattr(sys, "path", [str(projection), *sys.path])
         loaded = importlib.import_module("instruction_projections")
-        assert Path(loaded.__file__).is_relative_to(bundle)
+        assert Path(cast(str, loaded.__file__)).is_relative_to(bundle)
     finally:
         for name, module in list(sys.modules.items()):
             filename = getattr(module, "__file__", None)
@@ -572,7 +585,7 @@ def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path,
 
 @pytest.mark.parametrize("ext", ["ps1", "sh"])
 @pytest.mark.parametrize("case", ["valid", "duplicate"])
-def test_installer_reference_materialization_preserves_comments_and_refuses_ambiguity(tmp_path, ext, case):
+def test_installer_reference_materialization_preserves_comments_and_refuses_ambiguity(tmp_path: Path, ext: str, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source, target = canonical / "plugins/example", destination / "plugins/example"
     text = "  " + engine.canonical_line(ext) + " # retain\n"
@@ -591,7 +604,7 @@ def test_installer_reference_materialization_preserves_comments_and_refuses_ambi
         assert log[0].startswith("OK") and output.read_text() == "# fixture engine\n"
         script = target / f"scripts/install.{ext}"
         assert script.read_text() == "  " + engine.local_line(ext) + " # retain\n"
-        assert engine.is_local_ref(engine.find_engine_ref(script, ext), target)
+        assert engine.is_local_ref(cast("engine.EngineRef", engine.find_engine_ref(script, ext)), target)
     else:
         assert "expected exactly one" in log[0] and not output.exists()
         assert (target / f"scripts/install.{ext}").read_text() == text
@@ -599,7 +612,7 @@ def test_installer_reference_materialization_preserves_comments_and_refuses_ambi
 
 @pytest.mark.parametrize("ext", ["ps1", "sh"])
 @pytest.mark.parametrize("case", ["corruption", "source-drift"])
-def test_native_installer_copy_is_verified_before_entrypoint_rewrite(tmp_path, monkeypatch, ext, case):
+def test_native_installer_copy_is_verified_before_entrypoint_rewrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ext: str, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source, target = canonical / "plugins/example", destination / "plugins/example"
     text = engine.canonical_line(ext) + "\n"
@@ -609,17 +622,17 @@ def test_native_installer_copy_is_verified_before_entrypoint_rewrite(tmp_path, m
     canonical_engine = canonical / f"libs/installer-engine/installer-engine.{ext}"
     _write(canonical_engine, "# admitted engine\n")
     output = target / f"scripts/installer-engine.{ext}"
-    copyfile = installers.shutil.copyfile
+    copyfile = cast("_CopyFile", getattr(getattr(installers, "shutil"), "copyfile"))
     copied = []
 
-    def copy_then_fault(src, dst, *args, **kwargs):
-        result = copyfile(src, dst, *args, **kwargs)
+    def copy_then_fault(src: str | Path, dst: str | Path, *args: Any, **kwargs: Any) -> str | Path:
+        result: str | Path = copyfile(src, dst, *args, **kwargs)
         if Path(src) == canonical_engine and Path(dst) == output:
             copied.append((src, dst))
             (output if case == "corruption" else canonical_engine).write_bytes(b"# changed engine\n")
         return result
 
-    monkeypatch.setattr(installers.shutil, "copyfile", copy_then_fault)
+    monkeypatch.setattr(cast(object, getattr(installers, "shutil")), "copyfile", copy_then_fault)
     log = installers.materialize_ref_into(
         source_consumer_dir=source, dest_consumer_dir=target,
         canonical_root=canonical, dest_root=destination,
@@ -631,7 +644,7 @@ def test_native_installer_copy_is_verified_before_entrypoint_rewrite(tmp_path, m
 
 
 @pytest.mark.parametrize("case", ["stale", "absent", "foreign", "absent-bad-digest"])
-def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path, case):
+def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source, target = canonical / "plugins/agent-mcp", destination / "plugins/agent-mcp"
     script = source / "scripts/init.ps1"
@@ -654,7 +667,7 @@ def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path, case)
                "# foreign initializer\n" if case == "foreign" else "# admitted prior initializer\n")
     before = {path.relative_to(canonical): path.read_bytes()
               for path in canonical.rglob("*") if path.is_file()}
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         source_consumer_dir=source, dest_consumer_dir=target,
         canonical_root=canonical, dest_root=destination,
     )
@@ -675,7 +688,7 @@ def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path, case)
 
 
 @pytest.mark.parametrize("case", ["valid", "wrong-name", "conditional", "escape"])
-def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path, case):
+def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path: Path, case: str) -> None:
     project = tmp_path / "services/example"
     path = "../../../outside" if case == "escape" else "../../libs/selected"
     entry = f'{{ path = "{path}", editable = true'
@@ -694,7 +707,7 @@ def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path, 
 
 
 @pytest.mark.parametrize("case", ["absent", "stale", "foreign"])
-def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path, case):
+def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source = canonical / "worktree-manager"
     _write(source / "scripts/source.txt", "retained\n")
@@ -725,7 +738,7 @@ def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path, 
 
 
 @pytest.mark.parametrize("case", ["absent", "stale", "foreign"])
-def test_single_consumer_canonical_reference_refreshes_support_before_conversion(tmp_path, case):
+def test_single_consumer_canonical_reference_refreshes_support_before_conversion(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source = canonical / "plugins/agent-vault"
     for ext in ("ps1", "sh"):
@@ -759,15 +772,15 @@ def test_single_consumer_canonical_reference_refreshes_support_before_conversion
             ).read_bytes()
         for ext in ("ps1", "sh"):
             assert engine.is_local_ref(
-                engine.find_engine_ref(destination / f"scripts/install.{ext}", ext), destination,
+                cast("engine.EngineRef", engine.find_engine_ref(destination / f"scripts/install.{ext}", ext)), destination,
             )
     assert before == {path.relative_to(canonical): path.read_bytes()
                       for path in canonical.rglob("*") if path.is_file()}
 
 
 @pytest.mark.parametrize("case", ["valid", "fresh-file", "yanked-file", "missing-hash"])
-def test_public_release_selection_ages_every_file_and_binds_hashes(case):
-    def file(digest, timestamp="2026-01-01T00:00:00Z"):
+def test_public_release_selection_ages_every_file_and_binds_hashes(case: str) -> None:
+    def file(digest: str, timestamp: str="2026-01-01T00:00:00Z") -> dict[str, Any]:
         return {"yanked": False, "upload_time_iso_8601": timestamp, "digests": {"sha256": digest}}
 
     releases = {
@@ -784,11 +797,11 @@ def test_public_release_selection_ages_every_file_and_binds_hashes(case):
         latest["digests"] = {}
     urls = []
 
-    def fetch(url):
+    def fetch(url: str) -> bytes:
         urls.append(url)
         return json.dumps({"releases": releases}).encode()
 
-    kwargs = dict(min_age_days=7, now=datetime(2026, 2, 1, tzinfo=timezone.utc), fetch=fetch)
+    kwargs: dict[str, Any] = dict(min_age_days=7, now=datetime(2026, 2, 1, tzinfo=timezone.utc), fetch=fetch)
     if case == "missing-hash":
         with pytest.raises(seasoned.SeasonedVersionError, match="file SHA-256"):
             seasoned.resolve_seasoned_public_release("Example_Pkg", **kwargs)
@@ -801,7 +814,7 @@ def test_public_release_selection_ages_every_file_and_binds_hashes(case):
 
 
 @pytest.mark.parametrize("case", ["valid", "duplicate-hash", "wrong-pin", "boolean-age"])
-def test_public_toolchain_requires_canonical_hash_and_pin_provenance(tmp_path, case):
+def test_public_toolchain_requires_canonical_hash_and_pin_provenance(tmp_path: Path, case: str) -> None:
     source = public.PublicToolchainSource(7, {"wheel": "1.0"}, {"wheel": ("a" * 64,)})
     provenance = source.provenance | {"python": "3.11.9"}
     if case == "duplicate-hash":
@@ -826,7 +839,7 @@ def test_public_toolchain_requires_canonical_hash_and_pin_provenance(tmp_path, c
 
 
 @pytest.mark.parametrize("case", ["configured", "plaintext", "public", "other-host"])
-def test_governed_feed_requires_configured_https_nonpublic_index(case):
+def test_governed_feed_requires_configured_https_nonpublic_index(case: str) -> None:
     url = {
         "plaintext": "http://feed.example/simple", "public": "https://pypi.org/simple",
         "other-host": "https://other.example/simple",
@@ -838,7 +851,7 @@ def test_governed_feed_requires_configured_https_nonpublic_index(case):
 
 
 @pytest.mark.parametrize("case", ["valid", "unpaired", "invalid-type", "empty"])
-def test_changefile_add_writes_paired_intent_only(tmp_path, monkeypatch, capsys, case):
+def test_changefile_add_writes_paired_intent_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], case: str) -> None:
     monkeypatch.setattr(changefile, "CHANGEFILES_DIR", tmp_path / ".changefiles")
     args = argparse.Namespace(
         plugin=[] if case == "empty" else ["example", "other"],
@@ -863,7 +876,7 @@ def test_changefile_add_writes_paired_intent_only(tmp_path, monkeypatch, capsys,
         assert output.err and not (tmp_path / ".changefiles").exists()
 
 
-def _release_profile():
+def _release_profile() -> dict[str, Any]:
     return {
         "schema": PROFILE_SCHEMA, "version": 1, "component": "engine", "backend": "cpu",
         "release": {"identity": "engine:1.0", "sha256": "sha256:" + "2" * 64},
@@ -890,10 +903,10 @@ def _release_profile():
 
 
 @pytest.mark.parametrize("case", ["valid", "foreign-artifact", "self-approval", "duplicate"])
-def test_release_profiles_bind_whole_records_to_promotion_channel(case):
+def test_release_profiles_bind_whole_records_to_promotion_channel(case: str) -> None:
     record = _release_profile()
     identity = record["artifact"]["artifact_id"]
-    index = {
+    index: dict[str, Any] = {
         "artifacts": [{"artifact_id": identity}],
         "runtime_profiles": {"schema": profiles.SCHEMA, "version": 1, "profiles": [record]},
     }

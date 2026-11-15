@@ -7,9 +7,21 @@ admission before the existing constructor may consume it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 import json
 from pathlib import Path
 import sys
+from typing import Any, TYPE_CHECKING, TypedDict, cast
+
+if TYPE_CHECKING:
+    from artifact_release_discovery import ReleaseRunner, SubjectVerifier
+    from runtime_source_authentication import AuthenticatedSource
+
+
+class _ReleaseAdmission(TypedDict):
+    signer_digest: str
+    source_digest: str
+    source_ref: str
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installation-context"))
 from installation_context import resolve_runtime_profile_policy
@@ -25,14 +37,14 @@ class InstallationProfilePlan:
     release_selection: ReleaseSelection | None
     source_trigger: str | None
 
-    def policy(self) -> dict:
-        return json.loads(self.policy_json)
+    def policy(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.policy_json))
 
 
 def plan_installation_profile(
-    *, installation: dict, release_index: Path | None,
+    *, installation: Mapping[str, Any], release_index: Path | None,
     repository: str, signer_digest: str, source_digest: str, source_ref: str,
-    release: dict, artifact: dict | None, target: dict, component: str,
+    release: dict[str, Any], artifact: dict[str, Any] | None, target: dict[str, Any], component: str,
     roots: list[str], max_subject_bytes: int,
     backend: str | None = None, retained_backend: str | None = None,
     existing_installation: bool = False, preference: tuple[str, ...] = (),
@@ -63,7 +75,7 @@ def plan_installation_profile(
     if trigger is None:
         try:
             selected = select_release_profile(
-                release_index, repository=repository, signer_digest=signer_digest,
+                cast(Path, release_index), repository=repository, signer_digest=signer_digest,
                 source_digest=source_digest, source_ref=source_ref,
                 release=release, artifact=artifact, target=target,
                 component=component, roots=roots, max_subject_bytes=max_subject_bytes,
@@ -80,10 +92,11 @@ def plan_installation_profile(
 
 
 def plan_discovered_installation_profile(
-    directory: Path, origin, *, installation: dict, repository: str,
-    source_checkout: Path, main_commit: str, target: dict, component: str,
+    directory: Path, origin: AuthenticatedSource, *, installation: Mapping[str, Any], repository: str,
+    source_checkout: Path, main_commit: str, target: dict[str, Any], component: str,
     roots: list[str], max_subject_bytes: int, deadline: float,
-    preference: tuple[str, ...] = (), runner=None, verify_subject=None,
+    preference: tuple[str, ...] = (), runner: ReleaseRunner | None = None,
+    verify_subject: SubjectVerifier | None = None,
 ) -> InstallationProfilePlan:
     """Associate real source-bound discovery and bundle facts with owner intent.
 
@@ -113,12 +126,13 @@ def plan_discovered_installation_profile(
         main_commit=main_commit, deadline=deadline, runner=runner, verify_subject=verify_subject,
     )
     origin.verify()
-    release_index, artifact = None, None
+    release_index: Path | None = None
+    artifact: dict[str, Any] | None = None
     release = {
         "identity": "source:" + origin.identity.source_commit,
         "sha256": "sha256:" + origin.identity.assembly_hash,
     }
-    admission = {
+    admission: _ReleaseAdmission = {
         "signer_digest": main_commit, "source_digest": main_commit,
         "source_ref": "refs/heads/main",
     }

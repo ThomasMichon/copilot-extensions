@@ -71,34 +71,47 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
+import tempfile as tempfile
 import time
 import zipfile
 from pathlib import Path
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, TYPE_CHECKING, TypedDict, cast
+
+_BuildOptions = TypedDict("_BuildOptions", {"uv": str, "deadline": float | None}, total=False)
+_RequirementOptions = TypedDict("_RequirementOptions", {
+    "deadline": float | None, "run": Callable[[list[str]], subprocess.CompletedProcess[str]]}, total=False)
 from artifact_source_build import PromotionArtifactError, parse_wheel_identity, payload_hash_directories
 from artifact_source_build import read_project_version as _read_project_version
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import uv_editable_ref as uer  # noqa: E402
+import uv_editable_ref as uv_editable_ref  # noqa: E402
+uer = uv_editable_ref
 from build_toolchain_lock import (  # noqa: E402
-    ArtifactBuildError,
-    ToolchainLock,
-    _assert_toolchain_satisfies_build_requires,
-    _hash_fields,
-    _query_marker_environment,  # noqa: F401 -- re-exported for test/caller use
-    _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
-    _venv_python_path,  # noqa: F401 -- re-exported for test/caller use
-    _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401 -- re-exported for test/caller use
-    resolve_toolchain_lock,
-    sanitize_subprocess_env,
-    strip_package_source_env_vars,
+    ArtifactBuildError as ArtifactBuildError,
+    ToolchainLock as ToolchainLock,
+    _assert_toolchain_satisfies_build_requires as _assert_toolchain_satisfies_build_requires,
+    _hash_fields as _hash_fields,
+    _query_marker_environment as _query_marker_environment,  # noqa: F401
+    _governed_feed_configured as _governed_feed_configured,  # noqa: F401
+    _venv_python_path as _venv_python_path,  # noqa: F401
+    _TRUSTED_INDEX_HOSTS_ENV_VAR as _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401
+    resolve_toolchain_lock as resolve_toolchain_lock,
+    sanitize_subprocess_env as sanitize_subprocess_env,
+    strip_package_source_env_vars as strip_package_source_env_vars,
 )
 
-try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
-    # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+else:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+        import tomli as tomllib
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -115,7 +128,7 @@ _GENERATOR_RE = re.compile(r"^Generator:\s*(.+?)\s*$", re.MULTILINE)
 _UNIVERSAL_TAGS = {"none", "any", "py3", "py2.py3"}
 
 
-def _read_sources_table(consumer_dir: Path) -> dict:
+def _read_sources_table(consumer_dir: Path) -> dict[str, Any]:
     """The raw ``[tool.uv.sources]`` table from ``consumer_dir``'s
     `pyproject.toml` (``{}`` if the file is absent or symlinked -- a valid
     no-op, mirroring `uv_editable_ref.find_uv_editable_refs`'s own identical
@@ -487,10 +500,8 @@ def compute_payload_hash(
     lib lives at which path is itself a change (not just the content). Must
     be called BEFORE building any wheel from ``dirs`` -- see
     `directory_content_hash`'s own docstring."""
-    return payload_hash_directories(
-        dirs, root=REPO if root is None else root, directory_hash=directory_content_hash,
-        hash_fields=_hash_fields, workers=workers,
-    )
+    return payload_hash_directories(dirs, root=REPO if root is None else root,
+        directory_hash=directory_content_hash, hash_fields=_hash_fields, workers=workers)
 
 
 def parse_wheel_filename(path: Path) -> dict[str, str]:
@@ -593,11 +604,11 @@ def sha256_file(path: Path) -> str:
     return f"sha256:{h.hexdigest()}"
 
 
-def _build_child(command: list[str], environment: dict[str, str], deadline: float | None):
+def _build_child(command: list[str], environment: dict[str, str], deadline: float | None) -> subprocess.CompletedProcess[str]:
     if deadline is None:
         return subprocess.run(
             command, capture_output=True, text=True, env=environment,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
         )
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -628,9 +639,8 @@ def build_wheel(
     toolchain: ToolchainLock | None = None,
     reserved_names: set[str] | None = None,
     offline: bool = False,
-    uv: str = "uv",
-    deadline: float | None = None,
-    procutil=None,
+    uv: str = "uv", deadline: float | None = None,
+    procutil: ModuleType | None = None,
     construction_fd: int | None = None,
     retained_runtime: tuple[Path, str, Path] | None = None,
     normalize_timestamps: bool = False,
@@ -689,19 +699,17 @@ def build_wheel(
         build_env = sanitize_subprocess_env()
         strip_package_source_env_vars(build_env, strip_credentials=True)
 
-        def run(argv):
+        def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
             # UV receives its source explicitly; Windows cannot launch with a
             # deeply retained source directory as the process working directory.
-            return run_owned(
-                argv, cwd=out_dir, env=build_env, timeout=deadline - time.monotonic(),
+            return run_owned(argv, cwd=out_dir, env=build_env, timeout=deadline - time.monotonic(),
                 deadline=deadline, procutil=procutil, construction_fd=construction_fd,
-                runtime_root=retained_runtime[0], runtime_version=retained_runtime[1],
-                runtime_path=retained_runtime[2],
+                runtime_root=retained_runtime[0], runtime_version=retained_runtime[1], runtime_path=retained_runtime[2],
             )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     if toolchain is not None:
-        options = {"deadline": deadline} if deadline is not None else {}
+        options: _RequirementOptions = {"deadline": deadline} if deadline is not None else {}
         if run is not None:
             options["run"] = run
         _assert_toolchain_satisfies_build_requires(source_dir, toolchain, **options)
@@ -760,9 +768,7 @@ def read_project_version(project_dir: Path) -> str:
     return _read_project_version(project_dir, error_type=ArtifactBuildError)
 
 
-def _assert_version_corresponds(
-    *, raw_version: str, wheel_version: str, label: str
-) -> None:
+def _assert_version_corresponds(*, raw_version: str, wheel_version: str, label: str | Path) -> None:
     """Accept the repository's hyphen-to-dot PEP 440 spelling convention only."""
     if raw_version.replace("-", ".") != wheel_version:
         raise ArtifactBuildError(
@@ -772,13 +778,11 @@ def _assert_version_corresponds(
 
 
 def build_plugin_artifacts(
-    plugin: str,
-    *,
-    out_dir: Path,
+    plugin: str, *, out_dir: Path,
     python: str | None = None,
     toolchain: ToolchainLock | None = None,
     uv: str = "uv", deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Builds the plugin's own wheel plus every vendored lib wheel it needs,
     and returns the manifest describing the whole set (also written to
     ``out_dir`` as ``<plugin>-<version>-manifest.json``).
@@ -821,16 +825,16 @@ def build_plugin_artifacts(
     return build_source_artifacts(
         identity=identity, source_dir=plugin_dir, dependencies=vendored_libs,
         out_dir=out_dir, python=python, toolchain=toolchain,
-        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
+        **cast(_BuildOptions, {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )
 
 
 def build_source_artifacts(
-    *, identity: dict, source_dir: Path, dependencies: list[tuple[str, Path]],
+    *, identity: dict[str, Any], source_dir: Path, dependencies: list[tuple[str, Path]],
     out_dir: Path, python: str | None, toolchain: ToolchainLock | None,
     resources: tuple[Path, ...] = (),
     uv: str = "uv", deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Shared locked wheel construction; callers own source discovery and admission."""
     standalone = "component" in identity
     return build_project_artifacts(
@@ -841,22 +845,22 @@ def build_source_artifacts(
         raw_version=read_project_version(source_dir),
         schema_version=4 if standalone else MANIFEST_SCHEMA_VERSION,
         resources=resources, out_dir=out_dir, python=python, toolchain=toolchain,
-        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
+        **cast(_BuildOptions, {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )
 
 
 def build_project_artifacts(
-    *, identity: dict, projects: list[tuple[str, Path]], raw_version: str,
+    *, identity: dict[str, Any], projects: list[tuple[str, Path]], raw_version: str,
     schema_version: int, resources: tuple[Path, ...], out_dir: Path,
     python: str | None, toolchain: ToolchainLock | None,
-    selection: dict | None = None, payload_hash: str | None = None,
+    selection: dict[str, Any] | None = None, payload_hash: str | None = None,
     uv: str = "uv", deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """One locked construction path for plugin, standalone and core wheel sets."""
     from standalone_python_artifacts import artifact_label
     from installer_wheel_inputs import _check_deadline
 
-    execution = {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}
+    execution: _BuildOptions = {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}
     if deadline is not None:
         _check_deadline(deadline)
     label = artifact_label(identity)
@@ -880,7 +884,7 @@ def build_project_artifacts(
         _check_deadline(deadline)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     wheel_infos: list[dict[str, str]] = []
     reserved_names: set[str] = set()
 
@@ -898,7 +902,7 @@ def build_project_artifacts(
             )
 
         toolchain_record = toolchain.record
-        def _build_and_verify(source_dir: Path) -> tuple[Path, dict, str]:
+        def _build_and_verify(source_dir: Path) -> tuple[Path, dict[str, str], str]:
             if deadline is not None:
                 _check_deadline(deadline)
             wheel = build_wheel(
@@ -985,13 +989,11 @@ def build_project_artifacts(
 def main() -> int:
     from artifact_builder_cli import main as run
     from standalone_python_artifacts import build_standalone_artifacts
-    def build_core_artifacts(**kwargs):
+    def build_core_artifacts(**kwargs: Any) -> dict[str, Any]:
         from core_python_artifacts import build_core_artifacts as build
         return build(**kwargs)
-    return run(
-        build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts,
-        core_builder=build_core_artifacts,
-    )
+    return run(build_plugin_artifacts, __doc__ or "",
+        standalone_builder=build_standalone_artifacts, core_builder=build_core_artifacts)
 
 
 if __name__ == "__main__":

@@ -97,8 +97,8 @@ def test_runtime_only_portfolio_refuses_incomplete_native_evidence(
     if outcome == "passed":
         exec(body, {})
     else:
-        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
-        with pytest.raises(expected):
+        expected_error = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected_error):
             exec(body, {})
     assert len(calls) == (1 if outcome == "source-mismatch" else 2)
     if outcome == "failed":
@@ -218,8 +218,8 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
     if outcome == "passed":
         exec(body, {})
     else:
-        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
-        with pytest.raises(expected):
+        expected_error = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected_error):
             exec(body, {})
     if outcome == "failed":
         captured = capsys.readouterr()
@@ -301,8 +301,8 @@ ET.ElementTree(root).write(reports / "native.xml")
     if outcome == "passed" or (outcome == "skipped" and step_id == "consumers"):
         exec(body, {})
     else:
-        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
-        with pytest.raises(expected):
+        expected_error = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected_error):
             exec(body, {})
     arguments = json.loads((tmp_path / "arguments.json").read_text())
     assert arguments[0] == "agent-worktrees"
@@ -1284,7 +1284,10 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
     expected_files = {"tools/test_installer_source_build.py", "tools/test_runtime_source_wheel_cache.py"}
     for key in ("source-build-linux", "source-build-windows"):
         job = workflow["jobs"][key]
-        assert job["timeout-minutes"] == 6
+        assert job["timeout-minutes"] == (
+            "${{ matrix.suite == 'profiles' && 8 || 6 }}"
+            if key == "source-build-windows" else 6
+        )
         matrix = job["strategy"]["matrix"]
         assert matrix["suite"] == ["profiles", "refusals", "manager", "normal", "toolkit", "overlap"]
         normal = next(item for item in matrix["include"] if item["suite"] == "normal")
@@ -1420,7 +1423,10 @@ def test_manager_native_step_retains_owned_cleanup_and_child_failure(
     assert [limits.wall_seconds for _command, _sandbox, limits in calls] == [300, 120][:len(calls)]
     if len(calls) == 2:
         assert calls[1][0][4:-2] == ["worktree-manager/tests/test_runtime_source.py"]
-    assert job["timeout-minutes"] == 6
+    assert job["timeout-minutes"] == (
+        "${{ matrix.suite == 'profiles' && 8 || 6 }}"
+        if job_key == "source-build-windows" else 6
+    )
 
 
 def test_manager_native_step_loads_first_party_helpers_without_site_packages(

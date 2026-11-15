@@ -7,13 +7,17 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from runtime_input_verifier import LiveInputVerifier
 
 import pytest
 
 
 @pytest.fixture
-def verifier(monkeypatch):
+def verifier(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     monkeypatch.syspath_prepend(str(scripts))
     return importlib.import_module("runtime_input_verifier")
@@ -39,17 +43,20 @@ finally:
 """
 
 
-def _launch(guard, verifier, temporary, *, identity=None):
+def _launch(
+    guard: LiveInputVerifier, verifier: ModuleType, temporary: Path,
+    *, identity: dict[str, object] | None = None,
+) -> subprocess.Popen[bytes]:
     output = (temporary / "stdout").open("wb")
     error = (temporary / "stderr").open("wb")
     try:
-        with guard.child_launch(os.environ) as launch:
+        with guard.child_launch(cast(dict[str, str], os.environ)) as launch:
             process = subprocess.Popen(
                 [sys.executable, "-I", "-S", "-B", "-c", _CHILD,
-                 str(Path(verifier.__file__).parent),
+                 str(Path(cast(str, verifier.__file__)).parent),
                  json.dumps(guard.identity if identity is None else identity), str(temporary / "result")],
                 **launch, stdin=subprocess.DEVNULL, stdout=output, stderr=error,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
             )
     finally:
         output.close()
@@ -59,11 +66,11 @@ def _launch(guard, verifier, temporary, *, identity=None):
 
 @pytest.mark.parametrize("outcome", ["accepted", "revoked", "cancelled"])
 def test_native_candidate_checks_live_owner_and_settles_before_cancellation(
-    verifier, tmp_path, outcome,
-):
-    checks = []
+    verifier: ModuleType, tmp_path: Path, outcome: str,
+) -> None:
+    checks: list[bool] = []
 
-    def verify():
+    def verify() -> None:
         checks.append(True)
         if len(checks) == 4:
             if outcome == "revoked":
@@ -91,7 +98,7 @@ def test_native_candidate_checks_live_owner_and_settles_before_cancellation(
         guard.check()
 
 
-def test_closed_native_owner_cannot_be_replaced_by_its_retained_identity(verifier, tmp_path):
+def test_closed_native_owner_cannot_be_replaced_by_its_retained_identity(verifier: ModuleType, tmp_path: Path) -> None:
     with verifier.LiveInputVerifier(lambda: None, deadline=time.monotonic() + 15) as guard:
         process = _launch(guard, verifier, tmp_path)
     process.wait(timeout=15)
@@ -100,14 +107,14 @@ def test_closed_native_owner_cannot_be_replaced_by_its_retained_identity(verifie
 
 
 @pytest.mark.timeout(10)
-def test_idle_poll_expiry_cannot_discard_a_started_request(verifier, tmp_path, monkeypatch):
+def test_idle_poll_expiry_cannot_discard_a_started_request(verifier: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     offset = [0.0]
-    checks = []
+    checks: list[bool] = []
     actual_read = os.read
     with verifier.LiveInputVerifier(
         lambda: checks.append(True), deadline=time.monotonic() + 3,
     ) as guard:
-        def delayed_read(descriptor, count):
+        def delayed_read(descriptor: int, count: int) -> bytes:
             content = actual_read(descriptor, count)
             if descriptor == guard.requests and content and not offset[0]:
                 offset[0] = 0.2
@@ -125,8 +132,8 @@ def test_idle_poll_expiry_cannot_discard_a_started_request(verifier, tmp_path, m
         assert offset[0] == 0.2
 
 
-def test_native_child_refuses_a_mismatched_verification_scope(verifier, tmp_path):
-    checks = []
+def test_native_child_refuses_a_mismatched_verification_scope(verifier: ModuleType, tmp_path: Path) -> None:
+    checks: list[bool] = []
     with verifier.LiveInputVerifier(
         lambda: checks.append(True), deadline=time.monotonic() + 15,
     ) as guard:
@@ -138,7 +145,7 @@ def test_native_child_refuses_a_mismatched_verification_scope(verifier, tmp_path
     assert len(checks) == 2
 
 
-def test_expired_input_scope_refuses_before_native_launch(verifier):
+def test_expired_input_scope_refuses_before_native_launch(verifier: ModuleType) -> None:
     with pytest.raises(verifier.VerificationRefused, match="deadline"):
         with verifier.LiveInputVerifier(lambda: pytest.fail("expired verification"), deadline=0):
             pytest.fail("expired scope entered")
@@ -146,8 +153,8 @@ def test_expired_input_scope_refuses_before_native_launch(verifier):
 
 @pytest.mark.parametrize("declaration", ["", "INPUT_VERIFIER_ABI = 0", "INPUT_VERIFIER_ABI = True"])
 def test_old_source_cannot_silently_discard_required_input_verification(
-    verifier, tmp_path, declaration,
-):
+    verifier: ModuleType, tmp_path: Path, declaration: str,
+) -> None:
     candidate = tmp_path / "src" / "agent_worktrees" / "runtime_candidate.py"
     candidate.parent.mkdir(parents=True)
     candidate.write_text(declaration + "\n", encoding="utf-8")

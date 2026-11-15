@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 from contextlib import contextmanager
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import Future
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ import sysconfig
 import tempfile
 import threading
 import time
-from typing import Any, NoReturn, Protocol
+from typing import Any, NoReturn, Protocol, TypeAlias
 import venv
 import zipfile
 
@@ -24,12 +25,11 @@ from packaging.utils import canonicalize_name
 import pytest
 
 import runtime_source_wheels as completion
-import versioned_runtime as runtime
 from build_toolchain_lock import ToolchainLock
 from runtime_profile import ProfileError
 from installer_dependency_policy import _write_toml
 from installer_wheel_inputs import WheelError
-from installer_engine import ReadyCandidate
+from installer_engine import ReadyCandidate, runtime
 from runtime_source_lock import SourceLockCandidate
 from test_runtime_source_lock import (
     Adopter, Source, Target, source_project,
@@ -74,7 +74,7 @@ _encoded: EncodedWheel = _untyped_encoded
 
 
 @pytest.mark.parametrize("refuse", [None, ProfileError, KeyboardInterrupt])
-def test_library_builds_overlap_with_owner_validation_and_complete_settlement(refuse):
+def test_library_builds_overlap_with_owner_validation_and_complete_settlement(refuse: type[BaseException] | None) -> None:
     owner = threading.get_ident()
     fourth_started = threading.Event()
     first_checked = threading.Event()
@@ -82,8 +82,9 @@ def test_library_builds_overlap_with_owner_validation_and_complete_settlement(re
     started, settled, checked = [], [], []
     active, peak = 0, 0
 
-    def build(project, validate):
+    def build(project_path: Path, validate: completion._OwnerValidation) -> int:
         nonlocal active, peak
+        project = int(project_path.name)
         with lock:
             started.append(project)
             active += 1
@@ -95,7 +96,7 @@ def test_library_builds_overlap_with_owner_validation_and_complete_settlement(re
             if project:
                 assert first_checked.wait(5)
 
-            def verify():
+            def verify() -> None:
                 assert threading.get_ident() == owner
                 checked.append(project)
                 if project == 0:
@@ -112,11 +113,11 @@ def test_library_builds_overlap_with_owner_validation_and_complete_settlement(re
 
     if refuse:
         with pytest.raises(refuse, match="current inputs refused"):
-            completion._build_libraries(tuple(range(8)), build)
+            completion._build_libraries(tuple(Path(str(project)) for project in range(8)), build)
         assert set(started) == set(range(4))
         assert checked == [0]
     else:
-        assert completion._build_libraries(tuple(range(8)), build) == [
+        assert completion._build_libraries(tuple(Path(str(project)) for project in range(8)), build) == [
             project * 10 for project in range(8)
         ]
         assert set(checked) == set(range(8))
@@ -124,24 +125,33 @@ def test_library_builds_overlap_with_owner_validation_and_complete_settlement(re
     assert peak == 4 and active == 0
 
 
-def test_library_dispatch_cancellation_settles_even_a_dequeued_validation(monkeypatch):
+def test_library_dispatch_cancellation_settles_even_a_dequeued_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     four_started = threading.Event()
     four_requested = threading.Event()
     lock = threading.Lock()
-    started, requested, settled, checked = [], [], [], []
-    queue = completion.Queue
+    started: list[int] = []
+    requested: list[Future[object]] = []
+    settled: list[int] = []
+    checked: list[int] = []
+
+    queue: TypeAlias = completion.Queue[tuple[Callable[[], object] | None, Future[object]]]
 
     class InterruptedQueue(queue):
-        def put(self, value, *args, **kwargs):
-            if value[0] is not None:
+        def put(
+            self, item: tuple[Callable[[], object] | None, Future[object]],
+            block: bool = True, timeout: float | None = None,
+        ) -> None:
+            if item[0] is not None:
                 with lock:
-                    requested.append(value[1])
+                    requested.append(item[1])
                     if len(requested) == 4:
                         four_requested.set()
-            return super().put(value, *args, **kwargs)
+            return super().put(item, block, timeout)
 
-        def get(self, *args, **kwargs):
-            value = super().get(*args, **kwargs)
+        def get(
+            self, block: bool = True, timeout: float | None = None,
+        ) -> tuple[Callable[[], object] | None, Future[object]]:
+            value = super().get(block, timeout)
             if value[0] is not None:
                 assert four_requested.wait(5)
                 raise KeyboardInterrupt("fixture dequeued validation interrupted")
@@ -149,7 +159,8 @@ def test_library_dispatch_cancellation_settles_even_a_dequeued_validation(monkey
 
     monkeypatch.setattr(completion, "Queue", InterruptedQueue)
 
-    def build(project, validate):
+    def build(project_path: Path, validate: completion._OwnerValidation) -> int:
+        project = int(project_path.name)
         with lock:
             started.append(project)
             if len(started) == 4:
@@ -163,7 +174,7 @@ def test_library_dispatch_cancellation_settles_even_a_dequeued_validation(monkey
                 settled.append(project)
 
     with pytest.raises(KeyboardInterrupt, match="dequeued validation interrupted"):
-        completion._build_libraries(tuple(range(8)), build)
+        completion._build_libraries(tuple(Path(str(project)) for project in range(8)), build)
     assert set(started) == set(range(4))
     assert set(settled) == set(started)
     assert len(requested) == 4
@@ -268,7 +279,7 @@ def toolchain() -> ToolchainLock:
 
 @pytest.fixture
 def built_wheels(monkeypatch: pytest.MonkeyPatch) -> FixtureBuilder:
-    def build(project: Path, output: Path, **_options: Any) -> Path:
+    def build(project: Path, output: Path, **_options: object) -> Path:
         data = completion._toml(project / "pyproject.toml")["project"]
         name, version = data["name"].replace("-", "_"), data["version"].replace("-", ".")
         metadata = f"Metadata-Version: 2.3\nName: {data['name']}\nVersion: {version}\n"
@@ -294,8 +305,10 @@ def built_wheels(monkeypatch: pytest.MonkeyPatch) -> FixtureBuilder:
 
 
 def arguments(toolchain: ToolchainLock, **changes: Any) -> dict[str, Any]:
+    uv = shutil.which("uv")
+    assert uv is not None
     return dict(
-        uv=shutil.which("uv"), toolchain=toolchain,
+        uv=uv, toolchain=toolchain,
         limits=completion.WheelLimits(1 << 20, 1 << 22, 1 << 20, 1 << 18, 1000, 100, 1 << 16),
         max_wheels=4, max_total_bytes=1 << 21, max_snapshot_bytes=1 << 21,
         deadline=time.monotonic() + 60,
@@ -373,7 +386,7 @@ def test_native_source_lock_completes_helpers_extras_before_existing_offline_con
         builder = completion.build_wheel
         build_executables = []
 
-        def observed_build(*args: Any, **options: Any) -> Path:
+        def observed_build(*args: Path, **options: Any) -> Path:
             build_executables.append(options["uv"])
             return builder(*args, **options)
 
@@ -582,9 +595,10 @@ def test_source_generator_is_read_only_after_bounded_metadata_inspection(
         return path
 
     def guarded_read(
-        archive: zipfile.ZipFile, name: str, *args: Any, **options: Any,
+        archive: zipfile.ZipFile, name: str | zipfile.ZipInfo, *args: Any, **options: Any,
     ) -> bytes:
-        if archive.getinfo(name).file_size > budget:
+        info = name if isinstance(name, zipfile.ZipInfo) else archive.getinfo(name)
+        if info.file_size > budget:
             pytest.fail("oversized metadata decompressed before bounded inspection")
         return original_read(archive, name, *args, **options)
 
@@ -649,7 +663,7 @@ def test_source_mutation_during_build_cannot_relabel_wheels(
     candidate = selected_source(source, target, adopter)
     original = completion.build_wheel
 
-    def mutate(*args: Any, **kwargs: Any) -> Path:
+    def mutate(*args: Path, **kwargs: Any) -> Path:
         result = original(*args, **kwargs)
         (source[0] / "module.py").write_text("changed")
         return result

@@ -1,6 +1,27 @@
 """Promotion composition, transfer integrity, signing and immutable publication."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Protocol
+    from pathlib import Path
+    import subprocess
+    class _GhRunner(Protocol):
+        def __call__(self, argv: list[str], *, verification: bool = False, binary: bool = False, timeout: float = ...) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]: ...
+    class _TomlLoads(Protocol):
+        def __call__(self, value: str, /, *, parse_float: Callable[[str], object] = float) -> dict[str, Any]: ...
+
+from typing import cast
+
+from typing import Any, IO
+from email.message import Message
+
+if TYPE_CHECKING:
+    from build_toolchain_lock import ToolchainLock
+
+
+
 import hashlib
 import base64
 import csv
@@ -31,7 +52,7 @@ import promote_release as promotion
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
 from test_promote_release import (
-    _commit, _git, no_ambient_git_identity as _identity_fixture, repo as _repo_fixture,
+    _commit, _git as _git, no_ambient_git_identity as _identity_fixture, repo as _repo_fixture,
 )
 
 repo = _repo_fixture
@@ -69,7 +90,7 @@ def _wheel_bytes(
     return output.getvalue()
 
 
-def _complete_manifest(manifest: dict, *, toolchain=None) -> dict:
+def _complete_manifest(manifest: dict[str, Any], *, toolchain: ToolchainLock | None=None) -> dict[str, Any]:
     toolchain = toolchain or builder.ToolchainLock(Path("."), {
         "setuptools": "80.9.0", "wheel": "0.45.1", "packaging": "25.0",
     }, provenance={
@@ -103,7 +124,7 @@ def _complete_manifest(manifest: dict, *, toolchain=None) -> dict:
 
 def _manifest(
     directory: Path, *, role: str = "plugin", candidate_root: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     directory.mkdir(parents=True, exist_ok=True)
     wheel = directory / "demo-1.0-py3-none-any.whl"
     wheel.write_bytes(_wheel_bytes("demo", "1.0"))
@@ -121,11 +142,11 @@ def _manifest(
     return _complete_manifest(manifest)
 
 
-def _index(directory: Path, *, candidate_root: Path | None = None) -> dict:
+def _index(directory: Path, *, candidate_root: Path | None = None) -> dict[str, Any]:
     directory.mkdir()
     manifest = _manifest(directory.parent / "wheels", candidate_root=candidate_root)
     entry = artifacts.bundle_wheels(manifest, directory.parent / "wheels", directory)
-    index = {
+    index: dict[str, Any] = {
         "schema": artifacts.SCHEMA, "schema_version": 1,
         "dev_head": DEV, "main_before": MAIN, "content_tree": TREE, "artifacts": [entry],
     }
@@ -133,17 +154,17 @@ def _index(directory: Path, *, candidate_root: Path | None = None) -> dict:
     return index
 
 
-def _write_index(directory: Path, index: dict) -> None:
+def _write_index(directory: Path, index: dict[str, Any]) -> None:
     (directory / artifacts.INDEX_NAME).write_text(json.dumps(index), encoding="utf-8")
 
 
-def _validate(directory: Path, **kwargs) -> dict:
+def _validate(directory: Path, **kwargs: Any) -> dict[str, Any]:
     return artifacts.validate_artifacts(
         directory, content_tree=TREE, dev_head=DEV, main_before=MAIN, **kwargs
     )
 
 
-def test_bundle_and_transfer_roundtrip(tmp_path):
+def test_bundle_and_transfer_roundtrip(tmp_path: Path) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     assert _validate(directory, projects={"demo": "1.0"}) == index
@@ -154,7 +175,7 @@ def test_bundle_and_transfer_roundtrip(tmp_path):
         assert bundle.read("demo-1.0-py3-none-any.whl") == _wheel_bytes("demo", "1.0")
 
 @pytest.mark.parametrize("failure", ["missing", "unreadable", "copy"])
-def test_bundle_wheel_read_failures_are_structured(tmp_path, monkeypatch, failure):
+def test_bundle_wheel_read_failures_are_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     wheel_dir, out_dir = tmp_path / "wheels", tmp_path / "bundles"
     manifest = _manifest(wheel_dir)
     out_dir.mkdir()
@@ -164,14 +185,14 @@ def test_bundle_wheel_read_failures_are_structured(tmp_path, monkeypatch, failur
     elif failure == "unreadable":
         original = Path.open
 
-        def open_file(path, *args, **kwargs):
+        def open_file(path: Path, *args: Any, **kwargs: Any) -> IO[Any]:
             if path == wheel:
                 raise PermissionError("wheel read denied")
-            return original(path, *args, **kwargs)
+            return cast(IO[Any], original(path, *args, **kwargs))
 
         monkeypatch.setattr(Path, "open", open_file)
     else:
-        def copy_failure(*args, **kwargs):
+        def copy_failure(*args: object, **kwargs: object) -> None:
             raise OSError("wheel copy failed")
 
         monkeypatch.setattr(artifacts.shutil, "copyfileobj", copy_failure)
@@ -179,7 +200,7 @@ def test_bundle_wheel_read_failures_are_structured(tmp_path, monkeypatch, failur
         artifacts.bundle_wheels(manifest, wheel_dir, out_dir)
 
 
-def test_build_cli_creates_missing_output_directory(tmp_path, monkeypatch):
+def test_build_cli_creates_missing_output_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import build_toolchain_lock
 
     monkeypatch.setattr(promotion, "_load_module", lambda *args: SimpleNamespace())
@@ -190,7 +211,7 @@ def test_build_cli_creates_missing_output_directory(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("kind", ["file", "nonempty"])
-def test_build_cli_reports_invalid_output_directory(tmp_path, monkeypatch, capsys, kind):
+def test_build_cli_reports_invalid_output_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], kind: str) -> None:
     monkeypatch.setattr(promotion, "_load_module", lambda *args: SimpleNamespace())
     directory = tmp_path / "bundles"
     if kind == "file":
@@ -202,7 +223,7 @@ def test_build_cli_reports_invalid_output_directory(tmp_path, monkeypatch, capsy
     assert "promotion-python-artifacts: FAILED:" in capsys.readouterr().err
 
 
-def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order(tmp_path, monkeypatch):
+def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     wheel_dir = tmp_path / "wheels"
     manifest = _manifest(wheel_dir)
     library = wheel_dir / "library-1.0-py3-none-any.whl"
@@ -219,7 +240,7 @@ def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_or
     for path in wheel_dir.iterdir():
         os.utime(path, (1000000000, 1000000000))
         path.chmod(0o444)
-    monkeypatch.setattr(zipfile.time, "localtime", lambda *_: (2050, 12, 31, 23, 59, 58, 0, 0, 0))
+    monkeypatch.setattr(getattr(zipfile, "time"), "localtime", lambda *_: (2050, 12, 31, 23, 59, 58, 0, 0, 0))
     manifest["wheels"].reverse()
     try:
         rebuilt = artifacts.bundle_wheels(manifest, wheel_dir, second)
@@ -244,8 +265,8 @@ def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_or
     "oversized-manifest", "oversized-bundle", "invalid-json", "invalid-zip",
 ])
 def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest(
-    tmp_path, monkeypatch, mutation,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     entry = index["artifacts"][0]
@@ -318,7 +339,7 @@ def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_dige
         _validate(directory)
 
 
-def test_trusted_validate_cli_does_not_import_candidate_code(repo, tmp_path, monkeypatch):
+def test_trusted_validate_cli_does_not_import_candidate_code(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = tmp_path / "export"
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch)
@@ -353,7 +374,7 @@ def test_trusted_validate_cli_does_not_import_candidate_code(repo, tmp_path, mon
     assert result == ""
 
 
-def test_promotion_cli_never_executes_candidate_composer_with_release_authority(repo, tmp_path):
+def test_promotion_cli_never_executes_candidate_composer_with_release_authority(repo: Path, tmp_path: Path) -> None:
     remote = tmp_path / "origin.git"
     _git(["init", "--bare", str(remote)], repo)
     _git(["remote", "add", "origin", str(remote)], repo)
@@ -374,7 +395,7 @@ def test_promotion_cli_never_executes_candidate_composer_with_release_authority(
          "--candidate-branch", "release/trusted-composition"],
         capture_output=True, text=True, check=False,
         env={**os.environ, "GH_TOKEN": "release-authority-sentinel"},
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert "pushed candidate branch: release/trusted-composition" in result.stdout
@@ -391,7 +412,7 @@ def test_promotion_cli_never_executes_candidate_composer_with_release_authority(
     assert checkout["with"]["ref"] == "${{ github.sha }}"
 
 
-def test_validator_accepts_declared_vendored_library_wheel(tmp_path):
+def test_validator_accepts_declared_vendored_library_wheel(tmp_path: Path) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     path = directory / index["artifacts"][0]["filename"]
@@ -425,7 +446,7 @@ def test_validator_accepts_declared_vendored_library_wheel(tmp_path):
     "wrong-wheel-tag", "wrong-generator", "missing-source", "escaping-source",
     "third-party-source", "wrong-wheel-version", "forged-artifact-id",
 ])
-def test_schema3_requires_complete_provenance_and_computed_identity(tmp_path, mutation):
+def test_schema3_requires_complete_provenance_and_computed_identity(tmp_path: Path, mutation: str) -> None:
     manifest = _manifest(tmp_path / "wheels")
     if mutation == "missing-payload":
         del manifest["payload_hash"]
@@ -471,7 +492,7 @@ def test_schema3_requires_complete_provenance_and_computed_identity(tmp_path, mu
         artifacts.validate_manifest(manifest)
 
 
-def test_forged_content_address_fails_even_when_manifest_index_filename_and_digest_agree(tmp_path):
+def test_forged_content_address_fails_even_when_manifest_index_filename_and_digest_agree(tmp_path: Path) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     entry = index["artifacts"][0]
@@ -499,7 +520,7 @@ def test_forged_content_address_fails_even_when_manifest_index_filename_and_dige
     "missing-record", "wrong-tag", "traversal", "backslash", "symlink", "duplicate-member",
     "extra-dist-info", "record-digest", "record-set", "compressed-bomb",
 ])
-def test_trusted_wheel_validation_reads_real_metadata_and_members(tmp_path, monkeypatch, mutation):
+def test_trusted_wheel_validation_reads_real_metadata_and_members(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
     manifest = _manifest(tmp_path / "wheels")
     wheel = manifest["wheels"][0]
     with zipfile.ZipFile(io.BytesIO(_wheel_bytes("demo", "1.0"))) as bundle:
@@ -552,7 +573,7 @@ def test_trusted_wheel_validation_reads_real_metadata_and_members(tmp_path, monk
         artifacts.validate_wheel(archive, wheel)
 
 
-def test_encoded_runtime_metadata_is_a_structured_refusal(tmp_path, monkeypatch):
+def test_encoded_runtime_metadata_is_a_structured_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     wheel = _manifest(tmp_path / "wheels")["wheels"][0]
     encoded = b"=?utf-8?b?" + base64.b64encode(b"helper>=2") + b"?="
     data = _wheel_bytes("demo", "1.0", members={
@@ -562,7 +583,7 @@ def test_encoded_runtime_metadata_is_a_structured_refusal(tmp_path, monkeypatch)
     })
     wheel["sha256"] = "sha256:" + hashlib.sha256(data).hexdigest()
 
-    def check_runtime(_bundle, _hashes, *, metadata, **_kwargs):
+    def check_runtime(_bundle: zipfile.ZipFile, _hashes: dict[str, str], *, metadata: Message, **_kwargs: object) -> None:
         artifacts.validate_runtime_metadata({"dependencies": ["helper>=2"]}, metadata)
 
     monkeypatch.setattr(validation, "validate_wheel_sources", check_runtime)
@@ -571,14 +592,14 @@ def test_encoded_runtime_metadata_is_a_structured_refusal(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("payload", [b"", b"chunked digest" * 200000], ids=["empty", "multi-chunk"])
-def test_digest_matches_sha256_across_multiple_chunks(tmp_path, payload):
+def test_digest_matches_sha256_across_multiple_chunks(tmp_path: Path, payload: bytes) -> None:
     path = tmp_path / "data.bin"
     path.write_bytes(payload)
     assert artifacts._digest(path) == hashlib.sha256(payload).hexdigest()
 
 
 @pytest.mark.parametrize("field", ["dev_head", "main_before", "content_tree"])
-def test_transfer_rejects_another_composition(tmp_path, field):
+def test_transfer_rejects_another_composition(tmp_path: Path, field: str) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     index[field] = "e" * 40
@@ -591,7 +612,7 @@ def test_transfer_rejects_another_composition(tmp_path, field):
     "digest", "filename", "plugin", "version", "identity", "duplicate", "extra",
     "missing", "bool-schema", "list-root", "list-entry", "wrong-project-set",
 ])
-def test_transfer_rejects_corruption(tmp_path, mutation):
+def test_transfer_rejects_corruption(tmp_path: Path, mutation: str) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     entry = index["artifacts"][0]
@@ -614,7 +635,7 @@ def test_transfer_rejects_corruption(tmp_path, mutation):
     elif mutation == "bool-schema":
         index["schema_version"] = True
     elif mutation == "list-root":
-        index = []
+        index = cast(dict[str, Any], [])
     elif mutation == "list-entry":
         index["artifacts"] = [[]]
     _write_index(directory, index)
@@ -625,7 +646,7 @@ def test_transfer_rejects_corruption(tmp_path, mutation):
 @pytest.mark.parametrize("mutation", [
     "third-party", "changed-digest", "traversal", "duplicate", "bare-digest",
 ])
-def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
+def test_bundle_rejects_unsafe_wheels(tmp_path: Path, mutation: str) -> None:
     wheel_dir = tmp_path / "wheels"
     manifest = _manifest(wheel_dir)
     if mutation == "third-party":
@@ -643,7 +664,7 @@ def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
 
 
 @pytest.mark.parametrize("relative", ["applications/demo", ".marketplace/demo"])
-def test_declared_project_manifest_keeps_the_selected_primary_source(tmp_path, relative):
+def test_declared_project_manifest_keeps_the_selected_primary_source(tmp_path: Path, relative: str) -> None:
     manifest = _manifest(tmp_path / "wheels")
     manifest["project_path"] = relative
     manifest["wheels"][0]["source"] = relative
@@ -654,14 +675,14 @@ def test_declared_project_manifest_keeps_the_selected_primary_source(tmp_path, r
 
 
 @pytest.mark.parametrize("relative", ["../outside", "/outside", "C:/outside", "apps\\demo"])
-def test_declared_project_manifest_refuses_unsafe_source_root(tmp_path, relative):
+def test_declared_project_manifest_refuses_unsafe_source_root(tmp_path: Path, relative: str) -> None:
     manifest = _manifest(tmp_path / "wheels")
     manifest["project_path"] = relative
     with pytest.raises(artifacts.PromotionArtifactError, match="invalid manifest provenance"):
         artifacts.validate_manifest(manifest)
 
 
-def test_declared_project_manifest_cannot_select_another_repository_location(tmp_path):
+def test_declared_project_manifest_cannot_select_another_repository_location(tmp_path: Path) -> None:
     root = tmp_path / "source"
     root.mkdir()
     (root / "pyproject.toml").write_text(
@@ -675,7 +696,7 @@ def test_declared_project_manifest_cannot_select_another_repository_location(tmp
 
 
 @pytest.mark.parametrize("case", ["public-match", "wrong-source", "wrong-floor", "mixed-locks"])
-def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
+def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path: Path, case: str) -> None:
     wheel_dir, directory = tmp_path / "wheels", tmp_path / "export"
     directory.mkdir()
     manifest = _manifest(wheel_dir)
@@ -688,7 +709,7 @@ def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
     }
     if case != "wrong-source":
         _complete_manifest(manifest, toolchain=builder.ToolchainLock(Path("."), packages, provenance=provenance))
-    index = {
+    index: dict[str, Any] = {
         "schema": artifacts.SCHEMA, "schema_version": 1,
         "dev_head": DEV, "main_before": MAIN, "content_tree": TREE,
         "artifacts": [artifacts.bundle_wheels(manifest, wheel_dir, directory)],
@@ -699,7 +720,7 @@ def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
         _complete_manifest(manifest, toolchain=builder.ToolchainLock(Path("."), packages, provenance=provenance))
         index["artifacts"].append(artifacts.bundle_wheels(manifest, wheel_dir, directory))
     _write_index(directory, index)
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "content_tree": TREE, "dev_head": DEV, "main_before": MAIN,
         "source_policy": "seasoned-public", "min_age_days": 7,
     }
@@ -710,7 +731,7 @@ def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
             artifacts.validate_artifacts(directory, **kwargs)
 
 
-def _fake_builder(repo: Path, monkeypatch, *, public: bool = False) -> None:
+def _fake_builder(repo: Path, monkeypatch: pytest.MonkeyPatch, *, public: bool = False) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
     project.write_text(_STATIC_BUILD + '[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
     package = project.parent / "src" / "demo"
@@ -815,7 +836,7 @@ def resolve_toolchain_lock(*args, **kwargs):
         (repo / "tools" / name).write_text("raise RuntimeError('candidate forged toolchain provenance')")
     real_run = artifacts._run
 
-    def trusted_fixture_run(argv, *, cwd=None):
+    def trusted_fixture_run(argv: list[str], *, cwd: Path | None=None) -> str:
         if argv[2:3] == ["--repo"]:
             assert Path(argv[1]) == Path(artifacts.__file__).resolve()
             argv = [argv[0], str(driver / "promotion_python_artifacts.py"), *argv[2:]]
@@ -825,7 +846,7 @@ def resolve_toolchain_lock(*args, **kwargs):
     monkeypatch.setattr(artifacts, "_run", trusted_fixture_run)
 
 
-def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo, tmp_path, monkeypatch):
+def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PYTHONPATH", raising=False)
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch)
@@ -931,7 +952,7 @@ def test_materialized_producer_verifier_roundtrip(
         ) -> Path:
             # Only the external build backend is replaced: closure discovery,
             # pre-build source hashing, identity generation and verification are real.
-            project = artifacts.tomllib.loads(
+            project = cast("_TomlLoads", getattr(getattr(artifacts, "tomllib"), "loads"))(
                 (source_dir / "pyproject.toml").read_text(encoding="utf-8"),
             )["project"]
             name = project["name"]
@@ -1006,8 +1027,8 @@ def test_materialized_producer_verifier_roundtrip(
 @pytest.mark.parametrize("eol", ["crlf", "lf"])
 @pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])
 def test_candidate_artifact_validation_checks_out_composed_attributes(
-    repo, tmp_path, monkeypatch, suffix, eol, entrypoint,
-):
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, eol: str, entrypoint: str,
+) -> None:
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch, public=entrypoint == "workflow")
     (repo / ".gitattributes").write_text(f"*.{suffix} text eol={eol}\n", encoding="utf-8")
@@ -1018,7 +1039,7 @@ def test_candidate_artifact_validation_checks_out_composed_attributes(
     main = _git(["rev-parse", "main"], repo)
     consume = promotion.consume_pending_changes
 
-    def materialize(scratch, **kwargs):
+    def materialize(scratch: Path, **kwargs: Any) -> dict[str, Any]:
         summary = consume(scratch, **kwargs)
         (scratch / relative).write_bytes(payload)
         return summary
@@ -1049,8 +1070,8 @@ def test_candidate_artifact_validation_checks_out_composed_attributes(
 
 @pytest.mark.parametrize("mutation", ["changed-index", "invalid-tree"])
 def test_composed_source_identity_refuses_before_checkout_or_artifact_reads(
-    repo, tmp_path, monkeypatch, mutation,
-):
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     tree = _git(["write-tree"], repo)
     if mutation == "changed-index":
         (repo / "README.md").write_text("another composed snapshot\n", encoding="utf-8")
@@ -1059,7 +1080,7 @@ def test_composed_source_identity_refuses_before_checkout_or_artifact_reads(
         tree = "--not-a-tree"
     run = artifacts._run
 
-    def guarded_run(argv, **kwargs):
+    def guarded_run(argv: list[str], **kwargs: Any) -> str:
         assert "checkout-index" not in argv
         return run(argv, **kwargs)
 
@@ -1078,8 +1099,8 @@ def test_composed_source_identity_refuses_before_checkout_or_artifact_reads(
     "attribute_noise", ["none", "unstaged-root", "untracked-nested", "staged-policy"],
 )
 def test_composed_source_ignores_working_tree_representation_and_noise(
-    repo, tmp_path, monkeypatch, attribute_noise,
-):
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attribute_noise: str,
+) -> None:
     relative = Path("plugins/demo-plugin/generated.ps1")
     (repo / ".gitattributes").write_text("*.ps1 text eol=crlf\n", encoding="utf-8")
     (repo / relative).write_bytes(b"first line\nsecond line\n")
@@ -1105,7 +1126,7 @@ def test_composed_source_ignores_working_tree_representation_and_noise(
     (noise / "cache.json").write_text("untracked fixture noise", encoding="utf-8")
     checked = []
 
-    def validate(directory, **kwargs):
+    def validate(directory: Path, **kwargs: Any) -> dict[str, bool]:
         candidate = kwargs["candidate_root"]
         checked.append(candidate)
         assert kwargs["content_tree"] == tree
@@ -1124,14 +1145,14 @@ def test_composed_source_ignores_working_tree_representation_and_noise(
     assert (noise / "cache.json").read_text() == "untracked fixture noise"
 
 
-def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatch):
+def test_missing_artifacts_fail_before_candidate_push(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "README.md").write_text("changed\n")
     _commit(repo, "change")
     real_git = promotion._git
     pushes = []
 
-    def git(argv, **kwargs):
+    def git(argv: list[str], **kwargs: Any) -> str:
         if argv[0] == "push":
             pushes.append(argv)
         return real_git(argv, **kwargs)
@@ -1145,7 +1166,7 @@ def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatc
     assert not pushes
 
 
-def test_promoter_script_reports_canonical_checkout_failure(repo, tmp_path, monkeypatch, capsys):
+def test_promoter_script_reports_canonical_checkout_failure(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch)
     _commit(repo, "candidate")
@@ -1155,7 +1176,7 @@ def test_promoter_script_reports_canonical_checkout_failure(repo, tmp_path, monk
     )
     run = subprocess.run
 
-    def fail_checkout(argv, *args, **kwargs):
+    def fail_checkout(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if argv[0] == "git" and "checkout-index" in argv:
             return subprocess.CompletedProcess(argv, 128, "", "forced canonical checkout failure")
         return run(argv, *args, **kwargs)
@@ -1174,7 +1195,7 @@ def test_promoter_script_reports_canonical_checkout_failure(repo, tmp_path, monk
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
-def test_noop_does_not_build_or_require_artifacts(repo, tmp_path):
+def test_noop_does_not_build_or_require_artifacts(repo: Path, tmp_path: Path) -> None:
     report = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=tmp_path / "missing",
     )
@@ -1187,12 +1208,12 @@ def test_noop_does_not_build_or_require_artifacts(repo, tmp_path):
     assert not (tmp_path / "never-built").exists()
 
 
-def test_export_and_push_cannot_share_authority(repo, tmp_path):
+def test_export_and_push_cannot_share_authority(repo: Path, tmp_path: Path) -> None:
     with pytest.raises(promotion.PromotionError, match="separate"):
         promotion.promote(repo=repo, push=True, build_python_artifacts_dir=tmp_path / "export")
 
 
-def test_export_refuses_an_existing_output_without_touching_it(repo, tmp_path):
+def test_export_refuses_an_existing_output_without_touching_it(repo: Path, tmp_path: Path) -> None:
     directory = tmp_path / "export"
     directory.mkdir()
     marker = directory / "keep.txt"
@@ -1205,7 +1226,7 @@ def test_export_refuses_an_existing_output_without_touching_it(repo, tmp_path):
     assert marker.read_text() == "untouched"
 
 
-def test_failed_builder_never_publishes_partial_export(repo, tmp_path, monkeypatch):
+def test_failed_builder_never_publishes_partial_export(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_builder(repo, monkeypatch)
     commit = _commit(repo, "Python project")
     monkeypatch.setattr(artifacts, "_run", lambda *a, **kw: (_ for _ in ()).throw(
@@ -1221,13 +1242,15 @@ def test_failed_builder_never_publishes_partial_export(repo, tmp_path, monkeypat
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
-def test_attestation_checks_exact_workflow_ref_and_digests(tmp_path, monkeypatch):
+def test_attestation_checks_exact_workflow_ref_and_digests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = tmp_path / "export"
     _index(directory)
     calls = []
-    monkeypatch.setattr(publisher, "_gh", lambda argv, **kw: (
-        calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 0, "verified", "")
-    ))
+    def record_call(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 0, 'verified', '')
+
+    monkeypatch.setattr(publisher, "_gh", record_call)
     publisher.verify_attestations(
         directory, repository="example/plugins", signer_digest=MAIN, source_digest=MAIN,
         source_ref="refs/heads/main",
@@ -1243,13 +1266,15 @@ def test_attestation_checks_exact_workflow_ref_and_digests(tmp_path, monkeypatch
         assert kwargs == {"verification": True}
 
 
-def test_attestation_failure_stops_before_any_publication(tmp_path, monkeypatch):
+def test_attestation_failure_stops_before_any_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = tmp_path / "export"
     _index(directory)
     calls = []
-    monkeypatch.setattr(publisher, "_gh", lambda argv, **kw: (
-        calls.append(argv) or subprocess.CompletedProcess(argv, 1, "", "bad signer")
-    ))
+    def record_call(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, '', 'bad signer')
+
+    monkeypatch.setattr(publisher, "_gh", record_call)
     assert publisher.main([
         "publish", "--directory", str(directory), "--repository", "example/plugins",
         "--signer-digest", MAIN, "--source-digest", MAIN, "--source-ref", "refs/heads/main",
@@ -1260,8 +1285,8 @@ def test_attestation_failure_stops_before_any_publication(tmp_path, monkeypatch)
 
 @pytest.mark.parametrize("mutation", ["extra-zip", "missing-bundle", "unsafe-name", "invalid-index"])
 def test_verified_index_rejects_invalid_subject_set_before_bundle_attestations(
-    tmp_path, monkeypatch, mutation,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     directory = tmp_path / "export"
     index = _index(directory)
     if mutation == "extra-zip":
@@ -1274,9 +1299,11 @@ def test_verified_index_rejects_invalid_subject_set_before_bundle_attestations(
     else:
         (directory / artifacts.INDEX_NAME).write_text("[]")
     calls = []
-    monkeypatch.setattr(publisher, "_gh", lambda argv, **kwargs: (
-        calls.append(argv) or subprocess.CompletedProcess(argv, 0, "verified", "")
-    ))
+    def record_call(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, 'verified', '')
+
+    monkeypatch.setattr(publisher, "_gh", record_call)
     with pytest.raises(artifacts.PromotionArtifactError):
         publisher.verify_attestations(
             directory, repository="example/plugins", signer_digest=MAIN, source_digest=MAIN,
@@ -1286,21 +1313,23 @@ def test_verified_index_rejects_invalid_subject_set_before_bundle_attestations(
     assert Path(calls[0][2]).name == artifacts.INDEX_NAME
 
 
-def test_verification_uses_read_token_not_release_authority(monkeypatch):
+def test_verification_uses_read_token_not_release_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GH_TOKEN", "release-test-token")
     monkeypatch.setenv("ARTIFACT_VERIFY_TOKEN", "verification-test-token")
     environments = []
-    monkeypatch.setattr(publisher.subprocess, "run", lambda *a, **kw: (
-        environments.append(kw["env"]) or subprocess.CompletedProcess(a, 0, "", "")
-    ))
-    publisher._gh(["attestation", "verify"], verification=True)
-    publisher._gh(["release", "upload"])
+    def record_call(*a: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+        environments.append(kw['env'])
+        return subprocess.CompletedProcess(a, 0, '', '')
+
+    monkeypatch.setattr(cast(object, getattr(publisher, "subprocess")), "run", record_call)
+    cast("_GhRunner", getattr(publisher, "_gh"))(["attestation", "verify"], verification=True)
+    cast("_GhRunner", getattr(publisher, "_gh"))(["release", "upload"])
     assert environments[0]["GH_TOKEN"] == "verification-test-token"
     assert environments[1]["GH_TOKEN"] == "release-test-token"
     assert all("ARTIFACT_VERIFY_TOKEN" not in env for env in environments)
 
 
-def _publish_fixture(tmp_path, monkeypatch):
+def _publish_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, Any]]:
     directory = tmp_path / "export"
     plugin_dir = tmp_path / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
@@ -1321,13 +1350,13 @@ def _publish_fixture(tmp_path, monkeypatch):
     "gh: Not Found (HTTP 404)", "HTTP 404: Not Found", "gh: HTTP 404: Not Found",
 ])
 def test_release_publication_never_clobbers_and_only_treats_404_as_absence(
-    tmp_path, monkeypatch, status, not_found,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str, not_found: str,
+) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     calls = []
     created = False
 
-    def gh(argv, **kwargs):
+    def gh(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         nonlocal created
         calls.append(argv)
         if argv[0] != "api":
@@ -1353,7 +1382,7 @@ def test_release_publication_never_clobbers_and_only_treats_404_as_absence(
         }), "")
 
     monkeypatch.setattr(publisher, "_gh", gh)
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         repository="example/plugins", merged_commit=TREE, candidate_commit=TREE,
         dev_head=DEV, repo=tmp_path,
     )
@@ -1387,12 +1416,12 @@ def test_release_publication_never_clobbers_and_only_treats_404_as_absence(
     (1, "HTTP 404: Not Found\nHTTP 403: Forbidden", False),
     (0, "HTTP 404: Not Found", False),
 ])
-def test_only_explicit_unambiguous_http_404_status_is_absence(code, error, expected):
+def test_only_explicit_unambiguous_http_404_status_is_absence(code: int, error: str, expected: bool) -> None:
     assert publisher._is_not_found(subprocess.CompletedProcess(["gh"], code, "", error)) is expected
 
 
 @pytest.mark.parametrize("tag_state", ["current", "same-ancestor", "wrong-ancestor", "unshipped", "missing"])
-def test_release_tag_must_bind_the_actual_plugin_payload(tmp_path, monkeypatch, tag_state):
+def test_release_tag_must_bind_the_actual_plugin_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tag_state: str) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     older = tmp_path / "older"
     shutil.copytree(tmp_path / "plugins", older / "plugins")
@@ -1406,7 +1435,7 @@ def test_release_tag_must_bind_the_actual_plugin_payload(tmp_path, monkeypatch, 
         older if commit == MAIN else tmp_path
     ))
     calls = []
-    def gh(argv, **kwargs):
+    def gh(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, json.dumps({
             "draft": False, "tag_name": "demo-v1.0", "assets": [],
@@ -1429,8 +1458,8 @@ def test_release_tag_must_bind_the_actual_plugin_payload(tmp_path, monkeypatch, 
 @pytest.mark.parametrize("kind", [
     "lightweight", "annotated", "absent", "cycle", "blob", "unauthorized", "missing-object",
 ])
-def test_tag_resolution_is_bounded_and_only_initial_404_means_absence(monkeypatch, kind):
-    def gh(argv, **kwargs):
+def test_tag_resolution_is_bounded_and_only_initial_404_means_absence(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    def gh(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if kind in ("absent", "unauthorized"):
             return subprocess.CompletedProcess(
                 argv, 1, "", "(HTTP 404)" if kind == "absent" else "(HTTP 403)",
@@ -1455,12 +1484,12 @@ def test_tag_resolution_is_bounded_and_only_initial_404_means_absence(monkeypatc
         )
 
 
-def test_tag_created_between_absence_check_and_release_creation_blocks_upload(tmp_path, monkeypatch):
+def test_tag_created_between_absence_check_and_release_creation_blocks_upload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory, _entry = _publish_fixture(tmp_path, monkeypatch)
     tags = iter([None, MAIN])
     monkeypatch.setattr(publisher, "_tag_commit", lambda *_: next(tags))
     calls = []
-    def gh(argv, **kwargs):
+    def gh(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return subprocess.CompletedProcess(
             argv, 1 if argv[0] == "api" else 0, "", "(HTTP 404)" if argv[0] == "api" else "",
@@ -1473,7 +1502,7 @@ def test_tag_created_between_absence_check_and_release_creation_blocks_upload(tm
     assert [argv[:2] for argv in calls if argv[0] == "release"] == [["release", "create"]]
 
 
-def test_actual_merge_composition_mismatch_blocks_all_release_writes(tmp_path, monkeypatch):
+def test_actual_merge_composition_mismatch_blocks_all_release_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory, _entry = _publish_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(promotion, "_tree_excluding_state", lambda *a, **kw: "e" * 40)
     calls = []
@@ -1486,7 +1515,7 @@ def test_actual_merge_composition_mismatch_blocks_all_release_writes(tmp_path, m
     assert not calls
 
 
-def test_invalid_bundle_blocks_publication_even_with_valid_index_digest(tmp_path, monkeypatch):
+def test_invalid_bundle_blocks_publication_even_with_valid_index_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     path = directory / entry["filename"]
     path.write_bytes(b"not a ZIP")
@@ -1503,7 +1532,7 @@ def test_invalid_bundle_blocks_publication_even_with_valid_index_digest(tmp_path
     assert not calls
 
 
-def test_changed_candidate_source_blocks_publication_before_any_release_write(tmp_path, monkeypatch):
+def test_changed_candidate_source_blocks_publication_before_any_release_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory, _entry = _publish_fixture(tmp_path, monkeypatch)
     (tmp_path / "plugins" / "demo" / "injected.py").write_text("changed source")
     calls = []
@@ -1520,7 +1549,7 @@ def test_changed_candidate_source_blocks_publication_before_any_release_write(tm
     assert not calls
 
 
-def test_first_party_label_does_not_substitute_for_candidate_closure(tmp_path):
+def test_first_party_label_does_not_substitute_for_candidate_closure(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "pyproject.toml").write_text(_STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\n')
@@ -1535,7 +1564,7 @@ def test_first_party_label_does_not_substitute_for_candidate_closure(tmp_path):
         artifacts.validate_source_binding(manifest, tmp_path)
 
 
-def test_candidate_source_binding_preserves_trusted_builder_namespace(tmp_path, monkeypatch):
+def test_candidate_source_binding_preserves_trusted_builder_namespace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import ast
 
     from release_helper_loaders import dynamic_loads
@@ -1560,14 +1589,14 @@ def test_candidate_source_binding_preserves_trusted_builder_namespace(tmp_path, 
     assert builder.PLUGINS_DIR == unrelated / "plugins"
 
 
-def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path):
+def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path: Path) -> None:
     with pytest.raises(artifacts.PromotionArtifactError, match="candidate commit identity"):
         artifacts.validate_candidate_artifacts(
             tmp_path, repo=tmp_path, dev_head="--untrusted-option", main_before=MAIN,
         )
 
 
-def _run_workflow_validator(repo, directory, dev, main, monkeypatch, *, report=None):
+def _run_workflow_validator(repo: Path, directory: Path, dev: str, main: str, monkeypatch: pytest.MonkeyPatch, *, report: dict[str, Any] | None=None) -> None:
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
     current = source_owned(workflow["jobs"])
@@ -1618,12 +1647,12 @@ def _run_workflow_validator(repo, directory, dev, main, monkeypatch, *, report=N
     exec(compile(script, "<trusted-workflow-validator>", "exec"), {})
 
 
-def test_workflow_validator_rejects_invalid_identity_before_git(tmp_path, monkeypatch):
+def test_workflow_validator_rejects_invalid_identity_before_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises((artifacts.PromotionArtifactError, ValueError), match="candidate commit identity"):
         _run_workflow_validator(tmp_path, tmp_path, "--untrusted-option", MAIN, monkeypatch)
 
 
-def test_workflow_validator_rejects_changed_bundle(repo, tmp_path, monkeypatch):
+def test_workflow_validator_rejects_changed_bundle(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch, public=True)
     dev = _commit(repo, "candidate")
@@ -1642,8 +1671,8 @@ def test_workflow_validator_rejects_changed_bundle(repo, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])
 def test_candidate_artifact_validation_resolves_temporary_root_aliases(
-    repo, tmp_path, monkeypatch, entrypoint,
-):
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entrypoint: str,
+) -> None:
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch, public=entrypoint == "workflow")
     dev = _commit(repo, "candidate")
@@ -1657,15 +1686,15 @@ def test_candidate_artifact_validation_resolves_temporary_root_aliases(
     temporary_directory = artifacts.tempfile.TemporaryDirectory
 
     class AliasedTemporaryDirectory:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: Any) -> None:
             self.directory = temporary_directory(**kwargs)
 
-        def __enter__(self):
+        def __enter__(self) -> str:
             root = Path(self.directory.__enter__())
             (root / "alias-child").mkdir()
             return str(root / "alias-child" / "..")
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> None:
             return self.directory.__exit__(*args)
 
     monkeypatch.setattr(artifacts.tempfile, "TemporaryDirectory", AliasedTemporaryDirectory)
@@ -1683,7 +1712,7 @@ def test_candidate_artifact_validation_resolves_temporary_root_aliases(
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
-def test_workflow_separates_candidate_execution_signing_and_release_authority():
+def test_workflow_separates_candidate_execution_signing_and_release_authority() -> None:
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())
     jobs = workflow["jobs"]

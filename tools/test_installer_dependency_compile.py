@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+from typing import cast
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import Any, Callable, Protocol
+    class _LegacyOfflineEnvironment(Protocol):
+        def __call__(self, tmp_path: Path) -> dict[str, str]: ...
+    class _LegacySettings(Protocol):
+        def __call__(self, global_value: str = "None", packages: str = "", index: str = "None") -> str: ...
+    class _LegacySourceProject(Protocol):
+        def __call__(self, path: Path, name: str = "fixture-source", sources: str = "", dependencies: str = "", module_code: str | None = None) -> Path: ...
+
+from typing import Any, Callable
+
 import hashlib
 import io
 import json
@@ -18,7 +31,7 @@ import pytest
 from test_installer_dependency_policy import NOW, offline_environment, policy, settings, source_project
 
 
-def test_live_temporary_inputs_survive_interpreter_shutdown(tmp_path):
+def test_live_temporary_inputs_survive_interpreter_shutdown(tmp_path: Path) -> None:
     script = (
         "import importlib.util, json, sys\n"
         "from contextlib import ExitStack\n"
@@ -32,18 +45,18 @@ def test_live_temporary_inputs_survive_interpreter_shutdown(tmp_path):
         "print(json.dumps(str(root)))\n"
     )
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", script, policy.__file__, str(tmp_path)],
+        [sys.executable, "-I", "-B", "-c", script, cast(str, policy.__file__), str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", check=True, timeout=30,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
     root = Path(json.loads(result.stdout))
     assert root.parent == tmp_path
     assert (root / "held-input").read_bytes() == b"retained"
 
 
-def compile_settings(output=None, **options):
+def compile_settings(output: str | None=None, **options: Any) -> str:
     output_value = "None," if output is None else "Some(" + json.dumps(output) + ",),"
-    return settings(**options).replace("PipInstallSettings", "PipCompileSettings").replace(
+    return cast("_LegacySettings", settings)(**options).replace("PipInstallSettings", "PipCompileSettings").replace(
         "settings: PipSettings {",
         "settings: PipSettings {\n"
         "generate_hashes: true,\nno_header: true,\nno_annotate: true,\n"
@@ -52,11 +65,11 @@ def compile_settings(output=None, **options):
     )
 
 
-def test_compile_projection_is_admitted_without_install_flags():
+def test_compile_projection_is_admitted_without_install_flags() -> None:
     assert policy.cutoff_arguments(compile_settings(), now=NOW, _operation="compile") == [
         "--exclude-newer", "2026-10-06T00:00:00Z",
     ]
-    for projection, operation in [(settings(), "compile"), (compile_settings(), "install")]:
+    for projection, operation in [(cast("_LegacySettings", settings)(), "compile"), (compile_settings(), "install")]:
         with pytest.raises(policy.DependencyPolicyError, match="projection is unsupported"):
             policy.cutoff_arguments(projection, now=NOW, _operation=operation)
 
@@ -64,8 +77,8 @@ def test_compile_projection_is_admitted_without_install_flags():
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows subprocess cwd limit")
 @pytest.mark.parametrize("relative_directory", [False, True])
 def test_native_compile_probe_keeps_operation_and_configuration_beyond_cwd_limit(
-    tmp_path, monkeypatch, relative_directory,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_directory: bool,
+) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV is required"
     deep = tmp_path / ("a" * 100) / ("b" * 100) / ("c" * 50)
@@ -83,13 +96,13 @@ def test_native_compile_probe_keeps_operation_and_configuration_beyond_cwd_limit
     actual = policy.subprocess.run
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((command, kwargs))
-        return actual(command, **kwargs)
+        return cast(subprocess.CompletedProcess[str], actual(command, **kwargs))
 
     monkeypatch.setattr(policy.subprocess, "run", run)
     admitted = policy.prepare_uv_compile(
-        uv, arguments, env=offline_environment(tmp_path), cwd=deep, now=NOW,
+        uv, arguments, env=cast("_LegacyOfflineEnvironment", offline_environment)(tmp_path), cwd=deep, now=NOW,
     )
     assert admitted[admitted.index("--exclude-newer") + 1] == "2020-01-01T00:00:00Z"
     assert len(calls) == 1
@@ -105,7 +118,7 @@ def test_native_compile_probe_keeps_operation_and_configuration_beyond_cwd_limit
     compile_settings().replace("settings: PipSettings {", "settings: PipSettings {\n dependency_mode: Direct,"),
     compile_settings().replace("settings: PipSettings {", "settings: PipSettings {\n build_isolation: Shared,"),
 ])
-def test_compile_projection_preserves_installer_refusals(projection):
+def test_compile_projection_preserves_installer_refusals(projection: str) -> None:
     with pytest.raises(policy.DependencyPolicyError):
         policy.cutoff_arguments(projection, now=NOW, _operation="compile")
 
@@ -116,8 +129,8 @@ def test_compile_projection_preserves_installer_refusals(projection):
     ["--group", "runtime"], ["--editable", "."], ["--unknown-option"],
     ["--output-file", "-"], ["--generate-hashes=false"],
 ])
-def test_unsupported_compile_shape_refuses_before_probe(monkeypatch, arguments):
-    def unexpected(*_args, **_kwargs):
+def test_unsupported_compile_shape_refuses_before_probe(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
+    def unexpected(*_args: object, **_kwargs: object) -> None:
         pytest.fail("unsupported compile inputs must not reach UV")
 
     monkeypatch.setattr(policy.subprocess, "run", unexpected)
@@ -134,8 +147,8 @@ def test_unsupported_compile_shape_refuses_before_probe(monkeypatch, arguments):
     ("output_file: None,", 'output_file: Some("ambient.txt",),'),
 ])
 def test_effective_compile_output_policy_cannot_be_supplied_by_ambient_config(
-    tmp_path, monkeypatch, before, after,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before: str, after: str,
+) -> None:
     requirements = tmp_path / "input.in"
     requirements.write_text("fixture>=1\n", encoding="utf-8")
     monkeypatch.setattr(
@@ -148,12 +161,12 @@ def test_effective_compile_output_policy_cannot_be_supplied_by_ambient_config(
         policy.prepare_uv_compile("fixture-uv", [str(requirements)], env={}, now=NOW)
 
 
-def test_compile_retained_resolver_drift_refuses_before_execution(tmp_path, monkeypatch):
+def test_compile_retained_resolver_drift_refuses_before_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     requirements = tmp_path / "input.in"
     requirements.write_text("fixture>=1\n", encoding="utf-8")
     calls = []
 
-    def probe(command, **_options):
+    def probe(command: list[str], **_options: object) -> subprocess.CompletedProcess[str]:
         assert "--show-settings" in command
         calls.append(command)
         projection = compile_settings()
@@ -168,12 +181,12 @@ def test_compile_retained_resolver_drift_refuses_before_execution(tmp_path, monk
 
 
 @pytest.mark.parametrize("option", ["-r", "--requirement", "--requirements", "-c", "--constraint", "--constraints"])
-def test_compile_include_paths_are_canonicalized_before_text_remapping(tmp_path, option):
+def test_compile_include_paths_are_canonicalized_before_text_remapping(tmp_path: Path, option: str) -> None:
     original = tmp_path / "original" / "nested.in"
     retained = tmp_path / "retained" / "nested.in"
     seen = []
 
-    def mirror(path):
+    def mirror(path: Path) -> Path:
         seen.append(path.resolve())
         return retained
 
@@ -183,12 +196,12 @@ def test_compile_include_paths_are_canonicalized_before_text_remapping(tmp_path,
     assert result == option + " " + retained.as_posix() + "\n"
 
 
-def test_compile_root_anchor_include_target_is_never_lexically_remapped_again():
+def test_compile_root_anchor_include_target_is_never_lexically_remapped_again() -> None:
     original = PurePosixPath("/tmp/build/child.in")
     retained = PurePosixPath("/private/inputs/hash/tmp/build/child.in")
     lexical_inputs = []
 
-    def remap(line):
+    def remap(line: str) -> str:
         lexical_inputs.append(line)
         return line.replace(str(original), str(retained))
 
@@ -200,8 +213,8 @@ def test_compile_root_anchor_include_target_is_never_lexically_remapped_again():
     assert lexical_inputs == ["# " + str(original)]
 
 
-def test_compile_retains_project_and_nested_requirements_but_not_output(tmp_path, monkeypatch):
-    project = source_project(tmp_path / "source")
+def test_compile_retains_project_and_nested_requirements_but_not_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = cast("_LegacySourceProject", source_project)(tmp_path / "source")
     manifest = project / "pyproject.toml"
     included = tmp_path / "nested.in"
     included.write_text("fixture-registry>=1\n", encoding="utf-8")
@@ -210,7 +223,7 @@ def test_compile_retains_project_and_nested_requirements_but_not_output(tmp_path
     output = tmp_path / "locked.txt"
     calls = []
 
-    def probe(command, **_kwargs):
+    def probe(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command[1:3] == ["pip", "compile"]
         assert "--reinstall" not in command
         calls.append(command)
@@ -237,9 +250,9 @@ def test_compile_retains_project_and_nested_requirements_but_not_output(tmp_path
     assert not output.exists()
 
 
-def test_compile_refuses_effective_editable_graph(tmp_path, monkeypatch):
-    source_project(tmp_path / "child", name="fixture-child")
-    project = source_project(
+def test_compile_refuses_effective_editable_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
+    project = cast("_LegacySourceProject", source_project)(
         tmp_path / "root", sources='fixture-child={path="../child", editable=true}',
         dependencies='"fixture-child"',
     )
@@ -250,16 +263,16 @@ def test_compile_refuses_effective_editable_graph(tmp_path, monkeypatch):
         )
 
 
-def source_compile_settings(names, **options):
+def source_compile_settings(names: list[str], **options: Any) -> str:
     return compile_settings(**options).replace(
         "no_emit_package: []",
         "no_emit_package: [" + "".join(f"PackageName({json.dumps(name)},)," for name in names) + "]",
     ).replace("settings: PipSettings {", "settings: PipSettings {\nsources: None,")
 
 
-def test_source_compile_retains_graph_and_derives_only_local_omissions(tmp_path, monkeypatch):
-    child = source_project(tmp_path / "child", name="fixture-child", dependencies='"registry-only>=1"')
-    project = source_project(
+def test_source_compile_retains_graph_and_derives_only_local_omissions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    child = cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child", dependencies='"registry-only>=1"')
+    project = cast("_LegacySourceProject", source_project)(
         tmp_path / "root", sources=(
             'fixture-child={path="../child", editable=true}\n'
             'registry-only={index="fixture-index"}'
@@ -291,15 +304,15 @@ def test_source_compile_retains_graph_and_derives_only_local_omissions(tmp_path,
 
 @pytest.mark.parametrize("conditional", [False, True])
 def test_source_compile_accepts_repeated_mapping_only_when_independently_active(
-    tmp_path, monkeypatch, conditional,
-):
-    child = source_project(tmp_path / "child", name="fixture-child")
-    sibling = source_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conditional: bool,
+) -> None:
+    child = cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
+    sibling = cast("_LegacySourceProject", source_project)(
         tmp_path / "sibling", name="fixture-sibling",
         dependencies=json.dumps("fixture-child; sys_platform == 'win32'") if conditional else "",
         sources='fixture-child={path="../child"}',
     )
-    project = source_project(
+    project = cast("_LegacySourceProject", source_project)(
         tmp_path / "root", dependencies='"fixture-child", "fixture-sibling"',
         sources='fixture-child={path="../child"}\nfixture-sibling={path="../sibling"}',
     )
@@ -320,9 +333,9 @@ def test_source_compile_accepts_repeated_mapping_only_when_independently_active(
 
 
 @pytest.mark.parametrize("omissions", [[], ["fixture-source", "registry-only"], ["wrong-source"]])
-def test_source_compile_refuses_ambient_omission_drift(tmp_path, monkeypatch, omissions):
-    source_project(tmp_path / "child", name="fixture-child")
-    project = source_project(
+def test_source_compile_refuses_ambient_omission_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, omissions: list[str]) -> None:
+    cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
+    project = cast("_LegacySourceProject", source_project)(
         tmp_path / "root", dependencies='"fixture-child"',
         sources='fixture-child={path="../child"}',
     )
@@ -343,8 +356,8 @@ def test_source_compile_refuses_ambient_omission_drift(tmp_path, monkeypatch, om
 @pytest.mark.parametrize("kind", [
     "remote", "unowned", "duplicate", "artifact", "dynamic", "caller-omission", "conditional", "alternatives",
 ])
-def test_source_compile_refuses_unsafe_graph_before_uv(tmp_path, monkeypatch, kind):
-    child = source_project(tmp_path / "child", name="fixture-child")
+def test_source_compile_refuses_unsafe_graph_before_uv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    child = cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
     sources = 'fixture-child={path="../child"}'
     if kind == "remote":
         sources = 'fixture-child={git="https://example.invalid/child"}'
@@ -357,7 +370,7 @@ def test_source_compile_refuses_unsafe_graph_before_uv(tmp_path, monkeypatch, ki
         sources = 'fixture-child={path="../child", marker="sys_platform == \'never\'"}'
     elif kind == "alternatives":
         sources = 'fixture-child=[{path="../child"}]'
-    project = source_project(
+    project = cast("_LegacySourceProject", source_project)(
         tmp_path / "root", name="fixture-child" if kind == "duplicate" else "fixture-source",
         sources=sources, dependencies='"fixture-child"',
     )
@@ -376,8 +389,8 @@ def test_source_compile_refuses_unsafe_graph_before_uv(tmp_path, monkeypatch, ki
             pytest.fail("unsafe graph reached export")
 
 
-def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, monkeypatch):
-    project = source_project(tmp_path / "root")
+def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = cast("_LegacySourceProject", source_project)(tmp_path / "root")
     monkeypatch.setattr(
         policy.subprocess, "run",
         lambda command, **options: subprocess.CompletedProcess(
@@ -394,9 +407,9 @@ def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, mon
 
 @pytest.mark.parametrize("native_format", ["PylockToml", "RequirementsTxt"])
 def test_explicit_source_compile_can_export_verified_native_wheel_lock(
-    tmp_path, monkeypatch, native_format,
-):
-    project = source_project(tmp_path / "root")
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_format: str,
+) -> None:
+    project = cast("_LegacySourceProject", source_project)(tmp_path / "root")
     projection = source_compile_settings([]).replace(
         "settings: PipSettings {",
         "settings: PipSettings {\nformat: Some(" + native_format + ",),",
@@ -423,8 +436,8 @@ def test_explicit_source_compile_can_export_verified_native_wheel_lock(
 
 @pytest.mark.parametrize("native_format", ["PylockToml", "RequirementsTxt"])
 def test_registry_compile_retains_inputs_and_verifies_native_wheel_lock_format(
-    tmp_path, monkeypatch, native_format,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_format: str,
+) -> None:
     requirements = tmp_path / "registry.in"
     requirements.write_text("fixture-registry>=1\n", encoding="utf-8")
     output = tmp_path / "pylock.toml"
@@ -458,13 +471,13 @@ def test_registry_compile_retains_inputs_and_verifies_native_wheel_lock_format(
 
 
 @pytest.mark.parametrize("expire_at", [1, 2])
-def test_retained_compile_deadline_bounds_both_context_entry_probes(tmp_path, monkeypatch, expire_at):
-    project = source_project(tmp_path / "root")
+def test_retained_compile_deadline_bounds_both_context_entry_probes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expire_at: int) -> None:
+    project = cast("_LegacySourceProject", source_project)(tmp_path / "root")
     clock = [100.0]
     monkeypatch.setattr(policy._configuration, "clock", SimpleNamespace(monotonic=lambda: clock[0]))
     calls = []
 
-    def probe(command, **options):
+    def probe(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         calls.append((command, options))
         assert 0 < options["timeout"] <= 1
         clock[0] = 102.0 if len(calls) == expire_at else 100.25
@@ -482,18 +495,18 @@ def test_retained_compile_deadline_bounds_both_context_entry_probes(tmp_path, mo
         assert not Path(calls[1][1]["cwd"]).exists()
 
 
-def test_retained_compile_deadline_is_checked_during_copy(tmp_path, monkeypatch):
-    project = source_project(tmp_path / "root")
+def test_retained_compile_deadline_is_checked_during_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = cast("_LegacySourceProject", source_project)(tmp_path / "root")
     clock = [100.0]
     monkeypatch.setattr(policy._configuration, "clock", SimpleNamespace(monotonic=lambda: clock[0]))
     original = policy._copy_retained_file
     copied = []
 
-    def copy(source, destination, *, deadline=None, on_progress=None):
+    def copy(source: Path, destination: Path, *, deadline: float | None=None, on_progress: Callable[[], None] | None=None) -> str | os.PathLike[str]:
         result = original(source, destination, deadline=deadline, on_progress=on_progress)
         copied.append(Path(destination))
         clock[0] = 102.0
-        return result
+        return cast("str | os.PathLike[str]", result)
 
     monkeypatch.setattr(policy, "_copy_retained_file", copy)
     monkeypatch.setattr(
@@ -511,9 +524,9 @@ def test_retained_compile_deadline_is_checked_during_copy(tmp_path, monkeypatch)
 
 @pytest.mark.parametrize("context", ["argument", "environment", "ambient"])
 @pytest.mark.parametrize("input_kind", ["registry", "recursive", "project"])
-def test_source_compile_refuses_context_only_local_mappings(tmp_path, monkeypatch, context, input_kind):
-    source_project(tmp_path / "child", name="fixture-child")
-    project = source_project(
+def test_source_compile_refuses_context_only_local_mappings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context: str, input_kind: str) -> None:
+    cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
+    project = cast("_LegacySourceProject", source_project)(
         tmp_path / "context", dependencies='"fixture-child"',
         sources='fixture-child={path="../child"}',
     )
@@ -524,7 +537,7 @@ def test_source_compile_refuses_context_only_local_mappings(tmp_path, monkeypatc
         root.write_text("-r input.in\n", encoding="utf-8")
         operand = root
     elif input_kind == "project":
-        operand = source_project(
+        operand = cast("_LegacySourceProject", source_project)(
             tmp_path / "input-project", name="fixture-root", dependencies='"fixture-child==2.0"',
         ) / "pyproject.toml"
     arguments = [str(operand)]
@@ -549,8 +562,8 @@ def test_source_compile_refuses_context_only_local_mappings(tmp_path, monkeypatc
     "direct-marker", "direct-extra", "recursive-marker", "recursive-extra",
     "mapped-marker", "mapped-extra", "nested-unselected",
 ])
-def test_source_compile_refuses_inactive_local_registry_ambiguity(tmp_path, monkeypatch, kind):
-    child = source_project(tmp_path / "child", name="fixture-child")
+def test_source_compile_refuses_inactive_local_registry_ambiguity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    child = cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
     direct = "fixture-child @ " + child.as_uri()
     registry = "fixture-child>=1"
     marker = "; sys_platform == 'never'"
@@ -558,14 +571,14 @@ def test_source_compile_refuses_inactive_local_registry_ambiguity(tmp_path, monk
     dependencies = json.dumps(("registry-only>=1" if kind == "mapped-extra" else registry) if "extra" in kind else (
         "fixture-child" + marker if kind == "mapped-marker" else direct + marker
     ))
-    project = source_project(tmp_path / "root", dependencies=dependencies, sources=sources)
+    project = cast("_LegacySourceProject", source_project)(tmp_path / "root", dependencies=dependencies, sources=sources)
     if kind == "nested-unselected":
-        nested = source_project(
+        nested = cast("_LegacySourceProject", source_project)(
             tmp_path / "optional", name="fixture-optional", dependencies='"fixture-child"',
             sources='fixture-child={path="../child"}',
         )
         assert nested.is_dir()
-        project = source_project(
+        project = cast("_LegacySourceProject", source_project)(
             project, dependencies=json.dumps(registry),
             sources='fixture-optional={path="../optional"}',
         )
@@ -595,14 +608,14 @@ def test_source_compile_refuses_inactive_local_registry_ambiguity(tmp_path, monk
 
 
 @pytest.mark.parametrize("reference", ["requirements", "project", "sources"])
-def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp_path, reference):
-    child = source_project(tmp_path / "child", name="fixture-child")
+def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp_path: Path, reference: str) -> None:
+    child = cast("_LegacySourceProject", source_project)(tmp_path / "child", name="fixture-child")
     dependency = "fixture-child @ " + child.as_uri()
     if reference == "requirements":
         operand = tmp_path / "input.in"
         operand.write_text(dependency + "\n", encoding="utf-8")
     else:
-        source = source_project(
+        source = cast("_LegacySourceProject", source_project)(
             tmp_path / "source", dependencies='"fixture-child"' if reference == "sources" else json.dumps(dependency),
             sources='fixture-child={path="../child"}' if reference == "sources" else "",
         )
@@ -611,7 +624,7 @@ def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp
     with pytest.raises(policy.DependencyPolicyError, match="directory dependencies"):
         policy.run_uv_compile(
             "uv", [str(operand), "-o", str(output), "--python", sys.executable, "--no-index"],
-            env=offline_environment(tmp_path), cwd=tmp_path, now=NOW,
+            env=cast("_LegacyOfflineEnvironment", offline_environment)(tmp_path), cwd=tmp_path, now=NOW,
             trusted_source_roots=(tmp_path,), capture_output=True, text=True, timeout=30,
         )
     assert not output.exists()
@@ -621,9 +634,9 @@ def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp
 @pytest.mark.parametrize("source_kind", ["project", "requirements"])
 @pytest.mark.parametrize("missing_age", [False, True])
 def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
-    tmp_path, monkeypatch, source_kind, missing_age, alias, nested_alias=False, root_anchor=False,
-    source_graph=False, metadata_name_conflict=False, recursive_source=False,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_kind: str, missing_age: bool, alias: bool, nested_alias: bool=False, root_anchor: bool=False,
+    source_graph: bool=False, metadata_name_conflict: bool=False, recursive_source: bool=False,
+) -> None:
     artifacts = {}
     projects = {}
     downloads = []
@@ -653,16 +666,16 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         projects[name] = files
 
     class Index(BaseHTTPRequestHandler):
-        def log_message(self, *_args):
+        def log_message(self, *_args: object) -> None:
             pass
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             self.respond(head=False)
 
-        def do_HEAD(self):
+        def do_HEAD(self) -> None:
             self.respond(head=True)
 
-        def respond(self, *, head):
+        def respond(self, *, head: bool) -> None:
             name = self.path.rstrip("/").rsplit("/", 1)[-1]
             if self.path.startswith("/simple/") and name in projects:
                 body = json.dumps({"meta": {"api-version": "1.2"}, "name": name,
@@ -685,7 +698,7 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
     server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    environment = offline_environment(tmp_path)
+    environment = cast("_LegacyOfflineEnvironment", offline_environment)(tmp_path)
     environment.pop("UV_OFFLINE", None)
     config = tmp_path / "uv.toml"
     config.write_text(
@@ -695,22 +708,22 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
     environment["UV_CONFIG_FILE"] = str(config)
     working_directory = Path(tmp_path.anchor) if root_anchor else tmp_path
     if source_kind == "project":
-        project = source_project(tmp_path / "source", dependencies='"fixture-root>=1"')
+        project = cast("_LegacySourceProject", source_project)(tmp_path / "source", dependencies='"fixture-root>=1"')
         if source_graph:
-            local = source_project(tmp_path / "local", name="fixture-owned", dependencies='"fixture-root>=1"')
+            local = cast("_LegacySourceProject", source_project)(tmp_path / "local", name="fixture-owned", dependencies='"fixture-root>=1"')
             if recursive_source:
-                source_project(tmp_path / "leaf", name="fixture-leaf", dependencies='"fixture-root>=1"')
-                local = source_project(
+                cast("_LegacySourceProject", source_project)(tmp_path / "leaf", name="fixture-leaf", dependencies='"fixture-root>=1"')
+                local = cast("_LegacySourceProject", source_project)(
                     local, name="fixture-owned", dependencies='"fixture-leaf"',
                     sources='fixture-leaf={path="../leaf"}',
                 )
-            project = source_project(
+            project = cast("_LegacySourceProject", source_project)(
                 project, name="fixture-root" if metadata_name_conflict else "fixture-source",
                 dependencies='"fixture-owned"',
                 sources='fixture-owned={path="../local", editable=true}',
             )
         operand = project / "pyproject.toml"
-        roots = (tmp_path,) if source_graph else (project,)
+        roots: tuple[Path, ...] = (tmp_path,) if source_graph else (project,)
     else:
         operand = tmp_path / "requirements.in"
         nested = tmp_path.as_posix() + "/./nested.in" if nested_alias else "nested.in"
@@ -725,7 +738,7 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
     mutations = []
     retained_directories = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         if "--show-settings" not in command and command[1:3] == ["pip", "compile"]:
             mutations.append(True)
             operand.write_text("unadmitted input\n", encoding="utf-8")
@@ -754,7 +767,7 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         arguments = [operand_argument, "-o", str(output) if root_anchor else "locked.txt", "--python", sys.executable,
                      "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
                      "--only-binary", ":all:"]
-        options = dict(env=environment, cwd=working_directory, now=NOW, trusted_source_roots=roots)
+        options: dict[str, Any] = dict(env=environment, cwd=working_directory, now=NOW, trusted_source_roots=roots)
         if source_graph:
             with policy.retain_uv_source_compile("uv", arguments, **options) as transaction:
                 result = policy.subprocess.run(
@@ -790,35 +803,35 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
 
 
 @pytest.mark.parametrize("missing_age", [False, True])
-def test_native_source_compile_exports_only_seasoned_third_party_closure(tmp_path, monkeypatch, missing_age):
+def test_native_source_compile_exports_only_seasoned_third_party_closure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_age: bool) -> None:
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="project", missing_age=missing_age, alias=False,
         source_graph=True,
     )
 
 
-def test_native_source_compile_never_omits_a_root_metadata_registry_identity(tmp_path, monkeypatch):
+def test_native_source_compile_never_omits_a_root_metadata_registry_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="project", missing_age=False, alias=False,
         source_graph=True, metadata_name_conflict=True,
     )
 
 
-def test_native_source_compile_retains_recursive_local_mappings(tmp_path, monkeypatch):
+def test_native_source_compile_retains_recursive_local_mappings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="project", missing_age=False, alias=False,
         source_graph=True, recursive_source=True,
     )
 
 
-def test_native_compile_nested_absolute_include_cannot_reopen_original(tmp_path, monkeypatch):
+def test_native_compile_nested_absolute_include_cannot_reopen_original(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="requirements", missing_age=False, alias=False,
         nested_alias=True,
     )
 
 
-def test_native_compile_root_working_directory_keeps_canonical_includes(tmp_path, monkeypatch):
+def test_native_compile_root_working_directory_keeps_canonical_includes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="requirements", missing_age=False, alias=False,
         root_anchor=True,

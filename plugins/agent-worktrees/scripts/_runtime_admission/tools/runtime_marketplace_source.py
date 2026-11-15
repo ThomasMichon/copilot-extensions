@@ -13,9 +13,11 @@ import os
 from pathlib import Path
 import re
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Iterator, Mapping
 
-import runtime_source_authentication as authentication
+import runtime_source_authentication as runtime_source_authentication
+authentication = runtime_source_authentication
 from runtime_profile_errors import ProfileError, ProfileUnavailable
 
 if TYPE_CHECKING:
@@ -31,7 +33,7 @@ from worktree_manager import engine_origin, runtime_source, runtime_source_confi
 _COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 
 
-def _registered(installation: dict, policy: dict):
+def _registered(installation: Mapping[str, Any], policy: dict[str, Any]) -> engine_origin.RegisteredOrigin:
     provenance = installation_context.resolve_payload_source(**{
         key: installation[key] for key in (
             "payload_root", "plugin_id", "copilot_home", "project_root",
@@ -56,7 +58,7 @@ def _registered(installation: dict, policy: dict):
     return origin
 
 
-def _repository(origin) -> str:
+def _repository(origin: engine_origin.RegisteredOrigin) -> str:
     descriptor = origin.definition["source"]
     kind = descriptor.get("source")
     field = "repo" if kind == "github" else "url"
@@ -68,13 +70,13 @@ def _repository(origin) -> str:
         or ref not in ("", "main", "refs/heads/main") and not _COMMIT.fullmatch(ref)
     ):
         raise ProfileUnavailable("registered marketplace ref or layout is unsupported")
-    return f"https://github.com/{descriptor[field]}.git" if kind == "github" else descriptor[field]
+    return f"https://github.com/{descriptor[field]}.git" if kind == "github" else cast(str, descriptor[field])
 
 
 @contextmanager
 def retain_authenticated_marketplace_source(
-    plan: InstallationProfilePlan, *, installation: dict, deadline: float,
-):
+    plan: InstallationProfilePlan | authentication._OriginPolicy, *, installation: Mapping[str, Any], deadline: float,
+) -> Iterator[authentication.AuthenticatedSource]:
     """Hold real acquisition/configuration custody through source consumption."""
     authentication._check_deadline(deadline)
     policy = authentication._policy(plan, installation)
@@ -99,7 +101,7 @@ def retain_authenticated_marketplace_source(
     if ledger is None:
         raise ProfileUnavailable("native installed source ledger is unavailable")
 
-    def inventory():
+    def inventory() -> dict[str, Any] | None:
         authentication._check_deadline(deadline)
         return native_git_inventory_item(
             origin.source, home, cache, definition=origin.definition, environment=environment,
@@ -148,7 +150,7 @@ def retain_authenticated_marketplace_source(
                 "source": prepared.identity.document(),
             }, sort_keys=True, separators=(",", ":")).encode()
 
-            def verify():
+            def verify() -> None:
                 authentication._check_deadline(deadline)
                 authentication._policy(plan, installation)
                 if (

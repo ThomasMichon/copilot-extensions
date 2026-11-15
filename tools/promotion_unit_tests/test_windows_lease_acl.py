@@ -12,12 +12,13 @@ import pytest
 
 SOURCE = Path(__file__).resolve().parents[2] / "libs/versioned-runtime/versioned_runtime_leases.py"
 SPEC = importlib.util.spec_from_file_location("unit_windows_lease_acl", SOURCE)
+assert SPEC is not None and SPEC.loader is not None
 leases = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(leases)
 
 
 @pytest.mark.parametrize("directory", [False, True], ids=["file", "directory"])
-def test_exact_generated_legacy_acl_is_recognized(directory):
+def test_exact_generated_legacy_acl_is_recognized(directory: bool) -> None:
     flags = "OICI" if directory else "ID"
     for principals in itertools.permutations(("OW", "SY", "BA")):
         value = ("O:BAD:P" if directory else "O:BAD:") + "".join(
@@ -41,7 +42,7 @@ CASES = {
 
 
 @pytest.mark.parametrize("name", CASES)
-def test_foreign_public_partial_or_edited_acl_is_not_repair_authority(name):
+def test_foreign_public_partial_or_edited_acl_is_not_repair_authority(name: str) -> None:
     assert not leases._legacy_windows_lease_acl(CASES[name], directory=True)
 
 
@@ -56,22 +57,22 @@ def test_foreign_public_partial_or_edited_acl_is_not_repair_authority(name):
     (0, 0, 0x1F01FF, "S-1-5-21-1002", False),
 ], ids=["direct", "inherited", "inherit-only", "deny", "read-only", "admin-only",
         "owner-rights", "other-account"])
-def test_legacy_repair_requires_actual_account_full_control(kind, flags, mask, sid, expected):
+def test_legacy_repair_requires_actual_account_full_control(kind: int, flags: int, mask: int, sid: str, expected: bool) -> None:
     assert leases._windows_account_full_control(kind, flags, mask, sid, "S-1-5-21-1001") is expected
 
 
-def test_posix_lease_requests_private_root_before_descendants(tmp_path, monkeypatch):
+def test_posix_lease_requests_private_root_before_descendants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Portable call-boundary control without acquiring a kernel lease."""
     root = tmp_path / "fresh"
     requested = []
     original = Path.mkdir
-    def mkdir(path, mode=0o777, parents=False, exist_ok=False):
+    def mkdir(path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
         if path == root:
             requested.append(mode)
         return original(path, mode=mode, parents=parents, exist_ok=exist_ok)
     class OpenReached(Exception):
         pass
-    def opened(*args, **kwargs):
+    def opened(*args: object, **kwargs: object) -> None:
         assert requested == [0o700]
         raise OpenReached()
     monkeypatch.setattr(Path, "mkdir", mkdir)
@@ -84,12 +85,13 @@ def test_posix_lease_requests_private_root_before_descendants(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("existing", [False, True])
-def test_candidate_requests_private_root_before_source_phase(tmp_path, monkeypatch, existing):
+def test_candidate_requests_private_root_before_source_phase(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool) -> None:
     repository = SOURCE.parents[2]
     monkeypatch.syspath_prepend(str(repository / "libs/installer-engine"))
     monkeypatch.syspath_prepend(str(repository / "libs/versioned-runtime"))
     path = repository / "libs/installer-engine/installer_engine.py"
     spec = importlib.util.spec_from_file_location("unit_private_first_touch_engine", path)
+    assert spec is not None and spec.loader is not None
     engine = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, engine)
     spec.loader.exec_module(engine)
@@ -106,7 +108,7 @@ def test_candidate_requests_private_root_before_source_phase(tmp_path, monkeypat
             root.chmod(0o755)
     requested = []
     original = Path.mkdir
-    def mkdir(path, mode=0o777, parents=False, exist_ok=False):
+    def mkdir(path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
         if path == root:
             requested.append(mode)
         return original(path, mode=mode, parents=parents, exist_ok=exist_ok)
@@ -114,7 +116,7 @@ def test_candidate_requests_private_root_before_source_phase(tmp_path, monkeypat
     original_hash = engine._construction_hash
     class SourceReached(Exception):
         pass
-    def fingerprinted(*args, **kwargs):
+    def fingerprinted(*args: object, **kwargs: object) -> None:
         digest = original_hash(*args, **kwargs)
         assert len(digest) == 64
         assert requested == [0o700]

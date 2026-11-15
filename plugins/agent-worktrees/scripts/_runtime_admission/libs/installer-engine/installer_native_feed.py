@@ -15,22 +15,27 @@ import ssl
 import subprocess
 import sys
 import time
+from typing import Any, BinaryIO, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import installer_dependency_policy as dependencies
 from installer_feed_policy import _is_public_pypi_url
 from installer_wheel_acquisition import (
-    DELIVERY_POLICY, AcquisitionUnavailable, WheelFeed, _name, _tls_record, _url,
+    DELIVERY_POLICY as DELIVERY_POLICY, AcquisitionUnavailable, WheelFeed, _name,
+    _tls_record as _tls_record, _url,
 )
 from installer_wheel_inputs import _check_deadline, _ordinary
-from installer_wheel_snapshot import _open, _unchanged
+from installer_wheel_snapshot import _open as _snapshot_open, _unchanged as _snapshot_unchanged
+
+_open = cast(Callable[[Path], BinaryIO], _snapshot_open)
+_unchanged = cast(Callable[..., os.stat_result], _snapshot_unchanged)
 
 
 class NativeFeedError(ValueError):
     """Unsupported, ambiguous or inconsistent native feed inputs."""
 
 
-def _body(value: str, prefix: str, opening="{", closing="}") -> str:
+def _body(value: str, prefix: str, opening: str = "{", closing: str = "}") -> str:
     match = re.fullmatch(re.escape(prefix) + r"\s*" + re.escape(opening) + r".*", value, re.DOTALL)
     if match is None:
         raise NativeFeedError("native feed projection is unsupported")
@@ -38,7 +43,7 @@ def _body(value: str, prefix: str, opening="{", closing="}") -> str:
     body, end = dependencies._balanced(value, position, opening, closing)
     if value[end:].strip().strip(","):
         raise NativeFeedError("native feed projection has trailing data")
-    return body
+    return cast(str, body)
 
 
 def _fields(body: str) -> dict[str, str]:
@@ -124,10 +129,10 @@ def _index_url(value: str) -> tuple[str, str, bool]:
     return location, unquote(_string(safe.get("username", ""))), safe.get("password") != "None"
 
 
-def _raw_indexes(transaction) -> list[tuple[str | None, str]]:
+def _raw_indexes(transaction: dependencies.RetainedUVInstall) -> list[tuple[str | None, str]]:
     environment = transaction.environment
     config = dependencies._toml(Path(environment["UV_CONFIG_FILE"]))
-    result = []
+    result: list[tuple[str | None, str]] = []
     for item in config.get("index", []):
         if isinstance(item, dict) and isinstance(item.get("url"), str):
             result.append((item.get("name"), item["url"]))
@@ -141,13 +146,13 @@ def _raw_indexes(transaction) -> list[tuple[str | None, str]]:
         for value in environment.get(key, "").split():
             name, separator, url = value.partition("=")
             result.append((name, url) if separator and "://" not in name else (None, value))
-    expanded = []
-    for name, value in result:
-        def replace(match):
+    expanded: list[tuple[str | None, str]] = []
+    for index_name, value in result:
+        def replace(match: re.Match[str]) -> str:
             if match[1] not in environment:
                 raise NativeFeedError("retained feed URL has an unresolved environment reference")
             return environment[match[1]]
-        expanded.append((name, re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replace, value)))
+        expanded.append((index_name, re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replace, value)))
     return expanded
 
 
@@ -159,7 +164,9 @@ def _basic(user: str, password: str) -> tuple[tuple[str, str], ...]:
     return (("Authorization", scheme + encoded),)
 
 
-def _netrc(environment, host, username):
+def _netrc(
+    environment: dict[str, str], host: str | None, username: str,
+) -> tuple[str, str] | None:
     home = environment.get("USERPROFILE" if os.name == "nt" else "HOME")
     location = environment.get("NETRC")
     path = Path(location) if location else Path(home) / ".netrc" if home else None
@@ -175,7 +182,7 @@ def _netrc(environment, host, username):
             if len(content) > 1 << 20:
                 raise NativeFeedError("native netrc credential input is oversized")
             _unchanged(path, before, stream, opened=opened)
-        provider = netrc.netrc.__new__(netrc.netrc)
+        provider: Any = netrc.netrc.__new__(netrc.netrc)
         provider.hosts, provider.macros = {}, {}
         provider._parse(str(path), io.StringIO(content.decode("utf-8")), False)
         credentials = provider.authenticators(host)
@@ -189,7 +196,11 @@ def _netrc(environment, host, username):
         raise NativeFeedError("native netrc credential input cannot be captured") from None
 
 
-def _credentials(index, transaction, location, username, password_present, raw, uv, deadline):
+def _credentials(
+    index: dict[str, str | None], transaction: dependencies.RetainedUVInstall,
+    location: str, username: str, password_present: bool,
+    raw: list[tuple[str | None, str]], uv: str, deadline: float,
+) -> tuple[tuple[str, str], ...]:
     name = index["name"]
     matches = []
     for candidate_name, candidate in raw:
@@ -219,9 +230,9 @@ def _credentials(index, transaction, location, username, password_present, raw, 
     if password_present and password is None:
         raise NativeFeedError("native embedded feed credentials could not be captured")
     if password is None:
-        pair = _netrc(environment, urlsplit(location).hostname, user)
-        if pair is not None:
-            user, password = pair
+        netrc_pair = _netrc(environment, urlsplit(location).hostname, user)
+        if netrc_pair is not None:
+            user, password = netrc_pair
     if password is None:
         command = [uv, "auth", "token", _url(location)[1]]
         if user:
@@ -231,7 +242,7 @@ def _credentials(index, transaction, location, username, password_present, raw, 
             result = subprocess.run(
                 command, env=environment, cwd=transaction.cwd, capture_output=True,
                 text=True, stdin=subprocess.DEVNULL, timeout=deadline - time.monotonic(),
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired):
             raise NativeFeedError("native feed credential lookup failed or timed out") from None
@@ -253,7 +264,9 @@ def _credentials(index, transaction, location, username, password_present, raw, 
     return _basic(user, password)
 
 
-def _configured_index(name, location, raw):
+def _configured_index(
+    name: str | None, location: str, raw: list[tuple[str | None, str]],
+) -> bool:
     for candidate_name, candidate in raw:
         if candidate_name is not None and candidate_name != name:
             continue
@@ -264,7 +277,9 @@ def _configured_index(name, location, raw):
     return False
 
 
-def _tls(network, *, environment, deadline):
+def _tls(
+    network: dict[str, str], *, environment: dict[str, str], deadline: float,
+) -> ssl.SSLContext:
     _check_deadline(deadline)
     if network.get("allow_insecure_host") != "[]":
         raise NativeFeedError("insecure native feed trust is not permitted")
@@ -274,7 +289,7 @@ def _tls(network, *, environment, deadline):
     if sys.platform == "win32":
         for store in ("CA", "ROOT"):
             for certificate, encoding, trust in ssl.enum_certificates(store):
-                if encoding == "x509_asn" and (trust is True or ssl.Purpose.SERVER_AUTH.oid in trust):
+                if encoding == "x509_asn" and (trust is True or ssl.Purpose.SERVER_AUTH.oid in cast(set[str], trust)):
                     context.load_verify_locations(cadata=ssl.DER_cert_to_PEM_cert(certificate))
     else:
         paths = ssl.get_default_verify_paths()
@@ -323,7 +338,10 @@ def _tls(network, *, environment, deadline):
     return context
 
 
-def _local_exclusions(value, transaction, wheels, selected):
+def _local_exclusions(
+    value: str, transaction: dependencies.RetainedUVInstall,
+    wheels: list[dict[str, Any]] | None, selected: tuple[str, ...],
+) -> tuple[str, ...]:
     """Admit only the held exact exclusion file selected by the composition owner."""
     try:
         if not isinstance(selected, tuple) or not 1 <= len(selected) <= 256:
@@ -356,8 +374,12 @@ def _local_exclusions(value, transaction, wheels, selected):
         raise NativeFeedError("native exact local exclusions cannot be captured") from None
 
 
-def _machine_constraints(outer, settings, transaction, wheels, *, excluded_local_packages=()):
-    exclusions = ()
+def _machine_constraints(
+    outer: dict[str, str], settings: dict[str, str],
+    transaction: dependencies.RetainedUVInstall, wheels: list[dict[str, Any]] | None, *,
+    excluded_local_packages: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    exclusions: tuple[str, ...] = ()
     if excluded_local_packages != ():
         exclusions = _local_exclusions(
             outer.get("constraints", ""), transaction, wheels, excluded_local_packages,
@@ -389,7 +411,7 @@ def _machine_constraints(outer, settings, transaction, wheels, *, excluded_local
     return exclusions
 
 
-def _seasoning_identity(settings):
+def _seasoning_identity(settings: dict[str, str]) -> dict[str, Any]:
     cutoff = _fields(_body(settings.get("exclude_newer", ""), "ExcludeNewer"))
     packages = _body(cutoff.get("package", ""), "ExcludeNewerPackage", "(", ")").strip().rstrip(",")
     packages = _body(packages, "", "{", "}")
@@ -416,15 +438,16 @@ class NativeFeedInputs:
     proxies: dict[str, str] = field(repr=False)
 
 
-def _transport_identity(context):
+def _transport_identity(context: ssl.SSLContext) -> dict[str, Any]:
     transport = _tls_record(context)
     transport["certificates"] = sorted(set(transport["certificates"]))
     return transport
 
 
 def capture_native_feed_inputs(
-    transaction, projection: str, original: str, profile, policy: dict, uv: str,
-    deadline: float, *, wheels: list[dict] | None, profile_policy: str,
+    transaction: dependencies.RetainedUVInstall, projection: str, original: str,
+    profile: object, policy: dict[str, Any], uv: str,
+    deadline: float, *, wheels: list[dict[str, Any]] | None, profile_policy: str,
     opaque_identity: Callable[[str], str],
     excluded_local_packages: tuple[str, ...] = (),
 ) -> NativeFeedInputs:
@@ -466,9 +489,9 @@ def capture_native_feed_inputs(
         position = body.index("{", match.start())
         inner, end = dependencies._balanced(body, position, "{", "}")
         index = _fields(inner)
-        name = index.get("name", "")
-        name = None if name == "None" else _string(
-            _body(_body(name, "Some", "(", ")").strip(), "IndexName", "(", ")").strip().rstrip(","),
+        projected_name = index.get("name", "")
+        name: str | None = None if projected_name == "None" else _string(
+            _body(_body(projected_name, "Some", "(", ")").strip(), "IndexName", "(", ")").strip().rstrip(","),
         )
         location, username, password_present = _index_url(index.get("url", ""))
         if (
@@ -526,9 +549,9 @@ def capture_native_feed_inputs(
     }, sort_keys=True, separators=(",", ":")))
     proxies = {}
     for key in ("http_proxy", "https_proxy"):
-        value = _optional(network.get(key, "None"))
-        if value is not None:
-            proxies[key.removesuffix("_proxy")] = value
+        proxy_value = _optional(network.get(key, "None"))
+        if proxy_value is not None:
+            proxies[key.removesuffix("_proxy")] = proxy_value
     _check_deadline(deadline)
     return NativeFeedInputs(
         profile, feeds, cutoffs, identity, origins, context, proxies,
@@ -536,8 +559,9 @@ def capture_native_feed_inputs(
 
 
 def recheck_native_feed_inputs(
-    transaction, projection: str, original: str, profile, policy: dict, uv: str,
-    deadline: float, **options,
+    transaction: dependencies.RetainedUVInstall, projection: str, original: str,
+    profile: object, policy: dict[str, Any], uv: str,
+    deadline: float, **options: Any,
 ) -> NativeFeedInputs:
     """Recheck the held compiler's settings without resolving dependencies."""
     expected = capture_native_feed_inputs(
@@ -549,7 +573,7 @@ def recheck_native_feed_inputs(
             [*transaction.argv, "--show-settings"],
             env=transaction.environment, cwd=transaction.cwd, capture_output=True, text=True,
             timeout=min(30, deadline - time.monotonic()),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise NativeFeedError("held native feed configuration probe failed or timed out") from None

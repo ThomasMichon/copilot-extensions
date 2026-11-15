@@ -14,7 +14,7 @@ from email.message import Message
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import BinaryIO, cast
+from typing import Any, BinaryIO, cast
 
 from artifact_source_build import (
     PromotionArtifactError, data_file_sources, validate_entry_points, validate_runtime_metadata,
@@ -23,7 +23,7 @@ from standalone_python_artifacts import COMPONENTS, artifact_label
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_wheel_inputs import WheelLimits
-from runtime_wheel_inspection import inspect_wheel_facts
+from runtime_wheel_inspection import inspect_wheel_facts as inspect_wheel_facts
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -38,7 +38,7 @@ _BUNDLE_LIMIT = 512 << 20
 _WHEEL_TAG_LIMIT = 10_000
 
 
-def _artifact_label(record: dict) -> str:
+def _artifact_label(record: dict[str, Any]) -> str:
     try:
         return artifact_label(record)
     except (KeyError, TypeError, ValueError) as exc:
@@ -53,7 +53,7 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def validate_artifact_entry(entry: dict) -> str:
+def validate_artifact_entry(entry: dict[str, Any]) -> str:
     """Return only the exact filename declared by a valid artifact identity."""
     if not isinstance(entry, dict):
         raise PromotionArtifactError("invalid artifact entry")
@@ -74,8 +74,8 @@ def validate_artifact_entry(entry: dict) -> str:
 
 
 def validate_bundle_binding(
-    path: Path, entry: dict, *, candidate_root: Path | None = None,
-) -> tuple[dict, str]:
+    path: Path, entry: dict[str, Any], *, candidate_root: Path | None = None,
+) -> tuple[dict[str, Any], str]:
     """Bind the canonical manifest to its actual archive and manifest bytes."""
     name = validate_artifact_entry(entry)
     if path.name != name or path.is_symlink() or not path.is_file() or _digest(path) != entry["sha256"]:
@@ -88,7 +88,7 @@ def validate_bundle_binding(
     return manifest, "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
 
 
-def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = None) -> dict:
+def validate_bundle(path: Path, entry: dict[str, Any], *, candidate_root: Path | None = None) -> dict[str, Any]:
     """Inspect untrusted ZIP bytes without extracting or executing candidate code."""
     try:
         with zipfile.ZipFile(path) as bundle:
@@ -154,8 +154,12 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                     if f"sha256:{digest.hexdigest()}" != wheel["sha256"]:
                         raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
                     archive.seek(0)
+                    if sys.platform == "win32":
+                        wheel_archive = cast(BinaryIO, archive)
+                    else:
+                        wheel_archive = archive
                     validate_wheel(
-                        archive, wheel,
+                        wheel_archive, wheel,
                         source_dir=candidate_root / wheel["source"] if candidate_root is not None else None,
                         component=(
                             next((key for key, source in COMPONENTS.items() if source == wheel["source"]), None)
@@ -163,7 +167,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                         ),
                         candidate_root=candidate_root,
                     )
-            return manifest
+            return cast(dict[str, Any], manifest)
     except (
         OSError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile,
         RuntimeError, NotImplementedError,
@@ -174,7 +178,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
 
 
 def validate_wheel(
-    archive: BinaryIO, wheel: dict, *, source_dir: Path | None = None,
+    archive: BinaryIO, wheel: dict[str, Any], *, source_dir: Path | None = None,
     component: str | None = None, candidate_root: Path | None = None,
 ) -> None:
     """Validate wheel bytes, metadata and RECORD without extracting package code."""
@@ -195,7 +199,7 @@ def validate_wheel(
 
 
 def inspect_wheel(
-    archive: BinaryIO, wheel: dict, *, expected_generator: str | None = None,
+    archive: BinaryIO, wheel: dict[str, Any], *, expected_generator: str | None = None,
     max_unpacked_bytes: int = _BUNDLE_LIMIT, max_metadata_bytes: int = _MANIFEST_LIMIT,
     max_archive_bytes: int = _BUNDLE_LIMIT,
     record_algorithms: frozenset[str] = frozenset({"sha256", "sha384", "sha512"}),
@@ -361,7 +365,7 @@ def validate_wheel_sources(
         raise PromotionArtifactError(f"cannot bind wheel payload to candidate source: {exc}") from exc
 
 
-def validate_manifest(manifest: dict) -> None:
+def validate_manifest(manifest: dict[str, Any]) -> None:
     """Reuse trusted builder identity rules without resolving or running a toolchain."""
     from build_python_artifacts import (
         _assert_version_corresponds, overall_identity_tags, parse_wheel_filename,
@@ -444,7 +448,7 @@ def validate_manifest(manifest: dict) -> None:
                     label=label,
                 )
             source_matches = (
-                any(item["source"] == source and item["role"] == wheel["role"] for item in selection["projects"])
+                any(item["source"] == source and item["role"] == wheel["role"] for item in cast(dict[str, Any], selection)["projects"])
                 and isinstance(source, str) and (
                     source in COMPONENTS.values() if wheel["role"] == "standalone" else
                     len(source.split("/")) == 2 and source.startswith(
@@ -485,7 +489,7 @@ def validate_manifest(manifest: dict) -> None:
         raise PromotionArtifactError(f"invalid manifest provenance: {exc}") from exc
 
 
-def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: int = 1) -> None:
+def validate_source_binding(manifest: dict[str, Any], root: Path, *, core_hash_workers: int = 1) -> None:
     """Hash the trusted-discovered closure in candidate data, never import its code."""
     import build_python_artifacts as builder
     from build_toolchain_lock import ArtifactBuildError
@@ -511,7 +515,7 @@ def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: in
             plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir, skip_test_runs=False) is not None
         ):
             raise PromotionArtifactError("artifact source tree contains a symlink")
-        resources = ()
+        resources: tuple[Path, ...] = ()
         if core:
             from core_python_artifacts import payload_hash, source_closure
             closure = source_closure(root, source_builder)
@@ -526,8 +530,8 @@ def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: in
             ):
                 raise PromotionArtifactError("core manifest selection differs from candidate")
         elif standalone:
-            from standalone_python_artifacts import source_closure
-            plugin_dir, libs, resources = source_closure(manifest["component"], root, source_builder)
+            from standalone_python_artifacts import source_closure as standalone_closure
+            plugin_dir, libs, resources = standalone_closure(manifest["component"], root, source_builder)
             if manifest.get("build_resources") != [
                 path.relative_to(root).as_posix() for path in resources
             ]:

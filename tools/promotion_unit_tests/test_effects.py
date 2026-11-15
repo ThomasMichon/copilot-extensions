@@ -3,7 +3,8 @@
 from pathlib import Path
 import os
 import sys
-from types import SimpleNamespace
+from types import FrameType, SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -12,7 +13,7 @@ from promotion_unit_contract import UnitEvidenceError
 from promotion_unit_effects import UnitRun, path_spelling
 
 
-def test_extended_windows_paths_retain_the_same_storage_boundary():
+def test_extended_windows_paths_retain_the_same_storage_boundary() -> None:
     from pathlib import PureWindowsPath
 
     for ordinary, extended in (
@@ -27,12 +28,12 @@ def test_extended_windows_paths_retain_the_same_storage_boundary():
     assert path_spelling(r"\\?\Volume{fixture}\data", "win32") == r"\\?\Volume{fixture}\data"
 
 
-def test_native_extended_temporary_paths_remain_confined(tmp_path):
+def test_native_extended_temporary_paths_remain_confined(tmp_path: Path) -> None:
     root = tmp_path / "synthetic"
     run = UnitRun(Mock(), tmp_path, {}, root)
     run.active = True
 
-    def native(path):
+    def native(path: Path) -> str:
         value = str(path)
         if sys.platform != "win32":
             return value
@@ -48,7 +49,7 @@ def test_native_extended_temporary_paths_remain_confined(tmp_path):
     "subprocess.Popen", "socket.__new__", "os.system", "os.posix_spawn",
     "os.exec", "os.fork", "ctypes.dlopen",
 ])
-def test_prohibited_actor_events_are_recorded_even_if_exception_is_caught(tmp_path, event):
+def test_prohibited_actor_events_are_recorded_even_if_exception_is_caught(tmp_path: Path, event: str) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.active = True
     with pytest.raises(UnitEvidenceError, match="not an eligible unit effect"):
@@ -56,7 +57,7 @@ def test_prohibited_actor_events_are_recorded_even_if_exception_is_caught(tmp_pa
     assert run.effects == [event]
 
 
-def test_only_declared_local_python_source_is_admitted(tmp_path):
+def test_only_declared_local_python_source_is_admitted(tmp_path: Path) -> None:
     admitted = "helper.py"
     run = UnitRun(Mock(), tmp_path, {admitted: "a" * 64}, tmp_path)
     run.active = True
@@ -66,14 +67,14 @@ def test_only_declared_local_python_source_is_admitted(tmp_path):
         run.audit("open", (str(tmp_path / "other.py"), "r", 0))
 
 
-def test_actual_git_storage_is_not_a_synthetic_fixture(tmp_path):
+def test_actual_git_storage_is_not_a_synthetic_fixture(tmp_path: Path) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.active = True
     with pytest.raises(UnitEvidenceError, match="Git storage"):
         run.audit("open", (str(tmp_path / ".git/config"), "r", 0))
 
 
-def test_writes_are_limited_to_synthetic_temporary_storage(tmp_path):
+def test_writes_are_limited_to_synthetic_temporary_storage(tmp_path: Path) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path / "synthetic")
     run.active = True
     run.audit("open", (str(tmp_path / "synthetic/data.json"), "w", 0))
@@ -85,14 +86,14 @@ def test_writes_are_limited_to_synthetic_temporary_storage(tmp_path):
     "flags", [os.O_RDONLY | os.O_TRUNC, os.O_RDONLY | os.O_APPEND],
     ids=["truncate", "append"],
 )
-def test_readonly_mutating_open_flags_are_refused_before_any_file_open(tmp_path, flags):
+def test_readonly_mutating_open_flags_are_refused_before_any_file_open(tmp_path: Path, flags: int) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path / "synthetic")
     run.active = True
     with pytest.raises(UnitEvidenceError, match="write outside"):
         run.audit("open", (str(tmp_path / "host-data.json"), "r", flags))
 
 
-def test_fixture_alias_cannot_escape_synthetic_temporary_storage(tmp_path):
+def test_fixture_alias_cannot_escape_synthetic_temporary_storage(tmp_path: Path) -> None:
     temporary = tmp_path / "synthetic"
     run = UnitRun(Mock(), tmp_path, {}, temporary)
     run.active = True
@@ -101,14 +102,14 @@ def test_fixture_alias_cannot_escape_synthetic_temporary_storage(tmp_path):
         run.audit("os.symlink", ("../../host", str(temporary / "fixture-current"), -1))
 
 
-def test_hardlink_relative_source_is_resolved_against_its_own_directory(tmp_path):
+def test_hardlink_relative_source_is_resolved_against_its_own_directory(tmp_path: Path) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.active = True
     with pytest.raises(UnitEvidenceError, match="indirection outside"):
         run.audit("os.link", ("host-file.txt", str(tmp_path / "alias"), -1, -1))
 
 
-def test_directory_relative_cleanup_is_bound_to_the_actual_private_descriptor(tmp_path, monkeypatch):
+def test_directory_relative_cleanup_is_bound_to_the_actual_private_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.active = True
     monkeypatch.setattr(sys, "platform", "linux")
@@ -120,14 +121,14 @@ def test_directory_relative_cleanup_is_bound_to_the_actual_private_descriptor(tm
 
 
 @pytest.mark.parametrize("flags", [os.O_RDONLY, os.O_WRONLY | os.O_TRUNC])
-def test_unattributed_relative_low_level_opens_are_refused(tmp_path, flags):
+def test_unattributed_relative_low_level_opens_are_refused(tmp_path: Path, flags: int) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.active = True
     with pytest.raises(UnitEvidenceError, match="unattributable descriptor-relative open"):
         run.audit("open", ("data.txt", None, flags))
 
 
-def test_descriptor_relative_open_validates_the_actual_target_before_execution(tmp_path, monkeypatch):
+def test_descriptor_relative_open_validates_the_actual_target_before_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     temporary = tmp_path / "synthetic"
     original = Mock()
     monkeypatch.setattr(os, "open", original)
@@ -142,7 +143,7 @@ def test_descriptor_relative_open_validates_the_actual_target_before_execution(t
     assert run._open_paths == []
 
 
-def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context(tmp_path, monkeypatch):
+def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     flags = os.O_RDONLY | (1 << 28)
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path))
@@ -152,19 +153,19 @@ def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context
     resolutions = []
     resolve = Path.resolve
 
-    def resolved(path, *args, **kwargs):
+    def resolved(path: Path, *args: bool, **kwargs: bool) -> Path:
         if path == target:
             resolutions.append(path)
         return resolve(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", resolved)
 
-    def original(name, actual_flags, mode, *, dir_fd):
+    def original(name: str, actual_flags: int, mode: int, *, dir_fd: int | None) -> None:
         assert name == "data.txt" and actual_flags == flags and mode == 0o640 and dir_fd == 41
         run.audit("open", (name, None, actual_flags))
         raise OSError("synthetic open refusal")
 
-    run._os_open = original
+    run._os_open = cast(Any, original)
     with pytest.raises(OSError, match="synthetic open refusal"):
         run.guarded_open("data.txt", flags, 0o640, dir_fd=41)
     assert resolutions == [target]
@@ -172,7 +173,7 @@ def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context
     class SelectedPath:
         calls = 0
 
-        def __fspath__(self):
+        def __fspath__(self) -> str:
             self.calls += 1
             return "data.txt" if self.calls == 1 else str(tmp_path.parent / "host.txt")
 
@@ -187,14 +188,14 @@ def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context
     assert run._open_paths == []
 
 
-def test_framework_activity_outside_execution_does_not_claim_a_unit_effect(tmp_path):
+def test_framework_activity_outside_execution_does_not_claim_a_unit_effect(tmp_path: Path) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.audit("subprocess.Popen", ())
     run.audit("open", (str(Path("unadmitted.py")), "r", 0))
     assert run.effects == []
 
 
-def test_nested_relative_open_restores_enclosing_path_after_refusal(tmp_path, monkeypatch):
+def test_nested_relative_open_restores_enclosing_path_after_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     temporary = tmp_path / "synthetic"
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(
@@ -205,7 +206,7 @@ def test_nested_relative_open_restores_enclosing_path_after_refusal(tmp_path, mo
     run.active = True
     executed = []
 
-    def original(name, flags, mode, *, dir_fd):
+    def original(name: str, flags: int, mode: int, *, dir_fd: int | None) -> int:
         assert dir_fd == 42
         with pytest.raises(UnitEvidenceError, match="write outside"):
             run.guarded_open(name, flags, dir_fd=41)
@@ -213,7 +214,7 @@ def test_nested_relative_open_restores_enclosing_path_after_refusal(tmp_path, mo
         executed.append((name, dir_fd))
         return 17
 
-    run._os_open = original
+    run._os_open = cast(Any, original)
     assert run.guarded_open("same.txt", os.O_WRONLY | os.O_CREAT, dir_fd=42) == 17
     assert executed == [("same.txt", 42)]
     assert run._open_paths == []
@@ -221,22 +222,22 @@ def test_nested_relative_open_restores_enclosing_path_after_refusal(tmp_path, mo
 
 
 @pytest.mark.parametrize("reason", ["known failure", ""])
-def test_xpass_cannot_be_serialized_as_unqualified_passing_evidence(tmp_path, reason):
+def test_xpass_cannot_be_serialized_as_unqualified_passing_evidence(tmp_path: Path, reason: str) -> None:
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
-    run.pytest_runtest_logreport(SimpleNamespace(
+    run.pytest_runtest_logreport(cast(pytest.TestReport, SimpleNamespace(
         nodeid="test.py::test_case", when="call", outcome="passed", wasxfail=reason,
-    ))
+    )))
     assert run.effects == ["xfail/xpass outcome is not positive unit evidence"]
 
 
-def test_only_the_actual_python_test_frame_starts_a_call_context(tmp_path):
-    def body():
+def test_only_the_actual_python_test_frame_starts_a_call_context(tmp_path: Path) -> None:
+    def body() -> None:
         pass
 
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     item = SimpleNamespace(obj=body, nodeid="test.py::test_case")
-    run.pytest_runtest_call(item)
-    assert run.dynamic_context(SimpleNamespace(f_code=body.__code__)) == item.nodeid + "|call"
-    assert run.dynamic_context(SimpleNamespace(f_code=UnitRun.pytest_runtest_logreport.__code__)) is None
-    run.pytest_runtest_teardown(item)
-    assert run.dynamic_context(SimpleNamespace(f_code=body.__code__)) is None
+    run.pytest_runtest_call(cast(pytest.Function, item))
+    assert run.dynamic_context(cast(FrameType, SimpleNamespace(f_code=body.__code__))) == item.nodeid + "|call"
+    assert run.dynamic_context(cast(FrameType, SimpleNamespace(f_code=UnitRun.pytest_runtest_logreport.__code__))) is None
+    run.pytest_runtest_teardown(cast(pytest.Item, item))
+    assert run.dynamic_context(cast(FrameType, SimpleNamespace(f_code=body.__code__))) is None

@@ -3,20 +3,26 @@ from __future__ import annotations
 
 import importlib.machinery
 import configparser
-import os
+import os as os
 import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from email.message import Message
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
 import zipfile
 
-if sys.version_info >= (3, 11):
-    import tomllib
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
 else:
-    import tomli as tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
 
 class PromotionArtifactError(RuntimeError):

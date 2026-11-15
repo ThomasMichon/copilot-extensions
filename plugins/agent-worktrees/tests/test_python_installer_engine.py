@@ -12,14 +12,62 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, Any, BinaryIO, NoReturn, Protocol, cast
 
 import pytest
 
+if TYPE_CHECKING:
+    from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot
+
+
+class _FrozenInputView(Protocol):
+    plugin: Path
+    packages: tuple[Path, ...]
+    payload_hash: str
+
+
+class _RetainedInstallView(Protocol):
+    argv: tuple[str, ...]
+    sources: dict[Path, Path]
+
+
+class _OwnedJob(Protocol):
+    def terminate_and_wait(self, timeout: float) -> None: ...
+
+
+class _ClosedSnapshot(Protocol):
+    def __call__(
+        self, tmp_path: Path, *, closure: bool = False, version: str = "1.0",
+        transport: str = "loose",
+    ) -> AbstractContextManager[WheelSnapshot]: ...
+
+
+class _ClosedInspected(Protocol):
+    def __call__(self, retained: WheelSnapshot, **changes: object) -> WheelInstallInputs: ...
+
+
+class _ClosedCandidate(Protocol):
+    def __call__(
+        self, engine: ModuleType, root: Path, plugin: Path, wheels: WheelInstallInputs,
+        **options: object,
+    ) -> AbstractContextManager[object]: ...
+
+
+class _CachedSourceWheel(Protocol):
+    def __call__(
+        self, owner_root: Path, binding: bytes, output: Path | None, *,
+        build: Callable[[Path], Path], validate: Callable[[Path], None],
+        max_archive_bytes: int, deadline: float,
+        progress_deadline: Callable[[], float] | None = None,
+    ) -> Path: ...
+
 
 @pytest.fixture
-def engine(monkeypatch):
+def engine(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     if sys.version_info < (3, 11):
         pytest.skip("the installer bootstrap requires Python 3.11 or newer")
     root = Path(__file__).resolve().parents[3]
@@ -27,6 +75,7 @@ def engine(monkeypatch):
     monkeypatch.syspath_prepend(str(root / "libs" / "installer-engine"))
     path = root / "libs" / "installer-engine" / "installer_engine.py"
     spec = importlib.util.spec_from_file_location("python_installer_engine", path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
@@ -44,7 +93,7 @@ def _package(root: Path, name: str, sources: str = "") -> Path:
     return root
 
 
-def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, monkeypatch, tmp_path):
+def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import io
 
     failure = subprocess.CalledProcessError(1, ["uv"], output="", stderr="\u2502 build failed")
@@ -53,7 +102,7 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
     monkeypatch.setattr(engine.sys, "stderr", stderr)
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
 
-    def fail(*_args, **_kwargs):
+    def fail(*_args: object, **_kwargs: object) -> NoReturn:
         raise failure
 
     monkeypatch.setattr(engine, "run_owned", fail)
@@ -70,26 +119,26 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
     OSError("child could not start"),
 ])
 def test_candidate_failure_survives_retained_cleanup(
-    engine, tmp_path, build_inputs, monkeypatch, capsys, primary,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], primary: BaseException,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     policy = sys.modules[engine.retain_uv_install.__module__]
     temporary_directory = policy.tempfile.TemporaryDirectory
-    cleanup_attempts = []
+    cleanup_attempts: list[str] = []
 
     class CleanupFailure:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: object) -> None:
             self.temporary = temporary_directory(**kwargs)
             self.name = self.temporary.name
 
-        def cleanup(self):
+        def cleanup(self) -> None:
             cleanup_attempts.append(self.name)
             self.temporary.name = self.name
             self.temporary.cleanup()
             raise PermissionError("injected retained cleanup failure")
 
-    def fail(*args, **kwargs):
+    def fail(*args: object, **kwargs: object) -> NoReturn:
         raise primary
 
     monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", CleanupFailure)
@@ -111,13 +160,13 @@ def test_candidate_failure_survives_retained_cleanup(
     assert "injected retained cleanup failure" in diagnostic
 
 
-def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys, tmp_path):
+def test_child_timeout_surfaces_captured_backend_diagnostic(engine: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     failure = subprocess.TimeoutExpired(
         ["uv"], 1, output="building example\n", stderr="backend stalled\n",
     )
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
 
-    def fail(*_args, **_kwargs):
+    def fail(*_args: object, **_kwargs: object) -> NoReturn:
         raise failure
 
     monkeypatch.setattr(engine, "run_owned", fail)
@@ -128,11 +177,11 @@ def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch,
     assert "building example" in diagnostic and "backend stalled" in diagnostic
 
 
-def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monkeypatch, tmp_path):
+def test_child_preserves_canonical_transaction_environment_and_cwd(engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     environment = {"UV_CONFIG_FILE": "retained-config", "VIRTUAL_ENV": "admitted-environment"}
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert kwargs["env"] == environment
         assert kwargs["cwd"] == tmp_path
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -148,7 +197,7 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
 @pytest.mark.parametrize("kind", [
     "relative", "ordinary", "extended-short", "unc", "short-python", "deep", "deep-unc",
 ])
-def test_windows_child_preserves_supported_executable_spelling(engine, monkeypatch, tmp_path, kind):
+def test_windows_child_preserves_supported_executable_spelling(engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str) -> None:
     executable = str(tmp_path / "powershell.exe")
     expected = executable
     if kind == "relative":
@@ -168,9 +217,9 @@ def test_windows_child_preserves_supported_executable_spelling(engine, monkeypat
         assert len(executable) >= 260
         expected = engine._native_retained_path(executable)
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
-    observed = []
+    observed: list[list[str]] = []
 
-    def run(argv, **options):
+    def run(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         observed.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -185,8 +234,8 @@ def test_windows_child_preserves_supported_executable_spelling(engine, monkeypat
 @pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell startup")
 @pytest.mark.parametrize("extended", [False, True])
 def test_windows_powershell_starts_through_the_actual_child_boundary(
-    engine, procutil, monkeypatch, tmp_path, extended,
-):
+    engine: ModuleType, procutil: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extended: bool,
+) -> None:
     shell = shutil.which("powershell.exe")
     assert shell is not None, "native Windows PowerShell is required"
     shell = str(Path(shell).resolve(strict=True))
@@ -203,8 +252,8 @@ def test_windows_powershell_starts_through_the_actual_child_boundary(
     assert result.args[0] == shell
 
 
-def test_frozen_procutil_imports_its_siblings_without_cross_root_reuse(engine, tmp_path):
-    loaded = []
+def test_frozen_procutil_imports_its_siblings_without_cross_root_reuse(engine: ModuleType, tmp_path: Path) -> None:
+    loaded: list[str] = []
     for name in ("first", "second"):
         root = _package(tmp_path / name, "agent-procutil")
         package = root / "src" / "agent_procutil"
@@ -214,17 +263,17 @@ def test_frozen_procutil_imports_its_siblings_without_cross_root_reuse(engine, t
         module = engine._procutil(engine.FrozenInputs(root, (root,), "unused"))
         assert module.VALUE == name
         sibling = sys.modules[module.__name__ + ".sibling"]
-        assert Path(sibling.__file__).is_relative_to(root)
+        assert Path(cast(str, sibling.__file__)).is_relative_to(root)
         loaded.append(module.__name__)
     assert loaded[0] != loaded[1]
 
 
 @pytest.mark.parametrize("windows", [False, True])
-def test_process_creation_failure_has_a_distinct_os_error_type(procutil, monkeypatch, windows):
+def test_process_creation_failure_has_a_distinct_os_error_type(procutil: ModuleType, monkeypatch: pytest.MonkeyPatch, windows: bool) -> None:
     failure = OSError(193, "not an executable", "broken-python")
     monkeypatch.setattr(procutil, "_is_windows", lambda: windows)
 
-    def failed(*args, **kwargs):
+    def failed(*args: object, **kwargs: object) -> NoReturn:
         raise failure
 
     monkeypatch.setattr(procutil.subprocess, "Popen", failed)
@@ -235,14 +284,14 @@ def test_process_creation_failure_has_a_distinct_os_error_type(procutil, monkeyp
     assert caught.value.__cause__ is failure
 
 
-def test_post_creation_job_failure_is_not_a_launch_error(procutil, monkeypatch):
+def test_post_creation_job_failure_is_not_a_launch_error(procutil: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     failure = OSError("Job assignment accounting unavailable")
     monkeypatch.setattr(procutil, "_is_windows", lambda: True)
     monkeypatch.setattr(procutil.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(pid=1))
 
-    def failed(*args, **kwargs):
+    def failed(*args: object, **kwargs: object) -> NoReturn:
         raise failure
 
     monkeypatch.setattr(procutil, "_assign_suspended_to_kill_on_close_job", failed)
@@ -251,7 +300,7 @@ def test_post_creation_job_failure_is_not_a_launch_error(procutil, monkeypatch):
     assert caught.value is failure and not isinstance(caught.value, procutil.SyncProcessLaunchError)
 
 
-def test_freeze_closes_transitive_external_paths_without_editing_source(engine, tmp_path):
+def test_freeze_closes_transitive_external_paths_without_editing_source(engine: ModuleType, tmp_path: Path) -> None:
     leaf = _package(tmp_path / "repo" / "libs" / "leaf", "example-leaf")
     middle = _package(
         tmp_path / "repo" / "libs" / "middle", "example-middle",
@@ -272,7 +321,7 @@ def test_freeze_closes_transitive_external_paths_without_editing_source(engine, 
     assert engine.freeze_inputs(plugin, tmp_path / "changed").payload_hash != frozen.payload_hash
 
 
-def test_freeze_retains_multiple_applications_and_their_shared_closure(engine, tmp_path):
+def test_freeze_retains_multiple_applications_and_their_shared_closure(engine: ModuleType, tmp_path: Path) -> None:
     root = tmp_path / "repo"
     shared = _package(root / "libs" / "shared", "shared")
     manager = _package(
@@ -293,7 +342,7 @@ def test_freeze_retains_multiple_applications_and_their_shared_closure(engine, t
     assert (shared / "src" / "module.py").read_text() == "VALUE = 1\n"
 
 
-def test_freeze_refuses_missing_additional_application_before_creating_destination(engine, tmp_path):
+def test_freeze_refuses_missing_additional_application_before_creating_destination(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "plugin")
     destination = tmp_path / "frozen"
     with pytest.raises((OSError, ValueError)):
@@ -305,7 +354,7 @@ def test_freeze_refuses_missing_additional_application_before_creating_destinati
     ["server"], "server", ("",), ("server,store",), ("../server",),
     ("server", "SERVER"), ("unknown",),
 ])
-def test_candidate_refuses_invalid_extra_selection_before_writing(engine, tmp_path, extras):
+def test_candidate_refuses_invalid_extra_selection_before_writing(engine: ModuleType, tmp_path: Path, extras: object) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
         stream.write('[project.optional-dependencies]\nserver=[]\n')
@@ -319,7 +368,7 @@ def test_candidate_refuses_invalid_extra_selection_before_writing(engine, tmp_pa
     assert not root.exists()
 
 
-def test_extra_selection_normalizes_order_and_refuses_ambiguous_declarations(engine, tmp_path):
+def test_extra_selection_normalizes_order_and_refuses_ambiguous_declarations(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     manifest = plugin / "pyproject.toml"
     with manifest.open("a", encoding="utf-8") as stream:
@@ -332,7 +381,7 @@ def test_extra_selection_normalizes_order_and_refuses_ambiguous_declarations(eng
         engine._selected_extras(plugin, ("server",))
 
 
-def test_dev_candidate_refuses_nonbase_profiles_before_writing(engine, tmp_path):
+def test_dev_candidate_refuses_nonbase_profiles_before_writing(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
         stream.write('[project.optional-dependencies]\nserver=[]\n')
@@ -347,7 +396,7 @@ def test_dev_candidate_refuses_nonbase_profiles_before_writing(engine, tmp_path)
     assert not root.exists()
 
 
-def test_construction_identity_preserves_base_and_binds_selected_extras(engine, tmp_path):
+def test_construction_identity_preserves_base_and_binds_selected_extras(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     files = engine._source_files((plugin,))
     base = engine._construction_hash(files, ())
@@ -358,7 +407,7 @@ def test_construction_identity_preserves_base_and_binds_selected_extras(engine, 
     assert engine._construction_hash(files, ("server",)) != server
 
 
-def test_freeze_identity_survives_relocation_and_ignores_build_outputs(engine, tmp_path):
+def test_freeze_identity_survives_relocation_and_ignores_build_outputs(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "one" / "plugin", "example")
     (plugin / "build").mkdir()
     (plugin / "build" / "stale.py").write_text("OLD = 1", encoding="utf-8")
@@ -373,13 +422,13 @@ def test_freeze_identity_survives_relocation_and_ignores_build_outputs(engine, t
 
 
 @pytest.mark.parametrize("mutation", ["content", "new-file", "dependency"])
-def test_freeze_refuses_concurrent_input_mutation(engine, tmp_path, monkeypatch, mutation):
+def test_freeze_refuses_concurrent_input_mutation(engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
     plugin = _package(tmp_path / "repo" / "plugin", "example")
     dependency = _package(tmp_path / "repo" / "dependency", "example-dependency")
     original_write = Path.write_bytes
     mutated = False
 
-    def copy_and_mutate(target, data):
+    def copy_and_mutate(target: Path, data: bytes) -> int:
         nonlocal mutated
         result = original_write(target, data)
         if not mutated:
@@ -404,28 +453,28 @@ def test_freeze_refuses_concurrent_input_mutation(engine, tmp_path, monkeypatch,
 @pytest.mark.parametrize("rollover", [False, True], ids=["memory", "disk"])
 @pytest.mark.parametrize("fault", [None, "corrupt", "write-failure"])
 def test_freeze_buffers_complete_baseline_without_reopening_copy_sources(
-    engine, tmp_path, monkeypatch, rollover, fault,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rollover: bool, fault: str | None,
+) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     files = engine._source_files((plugin,))
     destination = tmp_path / "frozen"
     read_bytes, write_bytes = Path.read_bytes, Path.write_bytes
     reads = dict.fromkeys(files, 0)
-    spools = []
+    spools: list[BinaryIO] = []
     create_spool = engine.tempfile.SpooledTemporaryFile
 
-    def spool(**kwargs):
+    def spool(**kwargs: object) -> BinaryIO:
         assert kwargs["max_size"] == 32 * 1024 * 1024
         buffer = create_spool(**{**kwargs, "max_size": 1 if rollover else 65536})
         spools.append(buffer)
-        return buffer
+        return cast(BinaryIO, buffer)
 
-    def count_read(path):
+    def count_read(path: Path) -> bytes:
         if path in reads:
             reads[path] += 1
         return read_bytes(path)
 
-    def write_snapshot(path, data):
+    def write_snapshot(path: Path, data: bytes) -> int:
         ordinary = Path(engine.runtime._normalize_windows_extended_path(str(path)))
         if ordinary.is_relative_to(destination):
             assert set(reads.values()) == {1}, "copy preceded completion of the baseline"
@@ -457,13 +506,13 @@ def test_freeze_buffers_complete_baseline_without_reopening_copy_sources(
             engine.freeze_inputs(plugin, destination)
         assert not destination.exists()
     assert len(spools) == 1 and spools[0].closed
-    assert spools[0]._rolled is rollover
+    assert cast(bool, getattr(spools[0], "_rolled")) is rollover
 
 
 @pytest.mark.parametrize("write_failure", [False, True])
 def test_freeze_overlaps_bounded_writes_and_settles_before_cleanup(
-    engine, tmp_path, monkeypatch, write_failure,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, write_failure: bool,
+) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     for index in range(6):
         (plugin / f"content-{index}.txt").write_text(str(index), encoding="utf-8")
@@ -473,12 +522,12 @@ def test_freeze_overlaps_bounded_writes_and_settles_before_cleanup(
     next_started = threading.Event()
     lock = threading.Lock()
     active = maximum = 0
-    writes = []
+    writes: list[Path] = []
     caller = threading.get_ident()
-    progress_threads = []
+    progress_threads: list[int] = []
     failure = PermissionError("snapshot writer failed")
 
-    def write(path, data):
+    def write(path: Path, data: bytes) -> int:
         nonlocal active, maximum
         ordinary = Path(engine.runtime._normalize_windows_extended_path(str(path)))
         source = plugin / ordinary.relative_to(destination)
@@ -519,25 +568,25 @@ def test_freeze_overlaps_bounded_writes_and_settles_before_cleanup(
 
 
 @pytest.mark.parametrize("fault", ["write-error", "short-write", "short-read"])
-def test_freeze_buffer_failure_closes_storage_and_removes_snapshot(engine, tmp_path, monkeypatch, fault):
+def test_freeze_buffer_failure_closes_storage_and_removes_snapshot(engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     destination = tmp_path / "frozen"
     create_spool = engine.tempfile.SpooledTemporaryFile
-    spools = []
+    spools: list[BinaryIO] = []
 
-    def spool(**kwargs):
+    def spool(**kwargs: object) -> BinaryIO:
         buffer = create_spool(**kwargs)
         spools.append(buffer)
         read = buffer.read
         if fault == "write-error":
-            def fail_write(_data):
+            def fail_write(_data: bytes) -> NoReturn:
                 raise PermissionError("source retention refused")
             monkeypatch.setattr(buffer, "write", fail_write)
         elif fault == "short-write":
             monkeypatch.setattr(buffer, "write", lambda data: len(data) - 1)
         else:
             monkeypatch.setattr(buffer, "read", lambda length: read(length)[:-1])
-        return buffer
+        return cast(BinaryIO, buffer)
 
     monkeypatch.setattr(engine.tempfile, "SpooledTemporaryFile", spool)
     message = "source retention refused" if fault == "write-error" else "buffer .* incomplete"
@@ -547,25 +596,25 @@ def test_freeze_buffer_failure_closes_storage_and_removes_snapshot(engine, tmp_p
     assert not destination.exists()
 
 
-def test_freeze_rolls_over_before_writing_a_file_larger_than_memory_limit(engine, tmp_path, monkeypatch):
+def test_freeze_rolls_over_before_writing_a_file_larger_than_memory_limit(engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     limit = 32 * 1024 * 1024
     (plugin / "data.bin").write_bytes(b"x" * (limit + 1))
     create_spool = engine.tempfile.SpooledTemporaryFile
-    observed = []
+    observed: list[int] = []
 
-    def spool(**kwargs):
+    def spool(**kwargs: object) -> BinaryIO:
         buffer = create_spool(**kwargs)
         write = buffer.write
 
-        def guarded_write(data):
+        def guarded_write(data: bytes) -> int:
             if len(data) > limit:
                 assert buffer._rolled, "oversized source was first buffered in memory"
                 observed.append(len(data))
-            return write(data)
+            return cast(int, write(data))
 
         monkeypatch.setattr(buffer, "write", guarded_write)
-        return buffer
+        return cast(BinaryIO, buffer)
 
     monkeypatch.setattr(engine.tempfile, "SpooledTemporaryFile", spool)
     frozen = engine.freeze_inputs(plugin, tmp_path / "frozen")
@@ -575,7 +624,7 @@ def test_freeze_rolls_over_before_writing_a_file_larger_than_memory_limit(engine
     )
 
 
-def test_freeze_refuses_missing_declared_dependency(engine, tmp_path):
+def test_freeze_refuses_missing_declared_dependency(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(
         tmp_path / "plugin", "example",
         '[tool.uv.sources]\nmissing = {path = "../missing"}\n',
@@ -585,7 +634,7 @@ def test_freeze_refuses_missing_declared_dependency(engine, tmp_path):
     assert not (tmp_path / "frozen").exists()
 
 
-def test_freeze_never_removes_preexisting_destination(engine, tmp_path):
+def test_freeze_never_removes_preexisting_destination(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     destination = tmp_path / "frozen"
     destination.mkdir()
@@ -595,14 +644,14 @@ def test_freeze_never_removes_preexisting_destination(engine, tmp_path):
     assert (destination / "owned").read_text() == "keep"
 
 
-def test_freeze_refuses_destination_inside_package(engine, tmp_path):
+def test_freeze_refuses_destination_inside_package(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     with pytest.raises(ValueError, match="inside runtime source"):
         engine.freeze_inputs(plugin, plugin / "frozen")
     assert not (plugin / "frozen").exists()
 
 
-def test_freeze_refuses_wrong_local_distribution(engine, tmp_path):
+def test_freeze_refuses_wrong_local_distribution(engine: ModuleType, tmp_path: Path) -> None:
     _package(tmp_path / "dependency", "wrong-name")
     plugin = _package(
         tmp_path / "plugin", "example",
@@ -612,7 +661,7 @@ def test_freeze_refuses_wrong_local_distribution(engine, tmp_path):
         engine.freeze_inputs(plugin, tmp_path / "frozen")
 
 
-def test_freeze_refuses_nonlocal_source_override(engine, tmp_path):
+def test_freeze_refuses_nonlocal_source_override(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(
         tmp_path / "plugin", "example",
         '[tool.uv.sources]\nexternal = {git = "https://example.invalid/source.git"}\n',
@@ -621,7 +670,7 @@ def test_freeze_refuses_nonlocal_source_override(engine, tmp_path):
         engine.freeze_inputs(plugin, tmp_path / "frozen")
 
 
-def test_freeze_refuses_symlinked_source_and_destination_escape(engine, tmp_path):
+def test_freeze_refuses_symlinked_source_and_destination_escape(engine: ModuleType, tmp_path: Path) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     alias = tmp_path / "alias"
     try:
@@ -638,7 +687,7 @@ def test_freeze_refuses_symlinked_source_and_destination_escape(engine, tmp_path
 
 
 @pytest.mark.timeout(300)
-def test_freeze_real_worktrees_graph_is_self_contained(engine, tmp_path):
+def test_freeze_real_worktrees_graph_is_self_contained(engine: ModuleType, tmp_path: Path) -> None:
     plugin = Path(__file__).resolve().parents[1]
     frozen = engine.freeze_inputs(plugin, tmp_path / "frozen")
     manifests = [
@@ -656,8 +705,8 @@ def test_freeze_real_worktrees_graph_is_self_contained(engine, tmp_path):
 
 @pytest.mark.parametrize("change", [None, "source", "snapshot", "missing"])
 def test_retained_inputs_validate_both_digests_from_one_source_read(
-    engine, tmp_path, monkeypatch, change,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str | None,
+) -> None:
     import hashlib
     from contextlib import contextmanager
 
@@ -668,7 +717,7 @@ def test_retained_inputs_validate_both_digests_from_one_source_read(
     source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
 
     @contextmanager
-    def retain(*_args, **_kwargs):
+    def retain(*_args: object, **_kwargs: object) -> Iterator[object]:
         if change == "source":
             (plugin / "src" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
         elif change == "snapshot":
@@ -682,7 +731,7 @@ def test_retained_inputs_validate_both_digests_from_one_source_read(
     calls = dict.fromkeys(files, 0)
     read_bytes = Path.read_bytes
 
-    def count_read(path):
+    def count_read(path: Path) -> bytes:
         if path in calls:
             calls[path] += 1
         return read_bytes(path)
@@ -705,15 +754,15 @@ def test_retained_inputs_validate_both_digests_from_one_source_read(
 
 
 @pytest.fixture
-def procutil(engine):
+def procutil(engine: ModuleType) -> ModuleType:
     root = Path(__file__).resolve().parents[3]
     package = root / "libs" / "agent-procutil"
-    return engine._procutil(engine.FrozenInputs(package, (package,), "unused"))
+    return cast(ModuleType, engine._procutil(engine.FrozenInputs(package, (package,), "unused")))
 
 
 @pytest.mark.parametrize("progress", [False, True])
-def test_owned_child_captures_both_streams_and_surfaces_failure(engine, procutil, tmp_path, progress):
-    observed = []
+def test_owned_child_captures_both_streams_and_surfaces_failure(engine: ModuleType, procutil: ModuleType, tmp_path: Path, progress: bool) -> None:
+    observed: list[tuple[str, bytes]] = []
     options = {"on_output": lambda name, data: observed.append((name, data))} if progress else {}
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         result = engine.run_owned(
@@ -739,14 +788,14 @@ def test_owned_child_captures_both_streams_and_surfaces_failure(engine, procutil
 
 @pytest.mark.parametrize("retained", [False, True])
 def test_productive_owned_child_renews_timeout_and_relays_before_completion(
-    engine, procutil, tmp_path, retained,
-):
-    observed = []
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, retained: bool,
+) -> None:
+    observed: list[tuple[float, str, bytes]] = []
     native = tmp_path / "native-output"
-    first_native = []
+    first_native: list[float] = []
     stop = threading.Event()
 
-    def observe_native():
+    def observe_native() -> None:
         while not stop.wait(.02):
             if native.stat().st_size:
                 first_native.append(time.monotonic())
@@ -792,8 +841,8 @@ def test_productive_owned_child_renews_timeout_and_relays_before_completion(
 
 @pytest.mark.parametrize("retained", [False, True])
 def test_productive_owned_child_preserves_explicit_absolute_deadline(
-    engine, procutil, tmp_path, retained,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, retained: bool,
+) -> None:
     engine.runtime.slot(tmp_path, "1.0")
     started = time.monotonic()
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
@@ -821,8 +870,8 @@ def test_productive_owned_child_preserves_explicit_absolute_deadline(
 
 @pytest.mark.parametrize("retained", [False, True])
 def test_productive_owned_child_cannot_renew_explicit_deadline(
-    engine, procutil, tmp_path, retained,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, retained: bool,
+) -> None:
     engine.runtime.slot(tmp_path, "1.0")
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         started = time.monotonic()
@@ -844,8 +893,8 @@ def test_productive_owned_child_cannot_renew_explicit_deadline(
 
 @pytest.mark.parametrize("condition", ["progress", "uneven", "silent"])
 def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
-    engine, procutil, tmp_path, condition,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, condition: str,
+) -> None:
     plugin = _package(tmp_path / "source", "example")
     for index in range(16):
         (plugin / f"input{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
@@ -853,7 +902,7 @@ def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
     uv = shutil.which("uv")
     assert uv, "the initial retention contract requires native UV"
     marker = tmp_path / "retention-writer"
-    scripts = Path(engine.__file__).parent
+    scripts = Path(cast(str, engine.__file__)).parent
     actor = (
         "import json,os,pathlib,sys,time\n"
         f"sys.path.insert(0,{str(scripts)!r})\n"
@@ -905,26 +954,26 @@ def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
             with pytest.raises(subprocess.TimeoutExpired) as failure:
                 engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
             assert time.monotonic() - started < 13
-            assert "phase=retention state=starting" in failure.value.stderr
-            preparation, entered, stalled = failure.value.stderr.partition("retention-copy-entered\n")
+            assert "phase=retention state=starting" in cast(str, failure.value.stderr)
+            preparation, entered, stalled = cast(str, failure.value.stderr).partition("retention-copy-entered\n")
             assert entered and "Source wheel progress: phase=retention" in preparation
             assert "Source wheel progress: phase=retention" not in stalled
-            assert "phase=retention state=completed" not in failure.value.stderr
+            assert "phase=retention state=completed" not in cast(str, failure.value.stderr)
     assert marker.is_file()
     _assert_writers_dead(engine, [int(marker.read_text())])
     assert engine.runtime.fingerprint_source(engine._source_files((plugin,))) == before
 
 
 def test_source_phase_and_cache_keep_productive_child_progress(
-    engine, procutil, tmp_path, monkeypatch, capsys,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     import installer_source_build as builds
 
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
-    elapsed = {}
+    elapsed: dict[str, float] = {}
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         with builds._source_phase("offline", 2, elapsed) as progress:
-            def build(directory):
+            def build(directory: Path) -> Path:
                 wheel = directory / "example-1.0-py3-none-any.whl"
                 engine._child(
                     [sys.executable, "-c",
@@ -937,10 +986,10 @@ def test_source_phase_and_cache_keep_productive_child_progress(
                 )
                 return wheel
 
-            def validate(path):
+            def validate(path: Path) -> None:
                 assert path.read_bytes() == b"validated wheel"
 
-            selected = builds.cached_source_wheel(
+            selected = cast(_CachedSourceWheel, getattr(builds, "cached_source_wheel"))(
                 tmp_path, b"source-progress", None, build=build, validate=validate,
                 max_archive_bytes=1024, deadline=progress.deadline,
                 progress_deadline=lambda: progress.deadline,
@@ -968,12 +1017,12 @@ def _wait_for_writer(marker: Path) -> list[int]:
     pytest.fail("installer writer tree did not start")
 
 
-def _assert_writers_dead(engine, pids: list[int]):
+def _assert_writers_dead(engine: ModuleType | SimpleNamespace, pids: list[int]) -> None:
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         live = [pid for pid in pids if engine.runtime._pid_alive(pid)]
         if sys.platform.startswith("linux"):
-            observed = []
+            observed: list[int] = []
             for pid in live:
                 try:
                     state = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0]
@@ -990,12 +1039,12 @@ def _assert_writers_dead(engine, pids: list[int]):
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux proc observation")
 @pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
-def test_owned_child_observation_handles_exit_but_not_unreadable_state(monkeypatch, error):
+def test_owned_child_observation_handles_exit_but_not_unreadable_state(monkeypatch: pytest.MonkeyPatch, error: type[OSError]) -> None:
     subject = SimpleNamespace(runtime=SimpleNamespace(_pid_alive=lambda pid: True))
     stat_path = Path("/proc/12345/stat")
     original_is_file, original_read_text = Path.is_file, Path.read_text
 
-    def read_text(path, *args, **kwargs):
+    def read_text(path: Path, *args: str | None, **kwargs: str | None) -> str:
         if path == stat_path:
             raise error("native process observation unavailable")
         return original_read_text(path, *args, **kwargs)
@@ -1010,7 +1059,7 @@ def test_owned_child_observation_handles_exit_but_not_unreadable_state(monkeypat
 
 
 @pytest.mark.parametrize("retained", [False, True])
-def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, procutil, tmp_path, retained):
+def test_owned_child_timeout_reaps_descendants_before_lease_release(engine: ModuleType, procutil: ModuleType, tmp_path: Path, retained: bool) -> None:
     marker = tmp_path / "writers"
     engine.runtime.slot(tmp_path, "1.0")
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
@@ -1029,20 +1078,20 @@ def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, proc
                 } if retained else {}),
             )
         _assert_writers_dead(engine, _wait_for_writer(marker))
-        assert "backend stdout" in failure.value.stdout
-        assert "backend stderr" in failure.value.stderr
+        assert "backend stdout" in cast(str, failure.value.stdout)
+        assert "backend stderr" in cast(str, failure.value.stderr)
     with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
         pass
 
 
 def test_owned_child_output_callback_failure_settles_before_releasing_custody(
-    engine, procutil, tmp_path, caplog,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
     marker = tmp_path / "writers"
     failure = OSError("progress sink closed")
-    calls = []
+    calls: list[str] = []
 
-    def failed_output(name, data):
+    def failed_output(name: str, data: bytes) -> NoReturn:
         _assert_writers_dead(engine, _wait_for_writer(marker))
         calls.append(name)
         raise failure
@@ -1066,8 +1115,8 @@ def test_owned_child_output_callback_failure_settles_before_releasing_custody(
 
 @pytest.mark.parametrize("retained", [False, True])
 def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
-    engine, procutil, tmp_path, retained,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, retained: bool,
+) -> None:
     marker = tmp_path / "writers"
     program = _writer_tree(marker).replace(
         "time.sleep(60)\n",
@@ -1090,8 +1139,8 @@ def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
                         "runtime_path": Path(engine.runtime.__file__),
                     } if retained else {}),
                 )
-            assert "output" in failure.value.stdout
-            assert "diagnostic" in failure.value.stderr
+            assert "output" in cast(str, failure.value.stdout)
+            assert "diagnostic" in cast(str, failure.value.stderr)
             _assert_writers_dead(engine, _wait_for_writer(marker))
         assert time.monotonic() - started < 90
         with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
@@ -1102,27 +1151,27 @@ def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
 
 
 def test_teardown_retry_retains_first_failure_even_when_wait_is_interrupted(
-    engine, monkeypatch, caplog,
-):
+    engine: ModuleType, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
     import installer_engine_process as ownership
 
     attempts = 0
     sleeps = 0
     failure = OSError("ownership accounting temporarily unavailable")
 
-    def settle():
+    def settle() -> None:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise failure
 
-    def sleep(delay):
+    def sleep(delay: float) -> None:
         nonlocal sleeps
         sleeps += 1
         if sleeps == 1:
             raise KeyboardInterrupt()
 
-    monkeypatch.setattr(ownership.time, "sleep", sleep)
+    monkeypatch.setattr(cast(ModuleType, getattr(ownership, "time")), "sleep", sleep)
     with pytest.raises(OSError) as raised:
         ownership._settle(settle)
     assert raised.value is failure
@@ -1130,35 +1179,35 @@ def test_teardown_retry_retains_first_failure_even_when_wait_is_interrupted(
     assert "retaining construction custody" in caplog.text
 
 
-def test_process_group_identity_is_not_reaped_before_descendants_settle(engine, monkeypatch):
+def test_process_group_identity_is_not_reaped_before_descendants_settle(engine: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     import installer_engine_process as ownership
     from types import SimpleNamespace
 
     observations = iter(["123 123 Z\n456 123 S\n", "123 123 Z\n"])
-    events = []
+    events: list[str] = []
     process = SimpleNamespace(pid=123, returncode=None)
 
-    def wait(timeout):
+    def wait(timeout: float) -> None:
         events.append("reap")
         process.returncode = 0
 
-    def observe(*args, **kwargs):
+    def observe(*args: object, **kwargs: object) -> SimpleNamespace:
         events.append("observe")
         return SimpleNamespace(stdout=next(observations))
 
     process.wait = wait
-    monkeypatch.setattr(ownership.os, "killpg", lambda *args: events.append("kill"), raising=False)
-    monkeypatch.setattr(ownership.signal, "SIGKILL", 9, raising=False)
-    monkeypatch.setattr(ownership.subprocess, "run", observe)
-    monkeypatch.setattr(ownership.time, "sleep", lambda delay: None)
-    ownership._terminate_group(process)
+    monkeypatch.setattr(cast(ModuleType, getattr(ownership, "os")), "killpg", lambda *args: events.append("kill"), raising=False)
+    monkeypatch.setattr(cast(ModuleType, getattr(ownership, "signal")), "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(cast(ModuleType, getattr(ownership, "subprocess")), "run", observe)
+    monkeypatch.setattr(cast(ModuleType, getattr(ownership, "time")), "sleep", lambda delay: None)
+    ownership._terminate_group(cast(subprocess.Popen[bytes], process))
     assert events == ["kill", "observe", "observe", "reap"]
-    ownership._terminate_group(process)
+    ownership._terminate_group(cast(subprocess.Popen[bytes], process))
     assert events == ["kill", "observe", "observe", "reap"], "never target a reaped PGID again"
 
 
 @pytest.mark.parametrize("death", ["pid", "containment"])
-def test_owned_child_hard_owner_death_reaps_writer_tree(engine, procutil, tmp_path, death):
+def test_owned_child_hard_owner_death_reaps_writer_tree(engine: ModuleType, procutil: ModuleType, tmp_path: Path, death: str) -> None:
     root = Path(__file__).resolve().parents[3]
     marker = tmp_path / "writers"
     owner_code = (
@@ -1188,7 +1237,9 @@ def test_owned_child_hard_owner_death_reaps_writer_tree(engine, procutil, tmp_pa
             job.close()
             job = None
         else:
-            os.killpg(owner.pid, signal.SIGKILL)
+            cast(Callable[[int, int], None], getattr(os, "killpg"))(
+                owner.pid, cast(int, getattr(signal, "SIGKILL")),
+            )
         owner.wait(timeout=10)
         _assert_writers_dead(engine, pids)
         with engine.runtime.construction_lease(tmp_path, "1.0", timeout=10):
@@ -1237,7 +1288,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
 
 @pytest.fixture
-def build_inputs(tmp_path, monkeypatch):
+def build_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     uv = shutil.which("uv")
     assert uv, "the existing plugin test runner requires uv"
     root = Path(__file__).resolve().parents[3]
@@ -1275,7 +1326,7 @@ def build_inputs(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def profile_inputs(build_inputs):
+def profile_inputs(build_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     plugin, uv = build_inputs
     with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
         stream.write(
@@ -1286,7 +1337,7 @@ def profile_inputs(build_inputs):
 
 
 @pytest.fixture
-def role_inputs(build_inputs):
+def role_inputs(build_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     plugin, uv = build_inputs
     for directory, name, dependencies, sources in (
         ("host", "example-host", 'dependencies=["example-host-leaf"]\n',
@@ -1312,8 +1363,8 @@ def role_inputs(build_inputs):
     [], "example", ("../example",), ("EXAMPLE", "example"), (False,), ("unknown",),
 ])
 def test_local_package_selection_refuses_before_runtime_writes(
-    engine, tmp_path, build_inputs, selection,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], selection: object,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     with pytest.raises(ValueError, match="selection"):
@@ -1326,8 +1377,8 @@ def test_local_package_selection_refuses_before_runtime_writes(
 
 
 def test_local_package_profile_is_normalized_and_keeps_full_source_identity(
-    engine, role_inputs, tmp_path,
-):
+    engine: ModuleType, role_inputs: tuple[Path, Path], tmp_path: Path,
+) -> None:
     plugin, _uv = role_inputs
     packages = engine._package_roots(plugin)
     selection = engine._selected_local_packages(
@@ -1353,8 +1404,8 @@ def test_local_package_profile_is_normalized_and_keeps_full_source_identity(
 
 @pytest.mark.timeout(180)
 def test_selected_local_role_uses_one_retained_graph_and_exact_installed_closure(
-    engine, tmp_path, role_inputs, monkeypatch,
-):
+    engine: ModuleType, tmp_path: Path, role_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from contextlib import contextmanager
 
     plugin, uv = role_inputs
@@ -1364,10 +1415,10 @@ def test_selected_local_role_uses_one_retained_graph_and_exact_installed_closure
     )
     client = ("agent-procutil", "example-dependency")
     retain = engine.retain_uv_install
-    transactions = []
+    transactions: list[_RetainedInstallView] = []
 
     @contextmanager
-    def trace(*args, **kwargs):
+    def trace(*args: object, **kwargs: object) -> Iterator[_RetainedInstallView]:
         with retain(*args, **kwargs) as transaction:
             transactions.append(transaction)
             assert set(transaction.sources) == set(engine._package_roots(plugin))
@@ -1394,7 +1445,7 @@ def test_selected_local_role_uses_one_retained_graph_and_exact_installed_closure
     assert not built.frozen_plugin.exists()
     assert all(not path.exists() for path in transactions[0].sources.values())
 
-    def refuse_construction(*args, **kwargs):
+    def refuse_construction(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("healthy role reuse cannot construct")
 
     with monkeypatch.context() as reuse:
@@ -1440,8 +1491,8 @@ def test_selected_local_role_uses_one_retained_graph_and_exact_installed_closure
     ("agent-procutil", "example-dependency", "example-host"),
 ])
 def test_incomplete_local_role_cannot_fall_back_or_complete(
-    engine, role_inputs, tmp_path, monkeypatch, selection,
-):
+    engine: ModuleType, role_inputs: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: tuple[str, ...],
+) -> None:
     plugin, uv = role_inputs
     monkeypatch.setenv("UV_PRERELEASE", "allow")
     for directory in ("host", "host-leaf"):
@@ -1465,8 +1516,8 @@ def test_incomplete_local_role_cannot_fall_back_or_complete(
 
 @pytest.mark.timeout(180)
 def test_deep_local_role_keeps_generated_constraints_out_of_source_ancestry(
-    engine, tmp_path, role_inputs,
-):
+    engine: ModuleType, tmp_path: Path, role_inputs: tuple[Path, Path],
+) -> None:
     plugin, uv = role_inputs
     deep = tmp_path / ("caller-" + "x" * 80) / "workspace" / "repo"
     deep.parent.mkdir(parents=True)
@@ -1495,20 +1546,20 @@ def test_deep_local_role_keeps_generated_constraints_out_of_source_ancestry(
 
 @pytest.mark.timeout(180)
 def test_role_health_refuses_an_excluded_installed_distribution(
-    engine, role_inputs, tmp_path, monkeypatch,
-):
+    engine: ModuleType, role_inputs: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin, uv = role_inputs
     construct = engine._construct
 
-    def extra_distribution(*args, **kwargs):
+    def extra_distribution(*args: object, **kwargs: object) -> Path:
         python = construct(*args, **kwargs)
-        slot = args[1]
+        slot = cast(Path, args[1])
         metadata = next(slot.rglob("example-1.0.0.dist-info")).with_name("example_host-1.0.0.dist-info")
         metadata.mkdir()
         (metadata / "METADATA").write_text(
             "Metadata-Version: 2.1\nName: example-host\nVersion: 1.0.0\n", encoding="utf-8",
         )
-        return python
+        return cast(Path, python)
 
     monkeypatch.setattr(engine, "_construct", extra_distribution)
     root = tmp_path / "runtime"
@@ -1525,17 +1576,17 @@ def test_role_health_refuses_an_excluded_installed_distribution(
 
 @pytest.mark.timeout(120)
 def test_selected_extras_use_retained_uv_and_cannot_reuse_another_profile(
-    engine, tmp_path, profile_inputs, monkeypatch,
-):
+    engine: ModuleType, tmp_path: Path, profile_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from contextlib import contextmanager
 
     plugin, uv = profile_inputs
     root = tmp_path / "runtime"
     retain = engine.retain_uv_install
-    transactions = []
+    transactions: list[_RetainedInstallView] = []
 
     @contextmanager
-    def trace(*args, **kwargs):
+    def trace(*args: object, **kwargs: object) -> Iterator[_RetainedInstallView]:
         with retain(*args, **kwargs) as transaction:
             transactions.append(transaction)
             yield transaction
@@ -1561,7 +1612,7 @@ def test_selected_extras_use_retained_uv_and_cannot_reuse_another_profile(
         )
     assert not built.frozen_plugin.exists()
 
-    def refuse_construction(*args, **kwargs):
+    def refuse_construction(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("completed profile reuse must not construct")
 
     monkeypatch.setattr(engine.runtime, "construction_lease", refuse_construction)
@@ -1597,8 +1648,8 @@ def test_selected_extras_use_retained_uv_and_cannot_reuse_another_profile(
 
 @pytest.mark.timeout(120)
 def test_selected_extra_dependency_failure_cannot_complete_or_activate(
-    engine, tmp_path, profile_inputs,
-):
+    engine: ModuleType, tmp_path: Path, profile_inputs: tuple[Path, Path],
+) -> None:
     plugin, uv = profile_inputs
     root = tmp_path / "runtime"
     arguments = dict(
@@ -1622,22 +1673,22 @@ def test_selected_extra_dependency_failure_cannot_complete_or_activate(
 
 
 def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change(
-    engine, procutil, tmp_path, build_inputs, monkeypatch,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from contextlib import contextmanager
 
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     retain = engine.retain_uv_install
-    transactions = []
+    transactions: list[_RetainedInstallView] = []
 
     @contextmanager
-    def trace_retention(*args, **kwargs):
+    def trace_retention(*args: object, **kwargs: object) -> Iterator[_RetainedInstallView]:
         with retain(*args, **kwargs) as transaction:
             transactions.append(transaction)
             yield transaction
 
-    def refuse_second_snapshot(*_args, **_kwargs):
+    def refuse_second_snapshot(*_args: object, **_kwargs: object) -> NoReturn:
         pytest.fail("construction must not create an engine-owned second snapshot")
 
     monkeypatch.setattr(engine, "retain_uv_install", trace_retention)
@@ -1666,9 +1717,9 @@ def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_chan
 
 @pytest.mark.parametrize("fault", [None, "original-source", "callback-error"])
 def test_preparation_keeps_pristine_source_separate_from_uv_projection(
-    engine, tmp_path, build_inputs, monkeypatch, fault,
-):
-    import tomllib
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
+    tomllib = importlib.import_module("tomllib")
     from contextlib import contextmanager
 
     plugin, uv = build_inputs
@@ -1703,17 +1754,17 @@ def test_preparation_keeps_pristine_source_separate_from_uv_projection(
     original = (plugin / "pyproject.toml").read_bytes()
     preparation = engine._prepare_installed
     retain = engine.retain_uv_install
-    snapshots = []
-    mirrors = []
+    snapshots: list[Path] = []
+    mirrors: list[Path] = []
 
     @contextmanager
-    def trace_retention(*args, **kwargs):
+    def trace_retention(*args: object, **kwargs: object) -> Iterator[_RetainedInstallView]:
         assert kwargs["non_editable"] is True
         with retain(*args, **kwargs) as transaction:
             mirrors.append(transaction.sources[plugin])
             yield transaction
 
-    def prepare(inputs, slot, python, callable_name, data, descriptor, timeout, payload):
+    def prepare(inputs: _FrozenInputView, slot: Path, python: Path, callable_name: str, data: dict[str, object], descriptor: int, timeout: float, payload: _FrozenInputView) -> None:
         snapshots.append(payload.plugin)
         assert payload.plugin != plugin and payload.plugin != inputs.plugin
         assert (payload.plugin / "pyproject.toml").read_bytes() == original
@@ -1721,7 +1772,7 @@ def test_preparation_keeps_pristine_source_separate_from_uv_projection(
         assert metadata["tool"]["uv"]["sources"]["example-dependency"]["editable"] is False
         if fault == "original-source":
             module.write_text("raise RuntimeError('changed original source')\n")
-        return preparation(inputs, slot, python, callable_name, data, descriptor, timeout, payload)
+        return cast(None, preparation(inputs, slot, python, callable_name, data, descriptor, timeout, payload))
 
     monkeypatch.setattr(engine, "retain_uv_install", trace_retention)
     monkeypatch.setattr(engine, "_prepare_installed", prepare)
@@ -1739,7 +1790,7 @@ def test_preparation_keeps_pristine_source_separate_from_uv_projection(
         with pytest.raises(error) as failure:
             with engine.numbered_candidate(root, generation, **arguments):
                 pytest.fail("failed preparation/source validation cannot complete")
-        diagnostic = failure.value.stderr if fault == "callback-error" else str(failure.value)
+        diagnostic = cast(subprocess.CalledProcessError, failure.value).stderr if fault == "callback-error" else str(failure.value)
         assert message in diagnostic
         assert not engine.runtime.marker_path(root, generation).exists()
     else:
@@ -1759,32 +1810,36 @@ def test_preparation_keeps_pristine_source_separate_from_uv_projection(
 
 
 def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
-    engine, tmp_path, monkeypatch,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from dataclasses import replace
 
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
-    import test_installer_closed_wheels as closed
+    closed = importlib.import_module("test_installer_closed_wheels")
     from installer_wheel_inputs import WheelDeadlineError
 
-    plugin = closed.negative_source_plugin.__wrapped__(tmp_path)
+    negative_source_plugin = cast(Callable[[Path], Path], closed.negative_source_plugin.__wrapped__)
+    snapshot_inputs = cast(_ClosedSnapshot, closed.snapshot)
+    inspected_inputs = cast(_ClosedInspected, closed.inspected)
+    candidate_inputs = cast(_ClosedCandidate, closed.candidate)
+    plugin = negative_source_plugin(tmp_path)
     sentinel = tmp_path / "unrelated.txt"
     sentinel.write_bytes(b"preserved")
     freeze = engine.freeze_inputs
     write = Path.write_bytes
-    snapshots = []
-    completed = []
+    snapshots: list[Path] = []
+    completed: list[_FrozenInputView] = []
     clock = [time.monotonic()]
 
-    def snapshot(*args, **kwargs):
-        destination = args[1]
+    def snapshot(*args: object, **kwargs: object) -> _FrozenInputView:
+        destination = cast(Path, args[1])
         snapshots.append(destination)
         assert kwargs["deadline"] == wheels.deadline
         result = freeze(*args, **kwargs)
         completed.append(result)
-        return result
+        return cast(_FrozenInputView, result)
 
-    def copy_and_expire(path, data):
+    def copy_and_expire(path: Path, data: bytes) -> int:
         result = write(path, data)
         if snapshots and Path(engine.runtime._normalize_windows_extended_path(str(path))).is_relative_to(
             snapshots[0],
@@ -1792,8 +1847,8 @@ def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
             clock[0] = wheels.deadline + 0.001
         return result
 
-    with closed.snapshot(tmp_path) as retained:
-        wheels = closed.inspected(retained)
+    with snapshot_inputs(tmp_path) as retained:
+        wheels = inspected_inputs(retained)
         wheels = replace(wheels, snapshot=replace(wheels.snapshot, _deadline=clock[0] + 1))
         monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
         monkeypatch.setattr(engine, "freeze_inputs", snapshot)
@@ -1807,7 +1862,7 @@ def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
         )
         root = tmp_path / "runtime"
         with pytest.raises(WheelDeadlineError, match="payload-snapshot deadline exhausted"):
-            with closed.candidate(
+            with candidate_inputs(
                 engine, root, plugin, wheels, construction_callable="demo_pkg:must_not_run",
             ):
                 pytest.fail("expired snapshot published")
@@ -1822,22 +1877,25 @@ def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
     assert not any(path.exists() for path in retained.paths.values())
 
 
-def test_successful_application_callback_uses_owned_pristine_snapshot(tmp_path, monkeypatch):
+def test_successful_application_callback_uses_owned_pristine_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
-    from test_local_install_source import native_source
+    native_source = importlib.import_module("test_local_install_source").native_source
 
-    source, snapshot = native_source.__wrapped__(tmp_path, SimpleNamespace(param={"callback": True}))
+    source_fixture = cast(Callable[[Path, pytest.FixtureRequest], tuple[ModuleType, Path]], native_source.__wrapped__)
+    source, snapshot = source_fixture(
+        tmp_path, cast(pytest.FixtureRequest, SimpleNamespace(param={"callback": True})),
+    )
     with source.project_inputs(snapshot, "demo-app") as (selected, wheels):
         selection = source.native_selection(selected, wheels)
         root = tmp_path / "runtime"
 
-        def validate(slot):
+        def validate(slot: Path) -> None:
             assert not source.engine.runtime.marker_path(root, slot.name).exists()
             source.engine._assert_source_pin(slot / "callback-payload", selection["identity"])
 
         with source.engine.numbered_candidate(
             root, selection["runtime_version"], plugin=selected.payload,
-            uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+            uv=Path(cast(str, shutil.which("uv"))), base_python=Path(sys.executable),
             health_module="demo_app", health_callable="snapshot_health",
             local_packages=tuple(selection["local_packages"]),
             wheel_inputs=wheels, application=snapshot / selected.project["application"],
@@ -1863,19 +1921,19 @@ def test_successful_application_callback_uses_owned_pristine_snapshot(tmp_path, 
 
 
 def test_expected_payload_pin_reuses_baseline_but_validates_retained_source(
-    engine, tmp_path, build_inputs, monkeypatch,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin, uv = build_inputs
     frozen = engine.freeze_inputs(plugin, tmp_path / "snapshot")
     files = set(engine._source_files(frozen.packages))
     fingerprint = engine.runtime.fingerprint_source
-    source_scans = []
+    source_scans: list[tuple[Path, ...]] = []
 
-    def observe(paths, **kwargs):
+    def observe(paths: Iterable[Path], **kwargs: object) -> str:
         paths = tuple(paths)
         if set(paths) == files:
             source_scans.append(paths)
-        return fingerprint(paths, **kwargs)
+        return cast(str, fingerprint(paths, **kwargs))
 
     monkeypatch.setattr(engine.runtime, "fingerprint_source", observe)
     root = tmp_path / "runtime"
@@ -1887,7 +1945,7 @@ def test_expected_payload_pin_reuses_baseline_but_validates_retained_source(
     assert len(source_scans) == 1, "retained validation must replace, not duplicate, the initial scan"
     assert engine.runtime.is_complete(root, "1.0.0", expect_hash=frozen.payload_hash)
 
-    def no_writer(*_args, **_kwargs):
+    def no_writer(*_args: object, **_kwargs: object) -> NoReturn:
         pytest.fail("healthy pinned reuse entered a construction writer")
 
     monkeypatch.setattr(engine, "_retained_inputs", no_writer)
@@ -1902,8 +1960,8 @@ def test_expected_payload_pin_reuses_baseline_but_validates_retained_source(
 
 @pytest.mark.parametrize("reuse", [None, "fast", "after-wait"])
 def test_expected_payload_pin_refuses_changed_dependency_before_build_or_reuse(
-    engine, tmp_path, build_inputs, monkeypatch, reuse,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, reuse: str | None,
+) -> None:
     plugin, uv = build_inputs
     frozen = engine.freeze_inputs(plugin, tmp_path / "snapshot")
     root = tmp_path / "runtime"
@@ -1920,20 +1978,20 @@ def test_expected_payload_pin_refuses_changed_dependency_before_build_or_reuse(
         "VALUE=2\n", encoding="utf-8",
     )
 
-    def no_writer(*_args, **_kwargs):
+    def no_writer(*_args: object, **_kwargs: object) -> NoReturn:
         pytest.fail("changed pinned inputs reached a construction writer")
 
     monkeypatch.setattr(engine, "_construct", no_writer)
-    admissions = []
+    admissions: list[str] = []
     if reuse == "after-wait":
         check_admission = engine.runtime.check_admission
 
-        def after_wait(*args, **kwargs):
+        def after_wait(*args: object, **kwargs: object) -> str:
             decision = engine.runtime.ADMIT_CONSTRUCT if not admissions else check_admission(
                 *args, **kwargs,
             )
             admissions.append(decision)
-            return decision
+            return cast(str, decision)
 
         monkeypatch.setattr(engine.runtime, "check_admission", after_wait)
     with pytest.raises(RuntimeError, match="Runtime inputs changed"):
@@ -1949,7 +2007,7 @@ def test_expected_payload_pin_refuses_changed_dependency_before_build_or_reuse(
 
 
 @pytest.mark.parametrize("invalid", ["wrong", "a" * 63, "g" * 64])
-def test_expected_payload_pin_refuses_malformed_hash(engine, tmp_path, invalid):
+def test_expected_payload_pin_refuses_malformed_hash(engine: ModuleType, tmp_path: Path, invalid: str) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     with pytest.raises(ValueError, match="full source SHA256"):
         with engine.numbered_candidate(
@@ -1962,8 +2020,8 @@ def test_expected_payload_pin_refuses_malformed_hash(engine, tmp_path, invalid):
 
 @pytest.mark.timeout(120)
 def test_dev_generations_freeze_sources_and_reuse_without_writers(
-    engine, procutil, tmp_path, build_inputs, monkeypatch,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     owner = str(plugin.parent)
@@ -1972,7 +2030,7 @@ def test_dev_generations_freeze_sources_and_reuse_without_writers(
         owner=owner, plugin=plugin, uv=uv, base_python=Path(sys.executable),
         health_module="example_module",
     )
-    snapshots = {}
+    snapshots: dict[Path, dict[Path, bytes]] = {}
     for value in (1, 2):
         (plugin.parent / "dependency" / "src" / "example_dependency.py").write_text(
             f"VALUE={value}\n", encoding="utf-8",
@@ -2005,7 +2063,7 @@ def test_dev_generations_freeze_sources_and_reuse_without_writers(
             for path in slot.rglob("*") if path.is_file()
         } == snapshot
 
-    def no_writer(*_args, **_kwargs):
+    def no_writer(*_args: object, **_kwargs: object) -> NoReturn:
         pytest.fail("healthy development reuse entered a construction writer")
 
     monkeypatch.setattr(engine.runtime, "construction_lease", no_writer)
@@ -2031,8 +2089,8 @@ def test_dev_generations_freeze_sources_and_reuse_without_writers(
 
 @pytest.mark.timeout(120)
 def test_nested_control_and_dev_retention_does_not_accumulate_source_ancestry(
-    engine, tmp_path, build_inputs,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path],
+) -> None:
     plugin, uv = build_inputs
     deep = tmp_path / ("caller-" + "x" * 80) / "workspace" / "repo"
     deep.parent.mkdir(parents=True)
@@ -2057,8 +2115,8 @@ def test_nested_control_and_dev_retention_does_not_accumulate_source_ancestry(
 
 @pytest.mark.timeout(120)
 def test_deep_runtime_keeps_short_frozen_inputs_and_checks_installed_origins(
-    engine, procutil, tmp_path, build_inputs,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path],
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / ("namespace-" + "n" * 85) / ("cell-" + "c" * 60) / "runtime"
     arguments = dict(
@@ -2091,12 +2149,12 @@ def test_deep_runtime_keeps_short_frozen_inputs_and_checks_installed_origins(
 
 @pytest.mark.timeout(120)
 def test_fresh_health_requires_its_frozen_origin_receipt(
-    engine, tmp_path, build_inputs, monkeypatch,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
 
-    def remove_evidence(_inputs, slot, *_args):
+    def remove_evidence(_inputs: object, slot: Path, *_args: object) -> None:
         (slot / ".runtime-input-origins.json").unlink()
 
     monkeypatch.setattr(engine, "_prepare_installed", remove_evidence)
@@ -2114,8 +2172,8 @@ def test_fresh_health_requires_its_frozen_origin_receipt(
 
 @pytest.mark.parametrize("development", [False, True], ids=["numbered", "development"])
 def test_real_first_builders_coalesce_and_release_construction_before_settlement(
-    engine, procutil, tmp_path, build_inputs, monkeypatch, development,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, development: bool,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     source = Path(__file__).resolve().parents[3]
@@ -2140,7 +2198,7 @@ def test_real_first_builders_coalesce_and_release_construction_before_settlement
         " with engine.runtime.construction_lease(root,candidate.slot.name,timeout=10):\n"
         "  print(json.dumps({'reused':candidate.reused,'hash':candidate.payload_hash}),flush=True)\n"
     )
-    processes = []
+    processes: list[tuple[subprocess.Popen[str], _OwnedJob | None]] = []
     try:
         for _ in range(2):
             processes.append(procutil.spawn_sync_in_kill_on_close_job(
@@ -2149,7 +2207,7 @@ def test_real_first_builders_coalesce_and_release_construction_before_settlement
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, **procutil.no_window_kwargs(),
             ))
-        results = []
+        results: list[dict[str, Any]] = []
         for process, _ in processes:
             stdout, stderr = process.communicate(timeout=60)
             assert process.returncode == 0, stdout + stderr
@@ -2170,8 +2228,8 @@ def test_real_first_builders_coalesce_and_release_construction_before_settlement
 
 
 def test_numbered_reuse_never_takes_construction_or_touches_published_bytes(
-    engine, tmp_path, build_inputs, monkeypatch,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     with engine.numbered_candidate(
@@ -2182,7 +2240,7 @@ def test_numbered_reuse_never_takes_construction_or_touches_published_bytes(
     before = {file: (file.read_bytes(), file.stat().st_ino, file.stat().st_mtime_ns)
               for file in slot.rglob("*") if file.is_file()}
 
-    def refuse_construction(*args, **kwargs):
+    def refuse_construction(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("completed reuse must not take an exclusive construction lease")
 
     monkeypatch.setattr(engine.runtime, "construction_lease", refuse_construction)
@@ -2205,7 +2263,7 @@ def test_numbered_reuse_never_takes_construction_or_touches_published_bytes(
                       for file in slot.rglob("*") if file.is_file()}
 
 
-def test_failed_isolated_health_never_publishes_or_selects(engine, tmp_path, build_inputs):
+def test_failed_isolated_health_never_publishes_or_selects(engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path]) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     root.mkdir()
@@ -2223,8 +2281,8 @@ def test_failed_isolated_health_never_publishes_or_selects(engine, tmp_path, bui
 
 @pytest.mark.parametrize("fail_preparation", [False, True])
 def test_installed_preparation_precedes_health_and_never_runs_on_reuse(
-    engine, tmp_path, build_inputs, fail_preparation,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], fail_preparation: bool,
+) -> None:
     plugin, uv = build_inputs
     (plugin / "src" / "example_module.py").write_text(
         "import pathlib,sys\n"
@@ -2260,7 +2318,7 @@ def test_installed_preparation_precedes_health_and_never_runs_on_reuse(
         assert candidate.reused
 
 
-def test_health_callable_exercises_lazy_imports_before_publication(engine, tmp_path, build_inputs):
+def test_health_callable_exercises_lazy_imports_before_publication(engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path]) -> None:
     plugin, uv = build_inputs
     source = plugin / "src" / "example_module.py"
     source.write_text(
@@ -2278,7 +2336,7 @@ def test_health_callable_exercises_lazy_imports_before_publication(engine, tmp_p
     assert not (root / "current-version").exists()
 
 
-def test_reuse_failed_direct_health_preserves_published_identity(engine, tmp_path, build_inputs):
+def test_reuse_failed_direct_health_preserves_published_identity(engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path]) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     with engine.numbered_candidate(
@@ -2307,8 +2365,8 @@ def test_reuse_failed_direct_health_preserves_published_identity(engine, tmp_pat
 
 @pytest.mark.parametrize("failure", ["unexecutable", "timeout"])
 def test_completed_runtime_launch_failure_requests_distinct_repair(
-    engine, tmp_path, build_inputs, failure,
-):
+    engine: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], failure: str,
+) -> None:
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     arguments = dict(plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module")
@@ -2338,11 +2396,11 @@ def test_completed_runtime_launch_failure_requests_distinct_repair(
     RuntimeError("ownership refused"),
 ])
 def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
-    engine, tmp_path, monkeypatch, failure,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException,
+) -> None:
     monkeypatch.setattr(engine, "_input_origins", lambda inputs, slot: {})
 
-    def failed(*args, **kwargs):
+    def failed(*args: object, **kwargs: object) -> NoReturn:
         raise failure
 
     monkeypatch.setattr(engine, "_child", failed)
@@ -2356,8 +2414,8 @@ def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job accounting failure")
 def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
-    engine, procutil, tmp_path, build_inputs, monkeypatch,
-):
+    engine: ModuleType, procutil: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import base64
     from native_installer_guardian_teardown import fault_source
 
@@ -2365,15 +2423,15 @@ def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
     root = tmp_path / "runtime"
     marker = tmp_path / "writers"
     observations = tmp_path / "teardown.json"
-    observed_inputs = []
+    observed_inputs: list[_FrozenInputView] = []
     original = engine._procutil
     run_owned = engine.run_owned
 
-    def instrument(inputs):
+    def instrument(inputs: _FrozenInputView) -> ModuleType:
         observed_inputs.append(inputs)
-        return original(inputs)
+        return cast(ModuleType, original(inputs))
 
-    def inject(argv, **options):
+    def inject(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         guardian = sys.modules[run_owned.__module__]
         packet = json.loads(guardian._guardian_packet(
             options["procutil"], options["runtime_path"], None,
@@ -2383,7 +2441,7 @@ def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
             root=root, frozen=observed_inputs[-1].plugin, marker=marker,
             observations=observations, writer=_writer_tree(marker),
         )
-        return run_owned(argv, **{**options, "guardian_sources": sources})
+        return cast(subprocess.CompletedProcess[str], run_owned(argv, **{**options, "guardian_sources": sources}))
 
     monkeypatch.setattr(engine, "_procutil", instrument)
     monkeypatch.setattr(engine, "run_owned", inject)

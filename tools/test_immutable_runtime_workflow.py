@@ -12,11 +12,12 @@ import subprocess
 import sys
 from pathlib import Path
 from types import CodeType
-from typing import Any, Protocol, TypedDict, cast
+from typing import Any, Mapping, Protocol, TypedDict, cast
 
 import pytest
 import yaml
-from _pytest.mark import Expression, KeywordMatcher
+from _pytest.mark import KeywordMatcher
+from _pytest.mark.expression import Expression
 
 
 
@@ -73,7 +74,7 @@ def _python_body(step: dict[str, Any]) -> CodeType:
     return compile(command[len(prefix):-len(suffix)], "<runtime-workflow-step>", "exec")
 
 
-def _enabled(expression: str, inputs: dict[str, bool | str]) -> bool:
+def _enabled(expression: str, inputs: Mapping[str, object]) -> bool:
     assert expression.startswith("${{ ") and expression.endswith(" }}")
     for clause in expression[4:-3].split(" && "):
         if clause == "github.event_name == 'workflow_dispatch'":
@@ -176,7 +177,7 @@ def test_manual_selection_preserves_every_existing_route_and_default() -> None:
     }
     assert set(defaults) == set(routes) and not any(defaults.values())
 
-    def selected(values: dict[str, bool | str]) -> set[str]:
+    def selected(values: dict[str, object]) -> set[str]:
         return {
             name for name, job in WORKFLOW["jobs"].items()
             if _enabled(job["if"], values)
@@ -194,11 +195,11 @@ def test_manual_selection_preserves_every_existing_route_and_default() -> None:
     assert set(WORKFLOW["jobs"]) == diagnostics | set().union(*routes.values())
 
 
-def _collected_packet_items(monkeypatch, files, expression=None):
-    items = []
+def _collected_packet_items(monkeypatch: pytest.MonkeyPatch, files: list[str], expression: str | None=None) -> list[pytest.Item]:
+    items: list[pytest.Item] = []
 
     class Inventory:
-        def pytest_collection_finish(self, session):
+        def pytest_collection_finish(self, session: pytest.Session) -> None:
             items.extend(session.items)
 
     arguments = [
@@ -213,7 +214,7 @@ def _collected_packet_items(monkeypatch, files, expression=None):
     return items
 
 
-def test_seed_packets_cover_actual_cases_once_without_wider_deadlines(monkeypatch):
+def test_seed_packets_cover_actual_cases_once_without_wider_deadlines(monkeypatch: pytest.MonkeyPatch) -> None:
     linux = WORKFLOW["jobs"]["packaging-seed-linux"]
     windows = WORKFLOW["jobs"]["packaging-seed-windows"]
     assert linux["strategy"] == windows["strategy"]
@@ -237,7 +238,7 @@ def test_seed_packets_cover_actual_cases_once_without_wider_deadlines(monkeypatc
     assert "pytest-timeout>=2.3,<3" in tooling["run"]
 
 
-def test_compile_packets_preserve_the_previous_actual_selection(monkeypatch):
+def test_compile_packets_preserve_the_previous_actual_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     linux = WORKFLOW["jobs"]["dependency-compile-linux"]
     windows = WORKFLOW["jobs"]["dependency-compile-windows"]
     assert linux["strategy"] == windows["strategy"]
@@ -265,7 +266,7 @@ def test_compile_packets_preserve_the_previous_actual_selection(monkeypatch):
 
 
 @pytest.mark.parametrize("job_name", ["dependency-compile-linux", "packaging-seed-linux"])
-def test_actual_native_packet_step_uses_containment_and_reports_cleanup(monkeypatch, job_name):
+def test_actual_native_packet_step_uses_containment_and_reports_cleanup(monkeypatch: pytest.MonkeyPatch, job_name: str) -> None:
     import plugin_test_containment as containment
 
     job = WORKFLOW["jobs"][job_name]
@@ -273,7 +274,7 @@ def test_actual_native_packet_step_uses_containment_and_reports_cleanup(monkeypa
     step = next(step for step in job["steps"] if step.get("shell") == "python")
     calls = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> int:
         assert options["cwd"] == ROOT
         assert options["env"]["HOME"] != os.environ.get("HOME")
         assert command[command.index("--basetemp") + 1] == str(options["sandbox"] / "pytest")

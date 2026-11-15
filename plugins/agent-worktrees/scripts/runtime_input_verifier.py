@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 import json
 import math
@@ -13,11 +14,27 @@ import subprocess
 import threading
 import time
 import uuid
+from types import TracebackType
+from typing import Any, TypedDict, cast
+
+
+class VerifierIdentity(TypedDict):
+    contract: str
+    version: int
+    id: str
+    deadline: float
+
+
+class LaunchOptions(TypedDict, total=False):
+    startupinfo: Any  # Native Windows STARTUPINFO is unavailable in POSIX stubs.
+    close_fds: bool
+    pass_fds: tuple[int, ...]
+    env: dict[str, str]
 
 CONTRACT = "agent-worktrees.runtime-input-verifier"
 ABI = 1
 ENVIRONMENT = "AGENT_WORKTREES_RUNTIME_INPUT_VERIFIER"
-_clients = {}
+_clients: dict[str, _Client] = {}
 _launch_lock = threading.Lock()
 
 
@@ -25,7 +42,7 @@ class VerificationRefused(RuntimeError):
     pass
 
 
-def _record(record):
+def _record(record: object) -> VerifierIdentity:
     if (
         not isinstance(record, dict) or set(record) != {"contract", "version", "id", "deadline"}
         or record["contract"] != CONTRACT or type(record["version"]) is not int or record["version"] != ABI
@@ -34,7 +51,7 @@ def _record(record):
         or not math.isfinite(record["deadline"])
     ):
         raise VerificationRefused("Unsupported live input-verifier contract")
-    return dict(record)
+    return cast(VerifierIdentity, dict(record))
 
 
 def require_source_contract(plugin: Path) -> None:
@@ -61,13 +78,13 @@ def _line(descriptor: int, deadline: float, *, idle: bool = False) -> bytes | No
         import msvcrt
         from ctypes import wintypes
 
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel.PeekNamedPipe.argtypes = [
             wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
             ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p,
         ]
         kernel.PeekNamedPipe.restype = wintypes.BOOL
-        handle = msvcrt.get_osfhandle(descriptor)
+        handle = cast(int, getattr(msvcrt, "get_osfhandle")(descriptor))
         available = wintypes.DWORD()
     idle_deadline = min(deadline, time.monotonic() + 0.1) if idle else deadline
     while len(result) <= 128:
@@ -106,19 +123,20 @@ def _write(descriptor: int, content: bytes) -> None:
 class LiveInputVerifier:
     """Keep the caller's actual verification callback in its owning process."""
 
-    def __init__(self, verify, *, deadline: float):
+    def __init__(self, verify: Callable[[], None], *, deadline: float) -> None:
         if not callable(verify):
             raise VerificationRefused("Live input verification requires its actual owner")
         self.identity = _record({
             "contract": CONTRACT, "version": ABI, "id": uuid.uuid4().hex, "deadline": deadline,
         })
         self.callback = verify
-        self.failure = None
-        self.descriptors = []
-        self.requests = self.replies = None
+        self.failure: BaseException | None = None
+        self.descriptors: list[int] = []
+        self.requests: int | None = None
+        self.replies: int | None = None
         self.active = False
 
-    def __enter__(self):
+    def __enter__(self) -> LiveInputVerifier:
         if self.active:
             raise VerificationRefused("Live input-verifier scope is already active")
         self.active = True
@@ -129,13 +147,16 @@ class LiveInputVerifier:
             raise
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.active = False
         for descriptor in self.descriptors:
             os.close(descriptor)
         self.descriptors.clear()
 
-    def check(self):
+    def check(self) -> None:
         if not self.active:
             raise VerificationRefused("Live input-verifier scope is closed")
         if self.failure is not None:
@@ -145,7 +166,7 @@ class LiveInputVerifier:
         self.callback()
 
     @contextmanager
-    def child_launch(self, environment: dict):
+    def child_launch(self, environment: dict[str, str]) -> Iterator[LaunchOptions]:
         self.check()
         requests, child_write = os.pipe()
         child_read, replies = os.pipe()
@@ -157,12 +178,12 @@ class LiveInputVerifier:
                 if os.name == "nt":
                     import msvcrt
 
-                    handles = [msvcrt.get_osfhandle(descriptor) for descriptor in endpoints]
+                    handles = [cast(int, getattr(msvcrt, "get_osfhandle")(descriptor)) for descriptor in endpoints]
                     for handle in handles:
-                        os.set_handle_inheritable(handle, True)
-                    startup = subprocess.STARTUPINFO()
+                        getattr(os, "set_handle_inheritable")(handle, True)
+                    startup = getattr(subprocess, "STARTUPINFO")()
                     startup.lpAttributeList = {"handle_list": handles}
-                    options = {"startupinfo": startup, "close_fds": True}
+                    options: LaunchOptions = {"startupinfo": startup, "close_fds": True}
                 else:
                     handles = list(endpoints)
                     options = {"pass_fds": endpoints}
@@ -174,15 +195,15 @@ class LiveInputVerifier:
             finally:
                 if os.name == "nt":
                     for descriptor in endpoints:
-                        os.set_handle_inheritable(msvcrt.get_osfhandle(descriptor), False)
+                        getattr(os, "set_handle_inheritable")(getattr(msvcrt, "get_osfhandle")(descriptor), False)
                 for descriptor in endpoints:
                     os.close(descriptor)
 
-    def wait(self, process):
-        interruption = None
+    def wait(self, process: subprocess.Popen[str]) -> tuple[str | None, str | None]:
+        interruption: KeyboardInterrupt | SystemExit | None = None
         while process.poll() is None:
             try:
-                request = _line(self.requests, self.identity["deadline"], idle=True)
+                request = _line(cast(int, self.requests), self.identity["deadline"], idle=True)
                 if request is None:
                     continue
                 match = re.fullmatch(
@@ -199,7 +220,7 @@ class LiveInputVerifier:
                     if isinstance(error, (KeyboardInterrupt, SystemExit)):
                         interruption = error
                     outcome = b":refused\n"
-                _write(self.replies, request[:-1] + outcome)
+                _write(cast(int, self.replies), request[:-1] + outcome)
             except (KeyboardInterrupt, SystemExit) as error:
                 interruption = error
                 self.failure = error
@@ -212,7 +233,7 @@ class LiveInputVerifier:
 
 
 class _Client:
-    def __init__(self, identity, endpoints):
+    def __init__(self, identity: VerifierIdentity, endpoints: list[int]) -> None:
         self.identity = identity
         self.lock = threading.Lock()
         self.sequence = 0
@@ -221,14 +242,14 @@ class _Client:
             import msvcrt
 
             endpoints = [
-                msvcrt.open_osfhandle(endpoints[0], os.O_RDONLY | os.O_BINARY),
-                msvcrt.open_osfhandle(endpoints[1], os.O_WRONLY | os.O_BINARY),
+                cast(int, getattr(msvcrt, "open_osfhandle")(endpoints[0], os.O_RDONLY | getattr(os, "O_BINARY"))),
+                cast(int, getattr(msvcrt, "open_osfhandle")(endpoints[1], os.O_WRONLY | getattr(os, "O_BINARY"))),
             ]
         self.read, self.write = endpoints
         for descriptor in endpoints:
             os.set_inheritable(descriptor, False)
 
-    def check(self):
+    def check(self) -> None:
         with self.lock:
             if self.closed or time.monotonic() >= self.identity["deadline"]:
                 raise VerificationRefused("Live input-verifier scope is closed or expired")
@@ -239,14 +260,14 @@ class _Client:
             if response != request + b":ok\n":
                 raise VerificationRefused("Current runtime inputs were refused")
 
-    def close(self):
+    def close(self) -> None:
         if not self.closed:
             self.closed = True
             os.close(self.read)
             os.close(self.write)
 
 
-def current_client(identity):
+def current_client(identity: object) -> _Client:
     identity = _record(identity)
     key = identity["id"]
     if key in _clients:
@@ -271,19 +292,21 @@ def current_client(identity):
     return client
 
 
-def close_clients():
+def close_clients() -> None:
     for client in _clients.values():
         client.close()
     _clients.clear()
 
 
-def wait_for_settlement(argv, environment, *, verifier=None):
+def wait_for_settlement(
+    argv: list[str], environment: dict[str, str], *, verifier: LiveInputVerifier | None = None,
+) -> subprocess.CompletedProcess[str]:
     with (verifier.child_launch(environment) if verifier is not None
-          else nullcontext({"env": environment})) as launch:
+          else nullcontext(LaunchOptions(env=environment))) as launch:
         process = subprocess.Popen(
             argv, **launch, stdin=subprocess.DEVNULL,
             executable=argv[0] if os.name == "nt" else None,
-            text=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     try:
         stdout, stderr = verifier.wait(process) if verifier is not None else process.communicate()
@@ -294,4 +317,4 @@ def wait_for_settlement(argv, environment, *, verifier=None):
         else:
             process.communicate()
         raise
-    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    return subprocess.CompletedProcess(argv, cast(int, process.returncode), stdout, stderr)

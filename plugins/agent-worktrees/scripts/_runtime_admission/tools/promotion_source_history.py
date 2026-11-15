@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import time
+from typing import Any
 
 PIPELINE_STATE_PATH = ".github/release-pipeline-state.json"
 COVERAGE_BASELINES_DIR = ".github/coverage-baselines"
@@ -20,8 +21,8 @@ class SourceHistoryError(RuntimeError):
     pass
 
 
-def _git(repo: Path, arguments: list[str], *, deadline: float | None = None, index=None) -> bytes:
-    timeout = 30
+def _git(repo: Path, arguments: list[str], *, deadline: float | None = None, index: Path | None = None) -> bytes:
+    timeout = 30.0
     if deadline is not None:
         if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
             raise SourceHistoryError("source history needs a finite deadline")
@@ -39,7 +40,7 @@ def _git(repo: Path, arguments: list[str], *, deadline: float | None = None, ind
             ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
              "-c", "core.longpaths=true", *arguments],
             cwd=repo, env=environment, capture_output=True, timeout=timeout,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise SourceHistoryError("cannot read acquired source history") from error
@@ -56,7 +57,7 @@ def content_tree(tree_sha: str, *, repo: Path, deadline: float | None = None) ->
         raise SourceHistoryError("source content needs an exact Git tree")
     with tempfile.TemporaryDirectory() as temporary:
         index = Path(temporary) / "index"
-        def git(arguments):
+        def git(arguments: list[str]) -> bytes:
             return _git(repo, arguments, deadline=deadline, index=index)
 
         git(["read-tree", tree_sha])
@@ -83,8 +84,8 @@ class PromotedSource:
     content_tree: str
 
 
-def _unique(pairs):
-    result = {}
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise SourceHistoryError("duplicate source promotion state field")
@@ -102,7 +103,7 @@ def read_promoted_source(
     """
     if not isinstance(main_commit, str) or not _SHA.fullmatch(main_commit):
         raise SourceHistoryError("source promotion needs an exact Main commit")
-    def git(arguments):
+    def git(arguments: list[str]) -> bytes:
         return _git(repo, arguments, deadline=deadline)
 
     if git(["cat-file", "-t", main_commit]).strip() != b"commit":

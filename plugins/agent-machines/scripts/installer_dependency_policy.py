@@ -17,17 +17,18 @@ import sysconfig
 import types
 import zipimport
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from functools import partial
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple, cast
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
 MIN_AGE_SECONDS = 604800
 SETTINGS_TIMEOUT_SECONDS = 30
-_HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-_BUNDLED_TOML = None
+_HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0
+_BUNDLED_TOML: types.ModuleType | None = None
 _REMOTE_REFERENCE = re.compile(r"(?:https?|git(?:\+[^:]+)?|ssh|svn|hg|bzr)://", re.IGNORECASE)
 _INDEX_OPTIONS = {"--index", "--index-url", "--default-index", "--extra-index-url", "-i"}
 _FILE_OPTIONS = {
@@ -53,26 +54,26 @@ class DependencyPolicyError(RuntimeError):
     """An installation could not establish the seasoning policy."""
 
 
-class _CompileMetadata(set):
+class _CompileMetadata(set[Path]):
     """Compile project roots are metadata inputs, never directory dependencies."""
 
 
-class _SourceCompileMetadata(set):
+class _SourceCompileMetadata(set[Path]):
     """Only unconditional owned path mappings may define omitted distributions."""
 
-    def __init__(self, values=()):
+    def __init__(self, values: Iterable[Path] = ()) -> None:
         super().__init__(values)
-        self.roots = set()
+        self.roots: set[Path] = set()
         self.depth = 0
 
 
-def _captured_environment(env):
-    return _configuration.captured_environment(
+def _captured_environment(env: dict[str, str] | None) -> dict[str, str]:
+    return cast(dict[str, str], _configuration.captured_environment(
         os.environ if env is None else env, windows=os.name == "nt", error_type=DependencyPolicyError,
-    )
+    ))
 
 
-def _toml_parser():
+def _toml_parser() -> types.ModuleType:
     global _BUNDLED_TOML
     for name in ("tomllib", "tomli"):
         try:
@@ -107,15 +108,15 @@ def _toml_parser():
     raise DependencyPolicyError("a proper TOML parser is unavailable in this bootstrap interpreter")
 
 
-def _toml(path: Path) -> dict:
+def _toml(path: Path) -> dict[str, Any]:
     parser = _toml_parser()
     try:
-        return parser.loads(Path(_native_retained_path(path)).read_text(encoding="utf-8"))
+        return cast(dict[str, Any], parser.loads(Path(_native_retained_path(path)).read_text(encoding="utf-8")))
     except (OSError, ValueError) as exc:
         raise DependencyPolicyError("first-party source TOML could not be read or parsed") from exc
 
 
-def _identity(name: str) -> str:
+def _identity(name: object) -> str:
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise DependencyPolicyError("first-party source has no literal project identity")
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -136,10 +137,10 @@ def _contained(path: Path, roots: tuple[Path, ...]) -> Path:
     raise DependencyPolicyError("local source is outside attributable trusted source roots")
 
 
-def _argument_pairs(arguments: list[str]):
-    return _configuration.argument_pairs(
+def _argument_pairs(arguments: Sequence[str]) -> Iterator[tuple[str, str]]:
+    return cast(Iterator[tuple[str, str]], _configuration.argument_pairs(
         arguments, _VALUE_OPTIONS, error_type=DependencyPolicyError,
-    )
+    ))
 
 
 def _check_requirement(
@@ -169,7 +170,7 @@ def _check_requirement(
         candidate = base / source
         if not (expected or candidate.exists() or source in (".", "..")
                 or re.search(r"[/\\]|^[A-Za-z]:|(?i:\.(whl|zip|tar\.gz|tgz))$", source)):
-            return
+            return None
     candidate = _contained(candidate, roots)
     if not candidate.is_dir():
         raise DependencyPolicyError("local artifacts cannot prove release age; only owned source directories are exempt")
@@ -179,7 +180,7 @@ def _check_requirement(
     return candidate
 
 
-def _bundled_dbus_next(project, name, wheel):
+def _bundled_dbus_next(project: str, name: str, wheel: Path) -> bool:
     return (project == "copilot-extensions-worktree-manager" and name == "dbus-next"
             and wheel.name == "dbus_next-0.2.3-py3-none-any.whl" and wheel.is_file()
             and hashlib.sha256(wheel.read_bytes()).hexdigest()
@@ -189,18 +190,18 @@ def _bundled_dbus_next(project, name, wheel):
 def _check_project(
     source: Path, roots: tuple[Path, ...], seen: set[Path], expected: str | None = None,
 ) -> None:
-    source_graph = isinstance(seen, _SourceCompileMetadata)
-    if source_graph:
-        if seen.depth == 0:
-            seen.roots.add(source.resolve())
-        seen.depth += 1
+    source_graph = seen if isinstance(seen, _SourceCompileMetadata) else None
+    if source_graph is not None:
+        if source_graph.depth == 0:
+            source_graph.roots.add(source.resolve())
+        source_graph.depth += 1
     try:
         _inspect_project(source, roots, seen, expected)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise DependencyPolicyError("source dependency metadata is unsupported") from exc
     finally:
-        if source_graph:
-            seen.depth -= 1
+        if source_graph is not None:
+            source_graph.depth -= 1
 
 
 def _inspect_project(
@@ -365,15 +366,15 @@ def cutoff_arguments(
     settings: str, *, now: datetime | None = None, _operation: str = "install",
 ) -> list[str]:
     """Honor a stronger global cutoff; reject package/index escape hatches."""
-    return _configuration.cutoff_arguments(
+    return cast(list[str], _configuration.cutoff_arguments(
         settings, now=now, operation=_operation, min_age=MIN_AGE_SECONDS,
         balanced=_balanced, remote_reference=_REMOTE_REFERENCE, error_type=DependencyPolicyError,
-    )
+    ))
 
 
-def _source_inputs(
-    arguments, environment, cwd, trusted_source_roots, *, operation="install", non_editable=False,
-):
+def _source_inputs(arguments: list[str], environment: dict[str, str], cwd: Path | None,
+    trusted_source_roots: tuple[Path, ...], *, operation: str = "install", non_editable: bool = False,
+) -> tuple[Path, set[Path], set[Path], set[Path]]:
     if "--" in arguments:
         raise DependencyPolicyError("UV end-of-options markers cannot precede mandatory resolver policy")
     if any(arg.split("=", 1)[0] in ("--show-settings", "--dry-run") for arg in arguments):
@@ -438,7 +439,7 @@ def _source_inputs(
         elif "file:" in value.lower():
             raise DependencyPolicyError("local file reference in an unsupported option")
     compiled_projects = _SourceCompileMetadata(seen) if isinstance(seen, _SourceCompileMetadata) else set(seen)
-    if isinstance(compiled_projects, _SourceCompileMetadata):
+    if isinstance(compiled_projects, _SourceCompileMetadata) and isinstance(seen, _SourceCompileMetadata):
         compiled_projects.roots.update(seen.roots)
     if project_directory:
         manifest = base / project_directory / "pyproject.toml"
@@ -481,8 +482,8 @@ def _source_inputs(
         raise DependencyPolicyError("source lock export cannot use context-only project mappings")
     for variable in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE"):
         if environment.get(variable):
-            for path in environment[variable].split():
-                _check_requirements_sources(base / path, set(), roots, base, seen, files, editables)
+            for requirement_path in environment[variable].split():
+                _check_requirements_sources(base / requirement_path, set(), roots, base, seen, files, editables)
     if non_editable and editables:
         raise DependencyPolicyError("deployed runtimes require non-editable source inputs")
     source_editables = (
@@ -499,22 +500,24 @@ def _source_inputs(
                 if entry.get("editable") is True and "path" in entry:
                     editables.add(_contained(project / entry["path"], roots))
     if isinstance(seen, _SourceCompileMetadata):
-        seen.roots = compiled_projects.roots
+        seen.roots = cast(_SourceCompileMetadata, compiled_projects).roots
     return base, seen, files, editables
 
 
-def _compile_arguments(arguments, environment, cwd, roots, operation):
-    return _configuration.source_compile_arguments(
+def _compile_arguments(arguments: list[str], environment: dict[str, str], cwd: Path | None,
+    roots: tuple[Path, ...], operation: str) -> list[str]:
+    return cast(list[str], _configuration.source_compile_arguments(
         arguments, environment, cwd, roots, operation, source_inputs=_source_inputs,
         toml=_toml, identity=_identity, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
-    )
+    ))
 
 
-def _uv_install_command(uv, arguments, *, cwd, directory, operation="install"):
-    return _configuration.uv_command(
+def _uv_install_command(uv: str, arguments: list[str], *, cwd: Path | None, directory: Path,
+    operation: str = "install") -> tuple[list[str], Path]:
+    return cast(tuple[list[str], Path], _configuration.uv_command(
         uv, arguments, cwd=cwd, directory=directory, operation=operation,
         windows=os.name == "nt", argument_pairs=_argument_pairs, value_options=_VALUE_OPTIONS,
-    )
+    ))
 
 
 def prepare_uv_install(
@@ -526,7 +529,7 @@ def prepare_uv_install(
     deadline: float | None = None, native_target: bool = False,
 ) -> list[str]:
     """Preflight only. Installations must execute a retained UV transaction."""
-    return _configuration.prepare_uv_install(
+    return cast(list[str], _configuration.prepare_uv_install(
         uv, arguments, environment=_captured_environment(env), cwd=cwd, now=now,
         trusted_source_roots=trusted_source_roots, projection=_projection, operation=_operation,
         deadline=deadline, native_target=native_target, compile_inputs=_compile_arguments,
@@ -534,7 +537,7 @@ def prepare_uv_install(
         argument_pairs=_argument_pairs, balanced=_balanced, error_type=DependencyPolicyError,
         settings_timeout=SETTINGS_TIMEOUT_SECONDS, headless=_HEADLESS,
         value_options=_VALUE_OPTIONS,
-    )
+    ))
 
 
 def _check_requirements_sources(
@@ -550,7 +553,7 @@ def _check_requirements_sources(
 
 
 _configuration_path = Path(__file__).with_name("installer_dependency_config.py")
-_configuration = types.ModuleType(__name__ + "_configuration")
+_configuration: Any = types.ModuleType(__name__ + "_configuration")
 _configuration.__file__ = str(_configuration_path)
 exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec"), _configuration.__dict__)
 RetainedInputCleanupError = _configuration.RetainedInputCleanupError
@@ -574,19 +577,20 @@ _resolver_configuration = partial(
 )
 
 
-def _config_inputs(arguments, environment, base):
-    return _configuration.config_inputs(
+def _config_inputs(arguments: list[str], environment: dict[str, str], base: Path) -> list[tuple[Path, bool]]:
+    return cast(list[tuple[Path, bool]], _configuration.config_inputs(
         arguments, environment, base, argument_pairs=_argument_pairs,
         toml=_toml, error_type=DependencyPolicyError,
-    )
+    ))
 
 
-def _copy_retained_file(source, destination, *, deadline=None, on_progress=None):
-    return _configuration.copy_retained_file(
+def _copy_retained_file(source: str | os.PathLike[str], destination: str | os.PathLike[str], *,
+    deadline: float | None = None, on_progress: Callable[[], None] | None = None) -> str | os.PathLike[str]:
+    return cast(str | os.PathLike[str], _configuration.copy_retained_file(
         source, destination, native_path=_native_retained_path,
         deadline=deadline, error_type=DependencyPolicyError,
         on_progress=on_progress,
-    )
+    ))
 
 
 class RetainedUVInstall(NamedTuple):
@@ -601,8 +605,8 @@ class RetainedUVInstall(NamedTuple):
 
 @contextmanager
 def retain_closed_wheel_install(
-    uv: str, snapshot, *, python: Path, env: dict[str, str] | None = None,
-):
+    uv: str, snapshot: object, *, python: Path, env: dict[str, str] | None = None,
+) -> Iterator[RetainedUVInstall]:
     """Project an already-inspected complete wheel set, never approve it.
 
     The caller owns profile/feed/target admission and the snapshot context through
@@ -628,8 +632,8 @@ def retain_uv_install(
     _operation: str = "install",
     deadline: float | None = None, native_target: bool = False,
     _projection: list[str] | None = None,
-    on_progress=None,
-):
+    on_progress: Callable[[], None] | None = None,
+) -> Iterator[RetainedUVInstall]:
     """Own the admitted graph and optional first-party exclusion constraints."""
     with _configuration.retain_local_exclusions(
         _retain_uv_install, uv, arguments, excluded_local_packages=excluded_local_packages,
@@ -656,12 +660,12 @@ def _retain_uv_install(
     _generated_constraints: tuple[Path, ...] = (),
     deadline: float | None = None, native_target: bool = False,
     _projection: list[str] | None = None,
-    on_progress=None,
-):
+    on_progress: Callable[[], None] | None = None,
+) -> Iterator[RetainedUVInstall]:
     """Own the admitted graph until the caller's execution and health settle."""
     check_time = partial(_configuration.remaining_timeout, deadline, error_type=DependencyPolicyError)
     check_time()
-    execution = ({"deadline": deadline} if deadline is not None else {}) | (
+    execution: dict[str, Any] = ({"deadline": deadline} if deadline is not None else {}) | (
         {"native_target": True} if native_target else {})
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
@@ -671,8 +675,8 @@ def _retain_uv_install(
         )
     base, projects, files, editables = _source_inputs(
         arguments, environment, cwd, trusted_source_roots,
-        **({"operation": _operation} if _operation != "install" else {}),
-        **({"non_editable": True} if non_editable else {}),
+        **cast(dict[str, Any], {"operation": _operation} if _operation != "install" else {}),
+        **cast(dict[str, Any], {"non_editable": True} if non_editable else {}),
     )
     check_time()
     uv = _select_uv_executable(uv)
@@ -716,11 +720,11 @@ def _retain_uv_install(
         else:
             normalized.append(option or value)
     arguments = normalized
-    original_projection = []
+    original_projection: list[str] = []
     original = prepare_uv_install(
         uv, arguments, env=environment, cwd=cwd, now=now,
         trusted_source_roots=trusted_source_roots, _projection=original_projection,
-        **({"_operation": _operation} if _operation != "install" else {}),
+        **cast(dict[str, Any], {"_operation": _operation} if _operation != "install" else {}),
         **execution,
     )
     if on_progress is not None:
@@ -816,7 +820,7 @@ def _retain_uv_install(
                 text = remap(text)
             Path(_native_retained_path(destination)).write_text(
                 text, encoding="utf-8")
-        retained_config = {}
+        retained_config: dict[str, Any] = {}
         for path, is_project in reversed(_config_inputs(arguments, environment, base)):
             data = _toml(path)
             if is_project:
@@ -874,11 +878,11 @@ def _retain_uv_install(
         retained_roots = tuple(mirror(path) for path in projects)
         for path in retained_roots:
             Path(_native_retained_path(path)).mkdir(parents=True, exist_ok=True)
-        retained_projection = []
+        retained_projection: list[str] = []
         admitted = prepare_uv_install(
             uv, retained, env=retained_environment, cwd=retained_base, now=now,
             trusted_source_roots=retained_roots, _projection=retained_projection,
-            **({"_operation": _operation} if _operation != "install" else {}),
+            **cast(dict[str, Any], {"_operation": _operation} if _operation != "install" else {}),
             **execution,
         )
         original_configuration = _resolver_configuration(
@@ -912,8 +916,8 @@ def run_uv_install(
     retained_resource_roots: tuple[Path, ...] = (),
     excluded_local_packages: tuple[str, ...] = (),
     non_editable: bool = False,
-    _operation: str = "install", deadline: float | None = None, **run_options,
-) -> subprocess.CompletedProcess:
+    _operation: str = "install", deadline: float | None = None, **run_options: Any,
+) -> subprocess.CompletedProcess[Any]:
     """Audit and execute the same private source, requirements and configuration."""
     result = None
     try:
@@ -921,11 +925,11 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
-            **({"non_editable": True} if non_editable else {}),
-            **({"excluded_local_packages": excluded_local_packages}
+            **cast(dict[str, Any], {"non_editable": True} if non_editable else {}),
+            **cast(dict[str, Any], {"excluded_local_packages": excluded_local_packages}
                if excluded_local_packages != () else {}),
-            **({"_operation": _operation} if _operation != "install" else {}),
-            **({"deadline": deadline} if deadline is not None else {}),
+            **cast(dict[str, Any], {"_operation": _operation} if _operation != "install" else {}),
+            **cast(dict[str, Any], {"deadline": deadline} if deadline is not None else {}),
         ) as transaction:
             if deadline is not None:
                 run_options["timeout"] = _configuration.remaining_timeout(
@@ -944,22 +948,22 @@ def run_uv_install(
         return result
 
 
-def prepare_uv_compile(uv: str, arguments: list[str], **options) -> list[str]:
+def prepare_uv_compile(uv: str, arguments: list[str], **options: Any) -> list[str]:
     """Preflight a hashed requirements export; execute only through retention."""
     return prepare_uv_install(uv, arguments, _operation="compile", **options)
 
 
-def retain_uv_compile(uv: str, arguments: list[str], **options):
+def retain_uv_compile(uv: str, arguments: list[str], **options: Any) -> AbstractContextManager[RetainedUVInstall]:
     """Retain the admitted compile graph for the lifetime of its execution."""
     return retain_uv_install(uv, arguments, _operation="compile", **options)
 
 
-def retain_uv_source_compile(uv: str, arguments: list[str], **options):
+def retain_uv_source_compile(uv: str, arguments: list[str], **options: Any) -> AbstractContextManager[RetainedUVInstall]:
     """Retain source metadata for candidate export, never origin/feed approval."""
     return retain_uv_install(uv, arguments, _operation="source-compile", **options)
 
 
-def run_uv_compile(uv: str, arguments: list[str], **options) -> subprocess.CompletedProcess:
+def run_uv_compile(uv: str, arguments: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
     """Execute a retained, seasoned, hashed requirements export."""
     return run_uv_install(uv, arguments, _operation="compile", **options)
 

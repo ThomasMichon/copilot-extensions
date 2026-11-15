@@ -920,10 +920,7 @@ def private_retained_root(parent: Path, *, error_type: _Error, name: str = "inpu
     from ctypes import wintypes
 
     class SecurityAttributes(ctypes.Structure):
-        _fields_ = [
-            ("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID),
-            ("inherit", wintypes.BOOL),
-        ]
+        _fields_ = [("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID), ("inherit", wintypes.BOOL)]
 
     advapi = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("advapi32", use_last_error=True)
     kernel = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("kernel32", use_last_error=True)

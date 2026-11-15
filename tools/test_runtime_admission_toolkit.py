@@ -1,6 +1,27 @@
 """Fresh payload-only traversal of the actual source/build/constructor owners."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from typing import cast
+if TYPE_CHECKING:
+    from typing import Any, Callable, Mapping, Protocol
+    class _LegacyBundleBuild(Protocol):
+        def __call__(self, record: dict[str, Any], paths: Mapping[str, Path], output: Path, **changes: object) -> dict[str, Any]: ...
+    class _LegacyProduce(Protocol):
+        def __call__(self, selected: tuple[dict[str, Any], Path, str, dict[str, Any], dict[str, Path]], output: Path, **changes: object) -> dict[str, Any]: ...
+
+
+
+from typing import Any, Callable
+from types import ModuleType
+
+if TYPE_CHECKING:
+    from test_runtime_profile_policy import _Adopter
+    from worktree_manager.runtime_source_config import RuntimeSource
+
+import pytest
+
 import importlib.util
 import json
 import os
@@ -21,7 +42,8 @@ from test_runtime_feed_configuration import environment
 from test_runtime_source_lock import plan
 from test_installer_wheel_acquisition import CERTIFICATE
 from test_installer_packaging_seed import engine as engine  # noqa: F401
-from test_installer_packaging_seed import seed, selected_seed
+from test_installer_packaging_seed import selected_seed
+import installer_packaging_seed as seed
 from test_runtime_profile_bundle import inputs as inputs  # noqa: F401
 from test_runtime_profile_bundle import build as build_profile_bundle
 from test_runtime_profile_bundle import isolated_manager as isolated_manager  # noqa: F401
@@ -30,7 +52,7 @@ from test_runtime_profile_delivery import selected as selected  # noqa: F401
 from promotion_unit_tests.test_runtime_profile_wheels import _record
 
 
-def _toolkit(tmp_path):
+def _toolkit(tmp_path: Path) -> Path:
     repo = Path(__file__).resolve().parent.parent
     spec = importlib.util.spec_from_file_location(
         "payload_toolkit_packager", repo / "libs" / "payload-invocation" / "runtime_admission.py",
@@ -51,7 +73,7 @@ def _toolkit(tmp_path):
     return toolkit
 
 
-def test_copied_toolkit_validates_actual_bundle_and_sources_without_publishers(tmp_path):
+def test_copied_toolkit_validates_actual_bundle_and_sources_without_publishers(tmp_path: Path) -> None:
     from promotion_python_artifacts import bundle_wheels
     from test_promotion_python_artifacts import _manifest, _STATIC_BUILD
 
@@ -153,13 +175,13 @@ print("copied-bundle-source-validation-ok")
         [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(candidate),
          str(bundles), json.dumps(entry)],
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "copied-bundle-source-validation-ok"
 
 
-def test_copied_toolkit_discovers_the_source_bound_channel_without_publishers(tmp_path):
+def test_copied_toolkit_discovers_the_source_bound_channel_without_publishers(tmp_path: Path) -> None:
     toolkit = _toolkit(tmp_path)
     script = """
 import hashlib, importlib.abc, json, pathlib, subprocess, sys
@@ -253,16 +275,16 @@ print("copied-source-bound-discovery-ok")
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit)],
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "copied-source-bound-discovery-ok"
 
 
-def test_copied_toolkit_retains_a_delivery_without_checkout_imports(tmp_path, selected):
+def test_copied_toolkit_retains_a_delivery_without_checkout_imports(tmp_path: Path, selected: tuple[dict[str, Any], Path, str, dict[str, Any], dict[str, Path]]) -> None:
     toolkit = _toolkit(tmp_path)
     bundle = tmp_path / "delivery.zip"
-    result = produce(selected, bundle)
+    result = cast("_LegacyProduce", produce)(selected, bundle)
     profile = tmp_path / "selected-profile.json"
     profile.write_text(json.dumps(selected[0]), encoding="utf-8")
     script = """
@@ -294,12 +316,12 @@ print("copied-delivery-intake-ok")
     observed = subprocess.run(
         [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(profile), str(bundle), result["sha256"]],
         cwd=tmp_path, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert observed.returncode == 0, observed.stdout + observed.stderr
     assert observed.stdout.strip() == "copied-delivery-intake-ok"
 
-def test_copied_toolkit_maps_real_main_history_before_channel_discovery(tmp_path):
+def test_copied_toolkit_maps_real_main_history_before_channel_discovery(tmp_path: Path) -> None:
     toolkit = _toolkit(tmp_path)
     script = """
 import hashlib, importlib.abc, json, os, pathlib, subprocess, sys, time
@@ -401,14 +423,14 @@ print("copied-real-history-discovery-ok")
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit)],
         cwd=tmp_path, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "copied-real-history-discovery-ok"
 
 def test_copied_toolkit_acquires_actual_origin_before_packaging_or_source_fallback(
-    adopter, configured_source, tmp_path,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], tmp_path: Path,
+) -> None:
     toolkit = _toolkit(tmp_path)
     from test_runtime_profile_policy import owned_policy
 
@@ -449,14 +471,14 @@ print("copied-stdlib-origin-acquisition-ok")
         [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit),
          json.dumps(adopter[1], default=str), configured_source[2]],
         cwd=tmp_path, capture_output=True, text=True, timeout=90,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "copied-stdlib-origin-acquisition-ok"
 
 def test_copied_stdlib_origin_bootstraps_admitted_tools_and_rechecks_seed_revocation(
-    adopter, configured_source, target, feeds, tmp_path,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path,
+) -> None:
     source_with_process_owner(configured_source, build_only=True)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -599,22 +621,22 @@ print("copied-stdlib-origin-tooling-ok")
          json.dumps(adopter[1], default=str), json.dumps(env),
          str(Path(__file__).resolve().parents[1] / "plugins" / "agent-worktrees" / "scripts")],
         cwd=tmp_path, capture_output=True, text=True, timeout=120,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip().endswith("copied-stdlib-origin-tooling-ok")
 
 
 
-def test_copied_toolkit_retains_both_isolated_environments(tmp_path, isolated_manager):  # noqa: F811
+def test_copied_toolkit_retains_both_isolated_environments(tmp_path: Path, isolated_manager: tuple[dict[str, Any], dict[str, Path]]) -> None:  # noqa: F811
     toolkit = _toolkit(tmp_path)
     record, paths = isolated_manager
     transport = tmp_path / "wheels.zip"
-    built = build_profile_bundle(
+    built = cast("_LegacyBundleBuild", build_profile_bundle)(
         record, paths, transport, max_wheels=3, layout="manager-isolated",
     )
     bundle = tmp_path / "delivery.zip"
-    result = produce((record, transport, built["sha256"], {}, {}), bundle, layout="manager-isolated")
+    result = cast("_LegacyProduce", produce)((record, transport, built["sha256"], {}, {}), bundle, layout="manager-isolated")
     profile = tmp_path / "selected-profile.json"
     profile.write_text(json.dumps(record), encoding="utf-8")
     script = """
@@ -640,15 +662,15 @@ print("copied-isolated-delivery-ok")
     observed = subprocess.run(
         [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(profile), str(bundle), result["sha256"]],
         cwd=tmp_path, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert observed.returncode == 0, observed.stdout + observed.stderr
     assert observed.stdout.strip() == "copied-isolated-delivery-ok"
 
 
 def test_admitted_seed_runs_payload_local_semantic_validation(
-    adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, engine: ModuleType, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     toolkit = _toolkit(tmp_path)
     record = tmp_path / "profile.json"
     record.write_text(json.dumps(_record()), encoding="utf-8")
@@ -725,15 +747,15 @@ print("admitted-tooling-semantic-validation-ok")
                 [str(python), "-I", "-c", script, str(toolkit), str(record)],
                 executable=seed.dependencies._native_retained_path(python),
                 cwd=tmp_path, capture_output=True, text=True, timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
             )
             assert result.returncode == 0, result.stdout + result.stderr
             assert result.stdout.strip() == "admitted-tooling-semantic-validation-ok"
 
 
 def test_self_contained_toolkit_builds_and_constructs_without_checkout_imports(
-    adopter, configured_source, target, feeds, tmp_path,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path,
+) -> None:
     source_with_process_owner(configured_source, build_only=True)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -824,7 +846,7 @@ print("payload-source-build-and-constructor-ok")
             **os.environ, **env, "WORKTREE_MANAGER_ROOT": str(configured_source[0]),
         },
         capture_output=True, text=True, timeout=150,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "payload-source-build-and-constructor-ok"

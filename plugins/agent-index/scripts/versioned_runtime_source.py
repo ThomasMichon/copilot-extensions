@@ -373,8 +373,7 @@ def package_version(slot_name: str) -> str:
 
 
 def version_key(version: str) -> (
-    tuple[int, int, int, int, int, int, str, str]
-    | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
+    tuple[int, int, int, int, int, int, str, str] | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
 ):
     """Order package releases and profiles before generated identities."""
     supported = re.fullmatch(

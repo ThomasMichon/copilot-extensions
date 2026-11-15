@@ -10,13 +10,32 @@ import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+    from installer_packaging_seed import SeedLimits
+    from installer_wheel_acquisition import AcquisitionLimits
+    from installer_wheel_inputs import WheelLimits
+    from runtime_source_authentication import AuthenticatedSource
+    from runtime_source_build import SourceRuntimeInputs
+    from runtime_artifact_inputs import ArtifactRuntimeInputs
+
+
+class RuntimeInputOptions(TypedDict):
+    installation: dict[str, Any]
+    uv: str
+    python: Path
+    acquisition_limits: AcquisitionLimits
+    wheel_limits: WheelLimits
+    max_snapshot_bytes: int
+    deadline: float
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 
 import runtime_input_verifier as verification
-from runtime_install_governance import InstallationRefused
+from runtime_install_governance import InstallationRefused, SourceDescriptorOptions
 
 
 def _activate() -> None:
@@ -25,7 +44,7 @@ def _activate() -> None:
     _runtime_admission.activate()
 
 
-def _producer(origin) -> tuple[Path, str]:
+def _producer(origin: AuthenticatedSource) -> tuple[Path, str]:
     acquired = origin.acquired
     if acquired is None or acquired.commit != origin.identity.source_commit:
         raise InstallationRefused("Admission requires the original held source acquisition")
@@ -50,12 +69,12 @@ def _producer(origin) -> tuple[Path, str]:
 
 
 def run(
-    *, installation: dict, uv: Path, base_python: Path, deadline: float,
-    seed_limits, acquisition_limits, wheel_limits, max_subject_bytes: int,
+    *, installation: dict[str, Any], uv: Path, base_python: Path, deadline: float,
+    seed_limits: SeedLimits, acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits, max_subject_bytes: int,
     max_lock_bytes: int, max_snapshot_bytes: int,
-    wait_timeout: float, child_timeout: float, frontend: dict | None = None,
-    expected_source_identity: dict | None = None,
-):
+    wait_timeout: float, child_timeout: float, frontend: dict[str, str] | None = None,
+    expected_source_identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Keep acquisition and the restricted seed alive through native settlement.
 
     This qualification entry point is not enabled by the ordinary manifest.
@@ -113,10 +132,10 @@ def run(
             if completed.returncode:
                 raise subprocess.CalledProcessError(completed.returncode, completed.args)
             guard.check()
-            return json.loads(result_path.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], json.loads(result_path.read_text(encoding="utf-8")))
 
 
-def semantic_owner(request: dict):
+def semantic_owner(request: dict[str, Any]) -> dict[str, Any]:
     """Borrow the original acquisition; never reacquire its exclusive lease."""
     if not isinstance(request, dict) or type(request.get("version")) is not int or request["version"] != 1:
         raise InstallationRefused("Unsupported native admission invocation")
@@ -152,7 +171,7 @@ def semantic_owner(request: dict):
         directory = dependencies._private_retained_root(Path(temporary))
         if request["policy"]["selection"]["backend"] != "cpu":
             raise InstallationRefused("Worktrees admission requires its native CPU capability")
-        target = {
+        target: dict[str, Any] = {
             "device": "cpu", "environment": default_environment(),
             "tags": [str(tag) for tag in sys_tags()],
         }
@@ -166,12 +185,13 @@ def semantic_owner(request: dict):
             target=target, component=name, roots=roots,
             max_subject_bytes=request["max_subject_bytes"], deadline=deadline,
         )
-        common = dict(
+        common = RuntimeInputOptions(
             installation=installation, uv=request["uv"], python=Path(sys.executable),
             acquisition_limits=AcquisitionLimits(**request["acquisition_limits"]),
             wheel_limits=WheelLimits(**request["wheel_limits"]),
             max_snapshot_bytes=request["max_snapshot_bytes"], deadline=deadline,
         )
+        inputs_owner: AbstractContextManager[SourceRuntimeInputs | ArtifactRuntimeInputs]
         if plan.release_selection is not None:
             inputs_owner = retain_artifact_runtime_inputs(
                 plan, origin, directory, source_checkout=Path(request["checkout"]),
@@ -195,7 +215,7 @@ def semantic_owner(request: dict):
                 wait_timeout=min(request["wait_timeout"], deadline - time.monotonic()),
                 child_timeout=min(request["child_timeout"], deadline - time.monotonic()),
                 frontend=request["frontend"], input_verifier=guard,
-                **({"source_descriptor": installation["source_descriptor"]}
+                **cast(SourceDescriptorOptions, {"source_descriptor": installation["source_descriptor"]}
                    if installation.get("source_descriptor") is not None else {}),
             )
             inputs.verify()

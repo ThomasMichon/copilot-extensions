@@ -51,13 +51,14 @@ from promotion_candidate import (
     push_candidate,
 )
 from promotion_source_archive import (
-    changefile_existed_at as _changefile_existed_at,
+    changefile_existed_at as changefile_existed_at,
     git_environment,
     git_text,
     git_timeout_options,
     is_ancestor,
     main_version_inputs as _main_version_inputs,
 )
+_changefile_existed_at = changefile_existed_at
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -700,12 +701,12 @@ def promote(
             raise PromotionError("a frozen candidate cannot be recomposed")
         if expected_candidate_sha is None:
             raise PromotionError("frozen publication requires the admitted composition SHA")
-        return publish_frozen(
+        return cast(dict[str, Any], publish_frozen(
             frozen_candidate_dir, repo=repo, dev_head=dev_head, main_head=main_head,
             promotion_time=promotion_time, python_artifacts_dir=python_artifacts_dir,
             push=push, candidate_branch=candidate_branch,
             candidate_sha=expected_candidate_sha,
-        )
+        ))
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
         summary = consume_pending_changes(

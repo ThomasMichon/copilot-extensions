@@ -1,14 +1,18 @@
 """Real thread interleaving qualifies the guard outside the actor-free unit packet."""
+
+from pathlib import Path
+import pytest
 import os
 import sys
 import threading
 from unittest.mock import Mock
+from typing import Any, cast
 
 from promotion_unit_contract import UnitEvidenceError
 from promotion_unit_effects import UnitRun
 
 
-def test_interleaved_relative_opens_keep_thread_and_nested_path_custody(tmp_path, monkeypatch):
+def test_interleaved_relative_opens_keep_thread_and_nested_path_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     temporary = tmp_path / "synthetic"
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(
@@ -19,9 +23,11 @@ def test_interleaved_relative_opens_keep_thread_and_nested_path_custody(tmp_path
     run.active = True
     outside_ready, inside_ready, outside_done = (threading.Event() for _ in range(3))
     audit = run.audit
-    executed, outcomes, settled = [], {}, {}
+    executed: list[tuple[str, int | None]] = []
+    outcomes: dict[str, int | BaseException] = {}
+    settled: dict[str, bool] = {}
 
-    def interleaved_audit(event, arguments):
+    def interleaved_audit(event: str, arguments: tuple[Any, ...]) -> None:
         if event == "open" and arguments[0] == "same.txt":
             if threading.current_thread() is outside:
                 outside_ready.set()
@@ -31,7 +37,7 @@ def test_interleaved_relative_opens_keep_thread_and_nested_path_custody(tmp_path
                 assert outside_done.wait(5)
         audit(event, arguments)
 
-    def original(name, flags, mode, *, dir_fd):
+    def original(name: str, flags: int, mode: int, *, dir_fd: int | None) -> int:
         audit("open", (name, None, flags))
         if name == "same.txt" and dir_fd == 42:
             run.guarded_open("nested.txt", flags, dir_fd=dir_fd)
@@ -39,7 +45,7 @@ def test_interleaved_relative_opens_keep_thread_and_nested_path_custody(tmp_path
         executed.append((name, dir_fd))
         return 17
 
-    def open_path(label, directory_fd):
+    def open_path(label: str, directory_fd: int) -> None:
         try:
             if label == "inside":
                 assert outside_ready.wait(5)
@@ -53,8 +59,8 @@ def test_interleaved_relative_opens_keep_thread_and_nested_path_custody(tmp_path
             if label == "outside":
                 outside_done.set()
 
-    run.audit = interleaved_audit
-    run._os_open = original
+    cast(Any, run).audit = interleaved_audit
+    run._os_open = cast(Any, original)
     outside = threading.Thread(target=open_path, args=("outside", 41))
     inside = threading.Thread(target=open_path, args=("inside", 42))
     outside.start()

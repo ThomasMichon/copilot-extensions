@@ -1,7 +1,28 @@
 """One byte/semantic inspector, with promotion's independent source binding."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, BinaryIO, Callable, Protocol
+    from pathlib import Path
+    from installer_wheel_inputs import WheelFacts, WheelLimits
+    from artifact_source_build import PromotionArtifactError
+    class _ArchiveInspector(Protocol):
+        def __call__(self, archive: BinaryIO, *, limits: WheelLimits, deadline: float, record_algorithms: frozenset[str] = ...) -> WheelFacts: ...
+
+from typing import cast
+if TYPE_CHECKING:
+    from typing import Any, Callable, Mapping, Protocol
+    class _LegacyWheelBytes(Protocol):
+        def __call__(self, *, metadata: bytes | None = None, wheel: bytes | None = None, extra: Mapping[str, bytes] | None = None, record_mutator: Callable[[list[list[str]]], object] | None = None, compression: int = ..., prefix: str = "demo_pkg-1.0.dist-info/", name: str = "demo_pkg") -> bytes: ...
+
+from pathlib import Path
+
 import io
+from email.message import Message
+from typing import Any, BinaryIO, Callable
+import zipfile
 
 import pytest
 
@@ -10,23 +31,24 @@ import promotion_python_artifacts as promotion
 import runtime_profile_wheels as profiles
 import runtime_wheel_inspection as inspection
 from wheel_input_fixture import wheel_bytes
+from installer_wheel_inputs import WheelFacts
 
 
-def test_runtime_and_promotion_use_one_canonical_semantic_inspector(monkeypatch):
+def test_runtime_and_promotion_use_one_canonical_semantic_inspector(monkeypatch: pytest.MonkeyPatch) -> None:
     assert profiles.inspect_wheel is inspection.inspect_wheel
     assert validation.inspect_wheel_facts is inspection.inspect_wheel_facts
     assert promotion.inspect_wheel is validation.inspect_wheel
-    actual = inspection.inspect_archive
+    actual = cast("_ArchiveInspector", getattr(inspection, "inspect_archive"))
     observed = []
 
-    def inspect(*args, **options):
-        facts = actual(*args, **options)
+    def inspect(*args: BinaryIO, **options: Any) -> WheelFacts:
+        facts: WheelFacts = actual(*args, **options)
         observed.append(facts)
         return facts
 
     monkeypatch.setattr(inspection, "inspect_archive", inspect)
     wheel = {"filename": "demo_pkg-1.0-py3-none-any.whl"}
-    data = wheel_bytes()
+    data = cast("_LegacyWheelBytes", wheel_bytes)()
     runtime_metadata, runtime_size = inspection.inspect_wheel(io.BytesIO(data), wheel)
     promotion_metadata, promotion_size = promotion.inspect_wheel(io.BytesIO(data), wheel)
     assert len(observed) == 2
@@ -34,14 +56,14 @@ def test_runtime_and_promotion_use_one_canonical_semantic_inspector(monkeypatch)
     assert runtime_size == promotion_size == observed[0].unpacked_size
 
 
-def test_promotion_still_binds_inspected_members_to_actual_source(tmp_path, monkeypatch):
-    data = wheel_bytes(wheel=(
+def test_promotion_still_binds_inspected_members_to_actual_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = cast("_LegacyWheelBytes", wheel_bytes)(wheel=(
         b"Wheel-Version: 1.0\nGenerator: locked\n"
         b"Root-Is-Purelib: true\nTag: py3-none-any\n\n"
     ))
-    seen = []
+    seen: list[tuple[bytes, dict[str, str], dict[str, Any]]] = []
 
-    def validate(bundle, hashes, **options):
+    def validate(bundle: zipfile.ZipFile, hashes: dict[str, str], **options: Any) -> None:
         seen.append((bundle.read("demo_pkg/__init__.py"), hashes, options))
         raise promotion.PromotionArtifactError("source member changed")
 
@@ -63,9 +85,9 @@ def test_promotion_still_binds_inspected_members_to_actual_source(tmp_path, monk
 
 @pytest.mark.parametrize("owner", [inspection.inspect_wheel, promotion.inspect_wheel])
 @pytest.mark.parametrize("mutation", ["generator", "record", "tags", "bytes", "deadline"])
-def test_both_owners_preserve_byte_and_metadata_refusals(owner, mutation):
-    options = {"expected_generator": "locked"}
-    values = {"wheel": (
+def test_both_owners_preserve_byte_and_metadata_refusals(owner: Callable[..., tuple[Message, int]], mutation: str) -> None:
+    options: dict[str, Any] = {"expected_generator": "locked"}
+    values: dict[str, Any] = {"wheel": (
         b"Wheel-Version: 1.0\nGenerator: locked\n"
         b"Root-Is-Purelib: true\nTag: py3-none-any\n\n"
     )}
@@ -77,6 +99,6 @@ def test_both_owners_preserve_byte_and_metadata_refusals(owner, mutation):
         values["wheel"] = values["wheel"].replace(b"py3-none-any", b"cp311-none-any")
     elif mutation == "deadline":
         options["deadline"] = 0
-    data = b"invalid wheel" if mutation == "bytes" else wheel_bytes(**values)
-    with pytest.raises(inspection.PromotionArtifactError):
+    data = b"invalid wheel" if mutation == "bytes" else cast("_LegacyWheelBytes", wheel_bytes)(**values)
+    with pytest.raises(cast("type[PromotionArtifactError]", getattr(inspection, "PromotionArtifactError"))):
         owner(io.BytesIO(data), {"filename": "demo_pkg-1.0-py3-none-any.whl"}, **options)

@@ -13,6 +13,29 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from functools import wraps
+from collections.abc import Callable, Iterator
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, TypedDict, cast
+
+if TYPE_CHECKING:
+    from installer_wheel_snapshot import WheelInstallInputs
+    from runtime_install_governance import Governance
+    from versioned_runtime_source import SourceIdentity
+    from update_driver.core import Request
+    from update_driver.participant import BorrowedCustody
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+class ConstructionOptions(TypedDict, total=False):
+    wheel_inputs: WheelInstallInputs
+    local_packages: tuple[str, ...]
+    extras: tuple[str, ...]
+
+
+class ValidationOptions(TypedDict, total=False):
+    validate_candidate: Callable[[Path], None]
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -31,7 +54,7 @@ TRANSIENT_KEYS = (
 )
 
 
-def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
+def native_construction_options(plugin: Path, inputs: WheelInstallInputs) -> tuple[str, ConstructionOptions]:
     from install_source import wheel_selection
 
     selection = wheel_selection(plugin, "agent-worktrees", inputs)
@@ -42,8 +65,8 @@ def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
     }
 
 
-def selected_version(root: Path, runtime) -> str | None:
-    python = runtime.resolve_python(root)
+def selected_version(root: Path, runtime: ModuleType) -> str | None:
+    python = cast(Path | None, runtime.resolve_python(root))
     if python is None or not python.is_absolute() or ".." in python.parts:
         return None
     environment = python.parent.parent
@@ -51,7 +74,7 @@ def selected_version(root: Path, runtime) -> str | None:
     return version if runtime.slot_python(root, version) == python else None
 
 
-def installed_identity(slot: Path, runtime, refusal) -> dict:
+def installed_identity(slot: Path, runtime: ModuleType, refusal: type[Exception]) -> dict[str, Any]:
     python = runtime.slot_python(slot.parent.parent, slot.name)
     if python is None:
         raise refusal("Retained runtime has no interpreter for deployment evidence")
@@ -67,12 +90,15 @@ def installed_identity(slot: Path, runtime, refusal) -> dict:
         [str(python), "-I", "-B", "-c", probe],
         executable=str(python) if os.name == "nt" else None,
         capture_output=True, text=True, timeout=30, check=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
-    return json.loads(result.stdout)
+    return cast(dict[str, Any], json.loads(result.stdout))
 
 
-def selected_repair(root: Path, version: str, previous: str | None, source_identity, governance) -> str:
+def selected_repair(
+    root: Path, version: str, previous: str | None,
+    source_identity: SourceIdentity | None, governance: Governance,
+) -> str:
     """Choose the selected repair; the constructor still admits its exact inputs."""
     import re
     import installer_engine as engine
@@ -100,7 +126,7 @@ def positive_input_timeout(value: str) -> float:
     return seconds
 
 
-def bootstrap(payload: Path, *, stamp: bool = False):
+def bootstrap(payload: Path, *, stamp: bool = False) -> ModuleType:
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
     if stamp:
         base = payload / "scripts" / "_runtime_admission" / "libs"
@@ -135,7 +161,7 @@ def bootstrap(payload: Path, *, stamp: bool = False):
 
 
 @contextmanager
-def custody(*, required: bool = False):
+def custody(*, required: bool = False) -> Iterator[BorrowedCustody | None]:
     from update_driver import core, borrowed_custody, participant, participant_environment
     from update_driver.participant import ENVIRONMENT_KEY
 
@@ -154,7 +180,7 @@ def custody(*, required: bool = False):
 
 
 @contextmanager
-def required_custody():
+def required_custody() -> Iterator[BorrowedCustody | None]:
     if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
         yield None
     else:
@@ -164,9 +190,9 @@ def required_custody():
             yield owner
 
 
-def owned(function):
+def owned(function: Callable[P, T]) -> Callable[P, T]:
     @wraps(function)
-    def execute(*args, **kwargs):
+    def execute(*args: P.args, **kwargs: P.kwargs) -> T:
         with required_custody():
             return function(*args, **kwargs)
 
@@ -187,6 +213,7 @@ def adopt_broker(root: Path, slot: Path) -> None:
     from update_driver import core
 
     with custody(required=True) as owner:
+        owner = cast("BorrowedCustody", owner)
         owner.assert_owned()
         python = runtime.slot_python(root, slot.name)
         if python is None:
@@ -198,7 +225,7 @@ def adopt_broker(root: Path, slot: Path) -> None:
         ]
         process = subprocess.Popen(
             command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
+            text=True, encoding="utf-8", creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
             env=child_environment(),
         )
         try:
@@ -216,7 +243,7 @@ def adopt_broker(root: Path, slot: Path) -> None:
         owner.assert_owned()
 
 
-def _settle(wait):
+def _settle(wait: Callable[[], T]) -> T:
     while True:
         try:
             return wait()
@@ -230,7 +257,7 @@ def _source_digest(payload: Path) -> str:
     return engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
 
 
-def _admission_digest(args) -> str:
+def _admission_digest(args: argparse.Namespace) -> str:
     if args.action != "stamp":
         return _source_digest(args.payload)
     import versioned_runtime_source as source
@@ -250,10 +277,10 @@ def _admission_digest(args) -> str:
                 ".pytest_cache", ".mypy_cache", "tests"}
     files = []
 
-    def scan_error(error):
+    def scan_error(error: OSError) -> None:
         raise error
 
-    def require_ordinary(path, *, directory):
+    def require_ordinary(path: Path, *, directory: bool) -> None:
         info = path.lstat()
         if (
             not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
@@ -281,10 +308,10 @@ def _admission_digest(args) -> str:
             files.append(path)
     if not files:
         raise RuntimeError("Worktrees stamp source is empty")
-    return source._runtime().fingerprint_source(files)
+    return cast(str, source._runtime().fingerprint_source(files))
 
 
-def _native_arguments(args) -> list[str]:
+def _native_arguments(args: argparse.Namespace) -> list[str]:
     values = ["-Action", args.action, "-InstallDir", str(args.root.resolve())]
     for option in (
         "project_name", "bootstrap_python", "owner", "install_source", "input_timeout",
@@ -301,7 +328,7 @@ def _native_arguments(args) -> list[str]:
     return values
 
 
-def _uninstall_policy():
+def _uninstall_policy() -> ModuleType:
     spec = importlib.util.spec_from_file_location("_worktrees_uninstall_policy", SCRIPTS / "uninstall-state.py")
     if spec is None or spec.loader is None:
         raise RuntimeError("Worktrees uninstall policy is unavailable")
@@ -310,7 +337,7 @@ def _uninstall_policy():
     return policy
 
 
-def _uninstall_runtime(args, owner) -> int:
+def _uninstall_runtime(args: argparse.Namespace, owner: BorrowedCustody) -> int:
     from update_driver.windows_broker import remove
 
     if args.action != "uninstall":
@@ -336,9 +363,9 @@ def _uninstall_runtime(args, owner) -> int:
     return 0
 
 
-def _selected_snapshot_current(args) -> bool:
-    selected = getattr(args, "selected_snapshot", None)
-    absent = getattr(args, "expect_no_snapshot", False)
+def _selected_snapshot_current(args: argparse.Namespace) -> bool:
+    selected = cast(Path | None, getattr(args, "selected_snapshot", None))
+    absent = cast(bool, getattr(args, "expect_no_snapshot", False))
     if selected is None and not absent:
         return True
     pointer = args.root / "payload-dir"
@@ -357,18 +384,19 @@ def _selected_snapshot_current(args) -> bool:
         ):
             return False
         current = Path(pointer.read_text(encoding="utf-8-sig").strip())
-        if not current.is_absolute() or not selected.is_absolute():
+        if not current.is_absolute() or not cast(Path, selected).is_absolute():
             return False
-        return current.resolve(strict=True) == selected.resolve(strict=True) == args.payload.resolve(strict=True)
+        return current.resolve(strict=True) == cast(Path, selected).resolve(strict=True) == cast(Path, args.payload).resolve(strict=True)
     except (OSError, RuntimeError, ValueError):
         return False
 
 
-def _execute(args) -> int:
+def _execute(args: argparse.Namespace) -> int:
     from update_driver import ParticipantError, core
 
     with custody(required=True) as owner:
-        request = core.status(owner.request_id, root=owner.root)
+        owner = cast("BorrowedCustody", owner)
+        request = cast("Request", core.status(owner.request_id, root=owner.root))
         arguments = _native_arguments(args)
         if request.state != "running":
             raise RuntimeError("Native installer has no running execution owner")
@@ -401,7 +429,7 @@ def _execute(args) -> int:
              "-ExecutionPolicy", "Bypass", "-File", str(args.payload / "scripts" / "install.ps1"),
              *arguments],
             env=environment, stdout=sys.stdout, stderr=sys.stderr,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
         )
         try:
             code = process.wait()
@@ -411,7 +439,7 @@ def _execute(args) -> int:
         try:
             owner.assert_owned()
         except ParticipantError as error:
-            error.add_note(
+            getattr(error, "add_note")(
                 f"Native Worktrees installer child exited {code}; transaction custody is unconfirmed",
             )
             raise
@@ -420,7 +448,7 @@ def _execute(args) -> int:
         return code
 
 
-def _foreground(args, driver) -> int:
+def _foreground(args: argparse.Namespace, driver: ModuleType) -> int:
     if any(os.environ.get(key) for key in (
         "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
     )):
@@ -482,7 +510,7 @@ def _foreground(args, driver) -> int:
     if hasattr(sys.stderr, "reconfigure"):
         # The durable log already contains native Windows line endings.
         sys.stderr.reconfigure(newline="")
-    result = driver.wait(request.id, output=sys.stderr)
+    result = cast("Request", driver.wait(request.id, output=sys.stderr))
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Native Worktrees installation did not complete: {result.state}")
     return result.exit_code

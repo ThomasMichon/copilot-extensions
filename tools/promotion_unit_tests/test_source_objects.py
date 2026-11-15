@@ -1,6 +1,17 @@
 """Pinned raw-object batch protocol; no actual Git storage or subprocess execution."""
 from __future__ import annotations
 
+from typing import cast
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import Any, Protocol
+    class _LegacySourceCase(Protocol):
+        def __call__(self) -> tuple[dict[str, tuple[str, bytes]], dict[str, str]]: ...
+
+from typing import Any
+
+from pathlib import Path
+
 import hashlib
 import json
 import os
@@ -14,15 +25,20 @@ import promotion_source_archive as source_io
 import promotion_source_history as history
 from promotion_unit_tests.test_complete_source import case
 
+_Objects = tuple[
+    dict[str, tuple[str, bytes]], dict[str, str], dict[str, bytes],
+    list[tuple[Path, list[str], bytes | None]],
+]
 
-def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path, monkeypatch):
+
+def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import promote_release as promotion
     import time
 
     monkeypatch.setattr(time, "time", lambda: 100.0)
     calls = []
 
-    def git(arguments, **options):
+    def git(arguments: list[str], **options: object) -> str:
         calls.append((arguments, options))
         return str(tmp_path / ".git") if arguments[0] == "rev-parse" else ""
 
@@ -38,7 +54,7 @@ def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path,
     assert other.is_dir() and scratch.is_dir()
 
 
-def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path, monkeypatch):
+def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import source_preparation_process as process
 
     clock = [100.0]
@@ -46,7 +62,7 @@ def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_p
     calls = []
     commands = []
 
-    def run(argv, **options):
+    def run(argv: list[str], **options: Any) -> SimpleNamespace:
         commands.append(argv)
         calls.append(options)
         return SimpleNamespace(returncode=0, stdout=b"ok\n", stderr=b"")
@@ -72,7 +88,7 @@ def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_p
     assert source_io.git_timeout_options() == {}
 
 
-def test_local_composition_reserves_cleanup_inside_the_original_deadline(tmp_path, monkeypatch):
+def test_local_composition_reserves_cleanup_inside_the_original_deadline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import local_runtime_promotion as local
 
     clock = [100.0]
@@ -81,7 +97,7 @@ def test_local_composition_reserves_cleanup_inside_the_original_deadline(tmp_pat
     monkeypatch.setattr(local.promotion, "add_scratch_worktree", lambda *a, **kw: tmp_path / "scratch")
     cleanup = []
 
-    def consume(*args, **options):
+    def consume(*args: object, **options: object) -> dict[str, object]:
         assert source_io.git_timeout_options() == {"timeout": 8}
         clock[0] = 108.5
         return {}
@@ -98,9 +114,10 @@ def test_local_composition_reserves_cleanup_inside_the_original_deadline(tmp_pat
 
 
 @pytest.fixture
-def objects(monkeypatch):
-    files, identity = case()
-    blobs, records = {}, []
+def objects(monkeypatch: pytest.MonkeyPatch) -> _Objects:
+    files, identity = cast("_LegacySourceCase", case)()
+    blobs: dict[str, bytes] = {}
+    records: list[bytes] = []
     for name, (mode, raw) in sorted(files.items()):
         blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
         blobs[blob] = raw
@@ -112,9 +129,9 @@ def objects(monkeypatch):
         "tree": b"".join(records), "metadata": b"".join(checks),
         "blobs": b"".join(header + blobs[blob] + b"\n" for header, blob in zip(checks, identifiers, strict=True)),
     }
-    calls = []
+    calls: list[tuple[Path, list[str], bytes | None]] = []
 
-    def git(repo, arguments, *, data=None):
+    def git(repo: Path, arguments: list[str], *, data: bytes | None=None) -> bytes:
         calls.append((repo, arguments, data))
         if arguments[0] == "ls-tree":
             assert arguments == ["ls-tree", "-rz", identity["tree"]] and data is None
@@ -129,7 +146,7 @@ def objects(monkeypatch):
     return files, identity, outputs, calls
 
 
-def test_source_reader_uses_one_bounded_metadata_and_blob_batch_without_export_attributes(objects, tmp_path):
+def test_source_reader_uses_one_bounded_metadata_and_blob_batch_without_export_attributes(objects: _Objects, tmp_path: Path) -> None:
     files, identity, _outputs, calls = objects
     assert source_io.read_tree(
         tmp_path, **{key: identity[key] for key in ("candidate_sha", "main_before", "tree")},
@@ -140,11 +157,11 @@ def test_source_reader_uses_one_bounded_metadata_and_blob_batch_without_export_a
     assert not any("archive" in arguments or "--filters" in arguments for _repo, arguments, _data in calls)
 
 
-def test_blob_batch_accounts_for_repeated_subject_bytes_before_reading_content(monkeypatch, tmp_path):
+def test_blob_batch_accounts_for_repeated_subject_bytes_before_reading_content(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     blob = "a" * 40
     calls = []
 
-    def git(repo, arguments, *, data=None):
+    def git(repo: Path, arguments: list[str], *, data: bytes | None=None) -> bytes:
         calls.append(arguments)
         assert arguments == ["cat-file", "--batch-check"]
         assert data == (blob + "\n").encode()
@@ -162,8 +179,8 @@ def test_blob_batch_accounts_for_repeated_subject_bytes_before_reading_content(m
     "size", "blob-header", "blob-truncated", "blob-extra", "identity",
 ])
 def test_source_reader_refuses_wrong_generation_unsupported_types_and_batch_corruption(
-    objects, tmp_path, change,
-):
+    objects: _Objects, tmp_path: Path, change: str,
+) -> None:
     _files, identity, outputs, calls = objects
     if change == "parent":
         outputs["commit"] = outputs["commit"].replace(identity["main_before"].encode(), b"1" * 40)
@@ -200,13 +217,13 @@ def test_source_reader_refuses_wrong_generation_unsupported_types_and_batch_corr
         assert not calls
 
 
-def test_main_version_inputs_batch_only_selected_raw_blobs(monkeypatch, tmp_path):
+def test_main_version_inputs_batch_only_selected_raw_blobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     raw = b'{"version":"0.4.0-dev8"}\n'
     blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     paths = ["plugins/a/plugin.json", "plugins/b/plugin.json"]
     calls = []
 
-    def git(repo, args, *, data=None):
+    def git(repo: Path, args: list[str], *, data: bytes | None=None) -> bytes:
         assert repo == tmp_path
         calls.append((args, data))
         if args[0] == "ls-tree":
@@ -229,7 +246,7 @@ def test_main_version_inputs_batch_only_selected_raw_blobs(monkeypatch, tmp_path
 
 
 @pytest.mark.parametrize("kind", ["ordinary", "candidate", "ancestry", "changefile"])
-def test_promotion_git_calls_cannot_reintroduce_foreign_selectors(monkeypatch, tmp_path, kind):
+def test_promotion_git_calls_cannot_reintroduce_foreign_selectors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str) -> None:
     import promote_release as promotion
     from promotion_candidate import candidate_environment
 
@@ -238,11 +255,11 @@ def test_promotion_git_calls_cannot_reintroduce_foreign_selectors(monkeypatch, t
     monkeypatch.setenv("PROMOTION_TEST_RETAINED", "retained")
     calls = []
 
-    def run(args, **kwargs):
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         clean = kwargs["env"]
         assert not {"GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"} & clean.keys()
         assert clean["PROMOTION_TEST_RETAINED"] == "retained"
-        assert kwargs["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        assert kwargs["creationflags"] == (getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0)
         assert kwargs["cwd"] == str(tmp_path)
         assert args[:2] == ["git", "--no-replace-objects"]
         calls.append(args)
@@ -263,11 +280,11 @@ def test_promotion_git_calls_cannot_reintroduce_foreign_selectors(monkeypatch, t
 
 @pytest.mark.parametrize("failure", [None, "composition", "tree", "selection"])
 def test_local_composition_delegates_to_existing_owners_and_always_settles(
-    monkeypatch, tmp_path, failure,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str | None,
+) -> None:
     import local_runtime_promotion as local
 
-    calls = []
+    calls: list[object] = []
     scratch = tmp_path / "scratch"
     source, main, tree = "a" * 40, "b" * 40, "c" * 40
     control = {"files": {"control": "d" * 40}}
@@ -278,7 +295,7 @@ def test_local_composition_delegates_to_existing_owners_and_always_settles(
         lambda path, **kw: calls.append(("cleanup", path, kw)),
     )
 
-    def consume(path, **kwargs):
+    def consume(path: Path, **kwargs: object) -> dict[str, object]:
         assert path == scratch
         assert kwargs == {
             "main_head": main, "repo": tmp_path, "trusted_source": local.promotion.REPO,
@@ -289,14 +306,14 @@ def test_local_composition_delegates_to_existing_owners_and_always_settles(
             raise ValueError(failure)
         return {"control_preserved": control}
 
-    def build(path, **kwargs):
+    def build(path: Path, **kwargs: object) -> str:
         assert path == scratch and kwargs == {"control": control}
         calls.append("tree")
         if failure == "tree":
             raise ValueError(failure)
         return tree
 
-    def select(path):
+    def select(path: Path) -> tuple[str, ...]:
         assert path == scratch
         calls.append("selection")
         if failure == "selection":
@@ -316,7 +333,7 @@ def test_local_composition_delegates_to_existing_owners_and_always_settles(
 
 
 @pytest.mark.parametrize("target", ["directory", "file"])
-def test_changefile_reader_rejects_indirection_before_consumption(monkeypatch, tmp_path, target):
+def test_changefile_reader_rejects_indirection_before_consumption(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: str) -> None:
     import changefile
 
     directory = tmp_path / ".changefiles"
@@ -337,7 +354,7 @@ def test_changefile_reader_rejects_indirection_before_consumption(monkeypatch, t
 
 
 @pytest.mark.parametrize("mutation", ["none", "parent", "release", "tag", "duplicate"])
-def test_promoted_source_binds_frozen_identity_before_content_read(tmp_path, monkeypatch, mutation):
+def test_promoted_source_binds_frozen_identity_before_content_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
     main, parent, dev, blob, tree = (character * 40 for character in "abcde")
     promotion = {
         "dev_head": dev, "main_before": parent, "release_id": dev,
@@ -367,11 +384,11 @@ def test_promoted_source_binds_frozen_identity_before_content_read(tmp_path, mon
     }
     content_reads = []
 
-    def git(repo, arguments, *, deadline=None):
+    def git(repo: Path, arguments: list[str], *, deadline: float | None=None) -> bytes:
         assert repo == tmp_path and deadline == 99
         return replies[tuple(arguments)]
 
-    def content(value, *, repo, deadline):
+    def content(value: str, *, repo: Path, deadline: float) -> str:
         content_reads.append((value, repo, deadline))
         return "f" * 40
 

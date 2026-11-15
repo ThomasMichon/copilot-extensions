@@ -13,26 +13,33 @@ import subprocess
 import sys
 import tempfile
 import time
-import tomllib
 import uuid
 from contextlib import ExitStack, nullcontext
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+if TYPE_CHECKING:
+    from installer_wheel_snapshot import WheelInstallInputs
+    from single_instance_lease import SingleInstance
+tomllib = importlib.import_module("tomllib")
 
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 
-import installer_engine as engine
+import installer_engine as _engine
+engine = _engine
 import versioned_runtime as runtime
-import versioned_runtime_source as runtime_source
+import versioned_runtime_source as _runtime_source
+runtime_source = _runtime_source
 import runtime_install_publication as helper_publication
 import runtime_install_driver as install_driver
 import runtime_input_verifier as verification
 from runtime_install_profiles import runtime_profile_policy
 from runtime_install_governance import Governance, InstallationRefused
+import runtime_install_governance as governance_types
 
 
-def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = False) -> dict:
+def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = False) -> dict[str, Any]:
     """Validate data under the existing live lifecycle, without acquiring its locks."""
     publication = runtime._runtime_component("versioned_runtime_publication")
     before = publication.state_path(path, private=True)
@@ -63,20 +70,20 @@ def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = Fal
         raise InstallationRefused("Callback copy inventory is not its owner-created file")
     governance = Governance(
         Path(plan["root"]), Path(plan["owner"]),
-        **({"source_descriptor": plan["governance"]["source_descriptor"]}
-           if "source_descriptor" in plan["governance"] else {}),
-        **({"runtime_profile_policy": plan["governance"]["runtime_profile_policy"]}
-           if "runtime_profile_policy" in plan["governance"] else {}),
-        **({"runtime_profile_mode": plan["governance"]["runtime_profile_mode"]}
-           if "runtime_profile_mode" in plan["governance"] else {}),
-        **({"runtime_input_verification": plan["governance"]["runtime_input_verification"],
+        **cast(governance_types.SourceDescriptorOptions, {"source_descriptor": plan["governance"]["source_descriptor"]}
+               if "source_descriptor" in plan["governance"] else {}),
+        **cast(governance_types.RuntimeProfilePolicyOptions, {"runtime_profile_policy": plan["governance"]["runtime_profile_policy"]}
+               if "runtime_profile_policy" in plan["governance"] else {}),
+        **cast(governance_types.RuntimeProfileModeOptions, {"runtime_profile_mode": plan["governance"]["runtime_profile_mode"]}
+               if "runtime_profile_mode" in plan["governance"] else {}),
+        **cast(governance_types.InputVerificationOptions, {"runtime_input_verification": plan["governance"]["runtime_input_verification"],
             "prepare_only": prepare_only}
            if "runtime_input_verification" in plan["governance"] else {}),
     )
     if governance.signature() != plan["governance"]:
         raise InstallationRefused("Helper publication governance changed")
     if governance.context:
-        receipt = governance.initial[1]
+        receipt = cast(dict[str, Any], governance.initial[1])
         specs = (
             (governance.durable_home / "marketplaces" / ".locks" /
              f"{receipt['marketplaceId']}.genesis", "genesis", None),
@@ -127,13 +134,12 @@ def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = Fal
 
 
 def _publish_helpers(
-    governance: Governance, frontend: dict | None, content: Path, slot: Path,
-    descriptor: int, *, timeout: float,
-    base_python: Path,
+    governance: Governance, frontend: dict[str, str] | None, content: Path, slot: Path,
+    descriptor: int, *, timeout: float, base_python: Path,
     expected_payload_hash: str | None = None,
 ) -> helper_publication.HelperPublication | None:
     if frontend is None:
-        return
+        return None
     if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
         raise InstallationRefused("Helper publication requires a full source SHA256 pin")
     if (
@@ -171,7 +177,7 @@ def _publish_helpers(
             "package_version": (
                 pin["runtime_source"]["package_version"] if pin else identity["build_info"]["version"]
             ), "governance": governance.signature(),
-            "locks": [dict(lock._owner()) for lock in governance.publication_locks],
+            "locks": [dict(held_lock._owner()) for held_lock in governance.publication_locks],
             "pid": (
                 governance.publication_locks[0]._owner()["pid"]
                 if governance.publication_locks else os.getpid()
@@ -203,12 +209,12 @@ def _publish_helpers(
                     raise InstallationRefused("PowerShell helper source is not an ordinary absolute path")
             argv = [str(executable), "-NoProfile", "-NonInteractive", "-File", entry_name,
                     "publish-runtime-helpers", "-InstallDir", str(governance.root),
-                    "-BootstrapPython", sys._base_executable,
+                    "-BootstrapPython", getattr(sys, "_base_executable"),
                     "-RuntimePublicationPlan", str(plan_path), "-RuntimePublicationDigest", digest]
         else:
             argv = [str(executable), entry.as_posix(), "publish-runtime-helpers",
                     "--install-dir", str(governance.root),
-                    "--runtime-publication-python", sys._base_executable,
+                    "--runtime-publication-python", getattr(sys, "_base_executable"),
                     "--runtime-publication-plan", str(plan_path), "--runtime-publication-digest", digest]
         if governance.source_descriptor is not None:
             argv.extend([
@@ -224,7 +230,7 @@ def _publish_helpers(
         import agent_procutil
 
         try:
-            completed = engine.run_owned(
+            completed = getattr(engine, "run_owned")(
                 argv, cwd=Path(governance.root.anchor), env=environment, timeout=timeout,
                 procutil=agent_procutil, construction_fd=descriptor,
                 runtime_root=governance.root, runtime_version=slot.name,
@@ -245,12 +251,14 @@ def _publish_helpers(
             "file_identity": [result_state.device, result_state.inode],
         }:
             raise InstallationRefused("Native helper publication returned an invalid acknowledgement")
+        def validate_inputs() -> None:
+            helper_publication_plan(plan_path, digest)
         return helper_publication.publish(
             plan, directory,
             {plan_path: (plan_state.device, plan_state.inode),
              copies_path: (copies_state.device, copies_state.inode),
              result_path: (result_state.device, result_state.inode)},
-            validate_inputs=lambda: helper_publication_plan(plan_path, digest),
+            validate_inputs=validate_inputs,
         )
 
 
@@ -273,7 +281,7 @@ def _selected(root: Path) -> str | None:
 
 
 def _selector_snapshot(root: Path) -> dict[str, bytes | None]:
-    result = {}
+    result: dict[str, bytes | None] = {}
     for name in ("current-version", "last-known-good"):
         try:
             result[name] = (root / name).read_bytes()
@@ -338,15 +346,13 @@ def _monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:
 
 
 def _settle_monitor(
-    root: Path, slot: Path, summary: dict,
-    predecessor: tuple[int, str] | None, handles: list[subprocess.Popen],
+    root: Path, slot: Path, summary: dict[str, Any],
+    predecessor: tuple[int, str] | None, handles: list[subprocess.Popen[str]],
 ) -> bool:
     from agent_worktrees.runtime_monitor_settlement import settle_monitor
 
-    return settle_monitor(
-        root, slot, summary, predecessor, handles,
-        candidate_serving=_candidate_serving, refused=InstallationRefused,
-    )
+    return settle_monitor(root, slot, summary, predecessor, handles,
+                          candidate_serving=_candidate_serving, refused=InstallationRefused)
 
 
 def _source_provenance(
@@ -366,7 +372,7 @@ def _source_provenance(
         result = subprocess.run(
             ["git", "-C", str(payload), *arguments],
             capture_output=True, text=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         if result.returncode != 0:
             if "not a git repository" not in result.stderr:
@@ -380,7 +386,7 @@ def _source_provenance(
         status = subprocess.run(
             ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
             capture_output=True, text=True, timeout=30, check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         dirty = bool(status.stdout.strip())
     if source_identity is not None:
@@ -395,7 +401,7 @@ def _source_provenance(
     return provenance
 
 
-def _installed_identity(slot: Path) -> dict:
+def _installed_identity(slot: Path) -> dict[str, Any]:
     return install_driver.installed_identity(slot, runtime, InstallationRefused)
 
 
@@ -403,15 +409,15 @@ def _installed_identity(slot: Path) -> dict:
 def install(
     root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
-    expected_source_identity: dict | None = None,
-    frontend: dict | None = None,
+    expected_source_identity: dict[str, Any] | None = None,
+    frontend: dict[str, str] | None = None,
     recover_adopted_manager: bool = False,
-    wheel_inputs: engine.WheelInstallInputs | None = None,
-    native_wheel_inputs: engine.WheelInstallInputs | None = None,
+    wheel_inputs: WheelInstallInputs | None = None,
+    native_wheel_inputs: WheelInstallInputs | None = None,
     repair: bool = False,
-    source_descriptor: dict | None = None,
-    input_verifier=None,
-) -> dict:
+    source_descriptor: dict[str, Any] | None = None,
+    input_verifier: verification.LiveInputVerifier | None = None,
+) -> dict[str, Any]:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve():
         raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
     if input_verifier is not None:
@@ -429,14 +435,14 @@ def install(
     ):
         raise InstallationRefused("Source identity changed after frontend runtime selection")
     version = source_identity.runtime_version if source_identity is not None else package_version
-    wheel_options = {}
+    wheel_options: install_driver.ConstructionOptions = {}
     if native_wheel_inputs is not None:
         if wheel_inputs is not None or source_identity is not None:
             raise InstallationRefused("Native release wheels cannot replace a Source association")
         version, wheel_options = install_driver.native_construction_options(plugin, native_wheel_inputs)
     policy = None
     if wheel_inputs is not None:
-        if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
+        if source_identity is None or not isinstance(wheel_inputs, getattr(engine, "WheelInstallInputs")):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
         wheel_inputs.verify()
         receipt = wheel_inputs.receipt()
@@ -464,11 +470,11 @@ def install(
         version += ".repair." + uuid.uuid4().hex
     governance = Governance(
         root, payload,
-        **({"source_descriptor": source_descriptor} if source_descriptor is not None else {}),
-        **({"runtime_profile_policy": policy, "runtime_profile_mode": profile["mode"]}
-           if policy is not None else {}),
-        **({"runtime_input_verification": input_verifier.identity, "verify_inputs": input_verifier.check}
-           if input_verifier is not None else {}),
+        **cast(governance_types.SourceDescriptorOptions, {"source_descriptor": source_descriptor} if source_descriptor is not None else {}),
+        **cast(governance_types.RuntimeProfileOptions, {"runtime_profile_policy": policy, "runtime_profile_mode": profile["mode"]}
+               if policy is not None else {}),
+        **cast(governance_types.InputVerificationOptions, {"runtime_input_verification": input_verifier.identity, "verify_inputs": input_verifier.check}
+               if input_verifier is not None else {}),
     )
     os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
     root = governance.root
@@ -493,8 +499,8 @@ def install(
                     reuse_generations=source_identity is None and not wheel_options,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
-                    **({"validate_candidate": lambda _slot: governance.recheck()}
-                       if policy is not None else {}),
+                    **cast(install_driver.ValidationOptions, {"validate_candidate": lambda _slot: governance.recheck()}
+                           if policy is not None else {}),
                     **wheel_options,
                 ))
         except engine.HealthRepairRequired:
@@ -512,12 +518,12 @@ def install(
                 )
             import runtime_install_modes as modes
 
-            return modes.run(
+            return cast(dict[str, Any], modes.run(
                 root, plugin, payload=payload, uv=uv, base_python=base_python, mode="repair",
                 wait_timeout=wait_timeout, child_timeout=child_timeout,
                 expected_source_identity=runtime_source.manifest_fields(source_identity),
                 frontend=frontend, recover_adopted_manager=recover_adopted_manager,
-            )
+            ))
         version = candidate.slot.name
         print(
             f"Runtime {version}: candidate healthy (reused={candidate.reused}); "
@@ -555,7 +561,7 @@ def install(
                 print(stderr, end="", file=sys.stderr, flush=True)
             if completed.returncode != 0:
                 raise subprocess.CalledProcessError(completed.returncode, argv, stdout, stderr)
-            result = json.loads(result_path.read_text(encoding="utf-8"))
+            result = cast(dict[str, Any], json.loads(result_path.read_text(encoding="utf-8")))
             result["reused"] = candidate.reused
             return result
 
@@ -563,28 +569,28 @@ def install(
 @install_driver.owned
 def settle_candidate(
     root: Path, version: str, *, payload: Path, payload_hash: str,
-    expected_governance: dict, previous: str | None = None, wait_timeout: float = 180,
-    cutover_guard=None, lifecycle_slot: Path | None = None, package_version: str | None = None,
+    expected_governance: dict[str, Any], previous: str | None = None, wait_timeout: float = 180,
+    cutover_guard: SingleInstance | None = None, lifecycle_slot: Path | None = None, package_version: str | None = None,
     force_monitor_transition: bool = False,
     dev_owner: str | None = None,
-    frontend: dict | None = None, publication_source_root: Path | None = None,
+    frontend: dict[str, str] | None = None, publication_source_root: Path | None = None,
     publication_payload_hash: str | None = None,
     child_timeout: float = 180,
     base_python: Path | None = None,
     governance: Governance | None = None,
     recover_adopted_manager: bool = False,
-    release_dev_claim: dict | None = None,
-) -> dict:
+    release_dev_claim: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     governance = governance if governance is not None else Governance(
         root, payload,
-        **({"source_descriptor": expected_governance["source_descriptor"]}
-           if "source_descriptor" in expected_governance else {}),
-        **({"runtime_profile_policy": expected_governance["runtime_profile_policy"]}
-           if "runtime_profile_policy" in expected_governance else {}),
-        **({"runtime_profile_mode": expected_governance["runtime_profile_mode"]}
-           if "runtime_profile_mode" in expected_governance else {}),
-        **({"runtime_input_verification": expected_governance["runtime_input_verification"]}
-           if "runtime_input_verification" in expected_governance else {}),
+        **cast(governance_types.SourceDescriptorOptions, {"source_descriptor": expected_governance["source_descriptor"]}
+               if "source_descriptor" in expected_governance else {}),
+        **cast(governance_types.RuntimeProfilePolicyOptions, {"runtime_profile_policy": expected_governance["runtime_profile_policy"]}
+               if "runtime_profile_policy" in expected_governance else {}),
+        **cast(governance_types.RuntimeProfileModeOptions, {"runtime_profile_mode": expected_governance["runtime_profile_mode"]}
+               if "runtime_profile_mode" in expected_governance else {}),
+        **cast(governance_types.InputVerificationOptions, {"runtime_input_verification": expected_governance["runtime_input_verification"]}
+               if "runtime_input_verification" in expected_governance else {}),
     )
     if governance.signature() != expected_governance:
         raise InstallationRefused("Installation governance changed before candidate handover")
@@ -602,9 +608,7 @@ def settle_candidate(
             from agent_worktrees.manager_recovery import recover
 
             recover()
-        from agent_worktrees import (
-            config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment,
-        )
+        from agent_worktrees import config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment
         from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
         from agent_worktrees.runtime_monitor_identity import AsyncRetirementUnsupported
 
@@ -615,7 +619,6 @@ def settle_candidate(
             if Version(identity["package_version"]) != Version(package_version):
                 raise InstallationRefused("Retained runtime differs from the requested package version")
         manifest = deployment.manifest_bytes(identity, candidate_slot, payload_hash)
-
         monitor_scope = cfg.install_dir().resolve() == root
         with governance.held(timeout=wait_timeout), ExitStack() as cutover_custody:
             manifest = cutover_custody.enter_context(governance.manifest_publication(manifest))
@@ -682,8 +685,8 @@ def settle_candidate(
                     descriptor, timeout=child_timeout, base_python=base_python,
                     expected_payload_hash=publication_payload_hash,
                 )
-            handles: list[subprocess.Popen] = []
-            summary = {"action": "interrupted", "self_retirement": True}
+            handles: list[subprocess.Popen[str]] = []
+            summary: dict[str, Any] = {"action": "interrupted", "self_retirement": True}
             retiring_dev = serving_slot == "dev" or (
                 serving_slot is not None and runtime.is_dev_generation(serving_slot)
             )
@@ -714,7 +717,7 @@ def settle_candidate(
                 print(f"Runtime {version}: selection published", flush=True)
                 committed = True
                 if monitor_scope and not already_serving:
-                    summary = cutover.activate_after_update(
+                    summary = cast(dict[str, Any], cutover.activate_after_update(
                         runtime_python=str(runtime.slot_python(root, version)),
                         monitor_was_live=predecessor is not None,
                         cutover_guard=guard,
@@ -722,7 +725,7 @@ def settle_candidate(
                         transition_custody=custody,
                         asynchronous_retirement=True,
                         retirement_predecessor=retirement_predecessor,
-                    )
+                    ))
                     summary["self_retirement"] = True
                     if outgoing_deferred:
                         summary.setdefault("result", {})["retirement_pending"] = True
@@ -738,7 +741,7 @@ def settle_candidate(
                         f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
                     )
                 if deferred_release:
-                    replacement.settle_release(root, release_dev_claim, committed=True)
+                    replacement.settle_release(root, cast(dict[str, Any], release_dev_claim), committed=True)
                 deployment.publish(root, manifest)
             except PublicationOutcomePending:
                 if helpers is not None:
@@ -763,14 +766,14 @@ def settle_candidate(
 
                                 retirements.cancel(root, retirement_predecessor, runtime=runtime)
                             if deferred_release:
-                                replacement.settle_release(root, release_dev_claim, committed=False)
+                                replacement.settle_release(root, cast(dict[str, Any], release_dev_claim), committed=False)
                         elif any(content not in (
                             (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
                         ) for content in _selector_snapshot(root).values()):
                             runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                         if committed:
                             if deferred_release:
-                                replacement.settle_release(root, release_dev_claim, committed=True)
+                                replacement.settle_release(root, cast(dict[str, Any], release_dev_claim), committed=True)
                             deployment.publish(root, manifest)
                         break
                     except PublicationOutcomePending:
@@ -900,7 +903,7 @@ def main(argv: list[str] | None = None) -> int:
                 frontend=arguments.frontend,
                 recover_adopted_manager=arguments.recover_adopted_manager,
                 wheel_inputs=wheels, repair=arguments.mode == "repair",
-                **({"source_descriptor": selected.source_descriptor}
+                **cast(governance_types.SourceDescriptorOptions, {"source_descriptor": selected.source_descriptor}
                    if getattr(selected, "source_descriptor", None) is not None else {}),
             )
     elif arguments.inspect_helper_publication or arguments.complete_helper_publication:
@@ -947,7 +950,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if arguments.mode_owner and arguments.governance_generation is None:
             parser.error("whole-operation owner requires its original governance generation")
-        mode_arguments = (
+        mode_arguments: dict[str, Any] = (
             {"expected_governance": arguments.governance_generation}
             if arguments.mode_owner else {}
         )

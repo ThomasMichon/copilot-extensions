@@ -1,6 +1,32 @@
 """Controlled TLS-feed checks; no live feed or production installation."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, BinaryIO, Callable, Protocol
+    from pathlib import Path
+    class _PrivateRoot(Protocol):
+        def __call__(self, parent: Path, *, name: str = "inputs") -> Path: ...
+
+from typing import BinaryIO
+
+from typing import cast
+
+
+
+from typing import ContextManager, Iterator, IO
+from types import ModuleType
+
+if TYPE_CHECKING:
+    from installer_wheel_snapshot import WheelSnapshot
+    from installer_wheel_acquisition import AcquiredWheels
+    from installer_wheel_acquisition import AdmittedRetainedWheels
+
+from typing import Callable
+
+from typing import Any
+
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -17,6 +43,7 @@ import sys
 import threading
 import time
 from urllib.error import URLError
+from urllib.request import Request
 
 import pytest
 
@@ -36,20 +63,20 @@ EXPECTED = {
 
 
 @pytest.fixture
-def feeds():
+def feeds() -> Iterator[Callable[..., dict[str, Any]]]:
     owned = []
 
-    def create(*, certificate=CERTIFICATE):
-        state = {"routes": {}, "requests": []}
+    def create(*, certificate: Path=CERTIFICATE) -> dict[str, Any]:
+        state: dict[str, Any] = {"routes": {}, "requests": []}
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+            def do_GET(self) -> None:
                 self.respond(head=False)
 
-            def do_HEAD(self):
+            def do_HEAD(self) -> None:
                 self.respond(head=True)
 
-            def respond(self, *, head):
+            def respond(self, *, head: bool) -> None:
                 state["requests"].append((self.path, dict(self.headers)))
                 if state.get("authorize") and not state["authorize"](self.headers):
                     self.send_response(401)
@@ -69,7 +96,7 @@ def feeds():
                 if not head:
                     self.wfile.write(body)
 
-            def log_message(self, *_arguments):
+            def log_message(self, *_arguments: object) -> None:
                 pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -90,7 +117,7 @@ def feeds():
         assert not thread.is_alive()
 
 
-def listed(*, url=None, **changes):
+def listed(*, url: str | None=None, **changes: object) -> dict[str, Any]:
     return {
         "filename": FILENAME, "url": url or "/files/" + FILENAME,
         "hashes": {"sha256": EXPECTED["sha256"].removeprefix("sha256:")},
@@ -99,7 +126,7 @@ def listed(*, url=None, **changes):
     }
 
 
-def project(state, entries=None):
+def project(state: dict[str, Any], entries: list[Any] | None=None) -> bytes:
     body = json.dumps({
         "meta": {"api-version": "1.1"}, "name": "fixture",
         "files": entries if entries is not None else [listed()],
@@ -111,7 +138,7 @@ def project(state, entries=None):
     return body
 
 
-def limits(**changes):
+def limits(**changes: Any) -> acquisition.AcquisitionLimits:
     return replace(acquisition.AcquisitionLimits(
         max_packages=3, max_requests=10, max_redirects=5,
         max_candidates_per_project=10, max_index_bytes=4096,
@@ -120,7 +147,7 @@ def limits(**changes):
     ), **changes)
 
 
-def _load_fixture_module(name, path):
+def _load_fixture_module(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Fixture module cannot be loaded: {path}")
@@ -130,7 +157,7 @@ def _load_fixture_module(name, path):
     return module
 
 
-def worker_procutil():
+def worker_procutil() -> ModuleType:
     name = "_wheel_acquisition_test_procutil"
     if name not in sys.modules:
         _load_fixture_module(
@@ -139,7 +166,7 @@ def worker_procutil():
     return sys.modules[name]
 
 
-def acquisition_arguments(state):
+def acquisition_arguments(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "feeds": (acquisition.WheelFeed(IDENTITY, state["origin"] + "/simple"),),
         "download_origins": (), "cutoffs": {"fixture": datetime(2025, 1, 1, tzinfo=timezone.utc)},
@@ -149,13 +176,13 @@ def acquisition_arguments(state):
     }
 
 
-def acquire(state, **changes):
+def acquire(state: dict[str, Any], **changes: Any) -> ContextManager[AcquiredWheels]:
     expected = changes.pop("expected", [EXPECTED])
     return acquisition.acquire_wheel_inputs(expected, **(acquisition_arguments(state) | changes))
 
 
 @contextmanager
-def retained_wheel(tmp_path):
+def retained_wheel(tmp_path: Path) -> Iterator[WheelSnapshot]:
     source = tmp_path / FILENAME
     source.write_bytes(DATA)
     with acquisition.retain_wheel_inputs(
@@ -166,14 +193,14 @@ def retained_wheel(tmp_path):
         yield snapshot
 
 
-def admit_retained(state, snapshot, **changes):
+def admit_retained(state: dict[str, Any], snapshot: WheelSnapshot, **changes: Any) -> ContextManager[AdmittedRetainedWheels]:
     expected = changes.pop("expected", [EXPECTED])
     return acquisition.admit_retained_wheel_inputs(
         expected, snapshot=snapshot, **(acquisition_arguments(state) | changes),
     )
 
 
-def test_retained_bytes_are_admitted_by_current_feed_without_wheel_download(feeds, tmp_path):
+def test_retained_bytes_are_admitted_by_current_feed_without_wheel_download(feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     metadata = project(state)
     with retained_wheel(tmp_path) as snapshot, admit_retained(state, snapshot) as admitted:
@@ -194,7 +221,7 @@ def test_retained_bytes_are_admitted_by_current_feed_without_wheel_download(feed
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
-def test_retained_byte_identity_and_storage_refusals_precede_network(feeds, tmp_path):
+def test_retained_byte_identity_and_storage_refusals_precede_network(feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     project(state)
     with retained_wheel(tmp_path) as snapshot:
@@ -215,7 +242,7 @@ def test_retained_byte_identity_and_storage_refusals_precede_network(feeds, tmp_
     {"url": "http://127.0.0.1:9/file.whl"},
     {"url": "https://other.invalid/file.whl"},
 ])
-def test_retained_bytes_cannot_bypass_feed_policy(feeds, tmp_path, entry):
+def test_retained_bytes_cannot_bypass_feed_policy(feeds: Callable[..., dict[str, Any]], tmp_path: Path, entry: dict[str, Any]) -> None:
     state = feeds()
     project(state, [listed(**entry)])
     with retained_wheel(tmp_path) as snapshot:
@@ -226,11 +253,11 @@ def test_retained_bytes_cannot_bypass_feed_policy(feeds, tmp_path, entry):
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
-def test_first_owning_feed_still_controls_retained_bytes(feeds, tmp_path):
+def test_first_owning_feed_still_controls_retained_bytes(feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     first, second = feeds(), feeds()
     project(first, [listed(yanked=True)])
     project(second)
-    options = {
+    options: dict[str, Any] = {
         "feeds": (
             acquisition.WheelFeed(IDENTITY, first["origin"] + "/simple"),
             acquisition.WheelFeed("sha256:" + "c" * 64, second["origin"] + "/simple"),
@@ -242,7 +269,7 @@ def test_first_owning_feed_still_controls_retained_bytes(feeds, tmp_path):
     assert len(first["requests"]) == 1 and not second["requests"]
 
 
-def test_retained_bytes_remain_held_through_admission(feeds, tmp_path):
+def test_retained_bytes_remain_held_through_admission(feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     project(state)
     with pytest.raises((ValueError, PermissionError), match="changed|digest|denied"):
@@ -252,7 +279,7 @@ def test_retained_bytes_remain_held_through_admission(feeds, tmp_path):
             path.write_bytes(b"changed")
 
 
-def test_retained_admission_deadline_bounds_consumption(feeds, tmp_path, monkeypatch):
+def test_retained_admission_deadline_bounds_consumption(feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = feeds()
     project(state)
     deadline = time.monotonic() + 10
@@ -262,7 +289,7 @@ def test_retained_admission_deadline_bounds_consumption(feeds, tmp_path, monkeyp
                 monkeypatch.setattr(acquisition.time, "monotonic", lambda: deadline + 1)
 
 
-def test_retained_admission_deadline_interrupts_snapshot_reads(feeds, tmp_path, monkeypatch):
+def test_retained_admission_deadline_interrupts_snapshot_reads(feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = feeds()
     project(state)
     clock = [time.monotonic()]
@@ -270,16 +297,16 @@ def test_retained_admission_deadline_interrupts_snapshot_reads(feeds, tmp_path, 
     reads = []
     with retained_wheel(tmp_path) as snapshot:
         class SlowStream:
-            def __getattr__(self, name):
+            def __getattr__(self, name: str) -> Any:
                 return getattr(snapshot.archives[FILENAME], name)
 
-            def read(self, size):
+            def read(self, size: int) -> bytes:
                 reads.append(size)
                 result = snapshot.archives[FILENAME].read(size)
                 clock[0] = deadline + 1
                 return result
 
-        slow = replace(snapshot, archives={FILENAME: SlowStream()})
+        slow = replace(snapshot, archives={FILENAME: cast(BinaryIO, SlowStream())})
         with monkeypatch.context() as patch:
             patch.setattr(acquisition.time, "monotonic", lambda: clock[0])
             with pytest.raises(acquisition.WheelError, match="deadline"):
@@ -288,12 +315,12 @@ def test_retained_admission_deadline_interrupts_snapshot_reads(feeds, tmp_path, 
     assert len(reads) == 1 and not state["requests"]
 
 
-def test_snapshot_deadline_bounds_a_stalled_retained_feed_worker(feeds, tmp_path):
+def test_snapshot_deadline_bounds_a_stalled_retained_feed_worker(feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     metadata = project(state)
     started, release = threading.Event(), threading.Event()
 
-    def stall(handler):
+    def stall(handler: BaseHTTPRequestHandler) -> None:
         started.set()
         release.wait(5)
         try:
@@ -321,7 +348,7 @@ def test_snapshot_deadline_bounds_a_stalled_retained_feed_worker(feeds, tmp_path
 @pytest.mark.parametrize("certificate", [
     CERTIFICATE, CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"),
 ])
-def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds, certificate):
+def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds: Callable[..., dict[str, Any]], certificate: Path) -> None:
     state = feeds(certificate=certificate)
     metadata = project(state)
     with acquire(state) as result:
@@ -341,7 +368,7 @@ def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds, certif
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
 
 
-def test_real_tls_request_recovers_from_one_reset_before_headers(feeds, monkeypatch):
+def test_real_tls_request_recovers_from_one_reset_before_headers(feeds: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
     state = feeds()
     metadata = project(state)
     feed = acquisition.WheelFeed(IDENTITY, state["origin"] + "/simple")
@@ -351,11 +378,11 @@ def test_real_tls_request_recovers_from_one_reset_before_headers(feeds, monkeypa
     actual_open = client.opener.open
     calls = []
 
-    def open_request(request, *, timeout):
+    def open_request(request: Request, *, timeout: float) -> IO[bytes]:
         calls.append(request.full_url)
         if len(calls) == 1:
             raise URLError(ConnectionResetError(10054, "fixture reset"))
-        return actual_open(request, timeout=timeout)
+        return cast(IO[bytes], actual_open(request, timeout=timeout))
 
     monkeypatch.setattr(client.opener, "open", open_request)
     response, _location, chain = client.request(
@@ -371,7 +398,7 @@ def test_real_tls_request_recovers_from_one_reset_before_headers(feeds, monkeypa
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
-def parallel_projects(state, count=2):
+def parallel_projects(state: dict[str, Any], count: int=2) -> tuple[list[dict[str, str]], dict[str, datetime]]:
     expected = []
     for index in range(count):
         item = {
@@ -390,13 +417,13 @@ def parallel_projects(state, count=2):
     return expected, {item["name"]: datetime(2025, 1, 1, tzinfo=timezone.utc) for item in expected}
 
 
-def test_real_parallel_transfers_overlap_and_keep_selected_evidence_order(feeds):
+def test_real_parallel_transfers_overlap_and_keep_selected_evidence_order(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     expected, cutoffs = parallel_projects(state)
     barrier = threading.Barrier(2)
     completed = []
 
-    def download(handler):
+    def download(handler: BaseHTTPRequestHandler) -> None:
         barrier.wait(timeout=3)
         if handler.path.endswith(expected[0]["filename"]):
             time.sleep(0.1)
@@ -420,10 +447,10 @@ def test_real_parallel_transfers_overlap_and_keep_selected_evidence_order(feeds)
 
 
 @pytest.mark.parametrize("maximum,accepted", [(3, False), (4, True)])
-def test_parallel_requests_share_one_inclusive_budget(feeds, maximum, accepted):
+def test_parallel_requests_share_one_inclusive_budget(feeds: Callable[..., dict[str, Any]], maximum: int, accepted: bool) -> None:
     state = feeds()
     expected, cutoffs = parallel_projects(state)
-    options = dict(
+    options: dict[str, Any] = dict(
         expected=expected, cutoffs=cutoffs,
         limits=limits(max_workers=2, max_requests=maximum),
     )
@@ -439,7 +466,7 @@ def test_parallel_requests_share_one_inclusive_budget(feeds, maximum, accepted):
 
 @pytest.mark.parametrize("kind", ["metadata", "wheels", "redirects"])
 @pytest.mark.parametrize("accepted", [False, True])
-def test_parallel_transfers_share_aggregate_byte_and_redirect_budgets(feeds, kind, accepted):
+def test_parallel_transfers_share_aggregate_byte_and_redirect_budgets(feeds: Callable[..., dict[str, Any]], kind: str, accepted: bool) -> None:
     state = feeds()
     expected, cutoffs = parallel_projects(state)
     if kind == "metadata":
@@ -459,7 +486,7 @@ def test_parallel_transfers_share_aggregate_byte_and_redirect_budgets(feeds, kin
                 302, {"Location": "/redirected/" + item["filename"]}, b"",
             )
             state["routes"]["/redirected/" + item["filename"]] = (200, {}, DATA)
-    options = dict(expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2, **changes))
+    options: dict[str, Any] = dict(expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2, **changes))
     if accepted:
         with acquire(state, **options) as result:
             assert result.evidence()[counter] == maximum
@@ -469,7 +496,7 @@ def test_parallel_transfers_share_aggregate_byte_and_redirect_budgets(feeds, kin
                 pytest.fail("parallel transfers multiplied an aggregate budget")
 
 
-def test_parallel_digest_failure_settles_a_peer_before_releasing_private_inputs(feeds, monkeypatch):
+def test_parallel_digest_failure_settles_a_peer_before_releasing_private_inputs(feeds: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
     state = feeds()
     expected, cutoffs = parallel_projects(state)
     barrier = threading.Barrier(2)
@@ -478,12 +505,12 @@ def test_parallel_digest_failure_settles_a_peer_before_releasing_private_inputs(
     temporary = policy._temporary_inputs
 
     @contextmanager
-    def tracked(parent):
+    def tracked(parent: Path | None) -> Iterator[str]:
         with temporary(parent) as root:
             roots.append(Path(root))
             yield root
 
-    def download(handler):
+    def download(handler: BaseHTTPRequestHandler) -> None:
         barrier.wait(timeout=3)
         peer = handler.path.endswith(expected[1]["filename"])
         body = DATA if peer else b"x" * len(DATA)
@@ -510,7 +537,7 @@ def test_parallel_digest_failure_settles_a_peer_before_releasing_private_inputs(
     assert roots and all(not root.exists() for root in roots)
 
 
-def test_html_metadata_preserves_hash_upload_time_and_python_hint(feeds):
+def test_html_metadata_preserves_hash_upload_time_and_python_hint(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     project(state)
     digest = EXPECTED["sha256"].removeprefix("sha256:")
@@ -533,7 +560,7 @@ def test_html_metadata_preserves_hash_upload_time_and_python_hint(feeds):
     ({"hashes": {"sha256": "0" * 64}}, "digest", ValueError),
     ({"requires-python": ">=9"}, "Python hint", ValueError),
 ])
-def test_file_admission_refusals_precede_wheel_download(feeds, change, message, error):
+def test_file_admission_refusals_precede_wheel_download(feeds: Callable[..., dict[str, Any]], change: dict[str, Any], message: str, error: type[Exception]) -> None:
     state = feeds()
     project(state, [listed(**change)])
     with pytest.raises(error, match=message):
@@ -543,7 +570,7 @@ def test_file_admission_refusals_precede_wheel_download(feeds, change, message, 
 
 
 @pytest.mark.parametrize("route", ["link", "redirect"])
-def test_explicit_download_restriction_refuses_other_origins_before_request(feeds, route):
+def test_explicit_download_restriction_refuses_other_origins_before_request(feeds: Callable[..., dict[str, Any]], route: str) -> None:
     state, untrusted = feeds(), feeds()
     location = untrusted["origin"] + "/files/" + FILENAME + "?signature=synthetic-private-value"
     project(state)
@@ -563,7 +590,7 @@ def test_explicit_download_restriction_refuses_other_origins_before_request(feed
 
 
 @pytest.mark.parametrize("index_redirect", [False, True])
-def test_feed_delegates_https_delivery_without_origin_list_or_credential_forwarding(feeds, index_redirect):
+def test_feed_delegates_https_delivery_without_origin_list_or_credential_forwarding(feeds: Callable[..., dict[str, Any]], index_redirect: bool) -> None:
     state, delegated, storage = feeds(), feeds(), feeds()
     signature = "synthetic-private-value"
     location = delegated["origin"] + "/files/" + FILENAME + "?signature=" + signature
@@ -600,7 +627,7 @@ def test_feed_delegates_https_delivery_without_origin_list_or_credential_forward
 
 @pytest.mark.parametrize("route", ["index", "artifact"])
 @pytest.mark.parametrize("location", ["http://127.0.0.1:9/file", "file:///untrusted.whl"])
-def test_delegated_redirect_refuses_downgrade_and_non_https_before_request(feeds, route, location):
+def test_delegated_redirect_refuses_downgrade_and_non_https_before_request(feeds: Callable[..., dict[str, Any]], route: str, location: str) -> None:
     state = feeds()
     project(state)
     path = "/simple/fixture/" if route == "index" else "/files/" + FILENAME
@@ -611,7 +638,7 @@ def test_delegated_redirect_refuses_downgrade_and_non_https_before_request(feeds
     assert len(state["requests"]) == (1 if route == "index" else 2)
 
 
-def test_delegated_index_redirect_cannot_substitute_public_registry(feeds):
+def test_delegated_index_redirect_cannot_substitute_public_registry(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     state["routes"]["/simple/fixture/"] = (
         302, {"Location": "https://pypi.org/simple/fixture/"}, b"",
@@ -622,7 +649,7 @@ def test_delegated_index_redirect_cannot_substitute_public_registry(feeds):
     assert len(state["requests"]) == 1
 
 
-def test_explicit_download_origin_allows_redirect_without_forwarding_credentials(feeds):
+def test_explicit_download_origin_allows_redirect_without_forwarding_credentials(feeds: Callable[..., dict[str, Any]]) -> None:
     state, download = feeds(), feeds()
     project(state)
     download["routes"]["/files/" + FILENAME] = (200, {}, DATA)
@@ -641,7 +668,7 @@ def test_explicit_download_origin_allows_redirect_without_forwarding_credentials
 
 
 @pytest.mark.parametrize("route", ["link", "index-redirect", "chain", "insecure", "loop", "digest"])
-def test_feed_delegation_follows_only_https_locations_with_existing_bounds(feeds, route):
+def test_feed_delegation_follows_only_https_locations_with_existing_bounds(feeds: Callable[..., dict[str, Any]], route: str) -> None:
     state, foreign = feeds(), feeds()
     project(state)
     project(foreign)
@@ -688,7 +715,7 @@ def test_feed_delegation_follows_only_https_locations_with_existing_bounds(feeds
     "http://127.0.0.1:9/file.whl", "file:///untrusted.whl",
     "https://user:password@example.invalid/wheel.whl", "https://*.invalid/wheel.whl",
 ])
-def test_unsafe_link_location_is_refused_before_request(feeds, location):
+def test_unsafe_link_location_is_refused_before_request(feeds: Callable[..., dict[str, Any]], location: str) -> None:
     state = feeds()
     project(state, [listed(url=location)])
     with pytest.raises(ValueError, match="HTTPS location"):
@@ -704,14 +731,14 @@ def test_unsafe_link_location_is_refused_before_request(feeds, location):
     ("max_temporary_bytes", len(DATA) * 2 - 1, "storage"),
 ])
 def test_independent_inclusive_budgets_refuse_and_clean_partial_inputs(
-    feeds, tmp_path, monkeypatch, option, value, message,
-):
+    feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, option: str, value: int, message: str,
+) -> None:
     state = feeds()
     project(state)
-    actual = policy._private_retained_root
+    actual = cast("_PrivateRoot", getattr(policy, "_private_retained_root"))
     roots = []
 
-    def private(path):
+    def private(path: Path) -> Path:
         roots.append(path)
         return actual(path)
 
@@ -723,7 +750,7 @@ def test_independent_inclusive_budgets_refuse_and_clean_partial_inputs(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_exact_metadata_wheel_and_double_copy_storage_limits_are_inclusive(feeds):
+def test_exact_metadata_wheel_and_double_copy_storage_limits_are_inclusive(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     metadata = project(state)
     with acquire(state, limits=limits(
@@ -738,7 +765,7 @@ def test_exact_metadata_wheel_and_double_copy_storage_limits_are_inclusive(feeds
     ([listed(), listed(filename="other.whl")], 1, "candidate budget exceeded for fixture: 2 > 1"),
     ([None], 10, "invalid entries for fixture"),
 ])
-def test_index_budget_and_invalid_rows_are_distinct_refusals(feeds, entries, maximum, reason):
+def test_index_budget_and_invalid_rows_are_distinct_refusals(feeds: Callable[..., dict[str, Any]], entries: list[Any], maximum: int, reason: str) -> None:
     state = feeds()
     project(state, entries)
     with pytest.raises(acquisition.WheelError, match=reason):
@@ -747,7 +774,7 @@ def test_index_budget_and_invalid_rows_are_distinct_refusals(feeds, entries, max
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
-def test_changed_download_digest_is_not_an_availability_failure(feeds):
+def test_changed_download_digest_is_not_an_availability_failure(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     project(state)
     state["routes"]["/files/" + FILENAME] = (200, {}, b"changed bytes")
@@ -757,7 +784,7 @@ def test_changed_download_digest_is_not_an_availability_failure(feeds):
     assert not isinstance(failure.value, acquisition.AcquisitionUnavailable)
 
 
-def test_expired_deadline_does_not_send_a_request(feeds):
+def test_expired_deadline_does_not_send_a_request(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     project(state)
     with pytest.raises(ValueError, match="deadline"):
@@ -766,7 +793,7 @@ def test_expired_deadline_does_not_send_a_request(feeds):
     assert not state["requests"]
 
 
-def test_invalid_tls_trust_is_a_sanitized_refusal(feeds):
+def test_invalid_tls_trust_is_a_sanitized_refusal(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     project(state)
     with pytest.raises(ValueError, match="request failed") as failure:
@@ -776,7 +803,7 @@ def test_invalid_tls_trust_is_a_sanitized_refusal(feeds):
     assert not state["requests"]
 
 
-def test_cancellation_during_consumption_settles_both_owned_input_contexts(feeds):
+def test_cancellation_during_consumption_settles_both_owned_input_contexts(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     project(state)
     with pytest.raises(KeyboardInterrupt):
@@ -786,16 +813,16 @@ def test_cancellation_during_consumption_settles_both_owned_input_contexts(feeds
     assert all(not path.exists() for path in paths)
 
 
-def test_storage_peak_counts_worker_control_and_exact_snapshot_copies(feeds, monkeypatch):
+def test_storage_peak_counts_worker_control_and_exact_snapshot_copies(feeds: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
     state = feeds()
     content = b"x" * 131_072
     expected = EXPECTED | {"sha256": "sha256:" + hashlib.sha256(content).hexdigest()}
     metadata = project(state, [listed(hashes={"sha256": expected["sha256"][7:]})])
     state["routes"]["/files/" + FILENAME] = (200, {}, content)
     roots = []
-    actual = policy._private_retained_root
+    actual = cast("_PrivateRoot", getattr(policy, "_private_retained_root"))
 
-    def private(path):
+    def private(path: Path) -> Path:
         roots.append(path)
         return actual(path)
 
@@ -817,12 +844,12 @@ def test_storage_peak_counts_worker_control_and_exact_snapshot_copies(feeds, mon
 
 
 @pytest.mark.parametrize("phase", ["headers", "body"])
-def test_trickling_http_cannot_renew_the_whole_deadline(feeds, phase):
+def test_trickling_http_cannot_renew_the_whole_deadline(feeds: Callable[..., dict[str, Any]], phase: str) -> None:
     state = feeds()
     project(state)
     done = threading.Event()
 
-    def trickle(handler):
+    def trickle(handler: BaseHTTPRequestHandler) -> None:
         try:
             if phase == "headers":
                 handler.wfile.write(b"HTTP/1.1 200 OK\r\n")
@@ -853,9 +880,9 @@ def test_trickling_http_cannot_renew_the_whole_deadline(feeds, phase):
     assert done.wait(2)
 
 
-def _running(pid):
+def _running(pid: int) -> bool:
     if os.name == "nt":
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel.OpenProcess.restype = ctypes.c_void_p
         kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         kernel.CloseHandle.argtypes = [ctypes.c_void_p]
@@ -863,7 +890,7 @@ def _running(pid):
         if not handle:
             return False
         try:
-            return kernel.WaitForSingleObject(handle, 0) == 258
+            return cast(bool, kernel.WaitForSingleObject(handle, 0) == 258)
         finally:
             kernel.CloseHandle(handle)
     try:
@@ -874,8 +901,8 @@ def _running(pid):
 
 
 def test_blocked_dns_worker_is_reaped_before_return_and_private_cleanup(
-    feeds, tmp_path, monkeypatch,
-):
+    feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     state = feeds()
     project(state)
     marker = tmp_path / "worker-pid"
@@ -889,9 +916,9 @@ def test_blocked_dns_worker_is_reaped_before_return_and_private_cleanup(
     ).encode()
     monkeypatch.setattr(acquisition, "_worker_sources", lambda: sources)
     roots = []
-    actual = policy._private_retained_root
+    actual = cast("_PrivateRoot", getattr(policy, "_private_retained_root"))
 
-    def private(path):
+    def private(path: Path) -> Path:
         roots.append(path)
         return actual(path)
 
@@ -914,7 +941,7 @@ def test_blocked_dns_worker_is_reaped_before_return_and_private_cleanup(
     ([], "unavailable", acquisition.AcquisitionUnavailable),
     ([listed(filename="another.whl")], "not listed", acquisition.AcquisitionUnavailable),
 ])
-def test_ambiguous_or_refused_index_data_is_not_substituted(feeds, entries, message, error):
+def test_ambiguous_or_refused_index_data_is_not_substituted(feeds: Callable[..., dict[str, Any]], entries: list[Any], message: str, error: type[Exception]) -> None:
     state = feeds()
     project(state, entries)
     with pytest.raises(error, match=message):
@@ -923,7 +950,7 @@ def test_ambiguous_or_refused_index_data_is_not_substituted(feeds, entries, mess
     assert len(state["requests"]) == 1
 
 
-def test_first_index_ownership_does_not_search_a_later_compatible_file(feeds):
+def test_first_index_ownership_does_not_search_a_later_compatible_file(feeds: Callable[..., dict[str, Any]]) -> None:
     first, second = feeds(), feeds()
     project(first, [listed(filename="fixture-2.0-py3-none-any.whl")])
     project(second)
@@ -937,7 +964,7 @@ def test_first_index_ownership_does_not_search_a_later_compatible_file(feeds):
     assert len(first["requests"]) == 1 and second["requests"] == []
 
 
-def test_long_selected_wheel_name_keeps_native_extended_path_custody(feeds):
+def test_long_selected_wheel_name_keeps_native_extended_path_custody(feeds: Callable[..., dict[str, Any]]) -> None:
     state = feeds()
     name = "fixture" + "x" * 190
     filename = name + "-1.0-py3-none-any.whl"
@@ -960,7 +987,7 @@ def test_long_selected_wheel_name_keeps_native_extended_path_custody(feeds):
 
 
 @pytest.mark.parametrize("filename", ["NUL.whl", "CON.whl", "../escape.whl"])
-def test_invalid_selected_paths_refuse_before_any_request(feeds, filename):
+def test_invalid_selected_paths_refuse_before_any_request(feeds: Callable[..., dict[str, Any]], filename: str) -> None:
     state = feeds()
     project(state)
     with pytest.raises(ValueError, match="exact file"):
@@ -970,7 +997,7 @@ def test_invalid_selected_paths_refuse_before_any_request(feeds, filename):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows windowless-parent observation")
-def test_acquisition_console_workers_from_windowless_parent_surface_no_ui(feeds, tmp_path, monkeypatch):
+def test_acquisition_console_workers_from_windowless_parent_surface_no_ui(feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = feeds()
     project(state)
     root = Path(__file__).resolve().parents[1]
@@ -1023,7 +1050,7 @@ pathlib.Path(spec["result"]).write_text(json.dumps(result))
 """, encoding="utf-8")
     specification = {
         "engine": str(root / "libs" / "installer-engine"),
-        "procutil": str(Path(procutil.__file__)), "workers": str(workers_path),
+        "procutil": str(Path(cast(str, procutil.__file__))), "workers": str(workers_path),
         "expected": [EXPECTED], "identity": IDENTITY, "origin": state["origin"],
         "policy": POLICY, "limits": vars(limits()), "certificate": str(CERTIFICATE),
         "result": str(result_path),

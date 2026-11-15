@@ -7,8 +7,15 @@ import os
 import sys
 import threading
 from pathlib import Path
+from collections.abc import Iterator, Sequence
+from types import CodeType, FrameType
+from typing import Any, NoReturn, TYPE_CHECKING, cast
 
 from coverage import CoveragePlugin
+
+if TYPE_CHECKING:
+    from coverage import Coverage
+    import pytest
 
 from promotion_unit_contract import UnitEvidenceError
 
@@ -22,17 +29,20 @@ def path_spelling(value: str, platform: str) -> str:
     return value
 
 
-def canonical_path(value) -> Path:
+def canonical_path(value: str | os.PathLike[str]) -> Path:
     return Path(path_spelling(str(Path(value).resolve()), sys.platform))
 
 
 class _OpenPaths(threading.local):
-    def __init__(self):
+    def __init__(self) -> None:
         self.paths: list[tuple[str, Path]] = []
 
 
 class UnitRun(CoveragePlugin):
-    def __init__(self, coverage, root: Path, sources: dict, temporary: Path, *, nodes=()):
+    def __init__(
+        self, coverage: Coverage, root: Path, sources: dict[str, Any], temporary: Path,
+        *, nodes: Sequence[str] = (),
+    ) -> None:
         self.coverage = coverage
         self.root = canonical_path(root)
         self.sources = sources
@@ -40,11 +50,11 @@ class UnitRun(CoveragePlugin):
         self.nodes = tuple(nodes)
         self.opened_sources: set[str] = set()
         self.collected: list[str] = []
-        self.reports: list[dict] = []
+        self.reports: list[dict[str, str]] = []
         self.effects: list[str] = []
         self.active = False
-        self.call_code = None
-        self.call_node = None
+        self.call_code: CodeType | None = None
+        self.call_node: str | None = None
         self._os_open = os.open
         self._open_state = _OpenPaths()
 
@@ -52,11 +62,11 @@ class UnitRun(CoveragePlugin):
     def _open_paths(self) -> list[tuple[str, Path]]:
         return self._open_state.paths
 
-    def refuse(self, effect: str) -> None:
+    def refuse(self, effect: str) -> NoReturn:
         self.effects.append(effect)
         raise UnitEvidenceError(f"not an eligible unit effect: {effect}")
 
-    def mutation_path(self, name, directory_fd=None) -> Path:
+    def mutation_path(self, name: object, directory_fd: object = None) -> Path:
         if not isinstance(name, (str, bytes, os.PathLike)):
             self.refuse("unattributable filesystem mutation")
         path = Path(os.fsdecode(name))
@@ -70,7 +80,10 @@ class UnitRun(CoveragePlugin):
             path = directory / path
         return canonical_path(path)
 
-    def guarded_open(self, name, flags, mode=0o777, *, dir_fd=None):
+    def guarded_open(
+        self, name: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+    ) -> int:
         if not self.active:
             return self._os_open(name, flags, mode, dir_fd=dir_fd)
         if not isinstance(name, (str, bytes, os.PathLike)):
@@ -84,7 +97,7 @@ class UnitRun(CoveragePlugin):
         finally:
             self._open_paths.pop()
 
-    def audit(self, event: str, args: tuple) -> None:
+    def audit(self, event: str, args: tuple[Any, ...]) -> None:
         if not self.active:
             return
         if (
@@ -146,7 +159,7 @@ class UnitRun(CoveragePlugin):
                 if relative not in self.sources:
                     self.refuse("unadmitted source read: " + relative)
 
-    def pytest_collect_directory(self, path, parent):
+    def pytest_collect_directory(self, path: Path, parent: pytest.Collector) -> pytest.Directory | None:
         if path != self.root / "tools/promotion_unit_tests":
             return None
         import pytest
@@ -155,7 +168,7 @@ class UnitRun(CoveragePlugin):
         root = self.root
 
         class AdmittedDirectory(pytest.Directory):
-            def collect(directory):
+            def collect(directory: pytest.Directory) -> Iterator[pytest.Collector]:
                 for name in files:
                     yield from directory.ihook.pytest_collect_file(
                         file_path=root / name, parent=directory,
@@ -163,7 +176,9 @@ class UnitRun(CoveragePlugin):
 
         return AdmittedDirectory.from_parent(parent, path=path)
 
-    def pytest_collection_modifyitems(self, session, config, items):
+    def pytest_collection_modifyitems(
+        self, session: pytest.Session, config: pytest.Config, items: list[pytest.Item],
+    ) -> None:
         ranks = {node: rank for rank, node in enumerate(self.nodes)}
         selected = [item for item in items if item.nodeid in ranks]
         observed = [item.nodeid for item in selected]
@@ -177,30 +192,30 @@ class UnitRun(CoveragePlugin):
         if deselected:
             config.hook.pytest_deselected(items=deselected)
 
-    def pytest_collection_finish(self, session):
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.collected = [item.nodeid for item in session.items]
 
-    def pytest_runtest_setup(self, item):
+    def pytest_runtest_setup(self, item: pytest.Item) -> None:
         self.call_code = None
         self.call_node = None
 
-    def pytest_runtest_call(self, item):
+    def pytest_runtest_call(self, item: pytest.Function) -> None:
         function = getattr(item.obj, "__func__", item.obj)
         self.call_code = getattr(function, "__code__", None)
         self.call_node = item.nodeid
         if self.call_code is None:
             self.refuse("unit case must be a direct Python test function")
 
-    def pytest_runtest_teardown(self, item):
+    def pytest_runtest_teardown(self, item: pytest.Item) -> None:
         self.call_code = None
         self.call_node = None
 
-    def dynamic_context(self, frame):
+    def dynamic_context(self, frame: FrameType) -> str | None:
         if frame.f_code is self.call_code:
-            return self.call_node + "|call"
+            return cast(str, self.call_node) + "|call"
         return None
 
-    def pytest_runtest_logreport(self, report):
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         if hasattr(report, "wasxfail"):
             self.effects.append("xfail/xpass outcome is not positive unit evidence")
         self.reports.append({

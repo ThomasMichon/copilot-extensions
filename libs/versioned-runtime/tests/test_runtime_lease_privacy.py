@@ -20,7 +20,9 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Actual POSIX filesystem
 
 
 @pytest.mark.parametrize("kind", ["construction", "retention"])
-def test_posix_fresh_lease_root_passes_strict_private_admission(tmp_path, monkeypatch, kind):
+def test_posix_fresh_lease_root_passes_strict_private_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "fleet-manager/src"))
     from fleet_manager.private_state import private_directory
 
@@ -36,7 +38,9 @@ def test_posix_fresh_lease_root_passes_strict_private_admission(tmp_path, monkey
     private_directory(root)
 
 
-def test_posix_existing_root_is_not_repaired_for_private_admission(tmp_path, monkeypatch):
+def test_posix_existing_root_is_not_repaired_for_private_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "fleet-manager/src"))
     from fleet_manager.private_state import private_directory
 

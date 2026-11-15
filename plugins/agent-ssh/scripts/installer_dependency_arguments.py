@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import json
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, Set
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,7 +26,7 @@ def captured_environment(
 
 
 def argument_pairs(
-    arguments: Iterable[str], value_options: Set[str], *, error_type: _Error,
+    arguments: Iterable[str], value_options: Collection[str], *, error_type: _Error,
 ) -> Iterator[tuple[str, str]]:
     iterator = iter(arguments)
     positional = False
@@ -87,7 +87,7 @@ def uv_command(
     operation: str,
     windows: bool,
     argument_pairs: _Pairs,
-    value_options: Set[str],
+    value_options: Collection[str],
 ) -> tuple[list[str], Path | None]:
     if not windows or len(os.path.abspath(cwd or Path.cwd())) < 260:
         return [uv, "pip", operation, *arguments], cwd

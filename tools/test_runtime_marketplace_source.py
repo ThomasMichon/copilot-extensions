@@ -1,6 +1,21 @@
 """Registered Git cache, independent acquisition and real source preparation."""
 from __future__ import annotations
 
+
+from typing import ContextManager, Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from test_runtime_profile_policy import _Adopter
+    from worktree_manager.runtime_source_config import RuntimeSource
+    from runtime_profile_policy import InstallationProfilePlan
+    from runtime_source_authentication import AuthenticatedSource
+    from prepare_runtime_source import PreparedSource
+    from worktree_manager.runtime_source import ResolvedSource
+
+from typing import Any
+
 import json
 import os
 import shutil
@@ -17,18 +32,18 @@ from test_runtime_source_lock import plan
 from worktree_manager import runtime_source, runtime_source_config
 
 
-def write(path, document):
+def write(path: Path, document: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document), encoding="utf-8")
 
 
 @pytest.fixture
-def tmp_path(tmp_path_factory):
+def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("mp")
 
 
 @pytest.fixture
-def registered_source(adopter, configured_source):
+def registered_source(adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource]) -> dict[str, Any]:
     root, upstream, _, _ = configured_source
     installation = adopter[1]
     home = installation["copilot_home"]
@@ -81,7 +96,7 @@ def registered_source(adopter, configured_source):
     }
 
 
-def retain(fixture, selected_plan=None, **options):
+def retain(fixture: dict[str, Any], selected_plan: InstallationProfilePlan | None=None, **options: Any) -> ContextManager[AuthenticatedSource]:
     adopter = fixture["adopter"]
     return marketplace.retain_authenticated_marketplace_source(
         selected_plan or plan(adopter), installation=adopter[1],
@@ -89,7 +104,7 @@ def retain(fixture, selected_plan=None, **options):
     )
 
 
-def test_actual_registered_source_binds_independent_commit_tree_and_payload(registered_source):
+def test_actual_registered_source_binds_independent_commit_tree_and_payload(registered_source: dict[str, Any]) -> None:
     fixture = registered_source
     before = {
         name: (fixture["home"] / name).read_bytes()
@@ -116,8 +131,8 @@ def test_actual_registered_source_binds_independent_commit_tree_and_payload(regi
 
 
 def test_installation_selects_its_registered_provider_without_trying_configured_source(
-    registered_source, monkeypatch,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = registered_source
     monkeypatch.setattr(
         marketplace.authentication, "retain_authenticated_source",
@@ -133,8 +148,8 @@ def test_installation_selects_its_registered_provider_without_trying_configured_
 
 
 def test_failed_selected_marketplace_provider_does_not_try_another_provider(
-    registered_source, monkeypatch,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = registered_source
     write(fixture["home"] / "config.json", {"installedPlugins": []})
     monkeypatch.setattr(
@@ -149,7 +164,7 @@ def test_failed_selected_marketplace_provider_does_not_try_another_provider(
             pytest.fail("missing native evidence became source authentication")
 
 
-def test_newer_remote_tip_is_not_substituted_for_installed_source(registered_source):
+def test_newer_remote_tip_is_not_substituted_for_installed_source(registered_source: dict[str, Any]) -> None:
     fixture = registered_source
     (fixture["upstream"] / "later.txt").write_text("later release")
     git(fixture["upstream"], "add", ".")
@@ -160,7 +175,7 @@ def test_newer_remote_tip_is_not_substituted_for_installed_source(registered_sou
         assert selected.identity.source_commit == fixture["commit"]
 
 
-def test_explicit_copilot_home_does_not_require_an_environment_duplicate(registered_source):
+def test_explicit_copilot_home_does_not_require_an_environment_duplicate(registered_source: dict[str, Any]) -> None:
     fixture = registered_source
     home = fixture["home"].with_name("custom-copilot")
     fixture["home"].rename(home)
@@ -177,8 +192,8 @@ def test_explicit_copilot_home_does_not_require_an_environment_duplicate(registe
 
 
 def test_explicit_source_provenance_is_unavailable_without_an_installed_locator(
-    registered_source, monkeypatch,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = registered_source
     fixture["adopter"][1]["source_descriptor"] = fixture["definition"]["source"]
     monkeypatch.setattr(runtime_source, "acquire", lambda *a, **k: pytest.fail("explicit origin acquired"))
@@ -188,8 +203,8 @@ def test_explicit_source_provenance_is_unavailable_without_an_installed_locator(
 
 
 def test_empty_environment_does_not_inherit_ambient_cache_or_git_configuration(
-    registered_source, monkeypatch,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = registered_source
     fixture["adopter"][1]["environment"] = {}
     monkeypatch.setenv("COPILOT_CACHE_HOME", str(fixture["cache"]))
@@ -202,7 +217,7 @@ def test_empty_environment_does_not_inherit_ambient_cache_or_git_configuration(
             pytest.fail("explicitly empty environment inherited an ambient cache")
 
 
-def test_none_environment_keeps_normal_ambient_selection(registered_source, monkeypatch):
+def test_none_environment_keeps_normal_ambient_selection(registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     fixture = registered_source
     fixture["adopter"][1]["environment"] = None
     monkeypatch.setenv("COPILOT_CACHE_HOME", str(fixture["cache"]))
@@ -211,7 +226,7 @@ def test_none_environment_keeps_normal_ambient_selection(registered_source, monk
         assert selected.identity.source_commit == fixture["commit"]
 
 
-def test_preparation_preserves_acquisitions_long_path_support(registered_source):
+def test_preparation_preserves_acquisitions_long_path_support(registered_source: dict[str, Any]) -> None:
     fixture = registered_source
     name = "long-" + "x" * 230 + ".py"
     member = fixture["upstream"] / "plugins" / "agent-example" / name
@@ -234,8 +249,8 @@ def test_preparation_preserves_acquisitions_long_path_support(registered_source)
     "origin", "tracked", "untracked", "assume-unchanged", "ignored", "catalog", "ambiguous",
 ])
 def test_corrupt_native_evidence_refuses_before_independent_acquisition(
-    registered_source, monkeypatch, changed,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
     fixture = registered_source
     clone = fixture["clone"]
     if changed == "origin":
@@ -259,7 +274,7 @@ def test_corrupt_native_evidence_refuses_before_independent_acquisition(
             pytest.fail("invalid cache reached consumer")
 
 
-def test_self_described_cache_commit_is_not_origin_authentication(registered_source):
+def test_self_described_cache_commit_is_not_origin_authentication(registered_source: dict[str, Any]) -> None:
     fixture = registered_source
     clone = fixture["clone"]
     (clone / "forged.txt").write_text("not in the registered upstream")
@@ -273,7 +288,7 @@ def test_self_described_cache_commit_is_not_origin_authentication(registered_sou
 
 
 @pytest.mark.parametrize("changed", ["payload", "ledger-version", "payload-version"])
-def test_installed_source_must_match_actual_preparation(registered_source, changed):
+def test_installed_source_must_match_actual_preparation(registered_source: dict[str, Any], changed: str) -> None:
     fixture = registered_source
     if changed == "payload":
         (fixture["payload"] / "fixture_backend.py").write_text("not acquired source")
@@ -290,8 +305,8 @@ def test_installed_source_must_match_actual_preparation(registered_source, chang
 
 @pytest.mark.parametrize("missing", ["cache", "ledger"])
 def test_absent_native_evidence_is_unavailable_without_acquisition(
-    registered_source, monkeypatch, missing,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch, missing: str,
+) -> None:
     fixture = registered_source
     if missing == "cache":
         fixture["clone"].rename(fixture["cache"] / "held-source")
@@ -306,12 +321,12 @@ def test_absent_native_evidence_is_unavailable_without_acquisition(
 @pytest.mark.parametrize("phase", ["acquisition", "consumption"])
 @pytest.mark.parametrize("changed", ["registration", "ledger", "cache", "installed", "prepared"])
 def test_source_and_configuration_are_rechecked_through_consumption(
-    registered_source, monkeypatch, phase, changed,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch, phase: str, changed: str,
+) -> None:
     fixture = registered_source
     from contextlib import contextmanager
 
-    def mutate(prepared=None):
+    def mutate(prepared: Path | None=None) -> None:
         if changed == "registration":
             write(fixture["home"] / "settings.local.json", {
                 "extraKnownMarketplaces": {
@@ -332,7 +347,7 @@ def test_source_and_configuration_are_rechecked_through_consumption(
         if changed == "prepared":
             actual_prepare = marketplace.authentication.prepare_runtime_source.prepare
 
-            def changed_prepare(*args, **kwargs):
+            def changed_prepare(*args: Any, **kwargs: Any) -> PreparedSource:
                 result = actual_prepare(*args, **kwargs)
                 mutate(result.payload)
                 return result
@@ -342,7 +357,7 @@ def test_source_and_configuration_are_rechecked_through_consumption(
             actual_acquire = runtime_source.acquire
 
             @contextmanager
-            def changed_acquire(*args, **kwargs):
+            def changed_acquire(*args: RuntimeSource, **kwargs: Any) -> Iterator[ResolvedSource]:
                 with actual_acquire(*args, **kwargs) as acquired:
                     mutate()
                     yield acquired
@@ -357,8 +372,8 @@ def test_source_and_configuration_are_rechecked_through_consumption(
 
 
 def test_unsupported_registered_ref_never_reinterprets_the_latest_branch(
-    registered_source, monkeypatch,
-):
+    registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = registered_source
     definition = {"source": {**fixture["definition"]["source"], "ref": "release-tag"}}
     settings = {"extraKnownMarketplaces": {fixture["key"]: definition}}
@@ -370,14 +385,14 @@ def test_unsupported_registered_ref_never_reinterprets_the_latest_branch(
             pytest.fail("registered ref was replaced")
 
 
-def test_expired_provider_refuses_before_source_effects(registered_source, monkeypatch):
+def test_expired_provider_refuses_before_source_effects(registered_source: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_source, "acquire", lambda *a, **k: pytest.fail("expired source acquired"))
     with pytest.raises(ValueError, match="deadline"):
         with retain(registered_source, deadline=time.monotonic() - 1):
             pytest.fail("expired source reached consumer")
 
 
-def test_two_registered_marketplaces_keep_independent_source_owners(registered_source):
+def test_two_registered_marketplaces_keep_independent_source_owners(registered_source: dict[str, Any]) -> None:
     fixture = registered_source
     other_repo = fixture["upstream"].with_name("other")
     git(fixture["upstream"], "clone", "-q", str(fixture["upstream"]), str(other_repo))

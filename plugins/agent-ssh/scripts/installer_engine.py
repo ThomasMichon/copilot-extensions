@@ -23,11 +23,16 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
-tomllib = importlib.import_module("tomllib")
-import versioned_runtime as runtime
-import versioned_runtime_source as runtime_source
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    from installer_dependency_policy import _toml_parser
+    tomllib = _toml_parser()
+import versioned_runtime as versioned_runtime
+import versioned_runtime_source as versioned_runtime_source
+runtime, runtime_source = versioned_runtime, versioned_runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path,
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path as _native_retained_path,
     _bounded_content_map as _bounded_content_map,
     _private_retained_root as _private_retained_root, _select_uv_executable,
     _temporary_inputs as _temporary_inputs,
@@ -39,13 +44,16 @@ from installer_engine_process import (
     run_owned,
 )
 from installer_wheel_inputs import _check_deadline, _ordinary
-from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
+from installer_wheel_snapshot import (
+    WheelInstallInputs, WheelReuseInputs as WheelReuseInputs, _digest as _snapshot_digest,
+    _open as _snapshot_open, _unchanged as _snapshot_unchanged)
+
+_open, _unchanged, _digest = _snapshot_open, _snapshot_unchanged, _snapshot_digest
 from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
-    _wheel_construction_hash as _wheel_construction_hash,
-)
+    _wheel_construction_hash as _wheel_construction_hash)
 
 from installer_engine_health import (
     HealthRepairRequired as HealthRepairRequired,
@@ -87,12 +95,10 @@ class ContentRepairRequired(RuntimeError):
     """Published bytes differ; a caller must select a distinct generation."""
 
 
-def _construction_hash(
-    files: tuple[Path, ...], extras: tuple[str, ...],
+def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
     local_packages: tuple[str, ...] | None = None,
     *, on_progress: Callable[[], None] | None = None,
-    file_hashes: dict[Path, str] | None = None,
-) -> str:
+    file_hashes: dict[Path, str] | None = None) -> str:
     source_hash = runtime.fingerprint_source(
         files, file_hashes=file_hashes,
         **cast(dict[str, Any], {"on_progress": on_progress} if on_progress is not None else {}),
@@ -279,7 +285,7 @@ def freeze_inputs(
 
             before = runtime.fingerprint_source(files, on_file=retain_source, **progress)
             # Finish the full baseline before copying, preserving the mutation barrier.
-            def retained_sources():
+            def retained_sources() -> Iterator[tuple[Path, bytes]]:
                 for source in files:
                     if deadline is not None:
                         _check_deadline(deadline)
@@ -290,7 +296,7 @@ def freeze_inputs(
                         raise OSError("Frozen source buffer read was incomplete")
                     yield source, data
 
-            def write_source(item):
+            def write_source(item: tuple[Path, bytes]) -> None:
                 source, data = item
                 if deadline is not None:
                     _check_deadline(deadline)
@@ -373,8 +379,7 @@ def _retained_inputs(
 
 
 @contextmanager
-def _retained_input_graph(
-    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
+def _retained_input_graph(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
     on_progress: Callable[[], None],
 ) -> Iterator[FrozenInputs]:
     with retained_input_graph(

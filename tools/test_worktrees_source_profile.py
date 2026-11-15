@@ -1,6 +1,17 @@
 """Actual source-builder evidence consumed by the Worktrees native boundary."""
 from __future__ import annotations
 
+from typing import cast
+
+from types import ModuleType
+
+from typing import Any, Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from test_runtime_profile_policy import _Adopter
+    from worktree_manager.runtime_source_config import RuntimeSource
+
 import hashlib
 import importlib.util
 import json
@@ -26,7 +37,7 @@ from test_runtime_source_build import tmp_path as tmp_path  # noqa: F401
 from test_runtime_source_lock import plan
 
 
-def _native_owner(name, monkeypatch):
+def _native_owner(name: str, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     scripts = Path(__file__).resolve().parents[1] / "plugins" / "agent-worktrees" / "scripts"
     spec = importlib.util.spec_from_file_location(name, scripts / (name + ".py"))
     assert spec and spec.loader
@@ -37,13 +48,13 @@ def _native_owner(name, monkeypatch):
 
 
 def test_actual_worktrees_builder_binding_reaches_native_policy_without_relabeling_manager(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module, installation, settings = adopter
     old_payload = installation["payload_root"]
     payload = old_payload.with_name("agent-worktrees")
     old_payload.rename(payload)
-    installation.update(
+    cast(dict[str, Any], installation).update(
         payload_root=payload, plugin_id="agent-worktrees",
         legacy_root=installation["legacy_root"].with_name(".agent-worktrees"),
     )

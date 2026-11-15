@@ -40,20 +40,20 @@ class _Execution(TypedDict, total=False):
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from artifact_source_build import read_build_system_requires  # noqa: E402
 from governed_feed_trust import (  # noqa: E402
-    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401 -- re-exported for test/caller use
-    _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401 -- legacy import compatibility
-    ArtifactBuildError,
-    _credential_free_index_identity,  # noqa: F401 -- re-exported for test/caller use
-    _effective_default_index_url,  # noqa: F401 -- re-exported for test/caller use
-    _effective_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
-    _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
-    _opaque_index_identity,  # noqa: F401 -- re-exported for test/caller use
-    _project_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
-    _restrict_file_to_owner,
-    _trusted_index_hosts,  # noqa: F401 -- re-exported for test/caller use
-    _url_host,  # noqa: F401 -- re-exported for test/caller use
-    _validated_trusted_index_url,
-    strip_package_source_env_vars,
+    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS as _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401
+    _TRUSTED_INDEX_HOSTS_ENV_VAR as _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401
+    ArtifactBuildError as ArtifactBuildError,
+    _credential_free_index_identity as _credential_free_index_identity,  # noqa: F401
+    _effective_default_index_url as _effective_default_index_url,  # noqa: F401
+    _effective_uv_toml_candidates as _effective_uv_toml_candidates,  # noqa: F401
+    _governed_feed_configured as _governed_feed_configured,  # noqa: F401
+    _opaque_index_identity as _opaque_index_identity,  # noqa: F401
+    _project_uv_toml_candidates as _project_uv_toml_candidates,  # noqa: F401
+    _restrict_file_to_owner as _restrict_file_to_owner,
+    _trusted_index_hosts as _trusted_index_hosts,  # noqa: F401
+    _url_host as _url_host,  # noqa: F401
+    _validated_trusted_index_url as _validated_trusted_index_url,
+    strip_package_source_env_vars as strip_package_source_env_vars,
 )
 from public_toolchain_source import (  # noqa: E402
     PublicToolchainSource,
@@ -105,7 +105,7 @@ def _seasoned_install(
 ) -> subprocess.CompletedProcess[str]:
     try:
         if deadline is None:
-            return run_uv_install(uv, arguments, env=env, capture_output=True, text=True)
+            return cast(subprocess.CompletedProcess[str], run_uv_install(uv, arguments, env=env, capture_output=True, text=True))
         with retain_uv_install(uv, arguments, env=env, deadline=deadline) as transaction:
             return subprocess.run(
                 list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,

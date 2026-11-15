@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -153,7 +153,7 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
         scans = []
         actual_fingerprint = locks.runtime.fingerprint_source
 
-        def fingerprint(paths, **kwargs):
+        def fingerprint(paths: Iterable[Path], **kwargs: Any) -> str:
             scans.append(tuple(paths))
             assert callable(kwargs["on_progress"])
             return actual_fingerprint(scans[-1], **kwargs)
@@ -173,8 +173,8 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
 @pytest.mark.skipif(os.name != "nt", reason="Windows native interpreter path limit")
 @pytest.mark.timeout(60)
 def test_source_configuration_launches_a_real_long_path_interpreter(
-    adopter, source, target, tmp_path,
-):
+    adopter: Adopter, source: Source, target: Target, tmp_path: Path,
+) -> None:
     import venv
     from build_toolchain_lock import _query_marker_environment
 
@@ -191,14 +191,15 @@ def test_source_configuration_launches_a_real_long_path_interpreter(
 
 @pytest.mark.parametrize("changed", ["origin", "retained", "custody"])
 def test_source_owner_delegation_keeps_fresh_origin_retention_and_custody_checks(
-    adopter, source, target, tmp_path, monkeypatch, changed,
-):
+    adopter: Adopter, source: Source, target: Target, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
     from versioned_runtime_source import SourceIdentityError
 
     actual_source = locks._source
     active = True
 
-    def verify(payload, identity):
+    def verify(payload: Path, identity: SourceIdentity) -> None:
         assert payload == source[0] and identity == source[1]
         if not active:
             raise ProfileError("fixture source owner custody closed")

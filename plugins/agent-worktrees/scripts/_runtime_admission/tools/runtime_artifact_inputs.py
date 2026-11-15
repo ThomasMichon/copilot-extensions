@@ -1,17 +1,19 @@
 """Compose attested first-party bytes and current governed dependency inputs."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 import zipfile
+from types import ModuleType
+from typing import Any, cast
 
 from artifact_attestation import INDEX_LIMIT, INDEX_NAME, verify_attestation_subject
 from artifact_bundle_validation import validate_bundle_binding
 from installer_dependency_policy import _private_retained_root, _temporary_inputs
-from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
+from installer_wheel_acquisition import AcquisitionLimits, AcquiredWheels, acquire_wheel_inputs
 from installer_wheel_inputs import WheelLimits, _check_deadline, _member_chunks, _ordinary
 from installer_wheel_snapshot import WheelInstallInputs, _digest, _open, _unchanged, retain_wheel_inputs
 from installation_context import resolve_runtime_profile_policy
@@ -21,7 +23,8 @@ from promotion_source_history import is_ancestor, read_promoted_source
 from runtime_feed_configuration import retain_native_feed_inputs
 from runtime_input_revocation import verify_digests_not_revoked
 from runtime_profile import ProfileError, RuntimeProfile
-from runtime_profile_release import select_release_profile, validate_release_bindings
+from runtime_profile_policy import InstallationProfilePlan
+from runtime_profile_release import ReleaseSelection, select_release_profile, validate_release_bindings
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_authentication import AuthenticatedSource
 from versioned_runtime_source import SourceIdentity
@@ -37,14 +40,14 @@ class ArtifactRuntimeInputs:
 
     @property
     def runtime_version(self) -> str:
-        return self.identity.runtime_version + ".profile." + self.wheels.receipt()["lock_id"][7:23]
+        return self.identity.runtime_version + ".profile." + cast(str, self.wheels.receipt()["lock_id"])[7:23]
 
     def verify(self) -> None:
         self._verification()
         self.wheels.verify()
 
 
-def _selection(plan, directory, deadline):
+def _selection(plan: InstallationProfilePlan, directory: Path, deadline: float) -> RuntimeProfile:
     selected = plan.release_selection
     if selected is None or plan.source_trigger is not None:
         raise ProfileError("artifact inputs require an actual selected release profile")
@@ -65,12 +68,12 @@ def _selection(plan, directory, deadline):
 
 @contextmanager
 def retain_artifact_runtime_inputs(
-    plan, origin: AuthenticatedSource, directory: Path, *, installation: dict,
-    source_checkout: Path, uv: str, python: Path, procutil,
+    plan: InstallationProfilePlan, origin: AuthenticatedSource, directory: Path, *, installation: Mapping[str, Any],
+    source_checkout: Path, uv: str, python: Path, procutil: ModuleType,
     acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits,
     max_snapshot_bytes: int, deadline: float, env: dict[str, str] | None = None,
-    revoked_inputs=None,
-):
+    revoked_inputs: Callable[[], frozenset[str]] | None = None,
+) -> Iterator[ArtifactRuntimeInputs]:
     """Keep both byte owners and the original source owner live through health.
 
     The release authenticates the complete profile and first-party bundle.
@@ -93,7 +96,7 @@ def retain_artifact_runtime_inputs(
     policy = plan.policy()
     active = True
 
-    def verify_owner():
+    def verify_owner() -> None:
         if not active:
             raise ProfileError("artifact runtime input custody is closed")
         _check_deadline(deadline)
@@ -118,7 +121,7 @@ def retain_artifact_runtime_inputs(
             before = _ordinary(index_path)
             index_stream = held.enter_context(_open(index_path))
             opened = _unchanged(index_path, before, index_stream)
-            if _digest(index_stream, INDEX_LIMIT, deadline)[0] != plan.release_selection.subject_sha256:
+            if _digest(index_stream, INDEX_LIMIT, deadline)[0] != cast(ReleaseSelection, plan.release_selection).subject_sha256:
                 raise ProfileError("selected artifact subject changed after authentication")
             index = json.loads(index_stream.read(INDEX_LIMIT + 1))
             promoted = read_promoted_source(
@@ -127,7 +130,7 @@ def retain_artifact_runtime_inputs(
             if (
                 index["dev_head"] != promoted.dev_head or index["content_tree"] != promoted.content_tree
                 or not is_ancestor(
-                    source_checkout, plan.release_selection.signer_digest, promoted.main_before,
+                    source_checkout, cast(ReleaseSelection, plan.release_selection).signer_digest, promoted.main_before,
                     deadline=deadline,
                 )
             ):
@@ -146,10 +149,10 @@ def retain_artifact_runtime_inputs(
             stream = held.enter_context(_open(bundle))
             bundle_opened = _unchanged(bundle, bundle_before, stream)
             verify_attestation_subject(
-                bundle, repository=plan.release_selection.repository,
-                signer_digest=plan.release_selection.signer_digest,
-                source_digest=plan.release_selection.source_digest,
-                source_ref=plan.release_selection.source_ref,
+                bundle, repository=cast(ReleaseSelection, plan.release_selection).repository,
+                signer_digest=cast(ReleaseSelection, plan.release_selection).signer_digest,
+                source_digest=cast(ReleaseSelection, plan.release_selection).source_digest,
+                source_ref=cast(ReleaseSelection, plan.release_selection).source_ref,
             )
             manifest, manifest_digest = validate_bundle_binding(
                 bundle, entry, candidate_root=source_checkout,
@@ -178,7 +181,7 @@ def retain_artifact_runtime_inputs(
             ):
                 raise ProfileError("artifact wheel set differs from its first-party manifest")
             digests = [
-                profile.lock_id, plan.release_selection.subject_sha256, "sha256:" + entry["sha256"],
+                profile.lock_id, cast(ReleaseSelection, plan.release_selection).subject_sha256, "sha256:" + entry["sha256"],
                 manifest_digest, "sha256:" + origin.identity.assembly_hash,
                 *(wheel["sha256"] for wheel in record["wheels"]),
             ]
@@ -252,17 +255,17 @@ def retain_artifact_runtime_inputs(
                     "schema": "copilot-extensions.artifact-runtime-inputs", "version": 1,
                     "profile": record, "source": origin.record(), "policy": policy,
                     "artifact_manifest": manifest,
-                    "release_subject": plan.release_selection.subject_sha256,
+                    "release_subject": cast(ReleaseSelection, plan.release_selection).subject_sha256,
                     "bundle": "sha256:" + entry["sha256"],
                     "acquisition": None if acquisition is None else {
                         key: acquisition[key] for key in ("schema", "version", "policy_id", "files")
                     },
                 }, sort_keys=True, separators=(",", ":"), allow_nan=False))
 
-                def verify():
+                def verify() -> None:
                     verify_owner()
                     _unchanged(index_path, before, index_stream, opened=opened)
-                    if _digest(index_stream, INDEX_LIMIT, deadline)[0] != plan.release_selection.subject_sha256:
+                    if _digest(index_stream, INDEX_LIMIT, deadline)[0] != cast(ReleaseSelection, plan.release_selection).subject_sha256:
                         raise ProfileError("selected artifact subject changed during consumption")
                     _unchanged(bundle, bundle_before, stream, opened=bundle_opened)
                     if validate_bundle_binding(bundle, entry, candidate_root=source_checkout) != (
@@ -271,7 +274,7 @@ def retain_artifact_runtime_inputs(
                         raise ProfileError("selected artifact changed during consumption")
                     if feed is not None:
                         feed.verify()
-                        acquired.snapshot.verify()
+                        cast(AcquiredWheels, acquired).snapshot.verify()
                     verify_digests_not_revoked(
                         [*digests, inputs.receipt()["lock_id"]], revoked_inputs,
                     )

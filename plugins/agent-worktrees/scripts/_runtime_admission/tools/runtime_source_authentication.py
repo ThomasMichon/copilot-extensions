@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 import hashlib
 import json
 from pathlib import Path
 import re
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from runtime_profile_errors import ProfileError, ProfileUnavailable
 
@@ -28,13 +28,14 @@ for _parts in (
 ):
     sys.path.insert(0, str(_ROOT.joinpath(*_parts)))
 
-from installation_context import resolve_runtime_profile_policy
-import installer_dependency_policy as dependencies
-from installer_wheel_inputs import _check_deadline
-import prepare_runtime_source
+from installation_context import resolve_runtime_profile_policy as resolve_runtime_profile_policy
+import installer_dependency_policy as installer_dependency_policy
+dependencies = installer_dependency_policy
+from installer_wheel_inputs import _check_deadline as _check_deadline
+import prepare_runtime_source as prepare_runtime_source
 from versioned_runtime_source import SourceIdentity, read_source_identity
 from worktree_manager import runtime_source, runtime_source_config
-from worktree_manager.source_config import default_root
+from worktree_manager.source_config import default_root as default_root
 
 
 @dataclass(frozen=True)
@@ -46,18 +47,18 @@ class AuthenticatedSource:
     acquired: runtime_source.ResolvedSource | None = field(default=None, repr=False, compare=False)
     _policy_json: bytes | None = field(default=None, repr=False, compare=False)
 
-    def record(self) -> dict:
-        return json.loads(self.canonical)
+    def record(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.canonical))
 
     def verify(self) -> None:
         self._verification()
 
-    def policy(self) -> dict:
+    def policy(self) -> dict[str, Any]:
         if self._policy_json is None:
             raise ProfileError("source origin has no retained installation policy")
-        return json.loads(self._policy_json)
+        return cast(dict[str, Any], json.loads(self._policy_json))
 
-    def for_plan(self, plan: InstallationProfilePlan, *, installation: dict) -> AuthenticatedSource:
+    def for_plan(self, plan: InstallationProfilePlan, *, installation: Mapping[str, Any]) -> AuthenticatedSource:
         """Associate a held origin only after real discovery selects source mode."""
         self.verify()
         if isinstance(plan, _OriginPolicy):
@@ -69,7 +70,7 @@ class AuthenticatedSource:
         if record.get("mode") != "origin" or record.get("trigger") is not None:
             raise ProfileError("source origin has already been associated with a source plan")
 
-        def verify():
+        def verify() -> None:
             self.verify()
             _policy(plan, installation)
 
@@ -89,15 +90,15 @@ class _OriginPolicy:
     source_trigger: None = None
     release_selection: None = None
 
-    def policy(self) -> dict:
-        return json.loads(self.canonical)
+    def policy(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.canonical))
 
 
 @contextmanager
 def borrow_installation_origin(
-    payload: Path, record: dict, policy: dict, *, installation: dict,
+    payload: Path, record: dict[str, Any], policy: dict[str, Any], *, installation: Mapping[str, Any],
     verify_owner: Callable[[], None], deadline: float,
-):
+) -> Iterator[AuthenticatedSource]:
     """Borrow a caller-held origin through its live invocation-local verifier.
 
     The process retaining acquisition custody supplies the original facts and
@@ -157,7 +158,9 @@ def borrow_installation_origin(
         active = False
 
 
-def _policy(plan: InstallationProfilePlan, installation: dict) -> dict:
+def _policy(
+    plan: InstallationProfilePlan | _OriginPolicy, installation: Mapping[str, Any],
+) -> dict[str, Any]:
     expected = plan.policy()
     current = resolve_runtime_profile_policy(
         **installation, backend=expected.get("selection", {}).get("backend"),
@@ -172,11 +175,13 @@ def _policy(plan: InstallationProfilePlan, installation: dict) -> dict:
         or (not discovery and not current["selection"]["allowSourceFallback"])
     ):
         raise ProfileError("source authentication differs from its installation authority")
-    return current
+    return cast(dict[str, Any], current)
 
 
 @contextmanager
-def retain_installation_origin(*, installation: dict, deadline: float, backend: str | None = None):
+def retain_installation_origin(
+    *, installation: Mapping[str, Any], deadline: float, backend: str | None = None,
+) -> Iterator[AuthenticatedSource]:
     """Acquire the real source before release selection or Packaging bootstrap."""
     _check_deadline(deadline)
     policy = resolve_runtime_profile_policy(
@@ -193,8 +198,8 @@ def retain_installation_origin(*, installation: dict, deadline: float, backend: 
 
 @contextmanager
 def retain_installation_source(
-    plan: InstallationProfilePlan, *, installation: dict, deadline: float,
-):
+    plan: InstallationProfilePlan | _OriginPolicy, *, installation: Mapping[str, Any], deadline: float,
+) -> Iterator[AuthenticatedSource]:
     """Select the declared provider once; failed authentication never reselects."""
     _check_deadline(deadline)
     _policy(plan, installation)
@@ -211,8 +216,8 @@ def retain_installation_source(
 
 @contextmanager
 def retain_authenticated_source(
-    plan: InstallationProfilePlan, *, installation: dict, deadline: float,
-):
+    plan: InstallationProfilePlan | _OriginPolicy, *, installation: Mapping[str, Any], deadline: float,
+) -> Iterator[AuthenticatedSource]:
     """Hold the actual configured-source lease through preparation and use."""
     _check_deadline(deadline)
     policy = _policy(plan, installation)
@@ -247,7 +252,7 @@ def retain_authenticated_source(
             }
             canonical = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
 
-            def verify():
+            def verify() -> None:
                 _check_deadline(deadline)
                 _policy(plan, installation)
                 if default_root().absolute() != root or runtime_source_config.configured_source(root) != selection:

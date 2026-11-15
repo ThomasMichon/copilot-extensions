@@ -29,28 +29,48 @@ import sys
 import time
 import tempfile
 from pathlib import Path
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, TypedDict, cast
+
+
+class _Execution(TypedDict, total=False):
+    uv: str
+    deadline: float
+
+
+class _TimeoutOptions(TypedDict, total=False):
+    timeout: float
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from artifact_source_build import read_build_system_requires  # noqa: E402
 from governed_feed_trust import (  # noqa: E402
-    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401 -- re-exported for test/caller use
-    _PUBLIC_PYPI_HOSTS,  # noqa: F401 -- re-exported for test/caller use
-    _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401 -- legacy import compatibility
-    ArtifactBuildError,
-    _credential_free_index_identity,  # noqa: F401 -- re-exported for test/caller use
-    _effective_default_index_url,  # noqa: F401 -- re-exported for test/caller use
-    _effective_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
-    _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
-    _is_public_pypi_url,  # noqa: F401 -- re-exported for test/caller use
-    _normalize_hostname,  # noqa: F401 -- re-exported for test/caller use
-    _opaque_index_identity,  # noqa: F401 -- re-exported for test/caller use
-    _project_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
-    _restrict_file_to_owner,
-    _trusted_index_hosts,  # noqa: F401 -- re-exported for test/caller use
-    _url_host,  # noqa: F401 -- re-exported for test/caller use
-    _validated_trusted_index_url,
-    strip_package_source_env_vars,
+    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS as _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401
+    _TRUSTED_INDEX_HOSTS_ENV_VAR as _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401
+    ArtifactBuildError as ArtifactBuildError,
+    _credential_free_index_identity as _credential_free_index_identity,  # noqa: F401
+    _effective_default_index_url as _effective_default_index_url,  # noqa: F401
+    _effective_uv_toml_candidates as _effective_uv_toml_candidates,  # noqa: F401
+    _governed_feed_configured as _governed_feed_configured,  # noqa: F401
+    _opaque_index_identity as _opaque_index_identity,  # noqa: F401
+    _project_uv_toml_candidates as _project_uv_toml_candidates,  # noqa: F401
+    _restrict_file_to_owner as _restrict_file_to_owner,
+    _trusted_index_hosts as _trusted_index_hosts,  # noqa: F401
+    _url_host as _url_host,  # noqa: F401
+    _validated_trusted_index_url as _validated_trusted_index_url,
+    strip_package_source_env_vars as strip_package_source_env_vars,
 )
+if TYPE_CHECKING:
+    from installer_feed_policy import (
+        _PUBLIC_PYPI_HOSTS as _PUBLIC_PYPI_HOSTS,
+        _is_public_pypi_url as _is_public_pypi_url,
+        _normalize_hostname as _normalize_hostname,
+    )
+else:
+    from governed_feed_trust import (
+        _PUBLIC_PYPI_HOSTS as _PUBLIC_PYPI_HOSTS,
+        _is_public_pypi_url as _is_public_pypi_url,
+        _normalize_hostname as _normalize_hostname,
+    )
 from public_toolchain_source import (  # noqa: E402
     PublicToolchainSource,
     resolve_public_source,
@@ -79,11 +99,11 @@ _LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel", "packaging")
 
 
 def _seasoned_install(
-    arguments: list[str], env: dict, *, uv: str = "uv", deadline: float | None = None,
-) -> subprocess.CompletedProcess:
+    arguments: list[str], env: dict[str, str], *, uv: str = "uv", deadline: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     try:
         if deadline is None:
-            return run_uv_install(uv, arguments, env=env, capture_output=True, text=True)
+            return cast(subprocess.CompletedProcess[str], run_uv_install(uv, arguments, env=env, capture_output=True, text=True))
         with retain_uv_install(uv, arguments, env=env, deadline=deadline) as transaction:
             return subprocess.run(
                 list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
@@ -113,7 +133,7 @@ def _seasoned_install(
 _PYTHON_RUNTIME_ENV_VARS = ("PYTHONPATH", "PYTHONHOME")
 
 
-def sanitize_subprocess_env(env: dict | None = None) -> dict:
+def sanitize_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
     """A copy of ``env`` (or the current process environment, if ``env``
     is ``None``) with every variable in `_PYTHON_RUNTIME_ENV_VARS`
     stripped -- the shared sanitization every subprocess that runs a
@@ -326,7 +346,7 @@ _MARKER_ENV_QUERY_SCRIPT = (
 )
 
 
-def _query_marker_environment(python_exe: Path, *, deadline: float | None = None) -> dict:
+def _query_marker_environment(python_exe: Path, *, deadline: float | None = None) -> dict[str, str]:
     """Queries ``python_exe`` itself for its own PEP 508 marker-environment
     values -- never assumed from the process running this script, which
     may be a different Python than ``--python`` locked into the toolchain
@@ -338,8 +358,8 @@ def _query_marker_environment(python_exe: Path, *, deadline: float | None = None
             if os.name == "nt" and python_exe.is_file() else None
         ),
         capture_output=True, text=True, env=sanitize_subprocess_env(),
-        **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **cast(_TimeoutOptions, {"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     if result.returncode != 0:
         raise ArtifactBuildError(
@@ -347,7 +367,7 @@ def _query_marker_environment(python_exe: Path, *, deadline: float | None = None
             f"{result.stdout}\n{result.stderr}"
         )
     try:
-        return json.loads(result.stdout)
+        return cast(dict[str, str], json.loads(result.stdout))
     except json.JSONDecodeError as exc:
         raise ArtifactBuildError(
             f"{python_exe}: marker-environment query produced non-JSON "
@@ -367,12 +387,12 @@ class ToolchainLock:
 
     def __init__(
         self, venv_python: Path, packages: dict[str, str], *,
-        provenance: dict | None = None, deadline: float | None = None,
-    ):
+        provenance: dict[str, Any] | None = None, deadline: float | None = None,
+    ) -> None:
         self.venv_python = venv_python
         self.packages = packages
         self.provenance = provenance
-        self._marker_environment: dict | None = None
+        self._marker_environment: dict[str, str] | None = None
         self._deadline = deadline
 
     @property
@@ -384,7 +404,7 @@ class ToolchainLock:
         return f"setuptools ({self.packages['setuptools']})"
 
     @property
-    def marker_environment(self) -> dict:
+    def marker_environment(self) -> dict[str, str]:
         """The PEP 508 environment-marker dict for THIS locked toolchain's
         own interpreter (``venv_python``) -- queried directly from that
         interpreter (never assumed from whatever process happens to be
@@ -413,15 +433,15 @@ class ToolchainLock:
         return "sha256:" + _hash_fields(*pairs)
 
     @property
-    def record(self) -> dict:
+    def record(self) -> dict[str, Any]:
         validate_lock_provenance(self.provenance, self.packages)
-        record = {"packages": dict(sorted(self.packages.items())), "lock_id": self.lock_id}
+        record: dict[str, Any] = {"packages": dict(sorted(self.packages.items())), "lock_id": self.lock_id}
         record["provenance"] = self.provenance
         return record
 
 
 def _resolve_interpreter_identity(
-    python: str | None, env: dict, *, uv: str = "uv", deadline: float | None = None,
+    python: str | None, env: dict[str, str], *, uv: str = "uv", deadline: float | None = None,
 ) -> str:
     """Resolve the actual interpreter through the selected UV, within its budget.
 
@@ -562,7 +582,7 @@ def resolve_toolchain_lock(
     Lazy marker queries also retain the caller's original deadline.
     """
     _execution_options(deadline)
-    execution = {}
+    execution: _Execution = {}
     if uv is not None:
         selected_uv = Path(uv)
         if not selected_uv.is_absolute() or not selected_uv.is_file():
@@ -889,7 +909,8 @@ def _read_build_system_requires(source_dir: Path) -> list[str]:
 
 
 def _assert_toolchain_satisfies_build_requires(
-    source_dir: Path, toolchain: ToolchainLock, *, deadline: float | None = None, run=None,
+    source_dir: Path, toolchain: ToolchainLock, *, deadline: float | None = None,
+    run: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
 ) -> None:
     """Fails closed unless the locked toolchain's exact `setuptools`/
     `wheel` versions satisfy every applicable constraint ``source_dir``
@@ -952,8 +973,8 @@ def _assert_toolchain_satisfies_build_requires(
             ),
             input=payload, capture_output=True, text=True,
             env=sanitize_subprocess_env(),
-            **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            **cast(_TimeoutOptions, {"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     if result.returncode != 0:
         raise ArtifactBuildError(
