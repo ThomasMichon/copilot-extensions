@@ -167,6 +167,23 @@ traceable; unavailable pool leaves local controls working and sources read-only.
 - [ ] Report published versus installed/runtime-observed versions separately;
   transfer any remaining rollout or domain implementation to a named tracker.
 
+### Direct terminal-theme acceptance from #3939
+
+- [ ] **P3939-THEME:** Under the existing owner-declared configuration
+  contract, expose a supported source-independent theme setting to both the
+  Manager Picker's explicit truecolor surface and Worktrees human-CLI ANSI
+  output. Reuse an existing supported setting if established by its owner;
+  otherwise keep the setting/resolver with the existing owner. Preserve
+  defaults and semantic state distinctions. Terminal-emulator palette
+  remapping alone is not this setting. Do not duplicate the configuration
+  store, introduce generic plugin-YAML writes, require Manager for Worktrees
+  operation or expand the requirement to every plugin.
+
+This is a finite planned consumer mapping, not evidence that no setting exists
+in uninspected configuration paths. Reuse the generic effective-value,
+provenance, precedence, masking, preview/apply/reset and source-safety
+acceptance already retained here from #357.
+
 ### Installation and Updates - bounded vertical slice (#8877)
 
 The following implementation/validation decomposition is
@@ -238,6 +255,22 @@ provider/landing policy, complete onboarding and installed acceptance retain
 their separate owners; this amendment claims no runtime result.
 
 ## Validation Plan
+
+### Terminal-theme consumer validation from #3939
+
+- [ ] **V3939-THEME-1:** With no custom theme, both consumers retain their
+  existing defaults and semantic state distinctions.
+- [ ] **V3939-THEME-2:** With the supported setting, demonstrate selected
+  values in both Picker truecolor and Worktrees ANSI output without editing
+  installed plugin source. Verify explicit truecolor independently of
+  terminal-emulator remapping.
+- [ ] **V3939-THEME-3:** Preserve existing color-enabled/no-color behavior,
+  including Worktrees `NO_COLOR`/`FORCE_COLOR` semantics. Apply the existing
+  owner-backed source-safety, actual-consumer, compatibility and local-resolution
+  gates; add no native, every-host or whole-Phase-5 prerequisite.
+
+These local rows are included in the parent ROOT's existing wave-specific
+Configuration validation matrix, not a second framework-wide global gate.
 
 ### Confirmed existing-knowledge binding (#10763)
 
@@ -386,6 +419,15 @@ custody.
 
 ## Coordination
 
+The finite #3939 theme mapping retains the current Manager presentation/
+configuration and Worktrees configuration/output owners. It claims no wave,
+appoints no implementer and transfers no settings authority. If ownership or
+a common supported value cannot be resolved through the incumbent contract,
+retain that specific gap rather than create a second setting store.
+Current source OPEN state is preserved pending normal reviewed receiving
+delivery, relevant complete current readback and separate source judgment;
+this amendment adds no permanent-open veto.
+
 Claim exact waves through the parent Journal and owning issues before editing.
 Land independently useful slices serially through `dev` PRs. No shared feature
 branch or standing delegates are assigned. Re-read recent sibling effort claims
@@ -395,6 +437,16 @@ issue and owner in the parent Journal before implementation. Historical #357
 is acceptance provenance, not a replacement for those live execution tokens.
 
 ## Journal
+
+### 2026-11-14 - Theme-specific consumer receiving proposal
+
+Added one unchecked Plan row and three unchecked local Validation rows for
+#3939's two actual renderers. The existing generic configuration framework,
+#357 acceptance, parent global matrix, owners and every incumbent check state
+are unchanged. Qualified consumer files have literal palette/ANSI values;
+that bounded fact does not prove absence in other configuration paths.
+No implementation, settings mutation, installed proof or issue disposition
+is claimed.
 
 ### 2026-11-06 - Existing-knowledge binding source qualification
 

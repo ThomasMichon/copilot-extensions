@@ -14,6 +14,7 @@ import pytest
 
 from agent_worktrees import agenda_contract as contract
 from agent_worktrees import agenda_feed, record_cache, tracking
+from agent_worktrees import config as cfg
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
@@ -1055,7 +1056,7 @@ def test_agenda_schema_initialization_failure_retires_held_feed_but_keeps_roster
                 "contract_version": 1,
                 "project": "other-project",
             }
-        )["worktrees"] == [{"id": "other-worktree"}]
+        )["worktrees"] == [{"id": "other-worktree", "platform": cfg.detect_platform()}]
         assert held_terminal(reader) == {
             "type": "going-away",
             "generation": accepted["generation"],

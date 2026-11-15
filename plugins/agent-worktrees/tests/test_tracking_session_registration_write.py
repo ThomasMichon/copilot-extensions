@@ -43,6 +43,8 @@ def _clean_verb_registry():
 
 @pytest.fixture
 def record_path(tmp_tracking_dir: Path, monkeypatch, monkeypatch_config) -> Path:
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "test")
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
     config = cfg.Config(
         srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
@@ -74,7 +76,7 @@ def test_importing_the_module_registers_the_verb():
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("binding", ["project", "global", "dropin", "detected"])
 @pytest.mark.parametrize("tuple_record", [False, True])
-def test_registration_preserves_explicit_key_among_shared_hostname_entries(
+def test_registration_derives_reporter_independently_of_configured_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
     binding: str, tuple_record: bool,
 ) -> None:
@@ -88,13 +90,13 @@ def test_registration_preserves_explicit_key_among_shared_hostname_entries(
         "machines:\n"
         "  selected-space:\n    hostname: raw-host\n    physical_host: desk\n"
         f"    execution_platform: {platform}\n"
-        "  other-space:\n    hostname: raw-host\n    physical_host: desk\n"
+        "  other-space:\n    hostname: another-host\n    physical_host: another-desk\n"
         f"    execution_platform: {platform}\n",
     )
     project_root = tmp_path / "project"
     project_root.mkdir()
     machine_config: dict[str, object] = {
-        "repos": {"project": {"anchor": str(anchor), "worktree_root": str(tmp_path)}},
+        "repos": {"project": {"anchor": str(anchor), "worktree_root": str(tmp_path / "trees")}},
     }
     if binding == "project":
         machine_config["machine"] = "selected-space"
@@ -118,39 +120,37 @@ def test_registration_preserves_explicit_key_among_shared_hostname_entries(
         if tuple_record else None
     )
     record = tracking.create_new_record(
-        "local", "worktree/local", str(tmp_path / "local"), "project",
+        "local", "worktree/local", str(tmp_path / "trees" / "local"), "project",
         identity.machine if identity else "selected-space",
         platform, cfg.tracking_dir("project"), machine_identity=identity,
     )
-    before = record.yaml_path.read_bytes()
     result = tracking_session_registration_write.apply_session_register({
         "worktree_id": "local", "yaml_path": str(record.yaml_path),
         "session_id": "session",
     })
-    if binding == "detected":
-        assert result["error"] == "execution_space"
-        assert record.yaml_path.read_bytes() == before
-    else:
-        assert result == {"ok": True, "linked_handoff": None}
-        assert tracking.load_record(record.yaml_path).session_entry("session") is not None
-        authority = config_authority.load_project_authority_config("project")
+    assert result == {"ok": True, "linked_handoff": None}
+    loaded = tracking.load_record(record.yaml_path)
+    assert loaded.session_entry("session") is not None
+    assert loaded.execution_machine == "selected-space"
+    authority = config_authority.load_project_authority_config("project")
+    if binding != "detected":
         assert authority.machine == authority.configured_machine == "selected-space"
-        foreign_identity = (
-            WorktreeMachineIdentity("desk", platform, "other-space")
-            if tuple_record else None
-        )
-        foreign = tracking.create_new_record(
-            "foreign", "worktree/foreign", str(tmp_path / "foreign"), "project",
-            foreign_identity.machine if foreign_identity else "other-space",
-            platform, cfg.tracking_dir("project"), machine_identity=foreign_identity,
-        )
-        before = foreign.yaml_path.read_bytes()
-        rejected = tracking_session_registration_write.apply_session_register({
-            "worktree_id": "foreign", "yaml_path": str(foreign.yaml_path),
-            "session_id": "foreign-session",
-        })
-        assert rejected["error"] == "execution_space"
-        assert foreign.yaml_path.read_bytes() == before
+    foreign_identity = (
+        WorktreeMachineIdentity("another-desk", platform, "other-space")
+        if tuple_record else None
+    )
+    foreign = tracking.create_new_record(
+        "foreign", "worktree/foreign", str(tmp_path / "foreign-space" / "foreign"), "project",
+        foreign_identity.machine if foreign_identity else "other-space",
+        platform, cfg.tracking_dir("project"), machine_identity=foreign_identity,
+    )
+    before = foreign.yaml_path.read_bytes()
+    rejected = tracking_session_registration_write.apply_session_register({
+        "worktree_id": "foreign", "yaml_path": str(foreign.yaml_path),
+        "session_id": "foreign-session",
+    })
+    assert rejected["error"] == "execution_space"
+    assert foreign.yaml_path.read_bytes() == before
 
 
 def test_apply_session_register_creates_a_new_session_entry(record_path):
@@ -587,6 +587,8 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
 ):
     import agent_worktrees.config as cfg
 
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "test")
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
     config = cfg.Config(
         srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
@@ -600,7 +602,7 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
     path = tmp_tracking_dir / "wt-terminal.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-terminal", branch="worktree/wt-terminal",
-        worktree_path="/tmp/wt-terminal", repo="test-repo", machine="test",
+        worktree_path=str(tmp_tracking_dir / "trees" / "wt-terminal"), repo="test-repo", machine="test",
         platform=config.platform, started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
         status="finalized", completed_at=None, sessions=[], kind="bridge",
@@ -684,7 +686,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             )
         }
     )
-    monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+    monkeypatch.setattr(repos_mod, "read_registry", lambda **kwargs: registry)
     committed_path = cfg.inrepo_config_path(Path()).as_posix()
     git_calls = []
     shown_refs = []
@@ -752,6 +754,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
 
     monkeypatch.setattr(git_ops, "git", committed_config)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "workstation")
     project_root = tmp_path / ".harness"
     project_root.mkdir()
     (project_root / "config.yaml").write_text(
@@ -759,6 +762,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         "platform: windows\n"
         "knowledge_repo: knowledge\n"
         f"repos:\n  harness:\n    anchor: {harness}\n"
+        f"    worktree_root: {tmp_path / 'trees'}\n"
         + (
             f"    remote: '{machine_remote}'\n"
             if machine_remote is not None else ""
@@ -777,8 +781,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         ),
     )
 
-    local_path = tmp_path / "local.yaml"
-    foreign_path = tmp_path / "foreign.yaml"
+    local_path = project_root / "worktrees" / "local.yaml"
+    foreign_path = project_root / "worktrees" / "foreign.yaml"
     for path, worktree_id, machine, platform in (
         (local_path, "local", "workstation-windows", "windows"),
         (foreign_path, "foreign", "workstation-wsl", "wsl"),
@@ -787,7 +791,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             WorktreeRecord(
                 worktree_id=worktree_id,
                 branch=f"worktree/{worktree_id}",
-                worktree_path=str(tmp_path / worktree_id),
+                worktree_path=str(tmp_path / "trees" / worktree_id) if worktree_id == "local" else str(tmp_path / worktree_id),
                 repo="harness",
                 machine=machine,
                 platform=platform,

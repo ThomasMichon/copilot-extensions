@@ -147,6 +147,11 @@ def test_unfiltered_build_inputs_reject_scratch_links(tmp_path, monkeypatch, con
     import build_python_artifacts as build
 
     root, canonical, _checkout, _destination, _pointer, external = _fixture(tmp_path)
+    if consumer == "plugin":
+        plugin = root / "plugins" / "shared"
+        plugin.parent.mkdir()
+        canonical.rename(plugin)
+        canonical = plugin
     _link(canonical / "src/ordinary/.test-runs", external)
     with _no_external_reads(monkeypatch, external):
         with pytest.raises(build.ArtifactBuildError, match="symlink"):
@@ -160,7 +165,8 @@ def test_unfiltered_build_inputs_reject_scratch_links(tmp_path, monkeypatch, con
                     raw_path="../../libs/shared", lib="shared",
                 )
             else:
-                monkeypatch.setattr(build, "PLUGINS_DIR", root / "libs")
+                monkeypatch.setattr(build, "REPO", root)
+                monkeypatch.setattr(build, "PLUGINS_DIR", root / "plugins")
                 build.build_plugin_artifacts("shared", out_dir=tmp_path / "output")
 
 

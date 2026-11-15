@@ -5,6 +5,7 @@ import importlib.util
 import io
 from pathlib import Path
 import stat
+import shlex
 import subprocess
 import sys
 from types import ModuleType
@@ -26,12 +27,44 @@ RESOURCE_NAMES = {
     "versioned_runtime_construction.py": "agent_containers/versioned_runtime_construction.py",
     "versioned_runtime_publication.py": "agent_containers/versioned_runtime_publication.py",
     "versioned_runtime_source.py": "agent_containers/versioned_runtime_source.py",
+    "versioned_runtime_cache.py": "agent_containers/versioned_runtime_cache.py",
     "runtime_profile.py": "agent_containers/_runtime_profile.py",
 }
 STATIC_BUILD = (
     '[build-system]\nrequires = ["setuptools>=68"]\n'
     'build-backend = "setuptools.build_meta"\n'
 )
+
+
+def test_gateway_build_context_contains_the_canonical_runtime_and_cache_closure():
+    from standalone_python_artifacts import injected_resources
+
+    runtime = {
+        path.relative_to(ROOT).as_posix()
+        for path in injected_resources("fleet-manager", ROOT).values()
+    }
+    cache = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "libs/agent-procutil/src/agent_procutil").glob("python_cache*.py")
+    }
+    image = ROOT / "fleet-manager/containers/gateway"
+    inputs = {
+        token for line in (image / "Dockerfile").read_text().splitlines()
+        if line.startswith("COPY ") for token in shlex.split(line)[1:-1]
+    }
+    included = {
+        line[1:] for line in (image / "Dockerfile.dockerignore").read_text().splitlines()
+        if line.startswith("!")
+    }
+    assert all(
+        name in inputs or any(
+            source.endswith("/") and name.startswith(source) for source in inputs
+        )
+        for name in runtime
+    )
+    assert "libs/agent-procutil/src/agent_procutil/" in inputs
+    assert runtime | cache <= included
+
 
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +89,7 @@ def container_project(tmp_path):
 
 
 @pytest.mark.parametrize("included", [False, True], ids=["canonical", "matching-included"])
-def test_containers_admits_exact_six_source_owned_resources(container_project, tmp_path, included):
+def test_containers_admits_exact_source_owned_resources(container_project, tmp_path, included):
     source = container_project
     expected = {
         destination: source / "scripts" / name
@@ -72,7 +105,6 @@ def test_containers_admits_exact_six_source_owned_resources(container_project, t
     data, admitted = resources.build_inputs(source, root=tmp_path)
     assert data["project"] == {"name": "agent-containers", "version": "1.0"}
     assert admitted == expected
-    assert len(admitted) == 6
     assert all(path.is_relative_to(source / "scripts") for path in admitted.values())
 
 
@@ -426,7 +458,7 @@ def test_runtime_resource_selection_requires_all_canonical_bytes(
 
 
 @pytest.mark.parametrize("layout", ["canonical", "sdist"])
-def test_runtime_commands_deliver_six_bound_resources_and_helper(
+def test_runtime_commands_deliver_bound_resources_and_helper(
     tmp_path, runtime_builder, layout,
 ):
     module, events = runtime_builder
@@ -462,7 +494,7 @@ def test_runtime_commands_deliver_six_bound_resources_and_helper(
     assert set(outputs) == {
         "already-built.py", *(str(Path(build.build_lib) / name) for name in expected),
     }
-    assert len(outputs) == 7
+    assert len(outputs) == len(set(outputs))
     release = tmp_path / "release"
     commands["sdist"]().make_release_tree(str(release), ["pyproject.toml"])
     assert (release / "_standalone_runtime_build.py").read_bytes() == helper_bytes

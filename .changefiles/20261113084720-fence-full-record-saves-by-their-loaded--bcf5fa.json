@@ -1,0 +1,9 @@
+{
+  "comment": "Fence full-record saves by their loaded receiving subject before removing persisted machine labels",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

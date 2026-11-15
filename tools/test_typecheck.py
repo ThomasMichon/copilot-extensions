@@ -1,6 +1,7 @@
 """Focused inventory and actual-checker controls for the local typecheck front door."""
 from __future__ import annotations
 
+import ast
 from dataclasses import replace
 import importlib.machinery
 import json
@@ -536,6 +537,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
+        "tools/typecheck_bootstrap_views.py", "tools/typecheck_new_code.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         *(
             "libs/installer-engine/" + name
@@ -654,10 +656,76 @@ def test_real_catalog_source_and_frozen_frontdoors(
     tmp_path: Path, platform: str, python_version: str, bad_template: bool, frontdoor: str,
     record_property: Callable[[str, object], None],
 ) -> None:
+    _real_catalog_frontdoors(
+        tmp_path, platform, python_version, bad_template, frontdoor, record_property,
+    )
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("frontdoor", ["source", "frozen"])
+def test_real_bootstrap_source_and_frozen_frontdoors(
+    tmp_path: Path, platform: str, frontdoor: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    _real_catalog_frontdoors(
+        tmp_path, platform, "3.11", False, frontdoor, record_property, bad_bootstrap=True,
+    )
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("frontdoor", ["source", "frozen"])
+@pytest.mark.parametrize("selector", ["powershell", "posix"])
+def test_real_shim_selector_source_and_frozen_frontdoors(
+    tmp_path: Path, frontdoor: str, selector: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    _real_catalog_frontdoors(
+        tmp_path, "win32", "3.11", False, frontdoor, record_property,
+        bad_selector=selector,
+    )
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("configured", [False, True])
+def test_shim_selector_annotation_preserves_real_fallback(
+    tmp_path: Path, configured: bool,
+) -> None:
+    template = (typecheck.ROOT / "libs/payload-invocation/templates/powershell-shim.tmpl").read_text(
+        encoding="utf-8",
+    )
+    body = template.split("    $selector = @'\n", 1)[1].split("\n'@", 1)[0]
+    original = body.replace("prefix: str | None\n", "", 1)
+    assert original != body
+    expected = str(tmp_path / "existing-cache") if configured else None
+    provider = typecheck.ROOT / "libs/agent-procutil/src"
+    outputs = []
+    for program in (original, body):
+        code = (
+            "import sys;from pathlib import Path;"
+            f"sys.path.insert(0,{str(provider)!r});"
+            "from agent_procutil import python_cache;"
+            f"assert Path(python_cache.__file__).resolve()==Path({str(provider / 'agent_procutil/python_cache.py')!r}).resolve();"
+            f"sys.pycache_prefix={expected!r};sys.argv=['-c'];"
+            f"exec(compile({program!r},'<actual-shim-selector>','exec'))"
+        )
+        result = typecheck._run([sys.executable, "-I", "-B", "-c", code], tmp_path)
+        assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+        outputs.append(result.stdout)
+    assert outputs == [json.dumps(expected, ensure_ascii=True) + "\n"] * 2
+
+
+def _real_catalog_frontdoors(
+    tmp_path: Path, platform: str, python_version: str, bad_template: bool, frontdoor: str,
+    record_property: Callable[[str, object], None], *, bad_bootstrap: bool = False,
+    bad_selector: str | None = None,
+) -> None:
     """Reuse the test SDK, but exercise real Git transport, checker and MyPy."""
     from tools import promote_release as promotion
     from tools import promotion_frozen_candidate as frozen
     from tools import typecheck_catalog_views as catalog
+    from tools import typecheck_bootstrap_views as bootstrap_views
+    from tools.typecheck_source_views import _shape
 
     root = tmp_path / "source"
     root.mkdir()
@@ -665,8 +733,9 @@ def test_real_catalog_source_and_frozen_frontdoors(
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
         "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
+        "tools/typecheck_bootstrap_views.py", "tools/typecheck_new_code.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
-        catalog.DECLARATION, *catalog.MEMBERS,
+        catalog.DECLARATION, *catalog.MEMBERS, *bootstrap_views.INPUTS,
         *(
             "libs/installer-engine/" + name for name in (
                 "installer_dependency_policy.py", "installer_dependency_config.py",
@@ -697,8 +766,34 @@ def test_real_catalog_source_and_frozen_frontdoors(
         assert lines[59].startswith("    return context +")
         lines[59] = "    return 0\n"
         template.write_text("".join(lines), encoding="utf-8")
+    if bad_bootstrap:
+        producer = root / catalog.PRODUCER
+        original = producer.read_text(encoding="utf-8")
+        changed = original.replace(
+            "print(sys.executable,flush=True); ",
+            "probe: int = ''wrong''; print(sys.executable,flush=True); ", 1,
+        )
+        assert changed != original
+        producer.write_text(changed, encoding="utf-8")
+        producer_tree = ast.parse(producer.read_bytes())
+        (root / catalog.DECLARATION).write_text(json.dumps({
+            "kind": "in-process-catalog-v1", "module": _shape(producer_tree),
+            "functions": {n.name: _shape(n) for n in producer_tree.body
+                          if isinstance(n, ast.FunctionDef)
+                          and n.name in {"_load_command", "load_manifest", "render", "expected_files"}},
+        }), encoding="utf-8")
     expected_template = template.read_bytes()
     expected_declaration = (root / catalog.DECLARATION).read_bytes()
+    if bad_selector is not None:
+        assert bad_selector in {"powershell", "posix"}
+        selector_template = root / catalog.PREFIX / "templates" / (bad_selector + "-shim.tmpl")
+        original = selector_template.read_text(encoding="utf-8")
+        changed = original.replace("try:\n", "probe: int = \"wrong\"\ntry:\n", 1)
+        assert changed != original
+        selector_template.write_text(changed, encoding="utf-8")
+    expected_selectors = {
+        name: (root / name).read_bytes() for name in bootstrap_views.SELECTOR_TEMPLATES
+    }
     policy = next(p for p in typecheck.load_projects() if p.name == "lib-payload-invocation")
     assert policy.level == "pending" and policy.additional_python_versions == ("3.11",)
     declared_versions = (policy.python_version, *policy.additional_python_versions)
@@ -791,11 +886,20 @@ def test_real_catalog_source_and_frozen_frontdoors(
     label_prefix = "[pending] lib-payload-invocation (Python "
     assert result.stdout.count(label_prefix) == 1, result.stdout + result.stderr
     for version in (python_version,):
-        label = f"{label_prefix}{version}, {platform}, 4 physical files, 8 targets)"
+        label = f"{label_prefix}{version}, {platform}, 4 physical files, 11 targets)"
         assert label in result.stdout, result.stdout + result.stderr
         segment = result.stdout.split(label, 1)[1].split(label_prefix, 1)[0]
         errors = [line for line in segment.splitlines() if ": error:" in line]
-        if bad_template:
+        if bad_selector is not None:
+            assert len(errors) == 1, segment
+            assert errors[0].startswith(
+                catalog.PREFIX + "templates/" + bad_selector + "-shim.tmpl:"
+            ) and "[assignment]" in errors[0], segment
+        elif bad_bootstrap:
+            assert len(errors) == 1, segment
+            assert errors[0].startswith(catalog.PRODUCER + ":") and "[assignment]" in errors[0], segment
+            assert "bootstrap canonical source" in errors[0] and "full body requires Python 3.11" in errors[0]
+        elif bad_template:
             assert len(errors) == 4, segment
             assert all(
                 line.startswith(catalog.TEMPLATE + ":60:") and "[return-value]" in line
@@ -805,6 +909,7 @@ def test_real_catalog_source_and_frozen_frontdoors(
             assert not errors and "Success: no issues found" in segment, segment
     assert (checkout / catalog.TEMPLATE).read_bytes() == expected_template
     assert (checkout / catalog.DECLARATION).read_bytes() == expected_declaration
+    assert all((checkout / name).read_bytes() == content for name, content in expected_selectors.items())
     assert (checkout / "tools/typecheck_catalog_views.py").read_bytes() == (
         typecheck.ROOT / "tools/typecheck_catalog_views.py"
     ).read_bytes()
@@ -1293,6 +1398,9 @@ def test_git_comparison_and_physical_inventory_cover_developer_edits(tmp_path: P
     (tmp_path / "removed.py").unlink()
     assert set(typecheck.changed_paths(tmp_path, "HEAD")) == {"staged.py", "unstaged.py", "removed.py"}
     assert typecheck.changed_paths(tmp_path, "HEAD", "HEAD") == ()
+    assert set(typecheck.new_code_changes(tmp_path, "HEAD", "HEAD")) == {
+        "staged.py", "unstaged.py", "removed.py", "added.py",
+    }
     assert set(typecheck.python_paths(tmp_path)) == {"staged.py", "unstaged.py", "added.py"}
     with pytest.raises(typecheck.TypecheckError, match="Cannot resolve"):
         typecheck.changed_paths(tmp_path, "missing-comparison-base")
@@ -1332,6 +1440,33 @@ def test_changed_selection_conservatively_checks_all_admitted_consumers(
     assert typecheck.main(["--changed"]) == 0
     assert checked == ["sample", "caller"]
     assert "conservative dependency impact" in capsys.readouterr().out
+
+
+def test_new_code_merge_comparison_excludes_base_only_python(tmp_path: Path) -> None:
+    """The actual merge tree, not the feature tip, isolates the PR contribution."""
+    for args in (
+        ("init",), ("config", "user.name", "Example"),
+        ("config", "user.email", "example@example.com"),
+    ):
+        _matrix_git(tmp_path, *args)
+    (tmp_path / "initial.py").write_text("value: int = 1\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Common source")
+    common = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "switch", "-c", "feature")
+    (tmp_path / "feature.py").write_text("value: int = 2\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Feature source")
+    feature = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "switch", "-c", "base", common)
+    (tmp_path / "base_only.py").write_text("def legacy(value):\n    return value\n", encoding="utf-8")
+    _matrix_git(tmp_path, "add", ".")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "commit", "-m", "Base-only source")
+    base = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    _matrix_git(tmp_path, "-c", "commit.gpgsign=false", "merge", "--no-edit", "feature")
+    merged = _matrix_git(tmp_path, "rev-parse", "HEAD")
+    assert set(typecheck.new_code_changes(tmp_path, base, merged)) == {"feature.py"}
+    assert set(typecheck.new_code_changes(tmp_path, base, feature)) == {"feature.py", "base_only.py"}
 
 
 def test_missing_preparation_is_actionable_and_does_not_create_environment(
@@ -1393,6 +1528,42 @@ def test_pending_probe_never_certifies_admission(
     assert typecheck.main(["sample"]) == 1
     assert "do not certify admission" in capsys.readouterr().err
     assert typecheck.main(["--inventory", "--require-complete"]) == 2
+
+
+def test_enforced_invocation_tests_preserve_the_independent_catalog_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects = tuple(
+        item for item in typecheck.load_projects()
+        if item.name in {"lib-payload-invocation", "lib-payload-invocation-tests"}
+    )
+    files = tuple(
+        path for path in typecheck.python_paths()
+        if any(item.owns(path) for item in projects)
+    )
+    expected = tuple(
+        path for path in files if path.startswith("libs/payload-invocation/tests/")
+    )
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def check(
+        root: Path, item: typecheck.Project, selected: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool = False,
+    ) -> int:
+        assert root == typecheck.ROOT and all_paths == files
+        calls.append((item.name, selected))
+        return 0
+
+    monkeypatch.setattr(typecheck, "load_projects", lambda: projects)
+    monkeypatch.setattr(typecheck, "python_paths", lambda: files)
+    monkeypatch.setattr(typecheck, "check_project", check)
+    assert expected
+    assert typecheck.main(["--enforced"]) == 0
+    assert calls == [
+        (item.name, tuple(path for path in files if item.owns(path)))
+        for item in projects if item.level == "strict"
+    ]
+    assert ("lib-payload-invocation-tests", expected) in calls
 
 
 def test_dependency_policy_refusal_has_the_setup_error_contract(
@@ -1685,6 +1856,44 @@ def test_actual_mypy_rejects_type_regressions(
     assert lease.released
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "failure", "diagnostic"),
+    [
+        ("def missing(value):\n    return value\n", True, "[no-untyped-def]"),
+        ("value: int = 'old error'\n# newly added comment\n", True, "[assignment]"),
+        ("def accept(value: int) -> int:\n    return value\n", False, ""),
+    ],
+)
+def test_actual_new_code_frontdoor_strictly_checks_pending_whole_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    source: str, failure: bool, diagnostic: str,
+) -> None:
+    """Real MyPy sees the full pending file, including errors outside an edit."""
+    (tmp_path / "sample.py").write_text(source, encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("fixture\n", encoding="utf-8")
+    item = project(level="pending")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "fixture"
+
+    monkeypatch.setattr(typecheck, "ROOT", tmp_path)
+    monkeypatch.setattr(typecheck, "load_projects", lambda: (item,))
+    monkeypatch.setattr(typecheck, "python_paths", lambda: ("sample.py",))
+    monkeypatch.setattr(typecheck, "new_code_changes", lambda *_args: ("sample.py",))
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
+    assert typecheck.main(["--new-code"]) == int(failure)
+    assert diagnostic in capsys.readouterr().out
+    assert item.level == "pending" and lease.released
+    assert not list(environment.parent.glob("source-views-*/sample/*.py"))
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])

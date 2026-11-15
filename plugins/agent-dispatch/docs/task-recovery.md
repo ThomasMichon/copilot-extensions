@@ -65,6 +65,16 @@ Native acquisition receipts count even before agent/session-handle publication.
 A failed reservation with only a launched acquisition receipt remains blocked
 until its native retirement is qualified.
 
+Strict recovery also refuses a pending [source-relevance closeout](task-relevance.md).
+Those operations advance task generation, whereas the accepted closeout belongs
+to its captured original owner and generation. Diagnostics include that closeout
+in the opaque revision and report this refusal for all strict reset/detach
+operations; acceptance after a diagnostic read invalidates its revision.
+An already committed recovery still returns its original receipt on retry,
+without repeating a mutation against a later closeout. Legacy Proposed reset
+retains its same-generation behavior and independent execution guards. Neither
+path transfers closeout authority to a newer task episode.
+
 ### Fenced CLI mutations
 
 Read diagnostics, then use its exact revision. Supply a stable request identity

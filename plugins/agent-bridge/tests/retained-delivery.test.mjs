@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createRetainedInbox, retainedDeliverySelected, retainedConsumption,
-} from "../extensions/agent-bridge/retained-delivery.mjs";
-import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
+} from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
+import { isRemoteDriverSource } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 
 const contract = "retained-inbox-v1";
 const sid = "native-a";
@@ -58,13 +58,14 @@ function fixture() {
       assert.equal(body.limit, 1);
       assert.deepEqual(body.consumer, f.current);
       assert.deepEqual(body.binding, binding);
-      const row = f.rows.find((r) => r.handoff_stage !== "consumed");
+      const row = f.rows.find((r) => body.receiving_api === "native-sdk-v1"
+        ? !r.handoff_stage || r.handoff_stage === "offered" : r.handoff_stage !== "consumed");
       if (row && !row.handoff_id) {
         row.handoff_id = `handoff-${row.id}`;
         row.consumer = clone(body.consumer);
         row.handoff_stage = "offered";
       }
-      if (row) assert.deepEqual(row.consumer, body.consumer);
+      if (row && body.receiving_api !== "native-sdk-v1") assert.deepEqual(row.consumer, body.consumer);
       result = { contract, binding, consumer: body.consumer, messages: row ? [clone(row)] : [] };
     } else if (path === `${prefix}/begin`) {
       if (f.closed) throw new Error("epoch closed");
@@ -122,11 +123,129 @@ test("retained mode is explicit and never changes legacy delivery defaults", () 
   }
 });
 
+test("native SDK receiving recovers the original offered consumer after reload without process admission", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  const row = f.add();
+  row.handoff_id = "original-handoff";
+  row.handoff_stage = "offered";
+  row.consumer = { session_id: sid, incarnation: "previous", pid: null, process_started_at: null };
+  const inbox = f.consumer("reloaded", {
+    receivingApi: "native-sdk-v1", processIdentity: undefined,
+    request: (method, path, body) => {
+      const wire = clone(body);
+      if (wire?.consumer) {
+        wire.consumer.pid ??= null;
+        wire.consumer.process_started_at ??= null;
+      }
+      return f.request(method, path, wire);
+    },
+  });
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /retained-consumer="previous"/);
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.deepEqual(f.calls.find((call) => call.path.endsWith("/begin")).body.consumer, row.consumer);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 1);
+  f.events.push(f.event());
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(row.handoff_stage, "consumed");
+});
+
+test("compatible receiving observes a begun original but never sends it again", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  const row = f.add();
+  row.handoff_id = "original-handoff";
+  row.handoff_stage = "unknown";
+  row.consumer = { session_id: sid, incarnation: "previous", ...identity };
+  f.add();
+  await f.consumer("reloaded", { receivingApi: "native-sdk-v1" }).tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /msg-id="2"/);
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 1);
+  assert.equal(row.handoff_stage, "unknown");
+});
+
+test("native receiving does not turn unavailable process diagnostics into admission", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  await f.consumer("native", {
+    receivingApi: "native-sdk-v1",
+    processIdentity: { pid: "unavailable", process_started_at: NaN },
+  }).tick(sid);
+  assert.equal(f.sends.length, 1);
+  const enrollment = f.calls.find((call) => call.path.endsWith("/enroll")).body;
+  assert.equal("pid" in enrollment.consumer, false);
+  assert.equal("process_started_at" in enrollment.consumer, false);
+});
+
+test("native receiving recovers registration loss without replaying an accepted original", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  let next = 0;
+  const inbox = f.consumer("native", {
+    receivingApi: "native-sdk-v1", incarnation: () => `consumer-${++next}`,
+  });
+  await inbox.tick(sid);
+  const original = clone(f.rows[0]);
+  f.current = null;
+  f.frontendReady = false;
+  f.add();
+  await inbox.tick(sid);
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(f.current.incarnation, "consumer-2");
+  assert.equal(f.sends.length, 2);
+  assert.match(f.sends[0].prompt, /msg-id="1"/);
+  assert.match(f.sends[1].prompt, /msg-id="2"/);
+  assert.deepEqual(f.rows[0], original);
+});
+
+for (const boundary of ["before", "after"]) {
+  test(`portable loadout validation remains separate from private control (${boundary} begin)`, async () => {
+    const f = fixture();
+    f.capabilities.compatible_native_inbox = 1;
+    f.add();
+    let checks = 0;
+    await f.consumer("native", {
+      receivingApi: "native-sdk-v1",
+      validateSendContext: async () => {
+        if (++checks === (boundary === "before" ? 1 : 2)) {
+          throw new Error("selected extensions are duplicated");
+        }
+      },
+    }).tick(sid);
+    assert.equal(f.sends.length, 0);
+    assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length,
+      boundary === "before" ? 0 : 1);
+    assert.equal(f.rows[0].handoff_stage, boundary === "before" ? "offered" : "unknown");
+    assert.ok(f.logs.some((line) => line.includes("duplicated")));
+  });
+}
+
 test("driver consumption requires explicit source selection and still binds the original receipt", async () => {
   const f = fixture();
   f.add();
-  const inbox = f.consumer("consumer-a", { sourceAllowed: isRemoteDriverSource });
+  const pending = [], consumed = [];
+  const inbox = f.consumer("consumer-a", {
+    sourceAllowed: isRemoteDriverSource,
+    onPending: (sessionId, messages) => {
+      assert.equal(sessionId, sid);
+      pending.push(messages.map((msg) => msg.id));
+    },
+    onConsumed: (sessionId, id) => {
+      assert.equal(sessionId, sid);
+      consumed.push(id);
+    },
+  });
   await inbox.tick(sid);
+  assert.deepEqual(pending.at(-1), [1]);
+  assert.deepEqual(consumed, []);
   const receipt = f.receipt(f.rows[0]);
   const event = f.event();
   event.data.source = "agent-remote-driver-11111111-2222-4333-8444-555555555555";
@@ -137,6 +256,7 @@ test("driver consumption requires explicit source selection and still binds the 
   f.clock += 30_001;
   await inbox.tick(sid);
   assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.deepEqual(consumed, [1]);
   assert.equal(f.sends.length, 1);
 });
 

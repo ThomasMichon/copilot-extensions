@@ -16,11 +16,10 @@ Generated shims:
 - leave a replaceable payload working directory before provisioning or launch;
 - resolve the runtime only through the payload's canonical runtime resolver;
 - preserve caller arguments and child exit status;
-- send enabled Python bytecode caches to the resolved legacy state root's
-  `cache/python`, outside version slots (extended paths for native Windows
-  interpreters, including Windows Git Bash), with installation-scoped reuse or
-  fresh invocation namespaces under the
-  [shared cache contract](../agent-procutil/README.md#managed-python-bytecode-cache);
+- forward the complete policy-version-2 vector from the selected runtime's
+  [shared cache provider](../agent-procutil/README.md#platform-cache-provider-contract):
+  reuse completed runtimes' private OS-user-cache namespaces, or use `-B` for
+  unsealed, unavailable or older providers, without per-invocation allocation;
 - self-provision only through the same payload's installer/snapshot;
 - never scan installed marketplaces or resolve a sibling command through
   `PATH`.
@@ -41,6 +40,11 @@ object pipelines from native redirected stdin and preserve raw native bytes;
 Windows PowerShell's `ExpectingInput` alone does not distinguish those paths.
 The opted-in launcher suppresses PowerShell progress records, not errors, so
 module auto-loading cannot add CLIXML to its stderr transport.
+`callerCwdEnv` optionally names an environment variable that receives the
+caller's working directory before a delegating shim leaves the payload.
+The payload dispatcher uses that value to resolve relative path arguments
+without keeping its child process in a replaceable directory. Each invocation
+overwrites inherited values; dispatchers should consume it before further calls.
 `provisionMode` defaults to `snapshot`, where first use stamps the owning
 payload and provisions through its published snapshot. A self-staging installer
 may select `direct`; the payload shim then invokes that same installer with
@@ -415,6 +419,13 @@ the checker never imports the generator. Diagnostics retain template lines or
 the separate flight-expression source range. These witnesses do not qualify
 actual consumer copies, shell execution, toolkit activation or native runtime
 behavior, and do not change this project's pending status.
+
+Two additional source-mapped views check the actual shim cache selectors:
+the PowerShell here-string and POSIX single-quoted Python argument. Their
+launch arguments, real cache-helper import/call and candidate-local helper
+source retain checker custody. The PowerShell selector explicitly allows an
+optional prefix, preserving its existing `None` fallback and JSON output.
+These views do not execute either shell or qualify generated consumer copies.
 
 The four canonical programs belong to `lib-payload-invocation` in
 `tools/typecheck-projects.json`, checked on Python 3.10 and 3.11.

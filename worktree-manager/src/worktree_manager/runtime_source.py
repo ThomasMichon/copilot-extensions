@@ -243,7 +243,10 @@ def acquire(
         )
         if selection.channel == "stable":
             tag = f"refs/tags/{selection.ref}"
-            git_command(checkout, "fetch", "--no-tags", "origin", f"+{tag}:{tag}")
+            git_command(
+                checkout, "fetch", "--no-tags", *(["--", authority] if authority else ["origin"]),
+                f"+{tag}:{tag}",
+            )
             reference = tag
         else:
             reference = selection.ref if selection.channel == "exact" else tip

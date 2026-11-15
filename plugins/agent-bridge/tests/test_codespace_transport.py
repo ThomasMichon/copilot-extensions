@@ -298,6 +298,54 @@ async def test_legacy_checkout_metadata_refresh_uses_only_provider_argv(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_legacy_checkout_refresh_wraps_a_recovered_windows_shim(monkeypatch, tmp_path):
+    import json
+    from agent_bridge.session_host.codespace_transport import _refresh_checkout_metadata
+
+    runtime = tmp_path / ".agent-codespaces"
+    stable = tmp_path / "installed" / "agent-codespaces"
+    shim = stable / "bin" / "agent-codespaces.cmd"
+    shim.parent.mkdir(parents=True)
+    shim.write_text("")
+    runtime.mkdir()
+    (runtime / "payload-dir").write_text(f"{stable}\n", encoding="utf-8")
+    recorded = str(
+        runtime / ".install-stage" / "20260101T000000-1" / "agent-codespaces"
+        / "bin" / "agent-codespaces.cmd"
+    )
+    observed = {}
+
+    def wrap(command, env):
+        observed["unwrapped"] = list(command)
+        observed["wrap_env"] = env
+        return ["cmd.exe", "/d", "/s", "/c", *command]
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return json.dumps({"codespace": {"name": "synthetic"}}).encode(), b""
+
+    async def create(*argv, **kwargs):
+        observed["argv"] = list(argv)
+        observed["process_env"] = kwargs["env"]
+        return Process()
+
+    monkeypatch.setattr("agent_bridge.transport._wrap_batch_for_windows", wrap)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.asyncio.create_subprocess_exec", create,
+    )
+    target = {"name": "synthetic", "provider_command": [recorded]}
+
+    await _refresh_checkout_metadata(target)
+
+    expected = [str(shim), "namespace-resolve", "synthetic"]
+    assert observed["unwrapped"] == expected
+    assert observed["argv"] == ["cmd.exe", "/d", "/s", "/c", *expected]
+    assert observed["process_env"] is observed["wrap_env"]
+
+
+@pytest.mark.asyncio
 async def test_retained_workspace_resolution_does_not_refresh_a_live_rejoin(monkeypatch):
     from unittest.mock import AsyncMock
     from agent_bridge.session_host.codespace_transport import resolve_execution_workspace

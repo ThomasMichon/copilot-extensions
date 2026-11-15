@@ -19,7 +19,7 @@ def tuple_controller(monkeypatch, tmp_path):
         "execution_machine": "custom-guest", "platform": "wsl",
     }
     command = AsyncMock(return_value={"worktrees": [row]})
-    monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", command)
+    monkeypatch.setattr("agent_bridge.acquisition_authority._run_worktree_command", command)
     return row, command, tmp_path
 
 

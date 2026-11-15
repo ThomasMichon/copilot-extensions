@@ -12,6 +12,9 @@ from .observation_credentials import ObservationCredentialError
 def read(method, url, credentials, *, invoke, payload=None, deadline=None):
     if method != "GET" or payload is not None:
         raise ProviderError("observation credentials permit only native reads")
+    if getattr(credentials, "http_profile", "legacy") == "direct-v1":
+        from .observation_http import read_get
+        return read_get(url, credentials.authorization(), invoke=invoke, deadline=deadline)
     address = urlsplit(url)
     if (
         address.scheme != "https" or not address.hostname

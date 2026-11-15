@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare original-assignment claim closeout through independent readiness without releasing the native or reservation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

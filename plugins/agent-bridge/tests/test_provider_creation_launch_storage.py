@@ -141,9 +141,12 @@ def test_provider_migration_from_37_preserves_legacy_unknown_and_original_inputs
     )
     tmp_db.execute_write("ALTER TABLE live_messages DROP COLUMN exact_session")
     tmp_db.execute_write("UPDATE schema_version SET version=37")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=37)
     columns = {row["name"] for row in tmp_db.execute_read("PRAGMA table_info(live_messages)")}
     assert "exact_session" not in columns
-    validate_inbox_schema(tmp_db._get_conn(), exact_native=False)
+    validate_inbox_schema(tmp_db._get_conn(), exact_native=False, compatible_messages=False)
     with pytest.raises(ValueError, match="current schema"):
         Database(tmp_db.db_path, read_only=True)
     migrated = Database(tmp_db.db_path)

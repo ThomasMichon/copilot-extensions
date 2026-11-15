@@ -859,8 +859,11 @@ _install_service() {
     # bind fails outright with a bare FileNotFoundError if $RUN_DIR is
     # missing, and the log file open warns-and-continues without $INSTALL_DIR/
     # logs) -- neither was created here before.
-    mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs" || {
+    mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs" "$INSTALL_DIR/bin" || {
         _fail "Vault service directories cannot be prepared: $UNIT_DIR"; return 1;
+    }
+    cp -- "$SCRIPT_DIR/vault-service.sh" "$INSTALL_DIR/bin/vault-service.sh" || {
+        _fail 'Vault service launcher could not be published'; return 1;
     }
     local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp
     if [[ -d "$unit_path" ]]; then
@@ -882,11 +885,6 @@ _install_service() {
     # written to a file.
     local handoff_json=""
     if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
-        local cache_id
-        cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-        [[ "$cache_id" =~ ^[0-9a-f]{32}$ ]] || {
-            _fail "Vault handoff cache namespace could not be selected"; return 1;
-        }
         # config.SOCKET_PATH/run_dir() etc. resolve from these env vars at
         # import time, so they must be set for THIS invocation explicitly --
         # unlike the systemd-managed daemon (which gets them from the unit's
@@ -898,10 +896,8 @@ _install_service() {
             AGENT_VAULT_RUN_DIR="$RUN_DIR" \
             AGENT_VAULT_SOCKET="$SOCKET_PATH" \
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
-            "$LINK_PYTHON" -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-$cache_id" -m agent_vault.service --export-handoff 2>/dev/null
+            "$LINK_PYTHON" -B -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
-        # One-shot child has exited; drop the cache namespace it minted.
-        rm -rf -- "$INSTALL_DIR/cache/python/unsealed-$cache_id" 2>/dev/null || true
     fi
 
     service_configuration="$("$LINK_PYTHON" -I -B -X utf8 -c \
@@ -940,7 +936,7 @@ Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
 Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
 Environment="AGENT_VAULT_CONFIG=$service_configuration_path"
 $PORT_ENV_LINE
-ExecStart=$LINK_PYTHON -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-\${INVOCATION_ID}" -m agent_vault.service --foreground --persistent --handoff-stdin --configuration-root "$service_configuration_root"
+ExecStart=/bin/sh "$INSTALL_DIR/bin/vault-service.sh" "$LINK_PYTHON" "$INSTALL_DIR" --foreground --persistent --handoff-stdin --configuration-root "$service_configuration_root"
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR

@@ -98,7 +98,6 @@ def stamp_session_state_worktree_binding(
     worktree_id: str | None,
     *,
     worktree_dir: str | None = None,
-    machine: str | None = None,
     worktree_record: tracking.WorktreeRecord | None = None,
 ) -> dict[str, object] | None:
     """Best-effort, unconditional durable record of "this session registered
@@ -118,6 +117,7 @@ def stamp_session_state_worktree_binding(
     An actual record may add trusted subject fields only under nonblocking
     sidecar ownership and an uncached identity/revision/association recheck.
     The registration caller keeps the same guard through this atomic stamp.
+    Current machine/environment naming is never persisted in this association.
     """
     path = session_state_worktree_binding_path(session_id)
     if path is None or not worktree_id:
@@ -129,7 +129,6 @@ def stamp_session_state_worktree_binding(
         "sessionId": session_id,
         "worktreeId": worktree_id,
         "worktreeDir": worktree_dir,
-        "machine": machine,
         "registeredAt": tracking._now_iso(),
     }
     try:

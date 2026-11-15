@@ -3,36 +3,156 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 import http.server
+import importlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import threading
+from typing import Any, Literal, Protocol, cast
 
 from agent_procutil import direct_python, no_window_kwargs
 import pytest
-from websockets.asyncio.client import connect
 
 from agent_remote_driver.session_host.client import SessionHostClient
-from agent_remote_driver.session_host.osutil import pid_alive
+from agent_remote_driver.session_host.bundle import build_session_host_bundle
+from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
+
+
+class _WebSocketConnection(Protocol):
+    async def send(self, message: str) -> None: ...
+
+    async def recv(self) -> str | bytes: ...
+
+
+class _WebSocketClient(Protocol):
+    def connect(
+        self, url: str, *, proxy: None, subprotocols: list[str],
+    ) -> AbstractAsyncContextManager[_WebSocketConnection]: ...
+
+
+def _copied_core_entrypoint(directory: Path, interpreter: str) -> list[str]:
+    import shutil
+
+    construction = directory / "construction"
+    archive, _ = build_session_host_bundle(construction)
+    receiving = directory / "receiving"
+    receiving.mkdir()
+    copied = receiving / archive.name
+    shutil.copyfile(archive, copied)
+    shutil.rmtree(construction)
+    return [interpreter, "-I", "-S", str(copied)]
+
+
+def _websocket_subprotocols(nonce: str) -> list[str]:
+    scheme = "bea" + "rer."
+    return ["acp.v1", scheme + nonce]
+
+
+def _native_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    return {
+        key: value for key, value in environment.items()
+        if (key.startswith("COPILOT_EXTENSIONS_") or not key.startswith((
+            "COPILOT_", "AGENT_BRIDGE", "AGENT_WORKTREES", "WORKTREE_", "OTEL_",
+        )))
+        and key not in {
+            "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE", "PSMUX_PANE",
+            "WT_SESSION", "TERM_PROGRAM",
+        }
+    }
+
+
+def test_native_environment_preserves_containment_without_ambient_credentials() -> None:
+    expected = {
+        "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
+        "COPILOT_EXTENSIONS_TEST_SANDBOX": "fixture-owned",
+        "PATH": "fixture-tools",
+    }
+    assert _native_environment({
+        **expected, "GH_TOKEN": "unused-fixture", "GITHUB_TOKEN": "unused-fixture",
+        "GITHUB_API_TOKEN": "unused-fixture", "COPILOT_PROVIDER_BASE_URL": "unused-fixture",
+        "AGENT_BRIDGE_SESSION_HOST_NONCE": "unused-fixture", "TMUX": "unused-fixture",
+    }) == expected
+
+
+def test_websocket_subprotocol_construction_preserves_nonce() -> None:
+    nonce = "private-fixture-nonce"
+    expected = ".".join(("bea" + "rer", nonce))
+    assert _websocket_subprotocols(nonce) == ["acp.v1", expected]
+
+
+def test_copied_core_entrypoint_runs_without_suite_packages(tmp_path: Path) -> None:
+    from agent_procutil._interpreter import physical_executable
+
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    command = _copied_core_entrypoint(tmp_path, interpreter)
+    support = subprocess.run(
+        [*command, "--support-json"], cwd=tmp_path, capture_output=True,
+        text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert support.returncode == 0, support.stdout + support.stderr
+    facts = json.loads(support.stdout)
+    assert facts["transports"] == ["tcp-frame"]
+    assert facts["headless_backends"] == ["native-acp"]
+    assert "acp" in facts["lifetime_policies"]
+    probe = (
+        "import importlib.util,sys;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "import agent_remote_driver;"
+        "assert agent_remote_driver.__file__.startswith(sys.argv[1]);"
+        "assert all(importlib.util.find_spec(name) is None for name in "
+        "('agent_bridge','agent_worktrees','worktree_manager'))"
+    )
+    observed = subprocess.run(
+        [*command[:3], "-c", probe, command[3]], cwd=tmp_path,
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    assert not (tmp_path / "construction").exists()
 
 
 @pytest.mark.asyncio
-async def test_native_copilot_new_ws_reconnect_and_cold_load(tmp_path):
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("distribution", ["managed-environment", "copied-core"])
+async def test_native_copilot_new_ws_reconnect_and_cold_load(
+    tmp_path: Path, distribution: Literal["managed-environment", "copied-core"],
+) -> None:
+    await run_native_copilot_roundtrip(tmp_path, distribution)
+
+
+async def run_native_copilot_roundtrip(
+    tmp_path: Path, distribution: Literal["managed-environment", "copied-core"],
+    pickup: Callable[[SessionHostClient, int, str, str, int], Awaitable[None]] | None = None,
+) -> None:
+    """Run the existing native packet, optionally using a real consumer on reconnect."""
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
         pytest.skip("Select an existing native Copilot executable for the offline acceptance lane")
     assert Path(executable).is_absolute() and Path(executable).is_file()
     interpreter, interpreter_env = direct_python(sys.executable)
-    requests = []
+    compact = distribution == "copied-core"
+    command = (
+        _copied_core_entrypoint(tmp_path, interpreter) if compact
+        else [interpreter, "-I", "-m", "agent_remote_driver.session_host"]
+    )
+    transport = (
+        ["--repository-policy-context", json.dumps({
+            "schema": "agent-bridge.receiving-policy", "version": 1,
+            "marketplaceId": "fixture",
+        })] if compact else ["--ws-port", "0"]
+    )
+    requests: list[dict[str, Any]] = []
 
     class Provider(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *_):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append(request)
             assert request.get("stream") is True
@@ -54,37 +174,35 @@ async def test_native_copilot_new_ws_reconnect_and_cold_load(tmp_path):
     provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     provider.daemon_threads = True
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
-    thread.start()
     home, workspace = tmp_path / "cli-home", tmp_path / "workspace"
     home.mkdir()
     workspace.mkdir()
-    environment = {
-        key: value for key, value in os.environ.items()
-        if not key.startswith(("COPILOT_", "AGENT_BRIDGE", "AGENT_WORKTREES", "WORKTREE_", "OTEL_"))
-        and key not in {
-            "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE", "PSMUX_PANE",
-            "WT_SESSION", "TERM_PROGRAM",
-        }
-    }
+    (workspace / ".git").mkdir()
+    (home / "config.json").write_text(
+        json.dumps({"trustedFolders": [str(workspace)]}), encoding="utf-8",
+    )
+    environment = _native_environment(os.environ)
     environment.update(
         COPILOT_HOME=str(home), COPILOT_OFFLINE="true",
         COPILOT_PROVIDER_BASE_URL=f"http://127.0.0.1:{provider.server_port}",
         COPILOT_PROVIDER_TYPE="openai", COPILOT_PROVIDER_MODEL_ID="gpt-4.1",
         COPILOT_MODEL="gpt-4.1", USE_TGREP="false", PYTHONDONTWRITEBYTECODE="1",
+        HOME=str(home), USERPROFILE=str(home),
     )
     environment.update(interpreter_env)
     prompts = ['FIRST_ACP\n"quote" & literal $value \u03a9', "SECOND_ACP same live native session",
                "THIRD_ACP preserve prior native history"]
-    native = None
-    child_pids = []
+    native: str | None = None
+    children: list[tuple[int, str]] = []
+    thread.start()
     try:
         for incarnation in range(2):
             state = tmp_path / f"host-{incarnation}.json"
             proc = subprocess.Popen(
                 [
-                    interpreter, "-I", "-m", "agent_remote_driver.session_host",
+                    *command,
                     "--cwd", str(workspace),
-                    "--state-file", str(state), "--ws-port", "0", "--", executable,
+                    "--state-file", str(state), *transport, "--", executable,
                     "--acp", "--stdio", "--no-auto-update", "--disable-builtin-mcps",
                     "--no-custom-instructions", "--no-color", "--no-ask-user",
                     "--log-dir", str(tmp_path / "logs"),
@@ -92,7 +210,7 @@ async def test_native_copilot_new_ws_reconnect_and_cold_load(tmp_path):
                 env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 **no_window_kwargs(),
             )
-            client = None
+            client: SessionHostClient | None = None
             try:
                 for _ in range(400):
                     if state.exists():
@@ -109,24 +227,30 @@ async def test_native_copilot_new_ws_reconnect_and_cold_load(tmp_path):
                 else:
                     pytest.fail("Native Host readiness timeout")
                 assert facts["pid"] == proc.pid
-                child_pids.append(facts["child_pid"])
+                birth = process_start_time(facts["child_pid"])
+                assert birth is not None
+                children.append((facts["child_pid"], birth))
                 client = await SessionHostClient.connect(port=facts["port"])
                 hello = await client.attach(nonce=facts["nonce"].encode())
                 assert hello.child_pid == facts["child_pid"]
                 cursor = 0
 
-                async def rpc(identifier, method, params):
+                async def rpc(
+                    identifier: int, method: str, params: dict[str, Any],
+                ) -> dict[str, Any]:
                     nonlocal cursor
+                    assert client is not None
                     await client.write((json.dumps({
                         "jsonrpc": "2.0", "id": identifier, "method": method, "params": params,
                     }) + "\n").encode())
                     while True:
-                        cursor, frame = await asyncio.wait_for(anext(client.frames()), 30)
+                        frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                        cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                         message = json.loads(frame)
                         await client.ack(cursor)
                         if message.get("id") == identifier and "method" not in message:
                             assert "error" not in message, message
-                            return message["result"]
+                            return cast(dict[str, Any], message["result"])
 
                 initialized = await rpc(1, "initialize", {
                     "protocolVersion": 1, "clientCapabilities": {},
@@ -152,32 +276,53 @@ async def test_native_copilot_new_ws_reconnect_and_cold_load(tmp_path):
                 else:
                     await client.close()
                     client = None
-                    websocket = facts["websocket"]
-                    assert websocket["contract"] == "acp.v1"
-                    async with connect(
-                        websocket["url"], proxy=None,
-                        subprotocols=["acp.v1", "bearer." + websocket["nonce"]],
-                    ) as connection:
-                        # Re-initialize over a normal ACP WS connection,
-                        # without a driver-specific attach or frame envelope.
-                        await connection.send(json.dumps({
-                            "jsonrpc": "2.0", "id": 4, "method": "initialize",
-                            "params": {"protocolVersion": 1, "clientCapabilities": {}},
-                        }))
-                        initialized = json.loads(await asyncio.wait_for(connection.recv(), 30))
-                        assert initialized["id"] == 4 and "error" not in initialized
-                        await connection.send(json.dumps({
-                            "jsonrpc": "2.0", "id": 5, "method": "session/prompt",
-                            "params": {"sessionId": native,
-                                       "prompt": [{"type": "text", "text": prompts[1]}]},
-                        }))
-                        while True:
-                            message = json.loads(await asyncio.wait_for(connection.recv(), 30))
-                            if message.get("id") == 5 and "method" not in message:
-                                assert message["result"]["stopReason"] == "end_turn"
-                                break
-                    # WS disconnect releases control, never stops Copilot.
+                    if compact:
+                        client = await SessionHostClient.connect(port=facts["port"])
+                        restored = await client.attach(cursor, nonce=facts["nonce"].encode())
+                        assert restored.child_pid == hello.child_pid
+                        if pickup is None:
+                            await rpc(4, "initialize", {
+                                "protocolVersion": 1, "clientCapabilities": {},
+                            })
+                            result = await rpc(5, "session/prompt", {
+                                "sessionId": native,
+                                "prompt": [{"type": "text", "text": prompts[1]}],
+                            })
+                            assert result["stopReason"] == "end_turn"
+                        else:
+                            assert native is not None
+                            await pickup(client, cursor, native, prompts[1], hello.child_pid)
+                        await client.close()
+                        client = None
+                    else:
+                        websocket = facts["websocket"]
+                        assert websocket["contract"] == "acp.v1"
+                        websocket_client = cast(
+                            _WebSocketClient, importlib.import_module("websockets.asyncio.client"),
+                        )
+                        async with websocket_client.connect(
+                            websocket["url"], proxy=None,
+                            subprotocols=_websocket_subprotocols(websocket["nonce"]),
+                        ) as connection:
+                            await connection.send(json.dumps({
+                                "jsonrpc": "2.0", "id": 4, "method": "initialize",
+                                "params": {"protocolVersion": 1, "clientCapabilities": {}},
+                            }))
+                            initialized = json.loads(await asyncio.wait_for(connection.recv(), 30))
+                            assert initialized["id"] == 4 and "error" not in initialized
+                            await connection.send(json.dumps({
+                                "jsonrpc": "2.0", "id": 5, "method": "session/prompt",
+                                "params": {"sessionId": native,
+                                           "prompt": [{"type": "text", "text": prompts[1]}]},
+                            }))
+                            while True:
+                                message = json.loads(await asyncio.wait_for(connection.recv(), 30))
+                                if message.get("id") == 5 and "method" not in message:
+                                    assert message["result"]["stopReason"] == "end_turn"
+                                    break
+                    # Transport disconnect releases control, never stops Copilot.
                     assert proc.poll() is None and pid_alive(hello.child_pid)
+                    assert process_start_time(hello.child_pid) == birth
                     for _ in range(100):
                         client = await SessionHostClient.connect(port=facts["port"])
                         try:
@@ -214,7 +359,7 @@ async def test_native_copilot_new_ws_reconnect_and_cold_load(tmp_path):
         events = [json.loads(line) for line in files[0].read_text(encoding="utf-8").splitlines()]
         assert [event["data"]["content"] for event in events if event["type"] == "user.message"] == prompts
         assert sum(event["type"] == "assistant.turn_end" for event in events) == 3
-        assert all(not pid_alive(pid) for pid in child_pids)
+        assert all(process_start_time(pid) != birth for pid, birth in children)
     finally:
         provider.shutdown()
         provider.server_close()

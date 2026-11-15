@@ -86,6 +86,11 @@ contract; caller labels, ambient account selection or GitHub report support
 cannot establish Gitea authority. No arbitrary request-supplied executable,
 credential command, import or backend connection is accepted.
 
+The [optional native account-guard proposal](observation-account-guard.md)
+addresses actual Gitea actor proof through the existing typed GET owner, with
+explicit per-operation selection and bounded accounting. It is not implemented
+by configuration labels, observation scope or this source milestone alone.
+
 Inventory outcomes distinguish **complete**, **partial** and **unavailable**
 with bounded coverage/error and last-success evidence. A failed page, capped
 scan or outage cannot erase known membership or fabricate closure. Initial

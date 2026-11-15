@@ -1635,6 +1635,45 @@ class TestReresolveStaleInterpreter:
 
         assert _reresolve_stale_interpreter(args) == args
 
+    @pytest.mark.parametrize(
+        "retired",
+        [
+            (".install-stage", "20260101T000000-1", "agent-containers"),
+            ("snapshots", "0.4.0-dev70"),
+        ],
+    )
+    def test_remaps_removed_payload_copy_to_payload_dir(self, tmp_path, retired):
+        runtime = tmp_path / ".agent-containers"
+        stable = tmp_path / "installed" / "agent-containers"
+        shim = stable / "bin" / "agent-containers.cmd"
+        shim.parent.mkdir(parents=True)
+        shim.write_text("")
+        runtime.mkdir()
+        (runtime / "payload-dir").write_text(f"{stable}\n", encoding="utf-8")
+        stale = str(runtime.joinpath(*retired, "bin", "agent-containers.cmd"))
+
+        out = _reresolve_stale_interpreter([stale, "session-host-state", "c1"])
+
+        assert out == [str(shim), "session-host-state", "c1"]
+
+    @pytest.mark.parametrize("pointer", ["staged", "relative", "missing-tail"])
+    def test_removed_payload_copy_noop_without_valid_payload_dir(self, tmp_path, pointer):
+        runtime = tmp_path / ".agent-containers"
+        runtime.mkdir()
+        target = {
+            "staged": str(runtime / ".install-stage" / "x" / "agent-containers"),
+            "relative": "installed/agent-containers",
+            "missing-tail": str(tmp_path / "installed" / "agent-containers"),
+        }[pointer]
+        (runtime / "payload-dir").write_text(target, encoding="utf-8")
+        stale = str(
+            runtime / ".install-stage" / "20260101T000000-1" / "agent-containers"
+            / "bin" / "agent-containers.cmd"
+        )
+        args = [stale, "session-host-state", "c1"]
+
+        assert _reresolve_stale_interpreter(args) == args
+
     def test_noop_when_no_sibling_resolves(self, tmp_path):
         versions = tmp_path / "versions"
         (versions / "0.4.0-dev62").mkdir(parents=True)

@@ -72,6 +72,12 @@ def test_generated_toolkit_imports_and_resources_are_payload_local(tmp_path: Pat
     assert generator.process_manifest(manifest, check=True) == []
     inventory = json.loads((toolkit / "toolkit.json").read_text(encoding="utf-8"))
     assert inventory["requirements"] == ["packaging>=23"]
+    for name in ("application_sources", "python_project_inventory", "build_python_artifacts"):
+        relative = Path("tools") / f"{name}.py"
+        assert name in inventory["modules"]
+        assert (toolkit / relative).read_bytes() == (
+            generator.TEMPLATES.parents[2] / relative
+        ).read_bytes()
     assert not any(
         part in {"packaging", "site-packages", "self_install.py", "publish_python_artifacts.py"}
         for path in selected for part in path.relative_to(toolkit).parts

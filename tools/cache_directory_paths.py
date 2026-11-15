@@ -15,7 +15,7 @@ else:
 def ordinary_cache_root(path: Path) -> Path:
     """Refuse linked cache roots before resolving a lease or removing contents."""
     absolute = path.absolute()
-    for candidate in (absolute, *absolute.parents):
+    for candidate in reversed((absolute, *absolute.parents)):
         try:
             # Extended Windows paths do not interpret "." and ".."; inspect
             # every lexical ancestor so normalization cannot hide a link.

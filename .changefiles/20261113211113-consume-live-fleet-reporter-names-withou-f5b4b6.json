@@ -1,0 +1,9 @@
+{
+  "comment": "Consume live fleet reporter names without retargeting delegate commands or deriving missing callers from allocation IDs.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import pytest
 
 from agent_worktrees import claim_handoffs, output, resource_producer as producer
 from agent_worktrees import resource_producer_cli as cli
+from agent_worktrees import worktree_ops_cli
 from test_resource_producer import bind, reserve
 from test_resource_producer import owner as owner
 
@@ -38,7 +39,7 @@ def test_cli_rejects_oversize_bytes_or_invalid_utf8_before_authority(
     stream = BoundedInput(raw)
     monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(buffer=stream))
     monkeypatch.setattr(
-        cli.worktree_ops_cli, "_resolve_owner_ref",
+        worktree_ops_cli, "_resolve_owner_ref",
         lambda: pytest.fail("invalid input reached owner resolution"),
     )
     with output.capture_json_output() as captured:
@@ -69,7 +70,7 @@ def test_exact_byte_limit_decodes_before_owner_resolution(
         reached.append(True)
         return None
 
-    monkeypatch.setattr(cli.worktree_ops_cli, "_resolve_owner_ref", owner_ref)
+    monkeypatch.setattr(worktree_ops_cli, "_resolve_owner_ref", owner_ref)
     with output.capture_json_output() as captured:
         assert cli.cmd_resource_producer(
             argparse.Namespace(operation="reserve", owner_ref=None),

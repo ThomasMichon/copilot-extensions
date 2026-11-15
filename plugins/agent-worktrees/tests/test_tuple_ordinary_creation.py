@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import (
@@ -94,9 +95,9 @@ def test_omitted_core_mode_remains_legacy(
         config, build_launch_plan=False, creation_key="low-level-control",
     )["worktree"]
     record = tracking.load_record(cfg.tracking_dir() / f"{row['id']}.yaml")
-    assert record.machine == config.machine
-    assert record.machine_identity is None
-    assert "machine_identity_version" not in row and "execution_machine" not in row
+    assert record.machine == "friendly-host"
+    assert record.execution_machine == "local-space"
+    assert row["execution_machine"] == "local-space"
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
@@ -204,6 +205,14 @@ def test_ordinary_create_carries_selected_tuple_to_actual_knowledge_pair(
     knowledge_config = replace(config, repo_name="knowledge", repos={"knowledge": replace(
         config.default_repo, anchor=str(knowledge_anchor), worktree_root=str(knowledge_root),
     )})
+    (knowledge_anchor / "machines.yaml").write_text(
+        (Path(config.default_repo.anchor) / "machines.yaml").read_text(),
+    )
+    (cfg.project_dir("knowledge") / "config.yaml").write_text(yaml.safe_dump({
+        "repos": {"knowledge": {
+            "anchor": str(knowledge_anchor), "worktree_root": str(knowledge_root),
+        }},
+    }))
     monkeypatch.setattr(
         cfg, "load_config",
         lambda *_a, project=None, **_k: knowledge_config if project == "knowledge" else config,
@@ -283,7 +292,7 @@ def test_ordinary_create_replays_completed_legacy_key(
     assert m.cmd_create(args) == 0
     assert json.loads(capfd.readouterr().out)["worktree"] == original
     assert path.read_bytes() == before
-    assert tracking.load_record(path).machine_identity is None
+    assert tracking.load_record(path).execution_machine == "local-space"
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])

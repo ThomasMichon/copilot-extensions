@@ -74,20 +74,28 @@ def allocation_provenance(task_id: str, reservation: dict) -> tuple[str, str, in
     return original_task, original, int(attempt)
 
 
-def bind_allocation(client, reservation: dict, project: str | None) -> None:
+def bind_allocation(
+    client, reservation: dict, project: str | None, *, cohort_transport: str | None = None,
+) -> None:
     """No lost owner response may restore mutable routing as allocation authority."""
     if not project or not reservation.get("creation_key") or not hasattr(client, "record_spawn_allocation"):
         hold("coordinator cannot bind replay-safe allocation intent; upgrade before allocation")
     try:
-        bound = client.record_spawn_allocation(reservation["key"], project)
+        bound = client.record_spawn_allocation(
+            reservation["key"], project,
+            **({"cohort_transport": cohort_transport} if cohort_transport is not None else {}),
+        )
     except DispatchError as exc:
         hold(f"allocation target could not be recorded; preserve the original request: {exc}")
     if (
         not isinstance(bound, dict) or bound.get("allocation_project") != project
         or bound.get("creation_key") != reservation["creation_key"]
+        or cohort_transport is not None and bound.get("allocation_cohort_transport") != cohort_transport
     ):
         hold("coordinator did not retain the exact allocation intent")
     reservation["allocation_project"] = project
+    if cohort_transport is not None:
+        reservation["allocation_cohort_transport"] = cohort_transport
 
 
 def prepare_workspace(owner, task: dict, reservation: dict) -> dict:

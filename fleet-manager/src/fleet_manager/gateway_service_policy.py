@@ -14,7 +14,10 @@ from threading import RLock
 from typing import NoReturn
 import sqlite3
 
-from .enrolled_identity import EnrolledIdentity, EnrolledIdentityVerifier, PROFILE
+from .enrolled_identity import (
+    EnrolledIdentity, EnrolledIdentityVerifier, EnrolledRS256IdentityVerifier,
+    PROFILE, RS256_PROFILE,
+)
 from .gateway_manifest import ServiceSlot
 from .gateway_identity_provider import IdentityProvider
 from .gateway_service_context import (
@@ -373,10 +376,11 @@ class ServiceAuthority:
                 require(type(identity) is MachineIdentity and identity.profile == MACHINE_PROFILE
                         and identity.kind == kind and identity.resource == resource,
                         "invalid-credential")
-            elif type(verifier) is EnrolledIdentityVerifier:
+            elif type(verifier) in (EnrolledIdentityVerifier, EnrolledRS256IdentityVerifier):
                 identity = verifier.verify(
                     access, proof, method=method, target_uri=target_uri, kind=kind)
-                require(type(identity) is EnrolledIdentity and identity.profile == PROFILE
+                profile = RS256_PROFILE if type(verifier) is EnrolledRS256IdentityVerifier else PROFILE
+                require(type(identity) is EnrolledIdentity and identity.profile == profile
                         and identity.kind == kind, "invalid-credential")
             else:
                 require(type(verifier) is IdentityVerifier, "unsupported-profile")
@@ -625,6 +629,26 @@ class ServiceAuthority:
                 return False
             del self._callers[grant.generation]
             return True
+
+    def authorize_service_call(self, grant: CallerGrant, *, slot: str) -> ServiceSlot:
+        """Check an internal same-method call without retargeting its proof.
+
+        The original request retains grant custody. Both caller and destination
+        policy must independently allow the source; a local handler registration
+        or a Controller advertisement cannot supply that permission.
+        """
+        with self._lock:
+            scope = self.revalidate_caller(grant)
+            record = self._callers[grant.generation]
+            context, _, _ = self._active(user=type(record.identity) is BearerIdentity)
+            caller = (context.user_caller(scope.principal)
+                      if type(record.identity) is BearerIdentity
+                      else context.caller(scope.principal))
+            selected = context.slot(slot)
+            require(slot in caller.slots and scope.method in caller.methods
+                    and any(scope.method in route.methods for route in selected.routes),
+                    "source-caller-denied")
+            return selected
 
     def authorize_operation(
         self, grant: CallerGrant, intent: OperationIntent, admission: AdmissionAuthority, *,

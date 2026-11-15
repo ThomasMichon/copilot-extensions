@@ -93,6 +93,25 @@ OPEN pending that specific disposition, not a new universal ACK ceremony.
   Routing/fallback remains a separate reviewed repository decision; missing
   tools fail explicitly and workload isolation is not weakened.
 
+### Normal first-touch and installed SSH continuation
+
+The selected Gateway/SSH lane also retains the later normal first-touch,
+credential-reference and installed-frontdoor obligations directly recorded in
+the parent Phase 2 continuation. Preserve supported interpreter and explicitly
+activated Vault prerequisites, attended sign-ins/unlock, selected provider setup,
+existing keys/trust and interactive versus service lifetime. Retain v1 token/
+proof, v2 external PEM and explicitly selected v3 provider-owned continuity
+references without private JWK parsing/export, reenrollment or another issuer.
+
+The real noneditable normal Manager/selected-engine/Fleet SSH consumer must use
+the selected Source/profile application and SDK closure with inert defaults and
+refusal before effects. Healthy admitted incoming readiness AND all applicable
+current selections remain authoritative independently of old-state provenance,
+recovery, predecessor liveness or cleanup; current authentication/admission and
+strict physical deletion custody remain separate. The whole broader constructor
+PR is not a prerequisite to this independent consumer lane. Original-operation,
+native/release/installed/adopter and exact-stop gates retain their existing owners.
+
 ## Direct Validation
 
 - [ ] **Installed client (#6424).** On native Windows/Linux and available

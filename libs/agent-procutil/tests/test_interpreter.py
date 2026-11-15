@@ -127,6 +127,24 @@ def test_python_cache_rejects_relative_owner():
         pu.python_cache_args("versions/relative")
 
 
+def test_python_cache_policy_facade_preserves_complete_vector(monkeypatch, tmp_path):
+    from agent_procutil import python_cache
+
+    calls = []
+
+    def select(root, *, runtime=None):
+        calls.append((root, runtime))
+        return ["-B"]
+
+    monkeypatch.delitem(pu.__dict__, "python_cache_policy_args", raising=False)
+    monkeypatch.setattr(python_cache, "policy_arguments", select)
+    try:
+        assert pu.python_cache_policy_args(tmp_path, runtime=tmp_path / "target") == ["-B"]
+        assert calls == [(tmp_path, tmp_path / "target")]
+    finally:
+        monkeypatch.delitem(pu.__dict__, "python_cache_policy_args", raising=False)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows drive and UNC normalization")
 @pytest.mark.parametrize("root,expected", [
     ("C:\\runtime", "\\\\?\\C:\\runtime\\cache\\python"),

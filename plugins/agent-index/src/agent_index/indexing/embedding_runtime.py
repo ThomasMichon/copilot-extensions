@@ -20,6 +20,7 @@ class EmbeddingRuntime:
 
     Each factory result is owned by this run and closed on every exit. Return a
     fresh EngineClient (or compatible subclass), not a borrowed service client.
+    Readiness is requested once per model, only before an actual embedding call.
     Only engines reported as started by ``ensure_engine`` are stopped.
     """
 
@@ -58,3 +59,21 @@ def open_embedding_clients(
             cleanup.callback(client.close)
             clients[profile.model_id] = client
         return clients, cleanup.pop_all()
+
+
+def _model_readiness(
+    profiles: dict[str, ModelProfile], clients: dict[str, EngineClient], runtime: EmbeddingRuntime,
+) -> tuple[Callable[[str], None], list[ModelProfile]]:
+    """Bind lazy readiness and expose owned engines for the caller's finally cleanup."""
+    started_engines: list[ModelProfile] = []
+    ready_models: set[str] = set()
+
+    def prepare(model_id: str) -> None:
+        if model_id in ready_models or not runtime.manage_engines:
+            return
+        profile = profiles[model_id]
+        if runtime.ensure_engine(profile, clients[model_id]):
+            started_engines.append(profile)
+        ready_models.add(model_id)
+
+    return prepare, started_engines

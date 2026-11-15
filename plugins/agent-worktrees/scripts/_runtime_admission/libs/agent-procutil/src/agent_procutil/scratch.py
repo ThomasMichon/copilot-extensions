@@ -317,9 +317,13 @@ def _remove_directory(target: str, st: os.stat_result) -> bool:
     return True
 
 
-def remove_scratch(path: str | os.PathLike[str]) -> bool:
+def remove_scratch(
+    path: str | os.PathLike[str], *, expected_directory_identity: tuple[int, int] | None = None,
+) -> bool:
     """Best-effort removal that never follows symlinks, junctions or reparse points.
 
+    An optional creator-held directory identity fences replacement between
+    caller inspection and the cleanup owner's own no-follow pin.
     Returns whether the path is gone. Incomplete cleanup keeps the root
     ``scratch-owner.json`` breadcrumb so the retained directory stays labeled.
     """
@@ -333,6 +337,11 @@ def remove_scratch(path: str | os.PathLike[str]) -> bool:
     except FileNotFoundError:
         return True
     except OSError:
+        return False
+    if expected_directory_identity is not None and (
+        _is_link(st) or not stat.S_ISDIR(st.st_mode)
+        or (st.st_dev, st.st_ino) != expected_directory_identity
+    ):
         return False
     try:
         if _is_link(st):

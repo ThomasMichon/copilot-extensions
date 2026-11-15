@@ -1,0 +1,9 @@
+{
+  "comment": "Recover an exact native send when its client exits before the stopped projection, preserving explicit no-resume and unknown-operation custody",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -90,8 +90,12 @@ def test_noncanonical_or_git_source_is_refused(path):
         relative_file(path)
 
 
-def test_catalog_data_is_hash_bound_but_never_executable_unit_source(tmp_path):
-    name = "libs/payload-invocation/templates/catalog-python.tmpl"
+@pytest.mark.parametrize("name", [
+    "libs/payload-invocation/templates/catalog-python.tmpl",
+    "fleet-manager/containers/gateway/Dockerfile",
+    "fleet-manager/containers/gateway/Dockerfile.dockerignore",
+], ids=["catalog", "gateway-recipe", "gateway-ignore"])
+def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path, name):
     data = manifest()
     content = b"def emitted() -> str:\n    return 'catalog'\n"
     data["sources"][name] = hashlib.sha256(content).hexdigest()
@@ -106,7 +110,7 @@ def test_catalog_data_is_hash_bound_but_never_executable_unit_source(tmp_path):
     with pytest.raises(UnitEvidenceError, match="changed without admission"):
         verify_sources(tmp_path, data["sources"])
     with pytest.raises(UnitEvidenceError, match="source must be"):
-        relative_file(name.replace("catalog-python", "unreviewed"))
+        relative_file(name + ".unreviewed")
     with pytest.raises(UnitEvidenceError, match="outside the admitted unit packet"):
         admit_manifest({**data, "nodes": [name + "::test_template"]})
     with pytest.raises(UnitEvidenceError, match="coverage target"):

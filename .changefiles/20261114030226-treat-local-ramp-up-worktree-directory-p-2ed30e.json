@@ -1,0 +1,9 @@
+{
+  "comment": "Treat local ramp-up worktree directory prefixes as opaque after host renames",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

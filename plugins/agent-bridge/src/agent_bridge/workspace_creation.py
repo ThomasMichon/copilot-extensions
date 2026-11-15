@@ -85,6 +85,13 @@ async def start_request(
         return None
     if request.parity_fault:
         raise HTTPException(status_code=422, detail="keyed creation cannot inject a parity fault")
+    if request.dispatch_origin is not None:
+        from .dispatch_origin import capture
+
+        try:
+            capture(request.dispatch_origin, target)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
     try:
         session, creation = await start(
@@ -95,6 +102,8 @@ async def start_request(
             caller_session_id=request.caller_session_id, mcp_servers=request.mcp_servers,
             copilot_args=request.copilot_args, env_overrides=env or None,
             caller_owner_ref=request.caller_owner_ref, model=request.model, effort=request.effort,
+            **({"dispatch_origin": request.dispatch_origin.model_dump(mode="json")}
+               if request.dispatch_origin is not None else {}),
         )
     except AcquisitionRefused as exc:
         raise HTTPException(status_code=409, detail={

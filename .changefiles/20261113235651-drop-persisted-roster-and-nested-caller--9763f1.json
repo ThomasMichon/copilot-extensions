@@ -1,0 +1,9 @@
+{
+  "comment": "Drop persisted roster and nested caller naming while preserving platform-filtered v1/v2 reads and native receipt fences",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

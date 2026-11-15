@@ -25,7 +25,7 @@ import shutil
 import subprocess
 from functools import lru_cache
 
-from worktree_identity import execution_machine_from_fields
+from worktree_identity import WorktreeMachineIdentity, WorktreeMachineIdentityError
 
 from .procutil import run_agent_worktrees_capture
 
@@ -108,15 +108,44 @@ def aw_set_summary(summary: str) -> bool:
     return result.returncode == 0
 
 
-def aw_list_records(machine: str | None = None) -> list[dict]:
-    """Read raw worktree records from ``agent-worktrees list --json``.
+def _worktree_reporting_fields(data: object) -> dict[str, object]:
+    """Use the reporting process, never per-worktree naming snapshots."""
+    if not isinstance(data, dict) or "reporting_context" not in data:
+        machine = resolve_machine()
+        if not machine:
+            raise WorktreeMachineIdentityError("worktree reporting identity is unavailable")
+        return {"machine": machine}
+    context = data["reporting_context"]
+    names = ("hostname", "machine", "execution_machine")
+    try:
+        if not (
+            isinstance(context, dict)
+            and type(context.get("version")) is int and context["version"] == 1
+            and context.get("status") == "resolved"
+            and set(context) == {"version", "status", "environment", *names}
+            and context["environment"] in ("windows", "wsl", "linux")
+            and all(
+                isinstance(context[name], str) and context[name].strip()
+                and len(context[name].encode("utf-8")) <= 256
+                and not any(char in context[name] for char in "\r\n\0")
+                for name in names
+            )
+        ):
+            raise WorktreeMachineIdentityError("worktree reporting context is invalid or unavailable")
+        return WorktreeMachineIdentity(
+            context["machine"], context["environment"], context["execution_machine"],
+        ).to_record_fields()
+    except (WorktreeMachineIdentityError, UnicodeError) as exc:
+        raise WorktreeMachineIdentityError("worktree reporting context is invalid or unavailable") from exc
 
-    Used to *derive* the focus view from the status core instead of a parallel
-    focus table (the vision's derive-don't-duplicate rule). Optionally filtered
-    to one execution owner. Explicit tuples are validated before filtering;
-    malformed tuple metadata raises rather than looking like an empty result.
-    Raw physical/environment fields are returned unchanged. Empty when
-    agent-worktrees is absent or the read fails.
+
+def aw_list_records(machine: str | None = None) -> list[dict]:
+    """Derive a focus view from local Worktrees status and current reporter names.
+
+    Optional version-1 reporting context describes the serving host, outside
+    durable rows. Older providers use one live ``get machine`` probe for the
+    whole listing. Invalid current context fails visibly without a downgrade.
+    No projected names are written back to records or a parallel focus store.
     """
     result = run_agent_worktrees_capture("list", "--json", timeout=20)
     if result is None:
@@ -131,15 +160,15 @@ def aw_list_records(machine: str | None = None) -> list[dict]:
     rows = data.get("worktrees", []) if isinstance(data, dict) else data
     if not isinstance(rows, list):
         return []
-    out: list[dict] = []
-    for w in rows:
-        if not isinstance(w, dict):
-            continue
-        owner = execution_machine_from_fields(w)
-        if machine and owner != machine:
-            continue
-        out.append(w)
-    return out
+    names = _worktree_reporting_fields(data)
+    owner = names.get("execution_machine", names["machine"])
+    if machine and owner != machine:
+        return []
+    obsolete = {"machine", "platform", "machine_identity_version", "environment", "execution_machine"}
+    return [
+        {**{key: value for key, value in row.items() if key not in obsolete}, **names}
+        for row in rows if isinstance(row, dict)
+    ]
 
 
 def canonicalize_remote(url: str | None) -> str | None:

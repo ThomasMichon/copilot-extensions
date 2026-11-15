@@ -151,6 +151,14 @@ def test_bridge_receiving_result_is_usable_while_linkage_is_pending_but_not_unkn
         },
     }
     assert module._result(value, intent) == saved
+    for labels in ({}, {"execution_machine": "renamed", "machine_identity_version": "invalid"}):
+        unlabeled = copy.deepcopy(value)
+        unlabeled["worktree"].pop("execution_machine")
+        unlabeled["worktree"].update(labels)
+        assert module._result(unlabeled, intent) == unlabeled["worktree"]
+        unlabeled["allocation"]["target"]["machine"] = "other"
+        with pytest.raises(ValueError):
+            module._result(unlabeled, intent)
     unknown_link = copy.deepcopy(value)
     unknown_link["allocation"]["linkage"] = "unknown"
     assert module._result(unknown_link, intent) == saved

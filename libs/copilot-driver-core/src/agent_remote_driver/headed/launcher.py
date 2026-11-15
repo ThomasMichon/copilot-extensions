@@ -9,7 +9,7 @@ from pathlib import Path
 import secrets
 import subprocess
 import sys
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from agent_procutil import contained_test_mode, no_window_kwargs
 
@@ -25,6 +25,9 @@ from ..session_host.launcher import (
 from ..session_host.osutil import process_start_time
 from ..session_host.startup_admission import StartupAdmissionClient
 from ..session_host import protocol
+
+if TYPE_CHECKING:
+    from .native_handoff import WindowsNativeHandoff
 
 BINDING_ENV = "COPILOT_DRIVER_HEADED_BINDING"
 CLIENT_ENV = "COPILOT_DRIVER_HEADED_CLIENT"
@@ -127,6 +130,28 @@ class _PaneChild:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
         self.started = asyncio.Event()
+        self.job = None
+        self._cleanup_task: asyncio.Task | None = None
+
+    def launch(self, argv: list[str], *, native_handoff=None, **kwargs) -> None:
+        if self.proc is not None:
+            raise RuntimeError("A native incarnation cannot be launched twice")
+        if native_handoff is None:
+            # headless-guard: allow: the interactive child inherits the caller's existing pane console
+            self.proc = subprocess.Popen(argv, **kwargs)
+        else:
+            self.proc, self.job = native_handoff.launch(argv, **kwargs)
+        self.started.set()
+
+    def _settle_handoff(self) -> None:
+        from agent_procutil.owned_process import OwnedCleanupError
+
+        try:
+            self.job.terminate_and_wait(5)
+            self.proc.wait(timeout=5)
+        except BaseException as error:
+            raise OwnedCleanupError(self.proc, self.job) from error
+        self.job = None
 
     @property
     def pid(self) -> int | None:
@@ -140,10 +165,46 @@ class _PaneChild:
         await self.started.wait()
         while (result := self.returncode) is None:
             await asyncio.sleep(0.05)
+        if self.job is not None or self._cleanup_task is not None:
+            await self._finish_handoff()
         return result
 
+    async def _finish_handoff(self) -> None:
+        from agent_procutil.owned_process import OwnedCleanupError
+
+        try:
+            if self._cleanup_task is None:
+                worker = asyncio.to_thread(self._settle_handoff)
+                try:
+                    self._cleanup_task = asyncio.create_task(worker)
+                except BaseException:
+                    worker.close()
+                    raise
+            await asyncio.shield(self._cleanup_task)
+        except OwnedCleanupError:
+            raise
+        except BaseException as error:
+            if (
+                isinstance(error, asyncio.CancelledError) and self._cleanup_task is not None
+                and self._cleanup_task.done() and not self._cleanup_task.cancelled()
+            ):
+                try:
+                    self._cleanup_task.result()
+                except OwnedCleanupError:
+                    raise
+                except BaseException as failure:
+                    error = failure
+                else:
+                    raise
+            failure = OwnedCleanupError(self.proc, self.job)
+            failure.cleanup_task = self._cleanup_task
+            failure.cleanup_error = error
+            raise failure from error
+
     async def terminate(self) -> None:
-        if self.proc is not None and self.returncode is None:
+        if self.job is not None or self._cleanup_task is not None:
+            await self._finish_handoff()
+        elif self.proc is not None and self.returncode is None:
             # The retained Popen owns this exact child; never re-resolve a PID or mux name.
             self.proc.kill()
         await self.wait()
@@ -166,12 +227,22 @@ async def run_headed(
     nonce: str = "", policy_context: str | None = None,
     before_exec: Callable[[], None] | None = None,
     auth_wait: dict | None = None,
+    native_handoff: WindowsNativeHandoff | None = None,
 ) -> int:
     """Run legacy headed execution, or an explicitly source-authorized receiver."""
+    if native_handoff is not None:
+        from .native_handoff import WindowsNativeHandoff
+
+        if (
+            type(native_handoff) is not WindowsNativeHandoff
+            or os.name != "nt" or auth_wait is not None
+        ):
+            raise ValueError("Native handoff requires the Windows non-auth headed creation owner")
     arguments = dict(
         session_id=session_id, attempt_directory=attempt_directory, state_file=state_file,
         cwd=cwd, env=env, port=port, ws_port=ws_port, nonce=nonce,
         policy_context=policy_context, before_exec=before_exec,
+        native_handoff=native_handoff,
     )
     if auth_wait is None:
         return await _run_headed_once(child_argv, **arguments)
@@ -236,6 +307,7 @@ async def _run_headed_once(
     nonce: str = "", policy_context: str | None = None,
     before_exec: Callable[[], None] | None = None, auth_receiver=None,
     auth_resume: bool = False,
+    native_handoff: WindowsNativeHandoff | None = None,
 ) -> int:
     startup_prompt = _native_request(child_argv, session_id)
     cwd = str(Path(cwd or os.getcwd()).resolve())
@@ -308,8 +380,7 @@ async def _run_headed_once(
             cwd=cwd, env=child_env, **({} if _interactive_console() else no_window_kwargs()),
         )
         if auth_receiver is None:
-            owner.proc = subprocess.Popen(argv, **native_kwargs)
-            owner.started.set()
+            owner.launch(argv, native_handoff=native_handoff, **native_kwargs)
         else:
             if not auth_receiver.authorized():
                 raise RuntimeError("Source authorization expired before native launch")
@@ -386,7 +457,12 @@ async def _run_headed_once(
         if auth_receiver is None or not auth_receiver.stopped_for_auth:
             publish("child_exited")
         return result
-    except Exception:
+    except Exception as error:
+        if native_handoff is not None:
+            from agent_procutil.owned_process import OwnedCleanupError
+
+            if isinstance(error, OwnedCleanupError):
+                raise
         if owner.proc is None:
             raise
         if auth_receiver is not None:
@@ -409,23 +485,26 @@ async def _run_headed_once(
                 # Cancellation must not leave the native scope alive during transport drainage.
                 await owner.terminate()
         finally:
-            if startup is not None:
-                startup.close()
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
             try:
-                if websocket is not None:
-                    await websocket.close(drain=True)
+                if startup is not None:
+                    startup.close()
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
             finally:
                 try:
-                    if host is not None:
-                        await host.close()
+                    if websocket is not None:
+                        await websocket.close(drain=True)
                 finally:
                     try:
-                        await backend.close()
+                        if host is not None:
+                            await host.close()
                     finally:
-                        if owner.proc is not None and (
-                            auth_receiver is not None or owner.returncode is None
-                        ):
-                            await owner.terminate()
+                        try:
+                            await backend.close()
+                        finally:
+                            if owner.proc is not None and (
+                                native_handoff is not None
+                                or auth_receiver is not None or owner.returncode is None
+                            ):
+                                await owner.terminate()

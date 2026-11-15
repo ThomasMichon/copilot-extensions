@@ -494,9 +494,20 @@ class AcquisitionRuntime:
         driver: str,
         decision: AcquisitionDecision | None = None,
     ) -> tuple[str, str]:
-        return await acquisition_plugins.cli_native(
+        session_id, native = await acquisition_plugins.cli_native(
             self, req, driver, decision, verify_worktree=verify_worktree, clock=time, sleep=asyncio.sleep,
         )
+        if req.dispatch_origin is not None:
+            from .dispatch_cli_origin import inspect
+
+            _token, _stage, data = self.store.recovery(req)
+            if data.get("acquired") == "created" and inspect(
+                self.db.get_live_session(native),
+            ) != req.dispatch_origin.model_dump(mode="json"):
+                raise AcquisitionRefused(
+                    "cli_origin_unconfirmed", "new CLI native registration did not retain its original assignment",
+                )
+        return session_id, native
 
     async def _deliver(self, req: AcquisitionRequest, result: AcquisitionResult) -> None:
         prompt = self._delivery_prompt(req, result)

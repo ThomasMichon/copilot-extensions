@@ -16,7 +16,7 @@ from .live_delivery_state import LiveDeliveryState
 from .mux_questions import MuxQuestions
 from .models import ServiceConfig
 from .routes import (
-    acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_delivery_state,
+    acquisitions, acp_ws, admin, agents, dispatch_tasks, execution_context, health, live_delivery_state,
     live_inbox, live_questions, live_sessions,
     mux_questions, owner_membership, remote, session_observations, sessions, status, ui, worktrees,
 )
@@ -57,7 +57,7 @@ def configure_serving_app(
         acquisitions.router, health.router, ui.router, acp_ws.router,
         sessions.router, session_observations.router, owner_membership.router, live_sessions.router,
         live_inbox.router, live_questions.router, live_delivery_state.router,
-        mux_questions.router, remote.router, agents.router,
+        mux_questions.router, remote.router, agents.router, execution_context.router,
         worktrees.router, admin.router, dispatch_tasks.router,
     ):
         app.include_router(router)

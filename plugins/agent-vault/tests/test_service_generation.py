@@ -523,6 +523,7 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
     monkeypatch.setattr(vault, "_check_password_ttl", lambda: ttl_checks.append("checked"))
 
     def has(kpdb: str, entry: str, group: str | None = None) -> bool:
+        assert ttl_checks, "admitted credential work skipped expiry reconciliation"
         dispatched.append((kpdb, entry, group, vault._request_ctx.allow_prompt,
                            vault._request_ctx.reason))
         return True
@@ -568,7 +569,6 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
         assert await pending == {"ok": True, "exists": True}
         assert dispatched == [("fixture.kdbx", "fixture", "fixture-group", False,
                                "action=has peer=fixture-peer")]
-        assert ttl_checks == ["checked"]
         await asyncio.sleep(0)
         assert not connections.work and not connections.workers
         await controller.tick()
@@ -800,11 +800,19 @@ def test_contextual_ping_retains_backend_status_and_expiration(
     assert calls == ["expiry", "fixture.kdbx"]
 
 
+@pytest.mark.parametrize("protected_cache", [False, True])
 def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, protected_cache: bool,
 ) -> None:
-    from agent_vault import service
+    from agent_vault import extensions, service
 
+    monkeypatch.setenv("AGENT_VAULT_CACHE", "1" if protected_cache else "0")
+    monkeypatch.delenv("AGENT_VAULT_CACHE_DIR", raising=False)
+    if protected_cache:
+        monkeypatch.setenv("AGENT_VAULT_CACHE_DIR", str(tmp_path / "cache"))
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
     vault = service.VaultService()
     database = tmp_path / "resident.kdbx"
     database.touch()
@@ -815,6 +823,13 @@ def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
         pytest.fail("Legacy generation ping repeated the configuration-owner lookup")
 
     monkeypatch.setattr(service, "resolve_kpdb", unavailable)
+    configuration_calls: list[str] = []
+
+    def configuration_source(*_args: object, **_kwargs: object) -> dict[str, str]:
+        configuration_calls.append("called")
+        return {"group": "unexpected"}
+
+    registry.register_config_source(configuration_source)
     monkeypatch.setattr(
         vault.cli, "status",
         lambda kpdb: "locked" if kpdb == str(database) else "wrong-vault",
@@ -822,6 +837,7 @@ def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
     response = vault.handle_request({"action": "ping"})
     assert response["cli"] == "locked"
     assert response["runtime_generation"] == service.PROCESS_GENERATION
+    assert configuration_calls == []
     selections = iter(("first.kdbx", "second.kdbx"))
     monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: next(selections))
     selected = []

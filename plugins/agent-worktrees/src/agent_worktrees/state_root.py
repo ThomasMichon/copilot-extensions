@@ -847,7 +847,9 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
                 target.repo,
                 target.worktree_id,
             )
-            if actual_identity != expected_identity:
+            from .tracking_lookup import reciprocal_pair_subjects
+
+            if actual_identity != expected_identity and not reciprocal_pair_subjects(record, sibling_record):
                 return StatePair(
                     paired=True,
                     pair_id=record.pair_id,

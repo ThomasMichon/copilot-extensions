@@ -61,6 +61,16 @@ ownership, cleanup, review or deployment requirements.
   logging/installation authority; no claim, process, record or resource effect follows
   from this proposal.
 
+- **R4055-CD2:** Retain the later #5531 Codespaces and #5532 Containers
+  reconcile cases under their existing provider/lifecycle and diagnostics owners.
+  Their independent wait-OR-diagnostics choices are specified in PD8/PD9 and
+  VD8/VD9 below. A single observed lock timeout is not proof of a dead holder;
+  the Docker relationship remains a hypothesis. This is additive planned
+  receiving, not implementation, owner reassignment, lock removal or resource
+  release. The [authoritative replacement contract](../../../visions/installer/README.md#authoritative-runtime-replacement)
+  remains governing: no indefinite predecessor wait or separate recovery
+  prerequisite is introduced for an authorized explicit update.
+
 ## Context
 
 The reproduced Windows path loses output at both a Manager-to-engine handoff
@@ -230,6 +240,24 @@ owner reassignment, source disposition or claim/resource release.
   recording and later bounded registered-origin timeout capture without declaring the
   entire reconcile interface or POSIX/native/serving matrix complete.
 
+- [ ] **R4055-PD8:** Preserve #5531 at the actual Codespaces reconcile
+  lifecycle-lock caller: resolve automatically after the prior operation
+  completes, with proportionate bounded retry/wait, OR identify the holding
+  operation AND how long it has held the lock through actionable diagnostics.
+  Retain the original single-occurrence evidence and unknown root cause,
+  the existing admission budget and truthful timeout/unknown results.
+  Neither alternative requires forced unlock, killing a holder, expiring its
+  claim or implementing both alternatives.
+
+- [ ] **R4055-PD9:** Preserve #5532 at the actual Containers reconcile
+  consumer: proportionate bounded retry/wait for the underlying operation
+  OR actionable identification of the affected container/operation AND its
+  duration. Qualify, rather than assume, the proposed Docker relationship;
+  distinguish the actual reconcile helper and outer-watchdog outcomes.
+  Preserve the caller's budget, actual operation result and existing resource
+  custody without a forced operation, a second supervisor or a new
+  all-platform qualification programme.
+
 ## Validation Plan
 
 - [ ] Early admission/refusal and standalone cold paths produce discoverable
@@ -301,6 +329,21 @@ owner reassignment, source disposition or claim/resource release.
   completed bounded source credit is not reopened and no whole-broker/all-host
   completion gate is added.
 
+- [ ] **R4055-VD8:** At the real Codespaces reconcile caller, use an isolated
+  prior-operation control to verify the selected PD8 alternative: completion
+  followed by proportionate bounded continuation OR a diagnostic naming the
+  holder operation AND duration. Retain the original deadline, truthful
+  unresolved outcome and no forced unlock/kill/claim expiry. A generic timeout
+  message or an unrelated diagnostic producer is not this consumer proof.
+
+- [ ] **R4055-VD9:** At the real Containers reconcile consumer, verify the
+  selected PD9 alternative with a contained outstanding operation:
+  proportionate bounded continuation OR affected container/operation AND
+  duration diagnostics. Distinguish helper and watchdog results, preserve the
+  operation's result/unknown state and cleanup custody, and record whether
+  the Docker hypothesis was actually established. Do not require both
+  alternatives or infer native success from a source fixture.
+
 ## Proposal
 
 Use the existing native installer entrypoints and supervisors to establish
@@ -310,6 +353,17 @@ retention path. Extend existing orchestrated results with durable references.
 Keep necessary lifetime/publication repair as an independently qualified slice.
 
 ## Journal
+
+### 2026-11-12 - Later provider-reconcile receiving
+
+The reviewed #9502 intake already retained all seven original/refined #4055
+diagnostic clauses as planned work. Its unfinished implementation and this
+ROOT's Draft status do not negate that intake. Added PD8/PD9, actual global
+VD8/VD9 and CD2 for the later inherited #5531/#5532 alternatives. All incumbent
+requirements, check states, participants, independent broker/native holds and
+actual resource custodians remain unchanged. This entry records a proposal;
+normal review and complete merged receiving readback precede any separate
+redundant-tracking judgment. It claims no implementation or operational result.
 
 ### 2026-10-25 - Complementary registered-origin timeout capture
 

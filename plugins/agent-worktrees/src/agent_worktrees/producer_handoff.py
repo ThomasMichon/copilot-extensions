@@ -50,7 +50,7 @@ def _validate_consumer(
             if (
                 not received.has_producer
                 or not producer.valid_metadata(received.producer)
-                or received.producer["phase"] not in {"bound", "closed", "transferred"}
+                or received.producer["phase"] not in {"bound", "retained", "closed", "transferred"}
                 or producer.claim_ref(received.producer) != ref
                 or _immutable_metadata(received.producer) != _immutable_metadata(snapshot["producer"])
             ):

@@ -8,18 +8,15 @@ $ErrorActionPreference = 'Stop'
 $_root = $InstallDir
 $_py = $RuntimePython
 $_slot = $RuntimeSlot
-$_cacheId = [Guid]::NewGuid().ToString('N')
-$_cache = [IO.Path]::GetFullPath((Join-Path $_root "cache\python\unsealed-$_cacheId"))
-if (-not $_cache.StartsWith('\\?\')) {
-    $_cache = if ($_cache.StartsWith('\\')) { '\\?\UNC\' + $_cache.Substring(2) } else { '\\?\' + $_cache }
-}
-# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
-$_mintedCache = $_cache
+$_cacheArguments = @('-B')
 try {
-    $_selectedCache = & $_py -I -B -X ('pycache_prefix=' + $_cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" $_root 2>$null
+    $_selectedCache = & $_py -I -B -X utf8 -c "import json,sys; from agent_procutil.python_cache import POLICY_VERSION,policy_arguments; print(json.dumps(policy_arguments(sys.argv[1],runtime=sys.executable) if POLICY_VERSION==2 else ['-B']))" $_root 2>$null
     if ($LASTEXITCODE -eq 0 -and @($_selectedCache).Count -eq 1) {
-        $_selectedCache = [string]($_selectedCache | ConvertFrom-Json)
-        if ($_selectedCache) { $_cache = $_selectedCache }
+        $_candidate = ConvertFrom-Json -InputObject ([string]$_selectedCache)
+        if ($_candidate.Count -eq 2 -and $_candidate[0] -ceq '-X' -and
+            $_candidate[1] -is [string] -and $_candidate[1].StartsWith('pycache_prefix=') -and
+            $_candidate[1].Length -gt 15 -and $_candidate[1] -notmatch "[`r`n]" -and
+            $_candidate[1].IndexOf([char]0) -lt 0) { $_cacheArguments = $_candidate }
     }
 } catch {}
 $env:PYTHONUTF8 = '1'
@@ -73,10 +70,9 @@ $ErrorActionPreference = 'Continue'
 & $_py -I -B -c "import sys; from pathlib import Path; from agent_dispatch.installation_policy import windows_policy; p=windows_policy(Path(sys.argv[1]), observe_supervisor=False); raise SystemExit(0 if p['start_coordinator'] else 3)" $InstallDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 try {
-    & $_py -X ('pycache_prefix=' + $_cache) -m agent_dispatch serve 2>&1 | Out-File -FilePath $logFile -Append -Encoding utf8
+    & $_py @_cacheArguments -m agent_dispatch serve 2>&1 | Out-File -FilePath $logFile -Append -Encoding utf8
 } catch {
     # Teeing to the log failed (e.g. it got locked after resolution) -- keep the
     # coordinator alive without the tee rather than let logging kill the service.
-    & $_py -X ('pycache_prefix=' + $_cache) -m agent_dispatch serve *> $null
+    & $_py @_cacheArguments -m agent_dispatch serve *> $null
 }
-if ($_cache -eq $_mintedCache) { try { [IO.Directory]::Delete($_mintedCache, $true) } catch {} }

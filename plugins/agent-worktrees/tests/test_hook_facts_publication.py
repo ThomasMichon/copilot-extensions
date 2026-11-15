@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import hook_facts_publication as facts
+from agent_worktrees import config as cfg
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
 
@@ -99,6 +100,7 @@ def test_recorded_head_is_not_the_listing_or_execution_leg_resume_target(owner, 
             assert projection._decode_row(identity, encoded) == legacy_row
         durable = projection.read_advisory(
             tmp_path / "current.sqlite3", "project", contract_version=version,
+            wire_platform=cfg.detect_platform(),
         )
         assert durable["worktrees"] == publication["worktrees"]
     runtime.publish("project", [row(tmp_path)], observed_at=2)

@@ -134,6 +134,17 @@ and reliably).
   Actual reviewed delivery and complete current receiving readback precede
   any separate administrative tracking retirement.
 
+### Continuing #4547 direct-slot and partial-publication custody
+
+The finite #4547 family below retains existing installer/publication,
+frontdoor, hook, module-producer and source-attribution custodians, including
+the independent bounded #3303 claimant. Credit #6160/#7234 immutable-publication
+delivery without treating an original race hypothesis as a proven current
+cause. This planned intake neither appoints an executor nor authorizes a
+force replacement, native experiment, hook bypass or resource release.
+Normal review, complete current receiving readback and a separate source
+judgment precede any tracking retirement; no new generic ACK is required.
+
 ## Context
 
 This effort is seeded directly from a live investigation this session (see
@@ -474,6 +485,47 @@ owners, claims and first unresolved gates remain unchanged.
       copying/using managed instruction files, unconditional install/activation
       or competing guidance authority is introduced.
 
+### Direct retained #4547 startup/publication contract
+
+All rows remain unchecked. Preserve the existing phases, checked credit,
+first unresolved gate and independent full-harness qualification.
+
+- [ ] **P4547-A:** Reconcile the original health/importability-before-selector
+  publication expectation with delivered immutable-source/publication work
+  in #6160/#7234. Retain the source's observed failure and proposed explanation
+  separately; identify only a demonstrated remaining boundary, not a fresh
+  assertion that the historical publication hypothesis is the current cause.
+- [ ] **P4547-B:** Retain the direct/not-yet-activated interpreter producer
+  trail: actual resolution source, selected slot, marker and file timing,
+  distinguishing module execution with `-m` from importing the same package.
+  Attribute the actual producer rather than silently substituting an already
+  activated interpreter or a generic installation-health result.
+- [ ] **P4547-C:** Preserve existing-slot wait/retry, resolver-miss/first-use
+  provisioning and mutex-contention cases across ordinary create-PR, push and
+  pre-push paths. Credit delivered publication safeguards; qualify the finite
+  remaining caller boundary without reopening completed immutable-slot work.
+- [ ] **P4547-D:** Preserve pushed-head/no-PR partial success and managed
+  retry/recovery with original markers intact. Distinguish accepted,
+  uncertain and failed provider outcomes; no blind mutation replay, raw-provider
+  workaround or hook bypass follows from an error.
+- [ ] **P4547-E:** Retain incomplete `__main__`, unavailable provider module
+  and partial forced-library replacement as separately attributed variants.
+  Do not collapse distinct producer/file-timing evidence into one asserted
+  cause or treat force replacement as an authorized remedy.
+- [ ] **V4547-A:** Record attributable publication/importability evidence and
+  actual #6160/#7234 credit separately from the original hypothesis and any
+  still-unverified residual.
+- [ ] **V4547-B:** Verify the direct producer/resolution/slot/marker/file-timing
+  chain and the `-m` versus import distinction at the original finite tier.
+- [ ] **V4547-C:** Cover the existing-slot, resolver-miss/first-use and mutex
+  cases on each original create/push/pre-push caller path, retaining valid
+  ordinary paths and existing publication guarantees.
+- [ ] **V4547-D:** Verify partial-success and accepted/uncertain-result recovery
+  preserves published head identity and markers without duplicate effects
+  or bypassing the managed publication path.
+- [ ] **V4547-E:** Keep the three original variants independently attributable;
+  source or contained evidence must not be relabeled installed/native proof.
+
 ## Validation Plan
 
 - [ ] 20/20 clean full-harness starts: all 3 real extensions (and any others
@@ -650,6 +702,16 @@ neither replace nor expand the existing full-roster20/20 gate.
 Existing roster-derived20/20, turn-aware extension lifetime, hook evidence,
 latency, intended behavior and guard validations remain unchanged. No source
 lane inherits the whole-parent/native gate as a prerequisite to planned intake.
+
+### Global validation for #4547
+
+- [ ] **G4547:** Resolve EVERY P4547-A through E and V4547-A through E,
+  including direct producer attribution, all original caller/variant cases
+  and marker-preserving partial-success recovery. Retain checked immutable
+  publication credit, historical uncertainty and existing custody. Planned
+  receiving does not require the independent full-harness20/20 programme,
+  every-adopter/native rollout or historical-slot remediation to finish first;
+  it does not weaken those incumbent gates or authorize their execution.
 
 ## Proposal
 
@@ -1148,3 +1210,13 @@ Normal review/merge, whole current receiving readback and separate source
 judgments still precede administrative retirements. No implementation, native/
 installed proof, source appointment, owner/claim/resource release, actual host,
 settings, permission, process, credential or deployment effect occurred.
+
+### 2026-11-13 - Proposed finite #4547 receiving contract
+
+Added direct A-E Plan/local Validation, actual global Validation and continuing
+custody for the original direct-slot, first-use/mutex, partial-publication and
+separately attributed module/library variants. Preserve delivered immutable
+publication credit, the original hypothesis distinction and every incumbent
+phase, check state and claimant. This entry records authored planned intake,
+not review, merge, whole-family acceptance, source retirement or operational
+repair. Complete current receiving readback and separate source judgment remain.

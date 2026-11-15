@@ -176,7 +176,7 @@ async def _resume(
                 and already_live
             ):
                 store.release_workspace_gate(worktree_id, delivery)
-                return _session_info(session)
+                return _session_info(session, manager)
             if session.status != SessionStatus.STOPPED:
                 raise _refuse("live_holder", "An owned execution leg still holds this workspace")
     if owner_live:
@@ -360,7 +360,7 @@ async def _load_acp(
     if actual["head_session"] != native:
         raise _refuse("head_changed", "Owner no longer asserts the resumed native conversation")
     store.release_workspace_gate(worktree_id, delivery)
-    return _session_info(session)
+    return _session_info(session, manager)
 
 
 def _cli_info(

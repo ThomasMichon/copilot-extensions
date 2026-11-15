@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 
+from agent_procutil import no_window_kwargs
+
 PROMPT_TIMEOUT = 60
 PROMPT_TITLE = "Agent Vault"
 PROMPT_TITLE_ENV = "VAULT_PROMPT_TITLE"
@@ -71,6 +73,7 @@ Write-Output $box.Text
         r = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", ps_script],
             capture_output=True, text=True, timeout=PROMPT_TIMEOUT,
+            **no_window_kwargs(),
         )
         pw = r.stdout.strip().replace("\r", "")
         if pw and pw != "CANCELLED":
@@ -89,7 +92,10 @@ Write-Output $box.Text
                     args = ["zenity", "--password", f"--title={safe_title}"]
                 else:
                     args = ["kdialog", "--password", message, "--title", safe_title]
-                r = subprocess.run(args, capture_output=True, text=True, timeout=PROMPT_TIMEOUT)
+                r = subprocess.run(
+                    args, capture_output=True, text=True, timeout=PROMPT_TIMEOUT,
+                    **no_window_kwargs(),
+                )
                 if r.returncode == 0 and r.stdout.strip():
                     return r.stdout.strip()
                 return None

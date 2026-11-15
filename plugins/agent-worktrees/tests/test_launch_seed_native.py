@@ -78,16 +78,16 @@ def test_finite_monitor_paths_preserve_loaded_cli_overrides(monkeypatch, tmp_pat
 @pytest.fixture
 def record(tmp_path, monkeypatch):
     project = cfg.project_dir("demo")
-    project.mkdir(parents=True, exist_ok=True)
+    (project / "worktrees").mkdir(parents=True, exist_ok=True)
     (project / "config.yaml").write_text(json.dumps({
         "repo_name": "demo", "machine": "test",
-        "repos": {"demo": {"anchor": str(tmp_path), "default_branch": "dev"}},
+        "repos": {"demo": {"anchor": str(tmp_path), "worktree_root": str(tmp_path), "default_branch": "dev"}},
     }), encoding="utf-8")
-    checkout = tmp_path / "checkout"
+    checkout = tmp_path / "wt-a"
     checkout.mkdir()
     path = tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(checkout), "demo", "test",
-        cfg.detect_platform(), tmp_path,
+        cfg.detect_platform(), project / "worktrees",
     ).yaml_path
     monkeypatch.setattr(legacy.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
     return path
@@ -501,6 +501,83 @@ def test_definite_spawn_failure_restores_once_without_automatic_retry(record):
     assert _saved(record, reply)["events"][-1]["phase"] == "execution-returned"
     with pytest.raises(ValueError, match="do not replay"):
         native.spawn_failed(record, _identity(reply), reply["operation_id"])
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell required")
+@pytest.mark.parametrize("preparation", ["headed", "substituted", "drive-relative", "root-relative"])
+def test_direct_client_refusal_restores_a_real_seed(record, tmp_path, preparation):
+    seed = seeds.stage(record, kind="new", text="retry only after definite pre-creation refusal")
+    reply = native.prepare(record, [sys.executable], seed_id=seed.seed_id)
+    if preparation == "headed":
+        reply["headed"] = {"version": 1}
+    elif preparation in {"drive-relative", "root-relative"}:
+        image = Path(sys.executable)
+        reply["argv"][0] = (
+            image.drive + str(image)[len(image.anchor):]
+            if preparation == "drive-relative" else str(image)[len(image.drive):]
+        )
+    assert seeds.peek(record).handoff_id
+    prepared = tmp_path / "prepared.json"
+    prepared.write_text(json.dumps(reply), encoding="utf-8")
+    restore = tmp_path / "restore.py"
+    restore.write_text(
+        "import argparse,json\nfrom pathlib import Path\n"
+        "from agent_worktrees import launch_seed_native as native,launch_execution as audit\n"
+        "parser=argparse.ArgumentParser()\n"
+        "for name in ('record','launch-attempt-id','launch-resolution-id','operation-id',"
+        "'launch-parent-id'):parser.add_argument('--'+name)\n"
+        "args=parser.parse_args()\n"
+        "native.spawn_failed(Path(args.record),audit.Correlation("
+        "args.launch_attempt_id,args.launch_resolution_id,args.launch_parent_id),args.operation_id)\n"
+        "print(json.dumps({'recorded':True}))\n",
+        encoding="utf-8",
+    )
+
+    def literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    boundary = Path(__file__).resolve().parents[1] / "scripts" / "native-seed-boundary.ps1"
+    selected = str(tmp_path / "forwarder.exe") if preparation == "substituted" else reply["argv"][0]
+    driver = tmp_path / "refused.ps1"
+    driver.write_text(
+        f". {literal(boundary)}\n"
+        f"[Environment]::CurrentDirectory={literal(Path(sys.executable).anchor)}\n"
+        "function Get-AwNativeSeedRuntime {return @{Python='fixture';Bootstrap='fixture'}}\n"
+        "function Test-AwHeadedPreparation {return $false}\n"
+        "function Invoke-AwNativeSeedPhase {param([string]$Root,[string[]]$Arguments)\n"
+        f" if($Arguments[1] -eq 'prepare'){{return (Get-Content -Raw {literal(prepared)} | ConvertFrom-Json)}}\n"
+        " if($Arguments[1] -ne 'spawn-failed'){throw 'unexpected post-preparation phase'}\n"
+        f" $info=[Diagnostics.ProcessStartInfo]::new({literal(sys.executable)})\n"
+        " $info.UseShellExecute=$false;$info.CreateNoWindow=$true\n"
+        " $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true\n"
+        f" foreach($arg in @('-I',{literal(restore)})+@($Arguments|Select-Object -Skip 2))"
+        "{$info.ArgumentList.Add($arg)}\n"
+        " $process=[Diagnostics.Process]::Start($info)\n"
+        " try{\n"
+        "  $out=$process.StandardOutput.ReadToEndAsync();$err=$process.StandardError.ReadToEndAsync()\n"
+        "  if(-not $process.WaitForExit(15000)){throw 'restoration did not settle'}\n"
+        "  if($process.ExitCode -ne 0){throw $err.GetAwaiter().GetResult()}\n"
+        "  return (ConvertFrom-Json -InputObject $out.GetAwaiter().GetResult())\n"
+        " }finally{$process.Dispose()}\n"
+        "}\n"
+        f"exit (Invoke-AwNativeSeedBackend -Root {literal(tmp_path)} -Record {literal(record)} "
+        f"-SeedId {literal(seed.seed_id)} -Command @({literal(selected)}) "
+        "-RequireDirectClient -BeforeResume {throw 'refused target must never be published'})\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(driver)],
+        cwd=tmp_path, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not result.stdout
+    assert "Direct native client preparation is unconfirmed" in result.stderr
+    restored = seeds.peek(record)
+    assert (restored.seed_id, restored.text, restored.handoff_id) == (seed.seed_id, seed.text, None)
+    assert _saved(record, reply)["events"][-1]["phase"] == "execution-returned"
+    retry = native.prepare(record, [sys.executable], seed_id=seed.seed_id)
+    assert seeds.peek(record).handoff_id
+    native.spawn_failed(record, _identity(retry), retry["operation_id"])
 
 
 def test_unconfirmed_child_identity_never_finishes_or_restores(record):

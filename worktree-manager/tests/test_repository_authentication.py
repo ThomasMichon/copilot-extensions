@@ -84,10 +84,8 @@ def test_current_and_domain_failure_reads_use_one_qualified_invocation(selected,
     assert rows == result["configuration"]
     assert len(calls) == 1
     expected = agent_plugin_runtime.resolve_installed_plugin_command("agent-worktrees")
-    assert calls[0][0][:2] == expected[:2]
-    assert calls[0][0][2].startswith("pycache_prefix=")
-    assert calls[0][0][3:] == [
-        *expected[3:], "repos", "authentication", "inspect",
+    assert calls[0][0] == [
+        *expected, "repos", "authentication", "inspect",
         "--context-project", "sample", "--repository", "sample", "--json",
     ]
     assert calls[0][1]["timeout"] < 20

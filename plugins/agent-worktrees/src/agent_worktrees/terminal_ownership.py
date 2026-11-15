@@ -13,6 +13,16 @@ BRIDGE_CREATION_POLICY = "bridge-creation"
 CONCLUSION_POLICIES = (DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY, BRIDGE_CREATION_POLICY)
 
 
+def dispatch_creator_matches(record: tracking.WorktreeRecord) -> bool:
+    """Prove the receiving allocation independently of companion availability."""
+    allocation = record.dispatch_attempt
+    if allocation is None:
+        return False
+    from . import record_reporting
+
+    return record_reporting.historical_owner_is_local(record, allocation.creator_machine)
+
+
 def _bridge_creation_reason(
     record: tracking.WorktreeRecord, creation_nonce: str | None,
 ) -> str | None:
@@ -48,7 +58,7 @@ def _dispatch_ownership_confirmed(
         allocation is not None
         and reservation_key is not None
         and allocation.reservation_key == reservation_key
-        and allocation.creator_machine.casefold() == record.execution_machine.casefold()
+        and dispatch_creator_matches(record)
         and allocation.driver == owner
     )
 

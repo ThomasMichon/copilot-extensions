@@ -1,0 +1,17 @@
+{
+  "comment": "Ship the shared core explicit headed receiver seam with its consuming runtimes",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

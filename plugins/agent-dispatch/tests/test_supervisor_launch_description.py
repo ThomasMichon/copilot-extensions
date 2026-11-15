@@ -7,11 +7,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import re
 import sys
 
 import pytest
-from agent_procutil import python_cache_args
 
 INSTALLER = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="generated Windows launcher")
@@ -83,11 +81,9 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
     assert description["version"] == 1
     assert Path(description["executable"]).samefile(python)
     assert description["log_path"] == str(runtime / "supervise-service.log")
-    assert description["arguments"][0] == "-X"
-    cache = Path(description["arguments"][1].removeprefix("pycache_prefix="))
-    assert cache.parent == Path(python_cache_args(runtime)[1].partition("=")[2]).parent
-    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
-    args = description["arguments"][2:]
+    assert description["arguments"][0] == "-B"
+    assert not (runtime / "cache" / "python").exists()
+    args = description["arguments"][1:]
     assert args[:3] == ["-m", "agent_dispatch", "supervise"]
     assert args[args.index("--interval") + 1] == "41"
     if mode == "serve":

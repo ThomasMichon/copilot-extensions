@@ -56,9 +56,7 @@ def test_actual_request_admission_and_completed_replay(
     execution = "local-space" if map_kind == "matching" else physical + (
         "-wsl" if platform == "wsl" else ""
     )
-    assert record.machine_identity == (
-        None if first_mode == "legacy" else WorktreeMachineIdentity(physical, platform, execution)
-    )
+    assert record.machine_identity == WorktreeMachineIdentity(physical, platform, execution)
     receipt_path = launch_request._admission_path(cfg.tracking_dir(), intent["request_id"])
     paths = (path, receipt_path, launch_seed_state.state_path(path))
     before = {path: path.read_bytes() for path in paths}

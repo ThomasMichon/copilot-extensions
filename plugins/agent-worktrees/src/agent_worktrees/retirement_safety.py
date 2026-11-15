@@ -17,6 +17,16 @@ class RetirementBlocker:
     reason: str
 
 
+def retains_artifact_metadata(record: WorktreeRecord) -> bool:
+    """Retained bytes need their existing ledger after checkout retirement."""
+    return any(
+        claim.has_producer and isinstance(claim.producer, dict)
+        and claim.producer.get("lifetime") == "artifact-owned"
+        and claim.producer.get("phase") == "retained"
+        for claim in record.resources
+    )
+
+
 def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
     """Require explicit terminal PR state and released outbound ownership."""
     pending = [pr for pr in record.prs if pr.state not in ("merged", "closed")]
@@ -80,6 +90,8 @@ def delete_retired_pair(
     except Exception as exc:
         logging.getLogger(__name__).warning("Paired retirement deferred; records retained: %s", exc)
         return False
+    if retains_artifact_metadata(record) or retains_artifact_metadata(sibling):
+        return True
     sibling_path.unlink(missing_ok=True)
     path.unlink(missing_ok=True)
     # Both removals must reach the resident; the save above announced only

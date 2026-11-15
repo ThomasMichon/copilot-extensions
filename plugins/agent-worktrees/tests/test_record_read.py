@@ -31,6 +31,8 @@ def record_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
     monkeypatch.setattr(repos, "_repos_yaml_path", lambda: tmp_path / "repos.yaml")
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "global.yaml")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "current-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(cfg.project_state, "project_state_root", lambda project, legacy: legacy)
     data = {
         "worktree_id": "example-worktree",
@@ -55,6 +57,27 @@ def invoke(*args):
     with output.capture_json_output() as captured:
         rc = main.main(["--project", "example-project", "record", "--worktree-id", *args, "--json"])
     return rc, json.loads(captured.getvalue())
+
+
+@pytest.mark.parametrize("session_state", ["active", "yielded", "concluded"])
+@pytest.mark.parametrize("checkout_managed", [None, True, False])
+def test_exact_record_exposes_indexed_id_even_without_an_active_head(
+    record_fixture, session_state, checkout_managed,
+):
+    data, path = record_fixture
+    data["sessions"] = [{"session_id": "original-native", "state": session_state}]
+    if checkout_managed is not None:
+        data["checkout_managed"] = checkout_managed
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, response = invoke(data["worktree_id"])
+    assert rc == 0
+    record = response["worktree"]
+    assert record["session_ids"] == ["original-native"]
+    assert record["session_count"] == 1
+    assert record["last_session_id"] == ("original-native" if session_state == "active" else None)
+    assert record["checkout_managed"] is checkout_managed
+    assert path.read_bytes() == before
 
 
 def test_exact_record_never_falls_back_to_matching_foreign_head(record_fixture, monkeypatch):
@@ -221,7 +244,7 @@ def test_workspace_record_is_project_scoped_non_enrolling_and_non_activating(
 
 
 @pytest.mark.parametrize("version", [1, True, 2])
-def test_exact_record_read_preserves_or_refuses_explicit_tuple(record_fixture, version):
+def test_exact_record_read_ignores_legacy_tuple_version(record_fixture, version):
     from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
     data, path = record_fixture
@@ -231,12 +254,10 @@ def test_exact_record_read_preserves_or_refuses_explicit_tuple(record_fixture, v
     path.write_text(yaml.safe_dump(data))
     before = path.read_bytes()
     rc, result = invoke(data["worktree_id"])
-    if type(version) is int and version == 1:
-        assert rc == 0 and result["ok"] is True
-        assert {key: result["worktree"][key] for key in fields} == fields
-    else:
-        assert rc != 0 and result["ok"] is False
-        assert result["error"]["code"] == "record-malformed"
+    assert rc == 0 and result["ok"] is True
+    assert result["worktree"]["machine"] == "current-host"
+    assert result["worktree"]["platform"] == "windows"
+    assert result["worktree"]["execution_machine"] == "current-host"
     assert path.read_bytes() == before
 
 
@@ -305,6 +326,7 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "creation_nonce": data["creation_nonce"],
         "status": "active",
         "session_count": 0,
+        "session_ids": [],
         "last_session_id": None,
         "execution_leg": None,
         "execution_leg_opaque": False,
@@ -315,8 +337,11 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "session_backend_opaque": False,
         "dispatch_attempt": None,
         "dispatch_attempt_opaque": False,
-        "machine": "historical-owner",
+        "machine": "current-host",
         "platform": "windows",
+        "machine_identity_version": 1,
+        "environment": "windows",
+        "execution_machine": "current-host",
         "owner": data["owner"],
         "owner_ref": data["owner_ref"],
         "caller_worktree": None,
@@ -328,7 +353,10 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
 
 
 @pytest.mark.parametrize("task_id", ["assigned-task", "foreign-task"])
-def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, task_id, monkeypatch):
+@pytest.mark.parametrize("with_cohort", [False, True])
+def test_record_read_preserves_canonical_dispatch_attribution(
+    record_fixture, task_id, monkeypatch, with_cohort,
+):
     data, path = record_fixture
     attribution = {
         "task_id": task_id,
@@ -339,6 +367,20 @@ def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, ta
         "creator_machine": "example-owner",
         "ownership": "created",
     }
+    if with_cohort:
+        attribution["cohort"] = {
+            "schema": "dispatch-assignment-cohort", "version": 1,
+            "emitter": {
+                "repo": data["repo"], "source": "emitter", "producer_id": "source-reader",
+                "generation": 2, "request_id": "original-request", "task_id": task_id,
+            },
+            "pool": {
+                "task_id": task_id, "registration_id": "original-pool",
+                "machine": "example-owner", "env": "linux",
+                "reservation_key": attribution["reservation_key"],
+                "task_generation": 3, "catalog_revision": 7,
+            },
+        }
     data["dispatch_attempt"] = attribution
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     before = path.read_bytes()
@@ -406,7 +448,6 @@ def test_record_read_missing_is_not_terminal_or_suffix_lookup(record_fixture, ra
         ({"sessions": [None]}, "record-malformed"),
         ({"sessions": [{"session_id": 1}]}, "record-malformed"),
         ({"creation_nonce": True}, "record-malformed"),
-        ({"machine": []}, "record-malformed"),
         ({"owner_ref": {}}, "record-malformed"),
         ({"bound_agent": {}}, "record-malformed"),
         ({"checkout_managed": "false"}, "record-malformed"),

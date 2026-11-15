@@ -39,6 +39,14 @@ Preserve the owning ground-layer, installer and configuration authorities.
 
 ## Coordination
 
+The finite #3957 held-log launch-recovery intake below retains the current
+launcher, installer, logging, service and process custodians. #8051 owns only
+its separate communication/process-clock slice; its annex is unchanged.
+The Coordinator retains integration, not new launch or recovery authority.
+Current source OPEN/claim state remains pending normal review/merge, complete
+relevant current receiving readback and separate source judgment; this adds
+no permanent-open veto or owner-transfer permission.
+
 The proposed finite #5493 four-signature startup characterization stays with
 the SAME Coordinator/startup-attempt/container/native and ground/lifecycle
 custodians. Preserve #6467/#7486/#8051/#6793/#6470, scalar repair and all
@@ -86,6 +94,33 @@ rearm/replay permission or owner release; no new watchdog or generic ACK.
   #6812 updater observability. No production rollout or uncertain-turn resend
   follows from plan approval.
 
+- **Ambient routing intent:** Preserve the existing worktree-provisioner and
+  dispatch-client custodians for the separate #1414 family below. No implementer,
+  source, claim, resource, credential or operational authority is transferred.
+  Keep headless/no-worktree prompt and label routing, repository-resource
+  resolution and #2793's whole configuration outcome separate.
+
+### Continuing #5675 pinned-emitter recovery custody
+
+The finite Phase 3 family below retains the original diagnostic/regression/
+documented-recovery claimant and pinned-producer custodian. Credit #5679's
+delivered diagnostics and fenced recovery; only the original end-to-end
+witness remains unqualified. An existing authoritative source-fixture OR
+owner receipt may satisfy it at its actual evidence tier, without a new
+production exercise. Keep #5301's child-lifecycle repair separate. Reviewed
+documentary delivery is not migration authority, technical completion,
+claim release or permission to replace a valid producer.
+
+### Continuing #4774 emitter-receipt recovery custody
+
+The finite receipt family below keeps existing emitter, generic receipt and
+domain custodians; it does not appoint the recipe-taxonomy owner or introduce
+domain-specific polling. Credit #4790 and the archived Done emitter-receipts
+baseline without reopening them or folding the canonical token into itself.
+Normal reviewed direct Plan/local AND global Validation/Coordination/Journal
+delivery and complete current receiving readback precede separate source
+judgment. Existing owner-fenced recovery and strict annex duties remain
+independent; no replay, reassignment, cleanup or resource release is authorized.
 
 <!-- backlog-reconciliation:7556:qualified-fifteen:2877:Coordination -->
 
@@ -109,6 +144,23 @@ live/nonexpiring claim or turn terminal housekeeping into automatic
 nonterminal cleanup. #2793 retains its WHOLE configuration outcome and exact
 configuration-owner mapping condition; this reliability root does not accept
 that separate whole mapping.
+
+### Continuing proposed #6184/#6185/#6187/#6189 custody
+
+Retain existing evaluator/override/status and supervisor/publication custodians; detailed-effort/inner-conclusion/ground-cleanup and emitter/declaration/materialization custodians; effort-driver creation/evaluator/source-policy custodians; and task/reservation/source-coordinator/reassigned-role custodians. Appoint no implementer and transfer no source, claim, resource or independent pause. All four sources stay OPEN at this proposal stage. Preserve #6184's actual correction OR complete accepted-owner condition, #6187/#6189's explicit WHOLE independently-OPEN conditions and #6185's subordinate OPEN-parent readback duty without generalizing one source's condition to another. Review/merge/readback establishes planned coverage, not automatic retirement.
+
+Preserve every incumbent byte, status, checked credit, first unresolved Plan AND global Validation gate, Participant and Journal entry. Retain every owner-fenced and registry/deferral annex duty, including #3179's specific current-owner transfer acceptance without generalizing it into an ACK requirement for these families. Retain ordinary-startup admission and startup-clock matrices at their own scope; startup clocks are not new conclusion/recovery defaults. The separate #6189 design family does not expand Phase 6's checked source-safety reservation. No execution, cleanup, replay, restart, policy selection, source closure or release authority follows.
+
+The finite #7116 continuation keeps existing Coordinator/startup-attempt,
+native-head/mux/process, Bridge/Dispatch, reservation/ground/cleanup and
+detailed-effort owners. Retain the #8051 continuation and #9255 first-create
+reservations, #7116's existing narrow provenance/fresh-acquisition source
+claimant, and separately owned #6467 watchdog, #4028/#6934/#7337 lifecycle,
+#3194 hydration/reconnect, #4171 active turn, #6812 updater, #8015/#8046 discovery
+and #6462 ordinary identity/adoption. #7116 stays OPEN; current A9 receiving
+credit does not complete product acceptance or decide another source's
+tracking. No executor, model/native operation, cleanup or claim/resource
+transfer is appointed.
 
 ## Context
 
@@ -241,6 +293,173 @@ startup path first; it does not claim every suite entry point already conforms.
   preserving finite transient versus definitive-absence classification,
   distinct task/reservation accounting and original caller uncertainty.
 
+#### Direct retained #4774 generic receipt recovery
+
+- [ ] **P4774-A:** Preserve the delivered generic dedup-key to actual task
+  ID/status primitive and its later-tick retrieval. Retain stable declared
+  emitter identity, bounded/rotated logs and cursor retrieval through CLI
+  AND environment paths, including ordinary tick and side-load parity.
+  Credit #4790 rather than claiming the completed baseline is missing.
+- [ ] **P4774-B:** Establish an admitted usable result channel BEFORE authoring
+  effects AND retain a generic recoverable accepted/uncertain result if
+  receipt publication subsequently fails. Channel availability is not proof
+  that the authored effect failed or permission to replay it.
+- [ ] **P4774-C:** Retain created AND dedup-existing task identities and
+  partial success through the failure/recovery path. Preserve cursor/bounds,
+  concurrency, CLI/environment and side-load behavior; an empty success
+  envelope must not erase known results or license blind resubmission.
+- [ ] **V4774-A:** Qualify actual later-tick dedup-key/task-ID/status linkage,
+  stable emitter identity, bounded/rotated logs and both cursor surfaces,
+  with normal tick/side-load controls.
+- [ ] **V4774-B:** Cover pre-effect result-channel refusal and post-effect
+  publication failure, retaining recoverable accepted/uncertain outcomes
+  without domain polling or duplicate business effects.
+- [ ] **V4774-C:** Exercise created and dedup-existing results, partial
+  publication failure, empty-envelope and concurrent/cursor-boundary cases
+  while preserving all original CLI/environment/side-load controls.
+
+#### Direct retained #5675 pinned-emitter recovery
+
+**Agent-recommended tracking amendment.** Preserve this finite original
+contract within Phase 3, not as another supervisor or automatic failover.
+
+- [ ] **P5675-D:** Retain structured local identity, declaration eligibility,
+  expected cadence, health freshness, election status, pinned holder and
+  last renewal, distinguishing stale, fresh and unknown states. Credit the
+  delivered #5679 doctor/status diagnostics; a running supervisor,
+  `ok=true`/`held=false` or an expired readiness receipt alone does not prove
+  that a command executed, that a holder died or that takeover is allowed.
+- [ ] **P5675-R:** Preserve report-first explicit recovery bound to BOTH the
+  observed holder AND observed renewal, refusing a changed or valid producer.
+  Independently confirm the migration and absence of an old in-flight command.
+  Retain pin-not-failover: observability TTL, ineligibility or denied
+  acquisition alone never transfers the pin; a fresh valid remote producer
+  is not a fault. Keep migration guidance consistent with those safeguards
+  and credit the existing atomic renewal fence rather than rebuilding it.
+- [ ] **P5675-W:** Retain the original recovery -> executed target tick ->
+  LATER ordinary supervisor renewal witness. Lease release alone, a
+  `production_verified=false` result, a synthetic tick-success field or a
+  generic targeted-pass count is not that sequence. Seek an existing
+  authoritative source-fixture OR owner receipt before proposing any new
+  exercise; preserve its actual evidence tier and original finite scope.
+
+#### Local Validation - #5675
+
+- [ ] **V5675-D:** Qualify the actual structured identity/eligibility/cadence/
+  health/election/holder/renewal report with fresh, stale and unknown
+  controls. Preserve the delivered source credit without interpreting
+  denied acquisition or fresh remote production as death or failure.
+- [ ] **V5675-R:** Preserve observed-holder AND renewal change refusal,
+  valid-producer refusal, custom-scope and safe old-coordinator controls,
+  plus the independent no-old-command condition and corrected TTL guidance.
+  These controls establish fenced release, not restored production.
+- [ ] **V5675-W:** Resolve the ordered recovery, executed tick and later
+  ordinary renewal at the original accepted tier. An existing qualifying
+  source-fixture OR owner receipt is sufficient; do not mandate a new
+  native/all-host benchmark. Preserve the original recovery claimant,
+  pinned-producer custody, #5301 separation and all incumbent Phase 3 gates.
+
+#### Proposed finite evaluator-status authority from #6184
+
+- [ ] **P6184-A:** Establish CURRENT override-derived versus independently intentional registration-pause representation with existing evaluator/override/status custodians. Policy remains undecided by this amendment; never silently reactivate an independent pause.
+- [ ] **P6184-B:** Suitable current-authority evaluator status-sync OR supported explicit CLI resync/status; preserve the finite OR, inert coordinator-owned evaluators and existing consumer authority. Require neither both alternatives nor a fake managed process.
+- [ ] **P6184-C:** Distinguish override clear, status-preserving existing-row upsert, publication readback and evaluator filtering. Raw HTTP workaround, ordinary republication, coordinator-kind handling and #6487 publication safety are not this correction. Preserve independently OPEN source and original owners/claims.
+
+##### Local Validation - #6184
+
+- [ ] **V6184-A:** Paused evaluator then override clear: qualify the chosen supported sync OR CLI operation, actual registration-status readback and evaluator consumer/filtering.
+- [ ] **V6184-B:** Cover existing preserved row/republication and intended paused-to-active correction while independently intentional pause stays paused. Unknown authority grants no reactivation permission.
+- [ ] **V6184-C:** Read back every original/refined clause and finite OR. Retain the WHOLE source OPEN until actual authority/policy/consumer correction OR complete accepted owner; plan presence alone establishes neither.
+
+#### Proposed finite conclusion and emitter recovery from #6185
+
+- [ ] **P6185-A:** Establish actual attempt timeout, inter-attempt schedule, lock wait and attributable ownership. Retain long-cycle/direct-call observations as history, not current lock-age causality or unconditional infinite-retry proof. Changed embody.py makes the old 30-second helper assertion historical, not freshly current proof.
+- [ ] **P6185-B:** Substantiate sufficient longer inter-attempt backoff AND/OR off-affected-path retries AND/OR justified configurable attempt bounds. Require neither all three nor merely a global deadline increase.
+- [ ] **P6185-C:** Preserve exact worktree/session/reservation/generation, due/backoff/held outcomes, original budgets, sibling progress and cleanup authority. Historical bounded-retry/held-cleanup/identity-recovery credit is not completed removal. Age/timeout/held state authorizes no lock break, checkout deletion or business replay; retain safe unknown outcomes.
+- [ ] **P6185-D:** Diagnose accepted declaration -> publication -> launch/materialization -> actual emitter consumer. Distinguish changed declaration, independent persisted-file drift and live missing/unusable-spec report; retain embedded #6186's fresh-restart/frozen-file/old-health observations and uncertainty without claiming reproduction.
+- [ ] **P6185-E:** Confirmed materialized-content mismatch correction against authoritative current declaration OR ownership-safe deliberate erroring-emitter recovery. Preserve the OR; no requirement for both or unconditional healthy-poll rewriting.
+- [ ] **P6185-F:** Preserve admitted actual-start unconditional-writer, fingerprint-restart and bounded-crash-revival credit at its original tier. Do not invent an existing-file skip, equate PID liveness with healthy consumption, or delete a live file/kill a process as tracker maintenance.
+- [ ] **P6185-G:** Keep conclusion progress AND emitter convergence independently accountable under existing OPEN parent. Preserve observations, alternatives, detailed-effort/implementation owners, assignments, claims, reservations, budgets, generation identity, cleanup and source/release/consumer boundaries; neither lane closes the other.
+
+##### Local Validation - #6185
+
+- [ ] **V6185-A:** Actual inner caller, slow/contended attempt and observable unrelated progress qualify the chosen conclusion alternative. Account for exact identity, due/backoff/held transitions and demonstrated timeout/lock mechanism rather than historical assumption.
+- [ ] **V6185-B:** Qualify changed declaration, pre-existing divergent materialized spec and live missing/unusable spec through actual launch/reconcile/consumer chain. Cover chosen mismatch-correction OR safe recovery, unchanged healthy declarations and indeterminate publication/ownership.
+- [ ] **V6185-C:** Bounded sibling progress and attributable recovery retain denied/unknown ownership, held cleanup, removed/changed registration and restart-limit controls: no duplicate consumers, unsafe removal, business replay or silent declaration loss.
+- [ ] **V6185-D:** Separate inspected source/regression definitions, actual results, incident reproduction, release and installed acceptance. Preserve both lanes' original tiers; add no universal fleet rollout or unrelated native certification.
+- [ ] **V6185-E:** Before subordinate tracker retirement, read back complete OPEN parent and original/refined requirements: SR1-SR7, SRV1-SRV5 and embedded #6186. All technical rows remain unchecked. Intake executes no product/test/live lock/spec probe, retry, restart, kill, deletion, recovery, installation or deployment.
+
+#### Proposed finite mixed-effort producer policy from #6187
+
+- [ ] **P6187-A:** Visibly warn and exclude ONLY known stale/missing NAMED effort entries while unrelated actually eligible occurrences may proceed. Preserve warning lists, per-entry exclusion and correct eligible/created outputs; stale input is not wholesale discovery success.
+- [ ] **P6187-B:** Preserve dry-run nonmutation, source/config authority/validation, active-effort admission, occurrence/exclusive deduplication, verification/evaluator requirements and every effort's completion gate.
+- [ ] **P6187-C:** Distinguish archived/completed/stale names from malformed, ambiguous or unauthorized configuration. Preserve visible fail-closed invalid/unauthorized-input controls; no broad catch, success fallback or silent suppression.
+- [ ] **P6187-D:** Separately reviewed future implementation deliberately revises BOTH all-named all-or-nothing behavior AND existing contrary test with explicit source rationale. Earlier recipe/nested-layout delivery retains scope credit, not this repair. Preserve WHOLE source independence and effort-driver/evaluator/source-policy custody; #1043 hygiene acquires no producer/evaluation authority.
+
+##### Local Validation - #6187
+
+- [ ] **V6187-A:** Actual producer consumer covers mixed archived/stale/missing named and active eligible inputs, visible warnings, exact per-entry exclusions and correct eligible/created outputs.
+- [ ] **V6187-B:** Cover dry-run, duplicate occurrence/exclusive, noneligible effort and genuine lifecycle controls; no task effects occur during intake.
+- [ ] **V6187-C:** Malformed/ambiguous/unauthorized discovery stays visible/nonmutating as required while known stale input cannot suppress independent eligible work. Retain focused consumer regression, deliberate old-test revision and independently OPEN source; add no whole archived-programme/native-rollout gate.
+
+#### Proposed finite transfer and emitter-narrowing designs from #6189
+
+- [ ] **P6189-A:** Design UNCLAIMED queued/proposed cross-coordinator transfer: equivalent target creation/acceptance, source outcome/transferred-to provenance, partial/unknown outcomes, retry/idempotence and concurrent claim races. Semantics remain unresolved designs, not selected task effects.
+- [ ] **P6189-B:** Design concrete machine-reassignment trigger stopping NEW production AND continuing updates/evaluation of already-created locally active work. Keep both obligations independently visible; whole-declaration cutoff is not that split policy.
+- [ ] **P6189-C:** Preserve corrected mutating precedent remote_dispatch.dispatch_to_remote, not force_stop.py's Bridge transport. Approximately 90 quiet stale rows were NOT proof of uncovered business work; delivered verdicts may correctly become quiet.
+- [ ] **P6189-D:** Preserve task/reservation/source-coordinator and reassigned role/emitter custody, original alternatives and evidence tiers. No automatic recreation/abandonment, claimed-task movement, foreign-work transfer, claim release or federation execution. Federation is a future alternative, not prerequisite. This separate planned design family changes neither Phase 6's checked source-safety non-goal nor its implementation reservation.
+
+##### Local Validation - #6189
+
+- [ ] **V6189-A:** Review transaction cases: target acceptance, source outcome/provenance, failure before/after target creation, uncertain/lost response, retry/idempotence, duplicate submission and concurrent claim. Documentation must not manufacture acceptance or choose unresolved semantics.
+- [ ] **V6189-B:** Qualify chosen narrowing trigger's NEW-production stop AND continued local updates/evaluation, including terminal/legitimately quiet work and changed/unknown ownership; retain existing confirmation/claim authority.
+- [ ] **V6189-C:** Read back both complete designs, corrected transport/motivation and all contributor, assignment, reservation, literal-condition and source/release/isolated/native/installed boundaries. Preserve WHOLE source OPEN; reviewed design/receiving text is not execution, custody transfer or automatic disposition.
+
+#### Finite held-log launch recovery from #3957
+
+- [ ] **P3957-1:** Identify the actual supported Windows launcher, selected
+  interpreter/runtime, output-log path, service-token/held-handle boundary and
+  owning process. A hung label or failed open does not prove the prior
+  coordinator died or may be stopped.
+- [ ] **P3957-2:** While the canonical old log remains held/unwritable, let
+  only the existing authorized launch owner select a fresh writable,
+  attributable output path. Do not rename, truncate, change permissions on,
+  delete or overwrite the old owner's file; introduce no second resolver or
+  launch owner.
+- [ ] **P3957-3:** Preserve truthful startup/readiness and diagnostics across
+  banner failure, lock-after-path-selection, stream/tee failure and the
+  distinct persistent application-handler boundary. Attempted launch is not
+  coordinator readiness.
+- [ ] **P3957-4:** Preserve exact singleton/service/routing/process identity
+  and admitted work. Log failure authorizes neither a duplicate active
+  coordinator, kill, forced restart, lease expiry, ownership transfer nor
+  replacement of a healthy selection.
+- [ ] **P3957-5:** Qualify the actual generated Windows launch under relevant
+  noninteractive/service-token conditions and supported on-demand/service
+  paths. Source strings or parser checks alone do not satisfy that acceptance.
+- [ ] **P3957-6:** Keep recovery bounded and diagnosable. If a fresh log path
+  cannot be prepared, report failure without weakening the prior owner's
+  custody or silently counting startup as successful.
+
+##### Local Validation - held-log launch recovery
+
+- [ ] **V3957-1:** In an existing authorized isolated lane, retain the original
+  log-handle/unwritable condition under the relevant Windows token; demonstrate
+  the generated launcher using a fresh attributable path and the old
+  file/path remaining unchanged.
+- [ ] **V3957-2:** Cover the lock-after-selection race and banner, stream/tee
+  and persistent-handler failures with truthful ready/failed outcomes and
+  useful bounded diagnostics.
+- [ ] **V3957-3:** Cover supported service and on-demand generated-launch
+  paths, including noninteractive/S4U behavior; verify singleton identity and
+  no duplicate active owner.
+- [ ] **V3957-4:** Preserve a healthy selected coordinator and admitted work
+  when replacement logging fails. The case grants no kill, restart,
+  permission change, file cleanup, replay or overwrite authority.
+- [ ] **V3957-5:** Keep source, release, actual native launch/readiness and any
+  authorized installed-consumer observation separate. Synthetic assertions
+  do not replace the original native boundary.
+
 ### Phase 3a - Startup progress and timeout adoption
 
 - [x] Review the [startup-clock amendment](startup-progress-and-timeouts.md)
@@ -253,6 +472,88 @@ startup path first; it does not claim every suite entry point already conforms.
 - [ ] Resolve source/release and authorized adoption separately; preserve the
   parent Phase 3 and all unrelated owners' open acceptance.
 
+#### Complete acquisition-startup continuation - #7116
+
+- [ ] **AS7116-P1:** Preserve ALL NINE original finite findings: supported
+  truthful never-registered launching terminal/reconcile outcome; exact
+  native-head registration independent of deferred trust hooks OR correctly
+  prepared managed trust; authoritative fresh first-prompt readiness without
+  arbitrary unknown/null-to-idle; mux descendants reaped OR cleanly orphaned/
+  reported/accounted; two-attempt/rearm-three alignment OR no unsupported lower
+  dead-lettering; unresolved prepared-operation accountability; task-visible
+  requested-model fallback; transient ACP identity recovery through original
+  key/allocation/conversation/prompt/receipt; and terminal-reservation
+  generation/liveness/late-start/release ownership. Historical one-host counts/
+  manual workarounds are not current universal-outage proof or a supported fix.
+- [ ] **AS7116-P2:** Retain actual #8051 continuation and the existing startup
+  annex: 30s renewable RECEIVED target-contact silence AND independent fixed
+  5min startup grace; 1min is expected continuation latency, not turn execution.
+  Reject the old 2hour recommendation. Forward nested preparation/state/lock/
+  SSH/SessionHost/ACP/Git/mux/plugin/instruction progress, unknown/additive events
+  and target keepalives, never local timers; preserve final JSON/privacy,
+  identity and uncertain acceptance.
+- [ ] **AS7116-P3:** Compose the transferred relay/SSH preflight with the actual
+  3s ping, independent owner observation and retry/backoff, readiness BEFORE
+  plugin installation, exact relay identity and owned idempotent-probe
+  cancellation versus uncertain launch/shared-service custody. Keep #5761
+  namespace discovery and #9624 interim scope/design separately owned; neither
+  is delivered two-clock adoption.
+- [ ] **AS7116-P4:** Retain DISTINCT #9255 first-keyed-create acceptance through
+  existing StartupProgress/StartupClock/process/keyed/event owners: real composed
+  launch/readiness/hooks/pre-START overhead measured against ordinary native
+  loading BEFORE clock adoption, separate from synthetic slow peers. Compose
+  caller/receiver 30s/fixed 5min budgets, not a larger 180s buffered timeout,
+  copied 1min expectation or inferred safety-ceiling causality. Preserve
+  selected-peer negotiation/older refusal, original key/workspace/native
+  identity, final result/privacy; readiness ends startup, not the turn.
+- [ ] **AS7116-P5:** Retain direct A9R1-R3: terminal capacity accounting separate
+  from retained obligations; discount only definitively completed/fenced startup
+  AND proved exact-body absence, with conservative live/unknown/unreachable/
+  missing/legacy/in-progress refusal and late-start admission/publication fenced
+  BEFORE overlap. Keep actual `reconcile_reserving`/`fail_spawn`
+  release-requested consumers, the queued launcher-blocked-before-creation
+  counterexample, observer-only GONE retaining capacity, and definitive
+  original-caller failure closing only its matching revision. No invented test
+  node, native scenario or rollout prerequisite.
+- [ ] **AS7116-P6:** Retain A9R4 explicit reservation keys AND expected preview
+  revision at apply, WHOLE-queue native/transport protection, current control
+  authorization/no-live-holder evidence, unchanged legacy syntax and explicit
+  older-provider refusal. Existing queue/HTTP/client/CLI owners retain
+  provider-first adoption separately from source completion. Source #7836 merge
+  credit is delivered scope, not full ordinary-startup source acceptance or
+  resource settlement.
+- [ ] **AS7116-P7:** Preserve the existing narrow created-workspace-provenance/
+  exact-keyed-replay and operator-attested fresh-acquisition source claim in
+  #7116's current discussion: latest retained conversation already retired AND
+  holder absence confirmed, with generation/worktree/active-reservation/
+  exclusive-key fences intact. Reported focused tests and a forthcoming PR are
+  not technical completion, source transfer or permission to operate.
+
+##### Local Validation - #7116
+
+- [ ] **AS7116-LV1:** Resolve EACH original nine finding against its actual
+  receiver/evidence tier, preserving every OR alternative; readiness shape
+  alone cannot close mux/rearm/prepared/model/ACP/reservation acceptance.
+- [ ] **AS7116-LV2:** Qualify actual composed continuation/relay/fresh-create,
+  including real-versus-synthetic timing, healthy duration beyond silence,
+  pre-first/between-phase silence, recognized/unknown events, target-vs-local
+  keepalives, continued updates past fixed expiry, nested forwarding/flush/final
+  framing/privacy, selected-peer compatibility, disconnect/reconnect/response
+  loss and exactly ONE original operation with preserved identity. Only
+  existing-authorized owned teardown applies.
+- [ ] **AS7116-LV3:** Qualify every A9 capacity/queued-start/selection control:
+  completed/fenced-start AND exact-body absence, conservative unknowns and late
+  publication; explicit keys/preview revision with whole-queue/control/
+  no-live-holder/older-provider guards through actual existing boundaries.
+  Source/focused tests/independent acceptance/provider adoption remain distinct.
+- [ ] **AS7116-LV4:** Keep #7116 OPEN, every unresolved product row unchecked,
+  existing #8051/#9255 and narrow source reservations/custodians intact. Credit
+  historical #7593/#8177/#8218/#7836 only at their actual source/release tiers.
+  No new framework/lab/ledger/scheduler, prompt replay/fresh allocation/
+  shared-service stop, task/resource settlement, generic ACK or all-host/native
+  bar is introduced. Existing #7486/owner-fenced/deferral annexes remain operative
+  without importing another source's personal transfer condition.
+
 ### Phase 4 - Resolve repository resources from one registry
 
 - [x] Define an explicit registered-repository binding for script resources,
@@ -264,6 +565,28 @@ startup path first; it does not claim every suite entry point already conforms.
   pointers or repository-owned declarations.
 - [ ] Preserve standalone queue use and stage adopter migration deliberately;
   old peers must fail explicitly when required resolution support is unavailable.
+
+### Cross-plugin family - Ambient per-worktree coordinator-routing intent
+
+- [ ] **P1414-A:** Add stable dispatch-routing intent written by the existing
+  worktree provisioner at embody. Represent the supported default-local,
+  shared OR machine-moniker choice in worktree state, not a transient URL;
+  these are alternative choices, not simultaneous activation requirements.
+- [ ] **P1414-B:** Make the dispatch client discover that intent from CWD by
+  walking to the applicable worktree state and resolve the selected route to
+  its current endpoint at use time. Compose with existing rendezvous/routing
+  discovery and delivered dynamic endpoint resolution; neither alone supplies
+  the provisioner-written, CWD-discovered outcome.
+- [ ] **P1414-C:** Specify and implement precedence with explicit operator/task
+  authority strongest. Decide ambient intent's relative precedence against
+  rendezvous deliberately rather than inheriting an accidental ordering.
+  Worktree context selects a route only: it supplies no credentials, task
+  authorization, source authority or remote mutation authority.
+- [ ] **P1414-D:** Preserve existing prompt/label routing for headless/no-worktree
+  embodiments. Keep raw coordinator URLs refused and add no URL fallback.
+  Retain existing contributors, assignments, reservations, source/release and
+  isolated/native/installed distinctions. This planned intake neither releases
+  custody nor declares implementation or source retirement.
 
 ### Phase 5 - Recover held cleanup through existing ground-layer gates
 
@@ -632,6 +955,22 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
 
 ## Validation Plan
 
+- [ ] **G3957:** Resolve P3957-1 through P3957-6 and V3957-1 through V3957-5
+  at their stated tiers, preserving all incumbent Plan/global Validation,
+  check states, owners and holds. Read back the complete relevant current
+  receiving/custody contract after reviewed merge. This finite planned slice
+  neither completes the ROOT nor proves native/installed acceptance; plan
+  approval, merge or elapsed time grants no service action, source closure
+  or resource release.
+
+- [ ] **G5675:** Resolve EVERY P5675-D/R/W and V5675-D/R/W clause together
+  with continuing #5675 custody: delivered diagnostic/recovery credit,
+  report-first holder AND renewal fencing, no-old-command safeguard and
+  actual recovery -> tick -> later ordinary renewal proof. Preserve the
+  original source-fixture OR owner-receipt alternative and all parent/
+  strict-annex duties; no automatic takeover, migration, replay, owner
+  appointment, cleanup or resource release follows from this tracking intake.
+
 - [ ] Resolve every original/refined #2798/#3179/#8780/#8781 clause through the
   direct [owner-fenced Validation Plan](owner-fenced-recovery-intake.md#validation-plan).
   Preserve R2816, R2877, P5493 and every incumbent global validation/owner gate;
@@ -735,6 +1074,60 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
   is not incident diagnosis, reproduction, technical/whole-fleet completion
   or resource release; no every-host/unrelated whole-parent gate is added.
 
+### Global validation for #4774
+
+- [ ] **G4774:** Resolve EVERY P4774-A through C and V4774-A through C:
+  completed generic receipt credit, usable channel before effects AND
+  recoverable results after publication failure, created/dedup-existing IDs,
+  later reads and all retained cursor/bounds/concurrency/entry controls.
+  Keep actual emitter/receipt/domain and recovery custodians. No new
+  every-host programme, recipe-taxonomy appointment, polling loop, ownership
+  reset or replay authority is introduced; incumbent parent/annex gates remain.
+
+### Global validation of proposed #6184/#6185/#6187/#6189 families
+
+- [ ] **G6184:** Resolve EVERY P6184-A through C AND V6184-A through C with continuing custody: undecided pause-authority representation, suitable status-sync OR supported CLI, inert evaluator, independent-pause preservation and distinct clear/upsert/publication/filtering consumers. Preserve source's actual correction OR complete accepted-owner condition and independently OPEN state; add no blanket native or generic ACK gate.
+- [ ] **G6185:** Resolve EVERY P6185-A through G AND V6185-A through E: full SR1-SR7/SRV1-SRV5/embedded #6186, measured caller/lock relationship, sufficient backoff AND/OR off-path AND/OR justified bounds, exact due/held/cleanup custody and authoritative declaration-to-consumer mismatch correction OR safe emitter recovery. Score BOTH lanes independently; preserve historical credits, changed-helper uncertainty, OPEN-parent readback and original tiers without whole-fleet/native-programme bar.
+- [ ] **G6187:** Resolve EVERY P6187-A through D AND V6187-A through C: visible per-entry stale-name isolation with eligible progress; all dry-run/authority/admission/dedup/verification/evaluator/completion controls; invalid-input refusal; deliberate future revision of BOTH old behavior AND test. Preserve independently OPEN source and producer/evaluation custody; no hygiene-owner transfer or whole-programme gate.
+- [ ] **G6189:** Resolve EVERY P6189-A through D AND V6189-A through C for BOTH unfinished designs: UNCLAIMED transaction/acceptance/provenance/unknown/retry/claim races AND NEW-production stop with continued existing-work updates/evaluation. Retain corrected transport/motivation, Phase 6's checked non-goal/reservation, existing claims and independently OPEN source. Receiving/design acceptance is not execution, foreign-work transfer, federation prerequisite or source/resource release.
+
+- [ ] **AS7116-G:** Resolve EVERY AS7116-P1-P7 AND AS7116-LV1-LV4 together
+  with existing Phase 3a/startup, Phase 7 ordinary-keyed, owner-fenced and
+  registry-deferral duties at their original finite tiers. Score all nine
+  findings, continuation/relay, DISTINCT first-create, A9 capacity/queued-start/
+  key-selection and the actual narrow source claim without conflating
+  source/release/native/installed or capacity/resource settlement. Preserve every
+  original OR/AND, unknown-operation identity, explicit OPEN token, incumbent
+  check state/first gate and custodian; no universal ACK, every-host or unrelated
+  whole-parent prerequisite.
+
+### Ambient routing-intent validation
+
+- [ ] **V1414-A:** Exercise the actual provisioner embody writer for each
+  supported stable intent (default-local, shared, machine moniker), then the
+  actual dispatch-client CWD discovery path. Verify the intended route is
+  selected without unrelated worktree changes. A field alone or client-only
+  parser test does not establish this cross-plugin integration.
+- [ ] **V1414-B:** Change the coordinator endpoint after writing intent; verify
+  the client resolves the current endpoint when it acts. Inspect persisted
+  state for stable intent rather than a transient URL and verify raw-URL
+  fallback remains refused.
+- [ ] **V1414-C:** Exercise conflicting explicit operator/task and ambient
+  choices; assert explicit authority remains strongest. Exercise the chosen
+  rendezvous/ambient precedence, and verify intent confers no credentials,
+  task authorization, source authority or remote mutation authority.
+- [ ] **V1414-D:** Exercise a headless/no-worktree embodiment; verify existing
+  prompt/label routing is unchanged and does not depend on worktree state.
+- [ ] **G1414:** Resolve EVERY P1414-A-D AND V1414-A-D against the complete
+  #1414 original and eligible discussion. Preserve provisioner write, CWD
+  discovery, current-endpoint resolution, explicit-authority/rendezvous
+  precedence, stable-intent/no-URL behavior, no-worktree routing and every
+  credential/task/source-authority boundary. Preserve all incumbent Plan,
+  Validation, check states, owners and holds. Reviewed plan delivery records
+  unfinished work, not implementation completion, source retirement or resource
+  transfer; introduce no blanket native, installed, all-host or unrelated-parent
+  gate.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -748,6 +1141,55 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-11-14 - Finite held-log launch-recovery receiving proposal
+
+Added twelve unchecked Plan/local/global Validation rows retaining #3957's
+fresh attributable path, original held-file preservation, distinct persistent
+handler and actual generated Windows/S4U acceptance. This is independent of
+#8051's startup-clock scope and leaves its annex unchanged. Missing native
+proof is retained as planned work, not an implementation-first bar to
+consolidation. No process, log, service, runtime, native fixture, owner or
+issue state changed.
+
+### Proposed complete #7116 acquisition-startup receiving
+
+Added proposed direct Phase 3a Plan, local Validation and actual ROOT-global
+Validation for the complete current nine-finding/continuation/relay/first-create/
+A9/narrow-claim union. Existing checked continuation and ordinary-keyed source
+credit, all historical failures/uncertainties, status, first gates and strict
+annexes remain. Current direct #7116 receiving is credited without redoing
+settled intake or inventing implementation. Normal review, actual merge and
+whole-current readback remain; #7116's OPEN instruction and all source/resource
+duties survive. No product/native/test, queue, replay, rollout or custody effect
+occurred.
+
+### 2026-11-13 - Proposed four-family status, recovery and reassignment intake
+
+Proposed direct Phase 3 Plan/local Validation and ACTUAL global Validation retain #6184/#6185/#6187/#6189's complete original/refined/inherited unions: evaluator sync OR CLI and undecided pause policy; independently scored conclusion AND emitter lanes with original AND/OR choices; deliberate mixed-effort producer behavior AND test revision; and two unfinished transfer/narrowing designs. Every new technical row stays unchecked. All incumbent bytes, checked source credit, first gates, owners and strict-annex duties remain.
+
+Whole-current documentary qualification is not technical fulfillment. Changed embody.py makes the old helper-timeout assertion historical, not current proof; no product body was reread for this proposal. Normal reviewed delivery and complete current ROOT/strict-annex/source readback precede separate source-specific judgment; #3179's owner-transfer condition remains specific to its annex. All four sources remain OPEN. No implementation, incident reproduction, test, native operation, policy selection, task effect, cleanup, claim/resource release, source closure, installation or rollout occurred.
+
+### 2026-11-13 - Proposed finite #5675 recovery-proof intake
+
+Added direct D/R/W Plan, paired local Validation, actual global Validation
+and continuing custody for the original pinned-emitter recovery contract.
+Credit #5679's delivered diagnostics and fenced release; retain the distinct
+executed-tick/later-ordinary-renewal witness and existing source-fixture OR
+owner-receipt alternative. All incumbent bytes, status, check states and
+first unresolved gates remain. Normal reviewed merge and complete current
+receiving readback precede a separate source judgment; no migration,
+producer replacement, implementation or resource release occurred.
+
+### 2026-11-13 - Proposed finite #4774 receipt-recovery intake
+
+Added unchecked A-C Plan/local Validation, actual global Validation and
+continuing receipt custody for before-effect channel availability and
+after-effect recoverability. The completed generic primitive and archived
+Done baseline retain their credit. This is a proposed distinct planned
+receiver, not accepted whole-family transfer, implementation or source
+retirement. Complete current ROOT/strict-annex readback and separate source
+judgment remain; no operation replay, executor appointment or resource release.
 
 ### 2026-11-05 - Proposed owner-fenced recovery and CLI tracking intake
 

@@ -622,6 +622,9 @@ def test_nonrepair_bootstrap_update_policy_precedes_manager_self_install(
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
     installer = self_install._runtime_installer()
+    payload = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr(installer, "SCRIPTS", payload / "scripts")
+    monkeypatch.syspath_prepend(str(payload / "scripts"))
     monkeypatch.setattr(
         self_install, "self_install",
         lambda *args, **kwargs: pytest.fail("source preflight must precede Manager installation"),
@@ -631,7 +634,7 @@ def test_nonrepair_bootstrap_update_policy_precedes_manager_self_install(
             "source preflight must precede bootstrap ownership/repair",
         ),
     ))
-    arguments = ["--root", str(root), "--payload", str(self_install.running_payload_dir())]
+    arguments = ["--root", str(root), "--payload", str(payload)]
     assert installer.main([*arguments, "--", "update", *target]) == 1
     assert "No update was run" in capsys.readouterr().err
 

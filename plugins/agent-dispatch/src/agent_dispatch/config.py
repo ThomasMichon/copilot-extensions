@@ -54,8 +54,9 @@ lone dev box or against a designated coordinator host on a shared network:
   allocator or worker-prompt consumers.
 - ``AGENT_DISPATCH_RELATIONSHIP_ADMISSION`` / ``AGENT_DISPATCH_RELATIONSHIP_AUTHORITY``
   -- explicit trusted ``module:factory`` admission owner and its original
-  ``local``/``central`` queue authority; absent by default. Configuration does
-  not qualify participants or enable pool allocation.
+  ``local``/``central`` queue authority, or ``local-ordinary`` with ``local``
+  for the native ordinary assembly; absent by default. Configuration does not
+  qualify participants or enable pool allocation.
 """
 
 from __future__ import annotations

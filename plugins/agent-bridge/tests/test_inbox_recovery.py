@@ -152,6 +152,9 @@ def test_v32_preparation_adds_only_recovery_index_and_preserves_all_rows(inbox):
     consumers = [dict(row) for row in db.execute_read("SELECT * FROM bridge_inbox_consumers")]
     db.execute_write("DROP INDEX IF EXISTS live_messages_handoff_pending")
     db.execute_write("UPDATE schema_version SET version=32")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    restore_prior_inbox_guards(db._get_conn(), version=32)
     with pytest.raises((ValueError, RuntimeCustodyError), match="prepar|schema"):
         Database(db.db_path, read_only=True)
     assert db.execute_read("SELECT version FROM schema_version")[0][0] == 32

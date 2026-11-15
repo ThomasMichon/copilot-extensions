@@ -1,9 +1,13 @@
 """One actual resident admission spans setup, listeners and shutdown."""
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 
@@ -37,8 +41,11 @@ class Vault:
         self._shutdown = False
         self.is_expired = False
         self.cli = types.SimpleNamespace(status=lambda _: "fixture")
+        self._cache_warm = service.CacheWarmQueue(self)
     def initialize(self):
         admitted("initialize")
+    def _check_password_ttl(self):
+        pass
 
 def startup(vault, context):
     admitted("ready")
@@ -86,12 +93,8 @@ def invoke():
             assert not events, events
             bootstrap = argv.index("-c")
             assert argv[:bootstrap] == [
-                launch.windowless_python(sys.executable), "-X", argv[2],
+                launch.windowless_python(sys.executable), "-B",
             ]
-            assert argv[2].startswith("pycache_prefix=")
-            cache = Path(argv[2].split("=", 1)[1])
-            assert cache.parent.name == "python"
-            assert cache.parent.parent.parent.samefile(state)
             assert argv[bootstrap + 1] == launch._SERVICE_BOOTSTRAP
             assert argv[bootstrap + 2] == str(Path(launch.__file__).resolve().parent.parent)
             service_args = argv[bootstrap + 3:]
@@ -192,3 +195,61 @@ def test_actual_main_has_one_resident_and_no_finished_setup_record(tmp_path, mod
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])
     assert summary["records"] == (1 if mode in {"foreground", "windows"} else 0)
+
+
+@pytest.mark.parametrize("phase", ["tick", "cancel"])
+def test_expiry_progress_and_cancellation_ignore_saturated_request_executor(
+    monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    from agent_vault import service
+
+    checked = threading.Event()
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        started, progressed = asyncio.Event(), asyncio.Event()
+        release = threading.Event()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        vault = SimpleNamespace(
+            _shutdown=False, _runtime_can_work=True, is_expired=False,
+            _check_password_ttl=checked.set,
+        )
+        vault._cache_warm = service.CacheWarmQueue(vault)
+
+        class Generation:
+            def __init__(self, *_args: object) -> None:
+                pass
+
+            async def start(self, _port: int) -> None:
+                pass
+
+            async def tick(self) -> None:
+                assert checked.is_set()
+                progressed.set()
+
+        def block_request_worker() -> None:
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(5)
+
+        monkeypatch.setattr(service, "ServiceGeneration", Generation)
+        blocker = loop.run_in_executor(None, block_request_worker)
+        await asyncio.wait_for(started.wait(), 2)
+        pending = asyncio.create_task(service._serve(vault, 0, [], [], None))
+        try:
+            if phase == "tick":
+                await asyncio.wait_for(progressed.wait(), 1)
+            else:
+                await asyncio.sleep(0)
+            pending.cancel()
+            done, _ = await asyncio.wait({pending}, timeout=1)
+            assert pending in done, "expiry cancellation waited for a request worker"
+            with pytest.raises(asyncio.CancelledError):
+                pending.result()
+            assert not release.is_set()
+        finally:
+            release.set()
+            if not pending.done():
+                pending.cancel()
+            await asyncio.gather(pending, blocker, return_exceptions=True)
+
+    asyncio.run(scenario())

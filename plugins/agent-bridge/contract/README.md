@@ -23,6 +23,76 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
+The optional `compatible_native_inbox: 1` expansion selects
+`receiving_api: "native-sdk-v1"` on the existing retained endpoints.
+Source cases cover absent installation/process custody, actual Node/API receipt
+recovery, original one-shot handoffs, independent fresh input behind uncertain
+work, advisory metadata refresh, strict ingress/target checks, preserved legacy
+serialization and known schema-46 migration. Existing startup cases exercise
+both receiving modes. Portable execution-profile checks remain readonly and
+precede begin, without private controller ownership. Only current declarations,
+the independent HTTP-52 vector and genuine current execution evidence refresh;
+historical generations remain unchanged. These controls do not establish native
+Copilot or installed adoption.
+
+Declaration preparation can refresh a retired path's `current_path` fingerprint
+only through its already registered, affected semantic owner. The retired alias
+stays non-semantic; dirty backing bytes and missing/non-semantic owners refuse.
+This updates no captured observations or historical provenance.
+
+The optional CLI-only no-admission refusal adds six current-generation source
+controls. They execute the actual keyed-native CLI against failed ensure/client
+discovery, preserve other commands' existing client behavior, and distinguish
+read-only preflight from an attempted POST with a lost response. Only the former
+emits the request-bound version-1 refusal; the latter remains unknown.
+The new test module joins the committed execution closure. HTTP generation,
+daemon feature floors, input vector and historical HTTP-51 packets remain
+unchanged. This is source evidence, not native unavailable-owner recovery.
+
+The ordinary keyed-creation CLI/client origin carrier adds 25 source controls,
+bringing the current portfolio to 491. File/stdin parser calls join the real
+client, health negotiation, HTTP owner and first-save database without an
+acquisition. Composed writer/origin requirements, unsupported peers, cutover
+without baseline replay and invalid pre-connection forms retain strict
+semantics. The executing CLI publishes its creation and acquisition carriers
+through the existing contract declaration. No daemon capability or HTTP
+generation changes; automatic Dispatch callers remain separate.
+
+The independently optional `dispatch_cli_session_origin: 1` expansion adds 24
+source controls for original-acquisition first-save registration, pending
+unconfirmed launch, replay, same-process rename, legacy and stamped resume,
+opaque storage, transaction rollback and schema preparation. The original
+ACP provider retains its separate capability. Mode-specific acquisition-client
+controls refuse unsupported or malformed declarations before POST.
+The current vector observes
+both declarations; only current-generation evidence is refreshed. CLI source
+controls use synthetic native registration, not a live Copilot process.
+Automatic Dispatch callers and installed lifecycle qualification remain separate.
+
+The optional `dispatch_acp_session_origin: 1` expansion adds 39 source controls
+for strict original assignment metadata, pre-native first-save persistence,
+keyed HTTP replay, legacy omission, native-reuse preservation, unsupported
+venue refusal before launch gating, real-resolver refusal before privileged
+relay startup and ordinary/singleton resume responses.
+The current independent vector observes the actual daemon capability. The
+owning declaration includes the origin codec, immutable-config projection and
+affected creation/acquisition/resume seams; HTTP generation 52 and historical
+packets remain unchanged. This is ACP provider source qualification, not
+automatic caller migration, CLI-native registration or installed adoption.
+
+Live execution naming adds twelve focused controls to the current portfolio.
+They exercise the actual authenticated application route, current-config
+rename and failure behavior, standalone native/guest semantics and the Node
+registration/compatibility controls. The execution-context route and extension
+adapter are semantic sources. HTTP generation 52, prior feature floors and
+historical packets remain unchanged; the additive naming response carries its
+own `agent-bridge.execution-context/v1` schema.
+The controls include explicit-hostname and legacy-profile resolution and actual
+Node registration packets consumed by SQLite to prove rename/rollover alias and
+CLI-claim preservation. Node delivery controls cover transient predecessor
+failure, ambiguous naming, foreign incarnation and shutdown; private-cgroup
+root classification and unsafe legacy fallback remain explicit.
+
 The optional `live_delivery_observation: 1` expansion retains HTTP generation
 52 and every prior introduction floor. Eighteen additional source cases cover
 fresh/partial/stale pending input, SDK acceptance versus root consumption,
@@ -33,6 +103,14 @@ client, router, CLI and extension helper as semantic sources. This is not
 proof of native model transmission, installed extension reload or deployment.
 Prepare the expanded source declarations before the genuine current-generation
 capture; hashes alone are not new execution evidence.
+
+Worktrees retained cold-resume registration now corroborates a fresh native
+activation before attaching to a closed interval. Its changed registered
+receiver sources retain semantic classification and receive fresh current
+HTTP-52 execution evidence. The wire generation, independent input vector,
+historical packets and prompt-acceptance semantics are unchanged. Separate
+Worktrees parser/kernel-hold controls cover the new activation and its refusals;
+this source evidence does not establish installed continuation.
 
 Owner membership introduces HTTP generation 52 and
 `OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52`. Its named

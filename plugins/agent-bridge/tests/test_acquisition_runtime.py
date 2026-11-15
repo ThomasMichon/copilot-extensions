@@ -64,7 +64,7 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         },
     }
 
-    async def resolve(name):
+    async def resolve(name, **_kwargs):
         if name == "dispatch:task-a":
             return SpawnTarget(type="session", worktree_id="worktree-a", venue=source)
         assert name == "task-worker"

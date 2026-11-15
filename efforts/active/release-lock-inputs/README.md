@@ -24,6 +24,12 @@ under which each dependency is required.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+uses these candidate declarations through their existing resolution/admission
+owners before app staging. They are not approved locks or a new constructor.
+Fresh install and update share that input path; the existing source exceptions,
+consumer acceptance and unresolved Plan/Validation rows remain unchanged.
+
 - **Topology:** one isolated implementation PR.
 - **Host:** the #6937 claimant owns this slice through review and merge.
 - **Delegates:** none.

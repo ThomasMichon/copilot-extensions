@@ -296,3 +296,157 @@ def test_invalid_and_ambiguous_immutable_enrollments(keys):
     ):
         with pytest.raises(IdentityError):
             verifier(keys, enrollments=enrollments)
+
+
+@pytest.fixture(scope="module")
+def rsa_keys():
+    from joserfc.jwk import RSAKey
+
+    return RSAKey.generate_key(2048), ECKey.generate_key("P-256")
+
+
+def rsa_verifier(keys, **changes):
+    from fleet_manager.bearer_identity import ClaimRequirement
+    from fleet_manager.enrolled_identity import EnrolledRS256IdentityVerifier
+
+    return EnrolledRS256IdentityVerifier(**{
+        "issuer": ISSUER, "audience": AUDIENCE,
+        "jwks": {"keys": [{**keys[0].as_dict(private=False), "kid": "issuer-1"}]},
+        "trust_valid_until": NOW + 1000, "clock": Clock(),
+        "allowed_audiences": (AUDIENCE,), "enrollments": (binding(keys),),
+        "subject_claim": "object_id", "client_claim": "app_id",
+        "required_claims": (
+            ClaimRequirement("roles", ("gateway-client",), "list"),
+            ClaimRequirement("realm", ("realm-a",), "scalar")),
+        **changes,
+    })
+
+
+def rsa_pair(keys, nonce, **changes):
+    access = changes.pop("access", {})
+    header = changes.pop("access_header", {})
+    return application_pair(
+        keys, nonce, access_header={"alg": "RS256", "typ": "JWT", **header},
+        access={"sub": "not-selected", "client_id": "not-selected",
+                "object_id": "issuer-subject", "app_id": "application-client",
+                "roles": ["gateway-client"], "realm": "realm-a", **access}, **changes)
+
+
+def test_rs256_original_token_and_enrollment_both_required(rsa_keys):
+    owner = rsa_verifier(rsa_keys)
+    credentials = rsa_pair(rsa_keys, owner.nonce)
+    identity = check(owner, credentials)
+    assert type(identity) is EnrolledIdentity
+    assert (identity.subject, identity.profile, identity.kind, identity.expires_at) == (
+        "canonical-principal", "enrolled-rs256-pop-v1", "caller", NOW + 600)
+    assert identity.proof_key == rsa_keys[1].thumbprint()
+    refuses(owner, credentials, "proof-replayed")
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce), "invalid-key-binding", kind="service")
+    attacker = ECKey.generate_key("P-256")
+    refuses(owner, rsa_pair((rsa_keys[0], attacker), owner.nonce), "invalid-key-binding")
+    assert all(value not in repr(identity) for value in credentials)
+
+
+@pytest.mark.parametrize("claims,code", [
+    ({"object_id": "canonical-principal"}, "invalid-key-binding"),
+    ({"object_id": None}, "invalid-credential"),
+    ({"app_id": "other"}, "invalid-key-binding"),
+    ({"app_id": []}, "invalid-credential"),
+    ({"iss": "https://foreign.example"}, "invalid-credential"),
+    ({"aud": "foreign"}, "invalid-credential"),
+    ({"aud": [AUDIENCE, "unapproved"]}, "invalid-credential"),
+    ({"roles": "gateway-client"}, "required-claim-denied"),
+    ({"roles": ["other"]}, "required-claim-denied"),
+    ({"roles": ["gateway-client", "gateway-client"]}, "required-claim-denied"),
+    ({"realm": ["realm-a"]}, "required-claim-denied"),
+    ({"exp": NOW}, "expired-credential"),
+    ({"iat": True}, "invalid-credential"),
+    ({"nbf": NOW + 31}, "invalid-credential"),
+    ({"cnf": {"jkt": "x" * 43}}, "invalid-key-binding"),
+])
+def test_rs256_signed_claims_cannot_supply_their_own_authority(rsa_keys, claims, code):
+    owner = rsa_verifier(rsa_keys)
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce, access={"iat": NOW - 100, **claims}), code)
+
+
+@pytest.mark.parametrize("proof,code", [
+    ({"nonce": "old"}, "invalid-proof"), ({"htm": "POST"}, "invalid-proof"),
+    ({"htu": TARGET + "/other"}, "invalid-proof"),
+    ({"ath": "x" * 43}, "invalid-token-binding"),
+    ({"iat": NOW - 91}, "invalid-proof"),
+])
+def test_rs256_uses_the_real_common_request_proof_fence(rsa_keys, proof, code):
+    owner = rsa_verifier(rsa_keys)
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce, proof=proof), code)
+
+
+def test_rs256_signatures_confirmation_and_expiry_are_independent(rsa_keys):
+    from joserfc.jwk import RSAKey
+
+    owner = rsa_verifier(rsa_keys)
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce, signer=RSAKey.generate_key(2048)),
+            "invalid-signature")
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce, proof_signer=ECKey.generate_key("P-256")),
+            "invalid-signature")
+    for header in ({"jku": "https://foreign.example/keys"}, {"jwk": {}},
+                   {"typ": "at+jwt"}):
+        refuses(owner, rsa_pair(rsa_keys, owner.nonce, access_header=header),
+                "invalid-credential")
+    credentials = rsa_pair(rsa_keys, owner.nonce, access={
+        "cnf": {"jkt": rsa_keys[1].thumbprint()}, "exp": NOW + 2})
+    assert check(owner, credentials).expires_at == NOW + 2
+    owner._clock.value = NOW + 2
+    refuses(owner, credentials, "expired-credential")
+
+
+def test_rs256_cannot_be_selected_through_legacy_verifiers(rsa_keys, keys):
+    from fleet_manager.bearer_identity import BearerIdentityVerifier, PrincipalMapping
+
+    legacy = verifier(keys)
+    refuses(legacy, rsa_pair(rsa_keys, legacy.nonce), "invalid-credential")
+    bearer = BearerIdentityVerifier(
+        issuer=ISSUER, audience=AUDIENCE,
+        jwks={"keys": [{**rsa_keys[0].as_dict(private=False), "kid": "issuer-1"}]},
+        trust_valid_until=NOW + 1000, clock=Clock(), principal_claim="object_id",
+        required_claims=(), mappings=(PrincipalMapping("issuer-subject", "canonical-principal"),))
+    with pytest.raises(IdentityError, match="^unsupported-profile$"):
+        bearer.verify(rsa_pair(rsa_keys, "unused")[0], method="GET",
+                      target_uri=TARGET, kind="service")
+
+
+def test_rs256_enrollment_trust_expiry_and_exact_downstream_profile(rsa_keys):
+    from fleet_manager.runtime_admission import AdmissionAuthority, AdmissionError, ObservationRead
+    from test_runtime_admission import actor, policy
+
+    owner = rsa_verifier(rsa_keys, enrollments=(
+        replace(binding(rsa_keys), expires_at=NOW + 1),))
+    identity = check(owner, rsa_pair(rsa_keys, owner.nonce))
+    current = policy(enrollments=(actor("canonical-principal"),),
+                     identity_profile="enrolled-rs256-pop-v1")
+    admission = AdmissionAuthority(snapshot=lambda: current, clock=owner._clock)
+    grant = admission.authorize(identity, ObservationRead("fleet-a"),
+                                role="client", installation="client-a")
+    assert grant.enrollment.subject == "canonical-principal"
+    current = replace(current, revision=2, identity_profile="enrolled-pop-v1")
+    other_identity = check(owner, rsa_pair(rsa_keys, owner.nonce, proof={"jti": "other"}))
+    legacy_admission = AdmissionAuthority(snapshot=lambda: current, clock=owner._clock)
+    with pytest.raises(AdmissionError, match="^unsupported-profile$"):
+        legacy_admission.authorize(other_identity, ObservationRead("fleet-a"),
+                                   role="client", installation="client-a")
+    owner._clock.value = NOW + 1
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce), "expired-credential")
+    owner._clock.value = NOW + 1000
+    refuses(owner, rsa_pair(rsa_keys, owner.nonce), "authority-unavailable")
+
+
+@pytest.mark.parametrize("changes", [
+    {"subject_claim": []}, {"client_claim": ""}, {"required_claims": []},
+    {"required_claims": (object(),)},
+    {"jwks": {"keys": []}},
+])
+def test_rs256_claim_configuration_and_public_trust_are_not_provider_authority(rsa_keys, changes):
+    with pytest.raises(IdentityError):
+        rsa_verifier(rsa_keys, **changes)
+    private = {**rsa_keys[0].as_dict(private=True), "kid": "issuer-1"}
+    with pytest.raises(IdentityError, match="^invalid-key$"):
+        rsa_verifier(rsa_keys, jwks={"keys": [private]})

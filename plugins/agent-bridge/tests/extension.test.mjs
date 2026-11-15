@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 
 test("extension fallback port matches the canonical Python client default", () => {
-  const source = readFileSync(join(here, "../extensions/agent-bridge/extension.mjs"), "utf-8");
+  const source = readFileSync(join(here, "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs"), "utf-8");
   assert.match(source, /return `http:\/\/\$\{host\}:9280`;/);
   assert.doesNotMatch(source, /9281/);
 });

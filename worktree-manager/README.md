@@ -1081,12 +1081,13 @@ budget. Neither observation nor reconciliation alone authorizes selector
 settlement or rollback; a coordinating caller must hold the appropriate
 native ownership and recheck the result.
 Normal mux-daemon startup uses the
-[external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
-under Manager's durable root. Explicitly read-only retention/bootstrap controls
+[platform Python cache policy](../libs/agent-procutil/README.md#platform-cache-provider-contract)
+with Manager's durable root as the installation identity, not the cache location.
+Unsealed or older providers and explicitly read-only retention/bootstrap controls
 keep their separate no-bytecode contract.
 Worktrees' direct Manager and fast-Picker handoffs carry the same cache policy
-on their frozen engine callback command, using Worktrees' durable root rather
-than Manager's root. The callback keeps its original interpreter and arguments.
+on their frozen engine callback command, using Worktrees' installation identity
+rather than Manager's. The callback keeps its original interpreter and arguments.
 The retained launch-session registration and pane-wrapper removal callbacks
 also use that payload's constructed interpreter and retention bootstrap, without
 requiring `uv`. Their bounded metadata work is dispatched through the existing
@@ -3234,6 +3235,13 @@ pwsh -File scripts/preview-picker.ps1 -Project <project> -Format svg -Out picker
 cd scripts/picker-snapshot && python install.py
 uv run python render.py picker.png
 ```
+
+Current-roster readers consume the optional
+[live reporting context](../plugins/agent-worktrees/docs/engine-picker-contract.md#live-reporting-context)
+from the serving engine, including heartbeat-only renames and unavailable
+mapping withdrawal. Reporter naming never rewrites the configured source,
+selection key or action route. Providers without the envelope retain the legacy
+row-tuple baseline; no local-host lookup substitutes for a remote reporter.
 
 New Worktree options and the Open/Resume action menu expose independent,
 default-off `AHP` and `No Mux` checkmarks. `AHP` asks the Manager to create or

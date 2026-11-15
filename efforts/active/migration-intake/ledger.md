@@ -132,3 +132,174 @@ issue's body is a self-contained, repository-neutral restatement of the
 routed Plan bullet with no reference to this ledger's originating session
 context.)*
 
+## Finite account-execution intake (2026-11-13)
+
+This pass proposes the following disposition. `routed` takes effect only
+when normal review merges the accompanying direct domain Plan amendment;
+publishing this ledger proposal alone is not domain acceptance. Earlier
+passes and all unresolved residuals above remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Intended-account execution, including inherited stale-credential and registered-target parity | Public #5791, including its already-transferred #330/#2755 acceptance | routed | [`account-aware-operations`](../account-aware-operations/README.md), **Phase 2 only** | Retain existing #5791 pending separate whole-contract receiving/source judgment; no new issue or umbrella |
+
+Deduplication keeps one original-plus-inherited family, not separate new
+#330/#2755 work or another identity resolver. The current qualified source
+assessment credits #8921's explicit missing-token correction and #3050's
+short-name lookup; named-account actionable stale/rejected-token refusal
+and the complete supported dispatcher compatibility matrix remain
+unqualified acceptance, not declared absent implementation.
+
+The proposed home already owns repository/account selection and scoped
+execution. Its Phase 1 identity contract and Phase 4 recovery are interfaces,
+not additional primary phases or new owners. The direct Phase 2 Plan/local
+AND actual global Validation and Coordination retain the original finite
+contract, alternatives, diagnostic classes, current repair continuation and
+custody. The candidate is general-purpose public tracker work; no originating
+environment or private evidence is published.
+
+The owning effort remains Draft. Reviewed domain-Plan acceptance does not
+activate it, waive its temporary-token implementation restriction, create
+another tracker, satisfy runtime acceptance or authorize authentication,
+provider writes, rollout or source/resource release. Unknown current evidence
+continues to block technical completion; it is not force-published as proof.
+
+## Finite unmeasured-source accounting intake (2026-11-13)
+
+This proposes `routed`; it takes effect only when normal review merges
+the accompanying complete domain Plan amendment. Ledger publication alone
+is not acceptance.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Attributable failed/unmeasured context-source accounting, complete coverage and honest partial totals | Public #5896, complete original/refinement | routed | [progressive-context-disclosure](../progressive-context-disclosure/README.md), Phase 6 only | Retain #5896 pending actual reviewed receiving, full-current readback and separate source judgment; no new issue or umbrella |
+
+The existing reviewing-customizations measurement lane fits this finite
+portable outcome. Direct B5896/local BV5896/actual global G5896 and
+continuing Coordination preserve all four requirement groups. Existing
+source-resolution and static/dynamic-delivery efforts remain separate;
+the repair is not another disclosure standard, scanner owner or native
+activation programme. Independent capture/measurement is not retroactively
+gated on behavioral calibration. Prior ledger rows, custody and all
+incumbent acceptance remain unchanged.
+
+## Finite link-capability and portable-timeout intake (2026-11-13)
+
+This proposes `routed`; it takes effect only when normal review merges the
+accompanying complete direct domain Plan amendment. Ledger publication
+alone is not acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Logger five-boundary link-fixture capability and inherited two HostProfile controls/direct packet | Public #6093 including admitted #9618 acceptance | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 only | Retain #6093 and OPEN #1303; no new issue or umbrella; preserve LFV3 and existing source custodians |
+| Portable PowerShell spaced-path/Force timeout and investigator's candidate-first correction-OR-retry disposition | Public #6138, complete original/refinement | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 only | Retain #6138 and OPEN #1303; no new issue or umbrella; #6131/#6135 remain independent |
+
+Deduplication keeps each complete existing tracker family once: #9618 is
+inherited acceptance, not another candidate or implementation owner.
+Phase 7 is the intake/review route, not a second primary phase. These
+finite portable fixture contracts use the existing Logger/Manager and
+Budget waves; no new programme, runner or alternative domain owner is
+created. Existing claims, original alternatives, budgets and source/
+resource responsibilities remain. Reviewed planned receiving is not a
+fixture repair, causal timeout disposition, native PASS or source closure.
+
+## Finite classifier-startup investigation intake (2026-11-13)
+
+This proposes `routed`; it takes effect only when normal review merges the
+accompanying complete direct domain amendment. Ledger publication alone is
+not domain acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Exact PowerShell classifier-startup diagnosis, unchanged downgrade/rethrow acceptance and distinct related recovery observation | Public #6747, complete original and eligible refinements | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 only | Retain #6747 pending reviewed delivery, full-current receiving/source/custody readback and separate judgment; retain OPEN #1303 and existing diagnosis custody; no new issue |
+
+Phase 7 supplies deduplication/domain review, not another primary owner.
+The complete #6662 family is already directly retained as N6662; no duplicate
+candidate or Plan row is created. #5245's broader tail, release consumers and
+source-install duties remain independent. Receiving planned unresolved work
+does not establish causal repair, flake acceptance, executed evidence or
+claim/resource transfer.
+
+## Finite external image-mapping cleanup intake (2026-11-14 UTC)
+
+This records the domain Plan acceptance already merged in #12573. The
+complete current owning ROOT, strict framework and this intake contract/ledger
+were read back; the route was missing from this append-only record.
+Earlier rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Runner-owned external executable mapping after successful child exit, bounded handling OR truthful retained-artifact reconciliation | Public #7643, complete original and both eligible refinements | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 5 P7643/V7643/G7643 only | Existing #7643 remains OPEN pending a separate source-specific judgment; no new issue or umbrella, implementation appointment, cleanup or claim release |
+
+Phase 7 I7643 records this deduplication/ownership route, not a second primary
+owner or completed technical acceptance. The reviewed domain Plan receives
+the whole finite union directly. Its separate Phase 5 family does not join
+F4 or #10225 and does not absorb installer #7494/#7686 retained-input failures;
+no common cause or completion is inferred from shared terminology.
+
+Preserve bounded exact-owner handling **OR** a truthful retained-artifact
+outcome, successful-child versus failed-cleanup evidence, distinct primary
+and cleanup errors, actual artifact identity, original containment/budgets
+and the existing runner/group/sandbox and later cleanup custodians. Routing
+does not authorize a live XtaCache operation, process/service action, deletion,
+test, source change, resource transfer or technical completion. All ten
+P7643/V7643/G7643 technical rows remain unchecked.
+
+## Finite provider-appropriate update-guidance intake (2026-11-14 UTC)
+
+This proposes `routed`; it takes effect only when normal review merges the
+accompanying complete direct domain Plan amendment. Ledger publication alone
+is not domain acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Provider/policy-appropriate update-authentication advice with honest timeout/unavailable classification and unchanged update result | Public #12466, complete original | routed | [account-aware-operations](../account-aware-operations/README.md), Phase 4 P12466/V12466/G12466 only | Retain existing #12466 pending reviewed delivery, current receiving/source readback and separate judgment; no new issue or umbrella |
+
+Phase 5 is the intake/review route, not a second primary phase. The existing
+remote/provider diagnostic and scoped-execution contract is the fit. Current
+tracker deduplication retains #12466; broader auth/provider vocabulary does not
+by itself prove duplicate scope or the absence of another implementation.
+The finite source study identifies a generic-HTTPS failure branch with
+unconditional GitHub login advice, while crediting existing structured refusal,
+credential isolation and configured timeout controls. It establishes no global
+absence or technical completion.
+
+Keep GitHub/Enterprise advice valid, unknown/unrelated-provider diagnostics
+neutral, timeout/unavailability distinct from credential rejection and the
+original status/update outcome unchanged. Existing source custodians,
+Draft status, temporary-token implementation restriction, #5791/#810 scope
+and all prior Plan/Validation rows remain. Direct reviewed Plan acceptance
+does not appoint an executor, authorize authentication/test/update/provider
+effects or release a source/resource claim.
+
+## Finite #69 account-to-provider integration intake (2026-11-14 UTC)
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Deferred Phase 2 account-to-auth-provider abstraction AND actual account-to-provider-to-credential resolver/integration for the original non-CLI scope; delivered GitHub repo-to-account Phase 1 remains credit | Public #69, complete original and four comments | routed (proposed; effective after normal reviewed direct Plan acceptance) | account-aware-operations, P69-C/P69-I/V69/G69 only | Retain #69 pending direct receiving review/readback and a separate source-specific judgment; technical work remains planned; no new issue, executor, credential/provider effect or source/resource transfer |
+
+P69-C retains the contract/placement decision; P69-I and V69 retain unchecked
+technical delivery and behavior acceptance. Preserve the exact `accounts.yaml`
+and/or moving credential ownership into `agent-vault` alternative, with
+Worktrees, agent-vault/trust and venue-parity custody unchanged. This appends
+one primary route without changing any prior ledger entry. Ledger publication
+or reviewed Plan intake is not technical completion or issue disposition;
+future technical acceptance is not a new physical-OPEN condition on #69.
+
+## Finite runtime-startup intake (2026-11-15 UTC)
+
+This appends a proposed route; it becomes effective only through normal
+reviewed delivery of the accompanying complete direct domain Plan amendment.
+Ledger publication alone is not domain acceptance. Prior rows and unresolved
+residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Context-ingestion deferral OR streaming, same-type warm-up reuse, and explicit optional-only `--minimal`, with measured startup AND task-grounding latency and preserved required guidance | Public #4138, complete original and eligible discussion | routed (proposed; effective after normal reviewed direct Plan acceptance) | [progressive-context-disclosure](../progressive-context-disclosure/README.md), Phase 2 PC4138-P1/P2/P3/LV1-LV4/G only | Retain #4138 pending reviewed delivery, current receiving/source readback and separate judgment; no new issue, executor, measurement, native-session effect or source/resource transfer |
+
+Phase 8 remains the existing intake and ownership-review path, not a second
+primary phase. The ROOT's progressive-disclosure and grounding-latency scope
+supports this finite runtime contract; #4197's distinct documentation intake
+neither receives it nor prohibits separately admitting it. All new technical
+acceptance remains unchecked. Planned receiving does not require the features
+or a native activation to have happened first, and does not establish either.

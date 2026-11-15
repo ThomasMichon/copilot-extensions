@@ -155,6 +155,16 @@ def _receiver_capabilities(creator: str, target: dict) -> None:
         "max_response_bytes": allocation_creation_result.MAX_RESPONSE_BYTES,
     } or type(value["creation_result"].get("version")) is not int:
         raise ValueError("selected receiver lacks compatible ordinary creation results")
+    attempt = target.get("options", {}).get("dispatch_attempt", {})
+    if "cohort" in attempt:
+        from . import dispatch_cohort
+
+        supported = value.get("dispatch_cohort")
+        if (
+            supported != dispatch_cohort.capability()
+            or type(supported.get("version")) is not int
+        ):
+            raise ValueError("selected receiver lacks original dispatch cohort support; update the receiver")
 
 
 def _origin_operation(creator: str, path: Path, operation: str, payload: dict) -> dict:

@@ -17,6 +17,93 @@ import test_runtime_serving as serving_controls
 import test_live_inbox_runtime as inbox_controls
 import test_native_send_admission as native_controls
 import test_gc as gc_controls
+from test_receiving_bundle import (
+    test_actual_sdk_facade_loads_the_core_without_suite_services
+    as test_actual_sdk_facade_loads_the_core_without_suite_services,
+)
+from test_plugin_readiness_extension import (
+    test_core_extension_helper_contracts as test_core_extension_helper_contracts,
+    test_readiness_and_existing_delivery_node_contracts
+    as test_readiness_and_existing_delivery_node_contracts,
+)
+from test_native_send_unavailable import (
+    test_real_cli_reports_unavailable_before_constructing_native_admission
+    as test_real_cli_reports_unavailable_before_constructing_native_admission,
+    test_other_commands_keep_existing_unavailable_client_behavior
+    as test_other_commands_keep_existing_unavailable_client_behavior,
+    test_transport_distinguishes_preflight_from_a_lost_post_response
+    as test_transport_distinguishes_preflight_from_a_lost_post_response,
+)
+from test_worktree_source_evidence import (
+    test_reporter_naming_overrides_stored_names_without_retargeting_agent
+    as test_reporter_naming_overrides_stored_names_without_retargeting_agent,
+    test_invalid_reporting_context_does_not_replace_last_good_inventory
+    as test_invalid_reporting_context_does_not_replace_last_good_inventory,
+    test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes
+    as test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes,
+)
+from test_dispatch_origin_cli import (
+    test_origin_cli_reaches_actual_keyed_owner_without_acquisition
+    as test_origin_cli_reaches_actual_keyed_owner_without_acquisition,
+    test_origin_creation_client_composes_required_selected_peer_capabilities
+    as test_origin_creation_client_composes_required_selected_peer_capabilities,
+    test_origin_creation_client_rechecks_after_cutover_without_baseline_replay
+    as test_origin_creation_client_rechecks_after_cutover_without_baseline_replay,
+    test_origin_creation_client_invalid_scope_refuses_before_peer_discovery
+    as test_origin_creation_client_invalid_scope_refuses_before_peer_discovery,
+    test_origin_cli_invalid_forms_refuse_before_connect
+    as test_origin_cli_invalid_forms_refuse_before_connect,
+)
+from test_dispatch_cli_origin import (
+    test_origin_client_negotiates_mode_capability_before_acquisition
+    as test_origin_client_negotiates_mode_capability_before_acquisition,
+    test_connected_cli_creation_persists_before_delivery_and_replays
+    as test_connected_cli_creation_persists_before_delivery_and_replays,
+    test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch
+    as test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch,
+    test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting
+    as test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting,
+    test_resume_into_existing_conversation_preserves_its_stamp_or_absence
+    as test_resume_into_existing_conversation_preserves_its_stamp_or_absence,
+    test_resume_gate_never_stamps_provisional_or_legacy_identity
+    as test_resume_gate_never_stamps_provisional_or_legacy_identity,
+    test_incoherent_origin_refuses_registration_without_claiming_reservation
+    as test_incoherent_origin_refuses_registration_without_claiming_reservation,
+    test_foreign_driver_cannot_claim_origin_and_failed_fold_rolls_back_first_save
+    as test_foreign_driver_cannot_claim_origin_and_failed_fold_rolls_back_first_save,
+    test_legacy_and_opaque_storage_remain_unattributed
+    as test_legacy_and_opaque_storage_remain_unattributed,
+    test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_preparation
+    as test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_preparation,
+    test_current_schema_without_origin_storage_is_not_silently_repaired
+    as test_current_schema_without_origin_storage_is_not_silently_repaired,
+)
+from test_dispatch_session_origin import (
+    boundary as boundary,
+    singleton_boundary as singleton_boundary,
+    test_origin_rejects_malformed_or_cross_assignment_evidence
+    as test_origin_rejects_malformed_or_cross_assignment_evidence,
+    test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged
+    as test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged,
+    test_acquisition_refuses_unqualified_modes_and_other_assignments
+    as test_acquisition_refuses_unqualified_modes_and_other_assignments,
+    test_acquisition_first_save_replay_restart_and_reassignment_keep_birth
+    as test_acquisition_first_save_replay_restart_and_reassignment_keep_birth,
+    test_legacy_acquisition_reuse_never_backfills_origin
+    as test_legacy_acquisition_reuse_never_backfills_origin,
+    test_keyed_http_creation_retains_origin_and_rejects_changed_or_dropped_stamp
+    as test_keyed_http_creation_retains_origin_and_rejects_changed_or_dropped_stamp,
+    test_public_origin_requires_keyed_prepared_workspace
+    as test_public_origin_requires_keyed_prepared_workspace,
+    test_unsupported_target_refuses_before_worktree_effects
+    as test_unsupported_target_refuses_before_worktree_effects,
+    test_acquisition_venue_refusal_is_terminal_before_launch_gating
+    as test_acquisition_venue_refusal_is_terminal_before_launch_gating,
+    test_worktree_resume_responses_keep_known_origin
+    as test_worktree_resume_responses_keep_known_origin,
+    test_real_resolver_refuses_elevation_before_relay_start
+    as test_real_resolver_refuses_elevation_before_relay_start,
+)
 from fastapi.testclient import TestClient
 
 host_status_api = host_status.api
@@ -86,9 +173,41 @@ def test_host_status_legacy_timeout_compatibility(host_status_api, monkeypatch):
     host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout(host_status_api, monkeypatch)
 
 import bridge_http52_evidence as evidence
+from test_execution_context import (
+    test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records
+    as test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records,
+    test_standalone_uses_shared_unmapped_host_semantics
+    as test_standalone_uses_shared_unmapped_host_semantics,
+    test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster
+    as test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster,
+    test_current_context_route_retains_bridge_authentication
+    as test_current_context_route_retains_bridge_authentication,
+    test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key
+    as test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key,
+    test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming
+    as test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming,
+    test_machine_rename_rollover_retains_alias_and_cli_claim
+    as test_machine_rename_rollover_retains_alias_and_cli_claim,
+)
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+
+
+def test_execution_context_extension_controls():
+    from agent_procutil.owned_process import run_caller_owned
+
+    node = shutil.which("node")
+    assert node is not None, "execution-context capture requires Node"
+    tests = Path(__file__).parent
+    result = run_caller_owned(
+        [node, "--test", str(tests / "metadata.test.mjs"), str(tests / "bridge-endpoint.test.mjs"),
+         str(tests / "delivery.test.mjs")],
+        timeout=60, max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 from test_live_delivery_state import (
     delivery_api as delivery_api,
     test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row
@@ -279,6 +398,35 @@ from test_inbox_consumer_enrollment import (
 from test_live_inbox_producer import (
     test_retained_startup_admission_requires_its_original_ready_input
     as test_retained_startup_admission_requires_its_original_ready_input,
+)
+from test_live_inbox_runtime import (
+    test_legacy_request_serialization_does_not_send_a_new_selector
+    as test_legacy_request_serialization_does_not_send_a_new_selector,
+    test_native_sdk_receiving_needs_no_installation_or_process_custody
+    as test_native_sdk_receiving_needs_no_installation_or_process_custody,
+    test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work
+    as test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work,
+    test_native_inbox_preserves_real_target_and_ingress_boundaries
+    as test_native_inbox_preserves_real_target_and_ingress_boundaries,
+    test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade
+    as test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade,
+    test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls
+    as test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls,
+    test_native_poll_does_not_promote_unverified_legacy_startup_input
+    as test_native_poll_does_not_promote_unverified_legacy_startup_input,
+    test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work
+    as test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work,
+    test_native_receiving_does_not_reacquire_custody_after_metadata_refresh
+    as test_native_receiving_does_not_reacquire_custody_after_metadata_refresh,
+)
+from test_retained_sdk_recovery import (
+    test_native_sdk_process_recovery_uses_original_receipts_without_installation_context
+    as test_native_sdk_process_recovery_uses_original_receipts_without_installation_context,
+)
+from test_inbox_custody import (
+    inbox as inbox,
+    test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation
+    as test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation,
 )
 from test_plugin_readiness import (
     test_readonly_poll_never_claims_or_expires_mutation_controls
@@ -478,6 +626,9 @@ def test_http51_capture_actual_observations(
     health = api.get("/health").json()
     observed["live_question_answers"] = health["capabilities"]["live_question_answers"]
     observed["mux_question_answers"] = health["capabilities"]["mux_question_answers"]
+    observed["dispatch_acp_session_origin"] = health["capabilities"]["dispatch_acp_session_origin"]
+    observed["dispatch_cli_session_origin"] = health["capabilities"]["dispatch_cli_session_origin"]
+    observed["compatible_native_inbox"] = health["capabilities"]["compatible_native_inbox"]
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
@@ -578,6 +729,9 @@ def test_http51_capture_actual_observations(
     api.headers.pop("Authorization")
     observed["unauthenticated"] = api.post(path, json=body).status_code
     api.close()
+    assert observed["live_cli"] == vector["expected"]["live_cli"], json.dumps(
+        observed["live_cli"], sort_keys=True,
+    )
     assert observed == vector["expected"]
     if bound is not None:
         record_observations(evidence, bound, request.node.callspec.params["installation"], observed)

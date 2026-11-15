@@ -182,7 +182,21 @@ def test_released_library_overrides_are_canonical_and_invalidate_cache(released_
         runner._dep_fingerprint("agent-pull-requests")
 
 
-def test_released_preparation_passes_overrides_through_normal_policy(released_graph, monkeypatch):
+@pytest.fixture
+def preparation_metadata(tmp_path, monkeypatch):
+    import installer_dependency_policy
+    from agent_procutil import owned_process
+    monkeypatch.setenv("UV_CREDENTIALS_DIR", str(tmp_path / "credentials"))
+    monkeypatch.setattr(installer_dependency_policy, "_select_uv_executable", lambda uv: "fixture-uv")
+    monkeypatch.setattr(
+        owned_process, "run_caller_owned",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, (str(tmp_path / "credentials") + "\n").encode(), b"",
+        ),
+    )
+
+
+def test_released_preparation_passes_overrides_through_normal_policy(released_graph, monkeypatch, preparation_metadata):
     plugin, _, canonical = released_graph
     (runner.VENV_ROOT / "agent-pull-requests").mkdir(parents=True)
     monkeypatch.setattr(
@@ -245,7 +259,29 @@ def test_released_composition_refuses_source_activation_selectors(released_graph
 
 
 def _copy_metadata_checkout(source, checkout, consumer):
+    engine = source / "libs" / "installer-engine"
+    for source_file in engine.iterdir():
+        if source_file.is_file():
+            destination = checkout / "libs" / "installer-engine" / source_file.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_file, destination)
     roots = cache_policy._dependency_sources(consumer, source / "plugins" / consumer, source)
+    # Materialization reads every declared local source, including requirements
+    # inactive on the current platform; dependency resolution deliberately does not.
+    pending = list(roots)
+    while pending:
+        manifest = pending.pop() / "pyproject.toml"
+        if not manifest.is_file():
+            continue
+        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        for selected in data.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            for entry in selected if isinstance(selected, list) else [selected]:
+                if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                    continue
+                dependency = (manifest.parent / entry["path"]).resolve()
+                if dependency.is_relative_to(source.resolve()) and dependency not in roots:
+                    roots.add(dependency)
+                    pending.append(dependency)
     names = set()
     for root in roots:
         manifest = root / "pyproject.toml"
@@ -278,12 +314,12 @@ def test_real_materialized_metadata_preserves_active_platform_constraints(
         snapshot = tmp_path / "input"
         _copy_metadata_checkout(source, snapshot, consumer)
         log = materialize_main.materialize_uv_editable_refs(snapshot, canonical_root=snapshot)
-        assert not any(line.startswith("SKIP") for line in log), log
+        assert not any(line.startswith("SKIP") for line in log), [line for line in log if line.startswith("SKIP")]
         source = snapshot
     checkout = tmp_path / "release"
     _copy_metadata_checkout(source, checkout, consumer)
     log = materialize_main.materialize_uv_editable_refs(checkout, canonical_root=checkout)
-    assert not any(line.startswith("SKIP") for line in log), log
+    assert not any(line.startswith("SKIP") for line in log), [line for line in log if line.startswith("SKIP")]
     overrides, constraints = cache_policy.canonical_test_sources(
         consumer, checkout / "plugins" / consumer, checkout,
     )
@@ -356,7 +392,7 @@ def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
 
 
 @pytest.mark.parametrize("linked_parent", [False, True])
-def test_linked_cache_root_refuses_without_touching_target(graph, monkeypatch, linked_parent):
+def test_linked_cache_root_refuses_without_touching_target(graph, monkeypatch, linked_parent, preparation_metadata):
     target = runner.VENV_ROOT / "real"
     target.mkdir(parents=True)
     marker = target / "preserved"
@@ -373,7 +409,7 @@ def test_linked_cache_root_refuses_without_touching_target(graph, monkeypatch, l
 
 
 def test_automatic_body_drift_rebuild_refreshes_uv_and_preserves_other_cache(
-    graph, monkeypatch,
+    graph, monkeypatch, preparation_metadata,
 ):
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
@@ -505,7 +541,7 @@ def test_non_windows_cache_spelling_is_unchanged(monkeypatch, tmp_path):
     assert native_test_paths.native_test_path(tmp_path) is tmp_path
 
 
-def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(graph, monkeypatch):
+def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(graph, monkeypatch, preparation_metadata):
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
     python = root / "fixture-python"
@@ -518,8 +554,11 @@ def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(graph, monkeypatch
     identity = (root.stat().st_dev, root.stat().st_ino)
     monkeypatch.setattr(runner, "_venv_python", lambda _name: python)
 
-    def refuse(path):
-        raise PermissionError("owned cache is still held")
+    real_rmtree = cache_policy.shutil.rmtree
+    def refuse(path, *args, **kwargs):
+        if Path(path).name == held.name:
+            raise PermissionError("owned cache is still held")
+        return real_rmtree(path, *args, **kwargs)
 
     def unexpected(*args, **kwargs):
         pytest.fail("failed cleanup must not prepare or mark an environment ready")

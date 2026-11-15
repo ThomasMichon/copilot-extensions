@@ -13,6 +13,7 @@ from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_schema import _SchemaMixin
 from agent_bridge.inbox_custody import schema_triggers
 from tests.test_live_keyed_receipt import rollover
+from legacy_inbox_schema import restore_prior_inbox_guards
 
 
 def prior_owners(monkeypatch):
@@ -71,6 +72,7 @@ def test_actual_schema38_cold_start_refuses_before_aliasing_admitted_exact_input
     mid = admitted(tmp_db, kind)
     before = dict(tmp_db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0])
     prior = prior_owners(monkeypatch)
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=46)
     with monkeypatch.context() as old:
         old.setitem(sys.modules, "agent_bridge.inbox_custody", prior["inbox_custody"])
         old.setattr(_SchemaMixin, "_init_schema", prior["db_schema"]._SchemaMixin._init_schema)
@@ -95,14 +97,15 @@ def test_control_actual_schema38_startup_accepts_old_guard_and_moves_exact_row_o
         schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1]
     )
     tmp_db.execute_write("UPDATE schema_version SET version=39")
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=39)
     with monkeypatch.context() as old:
         old.setitem(sys.modules, "agent_bridge.inbox_custody", prior["inbox_custody"])
         old.setattr(_SchemaMixin, "_init_schema", prior["db_schema"]._SchemaMixin._init_schema)
         reopened = Database(tmp_db.db_path)
         reopened.close()
         old.setattr(
-            "agent_bridge.db_live_session_aliases._fold_in_predecessor",
-            prior["db_live_session_aliases"]._fold_in_predecessor,
+            "agent_bridge.db_live_sessions.register_live_session_atomic",
+            prior["db_live_session_aliases"].register_live_session_atomic,
         )
         rollover(tmp_db)
     assert tmp_db.execute_read("SELECT session_id FROM live_messages WHERE id=?", (mid,))[0][0] == "successor"
@@ -117,6 +120,7 @@ def test_writable_migration_replaces_only_known_guard_and_preserves_legacy_bytes
         schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1]
     )
     tmp_db.execute_write("UPDATE schema_version SET version=?", (version,))
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=version)
     migrated = Database(tmp_db.db_path)
     try:
         assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
@@ -143,6 +147,7 @@ def test_interrupted_guard_upgrade_rolls_back_both_guard_and_schema_marker(tmp_d
     tmp_db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
     tmp_db.execute_write(legacy)
     tmp_db.execute_write("UPDATE schema_version SET version=39")
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=39)
     conn = tmp_db._get_conn()
     before = conn.execute(
         "SELECT sql FROM sqlite_master WHERE name='live_messages_handoff_input_immutable'"
@@ -176,6 +181,7 @@ def test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint(
     before = dict(tmp_db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0])
     tmp_db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
     tmp_db.execute_write("UPDATE schema_version SET version=?", (start_version,))
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=start_version)
     info = db_schema.log.info
 
     def interrupt_after_commit(message, *args, **kwargs):
@@ -189,7 +195,7 @@ def test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint(
             tmp_db._migrate(tmp_db._get_conn(), start_version)
     assert tmp_db.execute_read("SELECT version FROM schema_version")[0][0] == checkpoint
     from agent_bridge.inbox_custody import validate_schema
-    validate_schema(tmp_db._get_conn(), exact_native=False)
+    validate_schema(tmp_db._get_conn(), exact_native=False, compatible_messages=False)
     resumed = Database(tmp_db.db_path)
     try:
         assert resumed.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION

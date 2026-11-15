@@ -53,6 +53,7 @@ async def submit(
 ) -> dict[str, Any]:
     from .native_keyed_admission import stored_receipt
     from .session_manager import DaemonDrainingError
+    from .session_prompts import SessionNotRunningError
     from .session_status import SessionStatus
 
     session = manager.get_session(session_id)
@@ -78,10 +79,16 @@ async def submit(
                 raise ValueError("native_session_stopped")
             if may_resume and session.status == SessionStatus.STOPPED:
                 return None
-            await manager._submit_prompt_locked(
-                session_id, request.prompt, no_resume=True,
-                delivery_id=request.delivery_id(), native_admission=request,
-            )
+            try:
+                await manager._submit_prompt_locked(
+                    session_id, request.prompt, no_resume=True,
+                    delivery_id=request.delivery_id(), native_admission=request,
+                )
+            except SessionNotRunningError:
+                if request.no_resume or not may_resume:
+                    raise
+                # Resume owns the distinction between transport loss and child exit.
+                return None
             saved = stored_receipt(manager.db, session_id, request)
             if saved is None:
                 raise ValueError("native_admission_history_unproven")

@@ -393,6 +393,8 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
                 "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
                 "versioned_runtime_source.py", "versioned_runtime_construction.py",
                 "versioned_runtime_publication.py",
+                "versioned_runtime_cache.py",
+                "daemon_instance_runtime.pyz",
             ):
                 content = _read(runtime_path / name, limit=1 << 20)
                 previous = _read(bootstrap / name, limit=1 << 20)

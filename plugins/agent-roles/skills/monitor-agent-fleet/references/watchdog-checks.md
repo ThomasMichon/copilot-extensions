@@ -20,7 +20,9 @@ holds anyone up. **The watchdog never asks a blocking question.** When unsure,
 it takes the least intrusive reversible option within its charter, usually a
 read-only finding or one steer with a stated default, and records the judgment.
 It never edits another agent's files, plan or agenda, never raises another
-agent's budget, never restarts, stops, deploys or merges, and never treats
+agent's budget, never restarts, stops, deploys or merges (outside a separately
+granted [repair scope](repair-escalation.md), which bounds any restart or
+stop), and never treats
 silence as authority. A monitor that waits on its own question has become the
 problem it watches for.
 

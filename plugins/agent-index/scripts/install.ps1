@@ -2177,24 +2177,19 @@ function Get-IndexPythonCacheArgs {
          $Root -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))')) {
         throw 'Python cache requires an absolute owned runtime root'
     }
-    # Reuse installed-<digest> only when the runtime itself validates its
-    # completion/RECORD evidence; otherwise never reuse a namespace.
-    $cacheId = [Guid]::NewGuid().ToString('N')
-    $prefix = [IO.Path]::GetFullPath((Join-Path $Root "cache\python\unsealed-$cacheId"))
-    if ($env:OS -eq 'Windows_NT' -and -not $prefix.StartsWith('\\?\')) {
-        $prefix = if ($prefix.StartsWith('\\')) { '\\?\UNC\' + $prefix.Substring(2) }
-            else { '\\?\' + $prefix }
-    }
     if ($Python) {
         try {
-            $selected = & $Python -I -B -X ('pycache_prefix=' + $prefix) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" $Root 2>$null
+            $selected = & $Python -I -B -X utf8 -c "import json,sys; from agent_procutil.python_cache import POLICY_VERSION,policy_arguments; print(json.dumps(policy_arguments(sys.argv[1],runtime=sys.executable) if POLICY_VERSION==2 else ['-B']))" $Root 2>$null
             if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) {
-                $selected = [string]($selected | ConvertFrom-Json)
-                if ($selected) { $prefix = $selected }
+                $candidate = ConvertFrom-Json -InputObject ([string]$selected)
+                if ($candidate.Count -eq 2 -and $candidate[0] -ceq '-X' -and
+                    $candidate[1] -is [string] -and $candidate[1].StartsWith('pycache_prefix=') -and
+                    $candidate[1].Length -gt 15 -and $candidate[1] -notmatch "[`r`n]" -and
+                    $candidate[1].IndexOf([char]0) -lt 0) { return $candidate }
             }
         } catch {}
     }
-    return @('-X', ('pycache_prefix=' + $prefix))
+    return @('-B')
 }
 
 function Restart-EngineDaemon {

@@ -23,7 +23,8 @@ def add_parsers(sub) -> None:
         default=None,
         help="[worktree_id] to list, OR 'add <summary>' to journal a new "
         "open follow-up, OR 'resolve <id>' to mark one done, OR "
-        "'dismiss <id>' to mark one explicitly not requiring action",
+        "'dismiss <id>' to mark one explicitly not requiring action; "
+        "use id 'legacy' for the old boolean-only follow-up",
     )
     p.add_argument(
         "--ref",
@@ -39,7 +40,7 @@ def add_parsers(sub) -> None:
         "--result-ref",
         default=None,
         dest="follow_up_result_ref",
-        help="with resolve: an optional reference to the result",
+        help="with resolve: a reference to the result (required for id 'legacy')",
     )
     p.add_argument(
         "--reason",
@@ -102,6 +103,7 @@ def _dispatch_follow_up(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+        min_version=2 if verb_args.get("follow_up_id") == "legacy" else 1,
     )
 
 
@@ -160,6 +162,7 @@ def _follow_ups_show(args: argparse.Namespace, worktree_id: str | None) -> int:
                 "follow_ups": items,
                 "open_count": open_count,
                 "legacy_follow_up": rec.follow_up,
+                "legacy_resolution_supported": True,
             }
         )
         return 0
@@ -228,6 +231,14 @@ def _follow_ups_add(args: argparse.Namespace, summary: str) -> int:
 def _follow_ups_resolve(args: argparse.Namespace, follow_up_id: str) -> int:
     from . import tracking_write
 
+    if follow_up_id == "legacy" and not (
+        getattr(args, "follow_up_result_ref", None) or ""
+    ).strip():
+        msg = "follow-ups resolve legacy: requires --result-ref"
+        if args.json:
+            return output._json_error(msg, 2)
+        output.err(msg)
+        return 2
     config = cfg.load_config()
     wt_id, rec_path = _follow_ups_record_path(args, config)
     if not rec_path.exists():
@@ -251,6 +262,8 @@ def _follow_ups_resolve(args: argparse.Namespace, follow_up_id: str) -> int:
             return output._json_error(msg)
         output.err(msg)
         return 1
+    if result.get("error") == "legacy_refused":
+        return _follow_ups_refused(args, result)
     if result.get("error") == "not_found":
         msg = f"follow-ups resolve: no such follow-up {follow_up_id!r} on {wt_id}"
         if args.json:
@@ -298,6 +311,8 @@ def _follow_ups_dismiss(args: argparse.Namespace, follow_up_id: str) -> int:
             return output._json_error(msg)
         output.err(msg)
         return 1
+    if result.get("error") == "legacy_refused":
+        return _follow_ups_refused(args, result)
     if result.get("error") == "not_found":
         msg = f"follow-ups dismiss: no such follow-up {follow_up_id!r} on {wt_id}"
         if args.json:
@@ -310,3 +325,14 @@ def _follow_ups_dismiss(args: argparse.Namespace, follow_up_id: str) -> int:
         return 0
     print(f"dismissed follow-up {item['id']} on {wt_id}: {reason}")
     return 0
+
+
+def _follow_ups_error(message: str, code: int = 1) -> int:
+    output.err(message)
+    return code
+
+
+def _follow_ups_refused(args: argparse.Namespace, result: dict) -> int:
+    if args.json:
+        return output._json_error(result["message"])
+    return _follow_ups_error(result["message"])

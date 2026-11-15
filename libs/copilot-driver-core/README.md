@@ -21,6 +21,22 @@ provides the ordinary application front door. Bridge consumes this same
 library through the existing canonical-reference and wheel-build owners,
 not a sibling plugin source dependency.
 
+Core also owns the complete Bridge registration/delivery JavaScript closure
+under `agent_remote_driver.bridge_extension`. It ships in the ordinary Core
+distribution and compact export. Bridge's single native SDK entrypoint supplies
+its actual plugin root and existing `joinSession` adapter; promotion projects
+these same assets into the payload, while source checkouts use the canonical
+Core directly. A partial projection refuses rather than selecting another
+source. Portable receiving exports the selected Core's package resources without
+searching for a suite installation. This ownership move adds no SDK extension,
+service, hook permission or automatic delivery mode.
+
+Capability-selected ordinary Bridge receiving uses that already-joined public
+SDK session. It does not construct or reacquire a private headed/remote controller
+to deliver queue/steer input. Native target/loadout checks and original one-shot
+receipts remain; mutable controls, creation and replacement retain their
+independent authorities.
+
 The compact legacy export preserves its disconnect-driven lifetime, rather
 than adopting ACP lifetime implicitly. An idle graceful detach closes that
 Host normally; cancellation of its external owner still propagates. Explicit
@@ -37,6 +53,17 @@ Python 3.11+ and its selected dependency closure before native creation.
 See the [optional provider contract](../../plugins/agent-remote-driver/README.md#optional-headless-sdk-provider)
 for supported ACP operations, permission limits and separate activity snapshots.
 Inventory availability does not enable automatic idle retirement.
+
+The Session Host Python `main(..., headed_run=...)` seam accepts an explicitly
+supplied in-process headed receiver while retaining the ordinary parser,
+repository policy and native creation/wait owners. Headless execution rejects
+that override rather than silently ignoring it. `--support-json` additively
+declares `headed_receivers: ["explicit-inprocess-v1"]` when headed execution
+is present. It is not a serialized-code or environment hook; a consumer owns
+any fixed retained executable and additional dependencies. The optional
+[MCP headed receiver](../../plugins/agent-mcp/docs/session-generation.md#opt-in-retained-windows-headed-receiver)
+is one explicit consumer. Ordinary core bundles have no MCP dependency or
+automatic originating-owner enrollment.
 
 Worktrees' mux-creation adapter also consumes this core. The core owns its
 short native check/create lease, neutral client working directory, nesting
@@ -165,6 +192,22 @@ receiving executable under the original attempt, independent of the caller's
 venv. Neither path allocates a workspace, mux or additional launch journal.
 Original native startup admission and literal prompt argv are preserved.
 Full caller migration and restoration qualification remain in progress.
+
+An in-process Windows caller may explicitly supply
+`run_headed(..., native_handoff=WindowsNativeHandoff(callback, handles))`.
+The existing headed native-child owner creates the selected direct
+`copilot.exe` suspended, retains its original `Popen` and strict Job, and calls
+the finite callback before execution. Explicit handles must already be
+inheritable; the native handle list borrows them without changing their flags.
+The callback must return `None` and must not resume or substitute the child.
+The same owner retains the original wait and settles its Job after exit.
+Interrupted settlement retains its original cleanup task and native custody
+in the cleanup error; it never authorizes replay.
+Script/coordinator images, shell/executable overrides, unsupported platforms
+and auth-wait composition are refused. This API is not a serialized-code hook,
+CLI option or automatic MCP overlay. Default headed creation, startup admission and auth custody remain
+unchanged; selecting and consuming a productive overlay through the retained
+executable remains separate qualification.
 
 `headed.caller.execute` retains that executable as the original Python
 caller's foreground child. A live, PID/birth-bound admission channel rechecks
@@ -343,7 +386,42 @@ the operation, exact binding, complete ordered history, holds and unknown effect
 or any effects. Missing records remain unknown, not settled or absent sessions.
 Neither codec availability nor successful decoding establishes store/native
 admission. The compact receiving archive includes these pure modules but adds
-no recovery command, provider or capability advertisement.
+no recovery command or native provider.
+
+`PermitRecoveryIntent` is a separate, effect-free data contract, not version 2
+of that record. `encode_permit_recovery_intent` and
+`decode_permit_recovery_intent` use exactly `contract`
+(`copilot-driver.headed-permit-recovery-intent`), integer `version` (1) and
+`intent`, with the same strict encoding rules and byte limit. The intent carries
+the unchanged original v1 descriptor, operation ID, intent phase and record
+revision (1 for retirement, 3 for restoration), an opaque `source_lease_ref`,
+independent `receiver_ref`/`receiver_revision`, original `permit_id` and
+`original_permit_revision`, and the action-specific `permit_revision` and
+`decision_ref`. Only the two execution-permit revisions are compared: the
+recovery decision must be later than original execution. Neither source-lease
+identity nor receiver ordering is converted into execution permission.
+The receiver revision belongs only to its exact retained `receiver_ref`;
+it cannot order a different receiver incarnation.
+
+The descriptor's `lease_revision` and existing `RecoveryStep.authority_revision`
+retain their v1 meanings. These codecs do not convert, reseal or rewrite old
+records, infer an action decision from a counter, or validate current authority.
+The owner must independently bind the intent to its exact committed recovery
+record, original permit and current action-specific decision, source and native
+scope before any future effect. Unknown work and legacy holds stay in that
+original record; an intent cannot replace it or clear them.
+
+The selected non-legacy entrypoint's existing `--support-json` response adds
+`headed_recovery_intents`, naming this contract and supported versions with
+`scope: data-only`, `owner_store: unqualified` and `effects_wired: false`.
+The legacy front door returns an empty list. Missing metadata from an older
+runtime means this optional data contract is unsupported, not that v1 records
+have changed or all legacy operations must stop. Read the actual selected
+executable's declaration, never a package version or a newer payload's metadata.
+No ordinary caller emits these intents. Worktrees' store and passive permit
+inspector remain unchanged and do not support this intent contract; their
+own provider expansion and support/refusal declaration must clear review before
+consumer use. No compatibility retirement or effectful integration is enabled.
 
 See the [ACP WS boundary](../../plugins/agent-remote-driver/docs/session-host-websocket.md).
 The compact dependency-free receiving archive supports TCP only. Tests stay

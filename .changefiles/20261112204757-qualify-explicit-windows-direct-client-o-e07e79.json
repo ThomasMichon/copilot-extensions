@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify explicit Windows direct-client owner publication through the existing native creation and wait boundary",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

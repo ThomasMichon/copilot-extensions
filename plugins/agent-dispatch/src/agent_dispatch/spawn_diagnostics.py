@@ -151,3 +151,18 @@ class SpawnDiagnostics:
                 )
         finally:
             _INPUTS.reset(token)
+
+
+def record_relationship_failure(request: dict, operation: str, error: BaseException) -> None:
+    """Keep the original writer's safe cause without changing unresolved custody."""
+    SpawnDiagnostics(
+        task_id=request["task_id"],
+        generation=request["generation"],
+        reservation_key=request.get("reservation_key"),
+    ).event(
+        "task_relationship_write", "unresolved",
+        operation=operation,
+        assignment_event_id=request["event_id"],
+        error_type=type(error).__name__,
+        error=exception_detail(error, None, current_inputs()),
+    )

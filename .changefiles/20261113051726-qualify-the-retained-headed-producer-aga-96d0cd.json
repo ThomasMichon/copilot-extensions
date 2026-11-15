@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the retained headed producer against real physical MCP custody handover",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

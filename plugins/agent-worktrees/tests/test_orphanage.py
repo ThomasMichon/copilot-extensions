@@ -9,11 +9,12 @@ from __future__ import annotations
 import argparse
 import json
 import types
+from contextlib import nullcontext
 
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import cleanup, finalize, providers, tracking, tracking_claims
+from agent_worktrees import cleanup, finalize, orphan_receiving, providers, tracking, tracking_claims
 from agent_worktrees import config as cfg
 
 
@@ -50,7 +51,7 @@ def test_rehome_writes_registry_with_provenance(tmp_path, monkeypatch):
     assert {e["ref"] for e in loaded} == {"verbose-space", "m/p/child"}
     cs = next(e for e in loaded if e["ref"] == "verbose-space")
     assert cs["kind"] == "codespace" and cs["source_worktree"] == "wt-owner"
-    assert cs["machine"] == "m" and cs["project"] == "p"
+    assert "machine" not in cs and cs["project"] == "p"
     assert cs["disposition"] == "abandoned" and cs["abandoned_at"]
     assert cs["handoff_to"] == "operator-flow"
     assert cs["note"] == "borrowed"
@@ -439,6 +440,7 @@ def test_reclaim_pr_rejects_provider_or_authority_mismatch_before_credentials(
 
 def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(
         tmp_path, monkeypatch):
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(True))
     _seed_project(tmp_path, monkeypatch)
     ref = "https://github.com/example/project/pull/42"
     tracking.rehome_abandoned_obligations(
@@ -466,6 +468,7 @@ def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(
 
 def test_claims_cleanup_keeps_unmerged_or_unqueryable_pr_claims(
         tmp_path, monkeypatch):
+    monkeypatch.setattr(orphan_receiving, "claim_guard", lambda *_args, **_kwargs: nullcontext(True))
     _seed_project(tmp_path, monkeypatch)
     ref = "https://github.com/example/project/pull/42"
     tracking.rehome_abandoned_obligations(

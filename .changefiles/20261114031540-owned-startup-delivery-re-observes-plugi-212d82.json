@@ -1,0 +1,21 @@
+{
+  "comment": "Owned startup delivery re-observes plugin readiness twice (15 s, then 30 s) with the same operation key when a cold guest is still loading plugins, instead of failing the launch on the first plugins_not_ready refusal",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

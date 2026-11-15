@@ -1,0 +1,9 @@
+{
+  "comment": "Document conditional Dispatch CLI session-origin acquisition migration",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

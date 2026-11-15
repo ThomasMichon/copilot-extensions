@@ -361,8 +361,9 @@ def _win_task_exists() -> bool:
 
 def _daemon_launch_argv() -> list[str]:
     """Argv that starts the foreground daemon without the Windows ``.cmd`` shim."""
-    from agent_procutil import python_cache_args
+    import agent_procutil
     from .execution_identity import source_repository
+    python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     core = _core()
     source = source_repository(Path.cwd())

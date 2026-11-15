@@ -28,6 +28,28 @@ has been audited. Telemetry implementation and Gateway services were not read.
 Installer templates and generated copies must remain synchronized through the
 existing tooling when their owner eventually changes them.
 
+### Supplemental service and keeper guard families
+
+The complete #7947 refinements additionally identify the following finite
+requirements. This is direct planned receiving, not an independent product
+audit or a new source-author-provenance feature. Existing core mechanisms
+and component owners remain authoritative.
+
+| Family | Required distinction and receiving responsibility |
+|---|---|
+| SSH diagnostics | Once the actual target is independently resolved, missing disposable fragment provenance alone must not block verify/explore. Preserve contradictory aliases, unsafe syntax and hand-edited configuration; read permission is not effect permission. |
+| Container birth | Reconstruct using physical resource ID, label, issuer assignment AND recipient evidence. A label-only discovery cannot rebind another task; retain current owner fences and compatible unknown fields. |
+| MCP lost sidecar | Distinguish missing discovery/control metadata from genuine unsupported capability. Retain authenticated control/drain and direct execution fallback; protected same-owner re-advertisement/doctor is not manual destruction or reset. |
+| Index derived layout | Keep corpus authorization and writer/source consistency while permitting canonical diagnostics and owner-scoped reconstruction of derived receipts/FTS/vector views. Unsupported schema or parse failure cannot authorize endpoint withdrawal. |
+| Bridge/Dispatch semantic recovery | Rebuild local relationships, reservations and outbox from durable grants, original request/admission IDs and recipient acknowledgments. Retain native invocation/delivery identity, withdrawal and coordinator epoch; missing receipt remains UNKNOWN and never licenses duplicate delivery. |
+| Keepers and updater retirement | Preserve protocol/fallback compatibility, rollback symmetry and hold-preserving authorized handover. Separate an older active writer/validated fallback from an explicitly revoked incarnation; raw slot/build-pointer mismatch is not semantic-version supersession. |
+
+Use the existing independently corroborated adoption patterns rather than
+create a competing recovery system. #7208's Windows receipt-stability cause
+remains unestablished; #7250 keeps redirect-rollback ownership. The direct
+SG7947 Plan and [six-family local matrix](validation.md#supplemental-7947-family-acceptance)
+remain subject to actual ROOT-global G7947 and all existing admission gates.
+
 ## Store taxonomy
 
 Classification is by **facts and failure domain**, not filename or `.db`

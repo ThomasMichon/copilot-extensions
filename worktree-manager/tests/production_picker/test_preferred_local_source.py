@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from machine_transport import (
-    execution_identity,
+    execution_platform,
     legacy_alias_forms,
     normalize_machine_entries,
     parse_machines_yaml,
@@ -22,7 +22,7 @@ from worktree_manager.production_picker.picker_tui import data_local, data_ssh, 
 
 
 def _execution_context(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
-    monkeypatch.setattr(execution_identity.sys, "platform", "win32" if platform == "windows" else "linux")
+    monkeypatch.setattr(execution_platform.sys, "platform", "win32" if platform == "windows" else "linux")
     monkeypatch.setattr(
         os, "uname", lambda: SimpleNamespace(release="6.1-microsoft-standard-WSL2"),
         raising=False,
@@ -33,11 +33,16 @@ def _execution_context(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
     monkeypatch.setattr(
         Path, "is_file", lambda path: False if path in markers else is_file(path),
     )
-    monkeypatch.setattr(
-        Path, "read_text",
-        lambda path, *a, **kw: "" if path == Path("/proc/1/cgroup") else read_text(path, *a, **kw),
-    )
-    assert execution_identity.detect_platform() == platform
+
+    def read(path: Path, *args, **kwargs) -> str:
+        if path == Path("/proc/1/cgroup"):
+            return "0::/init.scope"
+        if path == Path("/proc/self/mountinfo"):
+            return "29 23 0:25 / / rw - ext4 root rw"
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert execution_platform.detect_platform() == platform
 
 
 CASES = [

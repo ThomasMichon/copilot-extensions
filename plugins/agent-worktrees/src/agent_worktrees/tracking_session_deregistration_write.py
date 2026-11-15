@@ -126,11 +126,10 @@ def apply_session_deregister(args: dict) -> dict:
                 if changed:
                     tracking._next_lifecycle_revision(record, session_id)
                     if retires_current:
-                        self_session_ref = tracking.format_claim_ref(
-                            record.execution_machine, record.repo, record.worktree_id,
-                            session=session_id,
-                        )
-                        tracking.release_resource_claim(record, self_session_ref, save=False)
+                        from .session_self_claims import self_claims
+
+                        for claim in self_claims(record, session_id):
+                            tracking.release_resource_claim(record, claim.ref, save=False)
                     tracking.save_record(record, yaml_path)
                     if retires_current and not _record_has_open_session(record):
                         stop_fsmonitor_daemon(record.worktree_path)

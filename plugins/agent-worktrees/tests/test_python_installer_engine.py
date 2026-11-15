@@ -146,17 +146,20 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows executable spelling")
 @pytest.mark.parametrize("kind", [
-    "relative", "ordinary", "extended-short", "unc", "deep", "deep-unc",
+    "relative", "ordinary", "extended-short", "unc", "short-python", "deep", "deep-unc",
 ])
 def test_windows_child_preserves_supported_executable_spelling(engine, monkeypatch, tmp_path, kind):
-    executable = str(tmp_path / "tool.exe")
+    executable = str(tmp_path / "powershell.exe")
     expected = executable
     if kind == "relative":
         executable = expected = "tool.exe"
     elif kind == "extended-short":
         executable = engine._native_retained_path(executable)
     elif kind == "unc":
-        executable = expected = r"\\example.invalid\share\tool.exe"
+        executable = expected = r"\\example.invalid\share\powershell.exe"
+    elif kind == "short-python":
+        executable = str(tmp_path / "python.exe")
+        expected = engine._native_retained_path(executable)
     elif kind in {"deep", "deep-unc"}:
         parent = tmp_path if kind == "deep" else Path(r"\\example.invalid\share")
         for _ in range(6):

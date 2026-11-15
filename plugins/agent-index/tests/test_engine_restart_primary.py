@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from agent_procutil import no_window_kwargs, python_cache_args
+from agent_procutil import no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -89,10 +89,7 @@ function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
         stop = calls[0]
         module = stop.index("-m")
         assert stop[module:] == ["-m", "agent_index", "engine", "stop"]
-        assert stop[:module] == ["-I", "-X", stop[2], "-X", "utf8"]
-        cache = Path(stop[2].removeprefix("pycache_prefix="))
-        assert cache.parent == Path(python_cache_args(root)[1].partition("=")[2]).parent
-        assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+        assert stop[:module] == ["-I", "-B", "-X", "utf8"]
         if mode == "stop-failed":
             assert len(calls) == 1
         else:

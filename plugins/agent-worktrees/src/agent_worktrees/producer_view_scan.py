@@ -7,10 +7,9 @@ from pathlib import Path
 
 import yaml
 
-from . import config as cfg, installer
+from . import config as cfg, installer, record_reporting
 from .producer_views import ObservedClaim, issue, ownership_snapshot, qualified_owner
 from .strict_yaml import load_strict_yaml_document
-from .worktree_machine_identity import execution_machine_from_fields
 
 _READ_ERRORS = (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError, yaml.YAMLError)
 
@@ -39,16 +38,17 @@ def _component(value: object) -> bool:
     )
 
 
-def _record(data: object, path: Path, project: str, issues: list[dict[str, str]]) -> list[ObservedClaim]:
+def _record(
+    data: object, path: Path, project: str, issues: list[dict[str, str]], execution_machine: str,
+) -> list[ObservedClaim]:
     if not isinstance(data, dict):
         raise ValueError("record is not a mapping")
     if (
         data.get("worktree_id") != path.stem or data.get("repo") != project
-        or not _component(data.get("machine")) or not _component(path.stem)
+        or not _component(path.stem)
         or not isinstance(data.get("branch"), str)
     ):
         raise ValueError("record identity does not match its registered project/path")
-    execution_machine = execution_machine_from_fields(data)
     if not _component(execution_machine):
         raise ValueError("record execution owner is not canonical")
     owner = f"{execution_machine}/{project}/{path.stem}"
@@ -80,7 +80,7 @@ def _record(data: object, path: Path, project: str, issues: list[dict[str, str]]
             continue
         rows.append(ObservedClaim(
             owner, raw["kind"], ref, raw.get("state", "active"),
-            raw.get("handoff_bundle", ""), raw["producer"],
+            raw.get("handoff_bundle", ""), raw["producer"], (project, path.stem),
         ))
     return rows
 
@@ -133,6 +133,7 @@ def scan_ownership(
             before = _stamp(directory, directory=True)
             stamps.append((directory, before, True))
             paths = sorted(directory.iterdir())
+            reporter = record_reporting.local_context(directory / "_", project)
         except (*_READ_ERRORS, AttributeError) as exc:
             # cfg.project_dir() can reach project_state._normalized_repository_remote(),
             # which raises AttributeError on a non-strict-read malformed registry
@@ -146,7 +147,7 @@ def scan_ownership(
             try:
                 data, stamp = _read(path)
                 stamps.append((path, stamp, False))
-                rows.extend(_record(data, path, project, issues))
+                rows.extend(_record(data, path, project, issues, reporter.execution_machine))
             except _READ_ERRORS as exc:
                 issues.append(issue("record-unavailable", f"{project}/{path.name}", str(exc)))
     # Detect ordinary replacement/deletion/write races, not a cross-record transaction.

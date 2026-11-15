@@ -17,6 +17,9 @@ _AGENT_TAIL_FIELDS = (
     "pair_kind", "reaped_at", "codename", "codename_source", "resources",
     "last_finalize_released", "follow_ups", "prs", "pr", "sessions",
 )
+_LEGACY_NAMING_FIELDS = frozenset({
+    "machine", "platform", "machine_identity_version", "environment", "execution_machine",
+})
 _SERIALIZED_FIELDS = frozenset("""
 active_effort activity activity_at bound_agent bound_live bound_live_at branch
 caller_worktree checkout_managed codename codename_source completed_at
@@ -30,7 +33,7 @@ platform pr profile_assignment_revision profile_assignments prs reaped_at repo
 resources resume_count session_backend session_state_at session_summary session_turns
 sessions started_at status status_note_at summary title title_asserted worktree_id
 worktree_path
-""".split())
+""".split()) | _LEGACY_NAMING_FIELDS
 
 
 def add_doctor_arguments(parser) -> None:
@@ -50,6 +53,17 @@ def strict_mapping(raw: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("tracking record must be a YAML mapping")
     return data
+
+
+def without_legacy_naming(fixed: str) -> str:
+    """Re-encode only legacy mappings, retaining data referenced by YAML aliases."""
+    data = strict_mapping(fixed)
+    if not _LEGACY_NAMING_FIELDS.intersection(data):
+        return fixed
+    return yaml.safe_dump(
+        {key: value for key, value in data.items() if key not in _LEGACY_NAMING_FIELDS},
+        allow_unicode=True, sort_keys=False,
+    )
 
 
 def repair_bound_agent(raw: str, end_field: str) -> str | None:
@@ -92,9 +106,9 @@ def repair_bound_agent(raw: str, end_field: str) -> str | None:
 
 def apply_repair(path: Path, observed: bytes, fixed: str) -> Path:
     """Exclude association and record writers; retain the exact pre-repair bytes."""
-    strict_mapping(fixed)
+    fixed = without_legacy_naming(fixed)
     with pr_authority.guard(timeout=0), tracking._RecordLock(
-        path, blocking=False,
+        path, blocking=False, require_sidecar=True,
     ) as lock:
         if not lock.acquired:
             raise TimeoutError("tracking record is busy; repair refused")

@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify that retiring your own empty allocation is routine cleanup, not operator-only abandonment",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -76,7 +76,7 @@ if [ ! -f "$_payload_root/plugin.json" ]; then
     exit 126
 fi
 
-case "$PWD/" in
+@@CALLER_CWD_POSIX@@case "$PWD/" in
     "$_payload_root/"*)
         _outside="${COPILOT_PROJECT_DIR:-$HOME}"
         [ -d "$_outside" ] || _outside="${TMPDIR:-/tmp}"

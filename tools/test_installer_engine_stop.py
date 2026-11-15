@@ -47,6 +47,17 @@ def _shell(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _configuration_python(root: Path) -> None:
+    python = root / "versions" / "1.0" / "bin" / "python"
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text(
+        "#!/bin/sh\nprintf '%s\\n' "
+        + shlex.quote(_posix(root)) + " " + shlex.quote(_posix(root / "config.json")) + "\n",
+        encoding="utf-8", newline="\n",
+    )
+    python.chmod(0o755)
+
+
 @pytest.mark.parametrize("plugin", ("agent-bridge", "agent-vault"))
 def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plugin: str) -> None:
     root = tmp_path / "runtime"
@@ -54,12 +65,14 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
     scripts = REPO / "plugins" / plugin / "scripts"
     writer = "_install_systemd_unit" if plugin == "agent-bridge" else "_install_service"
     unit = home / ".config" / "systemd" / "user" / "fixture.service"
+    _configuration_python(root)
     body = "\n".join((
         "set -euo pipefail",
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
         'systemctl() { if [[ "${2:-}" == show ]]; then printf "%s\\n" "$UNIT_DIR/$SYSTEMD_UNIT"; '
         'else [[ "${2:-}" != is-active ]]; fi; }',
         f"HOME={shlex.quote(_posix(home))}; INSTALL_DIR={shlex.quote(_posix(root))}",
+        f"SCRIPT_DIR={shlex.quote(_posix(scripts))}",
         'VENV_DIR="$INSTALL_DIR/versions/1.0"; LINK_PYTHON="$VENV_DIR/bin/python"',
         'UNIT_DIR="$HOME/.config/systemd/user"; SYSTEMD_UNIT=fixture.service',
         'RUN_DIR="$INSTALL_DIR/run"; SOCKET_PATH="$RUN_DIR/vault.sock"; PIPE_PATH=fixture',
@@ -78,12 +91,17 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
     assert inspected.exists() and not control.exists()
     start = next(line[10:] for line in unit.read_text().splitlines() if line.startswith("ExecStart="))
     argv = shlex.split(start)
-    assert STOP.admits_argv(argv, _posix(root), plugin)
     if plugin == "agent-bridge":
+        assert STOP.admits_argv(argv, _posix(root), plugin)
         assert argv[-2:] == [f"{_posix(root)}/versions/1.0/bin/agent-bridge", "start"]
         assert STOP.admits_argv(["/usr/bin/python3", *argv], _posix(root), plugin)
     else:
-        assert argv[-3:] == ["--foreground", "--persistent", "--handoff-stdin"]
+        assert argv[4:] == [
+            "--foreground", "--persistent", "--handoff-stdin", "--configuration-root", _posix(root),
+        ]
+        assert STOP.admits_argv(
+            [argv[2], "-B", "-m", "agent_vault.service", *argv[4:]], _posix(root), plugin,
+        )
     changed = unit.read_text().replace(_posix(root) + "/", _posix(root) + "-other/")
     unit.write_text(changed)
     with pytest.raises(RuntimeError, match="does not name"):
@@ -97,6 +115,7 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
     source = REPO / "plugins" / plugin / "scripts" / "install.sh"
     root = tmp_path / "runtime"
     root.mkdir()
+    _configuration_python(root)
     home = tmp_path / "home"
     units = home / ".config" / "systemd" / "user"
     units.mkdir(parents=True)
@@ -116,8 +135,10 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
         "_is_wsl() { return 1; }; _supervisor_mode() { echo serve; }",
         "_supervisor_labels_configured() { return 1; }; _supervisor_action() { :; }",
         "_supervisor_audit() { :; }",
+        '_require_actions() { [[ "$*" == coordinator-replacement ]]; }',
         f"INSTALL_DIR={shlex.quote(_posix(root))};UNIT_DIR={shlex.quote(_posix(units))}",
         f"HOME={shlex.quote(_posix(home))}",
+        f"SCRIPT_DIR={shlex.quote(_posix(source.parent))}",
         'VENV_DIR="$INSTALL_DIR/versions/1.0"; VENV_PYTHON="$VENV_DIR/bin/python"',
         'ENV_FILE="$INSTALL_DIR/service.env"',
         'LINK_PYTHON="$VENV_PYTHON"; SYSTEMD_UNIT=fixture.service; NO_SERVICE=0',
@@ -211,6 +232,8 @@ def test_real_uninstall_preflight_binds_generated_unit_not_comment(
         changed = (
             original.replace("supervise-service.sh", "unrelated-service.sh")
             if kind == "supervisor" else
+            original.replace("vault-service.sh", "unrelated-service.sh")
+            if kind == "vault" else
             original.replace("-m " + plugin.replace("-", "_"), "-m unrelated_module")
         )
     elif mutation == "duplicate-executable":
@@ -233,6 +256,28 @@ def test_dispatch_supervisor_registration_cannot_name_another_unit(tmp_path: Pat
     ))
     with pytest.raises(RuntimeError, match="does not name"):
         STOP.check_unit(unit, _posix(root), plugin)
+
+
+@pytest.mark.parametrize("policy", ["no-write", "shared", "legacy"])
+def test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission(policy):
+    root = "/home/example/.agent-vault"
+    installation = hashlib.sha256(root.encode()).hexdigest()
+    prefix = (
+        f"/home/example/.cache/copilot-extensions/python/v1/{installation}/installed-{'a' * 64}/bytecode"
+        if policy == "shared" else f"{root}/cache/python/unsealed-{'b' * 32}"
+    )
+    arguments = ["-B"] if policy == "no-write" else ["-X", "pycache_prefix=" + prefix]
+    command = [
+        root + "/versions/1.0/bin/python", *arguments, "-m", "agent_vault.service",
+        "--foreground", "--persistent", "--handoff-stdin", "--configuration-root", "/home/example/project",
+    ]
+    assert STOP.admits_argv(command, root, "agent-vault")
+    assert not STOP.admits_argv(command, root + "-foreign", "agent-vault")
+    assert not STOP.admits_argv([*command, "--unexpected"], root, "agent-vault")
+    assert not STOP.admits_argv([*command[:-1], "relative"], root, "agent-vault")
+    if policy != "no-write":
+        command[2] = "pycache_prefix=/foreign/bytecode"
+        assert not STOP.admits_argv(command, root, "agent-vault")
 
 
 @pytest.mark.parametrize("kind", ("bridge", "coordinator", "supervisor", "vault"))
@@ -270,8 +315,9 @@ def test_real_preflight_checks_manager_effective_service_ownership(
     elif effective == "multiple-commands":
         values["ExecStart"] += " " + values["ExecStart"]
     elif effective == "different-path":
+        executable = values["ExecStart"].split("{ path=", 1)[1].split(" ;", 1)[0]
         values["ExecStart"] = values["ExecStart"].replace(
-            "{ path=" + _posix(root), "{ path=" + _posix(root) + "-foreign", 1,
+            "{ path=" + executable, "{ path=/foreign/executable", 1,
         )
     elif effective == "missing-property":
         del values["ExecStart"]

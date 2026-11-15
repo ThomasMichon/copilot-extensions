@@ -16,9 +16,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import (
-    no_window_kwargs, python_cache_args, spawn_daemon, windowless_python, windowless_python_env,
-)
+import agent_procutil
+from agent_procutil import no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env
 import httpx
 
 from . import http_auth
@@ -36,6 +35,8 @@ from .config import (
 from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, pid_alive as _pid_exists
 from .runtime_version import current_runtime_version
+
+python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
 
 def _emit(value: Any) -> int:

@@ -2,6 +2,13 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-13 - Original application integration merged
+
+[Source and bounded native evidence](<journal/2026/11.13 canonical-application-integration.md>)
+records #11121's preserved-history merge, containing-Main release and the remaining
+consumer/adopter gates. The original implementation was not superseded and the
+effort remains Active.
+
 ## 2026-11-11 - Ordinary suite convergence preflight
 
 Integration lead `lopsided-anvil` retains entrypoint wiring and whole-flow

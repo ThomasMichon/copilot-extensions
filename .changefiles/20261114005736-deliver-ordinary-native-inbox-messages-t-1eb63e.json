@@ -1,0 +1,29 @@
+{
+  "comment": "Deliver ordinary native inbox messages through capability-selected public SDK receiving without installation or private-controller admission, preserving original one-shot receipts.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    }
+  ]
+}

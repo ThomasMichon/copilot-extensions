@@ -38,7 +38,12 @@ def adoption_config(
     monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
     monkeypatch.setattr(cfg, "active_project", lambda: "project")
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "desk-wsl")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / (name or "project"))
+    cfg.project_dir().mkdir()
+    (cfg.project_dir() / "config.yaml").write_text(yaml.safe_dump({
+        "repos": {config.repo_name: {"anchor": config.default_repo.anchor}},
+    }), encoding="utf-8")
     return config
 
 
@@ -71,8 +76,8 @@ def test_tuple_adoption_producer_tracking_json_and_relationships(
 
     record = _produce(adoption_config, kind, mode=mode)
     identity = WorktreeMachineIdentity("desk-wsl", adoption_config.platform, "custom-space")
-    assert record.machine_identity == (identity if mode == "tuple-v1" else None)
-    assert record.machine == (identity.machine if mode == "tuple-v1" else adoption_config.machine)
+    assert record.machine_identity == identity
+    assert record.machine == identity.machine
     assert record.execution_machine == "custom-space"
     assert record.platform == adoption_config.platform
     assert record.pair_kind == ("anchor" if kind == "anchor" else None)
@@ -93,8 +98,7 @@ def test_tuple_adoption_producer_tracking_json_and_relationships(
     assert record.head_session is None and record.sessions == []
     row = _worktree_to_dict(record)
     assert {key: row[key] for key in record.machine_fields} == record.machine_fields
-    if mode == "legacy":
-        assert "execution_machine" not in row and "machine_identity_version" not in row
+    assert row["execution_machine"] == "custom-space"
     claim = tracking.ResourceClaim(kind="worktree", ref="custom-space/project/child")
     assert claims_owner._owner_dict("project", record, claim)["qualified_ref"] == (
         f"custom-space/project/{record.worktree_id}"
@@ -176,7 +180,7 @@ def _retain_history(record: tracking.WorktreeRecord) -> bytes:
 
 @pytest.mark.parametrize("kind", ["anchor", "external"])
 @pytest.mark.parametrize("first_mode", ["legacy", "tuple-v1"])
-def test_tuple_adoption_existing_record_skips_new_mapping_and_preserves_history(
+def test_tuple_adoption_existing_record_refreshes_reporter_and_preserves_history(
     adoption_config: cfg.Config, monkeypatch: pytest.MonkeyPatch, kind: str,
     first_mode: creation_identity.IdentityMode,
 ) -> None:
@@ -188,7 +192,9 @@ def test_tuple_adoption_existing_record_skips_new_mapping_and_preserves_history(
     )
     (Path(adoption_config.default_repo.anchor) / "machines.yaml").write_text("machines: {}\n")
     retained = _produce(adoption_config, kind)
-    assert retained.machine_fields == original.machine_fields
+    assert retained.execution_machine == "desk-wsl" + (
+        "-wsl" if adoption_config.platform == "wsl" else ""
+    )
     assert retained.creation_nonce == original.creation_nonce
     assert retained.head_session == "retained-session"
     assert retained.title == "retained title" and retained.follow_up and retained.paused
@@ -206,7 +212,7 @@ def test_tuple_adoption_competing_if_absent_winner_is_not_upgraded(
         winner_kwargs = dict(kwargs)
         winner_kwargs.pop("machine_identity_factory")
         winner, created = real_create(*args, **winner_kwargs)
-        assert created and winner.machine_identity is None
+        assert created and winner.execution_machine == "custom-space"
         winner_bytes.append(_retain_history(winner))
         return real_create(*args, **kwargs)
 
@@ -216,7 +222,7 @@ def test_tuple_adoption_competing_if_absent_winner_is_not_upgraded(
         lambda *_a: pytest.fail("the losing creation must not derive a tuple"),
     )
     record = _produce(adoption_config, kind)
-    assert record.machine_identity is None
+    assert record.execution_machine == "custom-space"
     assert record.yaml_path.read_bytes() == winner_bytes[0]
 
 

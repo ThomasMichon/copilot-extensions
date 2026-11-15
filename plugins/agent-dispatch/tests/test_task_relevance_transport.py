@@ -141,6 +141,7 @@ def test_actual_override_owner_prevents_report_admission(q, api, monkeypatch, ov
     set_override(overrides_path(), override, disabled=True, reason="operator hold")
     response = api.post(f"/task-relevance/tasks/{t.id}", headers=_headers(), json=request)
     assert response.status_code == 409
+    assert response.json()["relevance_rejection"]["code"] == "relevance_not_accepted"
     assert "operator override" in response.json()["detail"]
     assert q.get(t.id).status == Status.QUEUED
 

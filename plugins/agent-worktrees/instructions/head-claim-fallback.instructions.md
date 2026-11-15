@@ -76,7 +76,8 @@ content remains subject to the separate finalization checks.
 - **Only the operator** may direct closing an unmerged PR, resetting HEAD off
   its unmerged commits, or abandoning it -- never your own judgment:
   `finalize --abandon --handoff-to <recipient>`, on explicit instruction
-  only, never inferred from "stuck" or "CI's red".
+  only, never inferred from "stuck" or "CI's red". Retiring your own empty
+  allocation (no changes, commits or PR) is routine cleanup, not that.
 
 ## WIP disposition is not archival
 

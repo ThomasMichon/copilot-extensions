@@ -51,6 +51,7 @@ def _captured(queue, conn: sqlite3.Connection, task_id: str) -> dict:
         "waiters": _history(conn, "run_waiters", task_id),
         "acquisitions": _history(conn, "acquisition_receipts", task_id),
         "pool_assignments": _history(conn, "task_pool_assignments", task_id),
+        "relevance_closeouts": _history(conn, "task_relevance_closeouts", task_id),
         "task_relationships": [dict(row) for row in conn.execute(
             "SELECT id, task_relationship FROM task_events"
             " WHERE task_id=? AND task_relationship IS NOT NULL ORDER BY id DESC LIMIT ?",
@@ -145,6 +146,15 @@ def _reset_blockers(captured: dict) -> list[str]:
     return []
 
 
+def _generation_change_blockers(captured: dict) -> list[str]:
+    if any(row["acknowledgement"] is None for row in captured["relevance_closeouts"]):
+        return [
+            "pending relevance closeout retains its original generation; "
+            "resolve closeout through its existing owner before changing the task incarnation"
+        ]
+    return []
+
+
 def require_task_recovery_safe(queue, conn: sqlite3.Connection, task_id: str) -> None:
     """Prevent legacy reset from bypassing the same retained-execution fences."""
     captured = _captured(queue, conn, task_id)
@@ -175,7 +185,7 @@ class TaskRecoveryMixin:
             conn.execute("BEGIN")
             captured = _captured(self, conn, task_id)
             task = captured["task"]
-            blockers = _blockers(conn, captured)
+            blockers = _blockers(conn, captured) + _generation_change_blockers(captured)
             allowed, _ = _task_transition_spec("reset")
             reset_reasons = blockers + _reset_blockers(captured) + (
                 [] if task["status"] in allowed else ["status cannot be reset"]
@@ -284,7 +294,7 @@ class TaskRecoveryMixin:
             captured = _captured(self, conn, task_id)
             if _revision(captured) != expected_revision:
                 raise TaskError("task or retained execution changed; refresh diagnostics")
-            reasons = _blockers(conn, captured)
+            reasons = _blockers(conn, captured) + _generation_change_blockers(captured)
             if operation != "detach_agent":
                 reasons += _reset_blockers(captured)
             if reasons:

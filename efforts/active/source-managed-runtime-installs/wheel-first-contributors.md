@@ -43,6 +43,15 @@ This is the intended complete flow, including unimplemented integration.
 Exact current commands remain with their component owners; proposed switches in
 the transition document are not instructions to execute them against old tools.
 
+Every admitted app slice also carries the
+[current updater/service lifetime contract](update-service-lifetimes.md).
+The ordinary updater and its finite staging work follow caller cancellation;
+accepted service setup/start, required hosts/wrappers and runtime retention
+belong to an independent lifecycle owner. Prove the applicable L1-L6 controls
+after caller/ancestor cleanup; an older app row's source credit or early ping
+does not qualify the new lifetime behavior. Paused and unadmitted app lanes stay
+paused/unadmitted.
+
 1. **Enter independently of Copilot and the old runtime.** The trusted upstream
    self-install/recovery front door selects official Main by default, or an
    explicitly configured source repository/ref/checkout/commit. Preserve source

@@ -12,6 +12,15 @@
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
+## Goal
+
+Retain attributable custody for every shipped daemon and safe disposable
+instance lifetime under the unchanged Guiding Intent below. The
+[current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+requires finite update helpers to remain caller-owned while accepted production
+startup and daemon/runtime custody transfer to an independent lifecycle owner.
+Existing lease durations and production no-expiry semantics are unchanged.
+
 ## Guiding Intent
 
 Every shipped daemon launch has attributable instance custody, including
@@ -39,6 +48,21 @@ ownership remain with their existing lifecycle owners.
   preserve original instance IDs and unresolved lifecycle effects.
 - Public artifacts remain generic. No downstream-private runtime, session,
   machine, test-directory or incident identifiers are required.
+- The complete #8403 contract remains with the integration, shared-process,
+  caller and installer owners above. The earlier campaign KEEP OPEN judgment
+  compared the then-Draft, unimplemented original scope; it is not a permanent
+  prohibition on reviewed whole-contract tracking supersession. The current
+  compiler-free amendment and its remaining acceptance stay unfinished.
+- #9176/#9183 retain proposal and lab-consumer ownership, not shared lifecycle
+  source or resource custody. Their latest coordination reuses the existing
+  contained diagnostic route and does not require another lifecycle framework
+  before that experiment. Generic retained-work integration remains optional
+  under the existing owner; ordinary test expiry and production lifetime do
+  not change.
+- Any separate #8403 tracking retirement follows reviewed direct receiving and
+  complete current source/receiver readback. It does not complete this effort,
+  release an actual claim or retained artifact, or authorize native execution,
+  cleanup, installation or rollout.
 
 ## Context
 
@@ -93,6 +117,10 @@ boundary; process identity, leases, Job containment and safe cleanup retain
 their existing owners and guarantees.
 
 ## Plan
+
+- [ ] Qualify the existing instance/admission/retention handoff for independent
+  service startup versus cancellable update helpers. Preserve source, native
+  supervisor, container and test-purpose custody rather than adding an owner.
 
 ### Phase 1 - Reviewed contract
 
@@ -194,12 +222,48 @@ their existing owners and guarantees.
   only; the application owner's complete source publication and broader
   construction/lifecycle qualification remain open.
 
+#### Direct remaining-source contract from #8403
+
+- [ ] **CF8403-P1:** Complete the source-only outside-driver, PowerShell
+  adapter and non-owning process stage through the existing containment owner.
+  Preserve that owner's root, clock, resource limits and final settlement
+  checks. Source preparation is not functional/desktop, native-process or
+  installed acceptance.
+- [ ] **CF8403-P2:** Complete the remaining thin shell/PowerShell entrypoint
+  migration and actual compiler-free construction/lifecycle qualification.
+  Use setup-provided PATH Python without native repository code, build/release
+  compilation, on-device compilation or interpreter attestation. Preserve
+  kernel birth identity, owner/lease lifetime, production non-expiry,
+  renewable ten-minute/four-hour unattended bounds, the explicit interactive
+  exception, descendant settlement, protected work and exact-artifact cleanup.
+  Missing platform capability refuses explicitly, never through PID-only or
+  fail-open substitution. Source, supervisor, container, caller and installer
+  custody remain distinct.
+
+The local rows below qualify this remaining contract, not the historical
+compiled implementation or the separate retained-work proposal.
+
+| Local row | Required evidence |
+|---|---|
+| CF8403-V1 | Exercise each source-only outside-driver, PowerShell adapter and non-owning stage under the same containment owner, root, clock, resource limits and final settlement. Record source-only results without crediting native, desktop or installed behavior. |
+| CF8403-V2 | Requalify the actual remaining compiler-free entrypoints and construction/lifecycle consumers against every P2 identity, lifetime, descendant, protected-work, capability-refusal and exact-artifact condition. Preserve Windows Job/uncertainty controls and explicitly unavailable lanes; earlier compiled-helper, bounded adapter or synthetic-consumer results do not prove the full replacement. |
+
 ## Validation Plan
+
+- [ ] Apply the relevant [L1-L4 identity/lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  without weakening lease expiry or fixture containment. A service-owned Job
+  is not automatically a caller-owned termination scope.
 
 - [ ] Review and complete the compiler-free amendment below, preserving every
   original process/lifetime/artifact guarantee without native compilation.
 - [ ] Requalify the actual compiler-free implementation and consumers; retain
   original results as historical, not current replacement acceptance.
+
+- [ ] **CF8403-G:** Complete BOTH CF8403-P1 and P2 AND both local CF8403-V1/V2
+  rows together with the existing applicable identity/lifetime and compiler-free
+  validation above. Keep the original first Plan and first global Validation
+  gates, every existing owner and actual source/resource hold intact. Reviewed
+  tracking intake is not this technical acceptance.
 
 - [x] Pure tests cover reservation/admission/renewal/expiry, production
   non-expiry, interactive-policy refusal, concurrent mutation, PID reuse,
@@ -244,6 +308,7 @@ compiler-free construction/lifecycle qualification remain open.
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
+- [2026-11-14 - complete compiler-free tracking intake](../backlog-reconciliation/journal/2026/11.14-compiler-free-and-source-qualification.md)
 - [2026-11-02 - private inventory creation ownership](journal/2026/11.02%20private-inventory-ownership.md)
 - [2026-11-01 - merged finite source and non-UI safety preparation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md)
 - [2026-10-30 - compiler-free finite process custody](../lean-runtime-dependencies/journal/2026/10.30%20finite-owned-process.md)

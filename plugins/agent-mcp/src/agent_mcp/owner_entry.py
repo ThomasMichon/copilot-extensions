@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 from .execution_context import SharingUnavailable
@@ -28,7 +29,7 @@ def _qualify(request):
 
     entry = request["receiver"]
     if (
-        not sys.platform.startswith("linux")
+        not (sys.platform.startswith("linux") or sys.platform == "win32")
         or str(Path(sys.executable).absolute()) != entry["python"]
         or str(Path(sys.prefix).resolve()) != entry["prefix"]
         or str(Path(__file__).resolve()) != entry["module"]
@@ -66,6 +67,20 @@ def _require_owner_alive(owner):
         raise OwnerUnavailable("originating owner could not be verified alive") from error
 
 
+def _ordinary(original: list[str], environment: dict[str, str]) -> int:
+    if sys.platform == "win32":
+        from ._exec import no_window_creationflags, resolve_argv
+
+        # Windows has no POSIX exec; inherit stdio without consuming or replaying it.
+        return subprocess.call(
+            resolve_argv(original), env=environment,
+            stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+            creationflags=no_window_creationflags(),
+        )
+    os.execvpe(original[0], original, environment)
+    raise RuntimeError("Ordinary MCP exec unexpectedly returned")
+
+
 def _run_owned(request, declared, owner):
     environment = os.environ.copy()
     try:
@@ -80,9 +95,7 @@ def _run_owned(request, declared, owner):
             _require_owner_alive(owner)
             os.environ.clear()
             os.environ.update(environment)
-            original = request["original"]
-            os.execvpe(original[0], original, environment)
-            raise RuntimeError("Ordinary MCP exec unexpectedly returned")
+            return _ordinary(request["original"], environment)
         # No fallback beyond this boundary: backend startup or intake may occur.
         _require_owner_alive(owner)
         return args.func(args)

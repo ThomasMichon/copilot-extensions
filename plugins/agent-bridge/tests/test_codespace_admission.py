@@ -148,6 +148,10 @@ async def test_slow_provider_keeps_real_health_and_watchdog_responsive(
     operation = None
     try:
         await _until(lambda: server.started)
+        # The first request pays one-time app/import cold start on the serving loop;
+        # absorb it so the tight probes measure only the blocked provider call.
+        warm = _make_health_probe("127.0.0.1", port, timeout=10)
+        assert await asyncio.to_thread(warm)
         thread.start()
         operation = asyncio.create_task(launch())
         await _until(lambda: provider.entered(slow))

@@ -23,7 +23,7 @@ def test_ordinary_external_adoption_keeps_git_identity(
 ) -> None:
     config = adoption_config
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id_from_cwd", actual_infer)
-    cfg.project_dir().mkdir()
+    cfg.project_dir().mkdir(exist_ok=True)
     (cfg.project_dir() / "config.yaml").write_text(yaml.safe_dump({
         "repo_name": config.repo_name, "machine": config.machine,
         "repos": {config.repo_name: {
@@ -144,7 +144,7 @@ def test_ordinary_anchor_preserves_competing_legacy_winner(
     def competing_create(*args, **kwargs):
         legacy = {key: value for key, value in kwargs.items() if key != "machine_identity_factory"}
         winner, created = create(*args, **legacy)
-        assert created and winner.machine_identity is None
+        assert created and winner.execution_machine == "receiving-space"
         winners.append(_retain_history(winner))
         return create(*args, **kwargs)
 
@@ -157,7 +157,7 @@ def test_ordinary_anchor_preserves_competing_legacy_winner(
         tracking.parse_claim_ref("receiving-space/receiving/@anchor"),
         cfg.tracking_dir("receiving"),
     )
-    assert record.machine_identity is None
+    assert record.execution_machine == "receiving-space"
     assert record.yaml_path.read_bytes() == winners[0]
 
 

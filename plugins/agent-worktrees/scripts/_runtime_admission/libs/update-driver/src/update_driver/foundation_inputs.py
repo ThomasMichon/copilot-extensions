@@ -25,6 +25,7 @@ SUPPORT = (
     "runtime_launcher.py", "resolve-runtime.ps1", "versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     "installer_source_build.py", "installer_source_wheel_cache.py",
 )
 GENERATED = {

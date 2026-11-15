@@ -29,6 +29,13 @@ contract on one explicitly recorded native target before widening the matrix.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+consumes this effort's admitted core composition as an input to the same fresh
+install/update path. A composition bundle is not each app's complete staged
+project, and an isolated CLI proof is not whole-inventory activation. Keep
+optional profiles, artifact/admission owners and every remaining acceptance
+item here; this is alignment, not completion or a new publisher.
+
 - **Topology:** bounded per-slice PRs, leaving the default branch green.
 - **Host (owns PRs):** Core bundle submitter.
 - **Delegates:** none for this initial slice.
@@ -36,6 +43,15 @@ contract on one explicitly recorded native target before widening the matrix.
   provenance record, approval service, constructor, supervisor or source policy.
 - **Handoff:** record reviewed/merged slices and remaining acceptance here.
   An isolated proof never implicitly authorizes rollout.
+
+- **Finite #12600 tracking:** The direct cache-admission item below receives
+  the existing issue's complete bounded acceptance, not cache/source custody.
+  Existing cache/runtime and lifecycle owners retain their scope; the core
+  bundle submitter is not assigned their source by topical fit or Plan review.
+  Before source work or reserved-resource use, reconcile the actual owner and
+  that lane's assignment through existing coordination. Normal reviewed Plan
+  acceptance is documentary receiving, not a generic acknowledgement,
+  implementation assignment, cleanup permission or whole-parent prerequisite.
 
 ## Context
 
@@ -197,6 +213,37 @@ Comparison request (verbatim):
   matrix through the same admission contract.
 - [ ] Integrate install/update/no-op/rollback with the existing governor and
   lifecycle owners; prove reuse rather than rebuilding an unchanged closure.
+
+#### Direct retained #12600 ordinary cache-archive admission
+
+**Agent-recommended tracking amendment.** The current source rejects the
+reported layout before collector import; that refusal is not an ordinary
+installer/SDK delivery fix or proof of successful reclamation.
+
+- [ ] **P12600:** With existing cache/runtime source ownership retained,
+  make ordinary installer/SDK-delivered Python-cache archives and ancestor
+  modes satisfy the protected-import contract OR safely admit the reported
+  private-ancestor layout. Preserve refusal for genuinely unprotected,
+  redirected or symlinked resources before import/execution. Keep indexed
+  and legacy maintenance on the same correctly admitted collector path,
+  with per-layout reporting/continuation and optional maintenance errors
+  separate from incoming selection/readiness. Do not prescribe blanket
+  permission changes, weaken protection or infer reclamation from no warning.
+
+#### Local Validation - #12600
+
+- [ ] **V12600:** In the existing owner's authorized source/test lane, cover
+  actual ordinary delivered modes, a private `0700` ancestor with `0775`
+  descendants and `0664` archive, an untrusted writable-parent negative,
+  redirected/symlinked refusal and a refused archive never executing.
+  Prove the valid archive reaches the collector only after identity/protection
+  admission; retain indexed/legacy per-layout reporting and continuation.
+  Confirm optional maintenance failure does not veto selection/readiness.
+  Keep the acceptance to this Linux admission case and necessary portable
+  refusal controls, not unrelated venues or the complete platform matrix.
+
+#### Continuing publication and adoption
+
 - [ ] Publish through the existing artifact/promotion path only after its
   authority, provenance, feed and distribution rules are satisfied.
 - [ ] Adopt services one at a time only after the actual serialization,
@@ -224,6 +271,13 @@ Comparison request (verbatim):
   selector changed; faults leave the existing installation untouched.
 - [ ] Record each validation tier actually executed and reasons for unavailable
   native lanes. Required CI/review stay nonwaivable.
+- [ ] **G12600:** Resolve P12600 and V12600 at the exact reviewed source
+  head, preserving producer correction OR safe admission, all pre-import
+  positive/negative controls and the maintenance/readiness distinction.
+  Keep the reported post-#12585 indexed/legacy warning attributed rather
+  than assuming that merge fixed archive admission. Planned receiving is
+  not collector execution, cleanup/reclamation, installed/native proof,
+  ownership transfer or rollout; incumbent acceptance remains unchanged.
 
 ## Proposal
 

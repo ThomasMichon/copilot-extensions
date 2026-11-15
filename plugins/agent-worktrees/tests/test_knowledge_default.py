@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import subprocess
 
 import pytest
@@ -113,6 +114,7 @@ def test_confirmation_shares_one_aggregate_budget_across_rechecks_and_native_own
     original_read, original_invoke = defaults._read, binding.invoke
 
     def read(*args, **kwargs):
+        assert kwargs["project_root"] == Path(configured.config.default_repo.anchor)
         observations.append(kwargs["budget"])
         return original_read(*args, **kwargs)
 
@@ -146,8 +148,8 @@ def test_pointer_precondition_rechecks_accepted_inputs_after_native_preview(conf
         else:
             original = defaults._read
 
-            def read(*args):
-                result = original(*args)
+            def read(*args, **kwargs):
+                result = original(*args, **kwargs)
                 if change == "machine-during-read":
                     configured.config.machine = "changed-worker"
                 else:
@@ -217,14 +219,15 @@ def test_optional_provider_failure_keeps_the_existing_configuration_catalog(nati
     })
     native.config.knowledge_preferences = {"state_dir": str(native.root / "state")}
 
-    def unavailable(*a):
+    def unavailable(*a, **kwargs):
         raise ConfigurationError("preference-owner-unsupported", "Selected Machines needs an update.")
 
     monkeypatch.setattr(defaults, "_read", unavailable)
     result = catalog.catalog("first")
-    assert len(result["entries"]) == 4
-    assert all(row["editable"] == "true" for row in result["entries"])
-    assert all(row["preferred_knowledge_bindable"] == "false" for row in result["entries"])
+    repositories = [row for row in result["entries"] if "repository" in row]
+    assert len(repositories) == 4
+    assert all(row["editable"] == "true" for row in repositories)
+    assert all(row["preferred_knowledge_bindable"] == "false" for row in repositories)
     assert result["summary"]["knowledge_preference"]["code"] == "preference-owner-unsupported"
 
 
@@ -239,7 +242,7 @@ def test_preferred_binding_action_preserves_the_native_readiness_gate(configured
         "target": repos_configuration.target(p, n), "effective": "inherited", "sources": [],
     })
     result = catalog.catalog("first")
-    row = next(row for row in result["entries"] if row["repository"] == "shared")
+    row = next(row for row in result["entries"] if row.get("repository") == "shared")
     assert row["preferred_knowledge_bindable"] == str(not ready).lower()
     assert row["knowledge_bindable"] == str(not ready).lower()
     assert configured.calls == []

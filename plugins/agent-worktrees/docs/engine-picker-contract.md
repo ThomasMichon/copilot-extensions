@@ -513,6 +513,75 @@ as well as prompt-delivery execution.
 
 ## Resident current-roster reads
 
+### Live reporting context
+
+The running resident advertises `worktrees-reporting-context-v1` through its
+authenticated health response. Successful v1/v2 reads add `reporting_context`
+outside `worktrees` and `projection`; feed `begin`/`update` and `heartbeat`
+frames carry the same optional envelope. Its version-1 resolved shape is
+`{version: 1, status: "resolved", hostname, machine, environment, execution_machine}`.
+The three names are nonempty strings bounded to 256 UTF-8 bytes;
+`environment` is `windows`, `wsl` or `linux`. Invalid/unreadable current
+configuration returns `{version: 1, status: "unavailable"}`, never a retained
+name. Reporting facts grant no ownership, allocation or transport authority.
+
+The serving host uses the shared current execution resolver on every response
+and heartbeat, reading current machine configuration without loading tracking
+records, constructing a full project Config or spawning Git/CLI processes.
+Names are not persisted in this envelope, and changing them neither advances
+row/observation revisions nor changes a publication's freshness or quality.
+Saved local responses retain their advisory rows and add the reading host's
+current context. Remote consumers preserve the reporting host's envelope;
+they must not derive remote names from the coordinator's local hostname.
+
+Resident publication removes `machine`, `platform`, `machine_identity_version`,
+`environment` and `execution_machine` from stored worktree rows and their nested
+`caller_state`/candidate naming projections. Original `caller_worktree` and
+claim/allocation locators remain unchanged. The next normal complete publication
+replaces older row/index naming snapshots; there is no bulk migration or
+historical-event rewrite.
+
+Platform-filtered reads select the reporting process's OS substrate before
+resolving row IDs or codenames. Matching filters use the platform-free index;
+other platforms select no rows without resolving ambiguous aliases or decoding
+excluded rows. Producer point-refresh selection and completion use that same
+rule. All v1/v2 wire rows retain a transient `platform` for independently updated
+receivers, including unfiltered reads. It is not stored per worktree or derived
+from the machine registry. Its byte cost is checked before publication; naming
+renames or unavailable registry mappings cannot change semantic rows or their
+revisions. Saved responses reapply this compatibility field without writing
+the database.
+
+Naming-free publications use durable storage format 2, while both live protocols
+retain wire `projection.schema_version: 1`. An older saved-roster reader's
+strict format-1 gate refuses the platform-free index instead of misreading it as
+an empty platform selection. Its ordinary authenticated v1/v2 resident reads
+still work; saved fallback during resident absence requires an updated reader.
+New readers accept formats 1 and 2, and an older elected writer's next complete
+publication restores format 1 without a migration.
+
+Older saved publications retain their original semantic body for rollback.
+If that body cannot satisfy a requested platform filter, admission refuses it
+rather than treating a stamped platform as current identity. Older receivers
+ignore the additive reporting envelope; a provider rollback may omit it.
+Missing context means live reporter naming is unsupported, not that the reader
+should invent it. The reporting-context capability alone does not certify
+durable row/index naming removal on an older provider.
+
+Manager's production readers admit the envelope separately as receiver-only
+`_reporting_context`, stripping it before semantic-row validation or comparison.
+When present it supersedes row naming tuples; `unavailable` withdraws those
+names rather than reviving a stored tuple. An absent envelope retains the legacy
+baseline. A changed heartbeat context repaints admitted naming without changing
+row revisions, observation times, freshness or source/transport selection.
+Availability-only frames and legacy heartbeats without the optional property
+retain the last admitted context until a new complete publication replaces it.
+Malformed context or a wire row injecting receiver-only reporting metadata is
+rejected before replacing committed rows. These facts cannot retarget actions:
+configured source identity and transport authority remain separate.
+
+### Current publication and selection
+
 The separate [`record --worktree-id <exact-id> --json`](cli-reference.md#exact-durable-record-read)
 API reads one ground-owned durable record in the receiving project's tracking
 namespace. It is metadata, not a roster fallback, resident computation,

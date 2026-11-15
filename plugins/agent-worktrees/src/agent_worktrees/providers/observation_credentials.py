@@ -6,12 +6,14 @@ import base64
 import math
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.parse import urlsplit
 
 from .base import ProviderError
 
 MAX_SNAPSHOT_REQUESTS = 64
+HTTP_PROFILES = ("legacy", "direct-v1")
 
 
 class ForgeBinding(Protocol):
@@ -39,8 +41,50 @@ class ObservationCredential(Protocol):
 CredentialSource = Callable[[], ObservationCredential]
 
 
+@dataclass(frozen=True)
+class _ProfiledSource:
+    source: CredentialSource = field(repr=False)
+    http_profile: str
+    expected_account: str | None = None
+
+    def __call__(self) -> ObservationCredential:
+        return self.source()
+
+
+def with_http_profile(
+    source: CredentialSource, profile: str, *, expected_account: str | None = None,
+) -> CredentialSource:
+    """Request a transport, not credential verification or effect authority."""
+    if profile not in HTTP_PROFILES or not callable(source):
+        raise ValueError("unsupported native observation HTTP profile")
+    if expected_account is not None:
+        if (
+            profile != "direct-v1" or not isinstance(expected_account, str)
+            or not 1 <= len(expected_account) <= 255 or not expected_account.isascii()
+            or any(not char.isprintable() or char.isspace() for char in expected_account)
+        ):
+            raise ValueError("account guard requires a login and direct-v1 typed credentials")
+    return source if profile == "legacy" else _ProfiledSource(source, profile, expected_account)
+
+
 class ObservationCredentialError(ProviderError):
     """Abort the entire observation, including otherwise best-effort reads."""
+
+
+@dataclass(frozen=True)
+class _PinnedForge:
+    provider: str
+    api_base: str
+    repository: str
+    permission: str
+    authentication: str
+
+
+@dataclass(frozen=True)
+class _PinnedMaterial:
+    token: str = field(repr=False)
+    expires_at: float
+    forge: _PinnedForge
 
 
 class ObservationCredentials:
@@ -55,6 +99,17 @@ class ObservationCredentials:
         self.source = source
         self.provider, self.api_base, self.repository = provider, api_base, repository
         self.max_requests, self.requests = max_requests, 0
+        self.http_profile = getattr(source, "http_profile", "legacy")
+        self.expected_account = getattr(source, "expected_account", None)
+        self._pinned: _PinnedMaterial | None = None
+        if self.expected_account is not None and (
+            provider != "gitea" or self.http_profile != "direct-v1"
+        ):
+            raise ObservationCredentialError("unsupported native observation account guard")
+        if self.http_profile not in HTTP_PROFILES or (
+            self.http_profile != "legacy" and provider not in ("github", "gitea")
+        ):
+            raise ValueError("unsupported native observation HTTP profile")
 
     def acquire(self) -> ObservationCredential:
         if self.max_requests is not None and self.requests >= self.max_requests:
@@ -89,6 +144,23 @@ class ObservationCredentials:
             raise ObservationCredentialError("PR observation credential material is invalid")
         if expiry <= time.time():
             raise ObservationCredentialError("PR observation credential expired", transient=True)
+        if self.expected_account is not None:
+            current = _PinnedMaterial(token, expiry, _PinnedForge(
+                binding.provider, binding.api_base, binding.repository,
+                binding.permission, binding.authentication,
+            ))
+            if self._pinned is not None:
+                if current.token != self._pinned.token or current.forge != self._pinned.forge:
+                    raise ObservationCredentialError("PR observation verified material changed")
+                current = _PinnedMaterial(
+                    current.token, min(current.expires_at, self._pinned.expires_at), current.forge,
+                )
+                if current.expires_at <= time.time():
+                    raise ObservationCredentialError(
+                        "PR observation verified material expired", transient=True,
+                    )
+            self._pinned = current
+            return current
         return material
 
     def authorization(self) -> str:

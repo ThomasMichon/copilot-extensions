@@ -19,8 +19,10 @@ def spawn_owner_process(
     root: Path, *, source: str, installed: bool = False,
 ) -> tuple[Popen[bytes], Path]:
     """Launch the owner with its existing durable cwd, console and log policy."""
-    from agent_procutil import python_cache_args, spawn_daemon
+    import agent_procutil
+    from agent_procutil import spawn_daemon
     from agent_procutil.daemon_instances import DaemonInstanceSpec
+    python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     root = Path(os.path.abspath(root))
     root.mkdir(parents=True, exist_ok=True)

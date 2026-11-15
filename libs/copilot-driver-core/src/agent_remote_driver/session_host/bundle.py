@@ -22,10 +22,12 @@ _DRIVER_MODULES = (
     "session_preferences.py",
     "preference_attestation.py",
     "preference_exec.py",
+    "bridge_extension/__init__.py",
     "headed/__init__.py",
     "headed/backend.py",
     "headed/staging.py",
     "headed/launcher.py",
+    "headed/native_handoff.py",
     "headed/receipt.py",
     "headed/recovery.py",
     "headed/recovery_codec.py",
@@ -47,13 +49,15 @@ _DRIVER_MODULES = (
 )
 _PROCUTIL_MODULES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_darwin_caller_owned.py", "_job_scopes.py",
+    "_suspended_handoff.py",
     "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
     "_daemon_instance_owner.py", "_daemon_instance_clock.py", "_daemon_instance_reconcile.py",
     "_daemon_instance_records.py",
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_output_relay.py",
     "_windows_caller_owned.py", "_windows_job_types.py", "python_cache.py",
+    "python_cache_store.py", "python_cache_permissions.py", "python_cache_catalog.py",
     "daemon.py", "daemon_broker.py", "daemon_instances.py", "linux_daemon_scope.py", "native_child.py",
-    "owned_process.py", "startup.py", "streaming.py",
+    "owned_process.py", "owned_budget.py", "startup.py", "streaming.py",
 )
 
 
@@ -114,10 +118,15 @@ def _legacy_sources() -> tuple[tuple[str, bytes], ...]:
 
 
 def _sources(legacy: bool) -> tuple[tuple[str, bytes], ...]:
+    from agent_remote_driver.bridge_extension import extension_sources
+
     module, function = (_LEGACY_MAIN if legacy else _MAIN).split(":")
     entrypoint = f"import sys\nfrom {module} import {function}\nsys.exit({function}())\n"
     return tuple(
         (relative, path.read_bytes()) for relative, path in _bundle_sources()
+    ) + tuple(
+        ("agent_remote_driver/bridge_extension/" + name, content)
+        for name, content in extension_sources()
     ) + _policy_sources() + (_legacy_sources() if legacy else ()) + (
         ("__main__.py", entrypoint.encode("utf-8")),
     )

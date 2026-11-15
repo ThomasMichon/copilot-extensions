@@ -278,13 +278,16 @@ def test_actual_monitor_dispatch_preserves_reads_until_handoff_revokes_admission
         main, "_monitor_sweep", lambda *a, **k: pytest.fail("fixture must shut down before sweep"),
     )
 
+    factory = WorktreesRuntime.for_monitor
+
     def owner_factory(*args, **kwargs):
-        owner = WorktreesRuntime(*args, **kwargs)
+        owner = factory(*args, **kwargs)
+        assert owner.store.db_path.parent == tmp_path
         monkeypatch.setattr(owner.agendas, "roster_changed", lambda project: None)
         owners.append(owner)
         return owner
 
-    monkeypatch.setattr(worktrees_runtime, "WorktreesRuntime", owner_factory)
+    monkeypatch.setattr(worktrees_runtime.WorktreesRuntime, "for_monitor", staticmethod(owner_factory))
     results = []
 
     class Control:

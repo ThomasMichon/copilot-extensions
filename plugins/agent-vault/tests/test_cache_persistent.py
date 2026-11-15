@@ -289,7 +289,7 @@ def test_get_refresh_fails_when_authoritative_reconciliation_cannot_persist(
     assert "persistent cache could not be reconciled" in captured.err
 
 
-def test_cache_only_reads_legacy_raw_entry_without_migration_or_service(
+def test_cache_only_reads_explicit_root_entry_without_migration_or_service(
     enabled_cache,
     monkeypatch,
     capsys,
@@ -308,7 +308,7 @@ def test_cache_only_reads_legacy_raw_entry_without_migration_or_service(
         lambda *a, **k: pytest.fail("cache-only read contacted the service"),
     )
 
-    assert cli.cmd_get(_Args(entry="token", cache_only=True)) == 0
+    assert cli.cmd_get(_Args(entry="/token", cache_only=True)) == 0
     assert capsys.readouterr().out == "offline\n"
     assert persistent.get("A/token", "password") is None
     assert persistent.get("token", "password") == "offline"
@@ -578,13 +578,13 @@ def test_batch_service_errors_are_not_reported_as_cache_failures(
 
 
 @pytest.mark.parametrize("refresh", [False, True])
-@pytest.mark.parametrize("legacy_alias", [False, True])
+@pytest.mark.parametrize("absolute_root", [False, True])
 def test_batch_preserves_valid_pending_journal_semantics(
-    enabled_cache, monkeypatch, capsys, refresh, legacy_alias,
+    enabled_cache, monkeypatch, capsys, refresh, absolute_root,
 ):
     from agent_vault import config
 
-    entry = "token" if legacy_alias else "Example/one"
+    entry = "token" if absolute_root else "Example/one"
     monkeypatch.delenv("AGENT_VAULT_PINNED_CONTEXT", raising=False)
     monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(group="Example"))
     persistent = get_cache()
@@ -596,7 +596,8 @@ def test_batch_preserves_valid_pending_journal_semantics(
     monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: {
         "ok": True, "value": "authoritative", "generation": 1,
     })
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps([{"entry": entry}])))
+    requested = "/" + entry if absolute_root else entry
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps([{"entry": requested}])))
 
     assert cli.main(["batch-get", *(["--refresh"] if refresh else [])]) == 0
     result, = json.loads(capsys.readouterr().out)["results"]
@@ -608,7 +609,7 @@ def test_batch_preserves_valid_pending_journal_semantics(
         assert persistent.pending_replace(entry, "password")["candidate"] == "candidate"
         assert persistent.get(entry) is None
         assert persistent._cache_file.read_bytes() == cache_before
-    if legacy_alias:
+    if absolute_root:
         assert persistent.get("Example/token") is None
 
 
@@ -705,7 +706,7 @@ def test_batch_does_not_replace_cache_corrupted_during_service_read(
 
 
 @pytest.mark.parametrize("value,ok", [("cached-value", True), (42, False)])
-def test_batch_validates_legacy_alias_without_migrating(
+def test_batch_validates_explicit_root_entry_without_migrating(
     enabled_cache, monkeypatch, capsys, value, ok,
 ):
     from agent_vault import config
@@ -719,12 +720,13 @@ def test_batch_validates_legacy_alias_without_migrating(
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
     monkeypatch.setattr(
         cli, "ensure_service",
-        lambda: pytest.fail("legacy cached alias contacted the service"),
+        lambda: pytest.fail("explicit root cache hit contacted the service"),
     )
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"token"}]'))
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"/token"}]'))
 
     assert cli.main(["batch-get"]) == (0 if ok else 1)
     result, = json.loads(capsys.readouterr().out)["results"]
+    assert result["entry"] == "/token"
     assert result["ok"] is ok
     assert result["value"] == (value if ok else None)
     assert result["source"] == "cache"

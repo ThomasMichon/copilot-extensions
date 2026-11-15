@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { makeBridgeEndpoint } from "../extensions/agent-bridge/bridge-endpoint.mjs";
+import { makeBridgeEndpoint } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/bridge-endpoint.mjs";
 
 function setup({ bases, tokens = ["tok"], responses }) {
   const seen = [];

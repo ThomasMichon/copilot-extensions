@@ -21,6 +21,53 @@ WORKFLOW = (
 
 
 @pytest.mark.parametrize("outcome", [
+    "passed", "wrong-source", "missing-source", "retained", "failed", "partial",
+])
+def test_hosted_routing_uses_exact_fresh_canonical_contract(tmp_path, monkeypatch, outcome):
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["manager-engine-routing-windows"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-engine-routing'"
+    )
+    step = next(row for row in job["steps"] if row.get("id") == "routing")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("REQUESTED_SOURCE", (
+        "" if outcome == "missing-source" else "b" * 40 if outcome == "wrong-source" else "a" * 40
+    ))
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "a" * 40 + "\n")
+    root = Path(".validation/engine-routing")
+    if outcome == "retained":
+        root.mkdir(parents=True)
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        assert arguments == [
+            sys.executable, "tools/run-manager-runtime-acceptance.py",
+            "--contract", "engine-routing", "--root", str(root),
+        ]
+        assert kwargs == {"check": True}
+        if outcome == "failed":
+            raise subprocess.CalledProcessError(1, arguments)
+        root.mkdir(parents=True)
+        (root / "routing-result.json").write_text(json.dumps({
+            "prepared": outcome != "partial", "timed_runner_exit": 0,
+        }), encoding="utf-8")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if outcome == "passed":
+        exec(step["run"], {})
+    elif outcome == "failed":
+        with pytest.raises(subprocess.CalledProcessError):
+            exec(step["run"], {})
+    else:
+        with pytest.raises(ValueError):
+            exec(step["run"], {})
+    assert len(calls) == int(outcome in {"passed", "failed", "partial"})
+
+
+@pytest.mark.parametrize("outcome", [
     "passed", "failed", "skipped", "missing", "partial", "stale", "wrong-run", "runtime-claim",
     "requested-mismatch", "foreign-transport", "duplicate-field",
 ])

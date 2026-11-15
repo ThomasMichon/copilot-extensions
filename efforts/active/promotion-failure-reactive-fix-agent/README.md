@@ -109,8 +109,33 @@ complete direct Plan/local and actual global Validation/Journal delivery,
 followed by permitted whole-current readback and a separate source judgment,
 remain outstanding. A platform limitation is not a repaired-execution PASS.
 
+The directly retained #5890 family belongs to this effort's existing
+Phase 3 and unchanged Driving agent. This amendment makes the direct
+P5890/local V5890/global G5890 record the continuing decision and
+realization home; it neither chooses the policy nor appoints an executor.
+The local-dispatch annex and historical Journal references to #5890 retain
+their original policy provenance and unresolved activation dependency.
+
+Keep #5890 OPEN until normal review actually merges the complete receiving
+amendment and the full current ROOT and strict local-dispatch annex have
+been read back against the complete original/refinements. Any subsequent
+source-tracker judgment is separate. If administrative supersession is
+then supported, the historical issue link remains provenance rather than
+a required live claim token; the unresolved policy and activation gates
+remain here with the same custodians. No independent-OPEN requirement is
+created or assumed waived.
+
 - **Topology:** independent per-slice PRs against `dev`; no shared branch.
 - **Host (owns PRs):** the participant above, until split further.
+
+Keep #5960 with the existing Phase 2 Driving agent and sandboxed hosted
+workflow; no executor, credential, venue or policy is selected by this
+receipt. The local-dispatch annex remains constructed-but-unactivated.
+Historical #5890 references identify the policy provenance now directly
+retained in P5890/local V5890/G5890; administrative retirement does not
+resolve that policy or activate the lane, and continued OPEN status of
+that historical issue is not a gate. All independent guardrails and
+resource custody remain.
 
 ## Context
 
@@ -734,6 +759,41 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       other PR — no special-case merge path introduced anywhere in this
       effort.
 
+### Direct charter and diagnostic-packet acceptance from #5960
+
+This finite Phase 2 consumer-contract family stays with the existing
+Driving agent and hosted workflow. All incumbent checked credit,
+guardrails, first unresolved gates and separate lane owners remain.
+
+- [ ] **P5960-1:** Align unresolved/out-of-scope triage's direct-comment
+  promise with the supported safe reporting operation OR deliberately
+  supply the required safe operation. Preserve read-only diagnostic
+  credentials and ordinary reviewed contribution; do not give the agent
+  repository-write credentials merely to satisfy prose.
+- [ ] **P5960-2:** Accurately describe OR supply the commit SHA promised in
+  `.verify-issue/body.txt`, preserving independently verified job, optional
+  test, signature, run URL and excerpt provenance. Existing issue/event/
+  read context may contain the SHA; do not claim global unavailability
+  or causation for #4783.
+- [ ] **P5960-3:** Preserve the hosted Phase 2 charter, protected automation/
+  release/review paths and existing reporting uncertainty. Keep local
+  dispatch, hosted execution/platform qualification and recurrence-policy
+  responsibilities separate. Uninspected external handler behavior is not
+  evidence of globally absent human-facing reporting.
+
+#### Local Validation for #5960
+
+- [ ] **V5960-1:** Compare the unresolved/out-of-scope consumer promise with
+  the configured supported reporting operation and verify whichever
+  original alternative is selected, preserving read-only diagnostics.
+- [ ] **V5960-2:** Compare the actual diagnostic-file fields with the SHA
+  promise. Preserve independently verified provenance and distinguish
+  packet correction from other available SHA context.
+- [ ] **V5960-3:** Verify truthful packet/reporting promises without claiming
+  #4783 repair, external-handler absence or local-lane substitution.
+  Preserve ordinary reviewed delivery and every independent guardrail,
+  authentication, activation and hosted-execution acceptance condition.
+
 ### Phase 3 — Guardrails and walk-back criteria (do not skip)
 - [x] **Never auto-merge the resulting PR.** A human or the driving agent
       reviews it like any other contributor's PR before merge — this
@@ -854,6 +914,50 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       live runs so far); it exists so a future maintainer has a concrete
       bar to check against, not to bless every candidate change once hit.
 
+### Direct closed-signature recurrence acceptance from #5890
+
+This is an additive planned-work receipt within the existing Phase 3,
+owned by the existing Driving agent. The episode/rearm decision remains
+undecided. No implementation, dispatch, activation, policy selection or
+source/resource transfer is completed or authorized by this receipt.
+
+- [ ] **P5890-1 - Episode and rearm decision.** Decide what distinguishes a
+  genuinely resolved-then-regressed failure episode from another attempt on
+  unresolved work. State how explicit operator rearming differs from
+  automatic recurrence. Do not select suppress-forever or unlimited
+  re-dispatch by implication.
+- [ ] **P5890-2 - Cross-issue attempt bounds.** Establish and realize the
+  chosen episode/signature attempt-and-escalation contract across tracker
+  identities, including sequential recurrence after closure and closure
+  while an attempt is active. A new issue number, coordinator task dedup,
+  per-run timeout or output limit is not a cross-issue attempt budget.
+  Numeric bounds and episode identity remain decisions for the existing
+  owner, not choices made by this documentary intake.
+- [ ] **P5890-3 - Preserve incumbent controls.** Retain open-issue dedup and
+  cooldown, current caller serialization, verified failure evidence,
+  authenticated admission, diagnosis/intent preservation, draft outputs
+  and ordinary review/merge authority. Preserve the existing protected
+  paths and walk-back/expansion criterion. Do not invent a concurrent
+  watchdog race in the currently serialized caller or conflate cloud and
+  local execution lanes.
+
+#### Local Validation for #5890
+
+- [ ] **V5890-1:** Prove the selected policy with synthetic resolved/new
+  episode versus unresolved recurrence, sequential closure/recreation,
+  closure during an active attempt, attempt exhaustion/escalation and
+  explicit rearming cases, retaining the chosen identity across issue
+  numbers.
+- [ ] **V5890-2:** Preserve existing open-issue dedup/cooldown and serialized
+  caller behavior, verified evidence, draft outputs and normal acceptance.
+  No production fix-agent dispatch is authorized by this intake.
+- [ ] **V5890-3:** Keep completed offline local-lane construction credited.
+  Policy resolution and independent venue-authentication proof remain
+  activation dependencies, not prerequisites to documentary preservation
+  or already-authorized offline construction. Synthetic policy proof does
+  not establish live provisioning, authentication, hosted execution,
+  repair triage or any other incumbent acceptance.
+
 ### Finite hosted execution-capability qualification from #4783
 
 **Agent-recommended tracking amendment.** Preserve the complete original and
@@ -948,6 +1052,13 @@ This is not activation or replacement by the offline local lane.
       the test's assertion alone — proving it doesn't reflexively "fix"
       every red test by weakening the test.
 
+- [ ] **G5890:** Resolve every P5890-1 through P5890-3 and V5890-1 through
+  V5890-3 clause at its stated finite scope. Preserve the undecided owner
+  decision until actually made, cross-issue identity and escalation
+  coverage, current dedup/serialization and all incumbent guardrails.
+  Retain separate cloud/local/authentication/charter/hosted-execution
+  acceptance. Documentary intake is not implementation, activation,
+  source closure or whole-effort completion.
 - [ ] **G4783:** Resolve every direct #4783 Plan/local Validation and continuing
   Coordination clause at the original hosted execution boundary. Distinguish
   actual allowlist denial from runtime refusal and reflect-write correlation;
@@ -957,11 +1068,41 @@ This is not activation or replacement by the offline local lane.
   owners, all incumbent gates and exact source/resource custody. Documentary
   intake is not implementation, activation, source closure or parent completion.
 
+- [ ] **G5960:** Resolve every P5960/local V5960 clause at this finite hosted
+  consumer-contract boundary, preserving BOTH original OR alternatives,
+  verified diagnostic provenance, read-only agent credentials and ordinary
+  reviewed contribution. Keep direct-PR, intent-preservation, recurrence,
+  hosted execution and local authentication/activation gates independent.
+
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-11-13 - Complete #5960 consumer-contract receiving proposed
+
+Added seven unchecked Phase 2/local/global Validation rows for both complete
+reporting/packet mismatches and original alternatives under the same Driving
+agent. All incumbent content/checks and strict local-lane policy/
+authentication/activation conditions remain. No workflow execution,
+permission expansion, hosted repair, policy selection, receiving acceptance
+or source disposition is asserted.
+
+### 2026-11-13 - Complete recurrence-policy receiving proposed
+
+Added #5890's complete unresolved episode/rearm, cross-issue attempt and
+synthetic-validation contract directly in Phase 3, local Validation and
+actual global Validation. The existing Driving agent and all incumbent
+guardrails remain; no episode definition, numeric budget or rearming
+policy was selected. The strict local-lane reference and historical
+2026-10-10 policy-owner note remain provenance, reconciled by current
+Coordination rather than erased.
+
+This is proposed documentary receiving. Normal reviewed actual merge,
+whole-current ROOT/strict-annex readback and separate source judgment
+remain before any tracker disposition. No implementation, production
+dispatch, authentication, activation or custody effect occurred.
 
 ### 2026-10-30 - Proposed finite hosted execution-capability family
 

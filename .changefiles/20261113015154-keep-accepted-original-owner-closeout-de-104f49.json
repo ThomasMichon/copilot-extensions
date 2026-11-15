@@ -1,0 +1,9 @@
+{
+  "comment": "Keep accepted original-owner closeout deliverable after same-generation unassignment and requeue",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

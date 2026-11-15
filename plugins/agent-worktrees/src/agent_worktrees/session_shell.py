@@ -90,6 +90,15 @@ def prepare(
             helper = Path(__file__).resolve().parents[2] / "scripts" / helper.name
         _plain(helper)
         sources.append(helper)
+    for source in tuple(sources):
+        if source.name == "native-seed-boundary.ps1" and (
+            "# agent-worktrees:native-suspended-creation-v1"
+            in source.read_text(encoding="utf-8-sig").splitlines()
+        ):
+            for name in ("native-seed-process.ps1", "native-seed-process.cs"):
+                helper = source.with_name(name)
+                _plain(helper)
+                sources.append(helper)
     directory = launch_attempt._path(
         record_path.parent, attempt_id or uuid4().hex, uuid4().hex,
     ).with_suffix(".shell")

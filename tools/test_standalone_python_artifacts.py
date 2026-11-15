@@ -62,6 +62,9 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
             text = re.sub(r"(?m)^dbus-next = .*\n", "", text)
         target.write_text(text, encoding="utf-8")
     data = tomllib.loads((manager / "pyproject.toml").read_text(encoding="utf-8"))
+    assert not selected.keys() & {
+        canonicalize_name(Requirement(text).name) for text in data["project"]["dependencies"]
+    }, "embedded first-party packages must not also be installed into the Manager environment"
     projected, ranges = bundle_lock.collect_inputs(
         tmp_path, root_names=(data["project"]["name"],),
     )
@@ -675,6 +678,107 @@ def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path):
         assert {name: archive.read(name) for name in expected} == expected
 
 
+def test_mcp_native_owner_companion_survives_wheel_and_source_distribution(tmp_path):
+    project = tmp_path / "project"
+    shutil.copytree(
+        ROOT / "plugins" / "agent-mcp", project,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
+        ),
+    )
+    expected = {
+        "agent_mcp/" + name: (project / "src" / "agent_mcp" / name).read_bytes()
+        for name in ("owner_section.cs", "owner_snapshot.py")
+    }
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import setuptools.build_meta as backend; out=__import__('sys').argv[1]; "
+         "backend.build_wheel(out); backend.build_sdist(out)", str(archives)],
+        cwd=project, capture_output=True, text=True, encoding="utf-8", timeout=90, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    with zipfile.ZipFile(next(archives.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
+    unpacked = tmp_path / "unpacked"
+    shutil.unpack_archive(next(archives.glob("*.tar.gz")), unpacked)
+    rebuilt = tmp_path / "rebuilt"
+    rebuilt.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import setuptools.build_meta as backend; backend.build_wheel(__import__('sys').argv[1])",
+         str(rebuilt)],
+        cwd=next(unpacked.iterdir()), capture_output=True, text=True,
+        encoding="utf-8", timeout=90, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    with zipfile.ZipFile(next(rebuilt.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
+
+
+def test_manager_source_materializer_imports_from_isolated_wheel_resources(tmp_path):
+    from materialize_launch_wrapper_assets import materialize_into
+    from plugin_runtime_resources import application_resources
+
+    project = tmp_path / "manager"
+    project.mkdir()
+    log = materialize_into(
+        source_consumer_dir=ROOT / "worktree-manager", dest_consumer_dir=project,
+        canonical_root=ROOT, dest_root=tmp_path,
+    )
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    resources = application_resources(project, "worktree_manager")
+    helper = "worktree_manager/_runtime_assets/scripts/libs/versioned-runtime/standalone_build.py"
+    assert resources[helper].read_bytes() == (
+        ROOT / "libs/versioned-runtime/standalone_build.py"
+    ).read_bytes()
+    wheel_layout = tmp_path / "wheel-resources"
+    for member, source in resources.items():
+        destination = wheel_layout / member
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    candidate = tmp_path / "candidate"
+    application = candidate / "applications/example"
+    application.mkdir(parents=True)
+    (candidate / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = "applications/example"\n',
+    )
+    (application / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "1"\n')
+    (candidate / "resources").mkdir()
+    (candidate / "resources/helper.py").write_text("VALUE = 1\n")
+    (application / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "groups": [{"canonicalDir": "resources", "payloadDir": "helpers", "files": ["helper.py"]}],
+    }))
+    program = """
+import pathlib, sys
+tools = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(tools))
+sys.path.insert(0, str(tools / "tools"))
+from source_preparation_process import procutil_module
+permissions = procutil_module("python_cache_permissions")
+assert pathlib.Path(permissions.__file__).is_relative_to(tools / "libs" / "agent-procutil")
+import materialize_main
+root = pathlib.Path(sys.argv[2])
+log = materialize_main.materialize(root, canonical_root=root)
+assert not any(row.startswith("SKIP") for row in log), log
+assert (root / "applications/example/helpers/helper.py").read_bytes() == (root / "resources/helper.py").read_bytes()
+assert pathlib.Path(materialize_main.__file__).is_relative_to(tools)
+print("isolated-wheel-resource-materializer-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", program,
+         str(wheel_layout / "worktree_manager/_runtime_assets/scripts/runtime-source-tools"),
+         str(candidate)],
+        cwd=wheel_layout, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "isolated-wheel-resource-materializer-ok"
+
+
 @pytest.mark.parametrize("relative,package", [
     ("worktree-manager", "worktree_manager"),
     ("plugins/agent-worktrees", "agent_worktrees"),
@@ -706,6 +810,9 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
         ).items()
     }
     assert expected
+    if package == "agent_worktrees":
+        for name in ("native-seed-boundary.ps1", "native-seed-process.ps1", "native-seed-process.cs"):
+            assert f"{package}/_runtime_assets/scripts/{name}" in expected
     if package == "worktree_manager":
         canonical = ROOT / "libs" / "bootstrap-killswitch"
         for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):

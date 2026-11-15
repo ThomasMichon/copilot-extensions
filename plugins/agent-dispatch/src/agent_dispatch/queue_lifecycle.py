@@ -15,6 +15,7 @@ standalone.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import replace
 
 import json
@@ -746,6 +747,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
         start_acquisition_authority: dict | None = None,
         require_pool_assignment: bool = False,
         pool_recovery_revision: int | None = None,
+        transaction_guard: Callable[[sqlite3.Connection], None] | None = None,
+        unaccepted_closeout: bool = False,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -771,6 +774,10 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if (
                 note != "start" and task.status == Status.CLAIMED and task.owner is None
                 and worker_id is not None and pool_assignment(conn, task_id) is not None
+                and not (
+                    unaccepted_closeout and to == Status.ABANDONED
+                    and not require_owner and transaction_guard is not None
+                )
             ):
                 raise TaskError("allocator claim has no accepted worker to perform this transition")
             if note == "start":
@@ -875,6 +882,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 (task_id,),
             ).fetchone():
                 raise TaskError("spawn cooling remains unresolved")
+            if transaction_guard is not None:
+                transaction_guard(conn)
             retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
             if callable(retire_waiters):
                 wake_enqueued = retire_waiters(

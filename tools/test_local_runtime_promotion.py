@@ -19,6 +19,39 @@ import test_promote_release as support
 repo = support.repo
 
 
+@pytest.mark.parametrize("selected", ["example", "demo-plugin"])
+def test_main_seeded_application_export_retains_root_declaration_and_project_roster(
+    repo, tmp_path, selected,
+):
+    import local_install_source as installer_source
+    from promotion_python_artifacts import candidate_projects
+
+    declaration = '[tool.copilot-extensions.python-projects]\nexample = "apps/example"\n'
+    (repo / "pyproject.toml").write_text(declaration)
+    for relative, name in (("apps/example", "example"), ("plugins/demo-plugin", "demo-plugin")):
+        directory = repo / relative
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "src" / name.replace("-", "_")).mkdir(parents=True)
+        (directory / "src" / name.replace("-", "_") / "__init__.py").write_text("VALUE = 1\n")
+        (directory / "pyproject.toml").write_text(
+            '[project]\n' + f'name = "{name}"\nversion = "0.1.0-dev1"\n',
+        )
+    main = support._commit(repo, "Declared and builtin application source")
+    (repo / "README.md").write_text("new development content\n")
+    source = support._commit(repo, "Development selection")
+    output = tmp_path / "prepared"
+    record = installer_source.compose(
+        repo, source, main, output, projects=(selected,), deadline=time.monotonic() + 120,
+    )
+    assert record["composition"]["main_seed"] == main
+    assert (output / "source/pyproject.toml").read_text() == declaration
+    assert candidate_projects(output / "source") == {
+        "demo-plugin": "0.1.0-dev1", "example": "0.1.0-dev1",
+    }
+    assert (output / "source" / ("apps/example" if selected == "example" else "plugins/demo-plugin")
+            / "src" / selected.replace("-", "_") / "__init__.py").read_text() == "VALUE = 1\n"
+
+
 def test_concurrent_compositions_keep_changefile_readers_in_their_own_scratch(
     repo: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

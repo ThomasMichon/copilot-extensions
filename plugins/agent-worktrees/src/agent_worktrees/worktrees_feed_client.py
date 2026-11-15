@@ -8,6 +8,7 @@ import sys
 import time
 
 from . import worktrees_observation_contract as observations
+from . import worktrees_reporting
 from .worktrees_client import READ_TIMEOUT, validate_result
 from .worktrees_feed import BOOTSTRAP_CAPABILITY, FEED_ACTION, FEED_CAPABILITY
 from .worktrees_projection import MAX_COLLECTION_ITEMS, MAX_ROW_BYTES, _identity
@@ -199,6 +200,14 @@ class FeedReceiver:
                 not isinstance(frame.get("reason"), str) or not frame["reason"]
             ):
                 raise ProjectionUnavailable("resident feed going-away notice omitted its reason")
+            if "reporting_context" in frame and kind == "heartbeat":
+                try:
+                    worktrees_reporting.validate(frame["reporting_context"])
+                except ValueError as exc:
+                    raise ProjectionUnavailable(str(exc)) from exc
+                self.current = {
+                    **self.current, "reporting_context": frame["reporting_context"],
+                }
             return [frame]
         if self._begin is None or frame.get("projection") != self._begin["projection"]:
             raise ProjectionUnavailable("resident feed mixed publication barriers")

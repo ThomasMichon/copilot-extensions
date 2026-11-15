@@ -6,34 +6,33 @@ $_command = 'budget-guidance'
 $_module = 'budget_guidance'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $_runtimeRoot = Join-Path $env:USERPROFILE '.budget-guidance'
-$_cacheId = [Guid]::NewGuid().ToString('N')
-$_pythonCache = [IO.Path]::GetFullPath((Join-Path $_runtimeRoot "cache\python\unsealed-$_cacheId"))
-if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_pythonCache.StartsWith('\\?\')) {
-    $_pythonCache = if ($_pythonCache.StartsWith('\\')) { '\\?\UNC\' + $_pythonCache.Substring(2) }
-    else { '\\?\' + $_pythonCache }
-}
-$_mintedPythonCache = $_pythonCache
-# Reuse the sealed installed-<digest> cache when install evidence is valid.
+# Old providers cannot admit managed cache ownership; keep those launches read-only.
 function Select-PythonCache([string]$Python) {
     $selector = @'
-import json, os, sys
+import json, sys
 try:
-    from agent_procutil.python_cache import cache_arguments
-    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1]
-    assert os.path.basename(prefix).startswith('installed-')
+    from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
+    assert POLICY_VERSION == 2
+    arguments = policy_arguments(sys.argv[1], runtime=sys.executable)
 except Exception:
-    prefix = sys.pycache_prefix
-print(json.dumps(prefix, ensure_ascii=True))
+    arguments = ['-B']
+print(json.dumps(arguments, ensure_ascii=True))
 '@
     try {
-        $selected = & $Python -I -B -X "pycache_prefix=$_mintedPythonCache" -c $selector $_runtimeRoot
-        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) { return [string]($selected | ConvertFrom-Json) }
+        $selected = & $Python -I -B -X utf8 -c $selector $_runtimeRoot
+        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) {
+            $cacheArguments = ConvertFrom-Json -InputObject ([string]$selected)
+            if ($cacheArguments.Count -eq 1 -and $cacheArguments[0] -ceq '-B') { return '-B' }
+            if ($cacheArguments.Count -eq 2 -and $cacheArguments[0] -ceq '-X' -and
+                $cacheArguments[1] -is [string] -and
+                $cacheArguments[1].StartsWith('pycache_prefix=') -and
+                $cacheArguments[1].Length -gt 15 -and $cacheArguments[1] -notmatch "[`r`n]" -and
+                $cacheArguments[1].IndexOf([char]0) -lt 0) {
+                return $cacheArguments
+            }
+        }
     } catch {}
-    return $_mintedPythonCache
-}
-function Remove-MintedPythonCache {
-    if ($_pythonCache -ne $_mintedPythonCache) { return }
-    try { [IO.Directory]::Delete($_mintedPythonCache, $true) } catch {}
+    return '-B'
 }
 $_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
@@ -229,12 +228,11 @@ if ($_py) {
     # (copilot-extensions#5494).
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $script:_pythonCache = Select-PythonCache $_py
+    $_pythonCacheArgs = @(Select-PythonCache $_py)
     try {
-    & $_py -X "pycache_prefix=$_pythonCache" -m $_module @args
+    & $_py @_pythonCacheArgs -m $_module @args
     } finally {
         $ErrorActionPreference = $_previousEap
-        Remove-MintedPythonCache
     }
     exit $LASTEXITCODE
 }
@@ -329,12 +327,11 @@ if ($_provisionedPy) {
     # around just this forwarding call (copilot-extensions#5494).
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $script:_pythonCache = Select-PythonCache $_provisionedPy
+    $_pythonCacheArgs = @(Select-PythonCache $_provisionedPy)
     try {
-    & $_provisionedPy -X "pycache_prefix=$_pythonCache" -m $_module @args
+    & $_provisionedPy @_pythonCacheArgs -m $_module @args
     } finally {
         $ErrorActionPreference = $_previousEap
-        Remove-MintedPythonCache
     }
     exit $LASTEXITCODE
 }

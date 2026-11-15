@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from agent_worktrees import obligations as ob
 from agent_worktrees import config as cfg
 from agent_worktrees import tracking
@@ -16,6 +18,12 @@ from agent_worktrees.finalize import (
     _settle_current_session_claim,
 )
 from agent_worktrees.tracking import ResourceClaim
+
+
+@pytest.fixture(autouse=True)
+def receiving_claim_ledger(monkeypatch, monkeypatch_config, tmp_tracking_dir):
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "receiving-host")
 
 
 def _record(*states: str) -> SimpleNamespace:
@@ -105,10 +113,10 @@ def _tracking_record(tmp_tracking_dir: Path, **overrides) -> tracking.WorktreeRe
     base = dict(
         worktree_id="wt-settle",
         branch="worktree/wt-settle",
-        worktree_path="/tmp/wt-settle",
+        worktree_path=str(tmp_tracking_dir / overrides.get("worktree_id", "wt-settle")),
         repo="p",
-        machine="m",
-        platform="wsl",
+        machine="receiving-host",
+        platform=cfg.detect_platform(),
         started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00",
         resume_count=0,
@@ -132,7 +140,7 @@ def _tracking_record(tmp_tracking_dir: Path, **overrides) -> tracking.WorktreeRe
 def test_settle_current_session_claim_settles_active_claim(
     tmp_tracking_dir: Path, monkeypatch_config,
 ):
-    ref = "m/p/wt-settle#sess-1"
+    ref = "receiving-host/p/wt-settle#sess-1"
     rec = _tracking_record(
         tmp_tracking_dir,
         resources=[ResourceClaim(kind="session", ref=ref, state="active")],
@@ -152,7 +160,7 @@ def test_settle_current_session_claim_never_resurrects_released(
     tmp_tracking_dir: Path, monkeypatch_config,
 ):
     """A `sessionEnd`-released claim must stay released, never bounce back."""
-    ref = "m/p/wt-settle#sess-1"
+    ref = "receiving-host/p/wt-settle#sess-1"
     rec = _tracking_record(
         tmp_tracking_dir,
         resources=[ResourceClaim(kind="session", ref=ref, state="released")],
@@ -200,7 +208,7 @@ def test_settle_current_session_claim_reaches_a_live_daemon(
     from agent_worktrees import status_monitor_runtime as _smr
     from agent_worktrees import tracking_write
 
-    ref = "m/p/wt-settle-daemon#sess-1"
+    ref = "receiving-host/p/wt-settle-daemon#sess-1"
     rec = _tracking_record(
         tmp_tracking_dir,
         worktree_id="wt-settle-daemon",
@@ -239,7 +247,7 @@ def test_settle_current_session_claim_keeps_stale_record_on_dispatch_failure(
     finding)."""
     from agent_worktrees import tracking_write
 
-    ref = "m/p/wt-settle-fail#sess-1"
+    ref = "receiving-host/p/wt-settle-fail#sess-1"
     rec = _tracking_record(
         tmp_tracking_dir,
         worktree_id="wt-settle-fail",

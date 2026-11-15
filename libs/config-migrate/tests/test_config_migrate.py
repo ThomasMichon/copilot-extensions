@@ -154,6 +154,73 @@ def test_migrate_file_baseline_stamp_preserves_comments(tmp_path: Path) -> None:
     assert loaded[SCHEMA_VERSION_KEY] == 1 and loaded["foo"] == "bar"
 
 
+@pytest.mark.parametrize(
+    "original",
+    [
+        '{"repos":{"sample":{"remote":"https://github.com/example/project.git"}}}',
+        "# config\n{repos: {sample: {enabled: true}}}\n",
+        "{}\n",
+        "---\nrepos:\n  sample:\n    enabled: true\n",
+    ],
+    ids=("json", "flow-yaml", "empty-flow", "document-start"),
+)
+def test_migrate_file_baseline_stamp_preserves_valid_root_forms(
+    tmp_path: Path, original: str,
+) -> None:
+    reg = _baseline_reg()
+    path = tmp_path / "config.yaml"
+    path.write_text(original, encoding="utf-8")
+    expected = {**yaml.safe_load(original), SCHEMA_VERSION_KEY: 1}
+
+    result = migrate_file(path, "aw/config", reg)
+
+    assert result.changed
+    assert yaml.safe_load(path.read_text(encoding="utf-8")) == expected
+    assert path.with_name("config.yaml.bak").read_text(encoding="utf-8") == original
+    stamped = path.read_bytes()
+    assert not migrate_file(path, "aw/config", reg).changed
+    assert path.read_bytes() == stamped
+
+
+@pytest.mark.parametrize("original", ["- item\n", "value\n"], ids=("sequence", "scalar"))
+def test_migrate_file_refuses_non_mapping_without_rewrite(tmp_path: Path, original: str) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(MigrationError):
+        migrate_file(path, "aw/config", _baseline_reg())
+
+    assert path.read_text(encoding="utf-8") == original
+    assert not path.with_name("config.yaml.bak").exists()
+
+
+@pytest.mark.parametrize(
+    "original,parent,child",
+    [
+        ("items: &items [*items]\n", "items", 0),
+        ("items: &items {again: *items}\n", "items", "again"),
+        ("&root\nself: *root\n", None, "self"),
+    ],
+    ids=("list-cycle", "map-cycle", "root-cycle"),
+)
+def test_migrate_file_baseline_preserves_recursive_aliases(
+    tmp_path: Path, original: str, parent: str | None, child: str | int,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(original, encoding="utf-8")
+    reg = _baseline_reg()
+
+    assert migrate_file(path, "aw/config", reg).changed
+
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert loaded[SCHEMA_VERSION_KEY] == 1
+    cycle = loaded[parent] if parent is not None else loaded
+    assert cycle[child] is cycle
+    stamped = path.read_bytes()
+    assert not migrate_file(path, "aw/config", reg).changed
+    assert path.read_bytes() == stamped
+
+
 def test_migrate_file_baseline_stamp_summary_wording(tmp_path: Path) -> None:
     reg = _baseline_reg()
     p = tmp_path / "config.yaml"

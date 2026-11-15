@@ -23,6 +23,16 @@ Current operator reaffirmation:
 fresh physical-generation execution and preserved session reattachment. It does
 not replace the original Request or waive release and installed-consumer gates.
 
+### Updater and service lifetime
+
+The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+supplements this Goal without replacing any original request, client-session
+preservation or incoming-generation gate. Foreground updater cancellation must
+not kill accepted MCP service startup or its retained host/runtime tree.
+Client-owned stdio/session keepers remain with their actual client, not the
+updater's cleanup scope. This does not reintroduce a whole-SDK, desktop observer
+or unrelated portfolio prerequisite.
+
 ### Selected originating-owner design
 
 > explicit-launcher-handoff
@@ -142,6 +152,10 @@ and authorized installed-consumer acceptance. No global validation rule is waive
   the coordinator. Lopsided-gasket's MCP handover implementation and retained
   source changes remain independently owned; this correction does not replace
   that writer or settle its remaining work.
+- The [direct receiving annex](direct-receiving.md) retains #10652, #10653
+  and #10742 under their existing independent owners. Tracking consolidation
+  cannot release the affected installation's mutation hold or claim technical
+  completion; full reattachment is not an incoming-publication prerequisite.
 
 ## Context
 
@@ -205,6 +219,10 @@ owned-process cleanup remain this effort's requirements. Debugger conditions
 are also withdrawn; no original calibration approval is transferred or consumed.
 
 ## Plan
+
+- [ ] Apply the shared lifetime amendment at the actual MCP service handoff,
+  retaining all existing implementation owners and withdrawn-observer
+  boundaries; do not make a client wrapper a detached production service.
 
 The decomposition and implementation choices below are **agent-recommended**.
 Land and qualify incoming publication as the first implementation slice.
@@ -343,7 +361,128 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     merged at `59a739fce374514aaec89b65957c17a5bf6b2b29`; its
     [source-pinned query qualification](journal/2026/11.10-explicit-owner-cli.md#discovery-provider-qualification-and-merge)
     passed. Caller discovery/capture integration and rollback adoption remain
-    open.
+    open. #12306 corrects the live Windows declaration to retain explicit-pair
+    support without advertising the optional receiver on Windows; promoted
+    release and installed adoption of that correction remain separate.
+  - [ ] **Windows controlled caller:** expand and qualify the optional
+    physical receiver before emitting Windows caller overlays. Capture the
+    actual native client's PID/birth from its creation handle before execution;
+    do not reuse the Linux launcher's own identity or the observer-only native
+    admission callback. Qualify private handoff lifetime, delayed MCP start
+    after launcher exit, original stdio, rollback and exact cleanup without a
+    new per-client supervisor. Native handle retention is an explicit
+    qualification obligation, not a documented client guarantee. A
+    [bounded native retention proof and realization sequence](journal/2026/11.10-explicit-owner-cli.md#windows-native-retention-proof-and-next-realization)
+    establish feasibility, not caller adoption.
+    - [x] **Windows provider-only receiver:** #12316 qualifies direct selected
+      physical entry, native pre-effect fallback and owner refusal, physical
+      replacement/rollback and exact cleanup. Capability advertisement,
+      bootstrap, section transfer and controlled caller capture remain open;
+      see the [source qualification](journal/2026/11.10-explicit-owner-cli.md#windows-provider-only-receiver-qualification-and-merge).
+    - [x] **Windows section provider:** #12319 qualifies bounded versioned
+      native-owner transfer, actual creation-handle identity, protected
+      principal boundary, read-only retention, strict binding and owner-death
+      refusal; see the
+      [provider controls](journal/2026/11.10-explicit-owner-cli.md#windows-native-owner-section-provider).
+      #12330 adds the opt-in, in-process pre-execution seam to the existing
+      native creation/wait owner, including actual native refusal and packaged
+      companion controls.
+    - [x] **Windows independent section snapshot:** #12345 qualifies the
+      in-process native publisher and stdlib-only pinned reader through
+      publisher-process exit, protected principal boundary, read-only
+      inheritance, malformed/owner refusal and exact cleanup, including actual
+      wheel/source-distribution preservation. See the
+      [source result](journal/2026/11.10-explicit-owner-cli.md#windows-independent-publication-and-snapshot-source-controls).
+      Production caller selection and actual-client/installed acceptance
+      remain open.
+    - [x] **Windows anonymous actual-start bootstrap:** qualify the embedded
+      native snapshot before installed-provider discovery, physical receiver
+      selection and untouched stdio/context. Only pre-creation failure may
+      fall back; accepted-child exits and wait errors must never replay.
+      Controlled source packages are not actual-client or installed acceptance;
+      advertisement and production caller selection remain disabled.
+      #12350 merged at `ce3a3c1a3db4e5012154d2b0f069fb1e311a3cde`
+      after current-head approval, required CI and Windows/Linux source
+      controls. Native-client consumption follows below; joined Windows
+      physical-generation handover remains open.
+    - [x] **Windows native-client consumption source:** qualify actual offline
+      native Copilot through the existing suspended-creation owner and
+      anonymous bootstrap after publisher exit. Require the exact native
+      PID/birth, physical receiver, real upstream/client round trip, ordinary
+      context/settlement parity and owned cleanup. Distinguish client-owned
+      abrupt MCP settlement from graceful upstream EOF; neither this packet
+      nor its source merge is installed or productive caller adoption.
+      #12358 merged at `ef38cf03d57d4427ec2472dcb57315fd509186fb`
+      after current-head approval, required CI, both source platform lanes
+      and the actual pinned Windows native packet passed. See the
+      [source result](journal/2026/11.10-explicit-owner-cli.md#windows-native-client-consumption-reviewed-and-merged).
+    - [x] **Joined Windows native handover source:** compose the actual native
+      caller and anonymous snapshot with private physical receiver/custody
+      replacement, rollback and same-slot replacement. Require accepted
+      in-flight calls, original client/conduit/keeper/upstream identity,
+      actual client ping replies, unknown-delivery fencing without replay
+      and exact settlement. #12365 merged at
+      `5360651a6b065aaa54c4e0b44577aa816fe0a19f` after current-head approval,
+      required CI and hosted Linux/Windows qualification. Production capability
+      advertisement and caller enrollment remain separate next steps.
+    - [ ] **Windows receiver capability expansion:** advertise the qualified
+      optional physical receiver from the selected Windows executable, remove
+      the native packet's copied-capability override and rerun that actual
+      source composition. Keep unsupported/native/selection refusals,
+      invocation opt-outs and production caller enrollment unchanged. Require
+      reviewed source, hosted qualification and release before installed use.
+      - [x] **Source expansion merged:** #12368 landed at
+        `c807f2e8d051ff6152deefb0f71755eaf17d827e` after current-head approval,
+        required CI and hosted Windows/Linux qualification using the real
+        provider declaration. Release and installed acceptance remain open.
+    - [x] **Direct Windows creation/wait fixture-provider source:** qualify the
+      section publisher inside the existing native seed owner, with actual-client
+      attribution before execution, coordinator/substitution refusal, delayed
+      MCP startup and original streams/fixture-provider context/settlement.
+      #12372 merged at `4446cb40685750e0552cd2a1b1340ee91e743cc6` after
+      current-head approval, required CI and hosted Windows/Linux qualification.
+      This does not qualify retained-wait composition with the production
+      physical receiver, enroll a headed or default caller or close installed
+      acceptance.
+    - [x] **Retained-wait physical receiver composition:** independently run the
+      complete native-client physical receiver/custody handover packet through
+      the existing native creation/wait owner and after publisher exit. Keep
+      finite preparation/admission/execution receipt substitutions explicit;
+      require original streams, actual client attribution, accepted in-flight
+      and unknown outcomes, retained native lifetimes and exact settlement.
+      #12380 merged at `eb1468ff95703cc68214e297906079eaac94746e` after
+      current-head approval, required CI and hosted Windows/Linux qualification.
+      Headed/default caller adoption, release and installed acceptance remain
+      separate.
+    - [x] **Headed native-child creation seam:** qualify an explicitly selected
+      in-process publisher at the existing headed client's actual suspended
+      creation, retaining its original native handle, streams, wait and cleanup.
+      Keep default and auth-wait paths unchanged. Refuse forwarding/coordinator
+      images and unsupported custody before publication; preserve uncertain
+      cleanup without replay. Retained-executable caller selection and the
+      productive MCP overlay remain separate integration work.
+      #12389 merged at `c86ac86473bd3ba9483b129b9344a23494452b2d` after
+      current-head Copilot approval, required CI and hosted Windows/Linux
+      qualification. This closes the in-process creation/callback boundary,
+      not productive MCP publication or retained-executable caller adoption.
+    - [x] **Explicit retained headed MCP producer:** join the section publisher,
+      actual suspended native-child owner and fixed copied executable with
+      session-only private configuration transport. Qualify actual MCP startup
+      attribution, wrong-reader refusal, original wait and exact cleanup;
+      retain old-core refusal and unchanged default/auth behavior.
+      #12423 merged at `ae8c1d537beafd23ff0c5d0327b1fdf79d486f0c` after
+      genuine current-head approval, required CI and hosted Windows/Linux
+      qualification, including actual copied-receiver MCP startup and
+      native-owned protected-name lifetime after publisher handles close.
+      Installed handover, release and productive/default enrollment are
+      independent remaining gates.
+    - [ ] **Joined retained headed physical receiver:** compose this copied
+      producer with the real optional physical receiver/custody through
+      replacement, rollback, accepted/in-flight/unknown outcomes and exact
+      settlement. Keep actual native/client/conduit/keeper/upstream attribution
+      and the existing pre-effect context barrier; a synthetic configuration
+      provider or a separately qualified creation/wait packet is not this
+      composition. Default and installed adoption remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
@@ -360,6 +499,19 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     All 18 affected non-changefile blobs are present byte-for-byte on Main
     `d6a55e39950de6cd40204f8c9ff581dd7b547308` (MCP `0.2.241-dev1`);
     this is released source, not installed or productive adoption.
+    #12273 subsequently merged the #12272 standalone-Python portability fix
+    at `60221d0d568282a347f702250b570a0ad205bdff`: real Linux exec succeeds
+    with normal or omitted Python memfd/sealing bindings, retaining owner
+    identity and mandatory seals. Native libc refusal, seal failure/readback
+    and descriptor cleanup remain enforced. The isolated candidate helper also
+    passes on the actual missing-binding interpreter. Main
+    `2c7828b3cb61dd3df0d39c34b20edb999cd3a122` releases the exact correction
+    as MCP `0.2.252-dev1`; an ordinary update delivered it without a package
+    patch. The installed, contained Linux baseline now completes an actual
+    native tool invocation through custody with one initialization, one
+    invocation and verified owned cleanup. #12272 is closed. This is not a
+    subsequent installed generation handover, production lifetime or default
+    adoption result.
   - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
     across physical replacement and rollback when launch diagnostics differ,
     without silently changing legacy identities. Conditional optional-receiver
@@ -484,7 +636,18 @@ Git and the append-only journal preserve the earlier proposal as history, not
 as an active MCP contract. The unused calibration approval remains held; this
 withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 
+### Direct retained qualification lanes
+
+- [ ] Resolve the independent incoming-publication, protected-retirement and
+  authentic-input prepared/mixed requirements in the
+  [direct receiving annex](direct-receiving.md#plan), preserving every existing
+  milestone, unchecked item, owner and actual hold.
+
 ## Validation Plan
+
+- [ ] Prove the applicable [L1-L4 controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  through the actual MCP entry/stdio consumer while preserving original client
+  sessions and keeper identity. No desktop or whole-SDK matrix is imported.
 
 - [ ] First-slice incoming publication succeeds with a live old keeper,
   unfinished handover, unavailable outgoing census/provenance or occupied old
@@ -596,6 +759,12 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   focus/window calibration, foreground restoration, Terminal-host attribution
   and debugger conditions. The actual generated-CMD functional two-cycle and
   owned-cleanup controls remain required without those conditions.
+
+- [ ] Qualify the independent MRV-I/MRV-R/MRV-A lanes in the
+  [direct receiving Validation Plan](direct-receiving.md#validation-plan).
+  MRV-T requires reviewed whole receiving readback before separate tracking
+  judgments; neither tracking state nor a planned clause is runtime acceptance
+  or source/resource release.
 
 ## Proposal
 

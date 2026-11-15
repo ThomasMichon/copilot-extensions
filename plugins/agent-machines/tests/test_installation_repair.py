@@ -257,6 +257,48 @@ def test_installer_runtime_optional_owner_preserves_required_census(repair_fixtu
     assert not list(home.glob("*.ready"))
 
 
+def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, monkeypatch):
+    home, project, payload, _, _ = repair_fixture
+    calls = []
+
+    def capture(argv, *, cwd, environment, **_):
+        from agent_machines.installation_repair_process import ActionResult
+
+        calls.append((cwd, environment))
+        return ActionResult("exited", 0, json.dumps({
+            "schema": "copilot-extensions.module-readiness", "version": 1,
+            "module": argv[-1], "state": "ready",
+        }).encode())
+
+    monkeypatch.setenv("COPILOT_PROJECT_DIR", str(home))
+    monkeypatch.setattr(repair_api, "run_action", capture)
+    plan = repair_api.repair(project, home=home, required=True)
+    assert plan["requiredSatisfied"]
+    assert calls
+    for cwd, environment in calls:
+        assert Path(cwd) == payload
+        assert Path(environment["COPILOT_PROJECT_DIR"]) == project.resolve()
+
+
+def test_plan_digest_binds_the_selected_project(repair_fixture, tmp_path):
+    home, project, _, _, _ = repair_fixture
+    other = tmp_path / "other"
+    write_json(other / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {
+            "fixture": {"source": {"source": "directory", "path": str(project / ".ai")}},
+        },
+        "enabledPlugins": {"agent-example@fixture": True},
+    })
+    first = repair_api.repair(project, home=home, required=True)
+    second = repair_api.repair(other, home=home, required=True)
+    assert first["planDigest"] != second["planDigest"]
+    with pytest.raises(repair_api.RepairAdmissionError):
+        repair_api.repair(
+            other, home=home, required=True, apply=True,
+            expected_plan_digest=first["planDigest"],
+        )
+
+
 @pytest.mark.parametrize("change", [
     {"schema": "unknown"}, {"version": True}, {"version": 2},
     {"runtimeRoot": "../escape"}, {"noSelfProvisionEnv": "invalid-name"},

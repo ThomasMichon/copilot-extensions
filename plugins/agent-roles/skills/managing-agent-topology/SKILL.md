@@ -74,7 +74,7 @@ declared topology; record unsupported resource dimensions instead of assuming
 they are unlimited.
 
 For tooling and machine upkeep, assign
-[`maintain-agent-fleet`](../maintain-agent-fleet/SKILL.md) as a standing role
+[`maintain-agent-infrastructure`](../maintain-agent-infrastructure/SKILL.md) as a standing role
 with explicit machine/environment scope and minimum qualified coverage.
 Materialize its complete filled charter in the existing assignment contract;
 no role-specific schema extension is needed. Require separate maintenance authority

@@ -24,14 +24,17 @@ from promotion_unit_contract import (
 from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
 from promotion_release_helpers import verify_helper_contract
-from pytest_portfolio_guard import configure_temp_links
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
 
 
 class FrameworkTemporaryPaths:
-    pytest_configure = staticmethod(configure_temp_links)
+    @staticmethod
+    def pytest_configure(config) -> None:
+        from pytest_portfolio_guard import configure_temp_links
+
+        configure_temp_links(config)
 
 
 def prepare_framework_io() -> None:
@@ -203,7 +206,11 @@ def main() -> int:
             == set(manifest["composition"]["required_coverage_origins"])
         )
     if not complete:
-        raise UnitEvidenceError("coverage did not observe every admitted production target")
+        raise UnitEvidenceError(
+            "coverage did not observe every admitted production target; missing: "
+            + ", ".join(sorted(set(manifest["coverage_targets"]) - measured))
+            + "; unexpected: " + ", ".join(sorted(measured - set(manifest["coverage_targets"])))
+        )
     elapsed = time.monotonic() - started
     verify_observations(
         manifest["nodes"], run.collected, run.reports, run.effects,

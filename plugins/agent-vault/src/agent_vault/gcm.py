@@ -22,6 +22,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 log = logging.getLogger("agent-vault.gcm")
 
 IS_WINDOWS = os.name == "nt"
@@ -159,6 +161,7 @@ def git_credential_fill(
                 [gcm, "get"],
                 input=stdin_text, capture_output=True, text=True,
                 timeout=timeout, env=env,
+                **no_window_kwargs(),
             )
             result = _parse_credential_output(r.stdout)
             if result:
@@ -177,6 +180,7 @@ def git_credential_fill(
                 [git, "credential", "fill"],
                 input=stdin_text, capture_output=True, text=True,
                 timeout=timeout, env=env,
+                **no_window_kwargs(),
             )
             result = _parse_credential_output(r.stdout)
             if result:

@@ -18,7 +18,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +167,17 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snap
             validate_resource_arguments(command)
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
+    if spec.get("relevance") is not None:
+        from .emitter_relevance import validate_config
+
+        validate_config(spec)
+    if spec.get("managed_producer") is not None:
+        from .emitter_managed import validate_config
+
+        try:
+            validate_config(spec)
+        except ValueError as exc:
+            raise EmitterError(str(exc)) from exc
 
 
 def load_spec(path: str | Path) -> dict[str, Any]:
@@ -216,9 +227,17 @@ def _author_tasks(
     client: DispatchClient,
     spec: dict[str, Any],
     stdout: str,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
 ) -> list[dict[str, Any]]:
+    rows = _task_specs(stdout)
+    grant = None
+    if rows and spec.get("managed_producer") is not None:
+        from .emitter_managed import load_grant
+
+        grant = load_grant(client, spec, runner=runner)
     created = []
-    for row in _task_specs(stdout):
+    for row in rows:
         fields = dict(row)
         title = fields.pop("title")
         fields["source"] = spec.get("source") or "emitter"
@@ -227,7 +246,12 @@ def _author_tasks(
         fields.setdefault(
             "require_verification", bool(spec.get("require_verification", False))
         )
-        created.append(client.create(title, **fields))
+        if grant is None:
+            created.append(client.create(title, **fields))
+        else:
+            from .emitter_managed import create_or_observe
+
+            created.append(create_or_observe(client, title, fields, grant))
     return created
 
 
@@ -304,10 +328,34 @@ def _write_receipt_lines(path: Path, lines: list[str]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n" if lines else "")
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
+
+
+@contextlib.contextmanager
+def locked_receipts_path(
+    emitter_id: str, *, name: str = "receipts.jsonl", timeout: float = 5.0,
+) -> Iterator[Path]:
+    """Serialize a receipt-owner sidecar across periodic and on-demand processes."""
+    from ..single_instance import SingleInstance
+
+    path = receipts_path(emitter_id).with_name(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _thread_lock(path):
+        lock = SingleInstance(path.with_name(f"{path.name}.lock"))
+        deadline = time.monotonic() + timeout
+        while not lock.acquire():
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out acquiring receipts lock for {path}")
+            time.sleep(0.05)
+        try:
+            yield path
+        finally:
+            lock.release()
 
 
 def _mutate_receipts(
@@ -324,22 +372,9 @@ def _mutate_receipts(
     side-load are separate OS processes), so two concurrent writers never
     both compute the same next ``seq``.
     """
-    from ..single_instance import SingleInstance
-
-    path = receipts_path(emitter_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with _thread_lock(path):
-        lock = SingleInstance(path.with_name(f"{path.name}.lock"))
-        deadline = time.monotonic() + timeout
-        while not lock.acquire():
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"timed out acquiring receipts lock for {path}")
-            time.sleep(0.05)
-        try:
-            lines = _read_receipt_lines(path)
-            _write_receipt_lines(path, mutator(lines))
-        finally:
-            lock.release()
+    with locked_receipts_path(emitter_id, timeout=timeout) as path:
+        lines = _read_receipt_lines(path)
+        _write_receipt_lines(path, mutator(lines))
 
 
 def _append_receipts(
@@ -473,7 +508,7 @@ def run_side_load(
             f"side-load command exited {completed.returncode}: "
             f"{str(completed.stderr or '').strip()}"
         )
-    created = _author_tasks(client, spec, str(completed.stdout or ""))
+    created = _author_tasks(client, spec, str(completed.stdout or ""), runner=runner)
     _append_receipts(spec["id"], created, tick_id=f"side-load:{change_ref}")
     return {
         "registration_id": registration.get("id"),
@@ -488,6 +523,7 @@ def run_tick(
     spec: dict[str, Any],
     *,
     holder: str,
+    registration_id: str | None = None,
     runner: Callable[..., Any] = subprocess.run,
     clock: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
@@ -515,7 +551,21 @@ def run_tick(
         RECEIPTS_PATH_ENV: str(receipts_path(spec["id"])),
     }
     started_at = clock()
+    relevance = {}
     try:
+        if spec.get("relevance") is not None:
+            from .emitter_relevance import reconcile_receipts
+
+            try:
+                report = reconcile_receipts(
+                    client, spec, registration_id=registration_id, runner=runner,
+                )
+            except Exception as exc:
+                report = {
+                    "accepted": [], "recovered": [], "pending": None,
+                    "errors": [{"error": f"relevance reconciliation unavailable: {exc}"}],
+                }
+            relevance = {"relevance": report}
         if spec.get("ci_repair") is not None:
             from .ci_repair import AdmissionRefused, run_tick as run_ci_tick
 
@@ -606,11 +656,13 @@ def run_tick(
         returncode = int(completed.returncode)
         error = None
         created = (
-            _author_tasks(client, spec, str(completed.stdout or ""))
+            _author_tasks(client, spec, str(completed.stdout or ""), runner=runner)
             if returncode == 0 and task_output_json
             else []
         )
         _append_receipts(spec["id"], created, tick_id=f"{holder}:{started_at}", clock=clock)
+        if relevance and relevance["relevance"]["errors"]:
+            error = "emitter relevance reconciliation has unresolved errors"
     except subprocess.TimeoutExpired as exc:
         returncode = None
         error = f"timed out after {exc.timeout}s"
@@ -627,6 +679,7 @@ def run_tick(
         "error": error,
         "created": created,
         "duration_seconds": max(0.0, clock() - started_at),
+        **relevance,
     }
 
 
@@ -667,6 +720,7 @@ def serve(
     spec_path: str | Path,
     *,
     holder: str,
+    registration_id: str | None = None,
     cli_argv: list[str] | None = None,
     on_tick: Callable[[dict[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -702,6 +756,8 @@ def serve(
     """
     argv = list(cli_argv) if cli_argv is not None else [sys.executable, "-m", "agent_dispatch"]
     tick_argv = [*argv, "emitter", "tick", str(spec_path), "--holder", holder]
+    if registration_id is not None:
+        tick_argv += ["--registration-id", registration_id]
 
     def _default_on_tick(result: dict[str, Any]) -> None:
         if result.get("error"):

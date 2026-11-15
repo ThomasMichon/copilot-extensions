@@ -54,6 +54,18 @@ def test_cold_projection_restart_and_unchanged_initialization(cold):
     assert row["chunk_id"] == item.chunk_id and row["vector"] == [1.0, 0.0]
 
 
+def test_path_glob_fts_retains_source_isolation(cold: tuple[IndexConfig, MultiModelStore]) -> None:
+    _config, store = cold
+    selected = chunk(text="needle searchable primary", path="src/guide.md")
+    sibling = chunk("git:beta", "needle searchable sibling", path="src/guide.md")
+    store.upsert("small", [selected, sibling], np.array([[1, 0], [1, 0]], dtype=np.float32))
+    assert store.ensure_fts_index()
+    hits = store.content_store.fts_search(
+        "searchable", source="git:alpha", file_path_glob="src/*.md", limit=1,
+    )
+    assert [chunk_id for chunk_id, _score in hits] == [selected.chunk_id]
+
+
 def test_legacy_refused_without_mutation_and_unsafe_downgrade(cold, tmp_path, monkeypatch):
     config, _store = cold
     monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT")

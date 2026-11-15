@@ -6,10 +6,12 @@ import os
 import sys
 from pathlib import Path
 
-from agent_procutil import python_cache_args
+import agent_procutil
 from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_finite_worker
 
 from .mux_daemon_process import direct_daemon_python, scrub_session_credentials, selected_root
+
+python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 from .runtime_identity import running_slot
 from .self_install import default_root
 
@@ -28,7 +30,7 @@ def callback_command(arguments: list[str]) -> tuple[list[str], dict[str, str], P
             raise RuntimeError("mux callback requires a constructed Manager runtime")
         root = slot.parent.parent
         command += [
-            "-I", "-S", "-B", "-X", "utf8", *python_cache_args(root), str(bootstrap),
+            "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
         ]
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
             env.pop(name, None)

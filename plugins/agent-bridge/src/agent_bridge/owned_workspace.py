@@ -127,7 +127,6 @@ def _result(value: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
         or options.get("origin") != "delegate"
         or options.get("caller_worktree") != intent["caller_worktree"]
         or saved.get("repo") != intent["project"] or saved.get("owner_ref") != intent["creator"]
-        or saved.get("execution_machine") != intent["machine"]
         or saved.get("kind") != "bridge" or saved.get("caller_worktree") != intent["caller_worktree"]
         or any(not isinstance(saved.get(key), str) or not saved[key].strip()
                for key in ("id", "path", "creation_nonce"))

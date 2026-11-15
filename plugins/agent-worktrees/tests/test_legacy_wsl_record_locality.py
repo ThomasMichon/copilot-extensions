@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from agent_worktrees import claim_handoffs, claimant, claims_cli, config as cfg, tracking
 from agent_worktrees.machine_identity import is_local_machine
@@ -34,9 +35,13 @@ def legacy_records(tmp_path, monkeypatch, request):
     monkeypatch.setattr(cfg, "project_dir", lambda project=None: tmp_path / (project or "example"))
     monkeypatch.setattr(cfg, "tracking_dir", lambda *_args, **_kwargs: tmp_path / "example" / "worktrees")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "example-host")
     monkeypatch.setattr(claimant, "_owner_looks_dead", lambda _record: False)
     directory = tmp_path / "example" / "worktrees"
     directory.mkdir(parents=True)
+    (directory.parent / "config.yaml").write_text(yaml.safe_dump({
+        "repos": {"example": {"anchor": str(anchor)}},
+    }), encoding="utf-8")
     paths = {}
     for platform in ("wsl", "windows", "linux", ""):
         worktree_id = f"legacy-{platform or 'unknown'}"
@@ -73,14 +78,14 @@ def test_legacy_wsl_record_is_still_readable_by_id_and_qualified_guest_ref(legac
 
 
 @pytest.mark.parametrize("platform", ["windows", "linux", ""])
-def test_native_target_and_non_wsl_legacy_records_remain_foreign(legacy_records, platform):
+def test_obsolete_platform_labels_do_not_make_receiving_records_foreign(legacy_records, platform):
     assert not is_local_machine("example-host", legacy_records.config)
     worktree_id = f"legacy-{platform or 'unknown'}"
     ref = f"example-host/example/{worktree_id}"
-    assert claimant.local_claimant_alive(ref) is None
+    assert claimant.local_claimant_alive(ref) is True
     path, _, error = claims_cli._resolve_owner_ref_record_path(ref, legacy_records.config)
-    assert path is None
-    assert bool(error) is legacy_records.projected
+    assert path == legacy_records.paths[platform]
+    assert error is None
 
 
 def test_legacy_wsl_owner_ref_remains_locally_addressable(legacy_records):
@@ -91,7 +96,7 @@ def test_legacy_wsl_owner_ref_remains_locally_addressable(legacy_records):
     assert path == legacy_records.paths["wsl"]
 
 
-def test_folder_trust_accepts_only_the_proven_legacy_guest_record(legacy_records):
+def test_folder_trust_uses_receiving_namespace_not_obsolete_platform(legacy_records):
     from agent_worktrees import permissions, worktree_trust
     from agent_worktrees.execution_spaces import ExecutionSpaceError
 
@@ -99,9 +104,12 @@ def test_folder_trust_accepts_only_the_proven_legacy_guest_record(legacy_records
     assert worktree_trust.ensure_record_trusted(record, legacy_records.config)
     before = permissions._config_path().read_bytes()
     for platform in ("windows", "linux", ""):
+        candidate = tracking.load_record(legacy_records.paths[platform])
+        assert candidate.platform == "wsl"
         with pytest.raises(ExecutionSpaceError):
             worktree_trust.ensure_record_trusted(
-                tracking.load_record(legacy_records.paths[platform]), legacy_records.config,
+                replace(candidate, worktree_path=str(Path(candidate.worktree_path).parent)),
+                legacy_records.config,
             )
     assert permissions._config_path().read_bytes() == before
 
@@ -219,7 +227,8 @@ def test_legacy_wsl_locality_uses_actual_platform_not_configured_override(
     assert path == legacy_records.paths["wsl"]
     from agent_worktrees import execution_spaces
 
-    execution_spaces.require_record_mutation(tracking.load_record(path), overridden)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="platform"):
+        execution_spaces.require_record_mutation(tracking.load_record(path), overridden)
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is True
 
 
@@ -384,13 +393,9 @@ def test_legacy_child_cannot_authorize_registered_parent_ledger(
             machine=legacy_records.config.machine,
         )
     child = replace(tracking.load_record(legacy_records.paths["child"]), owner_ref=old_ref)
-    if legacy_records.projected:
-        with pytest.raises(execution_spaces.ExecutionSpaceError, match="parent ownership"):
-            finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
-    else:
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="parent ownership"):
         finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
     assert path.read_bytes() == before
     child.owner_ref = "example-host-wsl/parent/legacy-parent"
-    with pytest.raises(execution_spaces.ExecutionSpaceError):
-        finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
-    assert path.read_bytes() == before
+    finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
+    assert tracking.load_record(path).resources[0].state == "at-rest"

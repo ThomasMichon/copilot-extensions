@@ -123,7 +123,8 @@ def _reap(process: subprocess.Popen, root: Path, directory: Path, request_id: st
 
 
 def queue(root: Path, directory: Path):
-    from agent_procutil.python_cache import cache_arguments
+    import agent_procutil
+    cache_arguments = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     from . import config as cfg
     from . import status_monitor_runtime

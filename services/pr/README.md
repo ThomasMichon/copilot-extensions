@@ -555,6 +555,19 @@ lock and inspected wheels and is removed when its context manager exits.
 Keep both retained-wheel custody and the context open through the builder's
 input consumption, and pass the returned `python_base` as `PYTHON_BASE`.
 
+When the service and native executable have independently admitted application
+profiles, pass their additional `(RuntimeProfile, WheelSnapshot)` pairs through
+`additional_inputs`. The same owner verifies every original closure and retains
+its identity in `profile_lock_ids`; no merged approval/profile is manufactured.
+All selected targets and backends must match. Shared distributions must have
+identical inspected metadata and bytes, apart from the union of selected extras,
+and consume the aggregate archive/expanded-byte budgets once. The combined
+`lock_id` identifies the selected profile set, not a separately approved runtime.
+Canonical payload ownership is checked across the deduplicated union in the
+shared environment, not independently reset for each profile.
+Keep every selected snapshot open through context consumption. The existing
+single-profile call and its original lock identity remain unchanged.
+
 This is byte construction only, not an installer or approval adapter. The
 trusted construction caller must independently approve the exact profile,
 first-party release, target/base image and governed feed acquisition. A profile

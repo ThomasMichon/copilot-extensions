@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 import stat
 
-from . import config as cfg, creation_allocation, creation_replay, tracking
+from . import config as cfg, creation_allocation, creation_replay, dispatch_cohort, tracking
 
 SCHEMA_VERSION = 1
 RECEIVING_IDENTITY_INDEX = "creations_receiving_identity"
@@ -77,6 +77,8 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         # Attempt provenance is evidence about the original allocation, not a
         # logical revision authorizing another one.
         "dispatch_task_id": (options["dispatch_attempt"] or {}).get("task_id"),
+        **({"dispatch_cohort": options["dispatch_attempt"]["cohort"]}
+           if options["dispatch_attempt"] is not None and "cohort" in options["dispatch_attempt"] else {}),
         **({"receiving_allocation": options["receiving_allocation"].to_fields()}
            if options.get("receiving_allocation") is not None else {}),
     }
@@ -224,6 +226,7 @@ def _replay(
         raise CreationRequestFailure("conflict", "Original creation root has no retained allocation proof", worktree)
     record = _owner_record(worktree, records, project)
     current_facts = json.loads(facts)
+    dispatch_cohort.require_record(record, current_facts)
     if (
         current_facts.get("kind") == "bridge"
         and record.caller_worktree != current_facts.get("caller_worktree")
@@ -320,6 +323,7 @@ def create(
             raise
         worktree = result["worktree"]
         record = _owner_record(worktree, records, config.repo_name)
+        dispatch_cohort.require_record(record, facts)
         if validate_record is not None:
             validate_record(record)
         with connection:

@@ -39,6 +39,17 @@ do not choose that policy implicitly here or substitute a per-run timeout for
 a per-failure attempt budget. Autonomous activation remains gated on resolving
 that decision and proving the chosen contract.
 
+The direct Phase 3 P5890/local V5890/global G5890 receipt in the
+[owning effort](README.md) preserves this complete unresolved policy
+family under the existing Driving agent. The #5890 reference above
+identifies its original policy tracker; it does not appoint another
+driver or make the issue's continued OPEN state an independent activation
+condition. Source-tracker supersession, if later supported, requires the
+ROOT's reviewed receiving/readback and separate source judgment. Until
+then retain the tracker; afterward the historical reference does not
+remove the still-unresolved decision, chosen-policy proof or independent
+authentication gate.
+
 Inference authentication and repository-operation authentication are separate
 capabilities, potentially supplied by different accounts. Resolve each
 explicitly and verify it in the selected venue. Use repository-scoped

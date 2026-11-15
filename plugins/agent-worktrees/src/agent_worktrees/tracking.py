@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
+from machine_transport import LocalExecutionContext
 
 from . import config as cfg
 from . import disposition_history, record_cache
@@ -29,9 +30,10 @@ from .tracking_lookup import (
     load_record_by_id as load_record_by_id,
 )
 from .effort_focus import ActiveEffort, active_effort_from_mapping
-from .record_io import load_record_uncached as _load_record_uncached
+from .dispatch_cohort import DispatchCohort
+from .record_io import load_record_uncached as _load_record_uncached  # noqa: F401 - external loader seam
 from . import record_machine_identity
-from .worktree_machine_identity import WorktreeMachineIdentity, parse_machine_identity
+from .worktree_machine_identity import WorktreeMachineIdentity
 from .tracking_session_activations import SessionActivation as SessionActivation
 from . import tracking_session_activations as session_activations
 
@@ -156,6 +158,7 @@ class DispatchAttempt:
     supervisor: str
     creator_machine: str
     ownership: Literal["created"] = "created"
+    cohort: DispatchCohort | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -166,6 +169,7 @@ class DispatchAttempt:
             "supervisor": self.supervisor,
             "creator_machine": self.creator_machine,
             "ownership": self.ownership,
+            **({"cohort": self.cohort.to_dict()} if self.cohort is not None else {}),
         }
 
 
@@ -181,7 +185,7 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
         "creator_machine",
         "ownership",
     }
-    if set(value) != required or value.get("ownership") != "created":
+    if not required.issubset(value) or set(value) - required - {"cohort"} or value.get("ownership") != "created":
         return None
     strings: dict[str, str] = {}
     for key in required - {"attempt", "ownership"}:
@@ -200,14 +204,13 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
         return None
     if attempt <= 0:
         return None
-    return DispatchAttempt(
-        task_id=strings["task_id"],
-        reservation_key=strings["reservation_key"],
-        attempt=attempt,
-        driver=strings["driver"],
-        supervisor=strings["supervisor"],
-        creator_machine=strings["creator_machine"],
-    )
+    try:
+        cohort = DispatchCohort.from_fields(
+            value["cohort"], task_id=strings["task_id"], reservation_key=strings["reservation_key"],
+        ) if "cohort" in value else None
+    except ValueError:
+        return None
+    return DispatchAttempt(attempt=attempt, cohort=cohort, **strings)
 
 
 @dataclass
@@ -641,7 +644,7 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
     branch: str
     worktree_path: str
     repo: str
-    machine: str
+    machine: str  # Transient reporter facts, never parsed from or written to YAML.
     platform: str
     started_at: str
     last_resumed_at: str
@@ -917,8 +920,7 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
     # when set, so a legacy/pre-Phase-1 YAML stays byte-identical.
     codename_source: str | None = None
     machine_identity: WorktreeMachineIdentity | None = None
-    _loaded_machine: str | None = field(default=None, repr=False, compare=False)
-    _loaded_machine_identity: tuple[object, ...] | None = field(default=None, repr=False, compare=False)
+    _reporting_context: LocalExecutionContext | None = field(default=None, repr=False, compare=False)
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -1526,29 +1528,27 @@ def _yaml_safe_load(raw: str) -> object:
     return yaml.load(raw, Loader=_FastSafeLoader)
 
 
-def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
+def load_record(
+    path: Path, *, copy_result: bool = True, reporting_context: LocalExecutionContext | None = None,
+) -> WorktreeRecord:
     """Load using the record cache's ``(mtime_ns, size)`` invalidation.
 
-    Copies carry transient machine CAS evidence, never serialized. A non-copy
-    result is shared/read-only; clone it before making an intentional update.
+    Cache durable data only; reporter naming is refreshed after every lookup.
+    A non-copy result shares nested data and remains read-only.
     """
-    from .pr_publication_state import loaded
-    record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
-    if copy_result:
-        record = loaded(record)
-        record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
-        record._loaded_machine_identity = record_machine_identity.identity_fence(record)
-    return record
+    from . import record_reporting
+    return record_reporting.load_local(path, copy_result=copy_result, reporting_context=reporting_context)
 
 
-def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
+def parse_record_data(
+    data: dict, *, path: Path, reporting_context: LocalExecutionContext | None = None,
+) -> WorktreeRecord:
     """Parse an already-read tracking mapping without filesystem effects."""
-    identity = parse_machine_identity(data)
     title = data.get("title")
     if title == "null" or title is None:
         title = None
 
-    started_at_raw = data.get("started_at", "")
+    started_at_raw = data.get("started_at") or ""
     if hasattr(started_at_raw, "isoformat"):
         started_at_raw = started_at_raw.isoformat()
 
@@ -2023,15 +2023,14 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
         branch=data["branch"],
         worktree_path=data.get("worktree_path", ""),
         repo=default_repo,
-        machine=data.get("machine", ""),
-        platform=data.get("platform", ""),
+        machine="",
+        platform="",
         started_at=str(started_at_raw),
         last_resumed_at=str(last_resumed_raw),
         resume_count=int(data.get("resume_count", 0)),
         title=title,
         status=data.get("status", "active"),
         completed_at=str(completed_raw) if completed_raw else None,
-        machine_identity=identity,
         sessions=sessions_list,
         session_backend=session_backend,
         session_backend_opaque=session_backend_opaque,
@@ -2120,8 +2119,11 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
         codename_source=(str(data["codename_source"])
                          if data.get("codename_source") else None),
     )
-    record._loaded_from, record._loaded_machine = path, record.machine
-    record._loaded_machine_identity = record_machine_identity.identity_fence(record)
+    record._loaded_from = path
+    if reporting_context is not None:
+        from .record_reporting import apply_context
+        apply_context(record, reporting_context)
+    record_machine_identity.remember_loaded_subject(record, path)
     return record
 
 
@@ -2306,10 +2308,11 @@ def _save_record_unlocked(
     preserve_handoff_reservations: bool = True,
 ) -> None:
     """Fence paired responsibility through the complete record transaction."""
-    from . import paired_claims
+    from . import paired_claims, record_reporting
 
     path = path if path is not None else record.yaml_path
     current = load_record(path) if path.exists() else None
+    record_reporting.refresh_for_save(record, path, current)
     with paired_claims.save_guard(record, current):
         _save_record_contents_unlocked(
             record, path, current=current,
@@ -2340,7 +2343,7 @@ def _save_record_contents_unlocked(
     current code** -- a still-live OLDER-code process has no such field and
     can drop it on an unrelated save (pre-existing/systemic, not per-field).
     """
-    from . import pr_authority, pr_publication_state, receiving_allocation, resource_producer
+    from . import dispatch_cohort, pr_authority, pr_publication_state, receiving_allocation, resource_producer
     if path is None:
         path = record.yaml_path
     capture_before = save_notifications.prepare(current, path)
@@ -2349,6 +2352,7 @@ def _save_record_contents_unlocked(
     preserve_checkout_location(record, current, path)
     receiving_allocation.preserve(record, current, path)
     resource_producer.preserve_incarnation(record, current)
+    dispatch_cohort.preserve(record, current)
     if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
             record.active_effort = current.active_effort
@@ -2546,14 +2550,13 @@ def _save_record_contents_unlocked(
     title_val = "null" if record.title is None else yaml.safe_dump(
         str(record.title), default_style='"', allow_unicode=False, width=float("inf"),
     ).strip()
-
+    started_val = yaml.safe_dump(str(record.started_at), default_style='"').strip()
     content = (
         f"worktree_id: {_yaml_scalar(record.worktree_id)}\n"
         f"branch: {_yaml_scalar(record.branch)}\n"
         f"worktree_path: {record.worktree_path}\n"
         f"repo: {record.repo}\n"
-        + record_machine_identity.serialized_fields(record)
-        + f"started_at: {record.started_at}\n"
+        f"started_at: {started_val}\n"
         f"last_resumed_at: {record.last_resumed_at}\n"
         f"resume_count: {record.resume_count}\n"
         f"title: {title_val}\n"
@@ -3030,9 +3033,11 @@ def list_records(
     if not tracking_path.exists():
         return records
 
+    reporting_context = None
     for yaml_file in sorted(tracking_path.glob("*.yaml")):
         try:
-            rec = load_record(yaml_file, copy_result=copy_records)
+            rec = load_record(yaml_file, copy_result=copy_records, reporting_context=reporting_context)
+            reporting_context = rec._reporting_context
         except Exception:
             continue
         if status_filter and rec.status != status_filter:
@@ -3175,7 +3180,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
     from . import paired_claims, receiving_allocation
-    from .retirement_safety import delete_retired_pair, require_retirable, retirement_blocker, same_pair
+    from .retirement_safety import delete_retired_pair, require_retirable, retains_artifact_metadata, retirement_blocker, same_pair
 
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
@@ -3241,7 +3246,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     save_record(record, path=path)
                     return True
                 except Exception as exc:
-                    if record.is_paired or record.receiving_allocation_present:
+                    if record.is_paired or record.receiving_allocation_present or retains_artifact_metadata(record):
                         logging.getLogger(__name__).warning("Record retirement deferred; record retained: %s", exc)
                         return False
                     path.unlink(missing_ok=True)

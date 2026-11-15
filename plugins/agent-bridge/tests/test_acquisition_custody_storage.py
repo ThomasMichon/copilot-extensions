@@ -159,6 +159,9 @@ def test_acquisition_writer_trigger_migrates_onto_an_existing_database(tmp_db: D
         " VALUES ('kept-delivery','launching','{\"original\":true}')")
     tmp_db.execute_write(f"DROP TRIGGER {name}")
     tmp_db.execute_write("UPDATE schema_version SET version=41")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=41)
     tmp_db.close()
     db = Database(path)
     try:

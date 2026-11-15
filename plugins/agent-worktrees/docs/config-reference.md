@@ -350,9 +350,11 @@ Launch selectors accept both `--machine example-host --environment WSL` and
 `--machine example-host-wsl`. The suffix decomposes into physical host
 `example-host` and environment `wsl`; it does not make the native Windows
 execution space local to its guest. Conflicting requests such as
-`example-host-wsl` with `Win` are rejected. Historical worktree records retain
-their machine and separately recorded platform rather than being relabeled
-merely because a launch used a logical key.
+`example-host-wsl` with `Win` are rejected. Historical worktree IDs, checkout
+names and allocation references retain their original spelling rather than
+being renamed by a launch selector. Canonical records do not persist machine
+or environment labels: [reporter naming](execution-identity.md#reporter-naming-and-tracking-data)
+is derived live, legacy naming keys are ignored and ordinary saves remove them.
 
 A machine registry entry opts into independent execution-space identity with
 `execution_platform: windows`, `wsl` or `linux`. Its registry key is canonical;
@@ -382,12 +384,11 @@ refused; review their provenance before any separate migration. Cross-space
 owned creation is still unsupported before allocation. This feature does not
 add reservation/receipt authority.
 
-Explicit [native machine-record repair](machine-record-repair.md) is available
-through `doctor --repair-machine-record <exact-id> --from-machine <old>`.
-`--to-machine <key>` optionally asserts the configured local target. Existing
-checkouts retain linked-Git proof; removed ones require canonical native
-registration and exact receiving-namespace evidence. Only the label changes:
-same-machine alias relationships remain intact, without automatic rebinding.
+Canonical records derive naming live rather than storing a machine label.
+The legacy [machine-record repair selector](machine-record-repair.md) returns a
+read-only retirement notice, including with `--fix`; old `--from-machine` and
+`--to-machine` values neither select execution authority nor rewrite metadata.
+Historical relationships and repair receipts remain unchanged.
 
 Claim and handoff transactions recheck each freshly loaded source, consumer,
 and child record while holding its sidecar lock. Authority comes from the
@@ -716,6 +717,15 @@ another health database or an executable found on PATH. It is caller-contained
 and bounded to one 60-second selection/observation/cleanup budget, reserving five
 seconds for settlement. A refused, interrupted, changed, unsupported or
 not-ready result cannot pass. A fully observed empty required set can pass.
+Machines payload lookup uses the explicitly addressed checkout's effective
+marketplace declarations, not the ambient working directory. An authored local
+directory source is read in place without requiring a copied installed payload.
+A missing or invalid local source refuses rather than selecting a stale copy;
+without a local declaration, the canonical copied-payload path is unchanged.
+Explicit installation context still takes precedence through its same-cell
+owner. The installed peer's completed interpreter and capability descriptor
+remain required. This read-only lookup, also used for accepted knowledge
+defaults, neither enables a Copilot plugin nor installs or starts its runtime.
 The caller-owned observation qualifies readiness inputs only, not a repair
 plan or every unrelated file in an enabled payload. Its digest cannot authorize
 an installer apply. Required-owner qualification and inventory completeness

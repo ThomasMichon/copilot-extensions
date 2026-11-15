@@ -32,6 +32,11 @@ from tools.typecheck_source_views import (  # noqa: E402
 from tools.typecheck_catalog_views import (  # noqa: E402
     MEMBERS as CATALOG_MEMBERS, catalog_inputs, catalog_views,
 )
+from tools.typecheck_bootstrap_views import (  # noqa: E402
+    INPUTS as BOOTSTRAP_INPUTS, bootstrap_view, require_bootstrap_version,
+    SELECTOR_INPUTS, powershell_selector_view, posix_selector_view,
+)
+from tools.typecheck_new_code import select_new_code  # noqa: E402
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -478,6 +483,21 @@ def changed_paths(root: Path, base: str, head: str | None = None) -> tuple[str, 
     return tuple(_relative(path) for path in result.stdout.split("\0") if path)
 
 
+def new_code_changes(root: Path, base: str, head: str | None = None) -> tuple[str, ...]:
+    """Include working-tree drift and untracked files even with a pinned comparison."""
+    changes = set(changed_paths(root, base, head))
+    if head is not None:
+        changes.update(changed_paths(root, head))
+    result = _run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+        root, env=git_environment(),
+    )
+    if result.returncode:
+        raise TypecheckError(result.stderr.strip() or "Git untracked inventory failed")
+    changes.update(_relative(path) for path in result.stdout.split("\0") if path)
+    return tuple(sorted(changes))
+
+
 def python_paths(root: Path = ROOT) -> tuple[str, ...]:
     """Include staged, unstaged and untracked non-ignored developer files."""
     env = git_environment()
@@ -615,6 +635,10 @@ def check_project(
     """Check one declared scope; never execute product or test code."""
     if not files:
         raise TypecheckError(f"{project.name}: selected scope has no Python files")
+    if project.name == "lib-payload-invocation":
+        require_bootstrap_version(
+            project.level, (project.python_version, *project.additional_python_versions),
+        )
     physical_count = len(files)
     path, digest = environment_path(root, project)
     python = environment_python(path)
@@ -656,9 +680,25 @@ def check_project(
         if project.name == "lib-payload-invocation":
             if set(files) != set(CATALOG_MEMBERS) or len(files) != len(CATALOG_MEMBERS):
                 raise TypecheckError("Catalog witnesses require the complete canonical project")
+            _harness_procutil_provider(root, ordered_imports)
+            views.procutil_search = tuple(ordered_imports)
+            import_inputs = _import_inputs(
+                root, tuple(dict.fromkeys((*project.import_roots, "libs/agent-procutil/src"))),
+                all_paths,
+            )
             emitted_catalogs = views.add_catalog(all_paths)
-            supplemental += len(emitted_catalogs)
-            files = (*files, *(str(view.output) for view in emitted_catalogs))
+            bootstrap = views.add(
+                bootstrap_view, all_paths, BOOTSTRAP_INPUTS, "catalog_binding_bootstrap.py",
+            )
+            selectors = (
+                views.add(powershell_selector_view, all_paths, SELECTOR_INPUTS, "shim_cache_powershell.py"),
+                views.add(posix_selector_view, all_paths, SELECTOR_INPUTS, "shim_cache_posix.py"),
+            )
+            supplemental += len(emitted_catalogs) + 1 + len(selectors)
+            files = (
+                *files, *(str(view.output) for view in emitted_catalogs), str(bootstrap.output),
+                *(str(view.output) for view in selectors),
+            )
         if guard and HARNESS_PREFIX.rstrip("/") in project.include:
             if "libs/agent-procutil/src" not in project.import_roots:
                 raise TypecheckError("Harness emitted imports require the declared ordinary procutil root")
@@ -715,7 +755,7 @@ def check_project(
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
-                    os.devnull if project.import_roots or guard
+                    os.devnull if import_inputs is not None or guard
                     else str(path / "mypy-cache" / platform / version)
                 ),
             ]
@@ -736,6 +776,8 @@ def check_project(
             print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
             if supplemental:
                 print(f"Supplemental portable emitted programs: {supplemental}; no native execution qualification")
+            if project.name == "lib-payload-invocation" and version == "3.10":
+                print("Bootstrap: Python 3.10 checks its exit guard only; full body requires Python 3.11.")
             print(views.diagnostics(result.stdout), end="")
             print(views.diagnostics(result.stderr), end="", file=sys.stderr)
             if result.returncode:
@@ -767,18 +809,19 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--all", action="store_true", help="probe all projects, including pending")
     selection.add_argument("--enforced", action="store_true", help="check admitted projects (default)")
     selection.add_argument("--changed", action="store_true", help="conservatively check all admitted consumers")
+    selection.add_argument("--new-code", action="store_true", help="strictly check whole added/modified files")
     selection.add_argument("--inventory", action="store_true", help="classify Python without checking")
-    parser.add_argument("--base", help="--changed comparison base (default: origin/dev)")
-    parser.add_argument("--head", help="--changed pinned head (default: current staged/unstaged files)")
+    parser.add_argument("--base", help="change-comparison base (default: origin/dev)")
+    parser.add_argument("--head", help="comparison head (new-code also includes current developer edits)")
     parser.add_argument("--prepare", action="store_true", help="explicitly prepare selected environments")
     parser.add_argument("--strict", action="store_true", help="probe strictness without changing admission")
     parser.add_argument("--require-complete", action="store_true", help="require every project to be strict")
     parser.add_argument("--json", action="store_true", help="machine-readable --inventory output")
     args = parser.parse_args(argv)
-    if args.projects and (args.all or args.enforced or args.changed or args.inventory):
+    if args.projects and (args.all or args.enforced or args.changed or args.new_code or args.inventory):
         parser.error("choose project names or a portfolio selector, not both")
-    if (args.base or args.head) and not args.changed:
-        parser.error("--base and --head require --changed")
+    if (args.base or args.head) and not (args.changed or args.new_code):
+        parser.error("--base and --head require --changed or --new-code")
     if args.inventory and (args.prepare or args.strict):
         parser.error("--inventory does not prepare or run a checker")
     if args.json and not args.inventory:
@@ -786,6 +829,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         projects = load_projects()
         owners = inventory(python_paths(), projects)
+        new_files: dict[str, tuple[str, ...]] | None = None
+        if args.new_code:
+            changes = new_code_changes(ROOT, args.base or "origin/dev", args.head)
+            new_files = select_new_code(ROOT, owners, changes)
+            print(
+                f"Whole-file strict ratchet: {sum(map(len, new_files.values()))} physical files "
+                f"in {len(new_files)} projects; existing errors are not grandfathered."
+            )
         if args.changed:
             changes = changed_paths(ROOT, args.base or "origin/dev", args.head)
             print(
@@ -821,13 +872,22 @@ def main(argv: list[str] | None = None) -> int:
             raise TypecheckError("Unknown projects: " + ", ".join(sorted(unknown)))
         selected = [
             project for project in projects
-            if project.name in names or (not names and (args.all or project.level != "pending"))
+            if (
+                project.name in new_files if new_files is not None
+                else project.name in names or (not names and (args.all or project.level != "pending"))
+            )
         ]
         if not selected:
+            if new_files is not None:
+                print("No added/modified physical Python or known composed-program inputs.")
+                return 0
             raise TypecheckError("No projects selected")
         failed = False
         for project in selected:
-            files = tuple(path for path, owner in owners.items() if owner.name == project.name)
+            files = (
+                new_files[project.name] if new_files is not None
+                else tuple(path for path, owner in owners.items() if owner.name == project.name)
+            )
             if args.all and project.level == "pending" and not files:
                 print(f"{project.name}: pending, no physical Python files in this checkout; not checked.")
                 continue
@@ -837,11 +897,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Prepared {project.name}: {environment_python(path)}")
             else:
                 failed = check_project(
-                    ROOT, project, files, all_paths=tuple(owners), strict=args.strict,
+                    ROOT, project, files, all_paths=tuple(owners),
+                    strict=args.strict or args.new_code,
                 ) != 0 or failed
-        if not args.prepare and any(project.level == "pending" for project in selected):
+        if not args.prepare and new_files is None and any(project.level == "pending" for project in selected):
             print("Pending project probes do not certify admission.", file=sys.stderr)
             failed = True
+        if not args.prepare and new_files is not None:
+            print("Whole-file ratchet only; project admission and unmodeled emitted programs are unchanged.")
         return int(failed)
     except AlreadyRunningError as exc:
         print(f"typecheck: checker environment is busy: {exc}", file=sys.stderr)

@@ -3,6 +3,126 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-15 - Title-bound ready frontier](journal/2026/11.15-title-bound-ready-frontier.md)
+
+- [2026-11-14 - Accepted receivers and the next owner frontier](journal/2026/11.14-accepted-receivers-and-owner-frontier.md)
+
+- [2026-11-14 - Head, venue and journal receiving contracts](journal/2026/11.14-head-venue-and-journal-receivers.md)
+
+- [2026-11-14 - Reviewed planned intake and finite Manager-source contracts](journal/2026/11.14-planned-intake-and-manager-source.md)
+
+- [2026-11-14 - Review convergence and retained source contracts](journal/2026/11.14-review-convergence-and-source-keepers.md)
+
+- [2026-11-14 - Lifecycle, selector and custody frontier](journal/2026/11.14-lifecycle-and-selector-frontier.md)
+
+- [2026-11-14 - Runtime contracts and bounded receiving discriminators](journal/2026/11.14-runtime-contract-discriminators.md)
+
+- [2026-11-14 - Host inspection and reference-boundary proposal](journal/2026/11.14-host-proof-receiving.md)
+
+- [2026-11-14 - Deferred account/provider integration intake](journal/2026/11.14-account-provider-intake.md)
+
+- [2026-11-14 - Finite auth, typing and cache-admission intake](journal/2026/11.14-auth-typing-and-cache-intake.md)
+
+- [2026-11-14 - First-use readiness and messaging-handoff research](journal/2026/11.14-first-use-and-message-handoff-research.md)
+
+- [2026-11-14 - Publication-hook and retrieval-glob receiving](journal/2026/11.14-publication-and-retrieval-receiving.md)
+
+- [2026-11-14 - Mux receiving and three tracking retirements](journal/2026/11.14-mux-receiving-and-retirements.md)
+
+- [2026-11-14 - Compiler-free intake and source qualification](journal/2026/11.14-compiler-free-and-source-qualification.md)
+
+- [2026-11-13 - Runner, existing-entry and attribution receiving](journal/2026/11.13-runner-entry-and-attribution-receiving.md)
+
+- [2026-11-13 - Reviewed fixture, startup and interrupted-hook receiving](journal/2026/11.13-fixture-startup-and-hook-receiving.md)
+
+- [2026-11-13 - Canonical lifecycle and retained source boundaries](journal/2026/11.13-canonical-lifecycle-and-source-boundaries.md)
+
+- [2026-11-13 - Prerequisite and installed-acceptance keepers](journal/2026/11.13-prerequisite-and-installed-keepers.md)
+
+- [2026-11-13 - Merged source and retained inflow conditions](journal/2026/11.13-merged-source-and-inflow-conditions.md)
+
+- [2026-11-13 - Prospective outer-contract reconciliation](journal/2026/11.13-prospective-outer-contracts.md)
+
+- [2026-11-13 - Conductor continuation and retained native conditions](journal/2026/11.13-conductor-continuation-and-native-conditions.md)
+
+- [2026-11-13 - Gateway availability and retained source conditions](journal/2026/11.13-gateway-availability-and-source-conditions.md)
+
+- [2026-11-13 - Status, recovery and reassignment intake](journal/2026/11.13-status-recovery-and-reassignment-intake.md)
+
+- [2026-11-13 - Link-capability and portable-timeout intake](journal/2026/11.13-link-capability-and-portable-timeout-intake.md)
+
+- [2026-11-13 - Onboarding, conclusion and key-consumer intake](journal/2026/11.13-onboarding-conclusion-and-key-intake.md)
+
+- [2026-11-13 - Distinct decision, consumer and transfer intake](journal/2026/11.13-distinct-decisions-and-transfer-intake.md)
+
+- [2026-11-13 - Named scheduled-configuration intake](journal/2026/11.13-named-scheduled-configuration-intake.md)
+
+- [2026-11-13 - Recurrence and source-accounting intake](journal/2026/11.13-recurrence-and-source-accounting-intake.md)
+
+- [2026-11-13 - Resident-companion lifecycle intake](journal/2026/11.13-resident-companion-lifecycle-intake.md)
+
+- [2026-11-13 - Finite recovery and account-execution intake](journal/2026/11.13-finite-recovery-and-account-intake.md)
+
+- [2026-11-13 - Canonical keepers and finite receiving gaps](journal/2026/11.13-canonical-keepers-and-finite-intake.md)
+
+- [2026-11-13 - Inherited allocator and parked review intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md)
+
+- [2026-11-13 - Reviewed receiving readiness recovered](journal/2026/11.13-reviewed-receiving-readiness.md)
+
+- [2026-11-13 - Finite source completions and existing receivers](journal/2026/11.13-finite-source-and-existing-receivers.md)
+
+- [2026-11-13 - Current contracts and exact-dedup proposal](journal/2026/11.13-current-contracts-and-dedup-proposal.md)
+
+- [2026-11-13 - Loader/report source and accountability proposal](journal/2026/11.13-loader-report-source-and-accountability-proposal.md)
+
+- [2026-11-13 - Monitor goals and decline source completions](journal/2026/11.13-monitor-goals-and-decline-source-completions.md)
+
+- [2026-11-13 - Comment receiving and source qualification](journal/2026/11.13-comment-receiving-and-source-qualification.md)
+
+- [2026-11-13 - Adoption source and original-history boundaries](journal/2026/11.13-adoption-source-and-original-history.md)
+
+- [2026-11-13 - Finite source and MCP receiving boundaries](journal/2026/11.13-finite-source-and-mcp-receiving.md)
+
+- [2026-11-13 - Source fixtures and independent typing receiving](journal/2026/11.13-source-fixtures-and-typing-receiving.md)
+
+- [2026-11-13 - Finite leaf and guidance completions](journal/2026/11.13-finite-leaf-and-guidance-completions.md)
+
+- [2026-11-12 - Finite source completion and receiver corrections](journal/2026/11.12-finite-source-completion-and-receiver-corrections.md)
+
+- [2026-11-12 - Producer, recovery and snapshot boundaries](journal/2026/11.12-producer-recovery-and-snapshot-boundaries.md)
+
+- [2026-11-12 - Stamp acceptance and protected receiving direction](journal/2026/11.12-stamp-acceptance-and-protected-receiving-direction.md)
+
+- [2026-11-12 - Fixture tracking and retained token boundaries](journal/2026/11.12-fixture-tracking-and-retained-token-boundaries.md)
+
+- [2026-11-12 - Faithful fixture receiving and cohort boundaries](journal/2026/11.12-faithful-fixture-receiving-and-cohort-boundaries.md)
+
+- [2026-11-12 - Admission failure and citation boundary](journal/2026/11.12-admission-failure-and-citation-boundary.md)
+
+- [2026-11-12 - Dispatch and Bridge retained contracts](journal/2026/11.12-dispatch-and-bridge-retained-contracts.md)
+
+- [2026-11-12 - Lifetime and current receiving boundaries](journal/2026/11.12-lifetime-and-current-receiving-boundaries.md)
+
+- [2026-11-12 - Claim-kind source credit and current contract boundaries](journal/2026/11.12-claim-kind-credit-and-current-contracts.md)
+
+- [2026-11-12 - Approved-source tracking retirement and retained contracts](journal/2026/11.12-approved-source-retirement-and-contract-study.md)
+
+- [2026-11-12 - Account source credit and retained execution custody](journal/2026/11.12-account-source-credit-and-retained-custody.md)
+
+- [2026-11-12 - Index data receiving and inherited fixture scope](journal/2026/11.12-index-data-receiving-and-inherited-fixture-scope.md)
+
+- [2026-11-12 - Complete ROOT receiving and required source scope](journal/2026/11.12-complete-root-receiving-and-required-source-scope.md)
+
+- [2026-11-12 - Ordered reliability and diagnostic receiving](journal/2026/11.12-ordered-reliability-and-diagnostic-receiving.md)
+
+- [2026-11-12 - Menu completion and source-ownership receiving](journal/2026/11.12-menu-completion-and-source-ownership-receiving.md)
+
+- [2026-11-12 - Accepted Manager receiving and canonical residuals](journal/2026/11.12-accepted-manager-and-canonical-residuals.md)
+
+- [2026-11-12 - Manager containment and verified receiving](journal/2026/11.12-manager-containment-and-verified-receiving.md)
+
+- [2026-11-12 - Later receiving and finite source boundaries](journal/2026/11.12-later-receiving-and-source-boundaries.md)
+
 - [2026-11-12 - Preserved cache, truthful readiness and oldest contracts](journal/2026/11.12-preserved-cache-and-oldest-contracts.md)
 
 - [2026-11-12 - Oldest contracts and finite source delivery](journal/2026/11.12-oldest-contracts-and-finite-delivery.md)

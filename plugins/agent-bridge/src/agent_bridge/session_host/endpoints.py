@@ -37,6 +37,28 @@ class CredentialRelayReadinessError(RuntimeError):
     """A required remote credential-relay listener could not be proven ready."""
 
 
+# OpenSSH reserves 255 for its own connection/transport failures. The relay
+# ping command never exits 255, so that status is an unknown result, not an
+# authoritative "relay is not serving" answer.
+SSH_TRANSPORT_FAILURE_EXIT = 255
+
+
+class RelayProbeTransportError(RuntimeError):
+    """The relay probe could not reach the far side, so serving is unknown."""
+
+
+def _probe_result(rc: int | None, out: bytes | str | None, *, fail_open: bool) -> bool:
+    if rc == SSH_TRANSPORT_FAILURE_EXIT:
+        if fail_open:
+            return True
+        raise RelayProbeTransportError(
+            "credential relay probe SSH transport failed (exit 255); serving state unknown"
+        )
+    if isinstance(out, bytes):
+        return rc == 0 and out.strip() == b"OK"
+    return rc == 0 and (out or "").strip() == "OK"
+
+
 def transport_serving_probe(
     transport, relay_port: int, *, fail_open: bool = True, timeout: float = 60.0,
 ):
@@ -50,7 +72,7 @@ def transport_serving_probe(
             if fail_open:
                 return True
             raise
-        return rc == 0 and (out or "").strip() == "OK"
+        return _probe_result(rc, out, fail_open=fail_open)
     return probe
 
 
@@ -254,8 +276,9 @@ def endpoint_serving_probe_factory(
     listener from the pre-restart ``-R`` had not been released yet (dotfiles
     #855), or a listener that accepts but never speaks the relay protocol -- so
     the relay supervisor re-establishes until a genuinely live relay answers.
-    Transport failures return ``True`` (a health hint, never a reason to churn
-    a possibly-fine relay on a transient SSH failure). Set ``fail_open=False``
+    Transport failures, including an SSH exit 255 returned instead of raised,
+    return ``True`` (a health hint, never a reason to churn a possibly-fine
+    relay on a transient SSH failure). Set ``fail_open=False``
     for a launch or resume readiness gate where an inconclusive probe must
     block ACP delivery. Failed or cancelled probes reap their owned SSH tree
     before returning; cancellation is never a healthy hint. Mirrors
@@ -289,7 +312,7 @@ def endpoint_serving_probe_factory(
                 if fail_open and isinstance(exc, Exception):
                     return True
                 raise
-            return proc.returncode == 0 and (out or b"").strip() == b"OK"
+            return _probe_result(proc.returncode, out or b"", fail_open=fail_open)
 
         return _probe
 

@@ -84,6 +84,23 @@ def test_removal_handles_missing_path(tmp_path):
     assert scratch.remove_scratch(tmp_path / "absent")
 
 
+def test_expected_directory_identity_refuses_replaced_content(tmp_path):
+    original = tmp_path / "original"
+    original.mkdir()
+    before = original.stat()
+    original.rename(tmp_path / "retained")
+    original.mkdir()
+    (original / "foreign.txt").write_text("preserve")
+    assert not scratch.remove_scratch(
+        original, expected_directory_identity=(before.st_dev, before.st_ino),
+    )
+    assert (original / "foreign.txt").read_text() == "preserve"
+    current = original.stat()
+    assert scratch.remove_scratch(
+        original, expected_directory_identity=(current.st_dev, current.st_ino),
+    )
+
+
 @pytest.mark.parametrize("suffix", [os.sep, os.sep * 2, os.sep + ".", os.sep + ".."])
 def test_removal_rejects_directory_link_suffixes(tmp_path, suffix):
     outside = tmp_path / "outside"
@@ -96,7 +113,7 @@ def test_removal_rejects_directory_link_suffixes(tmp_path, suffix):
         pytest.skip(f"directory links unavailable: {exc}")
     assert not scratch.remove_scratch(str(link) + suffix)
     assert (outside / "keep.txt").read_text() == "precious"
-    assert link.is_dir()
+    assert scratch._is_link(link.lstat())
 
 
 def test_directory_swapped_for_link_after_inspection_is_not_followed(tmp_path, monkeypatch):

@@ -394,9 +394,11 @@ def _child(
     procutil = _procutil(inputs)
     native_argv = argv
     if os.name == "nt" and Path(argv[0]).is_absolute():
-        executable = runtime._normalize_windows_extended_path(argv[0])
-        if len(executable) >= 260:
-            executable = _native_retained_path(executable)
+        executable = _native_retained_path(argv[0])
+        if Path(argv[0]).name.lower() == "powershell.exe":
+            ordinary = runtime._normalize_windows_extended_path(argv[0])
+            if Path(ordinary).is_absolute() and len(ordinary) < 260:
+                executable = ordinary
         native_argv = [executable, *argv[1:]]
     for attempt in range(len(delays) + 1):
         decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -928,6 +930,7 @@ def _candidate(
                             "versioned_runtime_leases.py", "versioned_runtime_source.py",
                             "versioned_runtime_construction.py",
                             "versioned_runtime_publication.py",
+                            "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
                         ):
                             source = (
                                 slot / "runtime" if inputs.application is not None

@@ -1,13 +1,16 @@
 ---
 name: monitor-agent-fleet
 description: >-
-  Charters the sustained fleet-monitor ("task master") role: audits whether
-  assigned agents are advancing their root goals, reconstructs purpose and time
-  allocation from bounded history, diagnoses misdirections, and sends
-  separately authorized, deduplicated corrective steers. Under its own grant,
-  corrects the persisted charters of dormant workspaces. Defaults to a finite
-  read-only sweep. Not generic status reporting, task-queue dispatch, code
-  review, machine maintenance or permission to control workers.
+  Charters the sustained fleet-monitor ("task master") role. It keeps
+  assigned agents on task and drives them toward outcome-shaped root goals
+  and their charters to resolution. It rebuilds purpose from history,
+  keeps a charter summary per agent, holds standing authority to nudge
+  agents to set goals and lodge them in their charters, diagnoses
+  misdirection and sends separately authorized, deduplicated
+  steers. Under their own grants, it corrects dormant workspaces' charters and
+  delegates graduated parallel repair of blocked agents. Defaults to a finite
+  read-only sweep. Not status reporting, task-queue dispatch, code review,
+  host/tooling maintenance or blanket control of workers.
   Trigger phrases include:
   - 'task master'
   - 'monitor the agent fleet'
@@ -15,7 +18,10 @@ description: >-
   - 'agents going in circles'
   - 'watch agent progress'
   - 'steer struggling agents'
-  - 'correct dormant worktree charters'
+  - 'drive agents to completion'
+  - 'establish agent goals'
+  - 'unstick blocked fleet agents'
+  - 'correct dormant charters'
 ---
 
 # Monitor Agent Fleet (Sustained Role)
@@ -24,6 +30,14 @@ Act as a progress analyst and, only within an explicit steering scope, a
 corrective coach. You are not another worker, approval authority, scheduler or
 task queue. Optimize for meaningful accepted outcomes and information gained.
 Preserve each worker's original goal, ownership, limits and holds.
+
+This role **monitors agents** -- their goals, progress and blockers. It is not
+[`maintain-agent-infrastructure`](../maintain-agent-infrastructure/SKILL.md), which **maintains
+machines and tooling** -- releases, updates and post-disruption session
+recovery. When one agent is blocked, the monitor diagnoses and repairs that
+agent; a fault shared by a host or tool release goes to the maintainer.
+Do not merge these roles: an agent can make useful progress on older tooling,
+and healthy infrastructure does not prove that an agent is pursuing its goal.
 
 ## Existing owners
 
@@ -42,22 +56,26 @@ installation instructions.
 Every sweep advances these goals, and its report shows evidence for each
 applicable one. **A sweep report that lacks evidence for an applicable goal is
 incomplete**, not healthy. A finite one-shot request ("are the agents on
-track?") gets one read-only sweep reported against G1-G4 only; **G5 applies
-only to a recorded recurring assignment**. The goals describe outcomes; they
-never widen the charter's mode, steering, answer or source-change authority.
+track?") gets one read-only sweep reported against G1-G4 and G6 only; **G5
+applies only to a recorded recurring assignment**. The goals describe
+outcomes; they never widen the charter's mode, steering, answer, repair or
+source-change authority.
 
 | # | Goal | Each sweep must show |
 |---|------|----------------------|
 | G1 | **Discover the fleet regularly** from every declared roster and topology source | A per-venue coverage line: read, or a gap with the literal error |
-| G2 | **Keep every target on-charter**: correct detours, tangents and loops | A disposition per live head (running, required wait, productive wait or waste) and, for every waste, a steer within scope or a recorded reason not to send one (in read-only mode, the recommended steer) |
+| G2 | **Keep every target on-charter and drive it to resolution**: correct detours, tangents and loops, and move completion charters toward finalization | A disposition per live head (running, required wait, productive wait or waste); for every waste, a steer within scope or a recorded reason not to send one (in read-only mode, the recommended steer); for every completion target, its remaining acceptance and the resolution step due; for every infrastructure blocker, its repair rung or recommendation |
 | G3 | **Find weak points in guidance, efforts and charters** that let agents drift, and propose fixes | Each new finding mapped to a [weak-point catalogue](assets/WEAK-POINTS.md) pattern with a proposed fix, or "no new pattern" |
 | G4 | **Find weak points in this monitor's own charter, skill and readers**, and recommend improvements | Reader corrections and monitor blind spots captured per [self-improvement](references/self-improvement.md), or "none" |
 | G5 | **Recur until confident** every target works under optimum guidance (recorded recurring assignments only) | Current cadence and consecutive healthy-sweep count; the confidence cadence relaxes only after the charter's required healthy sweeps (default two), a sweep with a coverage gap or unknown target earns no healthy credit, and any waste finding returns it to the confidence cadence |
+| G6 | **Keep a current outcome-goal charter for every target**, and keep each agent maintaining its own | Per target: charter kind with evidence, last reconciliation, divergence from the agent's own charter, and goal-establishment or backfill status; for every set-to-work target, also its outcome-shaped root goal and source, alignment of recent work and projected progress (exploratory targets may have none); for a recurring assignment, the fleet's churn |
 
 Cadences and the healthy-sweep count are charter parameters; a consumer's
 adapter may override the defaults. The end state is **a fleet that stays
 on-charter without a monitor**: G3 and G4 exist to make the monitor's own work
-unnecessary. Under a recurring assignment, run until its recorded end
+unnecessary. A monitor that drives charters to resolution sees churn:
+completion agents finalize and drop out, and new ones replace them. Under a
+recurring assignment, run until its recorded end
 condition and report confidence per goal; **never self-declare an open-ended
 assignment done**.
 
@@ -67,7 +85,9 @@ Fill [the charter](assets/CHARTER.md) in the existing canonical effort,
 supervisory record or current-owner checkpoint. Record the original operator
 source, requested machines/workspaces, exclusions, observation period, report
 home, mode and owner. Default to one **read-only** sweep. "Potentially nudge" or
-"design a watchdog" does not authorize messages now.
+"design a watchdog" does not authorize messages now; only a recorded recurring
+observation or steering assignment may send goal-establishment steers without a
+steering grant.
 
 Recurring observation needs an explicit assignment with cadence, end condition
 and a named owner. Steering needs an explicit recipient scope, permitted message
@@ -79,9 +99,24 @@ permission prompts, alter reviewer verdicts, repair services, deploy guidance
 or reserve shared resources as part of observation. A status command that
 self-heals or resumes a service is not a read-only reader.
 
+Repairing a blocked agent's transport, identity or session state is a
+separate **repair scope**: it names recipients, a rung ceiling and any
+host-shared services that may be restarted. Follow
+[graduated repair](references/repair-escalation.md). Without it, report the
+diagnosis and recommended rung.
+
 Answering a worker's parked question is a separate **answer scope**: it names
 recipients and the routine question classes the monitor may answer. Without
 it, report the question with a recommended answer.
+
+**Goal establishment is role-inherent.** This role, and any equivalent
+supervisory agent chartered by the same operator, holds
+[standing goal-establishment authority](references/agent-charters.md#standing-goal-establishment-authority):
+it may nudge a set-to-work agent to establish an outcome-shaped root goal and
+steer it to lodge that goal in its own charter, without a separate steering
+grant. These steers follow the steering protocol, honor holds and exclusions,
+relay operator-defined goals verbatim and never add effect authority. A finite
+read-only sweep reports them instead of sending them.
 
 ### Track threads, not interruptions
 
@@ -123,25 +158,46 @@ ready machine. Retire one removed from the manifest, keeping its history and
 any outstanding steer record. Keep a declared but unready machine as a coverage
 gap rather than dropping it. Record the roster source and changes in the cycle
 log, then hold that roster for the rest of the cycle. Readiness failures never
-authorize provisioning, connecting or repairing a venue.
+authorize provisioning, connecting or repairing a venue; only a repair scope
+authorizes repair, and only for its named targets.
 
 For each owner, read only its applicable charter, original operator requests,
 canonical effort plan/validation, current agenda position and latest substantive
 results. Produce:
 
 ```text
-Root: <one-sentence outcome; original source>
+Root: <end-state outcome true when done (or the steady state a standing
+  service maintains); never the current activity; source>
+Root source: <operator-defined verbatim | agent-stated | monitor draft
+  (confidence) | missing>
 Acceptance: <remaining real completion criteria>
 Now: <current slice/experiment and why it serves the root>
+Alignment: <recent work vs root: aligned, detour, tangent or unknown>
+Projected progress: <converging, stalled, receding or unknown>
 Return: <saved parent action, if in a prerequisite>
 Last delta: <result or eliminated hypothesis; source/time>
 Blocker: <specific condition and owner, or none/unknown>
 ```
 
-Separate finite delivery from an explicitly indefinite service charter. An
-indefinite reviewer is judged by intake coverage and response latency, not by
-whether it ever stops. Changed operator intent can legitimately enlarge a goal;
-a child PR, review round or worktree title cannot.
+**Drive by outcome goals, not activity.** A root goal is the observable end
+state, not a description of what the agent is doing now. An operator-defined
+goal is recorded verbatim in the operator-goal register and wins over the
+agent's own wording and the monitor's draft. A missing or activity-shaped root
+is a finding; correct it with a goal-establishment steer, per
+[outcome goals](references/agent-charters.md#drive-by-outcome-goals-not-activity).
+
+Keep the result in the target's private
+[charter summary](references/agent-charters.md) and classify its kind:
+**completion** (finite, finalizes on acceptance), **standing** (explicitly
+indefinite service) or **exploratory** (no goal set yet). An indefinite
+reviewer is judged by intake coverage and response latency, not by whether it
+ever stops. **Handle exploratory agents with a light touch**: an agent in
+design discussion or a back-and-forth with the operator is not forced to move.
+Once an agent is set to work with a goal, stay on its case. Changed operator
+intent can legitimately enlarge a goal; a child PR, review round or worktree
+title cannot. The agent's own charter stays authoritative. When it is missing
+or diverges, steer the agent to backfill or reconcile it, rather than
+overwriting it.
 
 If sources conflict, preserve the conflict and mark inferred purpose with
 confidence. Missing/rewound agenda data does not erase confirmed external work.
@@ -189,9 +245,20 @@ diagnosis. Then use [interventions](references/interventions.md), with one cited
 diagnosis, one changed next action and one observable exit. Prioritize:
 
 1. A real operator decision or unreachable acceptance resource.
-2. A repeated no-delta experiment or lost root/return.
-3. A ready-to-deliver slice stuck chasing optional polish or an obsolete review.
-4. Routine status that needs no intervention.
+2. An infrastructure blocker: a transport that never delivers, a broken
+   identity or session state, or a wedged process. Follow
+   [graduated repair](references/repair-escalation.md).
+3. A repeated no-delta experiment or lost root/return.
+4. A ready-to-deliver slice stuck chasing optional polish or an obsolete
+   review, or met acceptance not yet finalized.
+5. A missing or activity-shaped root goal, a drifted plan or a stale charter
+   that the agent should establish, lodge or rework.
+6. Routine status that needs no intervention.
+
+For completion targets, choose the resolution step from
+[driving to resolution](references/agent-charters.md#drive-completion-charters-to-resolution):
+the next criterion, the finish line or a charter rework. Standing targets get
+only the on-course check. Exploratory targets get no completion pressure.
 
 Repetition is a diagnostic signal, not an automatic failure count. Compare
 source, selector, hypothesis, environment and result. Do not lower a required
@@ -213,9 +280,19 @@ until the work itself was measured.
 
 ## 5. Report, or steer within explicit authority
 
-In read-only mode, return recommendations and **messages sent: none**.
+In a finite read-only sweep, return recommendations and
+**messages sent: none**. A recorded recurring observation also returns recommendations, except
+that it may send goal-establishment steers under the standing authority, the
+one message class it sends without a steering grant; all other steers stay
+recommendations.
 In dormant correction mode, the intervention is an owner-written record
 correction with a pre-write liveness recheck and readback, never a message.
+In repair mode, the intervention is an owner-mediated repair on the lowest
+sufficient rung, with evidence captured first and a readback after. Diagnose
+independent blocked targets in parallel through bounded sub-agent delegates,
+one per target or shared service. The monitor keeps the escalation record and
+is the only voice toward the target. A steer that follows a repair still
+needs a steering scope; without one, report the recommended steer.
 For each proposed steer give the evidence, root criterion, changed strategy,
 expected result and preserved constraints. A useful steer asks for the next
 discriminating experiment or return to the parent, not "try harder" or
@@ -267,10 +344,19 @@ Change cadence by replacing the one owned schedule, stopping it before
 creating its successor, and record the reason; never run two.
 No daemon, cron entry, automatic joining, or background service is supplied.
 
+The monitor's standing charter is committed source: this skill plus any
+consumer adapter in the consuming repository. Re-read both from their current
+committed source at the start of each cycle, not from a copy remembered in the
+session or note, so merged guidance changes take effect on the next sweep. The
+supervisory note holds only tactical, per-target state about active charters;
+durable learnings belong in source through the self-improvement flow below,
+never only in the note or agent memory.
+
 Keep the supervisory note compact: targets, root pointers, coverage cursor,
-last delta, current blocker, outstanding steer, next observation and a pointer
-to the thread register. Do not
-copy every worker's plan or require a PR for every observation. Bound the
+last delta, current blocker, outstanding steer, next observation and pointers
+to the thread register and the per-target charter summaries. Do not copy
+every worker's plan: a charter summary indexes the plan rather than
+duplicating it. Do not require a PR for every observation. Bound the
 audit's own reads and delegated work; disclose incomplete coverage rather than
 spending indefinitely reconstructing low-value history. The monitor must not
 become a second busy loop or consume the coordinator it is supporting.

@@ -19,6 +19,15 @@ logging credit and #3963's accepted tracking route with its same discussion
 and existing claims preserved. Its 210 mapped detail rows are not 210
 distinct missing defects or a new implementation assignment.
 
+The [next eighteen-contract assessment](journal/2026/11.12-later-receiving-and-source-boundaries.md#eighteen-further-oldest-contracts)
+adds 94 retained requirement groups, not 94 missing defects. It corrects
+stale remote-reap, common context-scrub, native launch and accepted-receiver
+claims. #4055's existing diagnostics ROOT receives two later planned
+wait-OR-diagnostics alternatives in this proposal; separate reviewed
+receiving/readback and source judgment remain. The same checkpoint records
+two verified finite source completions and five independent inflow retentions.
+The 909-open census remains 180 above the fixed whole target.
+
 The research inspected immutable source at
 [`a1907222c9`](https://github.com/ThomasMichon/copilot-extensions/tree/a1907222c9c88137d9b22009b18c1651816e83de)
 and compared relevant files with observed Dev

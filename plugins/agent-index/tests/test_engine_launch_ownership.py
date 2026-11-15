@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agent_procutil import no_window_kwargs, python_cache_args
+from agent_procutil import no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -61,10 +61,7 @@ def test_native_cache_arguments_match_owned_lexical_python_contract(root: str) -
     )
     assert result.returncode == 0, result.stderr
     args = json.loads(result.stdout)
-    assert args[0] == "-X" and len(args) == 2
-    cache = Path(args[1].removeprefix("pycache_prefix="))
-    assert cache.parent == Path(python_cache_args(root)[1].partition("=")[2]).parent
-    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+    assert args == "-B"
 
 
 @pytest.mark.parametrize("root", ["relative-root", r"C:relative-root"])
@@ -145,8 +142,6 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
             + "\ntry { Restart-EngineDaemon }"
             " catch { Write-Host ('REFUSED:' + $_); exit $LASTEXITCODE }\n"
         )
-    previous = None
-    cache_root = Path(python_cache_args(root)[1].partition("=")[2]).parent
     for _cycle in range(2):
         result = _run_ps(script, script_dir=tmp_path)
         assert result.returncode == 23, result.stderr
@@ -157,10 +152,8 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
         if route != "explicit":
             assert "REFUSED:Primary index runtime failed to stop the engine" in result.stdout
         for record in records:
-            cache = Path(record["prefix"])
-            assert cache.parent == cache_root
-            assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
-            assert not record["disabled"]
+            assert record["prefix"] is None
+            assert record["disabled"] is True
             assert Path(record["runtime"]) == slot
             assert Path(record["cwd"]) == tmp_path
             assert record["rt_root"] == "caller-root"
@@ -168,14 +161,7 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
         assert all((tmp_path / name).read_bytes() == content for name, content in before.items())
         assert not list(slot.rglob("*.pyc"))
         assert not list(engine.rglob("*.pyc"))
-        caches = list(cache_root.rglob("*.pyc"))
-        assert caches and any(path.name.startswith("probe.") for path in caches)
-        current = {str(path): (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_ino)
-                   for path in caches}
-        if previous is not None:
-            assert all(current[path] == content for path, content in previous.items())
-            assert set(current) > set(previous)
-        previous = current
+        assert not (root / "cache" / "python").exists()
     probe = package / "probe.py"
     probe_stat = probe.stat()
     probe.write_text("VALUE = 'fresh selected runtime'\n", encoding="utf-8")
@@ -184,10 +170,7 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
     assert result.returncode == 23, result.stderr
     records = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     assert records and all(record["value"] == "fresh selected runtime" for record in records)
-    assert all(
-        (Path(path).read_bytes(), Path(path).stat().st_mtime_ns, Path(path).stat().st_ino) == content
-        for path, content in previous.items()
-    )
+    assert not (root / "cache" / "python").exists()
 
 
 @pytest.mark.parametrize("versioned", [False, True])
@@ -274,13 +257,10 @@ def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path
     else:
         with pytest.raises(ReplacedProcess):
             cli.main(["engine", "run"])
-    from agent_procutil import python_cache_args
     assert len(calls) == 1
     command = calls[0]
-    assert command[0] == str(engine_python) and command[1] == "-X"
-    cache = Path(command[2].removeprefix("pycache_prefix="))
-    assert cache.parent == Path(python_cache_args(tmp_path / "engine")[1].partition("=")[2]).parent
-    assert command[3:] == [
+    assert command[0] == str(engine_python) and command[1] == "-B"
+    assert command[2:] == [
         "-m", "agent_index_engine.app", "--host", "127.0.0.7", "--port", "19421",
     ]
 

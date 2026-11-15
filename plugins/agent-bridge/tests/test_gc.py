@@ -257,6 +257,9 @@ class TestDbGcPrimitives:
                     conn.execute(f"DROP TRIGGER {name}")
             conn.execute("ALTER TABLE workspace_embodiments DROP COLUMN creation_recoveries_json")
             conn.execute("UPDATE schema_version SET version=44")
+            from legacy_inbox_schema import restore_prior_inbox_guards
+
+            restore_prior_inbox_guards(conn, version=44)
             creation_writer_schema.validate_schema(conn, require_recovery=False)
         tmp_db.close()
         reopened = Database(tmp_db.db_path)

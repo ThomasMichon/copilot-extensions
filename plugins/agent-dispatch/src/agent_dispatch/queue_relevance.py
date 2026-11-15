@@ -1,7 +1,8 @@
 """Atomic source-relevance decisions; transport and owner closeout stay separate.
 
-The coordinator also admits local direct emitters through registered scope.
-No automatic emitter or periodic caller is enabled. Callers judge the backing object; queue history
+The coordinator also admits effective local sources through registered scope.
+Emitters opt in through the receipt owner; periodic callers remain separate.
+Callers judge the backing object; queue history
 decides resource-free abandonment or original-owner closeout on existing outboxes.
 """
 
@@ -15,8 +16,9 @@ import sqlite3
 
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
+from .queue_relevance_binding import capture_target, closeout_detail
 from .queue_relevance_registration import (
-    RelevanceRegistration, registration_revision, resolve_registration,
+    RelevanceAdmission, RelevanceRegistration, registration_revision, resolve_registration,
 )
 
 
@@ -113,11 +115,42 @@ class QueueRelevanceMixin:
             "task_id TEXT PRIMARY KEY, request_id TEXT NOT NULL, generation INTEGER NOT NULL,"
             "owner TEXT, owner_session_id TEXT, steer_id INTEGER NOT NULL, created_at REAL NOT NULL)"
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")}
+        for column in ("resource_binding", "readiness", "acknowledgement"):
+            if column in columns:
+                continue
+            try:
+                conn.execute(f"ALTER TABLE task_relevance_closeouts ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+    def prepare_relevance_closeout(
+        self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
+        expected_generation: int, authority_guard: Callable[[], None] | None = None,
+    ) -> dict:
+        from .queue_relevance_readiness import prepare
+        return prepare(
+            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            expected_generation=expected_generation,
+            authority_guard=authority_guard,
+        )
+
+    def finish_relevance_closeout(
+        self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
+        expected_generation: int, authority_guard: Callable[[], None] | None = None,
+    ) -> CompletionOutcome:
+        from .queue_relevance_acknowledgement import finish
+        return finish(
+            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            expected_generation=expected_generation,
+            authority_guard=authority_guard,
+        )
 
     def relevance_snapshot(
         self, task_id: str, *, registration: RelevanceRegistration | None = None,
         disabled_ids: frozenset[str] = frozenset(),
-        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
+        registration_admission: RelevanceAdmission | None = None,
     ) -> dict:
         """One queue snapshot for a source check; this is not source evidence."""
         with self._connect() as conn:
@@ -125,8 +158,9 @@ class QueueRelevanceMixin:
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            resolved = None
             if registration is not None:
-                resolve_registration(
+                resolved = resolve_registration(
                     conn, task, registration, disabled_ids=disabled_ids, require_revision=False,
                     admission=registration_admission,
                 )
@@ -136,10 +170,14 @@ class QueueRelevanceMixin:
                 "origin_ref": task.origin_ref, "generation": task.generation,
                 "revision": _revision(conn, task_id), "status": task.status,
                 "custody": _custody(conn, task),
-                "closeout": dict(closeout) if closeout is not None else None,
+                "closeout": closeout_detail(closeout),
                 **({
                     "registration_id": registration.registration_id,
                     "registration_revision": registration_revision(conn),
+                    **({"effective_revision": resolved.effective_revision}
+                       if resolved is not None and resolved.effective_revision is not None else {}),
+                    **({"emitter_spec_revision": resolved.emitter_spec_revision}
+                       if resolved is not None else {}),
                 } if registration is not None else {}),
             }
 
@@ -149,7 +187,8 @@ class QueueRelevanceMixin:
         reason: str, observation_ref: str, reporter: str, now: float | None = None,
         disabled_ids: frozenset[str] = frozenset(),
         on_transition: Callable[[CompletionOutcome], None] | None = None,
-        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
+        registration_admission: RelevanceAdmission | None = None,
+        evaluation_token: str | None = None,
     ) -> dict:
         """Accept a source judgment and ownership decision in one write.
 
@@ -161,7 +200,7 @@ class QueueRelevanceMixin:
         if not isinstance(scope, (RelevanceScope, RelevanceRegistration)):
             raise TaskError("relevance needs a coordinator-resolved source scope")
         for name, value in asdict(scope).items():
-            if name != "revision":
+            if name != "revision" and not (name == "effective_revision" and value is None):
                 _text(value, name)
         for name, value in (
             ("request_id", request_id), ("reason", reason),
@@ -174,8 +213,11 @@ class QueueRelevanceMixin:
             expected_generation, expected_revision,
         )):
             raise TaskError("relevance generation and revision must be nonnegative integers")
+        scope_fields = asdict(scope)
+        if isinstance(scope, RelevanceRegistration) and scope.effective_revision is None:
+            scope_fields.pop("effective_revision")
         request = {
-            "scope": asdict(scope), "generation": expected_generation,
+            "scope": scope_fields, "generation": expected_generation,
             "revision": expected_revision, "verdict": verdict, "reason": reason,
             "observation_ref": observation_ref, "reporter": reporter,
         }
@@ -193,6 +235,14 @@ class QueueRelevanceMixin:
                 if previous["request_json"] != encoded:
                     raise TaskError("relevance request key conflicts with its original request")
                 return json.loads(previous["result_json"])
+            if evaluation_token is not None:
+                if not isinstance(scope, RelevanceRegistration) or not conn.execute(
+                    "SELECT 1 FROM task_relevance_evaluations WHERE task_id=?"
+                    " AND registration_id=? AND token=? AND expires_at>?"
+                    " AND status='pending'",
+                    (task_id, scope.registration_id, evaluation_token, ts),
+                ).fetchone():
+                    raise TaskError("periodic relevance delivery ownership changed")
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
@@ -200,7 +250,7 @@ class QueueRelevanceMixin:
                 scope = RelevanceScope(*resolve_registration(
                     conn, task, scope, disabled_ids=disabled_ids, require_revision=True,
                     admission=registration_admission,
-                ))
+                ).scope)
             if task.kind != "finite" or (task.repo, task.source, task.origin_ref) != (
                 scope.repo, scope.source, scope.origin_ref,
             ):
@@ -241,14 +291,17 @@ class QueueRelevanceMixin:
                         (task_id, ts, _encoded(fields), reporter),
                     )
                     steer_id = inserted.lastrowid
+                    target, binding = capture_target(conn, task)
                     conn.execute(
                         "INSERT INTO task_relevance_closeouts"
-                        " (task_id, request_id, generation, owner, owner_session_id, steer_id, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        " (task_id, request_id, generation, owner, owner_session_id, steer_id,"
+                        " created_at, resource_binding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         (task_id, request_id, task.generation, (
-                            task.owner or (task.completed_by if task.status == Status.SUBMITTED else None)
+                            target.owner or (
+                                target.completed_by if target.status == Status.SUBMITTED else None
+                            )
                         ),
-                         task.owner_session_id, steer_id, ts),
+                         target.owner_session_id, steer_id, ts, _encoded(binding)),
                     )
             wake = None
             if decision == "closeout_pending":
@@ -318,7 +371,7 @@ class QueueRelevanceMixin:
                 (closeout["steer_id"],),
             ).fetchone() if closeout else None
             return {
-                "acceptance": result, "closeout": dict(closeout) if closeout else None,
+                "acceptance": result, "closeout": closeout_detail(closeout),
                 "steer_consumed_at": steer["taken_at"] if steer and steer["taken"] else None,
                 "wake": dict(wake) if wake else None,
             }

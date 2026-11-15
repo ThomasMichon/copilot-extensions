@@ -300,16 +300,30 @@ def _run(arguments, env, cwd, diagnostics, label, *, timeout=None):
 
 def _candidate_snapshot(root, identity, env, diagnostics):
     from agent_procutil import no_window_kwargs
+    import launch_wrapper_assets_ref as assets
 
     actual = _run(["git", "rev-parse", "HEAD"], env, REPO, diagnostics, "candidate-head")
     tree = _run(["git", "rev-parse", "HEAD^{tree}"], env, REPO, diagnostics, "candidate-tree")
     if actual != identity["candidate_commit"] or tree != identity["candidate_tree"]:
         raise RuntimeError("Executing checkout is not the exact admitted candidate")
+    selectors = [
+        "worktree-manager", "plugins/agent-worktrees", "libs", "tools", "docs",
+        "plugins/agent-containers/setup.py", ".github/plugin/marketplace.json",
+    ]
+    required = {
+        manifest.source_relative(name)
+        for manifest in assets.load_manifest_groups(
+            REPO / "worktree-manager", manifest_name=assets.PACKAGED_MANIFEST_NAME,
+        )
+        for name in manifest.files
+    }
+    selectors.extend(sorted(
+        name for name in required
+        if not any(name == parent or name.startswith(parent + "/") for parent in selectors)
+    ))
     archive = root / "candidate.tar"
     result = subprocess.run(
-        ["git", "archive", "--format=tar", "--output", str(archive), actual,
-         "worktree-manager", "plugins/agent-worktrees", "libs", "tools", "docs",
-         "plugins/agent-containers/setup.py", ".github/plugin/marketplace.json"],
+        ["git", "archive", "--format=tar", "--output", str(archive), actual, *selectors],
         cwd=REPO, env=env, timeout=30, capture_output=True, check=False, **no_window_kwargs(),
     )
     if result.returncode:
@@ -1322,6 +1336,7 @@ def test_process_image_attribution_waits_only_for_retained_exit(monkeypatch):
 
 def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
     from materialize_main import materialize_payload_invocation_into
+    import launch_wrapper_assets_ref as assets
 
     diagnostics = tmp_path / "diagnostics"
     diagnostics.mkdir()
@@ -1332,6 +1347,12 @@ def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
     identity = {"candidate_commit": commit, "candidate_tree": tree, "source_commit": commit}
 
     snapshot = _candidate_snapshot(tmp_path, identity, env, diagnostics)
+    for manifest in assets.load_manifest_groups(
+        snapshot / "worktree-manager", manifest_name=assets.PACKAGED_MANIFEST_NAME,
+    ):
+        for name in manifest.files:
+            relative = manifest.source_relative(name)
+            assert (snapshot / relative).read_bytes() == (REPO / relative).read_bytes()
     consumer = snapshot / "plugins" / "agent-worktrees"
     log = materialize_payload_invocation_into(
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,

@@ -180,7 +180,7 @@ def test_held_lifecycle_outcome_blocks_an_otherwise_settled_native_phase(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result, _events, _now = fake_owner(tmp_path, monkeypatch, held_lifecycle=True)
-    with pytest.raises(contract.QualificationError, match="settlement"):
+    with pytest.raises(owner.UnreapedProcessError, match="unsettled"):
         run(result)
     assert result.job_zero_observed and not result.lifecycle_settled
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Expose live reporting context outside persisted roster rows and publication revisions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

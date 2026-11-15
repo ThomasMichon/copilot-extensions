@@ -1,0 +1,9 @@
+{
+  "comment": "Document real receiver handover coverage through the retained native creation and wait owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

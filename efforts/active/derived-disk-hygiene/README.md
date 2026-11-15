@@ -111,11 +111,14 @@ installed rollout and legacy-data cleanup are outside the pilot.
       supported reclamation command.
 
 ### Track B — Stop unsealed bytecode growth (#10966)
-The [Python Bytecode Cache Lifecycle follow-on](../python-bytecode-cache-lifecycle/README.md)
-owns the proposed OS user-cache relocation, retirement-aware incremental
-collection and normal-update legacy bytecode relief. Its design clears review
-before implementation; this does not reopen the accepted #11122 delivery or
-authorize real-cache cleanup.
+The [Python Bytecode Cache Lifecycle follow-on](<../../2026/11/14 python-bytecode-cache-lifecycle/README.md>)
+delivered OS user-cache relocation, retirement-aware incremental collection
+and normal-update legacy bytecode relief through #12145, #12506, #12569 and
+#12585, following reviewed design #12131. The complete implementation is
+released through #12613; that source effort is Done. The accepted #11122
+delivery remains unchanged; source and fixture
+qualification do not authorize real-cache cleanup or satisfy the parent's
+installed-rollout and 24-hour observation gates.
 
 - [x] Apply the #10812 selector pattern (call `cache_arguments`, reuse
       `installed-<digest>`) to remaining random-minting launchers:

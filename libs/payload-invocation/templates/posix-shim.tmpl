@@ -158,48 +158,50 @@ _resolve_runtime() {
         . "$_resolver"
     fi
     if [ -n "${AGENT_RT_PY:-}" ]; then
-        _cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-        [ "${#_cache_id}" -eq 32 ] || exit 1
-        case "$_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
-        _python_cache="$_runtime_root/cache/python/unsealed-$_cache_id"
-        case "$AGENT_RT_PY" in
-            *.exe)
-                _python_cache="$(cygpath -aw "$_python_cache")" || return
-                case "$_python_cache" in
-                    '\\?\'*) ;;
-                    '\\'*) _python_cache='\\?\UNC\'"${_python_cache#'\\'}" ;;
-                    *) _python_cache='\\?\'"$_python_cache" ;;
-                esac ;;
-        esac
-        # Reuse the sealed installed-<digest> cache when install evidence is valid.
+        _python_cache_option="-B"
+        _python_cache_value=""
         _selector_root="$_runtime_root"
         case "$AGENT_RT_PY" in
             *.exe) _selector_root="$(cygpath -aw "$_runtime_root")" || _selector_root="" ;;
         esac
         if [ -n "$_selector_root" ]; then
-            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -X "pycache_prefix=$_python_cache" -c '
-import os, sys
+            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -c '
+import sys
 try:
-    from agent_procutil.python_cache import cache_arguments
-    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1]
-    assert os.path.basename(prefix).startswith("installed-")
+    from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
+    assert POLICY_VERSION == 2
+    arguments = policy_arguments(sys.argv[1], runtime=sys.executable)
+    assert arguments == ["-B"] or (
+        len(arguments) == 2 and arguments[0] == "-X"
+        and arguments[1].startswith("pycache_prefix=") and len(arguments[1]) > 15
+        and not any(c in arguments[1] for c in "\r\n\0"))
 except Exception:
-    prefix = sys.pycache_prefix or ""
-if "\n" not in prefix and "\r" not in prefix:
-    sys.stdout.write(prefix)
+    arguments = ["-B"]
+sys.stdout.buffer.write("\n".join(arguments).encode("utf-8"))
 ' "$_selector_root" 2>/dev/null)" || _selected_cache=""
-            if [ -n "$_selected_cache" ]; then
-                _python_cache="$_selected_cache"
-            fi
+            case "$_selected_cache" in
+                '-X
+pycache_prefix='*)
+                    _python_cache_option="-X"
+                    _python_cache_value="${_selected_cache#*
+}" ;;
+            esac
         fi
     fi
+}
+
+_dispatch_runtime() {
+    if [ "$_python_cache_option" = "-X" ]; then
+        exec "$AGENT_RT_PY" -X "$_python_cache_value" -m "$_module" "$@"
+    fi
+    exec "$AGENT_RT_PY" -B -m "$_module" "$@"
 }
 
 @@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime
 _boot_trace resolver-loaded shim
 if [ -n "${AGENT_RT_PY:-}" ]; then
     _boot_trace dispatch shim '' '' '' fast
-    exec "$AGENT_RT_PY" -X "pycache_prefix=$_python_cache" -m "$_module" "$@"
+    _dispatch_runtime "$@"
 fi
 if [ -n "${@@NO_SELFPROVISION_ENV@@:-}" ]; then
     printf '[%s] runtime not provisioned (%s set).\n' \
@@ -298,7 +300,7 @@ if [ -n "${AGENT_RT_PY:-}" ]; then
     _unlock_provision
     trap - EXIT INT TERM
     _boot_trace resolver-loaded
-    exec "$AGENT_RT_PY" -X "pycache_prefix=$_python_cache" -m "$_module" "$@"
+    _dispatch_runtime "$@"
 fi
 
 _installer="$_payload_root/scripts/@@INSTALLER@@.sh"
@@ -320,7 +322,7 @@ if [ -n "${AGENT_RT_PY:-}" ]; then
     trap - EXIT INT TERM
     _boot_trace resolver-loaded shim
     _boot_trace dispatch shim '' '' '' provisioned
-    exec "$AGENT_RT_PY" -X "pycache_prefix=$_python_cache" -m "$_module" "$@"
+    _dispatch_runtime "$@"
 fi
 printf '[%s] provisioning completed without a resolvable runtime.\n' "$_command" >&2
 exit 1

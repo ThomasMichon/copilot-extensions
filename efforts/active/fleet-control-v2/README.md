@@ -32,6 +32,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
 | Contract implementer | Release/role #6240, operation/receipt #6241 and isolated observation-storage #5862 contracts | Managed implementation worktree; assigned sub-issues |
 | Gateway/index integrator | End-to-end new Gateway, index client and subscribed credential integration #6443 | Separate managed worktree; #6443 and index consumer #6383 |
+| Profile prerequisite contributor | Bounded explicit RS256 application-token plus enrolled-proof source proposal and library integration, not provider/enrollment/adopter custody | Managed source worktree; #6804 and the linked source proposal |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
 
@@ -49,6 +50,15 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
   competing Gateway or ledger. Existing contract, auth, deployment and migration
   owners retain their work; inventory unmerged prototypes before duplicating
   implementation. The integrator owns the slice's PRs, not the whole V2 effort.
+- **Retained #6443 source-only refinements:** The existing Gateway/index
+  integrator retains the bounded lease/controller/consumer and Gateway-hosted
+  availability-coordinator contributions described in the linked slice. Normal
+  reviewed owned-module source contributions use non-blocking consultation;
+  another campaign-owner acknowledgement is not an added approval gate.
+  Coordinate actual overlapping edits and incompatible contracts. Preserve
+  existing serving-authority/provenance and affected runtime interfaces,
+  provider/credential/transaction custody, client lifecycle and deployment gates.
+  Source publication neither satisfies those effects nor transfers their owners.
 - **Central state and observation:** Reuse #5862 for the shared backing-store
   and query/subscription plane, not a competing observer. #3761 retains origin
   agency/write-through authority; #352 retains Manager UX/mux ownership.
@@ -373,6 +383,14 @@ All detailed slices are **agent-recommended** and remain subject to review.
   [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
   with the retained auth owner: actual broker/API proof compatibility,
   provider renewal and scoped enrollment, without changing management/SSH.
+- [x] Review and deliver the bounded
+  [RS256 application-token plus enrolled-proof service prerequisite](rs256-enrolled-service-profile.md),
+  preserving existing profiles and caller-only bearer semantics. Common source
+  acceptance is not actual provider interoperability or live enrollment.
+  Contract review merged in #12327; implementation, exact version `6`
+  support and synthetic crypto/TLS service-path qualification merged in #12335.
+  The resulting source contract was returned to #6804 for the retained
+  provider/enrollment work and Gateway/adopter integration.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
   Source implementation and signed-grant index ingress landed in #6809.
@@ -393,6 +411,12 @@ All detailed slices are **agent-recommended** and remain subject to review.
   remain part of the live proof below.
 - [ ] Prove the real CLI/Gateway/container/controller path, independently
   persistent index state and scoped negative cases before any native offload.
+
+- [ ] Retain and deliver #6443's bounded source-only lease/controller/consumer
+  and availability-coordinator refinements through the slice's GI-S1 through
+  GI-S3 Plan and matching local validation. These are independently progressable
+  source contributions, not closure of the resident/provider/live-adoption
+  items above; keep existing clients and explicit unsupported outcomes.
 
 ### Phase 2b - Central push-backed current state
 - [x] Review the [backing-store amendment](central-state-backing-store.md) under
@@ -482,6 +506,18 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Prove long-lived provider/OS sessions renew without Gateway-added presence
   prompts, with real challenge, explicit revocation and optional dead-man
   outcomes distinct from token/lease churn or temporary unavailability.
+
+- [ ] Complete GI-SV1 through GI-SV3 in the Gateway/index slice for #6443's
+  retained source-only lease/controller/consumer and availability-coordinator
+  refinements. Verify exact correlation/affinity, current-incarnation fencing,
+  explicit noninteractive lookup, one at-most-30-second concurrent-read phase
+  and truthful unsupported/cache-miss/unavailable/uncertain outcomes without
+  nonce/popup or replay. Record selected channel/consumer source composition
+  separately from synthetic controls. Do not check the parent Gateway/index,
+  provider, installed/container or live-adoption rows from source publication.
+- [x] Complete the bounded [RS256 enrolled-service source controls](rs256-enrolled-service-profile.md#validation-and-stopping-boundary)
+  with real synthetic-token/proof verification and contained TLS service-path
+  tests; retain actual provider/protected-key/enrollment and live-adoption gates.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -521,6 +557,51 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-11-13 - Proposed retained #6443 source-only refinements
+
+- Proposed explicit local Plan/Validation and matching parent Plan/global
+  Validation for the retained lease/controller/consumer and Gateway-hosted
+  noninteractive-availability source contributions. Existing options, clients,
+  custodians and all unfinished technical gates remain unchanged.
+- The source-contribution correction permits normal reviewed owned-module work
+  with non-blocking consultation, not an added campaign-owner signature.
+  Actual conflicting source, current serving authority and runtime/provider/
+  deployment boundaries retain their original contracts.
+- This is a tracking proposal, pending actual review, merge and fresh whole
+  receiving readback. It claims no delivered adapter, source acceptance,
+  technical completion, donor retirement, credential/resource release or rollout.
+
+
+### 2026-11-12 - Explicit RS256 enrolled-service source accepted
+
+- #12335 merged as `c6e5d0f098137a211bd9ed12a91a91dac88c2290`
+  after final-head Copilot approval with no issues and required green CI.
+  The exact source leaf and its validation gate are complete; the parent
+  Fleet/auth/Gateway aggregates remain open.
+- 446 focused source cases and the contained TLS connector/channel/source
+  path passed. Two bounded request-cost diagnostics passed separately.
+  Actual provider/protected-key/enrollment, same-owner hosting, installed
+  selection and rollout remain unqualified by these synthetic results.
+- Returned the exact callable/profile/configuration and provider-first
+  support boundary to #6804. No owner, credential, service, policy or
+  execution authority was transferred or activated.
+
+### 2026-11-12 - Explicit RS256 enrolled-service contract reviewed
+
+- #12327 merged after genuine current-head Copilot approval and required green
+  CI. The [bounded contract](rs256-enrolled-service-profile.md) is accepted for
+  source implementation, not evidence that a new verifier/profile is available.
+- Continue its isolated implementation and actor-free/contained service-path
+  validation. Preserve existing profiles, actual provider/protected-key/
+  enrollment gates and all parent aggregate obligations; no rollout is implied.
+- The implementation now reuses maintained RSA validation and the common
+  enrollment/proof engine with exact selected signed subject/client claims and
+  bounded scalar/list requirements. Version `6` does not broaden legacy
+  service profiles or RS256 caller-only bearer admission. Focused source
+  controls include real TLS channel/source-handler composition, expiry,
+  withdrawal, key replacement, delayed results and disconnect without replay.
+  Normal implementation review/CI and adopter integration remain open.
 
 ### 2026-10-28 - Direct retained Fleet acceptance amendment
 

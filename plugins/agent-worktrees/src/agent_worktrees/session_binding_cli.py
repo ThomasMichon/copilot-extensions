@@ -479,7 +479,6 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 binding_record = tracking._load_record_uncached(binding_path)
                 handoff_diagnostics.stamp_session_state_worktree_binding(
                     session_id, wt_id, worktree_dir=binding_record.worktree_path,
-                    machine=binding_record.execution_machine,
                     worktree_record=binding_record if binding_record.repo == registration_project else None,
                 )
     except Exception:

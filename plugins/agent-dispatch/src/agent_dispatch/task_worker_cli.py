@@ -19,7 +19,10 @@ _FIELDS = {
     "task_url": "AGENT_DISPATCH_TASK_URL",
     "task_worker": "AGENT_DISPATCH_TASK_WORKER_ID",
 }
-_COMMANDS = frozenset({"show", "payload", "start", "progress", "heartbeat", "complete", "abandon"})
+_COMMANDS = frozenset({
+    "show", "payload", "start", "progress", "heartbeat", "complete", "abandon",
+    "relevance-closeout",
+})
 
 
 @dataclass(frozen=True)
@@ -127,7 +130,10 @@ def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
     if args.command == "abandon" and not args.permit:
         raise DispatchError(403, "task abandonment requires --permit")
     with worker.client() as client:
-        if args.command == "show":
+        if args.command == "relevance-closeout":
+            from .relevance_closeout_cli import closeout
+            response = closeout(client, worker.task_id, worker.worker_id)
+        elif args.command == "show":
             response = client.get(worker.task_id)
         elif args.command == "payload":
             response = client.payload(worker.task_id)

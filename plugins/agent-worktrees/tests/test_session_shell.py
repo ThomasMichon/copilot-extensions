@@ -501,7 +501,8 @@ def test_normalized_setup_is_its_native_lifetime_owner_with_launch_owned_assets(
     scripts.mkdir(parents=True)
     monkeypatch.setattr(launch_seed_exec.installer, "__file__", str(package / "installer.py"))
     canonical = Path(__file__).resolve().parents[1] / "scripts"
-    for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1", "reconcile-machine-settings.ps1"):
+    for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+                 "native-seed-process.ps1", "native-seed-process.cs", "reconcile-machine-settings.ps1"):
         shutil.copy2(canonical / name, scripts / name)
     monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
@@ -543,14 +544,22 @@ def test_normalized_setup_is_its_native_lifetime_owner_with_launch_owned_assets(
 
 
 @pytest.mark.parametrize("packaged", [False, True], ids=["legacy", "application"])
-def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(launch, monkeypatch, packaged):
+@pytest.mark.parametrize("suspended", [False, True], ids=["old-provider", "suspended-provider"])
+def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(
+    launch, monkeypatch, packaged, suspended,
+):
     record, runtime, assets = launch
     package = runtime / "versions" / "current" / ".venv" / "agent_worktrees"
     scripts = package / "_runtime_assets" / "scripts" if packaged else runtime / "scripts"
     scripts.mkdir(parents=True)
     monkeypatch.setattr(launch_seed_exec.installer, "__file__", str(package / "installer.py"))
     helper = scripts / "native-seed-boundary.ps1"
-    helper.write_text("# current engine fixture\n", encoding="utf-8")
+    text = "# current engine fixture\n"
+    if suspended:
+        text += "# agent-worktrees:native-suspended-creation-v1\n"
+        for name in ("native-seed-process.ps1", "native-seed-process.cs"):
+            (scripts / name).write_text("fixture companion\n", encoding="utf-8")
+    helper.write_text(text, encoding="utf-8")
     wrapper = assets / "pane-wrapper.ps1"
     wrapper.write_text(
         "# worktree-manager:pane-boundary-v1\n" + session_shell.NATIVE_CONSOLE_MARKER + "\n",
@@ -560,8 +569,11 @@ def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(l
     prepared = session_shell.prepare(record, wrapper, installation_roots=(runtime,))
     copied = prepared.directory / helper.name
     assert copied.read_bytes() == helper.read_bytes()
+    if suspended:
+        for name in ("native-seed-process.ps1", "native-seed-process.cs"):
+            assert (prepared.directory / name).read_bytes() == (scripts / name).read_bytes()
     shutil.rmtree(runtime)
-    assert copied.read_text(encoding="utf-8") == "# current engine fixture\n"
+    assert copied.read_text(encoding="utf-8") == text
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
@@ -575,6 +587,7 @@ def test_mux_setup_copy_preserves_separate_admission_and_literal_native_argument
     scripts.mkdir()
     canonical = Path(__file__).resolve().parents[1] / "scripts"
     names = ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+             "native-seed-process.ps1", "native-seed-process.cs",
              "reconcile-machine-settings.ps1")
     for name in names:
         shutil.copy2(canonical / name, scripts / name)
@@ -808,6 +821,7 @@ def test_copy_then_actual_pane_construction_probes_manager_only_once(launch, mon
     scripts.mkdir()
     canonical = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+                 "native-seed-process.ps1", "native-seed-process.cs",
                  "reconcile-machine-settings.ps1"):
         shutil.copy2(canonical / name, scripts / name)
     (runtime / "current-version").write_text("A", encoding="utf-8")
@@ -857,6 +871,7 @@ def test_copied_mux_setup_runs_and_returns_after_disposable_source_removal(launc
     scripts.mkdir()
     canonical = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+                 "native-seed-process.ps1", "native-seed-process.cs",
                  "reconcile-machine-settings.ps1"):
         shutil.copy2(canonical / name, scripts / name)
     monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)

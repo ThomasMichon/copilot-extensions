@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 import json
 import math
@@ -90,7 +91,10 @@ def _closed(owner: _QueueOwner, task_id: str, event_id: str) -> bool:
     return current is not None and current["state"] == "closed"
 
 
-def _settle(owner: _QueueOwner, task_id: str, receipt: dict) -> dict | None:
+def _settle(
+    owner: _QueueOwner, task_id: str, receipt: dict, *,
+    authority_guard: Callable[[], None] | None = None,
+) -> dict | None:
     """Settle only the exact claim this confirmed disposition retired, through its owner.
 
     The supervisor's closeout and the worker's settlement request race for the same
@@ -103,11 +107,20 @@ def _settle(owner: _QueueOwner, task_id: str, receipt: dict) -> dict | None:
     closed = {"event_id": event_id, "state": "closed"}
     lock = _settle_lock(task_id, event_id)
     with lock:
+        if authority_guard is not None:
+            authority_guard()
         if _closed(owner, task_id, event_id):
             return closed
         try:
-            settled = owner.reconcile_task_relationship(task_id, event_id=event_id)
+            if authority_guard is None:
+                settled = owner.reconcile_task_relationship(task_id, event_id=event_id)
+            else:
+                settled = owner.reconcile_task_relationship(
+                    task_id, event_id=event_id, authority_guard=authority_guard,
+                )
         except Exception as exc:  # any failure retains the claim visibly
+            if authority_guard is not None:
+                authority_guard()
             try:
                 if _closed(owner, task_id, event_id):
                     return closed

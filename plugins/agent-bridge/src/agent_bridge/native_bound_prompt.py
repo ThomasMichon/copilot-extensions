@@ -16,6 +16,25 @@ if TYPE_CHECKING:
     from .client import BridgeClient
 
 
+class NativeSendNotAttempted(SendRefused):
+    """Request-bound refusal before this CLI attempts native prompt admission."""
+
+    def __init__(self, target: str, native: str, key: str, error: str) -> None:
+        super().__init__(
+            "refused_unavailable", reason="native_send_not_attempted", retryable=True,
+            target=target, error=error,
+        )
+        self.native = native
+        self.key = key
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            **super().payload(), "native_send_refusal_version": 1,
+            "native_session_id": self.native, "invocation_key": self.key,
+            "admission_status": "not_attempted",
+        }
+
+
 def submit_native_bound_prompt(
     client: BridgeClient, session_id: str, prompt: str, *,
     expected_native_session_id: str, caller_id: str | None,
@@ -23,7 +42,19 @@ def submit_native_bound_prompt(
     no_resume: bool = False,
 ) -> dict[str, Any]:
     """Submit only to the exact running native conversation under its turn lock."""
-    if not expected_native_session_id or not client.daemon_supports(NATIVE_BOUND_PROMPT_PROTOCOL_VERSION):
+    from .client import BridgeConnectionError
+
+    try:
+        supported = bool(expected_native_session_id) and client.daemon_supports(
+            NATIVE_BOUND_PROMPT_PROTOCOL_VERSION,
+        )
+    except BridgeConnectionError as exc:
+        if idempotency_key is not None:
+            raise NativeSendNotAttempted(
+                session_id, expected_native_session_id, idempotency_key, str(exc),
+            ) from exc
+        raise
+    if not supported:
         raise SendRefused(
             "refused_unavailable", reason="unsupported_native_fence", retryable=False,
             target=session_id, error="daemon does not support native-bound prompt admission",
@@ -94,6 +125,10 @@ def submit_native_bound_prompt(
                 UnicodeError, json.JSONDecodeError) as exc:
             if attempted:
                 raise unknown() from exc
+            if isinstance(exc, BridgeConnectionError):
+                raise NativeSendNotAttempted(
+                    session_id, expected_native_session_id, idempotency_key, str(exc),
+                ) from exc
             raise
         if (
             not isinstance(result, dict) or result.get("session_id") != native_target

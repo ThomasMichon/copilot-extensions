@@ -487,10 +487,14 @@ def test_claim_generation_does_not_advance_allocation_revision(tmp_path):
     assert retry.allocation_revision == first.allocation_revision == 1
 
 
-def test_legacy_unrecorded_allocation_cannot_mint_a_new_intent(tmp_path):
+def test_legacy_unrecorded_allocation_cannot_mint_a_new_intent(tmp_path, monkeypatch):
+    from agent_dispatch import queue_assignment_cohort
+
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create(title="work", repo="queue-repo")
-    first, _ = queue.reserve_spawn(task.id)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(queue_assignment_cohort, "retain_allocation_cohort", lambda *a, **k: None)
+        first, _ = queue.reserve_spawn(task.id)
     queue.fail_spawn(first.key, detail="old response was lost")
     with queue._connect() as conn:
         conn.execute("UPDATE spawn_reservations SET creation_key=NULL WHERE key=?", (first.key,))

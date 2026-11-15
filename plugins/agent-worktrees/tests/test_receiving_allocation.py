@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from machine_transport import LocalExecutionContext
 
 from agent_worktrees import creation_requests, execution_spaces, tracking
+from agent_worktrees import record_reporting
 from agent_worktrees import receiving_allocation as receiving, worktree_creation
 from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
@@ -76,6 +78,20 @@ def test_unlinked_created_child_allows_normal_local_mutation_and_completed_repla
     assert replayed["worktree"] == first["worktree"]
     assert same.receiving_allocation["phase"] == "created"
     assert len(list(records.glob("*.yaml"))) == 1
+
+
+def test_original_receipt_reference_is_not_a_current_reporter_label(receiver: tuple) -> None:
+    _, _, _records = receiver
+    _, record = create(receiver)
+    original = receiving.record_identity(record)
+    record_reporting.apply_context(record, LocalExecutionContext(
+        "same-observed-host", "renamed-physical", record.platform, "renamed-execution",
+    ))
+    assert receiving.record_identity(record) == original
+    assert receiving.parsed_receipt(record).origin == record.owner_ref
+    record.receiving_allocation["identity"]["ref"] = f"other/{record.repo}/{record.worktree_id}"
+    with pytest.raises(ValueError, match="child/creator"):
+        receiving.parsed_receipt(record)
 
 
 @pytest.mark.parametrize("change", [
@@ -215,9 +231,9 @@ def test_explicit_receiving_registry_does_not_need_foreign_creator_entry(receive
     _, record = create(receiver)
     context = execution_spaces.current_execution_context(config)
     (Path(config.default_repo.anchor) / "machines.yaml").write_text(yaml.safe_dump({
-        "machines": {record.execution_machine: {
-            "hostname": context.hostname, "physical_host": record.machine,
-            "execution_platform": record.platform,
+        "machines": {context.execution_machine: {
+            "hostname": context.hostname, "physical_host": context.machine,
+            "execution_platform": context.environment,
         }},
     }))
     with pytest.raises(execution_spaces.ExecutionSpaceError):

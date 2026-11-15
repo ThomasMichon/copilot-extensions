@@ -227,6 +227,19 @@ adopter pilot feedback gates subsequent widening.
 
 ## Journal
 
+### 2026-11-12 — Bounded operational-reference scan work
+- A metadata-layout regression reproduces the database reference timeout
+  below its entry cap: per-file native normalization repeatedly walks the
+  same candidate root and shared parent directories.
+- Prepare those directory resolutions only within the existing bounded
+  read and revalidate identity/type/canonical destinations before a negative
+  result. Preserve complete row coverage, real aliases and unsupported inputs,
+  the original entry/time budgets and true retained-reference refusal.
+- This closes the existing reference-discovery implementation rather than
+  qualifying historical session migration. Real retained Copilot references
+  remain an explicit owner-contract gate; no database repair, history rewrite,
+  installed rollout or real target move follows from source qualification.
+
 ### 2026-11-11 — Explicit live admission and cross-volume receiving source flow
 
 - Intent [#12178](https://github.com/ThomasMichon/copilot-extensions/pull/12178)

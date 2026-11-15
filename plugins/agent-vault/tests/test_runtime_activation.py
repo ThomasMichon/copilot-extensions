@@ -19,6 +19,38 @@ from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("package", [False, True])
+def test_native_readiness_ignores_project_local_shadow_module(tmp_path, package):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    project = tmp_path / "selected repository"
+    project.mkdir()
+    (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
+    prepare_runtime(runtime, payload)
+    marker = tmp_path / "shadow-executed"
+    target = project / "agent_vault.py"
+    if package:
+        target = project / "agent_vault" / "__main__.py"
+        target.parent.mkdir()
+        (target.parent / "__init__.py").write_text("", encoding="utf-8")
+    target.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('shadow')\n"
+        "raise SystemExit(73)\n",
+        encoding="utf-8",
+    )
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+        "AGENT_VAULT_NO_SELFPROVISION": "1",
+    })
+
+    result = invoke(payload, env, project, "installer-readiness")
+
+    assert not marker.exists(), result.stdout + result.stderr
+    assert result.returncode != 73
+    assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    assert not (runtime / "run").exists()
+
+
 @pytest.mark.parametrize("scoped", [False, True])
 def test_native_cold_contract_query_never_provisions(tmp_path, scoped):
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
@@ -56,6 +88,7 @@ def test_native_batch_reads_real_cache_without_service(tmp_path, monkeypatch):
         "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_EXTENSIONS_CONTEXT": context,
         "AGENT_VAULT_HOME": str(runtime), "AGENT_VAULT_CONFIG": str(home / "native.json"),
         "AGENT_VAULT_CACHE": "1", "AGENT_VAULT_NO_SELFPROVISION": "1",
+        "PYTHONUTF8": "0", "PYTHONIOENCODING": "ascii",
     })
     requests = [
         {"entry": "Example/one", "field": "password"},
@@ -122,7 +155,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
     assert metadata.returncode == 0, metadata.stdout + metadata.stderr
     assert json.loads(metadata.stdout)["capabilities"] == [
         "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
-        "authenticated-curl-v1", "daemon-bind-default-v1",
+        "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
     ]
     assert not (runtime / "run").exists()
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { createHeadedDriverSession } from "../extensions/agent-bridge/remote-driver.mjs";
+import { createHeadedDriverSession } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 import { createHeadedAdapter } from "../../../libs/copilot-driver-core/src/agent_remote_driver/headed/acp-adapter.mjs";
 
 async function fixture(run, {
@@ -115,6 +115,7 @@ async function fixture(run, {
   readonly.rpc.plugins = { list: async () => ({ plugins }) };
   const client = await createHeadedDriverSession(readonly, {
     declaration: JSON.stringify(declaration), cwd: directory, nativePid: process.pid,
+    extensionPluginRoot: bridgePluginRoot,
     ...(portable ? { pluginRoot, bridgePluginRoot, expectedSessionId: native.sessionId } : {}),
   });
   try {

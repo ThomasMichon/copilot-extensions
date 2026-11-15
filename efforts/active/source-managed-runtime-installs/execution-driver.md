@@ -6,6 +6,13 @@ Intent: [single installation execution owner](../../../visions/installer/README.
 
 ## Boundary
 
+The [current lifetime amendment](update-service-lifetimes.md) supersedes this
+slice's former ordinary-background-worker-only requirement. Foreground updates
+are caller-owned and cancellable; accepted service setup/start and its retained
+process/runtime tree belong to an independent lifecycle owner. Preserve one
+writer and durable results, not hidden continuation of a cancelled whole update.
+Historical evidence, existing implementers and operational holds remain intact.
+
 The [authoritative replacement contract](../../../visions/installer/README.md#authoritative-runtime-replacement)
 governs this plan's current objective and acceptance. Concrete conflicting writes
 receive bounded internal wait/join or replacement; neither a recorded nor a
@@ -53,16 +60,18 @@ policy changed or recurring worker enrolled by this plan.
    and integration. Per-slot ownership stays nested and unchanged. Inherited
    custody must be explicit and checked rather than inferred from an environment
    flag or PID file.
-4. Submit ordinary supported suite-update calls to a bounded headless worker
-   through the canonical process-lifetime primitive. A synchronous client
-   follows its durable request and output/result; it never becomes the
-   installer. Preserve existing option semantics, authentication, source choice,
-   telemetry and failure exit status. Unsupported skew must fail explicitly,
-   not fall back to a second foreground installer.
-5. Keep direct execution an explicitly named supervised-debug path using the
-   same transaction authority. Normal callers wait for a live installer;
-   operator-approved force/repair follows the bounded takeover contract below.
-   Neither mode permits overlapping installation writers.
+4. Execute ordinary supported suite updates in the foreground caller's owned
+   lifetime through the same transaction authority. Preserve explicit background
+   mode, option/source/authentication semantics, telemetry and honest failure or
+   cancellation. Joining an existing owner does not grant a mere observer
+   cancellation authority over it; incompatible execution contracts fail
+   explicitly rather than creating another installer.
+5. Hand accepted service setup/start to its independent lifecycle owner,
+   including readiness/activation recovery and required runtime retention.
+   Updater/caller/ancestor loss stops finite work but cannot kill that accepted
+   operation or daemon tree. Keep background and supervised-debug modes under
+   the same authority; none permits overlapping installation writers or
+   caller-contained production startup masquerading as durability.
 6. On worker loss, retain an interrupted/uncertain outcome. Recover pending
    work under exclusive authority, but do not automatically replay an ambiguous
    active installation. Do not kill unknown descendants or reclaim authority
@@ -131,9 +140,10 @@ The following implementation sequence is **agent-recommended**:
 **Acceptance:** cold first use with no Python or sibling runtime establishes
 the independently owned foundation and submits plugin work to it; simultaneous
 callers do not produce overlapping installation owners. Destroy the originating
-caller and its cleanup boundary during foundation construction and subsequent
-plugin provisioning, then verify the same owned operation or precise
-interrupted/recovery state and durable result. Prove source substitution,
+caller and its cleanup boundary during foreground foundation construction and
+provisioning: finite work stops with a precise interruption/recovery result.
+Separately accepted service startup and explicitly background operations
+retain their admitted lifetime and observable outcomes. Prove source substitution,
 failed/incomplete candidates, unavailable bootstrap capability, upgrade during
 an active request, managed-publication refusal and healthy standalone dispatch.
 Use real native Windows and Linux process boundaries and a fresh clean-room
@@ -367,9 +377,12 @@ current scope; this is not a competing driver or proof of a live repair.
   and deterministic updater fixtures; concurrent clients produce one execution,
   not merely one database row. Check real transaction overlap, not a mocked
   lock-acquisition call.
-- End the submitting process and its containment/job, then prove the admitted
-  worker and final result remain available. On Windows observe no visible
-  console or foreground changes; test the actual canonical spawn primitive.
+- Execute the [L1-L6 lifetime matrix](update-service-lifetimes.md#validation-and-completion)
+  through the real ordinary foreground entry and separately through explicit
+  background mode. End the caller/ancestor and every fixture-owned cleanup
+  scope: finite updater controls die, independently accepted service startup
+  and daemons survive, and outcomes remain truthful. On Windows preserve
+  headlessness; test actual native handoff and lifetime, not only an early ping.
 - Distinct explicit source/ref/options remain distinct, identical pending work
   coalesces, a request arriving during an active update is not silently lost,
   and a waiter returns the recorded canonical outcome.

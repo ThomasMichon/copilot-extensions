@@ -12,7 +12,6 @@ import struct
 import sys
 import tempfile
 import time
-import uuid
 from contextlib import contextmanager
 from collections.abc import Callable
 from functools import cache
@@ -382,22 +381,37 @@ def lifecycle_capabilities(python: Path) -> list[str] | None:
 
 
 def python_cache_arguments(python: Path) -> list[str]:
-    """Use the installed cache owner, with the existing unsealed legacy fallback."""
+    """Load only the selected runtime's policy, without writing into its package."""
     environment = python.parent.parent
     slot = environment.parent if environment.name == ".venv" else environment
     root = slot.parent.parent
     if slot.parent.name != "versions" or not python.is_absolute():
         raise ValueError("Hook runtime must be selected from a version slot")
     for directory in _site_packages(python):
-        helper = directory / "agent_procutil" / "python_cache.py"
+        helper = directory / "agent_procutil" / "__init__.py"
         if helper.is_file():
-            return _load_runtime_file(helper, "_hook_python_cache").cache_arguments(
-                root, runtime=python,
-            )
-    prefix = os.path.abspath(root / "cache" / "python" / ("unsealed-" + uuid.uuid4().hex))
-    if os.name == "nt" and not prefix.startswith("\\\\?\\"):
-        prefix = "\\\\?\\UNC\\" + prefix[2:] if prefix.startswith("\\\\") else "\\\\?\\" + prefix
-    return ["-X", "pycache_prefix=" + prefix]
+            previous = sys.dont_write_bytecode
+            sys.dont_write_bytecode = True
+            try:
+                name = "_hook_procutil_" + hashlib.sha256(os.fsencode(helper)).hexdigest()[:16]
+                provider = _load_runtime_file(helper, name)
+                select = getattr(provider, "python_cache_policy_args", None)
+                return select(root, runtime=python) if select else ["-B"]
+            except (OSError, ValueError, ImportError, RuntimeError):
+                return ["-B"]
+            finally:
+                sys.dont_write_bytecode = previous
+    return ["-B"]
+
+
+def configure_python_cache_environment(python: Path, environment: dict[str, str]) -> None:
+    """Apply the selected policy to legacy subprocesses without interpreter flags."""
+    arguments = python_cache_arguments(python)
+    if arguments == ["-B"]:
+        environment.pop("PYTHONPYCACHEPREFIX", None)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    else:
+        environment["PYTHONPYCACHEPREFIX"] = arguments[1].split("=", 1)[1]
 
 
 def session_launch_key(payload: dict) -> str:

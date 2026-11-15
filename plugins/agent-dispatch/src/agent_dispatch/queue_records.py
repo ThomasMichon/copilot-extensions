@@ -262,6 +262,11 @@ class SpawnReservation:
     allocation_revision: int = 1
     creation_key: str | None = None
     allocation_reservation_key: str | None = None
+    allocation_cohort: dict | None = None
+    allocation_cohort_transport: str | None = None
+    session_origin: dict | None = None
+    session_origin_reservation_key: str | None = None
+    session_origin_transport: str | None = None
     conversation_retired: bool = False
     release_requested: bool = False
     native_release_pending: bool = False
@@ -310,6 +315,16 @@ class SpawnReservation:
             creation_key=row["creation_key"] if "creation_key" in row.keys() else None,
             allocation_reservation_key=row["allocation_reservation_key"]
             if "allocation_reservation_key" in row.keys() else None,
+            allocation_cohort=json.loads(row["allocation_cohort"])
+            if "allocation_cohort" in row.keys() and row["allocation_cohort"] else None,
+            allocation_cohort_transport=row["allocation_cohort_transport"]
+            if "allocation_cohort_transport" in row.keys() else "baseline",
+            session_origin=json.loads(row["session_origin"])
+            if "session_origin" in row.keys() and row["session_origin"] else None,
+            session_origin_reservation_key=row["session_origin_reservation_key"]
+            if "session_origin_reservation_key" in row.keys() else None,
+            session_origin_transport=row["session_origin_transport"]
+            if "session_origin_transport" in row.keys() else "baseline",
             conversation_retired=bool(row["conversation_retired"])
             if "conversation_retired" in row.keys() else False,
             release_requested=bool(row["release_requested"]),

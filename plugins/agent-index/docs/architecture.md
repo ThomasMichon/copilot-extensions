@@ -27,9 +27,10 @@ That means the old "Phase 1 service shell only" description is stale. Future
 work still exists, but indexing and retrieval are present in the shipped code.
 
 Managed server launches use the
-[external Python bytecode cache](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
-outside immutable runtime slots. The separately managed engine uses its own
-durable engine root for that cache; it does not share the server's cache root.
+[platform Python cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract)
+outside immutable runtime slots. The separately managed engine has its own
+installation identity in the shared user-cache home. Unsealed engines and
+older providers disable bytecode writes rather than minting invocation caches.
 
 ## Incremental connector and reuse contracts
 
@@ -510,8 +511,13 @@ databases start without coverage and conservatively embed each presented pair
 once. These are optimization receipts, not new source-lock, checkpoint,
 committed-reader or global missing-vector-repair authorities.
 
-Engine readiness is deferred until missing-pair selection produces a nonempty
-embedding plan. An empty delta, wholly reused file set or metadata-only update
+Engine readiness is deferred per model until missing-pair selection produces
+a nonempty embedding plan for that model. A managed run ensures each needed
+model once, even across multiple batches; covered and inapplicable models are
+not ensured or stopped. Cleanup still stops only engines the runtime reports
+as started and closes every client owned by the run. The additive model-aware
+batch callback leaves existing zero-argument callbacks compatible.
+An empty delta, wholly reused file set or metadata-only update
 with verified pair coverage does not start embedding engines. Full reindexing
 forces pair writes, except for files already committed within its retry window.
 Completed changed files reconcile against their explicit retained chunk IDs
@@ -561,6 +567,17 @@ Retrieval facades retaining another canonical source naming scheme can override
 the pure `ContentStore.repo_filter_sql` method. The shared FTS/currentness path
 still executes that escaped prefilter before limiting candidates; the consumer
 migration recipe covers matching its vector-side policy.
+
+Full-text file-path filters use full-path shell globs (`*`, `?` and bracket
+classes), with SQL `%` and `_` treated as literal path characters. The path
+predicate runs with the other metadata predicates before the FTS candidate
+limit; it does not depend on filtering an already-truncated result list.
+
+Hydrated hybrid results apply the same case-sensitive path eligibility before the final
+result limit. Vector acquisition still uses a finite candidate window: matches
+outside it can leave an underfilled result, especially when FTS is unavailable.
+Filtering does not promise exhaustive top-N or identical FTS/hybrid rankings,
+and does not fall back to a corpus-wide scan.
 
 ```mermaid
 flowchart LR

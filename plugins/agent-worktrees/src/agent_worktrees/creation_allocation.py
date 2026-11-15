@@ -45,17 +45,19 @@ def validate_record_evidence(fields: object) -> dict:
 
 
 def require_record_evidence(record: tracking.WorktreeRecord, fields: object) -> None:
-    if record_evidence(record) != validate_record_evidence(fields):
+    retained = validate_record_evidence(fields)
+    if any(getattr(record, field) != retained[field] for field in _RELATIONSHIP_FIELDS):
         raise ValueError("Stored allocation conflicts with its original owner or pair identity")
 
 
 def require_result_identity(record: tracking.WorktreeRecord, result: dict) -> None:
     """Use original projection evidence even when an old receipt has no snapshot."""
+    if any(key in result and not isinstance(result[key], str) for key in ("machine", "platform")):
+        raise ValueError("Invalid stored allocation naming observation")
     if any(key in result for key in ("machine", "platform", "machine_identity_version",
                                      "environment", "execution_machine")):
-        if _receipt_identity(result) != record.machine_identity:
-            raise ValueError("Stored allocation changed its original owner representation")
-    current = {**record_evidence(record), "creation_nonce": record.creation_nonce}
+        _receipt_identity(result)
+    current = {field: getattr(record, field) for field in (*_RELATIONSHIP_FIELDS, "creation_nonce")}
     if any(key in result and result[key] != value for key, value in current.items()):
         raise ValueError("Stored allocation changed its original owner or pair identity")
 
@@ -151,8 +153,7 @@ class AdmittedAllocation:
         if (
             record.worktree_id != self.worktree_id or record.repo != self.project
             or record.branch != self.branch or record.worktree_path != self.path
-            or record.machine != self.machine or record.platform != self.platform
-            or record.machine_identity != self.machine_identity
+            or cfg.detect_platform() != self.platform
             or (nonce is not None and record.creation_nonce != nonce)
         ):
             raise ValueError("Stored New allocation conflicts with its original record identity")

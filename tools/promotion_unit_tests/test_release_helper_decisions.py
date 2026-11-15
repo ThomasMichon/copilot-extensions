@@ -471,27 +471,60 @@ def test_standalone_packaged_sources_charge_the_declared_consumer(
     assert module._plugins_needing_bump(["tools/unrelated.py"], {}) == {}
 
 
+def test_application_resource_projection_retains_companions_and_metadata_not_directories(tmp_path):
+    from plugin_runtime_resources import application_resources
+
+    spec = importlib.util.spec_from_file_location(
+        "application_resource_builder", ROOT / "libs/versioned-runtime/standalone_build.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    prefix = "scripts/runtime-source-tools/fixture/"
+    expected = {
+        "_runtime_assets/" + prefix + name
+        for name in ("native.cs", "pyproject.toml", "requirements.txt", "uv.lock")
+    }
+    for name in ("native.cs", "pyproject.toml", "requirements.txt", "uv.lock"):
+        _write(tmp_path / prefix / name, "fixture")
+    (tmp_path / prefix / "not-a-file.cs").mkdir()
+    assert set(module.application_resources(tmp_path, "worktree_manager")) == expected
+    assert set(application_resources(tmp_path, "worktree_manager")) == {
+        "worktree_manager/" + name for name in expected
+    }
+
+
 def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path, monkeypatch):
     source = ROOT / "worktree-manager"
-    manifest = assets.load_manifest(source, manifest_name=assets.PACKAGED_MANIFEST_NAME)
+    manifests = assets.load_manifest_groups(source, manifest_name=assets.PACKAGED_MANIFEST_NAME)
     destination = tmp_path / "worktree-manager"
     destination.mkdir()
     report = wrappers.materialize_into(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=ROOT,
+        manifest_name=assets.PACKAGED_MANIFEST_NAME,
     )
     assert report and all(line.startswith("OK") for line in report), report
-    bundle = manifest.payload_dir(plugin_dir=destination)
+    expected = {
+        (Path(manifest.payload_dir_raw) / name).as_posix()
+        for manifest in manifests for name in manifest.files
+    }
     assert {
-        path.relative_to(bundle).as_posix() for path in bundle.rglob("*") if path.is_file()
-    } == set(manifest.files)
+        path.relative_to(destination).as_posix() for path in destination.rglob("*") if path.is_file()
+    } == expected
     from plugin_runtime_resources import application_resources
 
     assert set(application_resources(destination, "worktree_manager")) == {
-        "worktree_manager/_runtime_assets/" + manifest.payload_dir_raw + "/" + name
-        for name in manifest.files
+        "worktree_manager/_runtime_assets/" + name for name in expected
     }
 
-    declared = {ROOT / manifest.source_relative(name) for name in manifest.files}
+    bundles = {
+        manifest.payload_dir(plugin_dir=destination).parent
+        for manifest in manifests if manifest.canonical_dir_raw == "plugins"
+    }
+    assert len(bundles) == 1
+    bundle = bundles.pop()
+    declared = {
+        ROOT / manifest.source_relative(name) for manifest in manifests for name in manifest.files
+    }
     for name, module in list(sys.modules.items()):
         filename = getattr(module, "__file__", None)
         if filename and Path(filename) in declared:

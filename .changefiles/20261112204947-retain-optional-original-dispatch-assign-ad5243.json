@@ -1,0 +1,9 @@
+{
+  "comment": "Retain optional original Dispatch assignment metadata in ACP session first-save state and expose it without restamping reused conversations",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

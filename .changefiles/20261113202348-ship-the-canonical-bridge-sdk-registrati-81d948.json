@@ -1,0 +1,9 @@
+{
+  "comment": "Ship the canonical Bridge SDK registration and delivery closure in Copilot Driver Core, preserving the original native adapter and selected portable resources.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

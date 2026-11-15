@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import owner_observation_contract as c
+from agent_worktrees import config as cfg
 from agent_worktrees import owner_observation_transport as wire
 from agent_worktrees.owner_observation_history import OwnerObservationHistory
 from agent_worktrees.worktrees_projection_index import ProjectionError, ProjectionUnavailable
@@ -182,6 +183,35 @@ def test_timestamp_only_refresh_and_heartbeats_do_not_advance_event_cursor(owner
         stream.close()
 
 
+@pytest.mark.parametrize("versioned", [False, True])
+def test_reporter_naming_is_neither_observation_facts_nor_record_incarnation(owner, versioned):
+    def naming(name):
+        return {
+            "machine": name,
+            **({
+                "machine_identity_version": 1, "environment": "wsl", "platform": "wsl",
+                "execution_machine": name + "-slot",
+            } if versioned else {}),
+        }
+
+    initial = enroll(owner, **naming("original"))
+    owner.publish("project", [row(title="meaningful change", **naming("original"))], observed_at=2)
+    before = owner.observation_read(request())
+    retained = deepcopy(history(owner, initial)["entries"])
+    assert len(retained) == 1
+    for at, names in ((3, naming("renamed")), (4, {})):
+        owner.publish("project", [row(title="meaningful change", **names)], observed_at=at)
+        current = owner.observation_read(request())
+        assert current["source_generation"] == initial["source_generation"]
+        assert current["cursor"] == before["cursor"]
+        assert history(owner, initial)["entries"] == retained
+        assert not {
+            "machine", "platform", "environment", "execution_machine", "machine_identity_version",
+        } & current["facts"]["row"].keys()
+    owner.publish("project", [row(title="meaningful change", nonce="record-two")], observed_at=5)
+    assert owner.observation_read(request())["source_generation"] != initial["source_generation"]
+
+
 @pytest.mark.parametrize("change", ["head", "source", "removed", "publication-failed"])
 def test_scope_changes_never_keep_old_active_facts(owner, change):
     initial = enroll(owner)
@@ -249,7 +279,7 @@ def test_optional_activation_failure_leaves_roster_and_current_path_usable(
         runtime.activate()
         runtime.publish("project", [{"id": "ordinary"}], observed_at=1)
         assert runtime.handle({"contract_version": 1, "project": "project"})["worktrees"] == [
-            {"id": "ordinary"}
+            {"id": "ordinary", "platform": cfg.detect_platform()}
         ]
         assert runtime.observation_read(request())["error"]["code"] == "unavailable"
         assert not set(wire.CAPABILITIES) & set(runtime.health()["capabilities"])

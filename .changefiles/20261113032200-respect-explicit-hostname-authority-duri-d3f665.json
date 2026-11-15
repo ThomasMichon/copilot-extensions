@@ -1,0 +1,25 @@
+{
+  "comment": "Respect explicit hostname authority during live execution observation matching",
+  "changes": [
+    {
+      "plugin": "libs/machine-transport",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

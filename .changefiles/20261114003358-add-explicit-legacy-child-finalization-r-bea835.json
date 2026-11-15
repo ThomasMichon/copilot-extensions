@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit legacy-child finalization recovery under an archived original owner while preserving normal custody and cleanup gates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

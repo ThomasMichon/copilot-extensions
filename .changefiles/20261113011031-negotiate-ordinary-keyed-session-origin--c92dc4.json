@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate ordinary keyed session-origin preference without changing historical creation requests",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

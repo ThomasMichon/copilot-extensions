@@ -28,6 +28,13 @@ def local_repo(pr_repo, monkeypatch):
     repo = replace(config.default_repo, pr=cfg.PRConfig())
     config = replace(config, repos={config.repo_name: repo})
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    project = checkout.parent.parent / "receiving"
+    records = project / "worktrees"
+    records.mkdir(parents=True)
+    (cfg.tracking_dir() / f"{wid}.yaml").rename(records / f"{wid}.yaml")
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: records)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     _git("merge", "--ff-only", f"worktree/{wid}", cwd=repo.anchor)
     _git("remote", "remove", "origin", cwd=repo.anchor)
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: True)

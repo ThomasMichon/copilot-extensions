@@ -205,6 +205,37 @@ ingestion, stale-fetch success or another account fallback. Query credentials
 and source-ingestion credentials remain distinct. Native source behavior is
 unchanged when this mode is not selected.
 
+## Retained source-only credential integration
+
+These are agent-recommended tracking elaborations of the existing #6443
+source-owner refinements, not a new runtime appointment or acceptance of any
+separately cited source's whole contract.
+
+- [ ] GI-S1 - First qualify the actual transport/provider boundary, then connect
+  the account-source authorization-lease boundary, subscribed-controller delivery
+  and receiving-consumer contract through the smallest compatible owned-module
+  adapter. Preserve exact source/account/
+  recipient/route/controller-generation and original-request correlation.
+  Authorization leases are not token-expiry, permission-scope assertions or
+  authority conferred by a lease ID. Preserve supported clients and explicit
+  unsupported results; no broad-account relabelling, uncertain-operation
+  replay, plaintext event delivery, second broker/service or credential store.
+- [ ] GI-S2 - Keep availability coordination in the existing Gateway, selecting
+  only currently admitted connected source bindings. Vault/providers retain
+  credential lifecycle, custody and durable authentication-transaction authority.
+  Add no second issuer, token store, daemon or transaction engine.
+  Use an explicit cached/guaranteed-noninteractive provider contract and complete
+  consumer/account/tenant/resource/scope affinity. Bound concurrent reads within
+  one at-most-30-second phase, revalidate the current incarnation and distinguish
+  cache miss, unavailable and uncertain. Opaque legacy resolve is not evidence
+  of noninteractive behavior; lookup creates no provider nonce or popup.
+- [ ] GI-S3 - Qualify synthetic source controls before composing the real selected
+  channel and consumer seams. Keep the fixed account-source API and source-only
+  tier explicit. Local user-action notification/authentication remains separate;
+  no existing Gateway migration, durable transaction takeover, Controller
+  activation, enrollment/subscription, real credential acquisition, native
+  recovery, runtime update or deployment is granted or claimed here.
+
 ## Validation and adoption gates
 
 - Unit/contract: genuine signature/issuer/audience/key/role/fleet/generation
@@ -229,6 +260,25 @@ unchanged when this mode is not selected.
 - Deployment/closure: artifact/release provenance, role-specific health, bounded
   update/restart and actual cleanup/ownership outcomes are recorded separately
   from proposal, mocks, compile or HTTP-health-only success.
+
+- [ ] GI-SV1 - Exercise GI-S1 using isolated fixtures and the real selected
+  consumer/provider interfaces, without live credential acquisition. Cover exact
+  correlation and recipient/route/generation,
+  unsupported capability, stale/revoked/expired and wrong-affinity denials,
+  protected delivery and uncertainty without replay. A lease identifier or
+  token-expiry/scope assertion must not manufacture source authorization.
+- [ ] GI-SV2 - Exercise GI-S2 with eligible/ineligible/disconnected bindings,
+  full affinity mismatches, delayed concurrent responses within the same
+  at-most-30-second phase, incarnation changes and distinct cache-miss,
+  unavailable and uncertain results. Prove the guaranteed-noninteractive
+  contract rather than invoking an opaque resolver; assert no provider
+  nonce/popup, credential disclosure, second issuer/token store/daemon or
+  separate authentication-transaction engine.
+- [ ] GI-SV3 - Record source-control and selected channel/consumer composition
+  evidence separately, with focused tests and normal review/CI at each source
+  revision. Synthetic controls are not real-provider, installed/image, live
+  query/refresh/restart or rollout acceptance. Keep every existing supported-read,
+  scope/crypto/transport, live-lane and deployment/closure gate above unchanged.
 
 Record every exercised tier and explicit reason for a skipped tier. Do not call
 this slice complete until its supported CLI reads, credential flow, scoped

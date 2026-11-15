@@ -196,6 +196,53 @@ def test_numbered_pr_preserves_verified_lost_ack_fallbacks(
     assert git("show", "HEAD:later-feedback.txt", cwd=wt) == "retain unpublished feedback"
 
 
+@pytest.mark.parametrize("remote_change", ["refresh", "foreign-edit"])
+def test_numbered_pr_owner_rewrite_continues_past_provider_refresh(
+    pr_repo, monkeypatch, remote_change,
+) -> None:
+    """An amended owner source replaces a provider-refreshed numbered PR head,
+    but never a head carrying an edit the owner never published."""
+    config, wid, wt, remote, branch, saved = _prepare(pr_repo)
+    current = record(wid)
+    current.pr.number = 42
+    current.pr.repo = "example/project"
+    current.pr.url = "https://gitea.example.com/example/project/pulls/42"
+    tracking.save_record(current)
+    monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
+    monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    _advance(config, wt)
+    forge = remote.parent / "forge"
+    git("clone", str(remote), str(forge), cwd=remote.parent)
+    git("config", "user.email", "forge@example.com", cwd=forge)
+    git("config", "user.name", "Forge", cwd=forge)
+    git("checkout", "-B", branch, f"origin/{branch}", cwd=forge)
+    git("rebase", "origin/master", cwd=forge)
+    if remote_change == "foreign-edit":
+        (forge / "reviewer.txt").write_text("suggested change\n")
+        git("add", "reviewer.txt", cwd=forge)
+        git("commit", "-m", "reviewer suggestion", cwd=forge)
+    git("push", "--force", "origin", branch, cwd=forge)
+    live = git("rev-parse", "HEAD", cwd=forge)
+    monkeypatch.setattr(pr_publish, "_provider_head", lambda *a, **k: live)
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda config, pr: PullResult(
+        number=42, head_sha=live, head_ref=branch, head_url=str(remote),
+    ))
+    git("rebase", "origin/master", cwd=wt)
+    (wt / "a.txt").write_text("owner amended\n")
+    git("add", "-A", cwd=wt)
+    git("commit", "--amend", "--no-edit", cwd=wt)
+    source = git("rev-parse", "HEAD", cwd=wt)
+    if remote_change == "foreign-edit":
+        assert not finalize.push_changes(wid, config)
+        assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == live
+        return
+    assert finalize.push_changes(wid, config)
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == source
+    assert record(wid).pr.head_sha == source
+    assert not list(metadata(wt).glob("*pr-reconciliation-*.json"))
+
+
 def test_legacy_reconciliation_persists_destination_binding(pr_repo, monkeypatch) -> None:
     """A compatible legacy PR (rewrite ownership dropped, only the original
     attested ``head_identity`` surviving) still has its verified destination

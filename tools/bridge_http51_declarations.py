@@ -20,6 +20,9 @@ def declaration_plan(
     updated = copy.deepcopy(snapshot.materialized)
     http = evidence.contract(updated)
     sources = {row["path"]: row for row in http["source_paths"]}
+    semantic_owners = {
+        path for path, row in sources.items() if row["semantic"] and "current_path" not in row
+    }
     http.setdefault("capability_versions", {}).update(evidence.CAPABILITY_VERSIONS)
     allowed = set(evidence.AFFECTED)
     for path in sorted(allowed | sources.keys()):
@@ -28,6 +31,14 @@ def declaration_plan(
         data = evidence.safe(root, actual_path).read_bytes()
         sha256 = evidence.previous.git_evidence.sha256_bytes(data)
         if path not in allowed:
+            if row.get("current_path") in allowed:
+                if row["semantic"] or actual_path not in semantic_owners:
+                    raise ValueError(f"relocated HTTP-51 source lacks its semantic owner: {path}")
+                committed = evidence.previous.git(root, "show", commit + ":" + actual_path)
+                if evidence.previous.git_evidence.sha256_bytes(committed) != sha256:
+                    raise ValueError(f"dirty HTTP-51 declaration source: {actual_path}")
+                row["sha256"] = sha256
+                continue
             if sha256 != row["sha256"]:
                 raise ValueError(f"unclassified HTTP-51 source drift: {path}")
             continue

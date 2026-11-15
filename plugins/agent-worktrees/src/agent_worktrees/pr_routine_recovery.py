@@ -190,8 +190,26 @@ def _verified_fallback(
     # (see pr_rewrite._validate's allow_feature_head) -- never a hardcoded
     # worktree/<id>, which would mismatch HEAD on a rebased private head.
     checked_out = git_ops._get_current_branch_safe(cwd) or record.branch
+    owned: dict = {}
+    repo = config.default_repo
     proof = pr_rebase.verify(
-        record, config.default_repo, remote, f"{checked_out}:refs/heads/{pr.branch}",
-        pr.head_sha, cwd=cwd,
+        record, repo, remote, f"{checked_out}:refs/heads/{pr.branch}",
+        pr.head_sha, cwd=cwd, owner=owned,
     )
-    return proof is not None and git_ops.is_commit_ancestor(observed, proof.old_source, cwd=cwd)
+    if proof is not None:
+        return git_ops.is_commit_ancestor(observed, proof.old_source, cwd=cwd)
+    # The owner may republish its own rewritten branch (pr_rebase's owner
+    # rewrite re-checks every guard under its lease); defer only when the live
+    # head holds nothing the source would drop, and only for a source that
+    # actually advanced past the tracked head (otherwise there is nothing to
+    # republish and the unproved reconciliation must still refuse).
+    if not owned or git_ops.is_commit_ancestor(owned["head"], pr.head_sha, cwd=cwd):
+        return False
+    upstream = pr_rebase._git(
+        "rev-parse", "--verify", f"{repo.remote}/{repo.default_branch}^{{commit}}", cwd=cwd,
+    )
+    return bool(owned) and pr_rebase._require_objects(
+        remote, pr.branch, (observed, pr.head_sha, owned["head"]), cwd,
+    ) and pr_rebase.refreshed_only(
+        observed, pr.head_sha, owned["head"], upstream, cwd,
+    )

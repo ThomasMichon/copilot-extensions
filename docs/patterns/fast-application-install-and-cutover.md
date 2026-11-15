@@ -36,10 +36,11 @@ trusted upstream installer / explicit manual recovery entry
     -> copy complete application projects into immutable version slots
     -> stage selected apps with bounded parallelism (incumbents unchanged)
     -> qualify every member required by the chosen activation strategy
-    -> activate through preferred graceful cutover or bounded cold takeover
+    -> run simple app setup through its owner before cutover
+    -> kill outgoing service trees; one bounded handoff only when reliable
+    -> start selected incoming services through their existing lifecycle owner
     -> verify real command/service readiness and record installation result
-    -> outgoing central owners self-retire independently of install success
-    -> optional one finite long-grace async central-only retirement fallback
+    -> independently clean obsolete outgoing artifacts/registrations
     -> retain last-good state, recovery evidence and unfinished obligations
 ```
 
@@ -48,6 +49,39 @@ adds bootstrap, background preparation, atomic-toolset and failure sequencing.
 The sequence is a target, not executable CLI syntax. In particular, a
 portfolio-wide atomic selector and complete stage-time readiness are not
 established by today's generated per-app installers.
+
+### Construction and cutoff target
+
+After existing source/composition selection, installation quick-copies complete
+projects, constructs their physical environments through the existing pure
+UV/wheel-backed path and runs simple app setup before cutover. Do not insert or
+repeat fingerprint/admission gates during construction/setup, or disguise them
+as readiness checks. The detailed preparation/readback mechanisms below describe
+current producers; they are not a mandate for another whole-source or
+whole-portfolio validation pass in the consuming installer. Actual copy,
+environment, setup and incoming-health failures remain failures.
+
+Stage remains free of active-state effects. Setup that touches active state
+runs through its existing activation owner after the required-set stage barrier.
+If it needs the outgoing state handle, perform bounded cutoff before opening
+that handle, rather than waiting on an old drain/schema/handoff protocol.
+Preserve data; do not delete or reset it to evade a lock or migration failure.
+
+The activation target is kill by default, handoff only when reliable: no
+reliable handoff means forced outgoing-service/owned-daemon cutoff before
+incoming startup; a reliable path gets one bounded attempt and then forced
+cutoff if it does not settle. Reuse the native lifecycle/identity owner and
+original deadline, not nested retry allowances. The direction identifies MCP,
+Vault and Index as requiring no handoff, and Worktrees and Bridge as
+crash-tolerant. The existing per-app audit owns their implementation findings;
+these statements do not claim installed acceptance.
+
+Protect session hosts/keepers, session-owned processes, foreground clients,
+connectivity and unrelated or reselected generations. A daemon's parentage or
+name is not proof every descendant is an outgoing service daemon. Confirmed
+cutoff, incoming readiness/current selection and deferred artifact cleanup
+remain separate facts. Legacy start-first/long-drain descriptions are not
+exceptions to this target.
 
 ### Prepare a selected application portfolio without installing it
 
@@ -111,6 +145,77 @@ Neither mode is a new release-approval token or installation-completion claim.
 | Repeat and rollback | Reinstalling an unchanged healthy selected generation reuses its native owner, route, data handle and completion, rather than restarting it. Preserve a state-compatible last-good generation and an independently usable manual recovery path. | Versioned runtime plus app currentness/recovery |
 | Plugin connector | Loading a plugin may discover/report the installed backend and emit bounded guidance. It must not build, install, repair, stamp, register providers or start services merely on session start. Exact selected commands remain attributable. | Owning plugin hook and command declarations |
 | Timing and diagnostics | Measure the real cold, repeat and update front doors, including required preparation. Respect the actual caller deadline; the bounded core ordinary-install lane uses its existing 300-second budget. Report phase/child failure and elapsed time. Do not fix timeouts by lengthening waits or timing only an already-built inner step. | Existing installer and test runners |
+
+### Repository-declared project locations
+
+The existing producer also accepts explicit independent Python projects outside
+the built-in `plugins/` and standalone locations. Declare their locations in
+the selected repository's root `pyproject.toml`:
+
+```toml
+[tool.copilot-extensions.python-projects]
+example-worker = ".marketplace/example-worker"
+example-client = "applications/example-client"
+```
+
+Each key selects one project through the existing `--project` option. Its
+directory contains the normal authoritative `pyproject.toml`, source, resources
+and first-party dependency declarations. Merely sharing a marketplace directory
+does not group projects into one application or select undeclared neighbors.
+The existing builder, profile preparation, project emitter and installer retain
+their normal responsibilities and produce separate application outputs.
+
+Declarations are read from the selected Git commit, not dirty checkout edits,
+and must survive archive extraction unchanged. Both suite and explicit project
+selection materialize their declared dependencies and packaged assets.
+Locations must be contained ordinary directories outside `libs/` trees;
+applications cannot also be vendored libraries. Aliases, built-in identity
+collisions, traversal and linked paths refuse. Existing built-in selection and
+the governed feed, toolchain, seasoning and source/wheel association checks are
+unchanged. This declaration is source discovery, not installation authority or
+an app-specific setup/start callback.
+
+An application that supplies its own setup/start implementation declares literal
+argument lists in its project metadata instead of adding its name to the
+producer's built-in callback map:
+
+```toml
+[tool.copilot-extensions.application]
+setup = ["prepare"]
+start = ["serve"]
+# Optional finite process budgets; omitted phases retain 180 seconds.
+callback_timeout_seconds = { setup = 180, start = 600 }
+```
+
+Both lists are required when the table is present; an empty list explicitly
+means no action. These arguments invoke the existing primary application entry
+point through the shared installer's normal setup/start boundaries. Stage still
+does not execute them. Missing declarations retain existing built-in behavior
+or an unsupported callback result for an unknown application.
+
+`callback_timeout_seconds` is optional and accepts only `setup` and `start`
+numeric process budgets, each finite, greater than zero and at most 3600 seconds.
+The producer copies the declaration into the retained application. Each callback
+uses its own budget; an omitted phase remains at 180 seconds. When the table is
+present, the enclosing prepared-application installer allows the sum of enabled
+callback budgets, the existing 600-second qualification allowance and 60 seconds
+for publication. Without the table, both legacy callback and enclosing 180-second limits
+are unchanged. Stage executes no callbacks. These are execution ceilings, not
+silence timers, a service drain policy or authority to replay uncertain startup.
+An app selecting them must still qualify its real control and recovery path.
+Independently deployed callers can require `callback-timeouts/v1` in the
+selected producer module's `APPLICATION_INSTALL_CAPABILITIES` before
+preparing an application that uses this extension. The base install contract
+remains the unchanged two-field version-1 declaration, so existing consumers
+that validate its exact shape still work. Older application receivers keep
+their strict unknown-field rejection.
+
+Opted-in source installation also separates retained-input lifetime from
+acquisition: copying and admitting wheel inputs keeps its original deadline,
+then those same immutable inputs remain verifiable through the finite enclosing
+installation allowance plus acquisition/construction room. Qualification still
+expires after its own 600 seconds. Only its post-qualification evidence checks
+use the enclosing callback allowance, without bypassing byte/identity checks.
 
 ### Common forward environment contract
 
@@ -352,6 +457,25 @@ as its cause, retains selection and management launchers, and does not attempt
 native cleanup or infer that nothing started. Cancellation retains its original
 exception after reporting the same uncertainty. Concurrent selector/launcher
 winners are preserved.
+
+The same publication transaction replaces ordinary bounded command files for
+the addressed installation without requiring their incumbent bytes to match
+today's generator. It captures those bytes before setup, detects intervening
+changes, and retains the existing shared-target leases through publication and
+pre-start recovery, including writers with different runtime roots. Startup
+acknowledgement checks both selection and every declared launcher before
+committing success; a changed launcher makes the outcome uncertain even if the
+selector still names the incoming generation.
+
+The prepared-source `install_source.py --install-application` entry composes
+the existing numbered candidate and application installer. Only classified
+content/health failure in an existing candidate, before invoking application
+callbacks, may select one distinct repair generation. Deadline, permission and
+callback failures are not repair-replay signals. A healthy selected repair is
+reused. With no setup/start callbacks or explicit configuration arguments, a
+complete matching publication is read back without restamping its completion,
+selectors, success record or launchers. Applications with callbacks still use
+their existing configuration/readiness owners.
 
 This is a conservative change to failure defaults, not a new callback protocol:
 existing arguments and deadlines are unchanged, and there is no new force flag,

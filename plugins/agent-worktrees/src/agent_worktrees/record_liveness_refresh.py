@@ -6,7 +6,7 @@ import copy
 
 import yaml
 
-from . import config as cfg, reclaim, sessions, tracking
+from . import config as cfg, reclaim, record_reporting, sessions, tracking
 from .push_timeout import ObservationUnavailable
 from .record_io import read_record_mapping
 from .session_projection import _valid_session_id
@@ -32,7 +32,9 @@ def _read(path):
     ):
         raise ObservationUnavailable("Strict refresh session registry metadata is malformed")
     try:
-        return tracking.parse_record_data(data, path=path)
+        return tracking.parse_record_data(
+            data, path=path, reporting_context=record_reporting.local_context(path, data.get("repo", "")),
+        )
     except (ValueError, TypeError, KeyError, OverflowError) as error:
         raise ObservationUnavailable("Strict refresh tracking metadata is malformed") from error
 

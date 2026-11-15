@@ -72,6 +72,60 @@ by this parked record.
   (Phase 10 implementation). Slices land as separate PRs referencing the
   issue for their phase.
 
+These two documentary families propose Phase 11/migration-intake tracking
+acceptance ONLY. Preserve the existing lifecycle host as the effort's tracking
+owner and the repository review-policy/author-feedback custodians for #5183
+and Worktrees default PR-output/policy custodians for #5211; no new implementer,
+joint runtime authority or generic registrar/schema is created. The generic
+reviewer runtime must not absorb consumer rubric, ACL, acting identity, merge
+policy, scheduler or telemetry. Keep this existing generic/consumer seam.
+
+The ROOT stays Blocked and execution stays parked. Explicit maintainer
+resumption and reconciliation of current phase/native/ground/provider/source
+ownership remain necessary BEFORE any execution. They are not represented as
+an automatic veto on a normally reviewed, complete, parked tracking addition.
+No status rename, reactivation, claim transfer, source takeover or resource
+release is requested. Preserve #2423's authoritative independent contract and
+every existing owner/hold. #4130 expressly excludes #5183/#5211; #11091 retains
+its distinct parser/count-budget scope.
+
+Normal review through the existing Phase 11/migration-intake domain-acceptance
+gate must first deliver the COMPLETE direct Plan/local AND ROOT-global
+Validation/Coordination/dated-Journal addition, followed by complete current
+receiving/source/history/custody readback. Only then may the coordinator make
+each separate redundant-tracking judgment. Keep #5183/#5211 OPEN now. No
+generic new ACK, implementation completion, all-parent/native gate or new owner
+is added, and no existing explicit condition is waived by this proposal.
+
+### Proposed Phase 11 tracking intake: #2887 and #2899
+
+This additive candidate uses the existing Phase 11/migration-intake
+deduplication, ownership and domain-acceptance route. Applying that route to
+#2887 is a proposal, not proof of acceptance or permission to resume the
+parked execution programme. Preserve the current status and every incumbent
+Plan, Validation and custody condition.
+
+- **C2887-1:** Keep the existing lifecycle host as tracking owner and the
+  registrar as sole owner of declaration schema, discovery and profile
+  validation. Do not assign an implementer, second schema or competing engine.
+- **C2887-2:** Preserve the generic/consumer seam. Consumers retain target
+  eligibility, ACL, acting forge identity, rubric/guidance, provider writeback,
+  merge/landing authority, scheduling and organizational telemetry.
+- **C2887-3:** Consume admitted knowledge-set and reviewer-persona references
+  with explicit provenance, applicability, access and unavailable/error
+  outcomes. Corpus content, persona authoring/tuning and private content stay
+  consumer-owned. A pointer grants neither disclosure nor write authority.
+- **C2887-4:** Keep repository/critical-area/topic approval or steer optional
+  and configurable, including explicitly autonomous cases. Landing ownership
+  and a generic human ACK are not substitutes for that policy.
+- **C2887-5:** Preserve independent #2878/#2885 scope and #2899's existing
+  source owner, implementers, provider ACL, verdict and landing boundaries.
+  The direct #2899 receiving condition below remains separate from this
+  candidate's review. No issue, claim or resource transfers by association.
+- **C2887-6:** This is tracking only. Execution remains parked under the
+  existing explicit maintainer-resumption and source/owner reconciliation
+  conditions. No provider operation, runtime change or rollout is authorized.
+
 ## Context
 
 Review automation crosses asynchronous systems that can delay, duplicate, lose,
@@ -490,6 +544,73 @@ any-boundary resumption, stale-revision blocking, etc.) checkable against
   wrong-remote reconciliation gap surfaced by that flow's own review.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Proposed parked semantic-finding and visible-round families
+
+These are two distinct finite source contracts. They remain parked for
+execution under the existing maintainer-resumption rule. Documentary intake
+does not resume implementation, appoint an executor or transfer source custody.
+
+- [ ] **R5183-P1:** Preserve the original alternative: EITHER revalidate EACH
+  carried finding against the CURRENT diff before listing it again OR provide
+  an effective cheap author-side process/tool to mark a finding "addressed,
+  awaiting re-validation" so the next pass explicitly checks it. Existing
+  REVIEW directives and CONTRIBUTING exact-fixing-commit/line or same-thread
+  callouts are credited as the original partial mitigation, not proof that
+  actual reviewer/author-feedback behavior now satisfies either alternative.
+- [ ] **R5183-P2:** Retain the reported #4993 25-round incident evidence:
+  findings persisted 10-20+ rounds after fixes, including the descendant that
+  outlived its leader and its named real-subprocess regression. Retain the
+  separately disclosed/tracked #5174 `extends:` per-hop-origin limitation and
+  bounded mitigation without repeatedly re-escalating it to High merely
+  because it remains intentionally scoped out. Preserve independent judgment:
+  actual new regressions or an inadequate mitigation still require findings.
+- [ ] **R5183-P3:** Keep semantic carried-finding acceptance separate from
+  #3638 merge-legibility reporting, runner rescue, completion-controller
+  activation and review-cap counting. An unrelated passing review, an accepted
+  verdict shape, a cap or a disabled controller is not semantic revalidation.
+  Do not repeatedly re-fix already-correct code merely to clear stale prose.
+- [ ] **R5183-LV1:** Through the chosen original EITHER/OR remedy, demonstrate
+  that a genuinely fixed carried finding is not blindly relisted against the
+  current diff, or that the cheap addressed/awaiting-revalidation signal is
+  actually consumed for explicit checking. Retain a true-new-regression
+  control and the deliberately disclosed, tracked bounded-mitigation case.
+  Preserve the named descendant regression and fixing-commit/line incident
+  evidence without treating this intake as a fresh execution of that fixture.
+- [ ] **R5183-LV2:** Attribute actual behavioral evidence, current revision and
+  remaining limitation truthfully. Guidance changes, unrelated green reviews,
+  transport success, round caps and disabled implementations are not behavioral
+  qualification. No shared-reviewer diagnosis, queue/log inspection, review
+  request, service action or administrator bypass follows from a slow PR.
+
+- [ ] **R5211-P1:** Surface the current review ROUND or equivalent cycle count
+  in BOTH default `pr-watch` AND `pr-status` output without manual event
+  counting. Credit the separate delivered `pr rounds` command, but do not
+  equate an optional command with its integration in the named default outputs.
+- [ ] **R5211-P2:** Retain a visible explicit SOFT threshold AND concrete
+  change of tactic: fresh top-to-bottom whole-diff reread rather than another
+  delta-only pass, OR a different approach such as splitting/narrowing the PR
+  or appropriate human checking. The original illustrative five is not a
+  mandatory constant; credit the delivered six-round/three-plateau primitive
+  and documented rethink/lower-level-cause/person tactic at their actual scope.
+- [ ] **R5211-P3:** Compose default count/threshold/tactic with R5183's
+  addressed/awaiting-revalidation alternative without merging the two sources'
+  distinct outcomes. Never lower rigor, waive real findings, CI, approvals,
+  verdict rules, merge authority or `pr bar` because a loop is long.
+  Unmeasured/unknown is not zero; a clean old head is not a clean new head.
+- [ ] **R5211-LV1:** Check BOTH actual default output consumers for a visible
+  current count, not just routing/availability of the optional rounds command.
+  Preserve truthful unknown/unmeasured and old-head/current-head distinctions.
+- [ ] **R5211-LV2:** Verify the explicit soft threshold produces a concrete
+  changed tactic and composes with the selected R5183 remedy while retaining
+  full review/check/approval authority. Do not reject an accepted equivalent
+  merely because its threshold differs from the original illustrative five.
+- [ ] **R5211-LV3:** Keep #11091's separate current-summary parser, counted-round
+  budget, unknown-metric and split-rule defect and #5352's FULL 32-round loop
+  PLUS comparison sample independent. Those issue references, existing policy
+  directives and source-described optional primitive are not newly executed
+  default-output or semantic-revalidation proof. No provider review, product
+  command, test, native interaction or service operation is run by intake.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -497,7 +618,124 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#2914** reviewer-recipe CodeSpace fallback stall: task never progresses after local-container-failure fallback decision (3rd recurrence)
   - A recurring reviewer-recipe stall is squarely this effort's review-automation reliability scope.
 
+### Phase 11 additive candidate - #2887 generic review convergence
+
+These proposed rows extend tracking before implementation through the existing
+Phase 11 intake rule. They preserve all incumbent phase rows and the parked
+execution state.
+
+- [ ] **P2887-1 - Optional steer/approval policy.** Specify configurable
+  operator steer or approval before consequential review writes by repository
+  and user-defined critical area/topic, with explicitly autonomous cases.
+  Bind approval to the authorized action and revision. `land=self|author`
+  remains landing ownership, not the steering policy; steering is not universal.
+- [ ] **P2887-2 - Knowledge-set references.** Define the generic input contract
+  for consumer-selected conventions, prior decisions or domain knowledge,
+  including provenance, applicability, access/trust and explicit unavailable
+  or error outcomes. Referenced corpora and consumer-specific content stay
+  downstream.
+- [ ] **P2887-3 - Reviewer-persona references.** Define the generic input
+  contract for consumer-selected persona/voice/priority sources, including
+  provenance, applicability, access/trust and explicit unavailable/error
+  outcomes. Persona authoring, tuning and private content stay consumer-owned.
+- [ ] **P2887-4 - Existing lifecycle and ownership.** Compose evidence,
+  investigation, draft, optional steer/approval and postback through the
+  existing registrar, reviewer lifecycle, driver and result-applicator/consumer
+  adapter. Preserve one review owner, resumable state, render-or-report
+  failures, eligibility, ACL, identity and forge/landing authority; no parallel
+  engine or declaration schema.
+- [ ] **P2887-5 - Finite and independent scope.** Retain long-term convergence
+  without directing immediate implementation. A finite #2899 repair need not
+  wait for independent #2887 capabilities or whole-parent completion. Do not
+  dispose of #2878, #2885 or consumer-owned work by association.
+
+#### Complete direct #2899 located-finding postback family
+
+- [ ] **P2899-1 - Actual finding location.** Carry structured file path,
+  available valid line/side/range and analyzed comparison/native iteration
+  context through the actual generic result applicator to the ADO thread-write
+  seam. A Markdown file mention, read-side `threadContext` or successful
+  general `post_comment` is not a located finding.
+- [ ] **P2899-2 - Supported anchored threads.** Emit actual supported ADO
+  `threadContext`/file/left-or-right ranges and necessary comparison/iteration
+  context when a valid location is known, including supported file-level
+  anchoring. Never fabricate lines or discard a valid location merely because
+  an adapter lacks a location parameter.
+- [ ] **P2899-3 - Classification and fallback.** Resolve rename, deleted-file,
+  side and range semantics against the analyzed comparison. Explicitly classify
+  stale, unavailable, unsupported and invalid locations. Preserve native
+  comparison policy without an unrelated latest-head gate. Use general-PR
+  fallback only when no valid specific location is available, expose the
+  reason, and never report anchored success for an unanchored result.
+- [ ] **P2899-4 - Policy and authority.** Preserve optional action/revision-bound
+  steer/approval, autonomous cases, acting reviewer identity, provider ACL and
+  verdict/landing boundaries. Thread creation grants neither vote/landing
+  authority nor permission to publish private guidance/content; no universal
+  human ACK.
+- [ ] **P2899-5 - Idempotent application.** Preserve finding/application
+  identity through retry, resume and comparison changes. Prevent duplicate or
+  wrong-location threads and success-shaped refusal, transport or partial-write
+  outcomes through the existing applicator/lifecycle, not another engine.
+- [ ] **P2899-6 - Finite validation.** Qualify structured finding to outgoing
+  payload to resulting location, both sides/ranges, file-only, rename/delete,
+  stale/unavailable fallback, negative validation, policy denial, idempotent
+  retry and general-comment compatibility. Preserve fixture, contract/provider
+  and native evidence tiers. Intake authorizes no live post or private-consumer
+  inspection.
+
+#### Paired local behavior Validation
+
+- [ ] **V2887-1:** Exercise approval-required and autonomous repository and
+  critical-area/topic cases, action/revision binding and distinction from
+  `land=self|author`; introduce no universal ACK.
+- [ ] **V2887-2:** Verify actual knowledge/persona reference consumption with
+  provenance, applicability, access and unavailable outcomes, preserving
+  consumer content, authoring, ACL, identity, rubric and landing authority.
+- [ ] **V2887-3:** Verify evidence/investigation/draft/steer/postback composition
+  through the existing driver/applicator with classified render-or-report
+  failures and no second schema or engine.
+- [ ] **V2899-1:** Verify structured finding data reaches the real applicator
+  and ADO write seam with supported anchored file/line/side/range, file-only
+  outcomes and comparison/iteration context.
+- [ ] **V2899-2:** Verify rename/delete/stale/unavailable/unsupported/invalid
+  classification, native comparison policy, fallback only without a valid
+  location, visible reasons and no fabricated anchored-success result.
+- [ ] **V2899-3:** Verify retry/resume across comparison changes, no duplicate
+  or wrong-location writes, explicit denial/refusal/transport/partial-write
+  outcomes and general-comment compatibility.
+- [ ] **V2899-4:** Keep fixtures, contract/provider evidence and native ADO
+  behavior distinct. No new live posting, private-consumer inspection or
+  unrelated latest-head requirement follows from this acceptance.
+- [ ] **V2887-R:** Apply the exact separate #2899 receiving/disposition gate
+  below. Preserve complete incumbent #2887 content, acceptance and custody;
+  tracking text, a link/title, generic helper or proposal alone earns no
+  source retirement.
+
 ## Validation Plan
+
+- [ ] **G2887-1:** Crosswalk every P2887-1..5 row to V2887-1..3 and the existing
+  registrar, lifecycle, applicator and consumer seam. Metadata presence alone
+  does not prove reference consumption.
+- [ ] **G2887-2:** Crosswalk every P2899-1..6 row to V2899-1..4, retaining valid
+  specific locations, fallback alternatives, optional/autonomous approval,
+  idempotency, exact source custody and fixture/contract/native evidence tiers.
+- [ ] **G2887-3:** After reviewed intake delivery, read back the complete
+  current ROOT Plan, local and ROOT-global Validation, Coordination, dated
+  Journal and incumbent phase/source ownership. Preserve the existing
+  migration-intake/domain-acceptance gate and parked state. Documentary
+  tracking is not implementation, resumption or parent completion.
+- [ ] **G2887-4:** Administratively supersede #2899 only after its complete
+  additive checklist is delivered directly into final-open/unlocked/eligible
+  #2887 and the full current #2887 body, incumbent acceptance and unchanged
+  custody are read back. A link/title/proposal/general-thread helper is not
+  receipt. Retain the source if any clause, owner or gate is lost. A finite
+  adapter repair need not await independent #2887 capabilities or whole-parent
+  completion.
+- [ ] **G2887-5:** Keep #2887's long-term objective separate from finite #2899
+  incorporation. Its own goal and applicable Plan/Validation/ownership must
+  be resolved or explicitly transferred under existing rules; incorporating
+  one child does not complete it, and does not require the independent parent
+  capabilities before that child's finite repair can be tracked or completed.
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
 - [ ] Duplicate request and response delivery produces one analysis and at most
@@ -522,6 +760,20 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   (`plugins/agent-dispatch/tests/test_simulation.py`,
   `test_simulation_revision.py`, `test_simulation_deferred_scenarios.py`).
 
+- [ ] **R5183-G:** Resolve EVERY R5183 Plan/local Validation condition through
+  the original current-diff carried-finding revalidation OR effective cheap
+  addressed/awaiting-revalidation alternative, retaining actual incident,
+  descendant-regression and disclosed tracked mitigation evidence, true
+  independent rigor, partial-guidance credit and separate merge/controller/
+  rescue/cap outcomes. This remains parked planned acceptance, not behavior
+  fulfillment, source/resource release or whole-effort completion.
+- [ ] **R5211-G:** Resolve EVERY R5211 Plan/local Validation condition:
+  visible current count in BOTH default status/watch outputs AND explicit
+  SOFT threshold/concrete tactic, composed with R5183 without lowering rigor
+  or bypassing actual review/CI/approval/merge authority. Preserve optional
+  six/three credit, unknown versus zero, current versus old head and independent
+  #11091/#5352 scope. This is not execution enrollment or native/provider proof.
+
 ## Proposal
 
 Build the provider-neutral durable lifecycle first, then adapt existing review
@@ -529,6 +781,35 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-11-14 - Proposed parked #2887/#2899 tracking intake
+
+Added a finite Phase 11 candidate for optional repository/critical-area
+review steering, knowledge/persona references with consumer-owned content,
+and the complete direct ADO located-finding postback family. The direct
+Coordination, Plan, local behavior Validation and ROOT-global crosswalk retain
+all incumbent rows, the registrar/lifecycle/applicator and consumer boundaries,
+and the exact separate #2899 receiving/disposition condition.
+
+The existing Phase 11/migration-intake domain-acceptance and complete current
+receiving readback remain separate gates. This is a proposed tracking intake,
+not evidence that those gates passed. The effort remains Blocked/parked;
+implementation still requires the existing explicit maintainer resumption.
+No implementation, source disposition, assignment, claim/resource transfer,
+provider action, rollout or parent completion is claimed.
+
+### 2026-11-13 - Proposed parked tracking of semantic findings and round visibility
+
+Current complete eligible #5183/#5211 original/discussion unions preserve two
+different outcomes: current-diff revalidation OR cheap addressed feedback, and
+visible counts in BOTH default status/watch outputs with a soft threshold and
+concrete changed tactic. Existing directives, exact-line/thread guidance and
+the optional six/three primitive remain credited partials. The 2026-11-02
+maintainer parking constrains execution; this proposal does not resume it.
+All thirteen new technical/validation rows remain unchecked, original
+participants/owners/status/phase/native/provider/resource holds are unchanged,
+and no runtime, review, queue, test or service action occurred. Complete normal
+reviewed intake/readback and separate source judgments remain pending.
 
 ### 2026-11-02 - Reconciled source delivery and parked the ROOT effort
 

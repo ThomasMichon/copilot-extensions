@@ -11,6 +11,8 @@ live daemon.
 from __future__ import annotations
 
 import json
+import runpy
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -27,17 +29,26 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path) -> Path:
-    path = tmp_tracking_dir / "wt-claim.yaml"
-    project_dir = cfg.project_dir("example")
+def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
+    project_dir = tmp_tracking_dir.parent / ".example"
+    monkeypatch.setattr(
+        cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent / f".{name or 'example'}",
+    )
     project_dir.mkdir(parents=True, exist_ok=True)
+    records = project_dir / "worktrees"
+    records.mkdir()
+    anchor, worktrees = project_dir / "anchor", project_dir / "checkouts"
+    anchor.mkdir()
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "machine")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda *args, **kwargs: records)
+    path = records / "wt-claim.yaml"
     (project_dir / "config.yaml").write_text(json.dumps({
-        "repo_name": "example", "machine": "machine",
-        "repos": {"example": {"anchor": str(tmp_tracking_dir)}},
+        "repo_name": "example", "machine": "machine", "platform": cfg.detect_platform(),
+        "repos": {"example": {"anchor": str(anchor), "worktree_root": str(worktrees)}},
     }), encoding="utf-8")
     tracking.create_new_record(
-        "wt-claim", "worktree/wt-claim", "/tmp/wt-claim", "example",
-        "machine", "wsl", tmp_tracking_dir,
+        "wt-claim", "worktree/wt-claim", str(worktrees / "wt-claim"), "example",
+        "machine", cfg.detect_platform(), records,
     )
     return path
 
@@ -50,6 +61,90 @@ def test_importing_the_module_registers_all_three_verbs():
     assert all(tracking_write._VERB_VERSIONS[verb] == 4 for verb in (
         "claim_add", "claim_release", "claim_settle",
     ))
+
+
+@pytest.mark.parametrize("verb", ["add", "release", "settle"])
+def test_busy_claim_record_is_a_known_non_mutating_rejection(tmp_path, monkeypatch, verb):
+    class BusyLock:
+        def __enter__(self):
+            raise TimeoutError("fixture-owned reclamation is in progress")
+
+        def __exit__(self, *args):
+            pytest.fail("an unentered record lock must not be released")
+
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *_args, **_kwargs: BusyLock())
+    monkeypatch.setattr(
+        tracking, "load_record", lambda *_args, **_kwargs: pytest.fail("no source read or mutation after contention"),
+    )
+    result = getattr(tracking_claim_write, f"apply_claim_{verb}")({
+        "worktree_id": "owned", "yaml_path": str(tmp_path / "owned.yaml"),
+        "kind": "codespace", "ref": "resource", "disposition": obligations.AT_REST,
+    })
+    assert result["error"] == "rejected"
+    assert "no claim mutation" in result["message"]
+
+
+@pytest.mark.parametrize("verb", ["release", "settle"])
+@pytest.mark.parametrize("json_mode", [False, True])
+@pytest.mark.parametrize("caller", ["current", "prior-v4"])
+def test_cli_contended_claim_never_reports_success(
+    record_path, monkeypatch, capfd, claim_transport, verb, json_mode, caller,
+):
+    from agent_worktrees import claims_cli
+
+    ref = "owned-resource"
+    assert tracking_claim_write.apply_claim_add({
+        "worktree_id": "wt-claim", "yaml_path": str(record_path), "kind": "codespace", "ref": ref,
+    })["ok"]
+    before = record_path.read_bytes()
+    config = cfg.load_project_config("example", include_control_plane_related_pr=False)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(
+        claims_cli, "_dispatch_claim",
+        claim_transport,
+    )
+
+    class BusyLock:
+        def __enter__(self):
+            raise TimeoutError("fixture-owned reclamation is in progress")
+
+        def __exit__(self, *args):
+            pytest.fail("unentered lock must not be released")
+
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *_args, **_kwargs: BusyLock())
+    args = Namespace(
+        json=json_mode, release_worktree="wt-claim", claim_owner_ref=None,
+        remove=False, released=False,
+    )
+    handler = getattr(claims_cli, f"_claims_{verb}")
+    if caller == "prior-v4":
+        prior = runpy.run_path(
+            str(Path(__file__).parent / "fixtures" / "claims_cli_v4.py"),
+        )
+        handler = prior[f"_claims_{verb}"]
+    assert handler(args, ref) == 1
+    captured = capfd.readouterr()
+    if json_mode:
+        report = json.loads(captured.out)
+        assert "busy" in report["error"]
+        assert "action" not in report and "disposition" not in report
+    else:
+        assert "busy" in captured.out + captured.err
+        assert "outbound claim" not in captured.out + captured.err
+    assert record_path.read_bytes() == before
+
+
+@pytest.fixture
+def claim_transport():
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        lock_data = tracking_write.rendezvous_fields(server)
+        yield lambda verb, args: tracking_write.dispatch(
+            verb, args, read_lock_data=lambda: lock_data, ensure_monitor=None,
+        )
+    finally:
+        server.close()
 
 
 @pytest.mark.parametrize("verb", ["claim_add", "claim_release", "claim_settle"])

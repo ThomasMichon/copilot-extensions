@@ -36,12 +36,8 @@ def assignment(task: dict, reservation: dict, *, driver: str = "ordinary-bridge"
     return value
 
 
-def initial_machine(task: dict, reservation: dict) -> str | None:
-    """Qualify the existing local Bridge launch before it can create anything."""
-    placed = assignment(task, reservation)
-    if placed is None:
-        return None
-    from .bridge_remote import normalize_host
+def local_execution_machine() -> str | None:
+    """Resolve the installed service binding before project-scoped discovery."""
     from .identity import resolve_machine
     from .remote_dispatch import configured_service_machine
 
@@ -49,7 +45,17 @@ def initial_machine(task: dict, reservation: dict) -> str | None:
         machine = configured_service_machine(strict=True)
     except (OSError, UnicodeError) as exc:
         raise TaskError("ordinary pool startup installed machine binding is unreadable") from exc
-    machine = machine or resolve_machine()
+    return machine or resolve_machine()
+
+
+def initial_machine(task: dict, reservation: dict) -> str | None:
+    """Qualify the existing local Bridge launch before it can create anything."""
+    placed = assignment(task, reservation)
+    if placed is None:
+        return None
+    from .bridge_remote import normalize_host
+
+    machine = local_execution_machine()
     if (
         not isinstance(machine, str) or not machine.strip()
         or normalize_host(machine) != normalize_host(placed["machine"])
@@ -140,6 +146,13 @@ def created_workspace_record(task: dict, reservation: dict, info: dict) -> dict:
         "creator_machine": reservation["execution_machine"], "ownership": "created",
     }
     allocation = record.get("dispatch_attempt")
+    if isinstance(allocation, dict) and (
+        "cohort" in allocation or reservation.get("allocation_cohort_transport") == "cohort-v1"
+    ):
+        original = reservation.get("allocation_cohort")
+        if not isinstance(original, dict):
+            raise TaskError("owned ordinary creation lacks its original cohort evidence")
+        expected["cohort"] = original
     if (
         not sessionless(record) or not isinstance(allocation, dict)
         or not isinstance(allocation.get("creator_machine"), str)

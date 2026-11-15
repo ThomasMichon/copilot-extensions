@@ -111,6 +111,7 @@ def provision(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -
     if not service._credential_lock.acquire(timeout=5.0):
         raise IdentityKeyError("service_busy", "Vault is busy; retry setup after the current operation.")
     try:
+        service._check_password_ttl()
         if not service.ensure_unlocked(kpdb):
             raise IdentityKeyError("needs_unlock", "Vault locked; unlock it or explicitly use --prompt.")
         deadline = min(operation_deadline, time.monotonic() + 20.0)

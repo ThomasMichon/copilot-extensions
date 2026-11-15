@@ -125,6 +125,7 @@ from .queue_standing_recovery import QueueStandingRecoveryMixin
 from .queue_standing_sources import QueueStandingSourcesMixin
 from .queue_task_recovery import TaskRecoveryMixin
 from .queue_relevance import QueueRelevanceMixin
+from .queue_relevance_evaluations import QueueRelevanceEvaluationsMixin
 from .queue_task_relationships import QueueTaskRelationshipsMixin
 from .assignment_workspace import RelationshipWriter
 from .queue_steering import QueueSteeringMixin
@@ -177,6 +178,7 @@ class TaskQueue(
     PoolDeclineMixin,
     TaskRecoveryMixin,
     QueueRelevanceMixin,
+    QueueRelevanceEvaluationsMixin,
     QueuePoolCatalogMixin,
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,
@@ -246,6 +248,7 @@ class TaskQueue(
         relationship_writer: RelationshipWriter | None = None,
         relationship_authority: str | None = None,
         standing_relationship_writer: RelationshipWriter | None = None,
+        ordinary_relationship_writer: RelationshipWriter | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -257,6 +260,7 @@ class TaskQueue(
         self._relationship_writer = relationship_writer
         self._relationship_authority = relationship_authority
         self._standing_relationship_writer = standing_relationship_writer
+        self._ordinary_relationship_writer = ordinary_relationship_writer
         if relationship_writer is not None and relationship_authority not in {"local", "central"}:
             raise ValueError("relationship writer requires its original local or central queue authority")
         self._wake_notifier: Callable[[], None] | None = None
@@ -311,9 +315,14 @@ class TaskQueue(
             self._migrate_execution_wakes(conn)
             self._migrate_task_recovery(conn)
             self._migrate_task_relevance(conn)
+            self._migrate_relevance_evaluations(conn)
             self._migrate_pool_catalog(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)
+            from .queue_assignment_cohort import migrate_allocation_cohorts
+            migrate_allocation_cohorts(conn)
+            from .queue_session_origin import migrate as migrate_session_origins
+            migrate_session_origins(conn)
             from .queue_submission_preparation import migrate_submission_preparation
             migrate_submission_preparation(conn)
             from .queue_standing_schema import migrate_standing_charters

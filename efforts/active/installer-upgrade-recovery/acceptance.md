@@ -20,6 +20,7 @@ generic gap with no existing tracker; retain the existing tracker otherwise.
 | Case | Affected before-state and entry | Required evidence | Existing coordination |
 |---|---|---|---|
 | U1 - Update reachability | Installed Python, environment, command or Manager is unavailable; invoke the ordinary repository update or standalone entry. | Fresh attributable incoming code runs before broken installed code; forwarding and exact failures survive. Ordinary non-update behavior is unchanged. | #7743; preserve its entry/stdio/settlement owners and #1238 command ownership. |
+| U1-7743 - Complete existing-entry boundaries | Use the original ordinary update/standalone entry and supported source/ref/project/argv/foreign controls. | Resolve every P7743-U1 entry-order, platform/stdio, selector/legacy, authority/race, separate-helper, settlement/unknown-effect, venue, adjacent-owner, marker-only and reboot/quarantine distinction at its original finite tier. Preserve U1 failure and ordinary non-update behavior; target success is not later-consumer success. | #7743's existing recovery/entry/stdio/settlement owners and source claim remain. The recorded native experiment is not replayed or quarantined without its original owner AND descendant settlement; that hold does not veto independent incoming replacement. No new ACK, implementation appointment, rollout or resource release. |
 | U2 - Explicit versus automatic | Automatic update is inhibited, with otherwise valid incoming inputs; compare explicit update with its automatic caller, including automatic `--force` and held clients. | Explicit replacement proceeds without clearing the preference; the automatic path remains inhibited even with `--force`. Preserve classification through every reached boundary. Without inhibition, automatic `--force` must still preserve session hosts, keepers, held clients and protected connectivity; neither automatic nor explicit force authorizes unsafe retirement. | Owning update request/entry paths; #10653 tracks unsafe forced cutover. #7030 retains the distinct managed-publication policy; it is not an automatic KillSwitch substitute. |
 | U3 - Construction compatibility | An affected runtime needs construction with supported UV, native dependency/bootstrap or source inputs. | Supported native arguments and immutable input policy; real incoming health before selection; actionable bounded errors and settled children on failure. | #9489 and canonical construction owners; #9501 is already merged. |
 | U4 - Existing installer state | Existing installation requests, incomplete foundation selection, stale transaction or publication records. | The explicit latest entry reaches ready/current incoming state without old recovery permission. Preserve original request/effect history; coordinate concrete writers by bounded native means, not persistent queuing. | #9448 and #7758. Existing refusal controls describe old behavior, not an exemption from authoritative replacement. |
@@ -42,6 +43,34 @@ generic gap with no existing tracker; retain the existing tracker otherwise.
 These are candidate families, not assertions that each needs a new defect or
 issue. Each implementation unit must identify a
 specific failing boundary, supported contract and unconflicted owner.
+
+## L5820 - Whole installer and resident-companion lifecycle
+
+Source: #5820, including its original version-slot/whole-lifecycle intent,
+resident-helper refinement and inherited #2395 acceptance. Direct owner:
+the existing [installer-recovery Plan](README.md#whole-installer-and-resident-companion-lifecycle---5820),
+not a new implementation appointment. Preserve all original owners, claims,
+holds and activation gates.
+
+| Clause | Unresolved acceptance retained directly in the Plan |
+|--------|----------------------------------------------------|
+| S1 - Payload exclusion | Only fast payload copy enters an attributable version-slot OR equivalent pending candidate; build/health/cutover/task waits stay outside replaceable payload throughout lifetime, with immutable completed slots preserved. |
+| S2 - Failure alternative | Staging failure hard-fails OR performs an enforced bounded protected attempt; never silently executes unprotected in place. Both alternatives are not mandatory. |
+| S3 - Independent lifetime | Background reconcile, descendants, tree custody, uncertainty and owned cleanup have independent bounds; a staged child UV timeout alone is insufficient. |
+| S4 - Exact companion chain | Exact registered resident `dtssh` start/stop/health command AND waiting PowerShell/host-helper descendants remain covered across supervision, health, restart and update. |
+| S5 - Identity and ownership | Selected source/provenance, argv/config/service identity, containment, child exit, readiness/reporting, exact-generation ownership and owned cleanup remain explicit, consistent with authoritative incoming replacement rather than an old-state veto. |
+| S6 - Native update witness | Ordinary native Windows plugin update while this companion is actively supervised, without manual killing, retry race or stopping unrelated/shared trees; automatic post-update supervision/readiness. |
+| S7 - Separate inherited acceptance | #2395 temporary per-unit restart-inhibition/expiry remains separately open unless implemented OR explicitly transferred to its rightful supervision owner. |
+
+Delivered fail-closed MCP/Budget staging and narrower constructor/reconcile/
+lifetime source credit are retained. #5827's CWD-prevention evidence and
+installer rename/CWD fixtures do not accept this exact Windows companion chain.
+V5820-L, V5820-N AND G5820 preserve the complete family; technical/native proof
+is future unchecked work, not a prerequisite to documenting it. The original
+#2385 consolidation condition remains: accept this concrete resident-helper
+tail while preserving #5820's complete current contract and existing ownership.
+No updater, live companion operation, resource release or custody transfer
+is authorized by this documentary intake.
 
 ## Required controls for a selected case
 

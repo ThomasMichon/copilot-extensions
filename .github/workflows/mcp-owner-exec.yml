@@ -6,9 +6,36 @@ on:
     branches: ["pr/**"]
     paths:
       - ".github/workflows/mcp-owner-exec.yml"
+      - "libs/agent-procutil/src/agent_procutil/__init__.py"
+      - "libs/agent-procutil/src/agent_procutil/_suspended_handoff.py"
+      - "libs/agent-procutil/tests/test_strict_job_spawn.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/headed/launcher.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/headed/native_handoff.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py"
+      - "libs/copilot-driver-core/src/agent_remote_driver/session_host/launcher.py"
+      - "libs/zdd/src/zdd/private_windows_native.py"
+      - "libs/zdd/tests/test_private_windows.py"
+      - "tools/plugin_test_selection.py"
+      - "plugins/agent-remote-driver/tests/test_headed_native_handoff.py"
+      - "plugins/agent-remote-driver/tests/test_headed_launcher.py"
+      - "plugins/agent-remote-driver/tests/test_session_host_core.py"
+      - "plugins/agent-remote-driver/tests/native/test_headed_extension.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_exec.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_headed.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_headed_bundle.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_overlay_pipe.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_bootstrap.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_entry.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_section.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_section_native.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_snapshot.py"
+      - "plugins/agent-mcp/src/agent_mcp/owner_section.cs"
+      - "plugins/agent-mcp/pyproject.toml"
+      - "plugins/agent-worktrees/scripts/native-seed-process.ps1"
+      - "plugins/agent-worktrees/scripts/native-seed-process.cs"
+      - "plugins/agent-worktrees/scripts/native-seed-boundary.ps1"
+      - "plugins/agent-worktrees/tests/test_native_seed_shell.py"
+      - "plugins/agent-worktrees/tests/test_launch_seed_native.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_handoff.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_capabilities.py"
       - "plugins/agent-mcp/src/agent_mcp/execution_context.py"
@@ -22,7 +49,14 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/custody_conduit.py"
       - "plugins/agent-mcp/src/agent_mcp/custody_launch.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
+      - "plugins/agent-mcp/tests/test_owner_headed.py"
+      - "plugins/agent-mcp/tests/native/test_owner_headed_windows.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
+      - "plugins/agent-mcp/tests/test_owner_bootstrap_windows.py"
+      - "plugins/agent-mcp/tests/test_owner_entry_windows.py"
+      - "plugins/agent-mcp/tests/test_owner_section.py"
+      - "plugins/agent-mcp/tests/test_owner_snapshot.py"
+      - "plugins/agent-mcp/tests/owner_section_security.py"
       - "plugins/agent-mcp/tests/test_custody_host.py"
       - "plugins/agent-mcp/tests/test_custody_conduit.py"
       - "plugins/agent-mcp/tests/test_custody_launch.py"
@@ -35,8 +69,10 @@ on:
       - "plugins/agent-mcp/tests/test_generation_handover.py"
       - "plugins/agent-mcp/tests/generation_native_fixture.py"
       - "plugins/agent-mcp/tests/native/test_owner_exec_copilot.py"
+      - "plugins/agent-mcp/tests/native/test_owner_bootstrap_copilot_windows.py"
       - "plugins/agent-mcp/tests/native/test_generation_handover_copilot.py"
       - "plugins/agent-mcp/tests/native/generation_copilot_provider.py"
+      - "plugins/agent-mcp/tests/native/generation_headed_transport.py"
 
 permissions:
   contents: read
@@ -54,12 +90,31 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Preserve headed defaults, auth custody and receiving closure
+        run: >-
+          python tools/run-plugin-tests.py agent-remote-driver
+          --test-file tests/test_headed_native_handoff.py
+          --test-file tests/test_headed_launcher.py
+          --test-file tests/test_headed_auth_child.py
+          --test-file tests/test_session_host_core.py
+      - name: Refuse unsupported suspended-publication custody
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_strict_job_spawn.py -k suspended_handoff
+      - name: Preserve default private listener and bounded reservation flags
+        run: >-
+          python tools/run-plugin-tests.py zdd
+          --test-file tests/test_private_windows.py
+          -k "explicit_dacl_and_native_listener_flags or invalid_listener_reservation"
       - name: Exercise actual exec identity and anonymous overlay in containment
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_owner_exec.py
+          --test-file tests/test_owner_headed.py
           --test-file tests/test_owner_handoff.py
           --test-file tests/test_owner_entry.py
+          --test-file tests/test_owner_section.py
+          --test-file tests/test_owner_snapshot.py
           --test-file tests/test_owner_capabilities.py
           --test-file tests/test_custody_host.py
           --test-file tests/test_custody_conduit.py
@@ -79,6 +134,7 @@ jobs:
           path: ${{ runner.temp }}/mcp-owner-exec-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7
+
       - name: Exercise trace-varying physical and optional-receiver handover
         run: >-
           python tools/run-plugin-tests.py agent-mcp
@@ -139,5 +195,155 @@ jobs:
         with:
           name: mcp-owner-native-client
           path: ${{ runner.temp }}/mcp-owner-copilot-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+
+  windows-publication:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Preserve headed defaults, auth custody and receiving closure
+        run: >-
+          python tools/run-plugin-tests.py agent-remote-driver
+          --test-file tests/test_headed_native_handoff.py
+          --test-file tests/test_headed_launcher.py
+          --test-file tests/test_headed_auth_child.py
+          --test-file tests/test_session_host_core.py
+      - name: Qualify suspended publication and original native streams
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_strict_job_spawn.py -k suspended_handoff
+      - name: Preserve default private listener and bounded reservation flags
+        run: >-
+          python tools/run-plugin-tests.py zdd
+          --test-file tests/test_private_windows.py
+          -k "explicit_dacl_and_native_listener_flags or invalid_listener_reservation"
+      - name: Exercise native publication, snapshots and pre-effect Windows entry
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_owner_section.py
+          --test-file tests/test_owner_snapshot.py
+          --test-file tests/test_owner_headed.py
+          --test-file tests/test_owner_bootstrap_windows.py
+          --test-file tests/test_owner_entry_windows.py
+          --test-file tests/test_owner_entry.py
+          --test-file tests/test_owner_capabilities.py
+          --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
+      - name: Refuse coordinator attribution before native publication
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_native_seed_shell.py
+          --test-file tests/test_launch_seed_native.py -k direct_client
+          --test-timeout 45 --timeout 90 --plugin-timeout 120
+          --junit-dir "${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}"
+      - name: Retain native publication source controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-native-publication
+          path: ${{ runner.temp }}/mcp-owner-publication-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Prepare pinned Windows client in disposable runner storage
+        shell: python
+        env:
+          COPILOT_ASSET_URL: https://github.com/github/copilot-cli/releases/download/v1.0.105/copilot-win32-x64.zip
+          COPILOT_ASSET_SHA256: 34e16e9cf47de0e1534920171d6f39fa246638bddbb6ece820870b382bcc061a
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import urllib.request
+          import zipfile
+          root = Path(os.environ["RUNNER_TEMP"]) / (
+              "mcp-owner-native-" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          )
+          root.mkdir()
+          archive = root / "copilot.zip"
+          with urllib.request.urlopen(os.environ["COPILOT_ASSET_URL"], timeout=60) as source:
+              with archive.open("xb") as target:
+                  shutil.copyfileobj(source, target)
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != os.environ["COPILOT_ASSET_SHA256"]:
+              raise SystemExit("Native client digest mismatch")
+          target = root / "copilot.exe"
+          with zipfile.ZipFile(archive) as contents:
+              members = [member for member in contents.infolist()
+                         if not member.is_dir() and Path(member.filename).name == "copilot.exe"]
+              if len(members) != 1:
+                  raise SystemExit("Expected one native client executable")
+              with contents.open(members[0]) as source, target.open("xb") as output:
+                  shutil.copyfileobj(source, output)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("COPILOT_NATIVE_TEST_EXECUTABLE=" + str(target) + "\n")
+      - name: Qualify the actual headed child owner, original wait and publication refusal
+        run: >-
+          python tools/run-plugin-tests.py agent-remote-driver
+          --test-file tests/native/test_headed_extension.py
+          -k actual_headed_child_creation_handoff --allow-explicit-tiers
+      - name: Prepare pinned private native mux in disposable runner storage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "mcp-headed-mux-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile "$archive" -TimeoutSeconds 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
+            throw 'Pinned native mux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root 'psmux')
+          $binaries = @(Get-ChildItem -LiteralPath (Join-Path $root 'psmux') -Filter 'psmux.exe' -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned native mux executable' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+          "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
+      - name: Qualify copied headed MCP receiver and private native-reader transfer
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/native/test_owner_headed_windows.py
+          --allow-explicit-tiers --test-timeout 120
+          --junit-dir "${{ runner.temp }}/mcp-owner-windows-headed-${{ github.run_id }}"
+      - name: Exercise actual Windows client after publisher exit and through its existing wait owner
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/native/test_owner_bootstrap_copilot_windows.py
+          --allow-explicit-tiers --test-timeout 120 --timeout 180 --plugin-timeout 200
+          --junit-dir "${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}"
+      - name: Exercise physical handover after publisher exit, retained wait and copied headed receiving
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/native/test_generation_handover_copilot.py
+          --allow-explicit-tiers --test-timeout 180 --timeout 420 --plugin-timeout 450
+          --junit-dir "${{ runner.temp }}/mcp-owner-windows-handover-${{ github.run_id }}"
+      - name: Retain actual Windows client source controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-windows-client
+          path: ${{ runner.temp }}/mcp-owner-windows-client-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain copied headed Windows receiver qualification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-windows-headed
+          path: ${{ runner.temp }}/mcp-owner-windows-headed-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain Windows physical handover qualification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-owner-windows-handover
+          path: ${{ runner.temp }}/mcp-owner-windows-handover-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 7

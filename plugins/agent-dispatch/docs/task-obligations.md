@@ -10,11 +10,16 @@ This is the evidence boundary for the
 [reviewed worktree-owned responsibility design](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/submission-closeout-amendment.md).
 The source queue also integrates protected relationships at direct assignment
 and allocator workspace attachment, as described below. That integration
-requires an explicitly assembled, qualified ground-owner writer; ordinary
-coordinator construction leaves it disabled. Neither this evidence nor an
+requires an explicitly assembled, qualified ground-owner writer; default
+finite-task construction leaves it disabled. The opt-in
+[native ordinary assembly](configuration.md#native-local-ordinary-admission)
+qualifies local ordinary participants through their existing owners.
+Neither this evidence nor an
 assignment claim finalizes a worktree or authorizes physical cleanup.
 Writer-cohort activation, submission readiness and same-worker rejection
 recovery remain separate qualification gates.
+The [correlation guide](cohort-correlation.md) maps existing forward/reverse
+inspection surfaces without adding cleanup authority.
 
 ## Snapshot and outcomes
 
@@ -31,7 +36,8 @@ The object contains:
 | `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
 | `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
-| `release_outcome` | `completed`, `unassigned_queued`, or null |
+| `closeout` | Optional, currently revalidated original-assignment readiness evidence; otherwise null or absent |
+| `release_outcome` | `completed`, `unassigned_queued`, `relevance_closeout_ready`, or null |
 
 `completed` reports the existing authoritative `COMPLETED` state. This preserves
 the current behavior of tasks without required verification, whose completion
@@ -62,6 +68,17 @@ unassignment outcome even when that reservation is releasing. The existing
 decline closeout can therefore report logical unassignment without pretending
 that its original native process has stopped.
 
+`relevance_closeout_ready` is narrower than task abandonment. The internal
+[relevance readiness provider](task-relevance.md#original-claim-readiness)
+obtains independent managed-workspace readiness and retains it on the accepted
+closeout row. The snapshot rechecks its captured queue, relationship request,
+assignment event, generation, worker, native and reservation before exposing
+this outcome. It permits settlement of that protected assignment claim only;
+task status, native, pool assignment and reservation remain retained. A different
+assignment selection, hold, changed binding or pending native retirement removes
+the outcome. No bare abandoned task or legacy relationship gains release proof.
+Actual workspace finalization and native conclusion remain separate.
+
 This object is current evidence, not a transferable release grant. The
 claim-owner consumer retains the original task authority, task/worktree
 assignment identity and relevant incarnation/event continuity, then reconcile
@@ -86,13 +103,266 @@ references or retarget them through the current default. Ordinary
 construction does not enable the qualified writer; upgrade and
 rollback must continue to treat missing support explicitly.
 
-Each detail read adds one connection/read transaction and five point-scoped
+An ordinary detail read adds one connection/read transaction and five point-scoped
 SELECTs, with no child process, network request, scan of repository files or
-per-call schema migration. Task-event lookup uses partial `(task_id, id)`
+per-call schema migration. The task read also performs an indexed closeout-row
+lookup. A retained closeout readiness adds bounded, original-resource lookups
+and indexed workspace/allocation native-history selection inside that same
+snapshot; it never re-runs external readiness.
+Task-event lookup uses partial `(task_id, id)`
 transition and worker-assignment indexes; pool assignment and
 spawn queries use existing task indexes.
 This is bounded source/transport qualification, not an installed/native latency
 measurement or a complete assignment/finalization qualification.
+
+## Original allocation cohort
+
+New spawn reservations retain an optional `allocation_cohort` snapshot using
+`dispatch-assignment-cohort` version `1`, with the public emitter receipt and
+exact-reservation pool assignment described below. Capture follows the actual
+pool claim inside the same reservation transaction and precedes workspace or
+native preparation. Failure to capture rolls back that claim and reservation.
+Existing reservation create/read/list responses expose the additive field;
+no separate endpoint, registry or cleanup authority is introduced.
+
+`allocation_reservation_key` identifies the original allocation request.
+Retries and later deduplicated task episodes copy that original snapshot,
+including its original task and pool, rather than recapturing current source or
+placement. A separately admitted replacement allocation revision captures its
+own new request. An existing targeted/reused workspace is not stamped by this
+queue evidence: the snapshot describes the request, not proof of its creation.
+The later assignment audit remains a distinct record of that assignment.
+
+Retained non-null snapshots and their allocation keys cannot be rewritten.
+Historical reservations, missing original evidence and reservations created by
+a rolled-back provider remain null; migration and later retries do not backfill
+them from current state. Null is unknown, not an empty or disposable cohort.
+Older readers may ignore the additive field. No request syntax changes, and
+the field's schema/version describes support independently of package versions.
+New Worktrees creation conditionally forwards this retained snapshot as
+`--dispatch-cohort`. Dispatch observes `dispatch_cohort` schema
+`dispatch-assignment-cohort`, version `1`, through the selected direct
+Worktrees runtime's existing `worktree-allocation capabilities --json` response
+(allocation schema/version `1`, origin role). It uses the same resolved
+interpreter for creation, not the marketplace payload or package version.
+Direct interpreter forms use Python isolated mode for both operations, so a
+checkout-local module, `PYTHONPATH` or user site cannot shadow the selected
+installed package. Existing mutable-shim baselines do not authorize discovery.
+The read uses the existing owned process-tree capture with a five-second
+execution timeout, normal tree cleanup and a 65,536-character combined output
+limit. Timeout/overflow becomes unknown support only after that owner's cleanup.
+Results are cached for up to 32 selected runtime prefixes per process;
+changing the selected runtime triggers fresh discovery.
+An unavailable observation remains unknown for that process/runtime selection.
+
+Prior providers without the declaration, invalid/unsupported declarations,
+mutable-shim launchers and provider rollback use the existing five-field
+Dispatch attempt without a cohort flag, with an explicit unattributed warning.
+Legacy reservations without a snapshot need no discovery. This optional audit
+carrier grants no new lifecycle authority and does not gate baseline creation.
+Before the first creation, the existing allocation transaction seals
+`allocation_cohort_transport` as `baseline` or `cohort-v1`. New reservations can
+start unselected; historical reservations migrate to baseline because an old
+creation may already have taken effect. Retries and later task episodes inherit
+the original selection. A lost binding response holds creation until the
+coordinator confirms the same choice. A baseline attempt never gains a cohort
+on upgrade; a cohort-bearing attempt requires a capable provider after rollback,
+rather than dropping immutable facts. Migration does not guess legacy evidence.
+An older caller omitting the choice cannot re-bind an unrecorded cohort-v1
+allocation; it must upgrade and confirm the transport. Metadata-only binding
+after a workspace has been recorded remains compatible.
+Before selecting cohort-v1, Dispatch checks the complete v1 reference fields,
+512-character string and counter limits, and 16-KiB encoded JSON bound. An
+unrepresentable new snapshot warns and selects baseline; an already-sealed
+cohort-v1 request refuses rather than changing facts.
+An effectful creation failure is never replayed using a second syntax.
+Creation-key recovery remains with the original owner. Prior callers still work
+with upgraded receivers on the baseline. The old form has no scheduled retirement.
+
+Only the new-allocation path sends the snapshot, using its original
+`allocation_reservation_key` task/attempt, never the current task's labels or
+assignment audit. Carried/targeted worktrees are resolved without discovery or
+restamping. Bridge session-state propagation remains separate and open.
+Ordinary initial-start validation admits the optional cohort only when it
+matches the retained allocation evidence, and requires it for a cohort-v1
+creation. All original sessionless task, reservation, attempt, driver,
+supervisor, creating-machine and ownership checks still apply before prompting.
+
+## Original session-origin reservation
+
+The reservation owner independently retains `session_origin` in the Bridge
+`DispatchSessionOrigin` version-1 shape: original `task_id`, `reservation_key`
+and `cohort` (`dispatch-assignment-cohort`, version `1`). It captures the actual
+producer receipt and matching pool claim inside the original reservation
+transaction, before any body preparation. Failure rolls back the claim.
+This is a candidate birth input, not evidence that a native was created:
+Bridge's first-save session record alone identifies the actual session origin.
+Resuming an older session never backfills its origin.
+
+Session and workspace keys have different lifetimes. A new acquisition delivery
+belongs to its current reservation, even when its workspace retains an earlier
+allocation or task episode. Ordinary keyed creation instead retains the first
+ordinary reservation for that `creation_key`; retrying a lost creation response
+cannot substitute a later task's origin. `session_origin_reservation_key`
+identifies that original reservation. Driver changes do not borrow an acquisition
+request as the original ordinary creation. A new allocation key gets its own
+snapshot; an existing targeted/reused workspace is never restamped.
+
+The existing reservation and pool-placement operations optionally accept
+`session_origin_transport: "baseline"` or `"origin-v1"`. Selection commits with
+the original snapshot and claim, never in a later preparation transaction.
+Omission selects baseline for a new native request. Thus an unchanged caller
+cannot send baseline while leaving a mutable pending choice for a later retry.
+Origin-v1 requires representable original evidence. Evidence, original-owner
+references and the selected transport are immutable.
+
+All ordinary attempts for a creation key participate in transport reconciliation,
+including an intervening rolled-back provider's baseline. Historical null choices
+remain conservatively baseline; contradictory sealed choices refuse. An active
+reservation replay cannot change its transport. A separately keyed acquisition
+or first ordinary creation can select origin-v1 despite inherited workspace
+facts: carrying a project/path is not current-attempt preparation.
+Lost responses retain the same reservation/request, never a second native form.
+Granting a new ordinary attempt on an origin-v1 lineage requires explicit
+origin-v1 confirmation. An unchanged supervisor that omits it is refused before
+the new reservation/claim commits, rather than receiving permission to send a
+baseline creation. Existing baseline lineages remain compatible.
+
+The running coordinator advertises `session_origin_reservation_versions: [1, 2]`
+through its existing pool-placement contract. The explicit client checks that
+selected peer before sending the optional property and confirms the returned
+selection before permitting startup. Older callers retain unchanged request
+bodies; an older, invalid or rolled-back provider receives no new syntax.
+Historical rows migrate to baseline with null evidence and remain unattributed.
+The old form has no scheduled retirement. No separate selection endpoint or
+preparation marker is introduced. The CLI acquisition caller below migrates
+conditionally; managed ordinary creation has its separate capability selection
+below. Running qualification and cleanup authority remain separate.
+
+Version `2` adds `session_origin_transport: "prefer-origin-v1"` on the same
+reservation/placement operations. For a new session-creation key it selects
+origin-v1; an existing ordinary creation lineage instead retains its original
+baseline or origin-v1 selection and candidate. The preference is resolved inside
+the original transaction and is never stored as a pending wire choice. It also
+explicitly confirms an original origin-v1 retry. Explicit version-1 baseline
+and origin-v1 requirements retain their conflict/refusal semantics.
+The client requires version `2` before sending the preference and verifies the
+returned resolved transport; older providers receive no new enum value.
+
+Receiver capture adds indexed reservation/creation-key reads plus the existing
+producer and exact-assignment point reads, once per newly committed reservation.
+Ordinary transport reconciliation examines that creation key's indexed attempt
+lineage and returns grouped choices; it does not scan unrelated reservations.
+Reads do not enrich or recapture it. No process, network request, registrar scan,
+background flow or additional ownership registry is introduced. Selection stays
+inside the existing reservation transaction.
+
+### Conditional CLI-native acquisition caller
+
+The CLI-native supervisor, `create --spawn --spawn-backend embody` and interactive
+embodiment observe coordinator support before reserving. They select origin-v1
+only when the selected executing Bridge CLI declares
+`agent-bridge.acquire` version `1` capability `dispatch-cli-session-origin` and
+the running daemon advertises integer `dispatch_cli_session_origin: 1`.
+Missing/unsupported declarations keep a new request on the unchanged, unattributed
+baseline. Restricted and CI-repair paths are not enrolled. Managed ordinary
+creation is described separately below.
+
+Preparation copies the sealed reservation's three session-origin fields into
+the acquisition snapshot independently of mutable task and allocation metadata.
+Origin-v1 acquisition validates that snapshot, requalifies its executing peer and
+sends it as `dispatch_origin`. A capable CLI also checks the selected daemon at
+its existing effect boundary. Rollback or unknown transport outcomes never cause
+replay of that reservation in baseline form. A resumed conversation retains its
+original stamp or legacy absence; only a newly registered session gets the
+candidate origin.
+
+Negotiation and metadata-bearing sends use the existing pinned peer launcher:
+installation cells retain their selected Bridge runtime, while legacy selection
+retains its immutable build and rechecks the owning installation before launch.
+Neither path discovers an alternative on ambient PATH. Baseline calls retain
+their prior launch resolver. Read-only probes disable Bridge auto-ensure, bound
+each command to five seconds and 64 KiB, and create no launch-debug record.
+There are at most two probe commands before reservation and two before an
+origin-bearing send, without polling, per-task history scans or a new resident.
+These declarations are not cached across daemon cutovers.
+
+`tests/test_session_origin_caller.py`, selected with the existing contained runner,
+checks real coordinator transport, original pool-claim capture, direct caller
+ordering, reused workspaces, snapshot detachment, baseline peers and rollback
+refusal. It also executes disposable cell/legacy Bridge processes across runtime
+selection changes and ownership revocation. These synthetic source controls do
+not qualify installed Bridge, actual native birth/closeout or production adoption.
+
+### Conditional managed ordinary creation caller
+
+The configured ordinary Bridge pool caller additionally requires reservation
+version `2`, executing CLI `agent-bridge.create` capability
+`keyed-dispatch-origin` and integer running `dispatch_acp_session_origin: 1`
+before requesting the atomic preference. Historical baseline creation keys stay
+baseline, including lost-response history and later task episodes. A new
+session key can retain origin-v1 independently of an older workspace.
+Legacy/unconfigured ordinary callers, restricted delivery and CI-repair do
+not acquire new optional syntax.
+
+Only the fresh keyed-create branch forwards the sealed candidate. It rechecks
+the selected pinned Bridge runtime and live daemon before invoking the existing
+`--dispatch-origin-file` carrier, with the prepared worktree and creation key.
+A private per-invocation temporary directory holds the JSON file so a retained
+writer requirement can continue using stdin. Success, refusal and transport
+exceptions all clean up that input; unknown create results retain their
+original reservation/request for reconciliation, never baseline replay.
+Existing agent-info, receipt and resume branches never restamp a conversation.
+
+The focused caller and ordinary-pool startup controls exercise current HTTP
+selection, retained baseline/origin retries, pre-effect refusal on version-1
+providers, composed writer stdin plus origin file, unknown response cleanup
+and daemon rollback. Source controls remain distinct from actual native
+session birth, production adoption and accountable owner closeout.
+
+## Original assignment cohort
+
+New protected assignment requests retain an additive `cohort` object with
+schema `dispatch-assignment-cohort`, version `1`, in the same original audit
+row. The existing task-detail `task_obligation.relationship`, exact-event
+query and relationship read expose it; no additional store or endpoint is used.
+The enclosing request supplies the task, generation, worker, workspace,
+reservation and original queue identity.
+
+`emitter` is the matched managed creation receipt: `repo`, `source`,
+`generation`, `request_id`, `producer_id` and `task_id`. It is null without a
+matching coordinator-owned receipt and coherent task producer fence.
+Caller-supplied source labels alone do not identify an emitter. The receipt
+does not contain a producer capability and does not establish that the producer
+is still eligible or that a present-day registration owns the task.
+
+`pool` is the original exact-reservation pool assignment, containing `task_id`,
+`registration_id`, `machine`, `env`, `reservation_key`, `task_generation` and
+`catalog_revision`. A display name, another reservation or the current catalog
+cannot substitute for that assignment. Null means that no such assignment was
+captured, not positive evidence that no pool ever existed.
+
+Capture runs inside the existing assignment transaction. Retries, restarts,
+producer handoff and later catalog/assignment changes read the retained facts,
+not recomputed labels. Historical requests without `cohort` remain unattributed;
+reads never backfill them. This is informational provenance, not permission to
+retire an agent, abandon a task or delete its workspace.
+
+The optional response declares its own schema/version from the executing
+coordinator. Existing request and callback formats are unchanged, and older
+readers may ignore the addition. A provider rollback still reads previously
+retained cohort facts without creating them for new assignments. Consumers
+requiring this evidence must retain an explicit unattributed state when it is
+absent; they must not infer support from package versions.
+Worktrees' original `dispatch_attempt` creation stamp uses the earlier
+[allocation snapshot](#original-allocation-cohort), not this later audit.
+Bridge session-state propagation remains separate. The selected in-process
+request-admission callback receives the assignment cohort with the rest of the
+original request; the existing Worktrees reserve/bind wire payload remains unchanged.
+
+Each new protected assignment adds two indexed point reads at most: its task
+pool assignment and its managed producer creation receipt. No new process,
+network request, registrar scan or per-read enrichment is introduced.
 
 ## Protected retained-relationship callback
 

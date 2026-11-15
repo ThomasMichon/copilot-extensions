@@ -17,6 +17,39 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="keyed native creation on an exact provider-exec instance, without a worktree")
     parser.add_argument("--worktree-writer-file", metavar="PATH",
                         help="required retained writer JSON for keyed creation in a prepared local worktree; - reads stdin")
+    parser.add_argument("--dispatch-origin-file", metavar="PATH",
+                        help="original Dispatch assignment JSON for keyed local ACP creation; - reads stdin")
+
+
+def validate_origin_arguments(args: argparse.Namespace) -> dict[str, Any] | None:
+    path = getattr(args, "dispatch_origin_file", None)
+    if path is None:
+        return None
+    from .dispatch_origin import DispatchSessionOrigin
+    from .remote_acp_config import is_remote_address
+
+    target = getattr(args, "target", "")
+    if (
+        not getattr(args, "creation_key", None) or not getattr(args, "worktree_id", None)
+        or getattr(args, "cli", False) or getattr(args, "provider_instance", False)
+        or getattr(args, "target_dir", None) is not None
+        or is_remote_address(target) or "://" in target
+        or path == "-" and any(getattr(args, field, None) == "-" for field in (
+            "prompt", "prompt_file", "worktree_writer_file",
+        ))
+    ):
+        print(
+            "[FAIL] --dispatch-origin-file requires keyed creation in a prepared local "
+            "ACP worktree and cannot share stdin.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    try:
+        text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+        return DispatchSessionOrigin.model_validate(json.loads(text)).model_dump(mode="json")
+    except (OSError, UnicodeError, ValueError, TypeError):
+        print("[FAIL] --dispatch-origin-file must contain a valid original assignment.", file=sys.stderr)
+        sys.exit(2)
 
 
 def validate_arguments(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -63,6 +96,7 @@ def read_writer_requirement(path: str) -> dict[str, Any]:
 def create(
     args: argparse.Namespace, client: Any, *, caller_id: str | None,
     worktree_writer: dict[str, Any] | None = None,
+    dispatch_origin: dict[str, Any] | None = None,
 ) -> None:
     from . import __main__ as core
     from .client import BridgeClientError
@@ -94,6 +128,7 @@ def create(
         provider_instance=provider_instance,
         request_timeout=core._startup_request_timeout(),
         **({"worktree_writer": worktree_writer} if worktree_writer is not None else {}),
+        **({"dispatch_origin": dispatch_origin} if dispatch_origin is not None else {}),
     )
     creation = result.get("creation")
     if not isinstance(creation, dict) or creation.get("status") != "complete":

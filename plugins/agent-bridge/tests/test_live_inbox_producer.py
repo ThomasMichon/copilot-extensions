@@ -265,9 +265,15 @@ def test_startup_without_native_readiness_times_out_without_admitting_a_prompt(s
 
 
 @pytest.mark.parametrize("changed", ["none", "body", "sender", "operation", "not-ready", "control"])
-def test_retained_startup_admission_requires_its_original_ready_input(serving, changed):
+@pytest.mark.parametrize("native_sdk", [False, True])
+def test_retained_startup_admission_requires_its_original_ready_input(serving, changed, native_sdk):
     app, client, db, consumer = serving
-    enroll(client, consumer)
+    if native_sdk:
+        from test_live_inbox_runtime import native_enroll
+
+        native_enroll(client, consumer)
+    else:
+        enroll(client, consumer)
     expectation = PluginReadinessRequest(
         owner="bridge", expected_session_id=consumer.session_id, cwd=str(db.db_path.parent),
         plugins=[], timeout_seconds=1,
@@ -309,7 +315,7 @@ def test_retained_startup_admission_requires_its_original_ready_input(serving, c
         message_id, reason = db.enqueue_live_message_if_fresh(consumer.session_id, **options)
         assert message_id is not None and reason is None
         message, = db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'")
-        assert message["runtime_custody_json"] is not None
+        assert (message["runtime_custody_json"] is None) == native_sdk
     else:
         with pytest.raises(RuntimeCustodyError, match="unsupported"):
             db.enqueue_live_message_if_fresh(consumer.session_id, **options)

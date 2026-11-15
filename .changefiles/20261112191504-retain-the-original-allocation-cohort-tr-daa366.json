@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the original allocation cohort transactionally before workspace preparation and preserve it across retries.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

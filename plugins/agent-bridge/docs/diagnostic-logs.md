@@ -128,8 +128,9 @@ establish a stall's cause or successful recovery.
 The generated Windows `start-agent-bridge.ps1 -ResolveOnly` prints its actual
 selected interpreter and exits before PID handling, CWD/environment changes,
 log setup or process startup. Normal scheduled and direct daemon startup use the
-[external Python bytecode cache](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
-under the installation's durable state, not its immutable slot.
+[platform Python cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract)
+outside durable tool state and immutable slots; unsealed or older providers
+disable bytecode writes.
 The read-only selection observation does not prove service health.
 
 ## Deliberate retained-spool adoption

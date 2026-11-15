@@ -317,13 +317,15 @@ the same socket and native pane/incarnation, including after a human rename.
 Seed admission uses the existing keyed, Bridge-owned delivery lane, never TTY
 typing. Driver display labels remain separate from exclusive driver ownership.
 
-The portable consumer's optional `portable_launch` observation pins the original
-attempt in `retained-inbox-v1`. First enrollment requires the current,
-claimed Bridge reservation and its exact native session/endpoint. Subsequent
-same-process enrollment uses the existing predecessor CAS; it cannot change the
-attempt or replay an original handoff. Ordinary remote registrations remain
-unsupported. A portable target cannot admit a prompt before enrollment or expose
-its associated prompt through the legacy inbox.
+The portable consumer includes its `portable_launch` observation in
+`retained-inbox-v1`. Current receiving additionally requires the actual daemon's
+`compatible_native_inbox: 1` and selects `receiving_api: "native-sdk-v1"`.
+Ordinary delivery uses the already-joined public SDK and fresh exact native
+registration, not a launch reservation or private controller as message
+authority. Launch allocation/rejoin retain their original reservation and native
+endpoint checks. Older consumers omitting the selector retain their original
+reservation-bound enrollment. A portable target cannot admit a prompt before
+enrollment or expose its retained prompt through the legacy inbox.
 
 Readonly plugin observations use the capability-qualified
 `controls?readiness_only=true` filter. It neither claims nor expires mutation

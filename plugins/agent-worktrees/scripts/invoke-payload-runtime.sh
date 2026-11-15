@@ -281,29 +281,30 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
-    local nonce python_cache selected_cache
-    nonce="$(LC_ALL=C od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-    [[ "$nonce" =~ ^[0-9a-f]{32}$ ]] || return 126
-    python_cache="$RUNTIME_ROOT/cache/python/unsealed-$nonce"
+    local selector_root selected_cache
+    local -a cache_arguments=(-B)
+    selector_root="$RUNTIME_ROOT"
     if [[ "$AGENT_RT_PY" == *.exe ]]; then
-        python_cache="$(cygpath -aw "$python_cache")"
-        case "$python_cache" in
-            '\\?\'*) ;;
-            '\\'*) python_cache='\\?\UNC\'"${python_cache#'\\'}" ;;
-            *) python_cache='\\?\'"$python_cache" ;;
-        esac
+        selector_root="$(cygpath -aw "$RUNTIME_ROOT")" || selector_root=""
     fi
-    selected_cache="$("$AGENT_RT_PY" -I -B -X "pycache_prefix=$python_cache" -c '
+    selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -c '
 import sys
 try:
-    from agent_procutil.python_cache import cache_arguments
-except ImportError:
-    print(sys.pycache_prefix)
-else:
-    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
-' "$RUNTIME_ROOT")" || return 126
-    [[ -n "$selected_cache" && "$selected_cache" != *$'\n'* ]] || return 126
-    exec "$AGENT_RT_PY" -X "pycache_prefix=$selected_cache" -m agent_worktrees "$@"
+    from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
+    assert POLICY_VERSION == 2
+    arguments = policy_arguments(sys.argv[1], runtime=sys.executable)
+    assert arguments == ["-B"] or (
+        len(arguments) == 2 and arguments[0] == "-X"
+        and arguments[1].startswith("pycache_prefix=") and len(arguments[1]) > 15
+        and not any(c in arguments[1] for c in "\r\n\0"))
+except Exception:
+    arguments = ["-B"]
+sys.stdout.buffer.write("\n".join(arguments).encode("utf-8"))
+' "$selector_root" 2>/dev/null)" || selected_cache=""
+    if [[ "$selected_cache" == $'-X\npycache_prefix='* ]]; then
+        cache_arguments=(-X "${selected_cache#*$'\n'}")
+    fi
+    exec "$AGENT_RT_PY" "${cache_arguments[@]}" -m agent_worktrees "$@"
 }
 
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&

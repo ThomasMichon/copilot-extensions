@@ -1,0 +1,9 @@
+{
+  "comment": "Admit effective declared emitter and companion evaluator relevance reports with revision fencing",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import pytest
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees import worktrees_runtime as runtime
+from agent_worktrees import config as cfg
 from agent_worktrees.worktrees_projection_index import Selection
 from agent_worktrees.worktrees_refresh import record_identity
 
@@ -54,7 +55,7 @@ def test_worktrees_runtime_cold_unready_and_deleted_roster_are_distinct(tmp_path
     assert owner.handle(request())["error"]["code"] == "unready"
     assert wake.is_set() and owner.demand_projects() == {"project"}
     owner.publish("project", [{"id": "first"}], observed_at=1)
-    assert owner.handle(request())["worktrees"] == [{"id": "first"}]
+    assert owner.handle(request())["worktrees"] == [{"id": "first", "platform": cfg.detect_platform()}]
     owner.publish("project", [], observed_at=2)
     result = owner.handle(request())
     assert result["ok"] is True and result["worktrees"] == []
@@ -85,7 +86,7 @@ def test_worktrees_runtime_authenticated_transport_and_drain(tmp_path):
         for _ in range(3):
             result = client.worktrees_read(request(worktree_id="first"))
             assert result["ok"] is True and result["worktrees"] == [
-                {"id": "first", "title": "current"}
+                {"id": "first", "title": "current", "platform": cfg.detect_platform()}
             ]
             assert result["projection"]["quality"] == "current"
         wrong = control.ControlClient(f"http://127.0.0.1:{server.port}", token="wrong-token")
@@ -225,7 +226,7 @@ def test_stale_writer_is_fenced_without_closing_admitted_cached_reads(tmp_path):
         with pytest.raises(projection.ProjectionUnavailable, match="no longer elected"):
             owner.publish("project", [{"id": "wrong"}], observed_at=2)
         assert not owner.store.superseded
-        assert owner.handle(request())["worktrees"] == [{"id": "first"}]
+        assert owner.handle(request())["worktrees"] == [{"id": "first", "platform": cfg.detect_platform()}]
     election["reader"] = False
     assert owner.handle(request())["error"]["code"] == "superseded"
     owner.shutdown()
@@ -244,7 +245,7 @@ def test_worktrees_runtime_old_publisher_cannot_reactivate_after_takeover(tmp_pa
         old.activate()
     assert old.handle(request())["ok"] is False
     new.publish("project", [{"id": "second"}], observed_at=2)
-    assert new.handle(request())["worktrees"] == [{"id": "second"}]
+    assert new.handle(request())["worktrees"] == [{"id": "second", "platform": cfg.detect_platform()}]
     assert projection.read_advisory(path, "project")["worktrees"] == [{"id": "second"}]
     old.shutdown()
     new.shutdown()
@@ -310,7 +311,9 @@ def test_passive_reads_never_record_demand_or_wake_the_producer(demand_owner):
     assert wakes == [] and owner.demand_projects() == set()
 
     owner.publish("project", [{"id": "first"}], observed_at=1)
-    assert owner.handle(request(passive=True))["worktrees"] == [{"id": "first"}]
+    assert owner.handle(request(passive=True))["worktrees"] == [
+        {"id": "first", "platform": cfg.detect_platform()},
+    ]
     assert owner.demand_projects() == set()
 
     assert owner.handle(request(project="other"))["error"]["code"] == "unready"
@@ -370,7 +373,7 @@ def test_passive_read_goes_stale_after_the_bound_when_the_producer_hangs(tmp_pat
         # No sweep iteration runs again; the reader's own clock still ages it.
         clock[0] = 45.5
         result = owner.handle(request(passive=True))
-        assert result["worktrees"] == [{"id": "first"}]
+        assert result["worktrees"] == [{"id": "first", "platform": cfg.detect_platform()}]
         assert result["availability"]["status"] == "stale"
         assert result["projection"]["freshness"]["refreshed_age_s"] == 45.5
         owner.publication_failed("project", OSError("producer fixture failed"))
@@ -405,7 +408,7 @@ def test_reactivated_resident_proves_freshness_only_by_its_own_publication(tmp_p
         owner.close_admission()
         owner.activate()
         result = owner.handle(request(passive=True))
-        assert result["worktrees"] == [{"id": "first"}]
+        assert result["worktrees"] == [{"id": "first", "platform": cfg.detect_platform()}]
         assert result["projection"]["freshness"]["refreshed_age_s"] is None
         assert result["availability"]["status"] == "stale"
         owner.publish("project", [{"id": "first"}], observed_at=2)
@@ -495,7 +498,7 @@ def test_publication_rearms_unavailable_wakes_but_passive_reads_do_not(demand_ow
     assert result["error"]["message"] == "producer fixture unavailable"
     assert len(wakes) == 1
     owner.publish("project", [{"id": "one"}], observed_at=1)
-    assert owner.handle(request())["worktrees"] == [{"id": "one"}]
+    assert owner.handle(request())["worktrees"] == [{"id": "one", "platform": cfg.detect_platform()}]
     assert len(wakes) == 1
 
     original = owner.store.read
@@ -538,7 +541,7 @@ def test_worktrees_runtime_failed_producer_keeps_labeled_last_good_rows(tmp_path
     owner.publish("project", [{"id": "one"}], observed_at=1)
     owner.publication_failed("project", OSError("producer fixture unavailable"))
     result = owner.handle(request())
-    assert result["worktrees"] == [{"id": "one"}]
+    assert result["worktrees"] == [{"id": "one", "platform": cfg.detect_platform()}]
     assert result["projection"]["revision"] == 1
     assert result["availability"] == {
         "status": "stale",
@@ -569,7 +572,7 @@ def test_worktrees_runtime_late_initial_activation_cannot_steal_new_election(tmp
     with pytest.raises(projection.ProjectionUnavailable, match="no longer elected"):
         late.activate()
     assert runtime.owner_generation(path) == active.store.generation
-    assert active.handle(request())["worktrees"] == [{"id": "active"}]
+    assert active.handle(request())["worktrees"] == [{"id": "active", "platform": cfg.detect_platform()}]
     assert late.handle(request())["ok"] is False
     active.shutdown()
     late.shutdown()
@@ -584,7 +587,7 @@ def test_worktrees_runtime_elected_activation_rechecks_a_raced_owner_once(tmp_pa
     owner = runtime.WorktreesRuntime(path, elected=lambda: True)
     owner.activate()
     owner.publish("project", [{"id": "new"}], observed_at=1)
-    assert owner.handle(request())["worktrees"] == [{"id": "new"}]
+    assert owner.handle(request())["worktrees"] == [{"id": "new", "platform": cfg.detect_platform()}]
     with pytest.raises(projection.ProjectionUnavailable, match="superseded"):
         previous.store.publish("project", [{"id": "old"}], observed_at=2)
     previous.shutdown()
@@ -596,6 +599,7 @@ def test_worktrees_runtime_point_wire_bound_uses_utf8_not_ascii_expansion(tmp_pa
     owner.activate()
     row = {
         "id": "one",
+        "platform": cfg.detect_platform(),
         **dict.fromkeys(
             (
                 "title",
@@ -604,9 +608,9 @@ def test_worktrees_runtime_point_wire_bound_uses_utf8_not_ascii_expansion(tmp_pa
                 "branch",
                 "path",
                 "repo",
-                "machine",
+                "origin",
                 "status",
-                "platform",
+                "interface",
                 "started_at",
                 "last_resumed_at",
                 "status_note_at",
@@ -623,7 +627,7 @@ def test_worktrees_runtime_point_wire_bound_uses_utf8_not_ascii_expansion(tmp_pa
     try:
         client = control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture")
         result = client.worktrees_read(request(worktree_id="one"))
-        assert result["worktrees"] == [row]
+        assert result["worktrees"] == [{"platform": cfg.detect_platform(), **row}]
     finally:
         server.close()
         owner.shutdown()

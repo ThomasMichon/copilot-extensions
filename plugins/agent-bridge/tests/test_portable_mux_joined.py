@@ -210,10 +210,19 @@ class Consumer:
             self.ready.set()
 
     def close(self, *, timeout=10):
-        from agent_remote_driver.session_host.osutil import process_start_time
+        from agent_procutil._daemon_instance_identity import birth_identity
+
+        def live_birth(pid):
+            try:
+                return birth_identity(pid)
+            except ProcessLookupError:
+                return None
 
         state = json.loads(self.state_file.read_text(encoding="utf-8")) if self.state_file.exists() else {}
-        extension_birth = process_start_time(state["extension_pid"]) if "extension_pid" in state else None
+        identities = {
+            state[key]: live_birth(state[key])
+            for key in ("child_pid", "extension_pid") if key in state
+        }
         try:
             if self.running():
                 self._write({"stop": True})
@@ -222,10 +231,10 @@ class Consumer:
             self._settle()
         assert not self.reader.is_alive() and not self.stderr.is_alive()
         assert self.process.returncode == 0, "".join(self.logs)
-        if "child_pid" in state:
-            assert process_start_time(state["child_pid"]) != state["child_process_start_time"]
-        if extension_birth is not None:
-            assert process_start_time(state["extension_pid"]) != extension_birth
+        # Exited Windows processes can retain queryable birth tokens while pinned.
+        for pid, original in identities.items():
+            if original is not None:
+                assert live_birth(pid) != original
         assert not self.errors
 
 

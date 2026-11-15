@@ -9,9 +9,12 @@ tests cover the claim/release/recover primitive layered on top of it via
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 from agent_bridge.session_host.host_index import ClaimConflict, HostIndex, HostRecord
 
 
@@ -21,6 +24,40 @@ def _idx(tmp_path: Path) -> HostIndex:
 
 def _register(idx: HostIndex, session_id: str = "s1") -> None:
     idx.register(HostRecord(session_id=session_id, port=9000, host_pid=111, child_pid=222))
+
+
+def test_current_retirement_excludes_independent_process_registration(tmp_path):
+    idx = _idx(tmp_path)
+    _register(idx)
+    original = idx.get("s1")
+    script = """
+import sys
+from agent_bridge.session_host.host_index import HostIndex, HostRecord
+from single_instance_lease import AlreadyRunningError
+index = HostIndex(sys.argv[1])
+index._LOCK_TIMEOUT_S = .15
+try:
+    index.register(HostRecord(session_id="s1", port=9001, host_pid=333, child_pid=444))
+except AlreadyRunningError:
+    print("blocked")
+else:
+    print("registered")
+"""
+
+    def register_peer():
+        return subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path / "hosts.json")],
+            check=True, capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        ).stdout.strip()
+
+    with idx.retiring_current(original) as admitted:
+        assert admitted
+        assert register_peer() == "blocked"
+    assert register_peer() == "registered"
+    assert HostIndex(tmp_path / "hosts.json").get("s1").host_pid == 333
+    with idx.retiring_current(original) as admitted:
+        assert not admitted
+    assert HostIndex(tmp_path / "hosts.json").get("s1").host_pid == 333
 
 
 @pytest.mark.parametrize("boundary", ["exited", "host-live", "child-unknown", "changed", "legacy", "remote"])

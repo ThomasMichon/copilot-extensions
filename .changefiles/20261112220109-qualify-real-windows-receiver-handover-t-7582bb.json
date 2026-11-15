@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify real Windows receiver handover through the existing native wait owner independently of publisher exit",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

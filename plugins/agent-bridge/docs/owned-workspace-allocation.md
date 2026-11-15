@@ -16,9 +16,12 @@ The actual worktree ID and path are persisted in Bridge's existing session row
 before native transport. Receiving resolution then selects that existing child,
 never another `resolve --new`. The bridge kind, caller navigation identity,
 qualified owner and actual receiving nonce remain distinct. Receiving creation
-may be complete while origin linkage is pending or currently unknown; startup
-does not wait for acknowledgement. The existing hosting, native-head, holder,
-prompt and session admission behavior remains in force.
+is checked against the origin's original allocation destination and options,
+not optional machine labels in the returned worktree row. Machine-free or
+stale-label rows do not change the retained SSH destination or allocation key.
+Receiving creation may be complete while origin linkage is pending or currently
+unknown; startup does not wait for acknowledgement. The existing hosting,
+native-head, holder, prompt and session admission behavior remains in force.
 
 An interrupted allocation retains its original key in the session target.
 Process-owned resume uses that same origin operation before spawning; a lost

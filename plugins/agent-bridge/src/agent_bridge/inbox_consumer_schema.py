@@ -10,8 +10,22 @@ from .runtime_custody import RuntimeCustodyError, _normalized_schema
 _HISTORY_INDEXES = frozenset(("bridge_inbox_consumers_session", "live_messages_retained_session"))
 
 
-def definitions() -> dict[str, tuple[str, str, str]]:
+def definitions(*, compatible_messages: bool = True) -> dict[str, tuple[str, str, str]]:
     table = "bridge_inbox_consumers"
+    metadata_changed = (
+        "NEW.pid IS NOT OLD.pid "
+        "OR (NEW.process_started_at IS NOT OLD.process_started_at AND ("
+        "NEW.process_started_at IS NULL OR OLD.process_started_at IS NULL OR "
+        "ABS(NEW.process_started_at - OLD.process_started_at) "
+        f">= {PROCESS_START_TOLERANCE_SECONDS})) "
+        "OR NEW.machine IS NOT OLD.machine OR NEW.venue IS NOT OLD.venue"
+    )
+    if compatible_messages:
+        metadata_changed = (
+            f"(({metadata_changed}) AND NOT EXISTS (SELECT 1 FROM {table} "
+            "WHERE session_id=OLD.session_id AND current=1 "
+            "AND installation='compatible-inbox-v1'))"
+        )
     result = {
         table: ("table", table,
             f"CREATE TABLE IF NOT EXISTS {table} ("
@@ -49,12 +63,8 @@ def definitions() -> dict[str, tuple[str, str, str]]:
         "live_sessions_retire_inbox_consumer_update": ("trigger", "live_sessions",
             "CREATE TRIGGER IF NOT EXISTS live_sessions_retire_inbox_consumer_update "
             "AFTER UPDATE ON live_sessions WHEN "
-            "NEW.session_id IS NOT OLD.session_id OR NEW.pid IS NOT OLD.pid "
-            "OR (NEW.process_started_at IS NOT OLD.process_started_at AND ("
-            "NEW.process_started_at IS NULL OR OLD.process_started_at IS NULL OR "
-            "ABS(NEW.process_started_at - OLD.process_started_at) "
-            f">= {PROCESS_START_TOLERANCE_SECONDS})) "
-            "OR NEW.machine IS NOT OLD.machine OR NEW.venue IS NOT OLD.venue "
+            "NEW.session_id IS NOT OLD.session_id OR "
+            + metadata_changed + " "
             "OR NEW.status != 'live' BEGIN "
             f"UPDATE {table} SET current=0 WHERE session_id=OLD.session_id AND current=1; END"),
     }
@@ -66,17 +76,29 @@ def definitions() -> dict[str, tuple[str, str, str]]:
     return result
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    for _kind, _table, statement in definitions().values():
+def _compatible_schema(conn: sqlite3.Connection, selected: bool | None) -> bool:
+    if selected is not None:
+        return selected
+    version = conn.execute("SELECT version FROM schema_version").fetchone()
+    return version is None or version[0] >= 47
+
+
+def ensure_schema(conn: sqlite3.Connection, *, compatible_messages: bool | None = None) -> None:
+    for _kind, _table, statement in definitions(
+        compatible_messages=_compatible_schema(conn, compatible_messages),
+    ).values():
         conn.execute(statement)
 
 
 def validate_schema(
     conn: sqlite3.Connection, *, require_history_indexes: bool = True,
     require_recovery_index: bool = True,
+    compatible_messages: bool | None = None,
 ) -> None:
     """Never repair missing enrollment history on a prepared database."""
-    for name, (kind, table, statement) in definitions().items():
+    for name, (kind, table, statement) in definitions(
+        compatible_messages=_compatible_schema(conn, compatible_messages),
+    ).items():
         if name in _HISTORY_INDEXES and not require_history_indexes:
             continue
         if name == "live_messages_handoff_pending" and not require_recovery_index:
@@ -89,3 +111,12 @@ def validate_schema(
             or _normalized_schema(row[2]) != _normalized_schema(statement)
         ):
             raise RuntimeCustodyError(f"Inbox consumer requires writable preparation: {name}")
+
+
+def migrate_compatible_receivers(conn: sqlite3.Connection) -> None:
+    """Keep process and installation observations out of native message admission."""
+    validate_schema(conn, compatible_messages=False)
+    name = "live_sessions_retire_inbox_consumer_update"
+    conn.execute(f"DROP TRIGGER {name}")
+    conn.execute(definitions()[name][2])
+    validate_schema(conn, compatible_messages=True)

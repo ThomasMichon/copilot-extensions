@@ -48,7 +48,8 @@ def _supported(python: Path) -> bool:
 
 
 def _read(
-    source: dict, machine: str, harness: str, *, budget: OwnedExecutionBudget | None = None,
+    source: dict, machine: str, harness: str, *,
+    project_root: Path | None = None, budget: OwnedExecutionBudget | None = None,
 ) -> tuple[dict, list[str]]:
     try:
         local_budget = OwnedExecutionBudget.from_timeout(8, cleanup_reserve=1)
@@ -56,7 +57,7 @@ def _read(
             OwnedExecutionBudget(min(local_budget.deadline, budget.execution_deadline), 1)
             if budget is not None else local_budget
         )
-        prefix, environment, python = machines_runtime.selected(budget=budget)
+        prefix, environment, python = machines_runtime.selected(project_root=project_root, budget=budget)
         if not _supported(python):
             raise ConfigurationError(
                 "preference-owner-unsupported", "The selected Machines runtime lacks accepted repository projection.",
@@ -124,7 +125,9 @@ def observe(project: str, *, budget: OwnedExecutionBudget | None = None) -> dict
         raise ConfigurationError("context-mismatch", "The selected project needs a native repository identity.")
     harness = native._selected(catalog, harnesses[0]["repository_id"])
     projection, runtime = _read(
-        source, config.machine, harness["repository_id"], **({"budget": budget} if budget is not None else {}),
+        source, config.machine, harness["repository_id"],
+        project_root=Path(config.default_repo.anchor),
+        **({"budget": budget} if budget is not None else {}),
     )
     preference = projection["knowledge_preference"]
     result = {"status": preference["status"], "projection": projection}

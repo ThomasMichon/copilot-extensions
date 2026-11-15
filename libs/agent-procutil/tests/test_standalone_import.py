@@ -42,10 +42,26 @@ def test_short_lived_helpers_import_without_daemon_modules(tmp_path, monkeypatch
     assert all(prefix.parent == (tmp_path / "cache" / "python").resolve() for prefix in prefixes)
     assert all(re.fullmatch(r"unsealed-[0-9a-f]{32}", prefix.name) for prefix in prefixes)
     assert prefixes[0] != prefixes[1]
+    assert module.python_cache_policy_args(tmp_path, runtime=tmp_path / "uninstalled") == ["-B"]
+    assert not (tmp_path / "cache").exists()
     with pytest.raises(module.SyncProcessLaunchError) as raised:
         module.spawn_sync_in_kill_on_close_job([str(tmp_path / "missing-executable")])
     assert isinstance(raised.value, FileNotFoundError)
     assert name + ".daemon" not in sys.modules
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_minimal_policy_loader_without_cache_companions_is_no_write(tmp_path, monkeypatch, registered):
+    source = tmp_path / "__init__.py"
+    source.write_bytes(Path(agent_procutil.__file__).read_bytes())
+    name = "_minimal_policy_procutil_fixture"
+    spec = importlib.util.spec_from_file_location(name, source)
+    module = importlib.util.module_from_spec(spec)
+    if registered:
+        monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    assert module.python_cache_policy_args(tmp_path) == ["-B"]
+    assert not (tmp_path / "cache").exists()
 
 
 @pytest.mark.integration

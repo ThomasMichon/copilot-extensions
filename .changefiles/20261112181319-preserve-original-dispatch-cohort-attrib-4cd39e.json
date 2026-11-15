@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve original Dispatch cohort attribution in Worktrees creation and replay",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

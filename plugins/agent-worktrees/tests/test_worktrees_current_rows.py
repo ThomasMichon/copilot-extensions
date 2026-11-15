@@ -67,7 +67,10 @@ def test_worktrees_current_rows_materialization_is_producer_only_and_marks_unkno
     path = tmp_path / "checkout"
     path.mkdir()
     (path / ".git").write_text("gitdir: unused")
-    record = SimpleNamespace(worktree_id="one", worktree_path=str(path))
+    record = SimpleNamespace(
+        worktree_id="one", worktree_path=str(path), status="active",
+        machine_fields={}, creation_nonce="", codename="",
+    )
     calls = []
 
     def serialize(rec, **kwargs):

@@ -28,7 +28,7 @@ class HostProfileTests(unittest.TestCase):
         self.profiles, self.state = self.work / "profiles", self.work / "state"
         self.profiles.mkdir()
         self.kernel, self.used, self.uncertain = None, False, False
-        self.calls, self.modes, self.owners, self.fd_paths = [], {}, {}, {}
+        self.calls, self.modes, self.owners, self.fd_paths, self.kinds = [], {}, {}, {}, {}
         self.executable = self.work / "apparmor_parser"
         self.executable.write_bytes(b"offline parser fixture")
         self.modes[self.executable] = 0o755
@@ -77,7 +77,7 @@ class HostProfileTests(unittest.TestCase):
         uid, gid = self.owners.get(path, (0, 0))
         return SimpleNamespace(
             st_dev=info.st_dev, st_ino=info.st_ino, st_uid=uid, st_gid=gid,
-            st_mode=stat.S_IFMT(info.st_mode) | mode, st_nlink=info.st_nlink,
+            st_mode=self.kinds.get(path, stat.S_IFMT(info.st_mode)) | mode, st_nlink=info.st_nlink,
             st_size=info.st_size, st_mtime_ns=info.st_mtime_ns,
         )
 
@@ -235,12 +235,10 @@ class HostProfileTests(unittest.TestCase):
     def test_linked_or_hardlinked_owned_profile_is_refused(self):
         path = self.install()
         saved = path.with_name("saved")
-        path.rename(saved)
-        path.symlink_to(saved)
+        self.kinds[path] = stat.S_IFLNK
         with self.assertRaises(host.ProfileError):
             host.operate("status")
-        path.unlink()
-        saved.rename(path)
+        del self.kinds[path]
         os.link(path, saved)
         with self.assertRaises(host.ProfileError):
             host.operate("uninstall", activation_quiesced=True)
@@ -481,13 +479,10 @@ class HostProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(host.ProfileError, "interrupted"):
             host.operate("status")
         next_receipt.unlink()
-        saved = self.state.with_name("saved-state")
-        self.state.rename(saved)
-        self.state.symlink_to(saved, target_is_directory=True)
+        self.kinds[self.state] = stat.S_IFLNK
         with self.assertRaises(host.ProfileError):
             host.operate("status")
-        self.state.unlink()
-        saved.rename(self.state)
+        del self.kinds[self.state]
 
     def test_unrelated_directory_entries_do_not_invalidate_physical_ownership(self):
         self.install()

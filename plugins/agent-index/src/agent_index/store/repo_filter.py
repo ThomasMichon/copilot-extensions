@@ -19,6 +19,9 @@ about this repo."
 
 from __future__ import annotations
 
+import fnmatch
+import re
+
 
 def repo_matches(source: str, repo: str) -> bool:
     """True if ``source`` belongs to ``repo`` (see module docstring)."""
@@ -40,6 +43,48 @@ def _like_pattern(value: str) -> str:
     """Escape a value for a SQL ``LIKE`` pattern (with ``ESCAPE '\\'``)."""
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return _sql_str(escaped)
+
+
+def path_glob_sql(pattern: str) -> str:
+    """Build a full-path shell-glob predicate for Lance's regex engine."""
+    parts: list[str] = []
+    last_closing_bracket = pattern.rfind("]")
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        index += 1
+        if char == "*":
+            parts.append(".*")
+        elif char == "?":
+            parts.append(".")
+        elif char == "[":
+            end = index
+            if end < len(pattern) and pattern[end] == "!":
+                end += 1
+            if end < len(pattern) and pattern[end] == "]":
+                end += 1
+            if end > last_closing_bracket:
+                parts.append(r"\[")
+                continue
+            while pattern[end] != "]":
+                end += 1
+            # Class-only translation avoids version-dependent wildcard groups.
+            fragment = fnmatch.translate(pattern[index - 1:end + 1])[4:-3]
+            if fragment == "(?!)":
+                return "FALSE"
+            if fragment.startswith("["):
+                body = re.sub(
+                    r"\\.|[\[\]]",
+                    lambda match: "\\" + match[0] if match[0] in "[]" else match[0],
+                    fragment[1:-1],
+                )
+                fragment = "[" + body + "]"
+            parts.append(fragment)
+            index = end + 1
+        else:
+            parts.append(re.escape(char))
+    regex = r"\A(?s:" + "".join(parts) + r")\z"
+    return f"regexp_like(file_path, '{_sql_str(regex)}')"
 
 
 def repo_filter_sql(repo: str) -> str:

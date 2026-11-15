@@ -70,7 +70,7 @@ def eventually(check, timeout=10):
 
 
 @pytest.mark.parametrize("reject_site", [False, True])
-def test_executor_shim_reuses_external_bytecode_without_mutating_source(
+def test_executor_shim_disables_bytecode_without_mutating_source(
     area: Path, monkeypatch: pytest.MonkeyPatch, reject_site: bool,
 ) -> None:
     from update_driver import core
@@ -115,7 +115,6 @@ def test_executor_shim_reuses_external_bytecode_without_mutating_source(
 
     before = snapshot(slot)
     root = area / "state"
-    assert "installed-" in agent_procutil.python_cache_args(root)[1]
     previous_prefix = sys.pycache_prefix
     previous_environment = os.environ.get("PYTHONPYCACHEPREFIX")
     for source in ("cold", "warm"):
@@ -129,12 +128,7 @@ def test_executor_shim_reuses_external_bytecode_without_mutating_source(
         assert result.exit_code == 0, result.log_path.read_text()
         assert "actual product" in result.log_path.read_text()
         assert snapshot(slot) == before
-        cache = snapshot(root / "cache" / "python")
-        assert any("participant." in name and name.endswith(".pyc") for name in cache)
-        if source == "cold":
-            cold_cache = cache
-        else:
-            assert cache == cold_cache
+        assert not (root / "cache" / "python").exists()
     assert sys.pycache_prefix == previous_prefix
     assert os.environ.get("PYTHONPYCACHEPREFIX") == previous_environment
 

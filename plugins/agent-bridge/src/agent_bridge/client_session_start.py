@@ -100,6 +100,7 @@ class SessionStartClientMixin(_Base):
         provider_instance: bool = False,
         remote_session_id: str | None = None,
         worktree_writer: dict[str, Any] | None = None,
+        dispatch_origin: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -120,6 +121,16 @@ class SessionStartClientMixin(_Base):
         body: dict[str, Any] = {}
         from .remote_acp_config import is_remote_address
 
+        if dispatch_origin is not None:
+            from .dispatch_origin import DispatchSessionOrigin
+
+            if (
+                not agent or not creation_key or not worktree_id or provider_instance
+                or target_dir is not None or remote_session_id is not None or parity_fault is not None
+                or is_remote_address(agent) or "://" in agent
+            ):
+                raise ValueError("dispatch origin requires keyed creation into a prepared local worktree")
+            body["dispatch_origin"] = DispatchSessionOrigin.model_validate(dispatch_origin).model_dump(mode="json")
         if worktree_writer is not None:
             from .acquisition_contract import WorktreeWriterRequirement
 
@@ -221,13 +232,21 @@ class SessionStartClientMixin(_Base):
 
         body["protocol_version"] = HTTP_PROTOCOL_VERSION
         send = self._request
+        capabilities = {}
         if worktree_writer is not None:
-            from .client_protocol_floor import protocol_floored_request
             from .creation_worktree_writer import CAPABILITY
+
+            capabilities[CAPABILITY] = 1
+        if dispatch_origin is not None:
+            from .dispatch_origin import CAPABILITY as ORIGIN_CAPABILITY
+
+            capabilities[ORIGIN_CAPABILITY] = 1
+        if capabilities:
+            from .client_protocol_floor import protocol_floored_request
             from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
 
             send = protocol_floored_request(
-                self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={CAPABILITY: 1},
+                self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities=capabilities,
             )
         return send(
             "POST",

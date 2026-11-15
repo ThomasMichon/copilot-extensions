@@ -19,11 +19,13 @@ def journal(tmp_path, monkeypatch):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "config.yaml").write_text(json.dumps({
         "repo_name": "demo", "machine": "test",
-        "repos": {"demo": {"anchor": str(tmp_path), "default_branch": "dev"}},
+        "repos": {"demo": {
+            "anchor": str(tmp_path), "worktree_root": str(tmp_path), "default_branch": "dev",
+        }},
     }), encoding="utf-8")
     record = tracking.create_new_record(
-        "wt-a", "worktree/wt-a", str(tmp_path / "checkout"), "demo", "test",
-        "windows", directory / "worktrees",
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo", "test",
+        cfg.detect_platform(), directory / "worktrees",
     )
     monkeypatch.setattr(state.locks, "read_lock", lambda *_: None)
     store = state.WorktreeRecoveryStore(record.yaml_path)

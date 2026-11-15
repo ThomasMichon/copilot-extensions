@@ -101,6 +101,9 @@ destination is refused rather than silently performing local creation.
 When composed through `run`, its temporary pending wrapper is settled only
 after verifying this same protected responsibility in the actual origin ledger.
 The wrapper does not add a competing plain child claim while linkage is pending.
+For a completed result, it retains the original claim's verified destination
+rather than deriving that destination from optional row machine labels. The
+returned repository and bound child incarnation must still match.
 An uncertain creation response can retain that protected operation without
 leaking another unresolved wrapper; missing, changed or malformed responsibility
 keeps the wrapper visibly unresolved instead.
@@ -157,6 +160,41 @@ key, including custom keys that differ from their physical host's name.
 and target facts; changed facts conflict. Supported receiving options are `kind`,
 `interface`, `origin`, `owner`, `name`, `bound_agent`, `caller_worktree`,
 `dispatch_attempt` and `no_pair`. Existing creation policy remains authoritative.
+
+### Original Dispatch cohort
+
+The optional `dispatch_cohort` capability, schema `dispatch-assignment-cohort`
+version `1`, declares support for `create --dispatch-cohort <JSON>` and the
+equivalent `dispatch_attempt.cohort` receiving option. Complete existing Dispatch
+attempt provenance is required. Composing callers must inspect this declaration
+on the actual selected origin runtime before using the flag. For remote creation,
+the origin additionally requires the same declaration from the selected receiver
+before reserving responsibility or sending a creation request. Missing support
+refuses the cohort-bearing operation; unchanged creation remains available.
+
+The cohort contains `schema`, `version`, `emitter` and `pool`. `emitter` is the
+original verified managed-creation receipt: `repo`, `source`, `generation`,
+`request_id`, `producer_id` and `task_id`. `pool` is the exact original assignment:
+`task_id`, `registration_id`, `machine`, `env`, `reservation_key`,
+`task_generation` and `catalog_revision`. Either reference may be `null` when
+unattributed. Task and reservation references must match the creating attempt;
+unknown fields (including producer capabilities) are refused. This is attribution,
+not independent proof of a producer grant or authority to finalize/delete work.
+
+The first tracking record retains this evidence under `dispatch_attempt.cohort`.
+Existing worktree rows and exact record reads expose it without another store.
+The original creation journal also retains it as an allocation fact: a changed
+cohort conflicts rather than allocating again, and inspection/replay refuses a
+child whose stamp no longer agrees. Ordinary full-record saves preserve the
+original attempt, including opaque future cohort forms. Reuse cannot replace it;
+legacy records cannot be backfilled by a later assignment.
+
+This is provider expansion only. Dispatch caller migration, Bridge session-state
+propagation and installed-runtime qualification remain separate. Existing
+cohort-free callers and legacy journals retain their prior semantics. An older
+receiver cannot consume the new option; callers must retain the original
+request/cohort and restore a capable receiver for recovery after rollback, never
+drop the stamp or replay a different baseline operation. No old form is retired.
 
 Protected metadata version `3` has lifetime `owned-worktree`, namespace
 `worktree-allocation`, and phases `pending`, `bound`, `confirmed`, `closed`.
@@ -299,11 +337,14 @@ uncertainty, never permission to discard or replace a known allocation. The
 finished-proof validator is unchanged; unfinished replies cannot authorize
 binding, acknowledgement or conclusion.
 
-Consumers verify the exact original request proof and compare the ordinary
-row's execution space, repository, worktree ID, nonce, path, branch and creator
-before using it. The original sessionless result is not fresh session/head/
-holder admission; a composing host must still perform its normal current-record
-checks before embodiment.
+Consumers verify the exact original request proof, including its original
+execution destination, and compare the ordinary row's repository, worktree ID,
+nonce, path, branch and creator before using it. Optional machine/environment
+labels in the journaled row are not identity evidence: machine-free rows and
+rows carrying old labels use the same verified receiving proof. This does not
+retarget the original allocation. The original sessionless result is not fresh
+session/head/holder admission; a composing host must still perform its normal
+current-record checks before embodiment.
 
 This response has a separate bound: the existing 64 KiB ordinary-row budget
 plus the 16 KiB lifecycle-proof budget. The old proof ABI, input bound,

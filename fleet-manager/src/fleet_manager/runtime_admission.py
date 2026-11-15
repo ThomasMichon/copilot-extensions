@@ -13,7 +13,7 @@ from .observations import STATE_FIELDS
 from .operations import COMMAND_FIELDS, OperationIntent
 from .planning import PlanError, digest, identifier
 from .runtime_identity import VerifiedIdentity
-from .enrolled_identity import EnrolledIdentity, PROFILE as ENROLLED_PROFILE
+from .enrolled_identity import EnrolledIdentity, PROFILE as ENROLLED_PROFILE, RS256_PROFILE
 from .machine_identity import MachineIdentity, PROFILE as MACHINE_PROFILE
 from .bearer_identity import BearerIdentity, PROFILE as BEARER_PROFILE
 
@@ -186,7 +186,7 @@ class AuthoritySnapshot:
         if not self.valid_from < self.valid_until:
             raise AdmissionError("invalid-record")
         if self.identity_profile not in (
-                "jwt-pop-v1", ENROLLED_PROFILE, MACHINE_PROFILE, BEARER_PROFILE):
+                "jwt-pop-v1", ENROLLED_PROFILE, RS256_PROFILE, MACHINE_PROFILE, BEARER_PROFILE):
             raise AdmissionError("unsupported-profile")
         if self.identity_profile == MACHINE_PROFILE and self.issuer != MACHINE_PROFILE:
             raise AdmissionError("invalid-record")
@@ -352,7 +352,8 @@ class AdmissionAuthority:
     @staticmethod
     def _identity(identity):
         ordinary = type(identity) is VerifiedIdentity and identity.profile == "jwt-pop-v1"
-        enrolled = (type(identity) is EnrolledIdentity and identity.profile == ENROLLED_PROFILE
+        enrolled = (type(identity) is EnrolledIdentity
+                    and identity.profile in (ENROLLED_PROFILE, RS256_PROFILE)
                     and identity.kind == "caller")
         machine = (type(identity) is MachineIdentity and identity.profile == MACHINE_PROFILE
                    and identity.kind == "caller")

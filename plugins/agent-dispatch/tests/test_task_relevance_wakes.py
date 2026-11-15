@@ -70,6 +70,115 @@ def test_retry_restart_and_separate_report_keep_one_closeout_wake_and_receipt(q)
     assert receipt["steer_consumed_at"] is None
 
 
+@pytest.mark.parametrize("transition", ["yield", "reset", "requeue"])
+def test_original_closeout_survives_unassignment_and_restart(q, transition):
+    task_id = bound(q)
+    original = request(q, task_id)
+    accepted = q.reconcile_task_relevance(task_id, **original)
+    q.yield_task(task_id, OWNER)
+    if transition != "yield":
+        q.reset(task_id)
+        if transition == "requeue":
+            q.approve(task_id)
+    restarted = TaskQueue(q.db_path)
+    before = restarted.get(task_id)
+    assert before.owner is before.owner_session_id is before.lease_expires_at is None
+    wake = restarted.claim_due_wake()
+    assert wake is not None and wake.id == accepted["wake_operation_id"]
+    assert (wake.owner, wake.owner_session_id) == (OWNER, NATIVE)
+    sent = []
+    assert deliver_execution_wake(
+        restarted, wake, None, lambda: sent.append((wake.owner, wake.owner_session_id)) or True,
+    )
+    restarted.finish_wake(wake.id, wake.delivery_token, delivered=True)
+    with pytest.raises(TaskError, match="owned by"):
+        restarted.take_steer(task_id, "other/worktree")
+    steer = restarted.take_steer(task_id, OWNER)
+    assert steer["id"] == accepted["steer_id"]
+    assert restarted.take_steer(task_id, OWNER) is None
+    after = restarted.get(task_id)
+    assert (after.status, after.generation, after.owner, after.owner_session_id, after.lease_expires_at) == (
+        before.status, before.generation, None, None, None,
+    )
+    assert sent == [(OWNER, NATIVE)]
+    assert restarted.reconcile_task_relevance(task_id, **original) == accepted
+    assert restarted.claim_one("other/worktree", task_id=task_id) is None
+    with pytest.raises(TaskError, match="requires owner closeout"):
+        restarted.reserve_spawn(task_id)
+
+
+def test_unassigned_closeout_native_transport_keeps_retained_target(hosted, monkeypatch):
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    accepted = _hosted_report(queue, task_id)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    restarted = TaskQueue(queue.db_path)
+    reservation = restarted.latest_reservation(task_id)
+    calls = _capture(monkeypatch)
+    wake = restarted.claim_due_wake()
+    assert wake is not None
+    assert deliver_execution_wake(
+        restarted, wake, None, lambda: deliver_owner_wake(
+            restarted, wake.owner, wake.owner_session_id, task_id, wake.message, wake.id,
+        ),
+    )
+    restarted.finish_wake(wake.id, wake.delivery_token, delivered=True)
+    assert [argv for argv, _ in calls] == [_expected(accepted["wake_operation_id"])]
+    assert "do not start or resume the goal" in calls[0][1]["input"]
+    assert restarted.latest_reservation(task_id) == reservation
+    assert restarted.get(task_id).status == Status.QUEUED
+    assert restarted.get(task_id).owner is restarted.get(task_id).lease_expires_at is None
+
+
+@pytest.mark.parametrize("change", ["owner", "native", "generation", "regressed_generation", "terminal"])
+def test_unassigned_closeout_refuses_foreign_or_changed_task_episode(q, change):
+    task_id = bound(q)
+    report(q, task_id)
+    q.yield_task(task_id, OWNER)
+    wake = q.claim_due_wake()
+    assert wake is not None
+    before = q.get(task_id)
+    column, value = {
+        "owner": ("owner", "other/worktree"),
+        "native": ("owner_session_id", "other-native"),
+        "generation": ("generation", before.generation + 1),
+        "regressed_generation": ("generation", before.generation - 1),
+        "terminal": ("status", Status.ABANDONED),
+    }[change]
+    with q._connect() as conn:
+        conn.execute(f"UPDATE tasks SET {column}=? WHERE id=?", (value, task_id))
+    with pytest.raises(TaskError, match="original unheld owner"):
+        q.take_steer(task_id, OWNER)
+    with pytest.raises(TaskError, match="fence advanced"):
+        q.admit_execution_wake(wake, provenance=None)
+    assert q.list_wakes(task_id)[0].execution_send_state is None
+
+
+@pytest.mark.parametrize("boundary", ["hold", "release", "retired", "cooling"])
+def test_unassigned_closeout_keeps_actual_execution_guards(hosted, boundary):
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    _hosted_report(queue, task_id)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    wake = queue.claim_due_wake()
+    assert wake is not None
+    if boundary == "hold":
+        queue.set_hold(task_id, reason="preserve work", actor="operator")
+        with pytest.raises(TaskError, match="original unheld owner"):
+            queue.take_steer(task_id, OWNER)
+    else:
+        column, value = {
+            "release": ("release_requested", 1),
+            "retired": ("conversation_retired", 1),
+            "cooling": ("cooling_token", "unresolved-cooling"),
+        }[boundary]
+        with queue._connect() as conn:
+            conn.execute(f"UPDATE spawn_reservations SET {column}=? WHERE task_id=?", (value, task_id))
+    with pytest.raises(TaskError):
+        queue.admit_execution_wake(wake, provenance=None)
+    assert queue.list_wakes(task_id)[0].execution_send_state is None
+
+
 @pytest.mark.parametrize("boundary", ["valid", "missing_provenance", "closed_scope"])
 def test_closeout_does_not_bypass_qualified_runtime_or_scope_closure(q, monkeypatch, boundary):
     from agent_dispatch.execution_effect_adapter import EffectRevocation

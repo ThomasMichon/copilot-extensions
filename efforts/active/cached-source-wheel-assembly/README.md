@@ -37,6 +37,13 @@ dependency policy, immutable generation and service activation boundaries.
 
 ## Coordination
 
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+places this effort's artifact/cache output before complete application staging.
+Fresh install and update consume the same prepared inputs; cache construction
+does not start services or replace the incoming activation owner. Existing
+Phase4, producer claims, timing targets and native/rollout gates remain here;
+this connection neither transfers them nor marks portfolio adoption complete.
+
 - **Topology:** independent slices; a reviewed proposal precedes constructor edits.
 - **Host:** `buzzing-flywheel` owns this proposal and its accepted implementation slice.
 - **Delegates:** none. Existing owners are not replaced or assigned new work.

@@ -111,7 +111,7 @@ run_runtime() {
         )" || exit 126
         export AGENT_VAULT_CACHE_DIR="$validated_cache"
     fi
-    exec "$AGENT_RT_PY" -m agent_vault "$@"
+    exec "$AGENT_RT_PY" -I -X utf8 -m agent_vault "$@"
 }
 
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&

@@ -87,6 +87,69 @@ def test_prepared_delivery_preserves_only_fixed_refusal_reasons(
     assert "raw diagnostic" not in repr(result.recovery())
 
 
+def _readiness_refusal(detail: str) -> dict[str, Any]:
+    return {
+        "owned_delivery_version": 1, "admission_status": "not_admitted",
+        "reason": "plugins_not_ready",
+        "error": str({"code": "plugins_not_ready", "reason": detail}),
+    }
+
+
+def test_prepared_delivery_reobserves_readiness_while_plugins_are_still_loading() -> None:
+    import json
+
+    calls: list[tuple[list[str], str]] = []
+    sleeps: list[float] = []
+    replies = [
+        _readiness_refusal("readiness-timeout"),
+        _readiness_refusal("failed:selected-loadout-pending:alpha@market"),
+        {"accepted": True, "message_id": 9, "session_id": "native",
+         "receipt": {"stage": "admitted", "session_id": "native"}},
+    ]
+
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        calls.append((argv, kwargs["input"]))
+        reply = replies.pop(0)
+        return SimpleNamespace(returncode=0 if reply.get("accepted") else 69, stdout=json.dumps(reply))
+
+    result = venue_refs.deliver_note(
+        "native", "owned", run=run, operation="operation", sleep=sleeps.append,
+        prepared_context={"version": 1, "cwd": "/workspace", "plugins": []},
+    )
+    assert result.status == "admitted" and result.message_id == 9
+    assert sleeps == list(venue_refs.READINESS_RETRY_DELAYS)
+    assert len(calls) == 3 and calls[0] == calls[1] == calls[2]
+
+
+def test_prepared_delivery_bounds_loading_retries_and_keeps_final_refusals() -> None:
+    import json
+
+    def deliver(detail: str) -> tuple[Any, list[float], int]:
+        sleeps: list[float] = []
+        calls: list[int] = []
+
+        def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+            calls.append(1)
+            return SimpleNamespace(returncode=69, stdout=json.dumps(_readiness_refusal(detail)))
+
+        result = venue_refs.deliver_note(
+            "native", "owned", run=run, operation="operation", sleep=sleeps.append,
+            prepared_context={"version": 1, "cwd": "/workspace", "plugins": []},
+        )
+        return result, sleeps, len(calls)
+
+    result, sleeps, count = deliver("readiness-timeout")
+    assert result.status == "refused" and result.reason == "plugins_not_ready"
+    assert sleeps == list(venue_refs.READINESS_RETRY_DELAYS)
+    assert count == len(venue_refs.READINESS_RETRY_DELAYS) + 1
+    for final in ("failed:selected-plugin-disabled:alpha@market", "native-session-changed",
+                  "startup-operation-input-changed",
+                  "failed:native-observation-error:readiness-timeout@market",
+                  "failed:selected-plugin-disabled:selected-loadout-pending@m"):
+        result, sleeps, count = deliver(final)
+        assert result.status == "refused" and sleeps == [] and count == 1
+
+
 def test_confirmed_admission_recovery_never_resends_after_native_session_exits() -> None:
     context = {"version": 1, "cwd": "/workspace", "plugins": []}
     pending = {

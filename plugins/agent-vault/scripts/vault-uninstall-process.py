@@ -98,14 +98,17 @@ def admits(request: dict) -> bool:
         return False
     try:
         arguments = _arguments(request["command"])
-        if len(arguments) not in (10, 13):
-            return False
         daemon, service = _contracts()
-        if arguments[1] != "-X":
+        if arguments[1:2] == ["-B"]:
+            invocation = arguments[2:]
+        elif arguments[1:2] == ["-X"]:
+            invocation = arguments[3:]
+        else:
             return False
-        invocation = arguments[3:]
+        if len(invocation) not in (7, 10):
+            return False
         bootstrap_package = None
-        if len(arguments) == 13:
+        if len(invocation) == 10:
             if invocation[:2] != ["-c", daemon]:
                 return False
             bootstrap_package = _path(invocation[2])
@@ -126,14 +129,15 @@ def admits(request: dict) -> bool:
         if slot.parent != root / "versions" and slot != root / ".venv":
             return False
         _path(invocation[6])
-        prefix = arguments[2].removeprefix("pycache_prefix=")
-        if prefix == arguments[2]:
-            return False
-        cache = _path(prefix)
-        if cache.parent != root / "cache/python" or not re.fullmatch(
-            r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", cache.name,
-        ):
-            return False
+        if arguments[1] == "-X":
+            prefix = arguments[2].removeprefix("pycache_prefix=")
+            if prefix == arguments[2]:
+                return False
+            cache = _path(prefix)
+            if cache.parent != root / "cache/python" or not re.fullmatch(
+                r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", cache.name,
+            ):
+                return False
         config = _member(str(slot / "pyvenv.cfg"), root)
         homes = [
             line.split("=", 1)[1].strip()

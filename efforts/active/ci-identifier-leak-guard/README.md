@@ -324,7 +324,54 @@ or this proposal is not delivery. If any original/4339 clause, custodian or coor
 condition cannot be preserved, RETAIN #3923. No scanner, canary, credential/list/secret
 inventory, branch policy, workflow, source or runtime effect occurs here.
 
+### Publication-hook intake from #8924
+
+The same custodians and isolated-source-worktree owner retain this work.
+The checked Phase 5 automatic-sweep row records its delivered scope; PH1
+reconciles that behavior with #8924's stronger managed-publication contract.
+PH1 defines the planned replacement, not retention of the old automatic hook
+path. Explicit local/manual scanner use and private-source migration remain
+independently owned.
+Neither this intake nor old provisioning evidence authorizes activation,
+private-input access, a policy mutation or release of a source/resource claim.
+
+- [ ] PH1 - Reconcile the recorded automatic sweep with branch/ref-only generic
+  pre-push authorization: no runtime startup, automatic cross-repository
+  discovery, source-validator or anchor-inventory work in managed publication.
+  Preserve review, branch/ref safety, claims bookkeeping and explicit manual
+  audits; retain the old row and its history, not contradictory activation rules.
+- [ ] PH2 - Keep configured identifier enforcement in trusted CI, bound to the
+  selected published baseline, lossless selected paths and actual pushed-tree
+  blobs. Preserve both input families/custodians, inert candidate data, stale-head
+  fences and trusted head-bound reporting; no automatic cross-repository sweep.
+- [ ] PH3 - Keep size enforcement on the final PR/push endpoint diff under the
+  existing limits, with literal path/blob correctness and invalid-ref refusal.
+  No full-history/intermediate-commit scan or local commit/push size gate;
+  preserve the explicit manual full-tree audit.
+- [ ] PH4 - Establish replacement trusted-main coverage before activating revised
+  hooks. Preserve #7833's independent held broker repair; no deadline expansion,
+  temporary bypass or installed rollout is part of this source change.
+
+#### Publication-hook technical validation
+
+- [ ] PHV1 - Exercise allowed/protected/refusal publication paths without runtime
+  startup or automatic discovery/scanning. Verify preserved review, branch/ref
+  and claim behavior, and the explicit/manual audit boundary.
+- [ ] PHV2 - Qualify the actual trusted action's baseline/path/tree selection,
+  configured inputs and no-live-sweep policy, then its current required-main
+  success/failure matrix before activation. Distinguish source wiring, recorded
+  receipts, genuinely unconfigured neutrality and configured enforcement;
+  setup/fetch/scan/report failures must not become a clean scan.
+- [ ] PHV3 - Check final endpoint size controls, including special/renamed paths,
+  invalid refs and changes absent from the final diff, plus manual full-tree
+  audit. Preserve original caps and no-history/no-local-gate behavior.
+
 ## Validation Plan
+
+- [ ] Resolve ALL PH1-PH4 Plan clauses AND PHV1-PHV3 technical checks. Preserve
+  every original direct3923/inherited4339 and global validation obligation,
+  incumbent custodian and continuing coordination; this bounded intake neither
+  completes those outcomes nor requires unrelated work before planning it.
 
 - [ ] Resolve EVERY direct3923 and inherited4339 Plan/Validation clause above at its
   original finite scope, preserving whole incumbent ROOT, same private-source/CI/control
@@ -356,6 +403,8 @@ inventory, branch policy, workflow, source or runtime effect occurs here.
 _Pending._
 
 ## Journal
+
+- [2026-11-14 publication-hook intake](journal/2026/11.14-publication-hook-intake.md)
 
 ### 2026-10-23 - Direct retained acceptance from #3923
 

@@ -3660,6 +3660,162 @@ async def test_full_stack_acp_handshake_through_host():
                 w.close()
 
 
+@pytest.mark.asyncio
+async def test_bridge_picks_up_relocated_core_without_recreating_conversation(tmp_path):
+    from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+    from agent_procutil._interpreter import physical_executable
+    from agent_remote_driver.session_host.bundle import build_session_host_bundle
+    from agent_bridge.acp_client import AcpClient
+
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    build = tmp_path / "build"
+    original, _ = build_session_host_bundle(build)
+    receiver = tmp_path / "receiver"
+    receiver.mkdir()
+    archive = receiver / original.name
+    archive.write_bytes(original.read_bytes())
+    original.unlink()
+    build.rmdir()
+    workspace = receiver / "workspace"
+    workspace.mkdir()
+    _write_hosting_policy(workspace, allowed=True)
+    state_file, calls_file = receiver / "host.json", receiver / "calls.jsonl"
+    child = """
+import importlib.util,json,os,sys
+for module in ("agent_bridge","agent_worktrees","agent_dispatch","agent_remote_driver"):
+    assert importlib.util.find_spec(module) is None, module
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get("method")
+    if "id" not in request:
+        continue
+    with open(sys.argv[1],"a",encoding="utf-8") as log:
+        log.write(json.dumps({"pid":os.getpid(),**request})+"\\n")
+    if method=="initialize":
+        result={"protocolVersion":request["params"]["protocolVersion"],
+                "agentCapabilities":{}}
+    elif method=="session/new":
+        result={"sessionId":"fixture-original-conversation"}
+    elif method=="session/prompt":
+        assert request["params"]["sessionId"]=="fixture-original-conversation"
+        result={"stopReason":"end_turn"}
+    else:
+        raise AssertionError(method)
+    print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)
+"""
+    proc, job = spawn_sync_in_kill_on_close_job(
+        [
+            interpreter, "-I", "-S", str(archive), "--mode", "headless",
+            "--cwd", str(workspace), "--state-file", str(state_file),
+            "--repository-policy-context", json.dumps({
+                "schema": "agent-bridge.receiving-policy", "version": 1,
+                "marketplaceId": "fixture",
+            }),
+            "--", interpreter, "-I", "-S", "-u", "-c", child, str(calls_file),
+        ],
+        require_job=os.name == "nt", allow_breakaway=False,
+        start_new_session=os.name != "nt", cwd=receiver,
+        env={**os.environ, "AGENT_BRIDGE_SESSION_HOST_NONCE": "fixture-pickup"},
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    wire = streams = bridge = control = None
+    seed = 'original input\n"quoted" & literal $value'
+    steering = "later Bridge input"
+
+    def observed_exit():
+        if os.name == "nt":
+            return proc.poll()
+        from agent_procutil.owned_process import _observe_unreaped
+
+        return _observe_unreaped(proc)
+
+    try:
+        facts = await _ready_host_state(state_file)
+        assert facts["pid"] == proc.pid and facts["lifetime_policy"] == "acp"
+        wire = await SessionHostClient.connect(port=facts["port"])
+        original_host = await wire.attach(nonce=b"fixture-pickup")
+        cursor = 0
+        for identifier, method, params in (
+            (1, "initialize", {"protocolVersion": 1}),
+            (2, "session/new", {"cwd": str(workspace), "mcpServers": []}),
+            (3, "session/prompt", {
+                "sessionId": "fixture-original-conversation",
+                "prompt": [{"type": "text", "text": seed}],
+            }),
+        ):
+            await wire.write((json.dumps({
+                "jsonrpc": "2.0", "id": identifier, "method": method, "params": params,
+            }) + "\n").encode())
+            cursor, frame = await asyncio.wait_for(anext(wire.frames()), 5)
+            assert json.loads(frame)["id"] == identifier
+            await wire.ack(cursor)
+        await wire.detach(reapable=False)
+        await wire.close()
+        wire = await SessionHostClient.connect(port=facts["port"])
+        picked_up = await wire.attach(cursor, nonce=b"fixture-pickup")
+        assert picked_up.child_pid == original_host.child_pid == facts["child_pid"]
+        streams = await open_acp_streams(wire, start_from=cursor)
+        bridge = AcpClient()
+
+        async def close_frontend():
+            await streams.aclose()
+            await wire.close()
+
+        await asyncio.wait_for(bridge.start_streams(
+            streams.reader, streams.writer, child_pid=picked_up.child_pid,
+            closer=close_frontend,
+        ), 10)
+        bridge.adopt_session("fixture-original-conversation")
+        result = await asyncio.wait_for(bridge.send_prompt(steering), 10)
+        assert result["stop_reason"] == "end_turn"
+        await asyncio.wait_for(bridge.shutdown(), 5)
+        assert observed_exit() is None
+        calls = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        assert [call["method"] for call in calls] == [
+            "initialize", "session/new", "session/prompt", "initialize", "session/prompt",
+        ]
+        assert {call["pid"] for call in calls} == {original_host.child_pid}
+        assert [call["params"]["prompt"][0]["text"] for call in calls
+                if call["method"] == "session/prompt"] == [seed, steering]
+        control = await SessionHostClient.connect(port=facts["port"])
+        await control.attach(cursor, nonce=b"fixture-pickup")
+        await control.terminate()
+        for _ in range(200):
+            exit_code = observed_exit()
+            if exit_code is not None:
+                break
+            await asyncio.sleep(.025)
+        else:
+            pytest.fail("The copied Core did not stop after explicit termination")
+        if os.name == "nt":
+            assert exit_code == 0
+        else:
+            assert exit_code.si_code == os.CLD_EXITED and exit_code.si_status == 0
+        assert not osutil_pid_alive(original_host.child_pid)
+    finally:
+        try:
+            if bridge is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(bridge.shutdown(), 5)
+            if streams is not None:
+                await streams.aclose()
+            for client in (wire, control):
+                if client is not None:
+                    await client.close()
+        finally:
+            if job is not None:
+                job.terminate_and_wait(10)
+            else:
+                from agent_procutil._caller_owned import _confirm_group
+                from agent_procutil.owned_process import _retire_posix_group
+
+                _retire_posix_group(proc)
+                _confirm_group(proc)
+            proc.communicate(timeout=10)
+
+
 # --------------------------------------------------------------------------
 # ACP stream adapter (Phase 2 bridge): host <-> asyncio streams, byte-exact
 # --------------------------------------------------------------------------

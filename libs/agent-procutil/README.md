@@ -4,6 +4,16 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`spawn_sync_in_kill_on_close_job(..., require_job=True, allow_breakaway=False,
+on_suspended=callback)` optionally calls an in-process creation owner with the
+original Windows `Popen`, after required Job assignment and before resume.
+The finite callback returns `None`; it may use the retained creation handle
+but must not resume, replace or launch a child. This is separate from scoped
+observer admission. Refusal confirms owned Job/child settlement before raising;
+uncertain cleanup retains both on `OwnedCleanupError`. Unsupported custody
+refuses before creation. Omission preserves existing behavior and does not
+enable caller enrollment or an additional supervisor.
+
 On Linux, `spawn_daemon` also separates a durable resident from its launching
 systemd unit's cleanup cgroup. It uses an independently named transient user
 scope, without a new restart policy or persistent service definition.
@@ -132,6 +142,9 @@ arbitrary third-party output.
 
 ## Managed Python bytecode cache
 
+This is the legacy compatibility API. New launchers use the complete
+[platform-cache policy vector](#platform-cache-provider-contract) instead.
+
 `agent_procutil.python_cache_args(root, runtime=target)` returns `["-X",
 "pycache_prefix=<root>/cache/python/<installation-scope>"]` for an absolute,
 caller-owned durable runtime state root. `target` is the interpreter or runtime
@@ -150,8 +163,8 @@ a changed installation selects another even when source paths, sizes, and
 timestamps match. Missing, malformed, redirected, or unrecorded evidence gets
 a fresh invocation namespace, not an owner-wide fallback. This reads existing
 installation evidence and produces no new deployment receipt or build cache.
-Native launchers that cannot inspect that evidence likewise use fresh
-invocation scopes; systemd uses its own service invocation ID.
+Older native launchers using that contract can likewise allocate fresh
+invocation scopes, including a systemd service invocation ID.
 
 `cache/python` contains mutable, derived executable bytecode outside immutable
 version slots, not protected credentials, configuration, or business data.
@@ -164,8 +177,13 @@ that those gates have passed or introduce another cleanup policy.
 
 `agent_procutil.python_cache.POLICY_VERSION == 2` advertises the additive
 `policy_arguments(root, runtime=target)` provider. Existing `cache_arguments`
-and `python_cache_args` callers retain their preceding contract; consumer
-migration and update-time collection are separate lifecycle work.
+and `python_cache_args` callers retain their preceding contract.
+`agent_procutil.python_cache_policy_args` exposes the new complete-vector
+provider through the package facade, including standalone lifecycle loaders.
+Callers supporting an older package select `-B` when that export is absent;
+they must not fall back to the legacy prefix allocator. Minimal bundles without
+the managed-cache companions also take `-B`. Launcher adoption does not itself
+reclaim legacy caches; update-time legacy relief is separate lifecycle work.
 
 The new provider returns `["-X", "pycache_prefix=<private-platform-cache>"]`
 only for a completed target slot belonging to the addressed installation.
@@ -216,6 +234,141 @@ no-write fallback, preserving the existing objects. This provider neither
 deletes a cache nor changes runtime selection, retention or service lifetime.
 The caller still owns target admission and retention across launch; an owner
 record or catalog entry is not a runtime lease or permission to execute it.
+
+### Incremental retirement collection
+
+`python_cache_collect.collect(root, retirement=...)` visits only the addressed
+installation's private catalog. The versioned-runtime owner supplies lexical
+construction/retention/publication custody, rechecks its existing protection
+policy and requires the exact recorded immutable slot to be absent. Existing,
+selected, rollback, retained, referenced and busy runtimes keep their caches.
+The catalog and owner record identify cache work; neither grants retirement.
+
+The default pass considers at most eight indexed namespaces, 256 directory
+entries (including empty-directory probes) and 32 MiB of successful bytecode
+removals, with a one-second soft deadline checked between operations. Ownership
+records are separately capped at 16 KiB per namespace and continuation state
+at 32 KiB and 64 directory levels. Individual native filesystem/security calls
+cannot be preempted. A keyset cursor rotates past protected/refused namespaces.
+An identity-bound persistent depth-first stack resumes within a large clean
+tree; deleted leaves provide progress without rescanning a skipped prefix.
+Oversized single files or depth, unknown content, links, replacement identities
+and unverified native ownership are retained with a partial/refusal outcome.
+Custom budgets require at least two entry probes so finalization can prove the
+namespace contains only its owner record. Metadata access failures retain work;
+only an explicit not-found result establishes absence. Malformed or excessively
+nested JSON is a per-namespace refusal and does not reset fair progress.
+
+Ordinary `.pyc` and interrupted numeric `.pyc.<id>` writes are removed through
+anchored no-follow operations. POSIX uses directory descriptors; Windows keeps
+non-delete-sharing ancestor handles and deletes the verified leaf by handle.
+The final same-object probe also requires a singly linked regular file, including
+hard links created after its initial admission.
+An earlier committed finalization phase permits recovery after owner-record
+removal. Only a now-empty namespace is removed. Successful byte counts are
+logical file sizes, not a physical-disk-space estimate.
+The deadline follows anchored entries through metadata reads, retirement's
+recorded/native process probes and removal. Expiry during protection scanning
+retains the namespace without completing the remaining process census.
+Expired finalization retains its continuation before the next owner-record or
+namespace mutation; mandatory handle and transaction cleanup remains unconditional.
+On POSIX, the private bytecode root protects normal interpreter-created
+group-writable mirror directories and files; descendants must still be
+ordinary current-user-owned objects. Windows retains per-descendant DACL checks.
+
+Normal version-slot `gc` runs this independent maintenance after runtime GC,
+including on repeated passes with no newly removed slot. Its existing return
+value/JSON remains unchanged; a bounded `gc: python-cache` stderr report carries
+counts, retained reasons, sanitized error codes and continuation status.
+Unsupported providers and maintenance failures do not veto runtime GC or
+successful incoming selection. No service or scheduler is added. This collector
+does not itself discover or delete legacy `cache/python` namespaces; the
+independent legacy pass below uses the same runtime owner's custody.
+Standalone maintenance imports its shipped source archive only after checking
+file protection. POSIX additionally validates the resolved archive ancestry
+with no-follow directory opens: current-user/root ownership, no shared writes
+(apart from sticky intermediate ancestors), and supported macOS ACLs. This
+protects the filename reopened by the importer, not merely an earlier descriptor.
+
+### Legacy update relief
+
+Normal runtime GC also calls `python_cache_collect.collect_legacy`. It examines
+only the addressed installation's `cache/python`, with a separate
+`gc: python-cache-legacy` report. The incoming installation/selection result
+and runtime GC return value remain independent of either collector's outcome.
+The existing explicit legacy inspection/prune command remains dry-run by
+default; its manual age-only option is not used by automatic maintenance.
+
+Only recognized `unsealed-<32 hex>` and `installed-<64 hex>` prefixes are
+examined. Within them the pass opens only the addressed runtime root's Python
+source mirror and its `versions` directory. The runtime owner must hold the
+exact absent slot's cleanup/construction lease and pass its normal protection
+checks. Positive custody is reused across consecutive prefixes for the same
+slot, but is closed before acquiring another slot: its publication lease is
+installation-wide and non-reentrant. Negative results release custody immediately.
+
+An individual ordinary, current-user-owned, non-shared-writable `.pyc` must
+affirmatively match that exact retired source path before removal. A bounded,
+non-executing marshal-format reader checks known released CPython 3.10--3.13 magic,
+header and complete object framing; every nested code object must name the
+same absolute source. That source, the bytecode cache tag/name and the source
+mirror must agree. Windows drops drive letters from its bytecode mirror, so
+the mirrored directory alone is never sufficient ownership evidence. No
+`marshal.loads`, code execution or new collector subprocess is used.
+The reader validates required bytes/tuple/string fields, name members and
+local/argument cardinality without constructing or executing code objects.
+The file's admitted magic selects its layout and cache tag, not the updater's
+Python version; actual native captures qualify all four formats across hosts.
+Unknown interpreter formats, malformed/oversized bytecode, hard links,
+reparse/symbolic links, changed paths and unsupported permissions are retained.
+Legacy directories may be world-readable, unlike executable new-cache
+selection; neither directories nor files may permit other unprivileged writers.
+macOS file admission checks file-specific extended ACLs as well as mode bits,
+including on an otherwise ordinary 0644 leaf.
+These cleanup checks never relax the provider's private-cache defaults.
+
+Only qualified leaves and now-empty retired-source directories are removed.
+Sibling base-interpreter, current, rollback, other-runtime and unknown content
+is untouched, including non-bytecode evidence inside a retired subtree.
+Whole-prefix collection remains explicitly refused as
+`legacy-whole-prefix-no-writer-custody`: even a complete process census plus
+age cannot exclude delayed/inherited-prefix writers. Maintenance does not
+silently promote that manual pruning policy into automatic deletion.
+
+The default legacy pass has independent caps of 128 namespace candidates,
+2,048 selected entry probes, 32 MiB each of inspected bytecode and successful
+removals, and two seconds checked between native calls. Namespace census and
+subtree discovery each have independent 100,000-probe/16-MiB-name budgets;
+their counters are reported separately. Each complete subtree-directory
+inventory is additionally capped at a quarter of its phase's probe/name budget
+(25,000 probes/4 MiB by default, with a two-probe minimum). Skipped and unknown names count.
+The bounded complete name census is explicit: incomplete/oversized or changing
+inventories refuse rather than claim a fair truncated scan. After a complete
+census, a persistent per-installation lexical cursor advances past refused
+namespaces. A 32 KiB/64-level identity-bound stack with per-directory lexical
+positions resumes within a namespace, including past retained leaves.
+These positions are comparison-only strings, not paths to reopen. Windows
+basename matching follows native case rules; POSIX matching stays case-sensitive.
+The namespace rotation cursor uses a bounded, versioned ASCII JSON envelope,
+so POSIX surrogate-escaped filename bytes round-trip through SQLite. The prior
+raw cursor is still readable; malformed or oversized envelopes restart safe
+discovery rather than blocking rotation.
+Temporary aggregate exhaustion preserves the current frame for a fresh pass;
+an intrinsically oversized or fresh-pass time-unavailable subtree is retained
+and skipped so eligible siblings are not starved.
+If a serialized continuation exceeds its limit, it backs out of the refused
+subtree to the closest persistable ancestor, retaining the parent's comparison
+position. A local serialization refusal is reported without rolling back
+namespace rotation or starving other prefixes.
+Each file is at most 8 MiB; a file larger than a custom per-pass byte budget
+is retained rather than starving later files. Native calls are not preemptible.
+
+Reports distinguish namespace and subtree enumeration names/bytes, inspected bytecode, successful
+file removals/logical bytes, removed retired subtrees (`completed`), retained
+reasons, sanitized errors and unfinished/budget-limited work. A remaining
+prefix is still `pending`, even after its eligible retired leaves are gone;
+base/unknown bytecode is not claimed reclaimed. Repeated successful updates
+resume eligible work, not a promise to empty every historical prefix.
 
 ## Windows bootstrap and shell admission
 

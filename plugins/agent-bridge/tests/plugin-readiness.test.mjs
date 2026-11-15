@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { observePluginReadiness } from "../extensions/agent-bridge/plugin-readiness.mjs";
-import { controlPlan, drainControls, drainInbox, InFlightMessages, renderDeliveredPrompt } from "../extensions/agent-bridge/delivery.mjs";
+import { observePluginReadiness } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/plugin-readiness.mjs";
+import { controlPlan, drainControls, drainInbox, InFlightMessages, renderDeliveredPrompt } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
 
 function fixture(t, rows = [{ name: "hooks-only", marketplace: "alias", enabled: true }]) {
   const cwd = mkdtempSync(join(process.cwd(), ".plugin-readiness-"));

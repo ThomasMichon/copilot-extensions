@@ -49,7 +49,7 @@ def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking
         _LOG.warning("Claimant record platform conflicts with the actual execution context")
     elif owner.machine and owner.machine != record.execution_machine:
         alias = None
-        if getattr(record, "machine_identity", None) is None and owner.is_qualified:
+        if owner.is_qualified:
             alias = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
         if alias is None or record.yaml_path is None or alias.resolve() != record.yaml_path.resolve():
             _LOG.warning("Claimant record execution owner conflicts with its qualified reference")

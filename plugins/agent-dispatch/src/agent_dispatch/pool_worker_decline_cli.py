@@ -20,7 +20,9 @@ DISPOSITION_WAIT_SECONDS = 600.0
 DISPOSITION_POLL_SECONDS = 5.0
 
 
-def _finalize(binding: dict, worktree: str) -> None:
+def _finalize(
+    binding: dict, worktree: str, *, expected_creation_nonce: str | None = None,
+) -> None:
     prefix = procutil.agent_worktrees_launch_prefix()
     if prefix is None:
         raise DispatchUpgradeRequired("selected Worktrees runtime is unavailable for own-worker closeout")
@@ -68,6 +70,8 @@ def _finalize(binding: dict, worktree: str) -> None:
         any(result.get(key) != value or type(result.get(key)) is not type(value)
             for key, value in expected.items())
         or not isinstance(result.get("creation_nonce"), str) or not result["creation_nonce"]
+        or (expected_creation_nonce is not None
+            and result["creation_nonce"] != expected_creation_nonce)
         or type(result.get("head_revision")) is not int or result["head_revision"] < 0
     ):
         raise DispatchError(502, "own-workspace closeout outcome is unconfirmed; custody retained")

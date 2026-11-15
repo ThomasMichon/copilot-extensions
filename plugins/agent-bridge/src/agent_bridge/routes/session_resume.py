@@ -33,7 +33,7 @@ async def resume_session(
                 lambda: bool(getattr(request.app.state, "ready", False)),
             )
             return JSONResponse({
-                **_session_info(session).model_dump(mode="json"), "retained_recovery": recovery,
+                **_session_info(session, mgr).model_dump(mode="json"), "retained_recovery": recovery,
             })
         session = await mgr.resume_session(
             session_id,
@@ -55,7 +55,7 @@ async def resume_session(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return _session_info(session)
+    return _session_info(session, mgr)
 
 
 @router.get("/{session_id}/retained-recovery/{operation_id:path}")

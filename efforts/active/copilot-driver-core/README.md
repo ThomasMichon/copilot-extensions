@@ -11,6 +11,16 @@
 
 ## Goal
 
+Operator root goal, verbatim:
+
+> Factor out session-host, mux logic, and agent-bridge's internal extension into a forward-deployable core, so that a machine or container lacking suite service can still have Copilot launched via ACP or Mux in an ACP-controllable Copilot session that can be picked up by a local or calling agent-bridge. This core should be uses by agent-worktrees and agent-bridge, and it should not depend on those services being installed into the target space.
+
+Source: operator direction of 2026-11-14 00:27Z, relayed through existing
+coordination. The complete intake reference is retained privately by the
+effort owner, not published with transport or session identifiers.
+
+### Continuing acceptance obligations
+
 Complete the standalone core, all named caller migrations, mode-appropriate
 lifetime and receiving acceptance, with the required source publication.
 For recovery, treat abrupt transport loss and observer, process or host restart
@@ -35,6 +45,39 @@ The completion gate is the complete caller-convergence and receiving flow,
 with real consumer validation and required source publication. A package,
 an extraction-only PR or one migrated caller is not completion.
 
+## Outcome acceptance and finalization
+
+The root outcome requires evidence from a built or copied core artifact, not
+only imports from this source checkout:
+
+- A target with only the core and its declared Copilot/mux prerequisites can
+  launch in both ACP and mux modes without installed or running Bridge,
+  Worktrees, Manager or Dispatch services.
+- A local or calling Bridge can discover and control that existing session
+  through the common broker, retaining its exact native conversation and
+  original input without a second session, seed replay or effectful fallback.
+- Actual Worktrees and Bridge callers select that same core. Receiving,
+  mode-appropriate lifetime, ownership, supported skew/rollback and exact
+  cleanup pass their existing acceptance gates.
+- Evidence names the artifact, executing provider and consumer boundary.
+  Controlled SDK/model-free cases, native Copilot execution and installed
+  adoption are reported separately; unavailable authority or capability is
+  an explicit open gate, never a substituted pass.
+
+- [ ] **G1045:** Accept the complete #1045 host inspection/progress contract
+  only when direct P1045 and paired V1045 pass through the built/copied core
+  artifact and its actual session-status and terse inspect/status JSON
+  receiving surfaces. Keep every incumbent artifact, caller-convergence,
+  lifetime, ownership, skew/rollback, cleanup, review/CI and finalization gate
+  conjunctive. This tracking intake adds no native, installed/live-deployment
+  or whole-#1138-completion prerequisite and waives no existing gate.
+
+Finalization requires this complete functional flow, every continuing Plan and
+Validation Plan item resolved or explicitly transferred to a named tracked
+objective, required source review/CI/publication completed, and the canonical
+effort marked Done and archived. A package, source leaf, review or merged PR
+alone does not satisfy this criterion. Deployment remains separately authorized.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -48,6 +91,19 @@ an extraction-only PR or one migrated caller is not completion.
 - **Topology:** tightly coupled source work with one owner, one checkout and
   dependency-ordered functional outcomes.
 - **Host (owns PRs):** Refactor driver.
+- **Finite #1045 receiving (proposed):** Carry the complete specialized host
+  inspection/progress contract as planned work, not only an integration seam.
+  Keep its existing technical/implementation acceptance lane and all current
+  source/resource owners unchanged; appoint no executor or new claimant.
+  Normal reviewed Plan/Validation acceptance receives tracking, not technical
+  completion, source retirement or custody transfer. A later source-specific
+  disposition remains separate. #1138 stays independently canonical for
+  immutable event/reference semantics; consume its cursor-neutral reference
+  and unavailable-evidence interface without requiring its whole completion.
+  Use existing causal consumers. Do not add a new observer poller or fold the
+  lane into an event-identity/programme wrapper unable to carry its full
+  contract. Preserve credited liveness/output/heartbeat and bounded-result
+  work as partial baseline, not a new independent round-trip proof.
 - **Delegates:** source-auth receiver/enforcement implementation and its callable
   contract move to the contributor owning #11781 (proof prestage #11758).
   The refactor driver releases
@@ -140,6 +196,33 @@ native qualification and activation need their existing separate admission.
 
 ## Plan
 
+### Next outcome - portable consumer acceptance
+
+- [x] Prove the smallest admitted standalone artifact flow for ACP and mux,
+  then Bridge pickup, with suite services absent from the target. Reuse
+  existing owned fixtures; preserve separate admission for native effects.
+- [ ] Correlate that flow with the actual Worktrees/Bridge caller paths and
+  coordinate any launch-caller changes with their existing owner, rather
+  than duplicate the mux-launch implementation.
+- [ ] Publish the first complete functional outcome through normal gates and
+  update this root acceptance record, retaining all remaining obligations.
+
+The bounded native checkpoint combines copied-Core ACP with the actual
+Bridge Python client (#12714) and the built-Core headed coordinator with
+Bridge's canonical retained-session client. Both run the target artifact
+under physical Python with site packages disabled and retain exact native
+conversation/input identity. Headed source publication is still pending.
+This closes only the smallest artifact/consumer flow above, not each named
+caller, all modes, installed adoption, lifetime or readiness stability.
+
+The source-complete actor-free recovery-intent adapter supports original-owner
+persistence but does not prove this outcome. Its bounded source acceptance is
+recorded in the journal, not counted as root acceptance. Select the portable
+consumer flow before adding further optional recovery-data layers.
+The completed source items below remain source milestones, not native
+or installed qualification. Container-auth pumping and mux-launch custody
+remain with their existing owners.
+
 ### Phase 1 - Review the implementation boundary
 
 - [x] Reconcile the merged vision, existing source owners and actual launch seams.
@@ -183,6 +266,32 @@ native qualification and activation need their existing separate admission.
   the [original-owner admission binding](implementation.md#original-owner-recovery-admission-binding).
 - [ ] Qualify ordinary/hoisted receiving, supported skew/rollback, endpoint and
   process identity, exact cleanup and measured cold/warm readiness.
+- [ ] **P1045:** Implement and integrate the entire host inspection/progress
+  contract in the standalone core and existing causal consumers, without a
+  new observer poller. Deliver version-tolerant end-to-end PING/PONG with a
+  nonce and RTT plus a fixed-size snapshot: Host PID/generation, child
+  PID/alive, turn-in-flight, maximum buffered sequence, frontend ACK, last
+  child-frame age and buffer depth. Choose a separate non-displacing control
+  connection/listener **OR** a supported multi-client read-only channel;
+  either choice must stay responsive independently of ACP bulk-frame
+  backpressure and must not replace the active frontend.
+  Report daemon API, provider/SSH forward, Session Host, Copilot child, ACP
+  turn and semantic-progress state/age separately. Bound current phase,
+  active-tool elapsed/update age, output/event byte **OR** sequence delta,
+  last-thought age/chunk count, `source`, `observed_at`, proof/scope and
+  cursor-neutral evidence reference. Retain the literal projection states:
+  `freshness` = fresh/stale/unknown; truncation = none/truncated/unknown;
+  `request_state` = requested/running/blocked/complete/unknown; and
+  `terminal_result` = success/failure/not-terminal/unknown. Distinguish declared
+  and derived milestones and reasoned unknown results, including evidence
+  limited or unavailable through retention/redaction.
+  Keep raw thoughts out by default; retain the explicit
+  `read --expand thoughts` detail path. Expose both the existing session-status
+  endpoint **AND** the terse `agent-bridge inspect/status --json` rendering,
+  preserving already-delivered `liveness`, `last_output_at` and
+  `last_heartbeat_at`. Preserve old-client/H1 compatibility. Consume #1138's
+  exact reference interface without taking over its identity/epoch/sequence
+  or retention semantics; a contract description alone is not delivery.
 - [ ] Establish independent POSIX owner-death custody and native Linux/pod
   qualification before opt-in auth-wait composition; ordinary non-auth execution
   remains a separate supported path.
@@ -201,6 +310,36 @@ native qualification and activation need their existing separate admission.
   forbid legacy internal spawning and mux creation on the selected new path.
 - [ ] Both modes expose the broker and truthful stage distinctions: reservation,
   process/mux, native binding, input readiness, prompt acceptance and restoration.
+- [ ] **V1045:** Validate actual P1045 behavior on isolated fixtures and through
+  the built/copied-artifact receiving surface. Prove nonce/RTT and every
+  fixed-size field, per-layer state/age, bounded projection states and unknown
+  reasons, cursor-neutral/unavailable references, both pull surfaces and
+  old-client/H1 coexistence. Cover the original fault matrix: blackholed
+  forward without EOF; live Host/dead child; live silent-thinking turn;
+  quiet long-running tool; frontend reconnect; and high-volume ACP
+  backpressure while inspection stays responsive.
+  Also cover no signal, stale/timed-out signal, malformed/partial projection,
+  contradictory sources, active tool without update delta, PING/PONG success
+  without semantic-progress proof, terminal success/failure and
+  retention/redaction that removes or limits evidence.
+  Assert the selected allowed observer path never writes, ACKs, moves a
+  cursor, renews ownership, changes reapability, displaces the frontend or
+  exposes raw thoughts by default. Process/socket existence or PING/PONG
+  demonstrates only its scoped liveness/RTT property, not semantic progress,
+  ownership or completion. Check #1138's interface at this consumer boundary,
+  not by re-owning or requiring its entire acceptance contract.
+  **Explicit V1045 field and effect assertions:** Check current phase,
+  active-tool elapsed/update ages, output/event byte-or-sequence delta,
+  last-thought age/chunk count, `source`, `observed_at`, proof/scope,
+  declared/derived milestones and reasoned `unknown_result` individually.
+  Assert each literal domain: `freshness` = fresh/stale/unknown; `truncation` =
+  none/truncated/unknown; `request_state` =
+  requested/running/blocked/complete/unknown; `terminal_result` =
+  success/failure/not-terminal/unknown. Check `liveness`,
+  `last_output_at` and `last_heartbeat_at` on both required pull surfaces.
+  Exercise the explicit thought-detail path with non-secret fixture content
+  while default output stays redacted. Assert that inspection never mutates
+  or reaps the session, in addition to every no-effect prohibition above.
 - [ ] Exact native identity, multiline/quoted seed, permissions and preference
   selections survive new/resume/reuse without staging or delivering a duplicate.
 - [ ] Structured pending-work and schedule evidence controls ACP idle expiry;

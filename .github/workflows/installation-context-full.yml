@@ -50,6 +50,7 @@ on:
           - komodo-recovery
           - manager-suite
           - manager-lifecycle
+          - manager-engine-routing
           - worktrees-git-probes
           - related-knowledge
           - registration-inspection
@@ -1466,6 +1467,57 @@ jobs:
             ${{ runner.temp }}/manager-lifecycle-evidence
             ${{ runner.temp }}/manager-suite-payload-evidence
           if-no-files-found: error
+          retention-days: 2
+
+  manager-engine-routing-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-engine-routing'
+    name: Installed Manager and engine routing (isolated Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify the canonical routing contract at an exact source
+        id: routing
+        shell: python
+        env:
+          REQUESTED_SOURCE: ${{ inputs.source_sha }}
+        run: |
+          import json, os, re, subprocess, sys
+          from pathlib import Path
+
+          expected = os.environ["REQUESTED_SOURCE"]
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if not re.fullmatch(r"[0-9a-f]{40}", expected) or expected != actual or expected != os.environ["GITHUB_SHA"]:
+              raise ValueError("Routing qualification requires its exact published source")
+          root = Path(".validation/engine-routing")
+          if root.exists():
+              raise ValueError("Routing qualification refuses retained preparation or result data")
+          subprocess.run([
+              sys.executable, "tools/run-manager-runtime-acceptance.py",
+              "--contract", "engine-routing", "--root", str(root),
+          ], check=True)
+          result = json.loads((root / "routing-result.json").read_text(encoding="utf-8"))
+          if result.get("prepared") is not True or result.get("timed_runner_exit") != 0:
+              raise ValueError("Routing preparation and every timed consumer must pass")
+          print("Prepared installed routing qualified; cold-first-touch and deployment are not exercised.")
+      - name: Retain routing preparation and consumer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-engine-routing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .validation/engine-routing
+          if-no-files-found: warn
           retention-days: 2
 
   manager-suite-windows:

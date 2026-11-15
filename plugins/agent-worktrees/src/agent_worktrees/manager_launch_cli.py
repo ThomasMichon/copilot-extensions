@@ -370,7 +370,8 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
 
 
 def _agent_worktrees_launch_command(project: str | None) -> list[str]:
-    from agent_procutil import python_cache_args
+    import agent_procutil
+    python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
     argv = [
         sys.executable, *python_cache_args(os.path.abspath(cfg.install_dir())),

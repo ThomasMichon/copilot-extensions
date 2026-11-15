@@ -8,7 +8,7 @@ ENV TMPDIR=/build/.tmp
 RUN mkdir -p "$TMPDIR" && ! command -v cc && ! command -v gcc
 COPY fleet-manager/pyproject.toml fleet-manager/setup.py fleet-manager/README.md ./fleet-manager/
 COPY fleet-manager/src/fleet_manager/*.py fleet-manager/src/fleet_manager/ssh-client-contract.json fleet-manager/src/fleet_manager/client-lifecycle-contract.json ./fleet-manager/src/fleet_manager/
-COPY libs/versioned-runtime/standalone_build.py libs/versioned-runtime/versioned_runtime.py libs/versioned-runtime/versioned_runtime_leases.py libs/versioned-runtime/versioned_runtime_construction.py libs/versioned-runtime/versioned_runtime_publication.py libs/versioned-runtime/versioned_runtime_source.py ./libs/versioned-runtime/
+COPY libs/versioned-runtime/standalone_build.py libs/versioned-runtime/versioned_runtime.py libs/versioned-runtime/versioned_runtime_leases.py libs/versioned-runtime/versioned_runtime_construction.py libs/versioned-runtime/versioned_runtime_publication.py libs/versioned-runtime/versioned_runtime_source.py libs/versioned-runtime/versioned_runtime_cache.py ./libs/versioned-runtime/
 COPY libs/installer-engine/installer_engine_process.py libs/installer-engine/runtime_launcher.py ./libs/installer-engine/
 COPY libs/agent-procutil/pyproject.toml libs/agent-procutil/setup.py libs/agent-procutil/README.md ./libs/agent-procutil/
 COPY libs/agent-procutil/src/agent_procutil/ ./libs/agent-procutil/src/agent_procutil/

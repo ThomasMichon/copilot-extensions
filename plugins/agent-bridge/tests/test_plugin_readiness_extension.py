@@ -23,3 +23,18 @@ def test_readiness_and_existing_delivery_node_contracts():
             ["node", "--version"], capture_output=True, text=True, timeout=5, **no_window_kwargs(),
         )
         pytest.fail(f"Node runtime: {version.stdout.strip()}\n{result.stdout}{result.stderr}")
+
+
+def test_core_extension_helper_contracts():
+    tests = Path(__file__).parent
+    result = subprocess.run(
+        ["node", "--test", *(
+            str(tests / name) for name in (
+                "announce.test.mjs", "bridge-endpoint.test.mjs", "delivery-state.test.mjs",
+                "extension.test.mjs", "headed-client.test.mjs", "metadata.test.mjs",
+                "remote-driver.test.mjs",
+            )
+        )],
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

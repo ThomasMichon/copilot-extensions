@@ -27,6 +27,30 @@ retention leases, and durable references remain deletion barriers.
 Completed deep slots remain complete when `gc --toss-incomplete` follows an
 age-preserving collection pass.
 
+After its ordinary version-slot pass, `gc` performs bounded, indexed Python
+cache maintenance through the shared
+[cache lifecycle provider](../agent-procutil/README.md#incremental-retirement-collection).
+It reuses the same cleanup/construction/retention/publication owner and refuses
+cache deletion until the exact recorded runtime is absent and unprotected.
+Repeated updates resume partially collected trees without requiring another
+slot retirement. Cache failures remain independent maintenance outcomes on
+stderr; the existing removed-version list and JSON contract are unchanged.
+The cache deadline applies during reference/selector/claim metadata,
+version discovery and recorded/native process probes, including when PID
+protection is disabled. Ordinary runtime GC keeps its existing policy.
+This does not migrate launchers or reclaim legacy per-tool cache trees.
+
+Before importing a shipped lifecycle archive, maintenance verifies its opened
+ordinary-file identity and native protection. POSIX accepts root/current-user
+ownership without group/other write access; Windows uses the runtime owner's
+file-handle DACL admission. macOS additionally requires an empty extended ACL;
+unknown or nonempty ACLs conservatively retain cache work. Failure is reported
+without importing that archive or vetoing completed runtime GC.
+POSIX also checks the resolved archive ancestry before filename-based import.
+Canonical retained helper bundles carry both the cache helper and its lifecycle
+archive, so GC from a retained bootstrap remains independent of its acquisition
+checkout and of site packages.
+
 ## Selector sharing on Windows
 
 The slot-local `runtime_launcher.py` retains a completed generation before site
@@ -111,6 +135,24 @@ are hashed in label order regardless of read completion order; failures remain
 fail-closed and all in-flight readers settle before return or error. Each call
 reads current bytes again: there is no persistent content-hash cache or
 background reader. Single-entry fingerprints need no worker pool.
+
+On Windows, fingerprint I/O accepts ordinary and extended-length source paths
+through the existing native-path helper, without changing machine-wide settings.
+Relative digest labels and paths reported to file observers retain their logical
+spelling; staging depth and the extended-length prefix do not change the digest.
+Observer and file-hash collector keys preserve the matched declared root's
+ordinary or extended spelling, so consumers can look up their original resolved
+source paths. The most-specific root determines reporting; duplicate declarations
+of one root use its first spelling. Digest labels remain canonical and unchanged.
+Extended UNC namespace prefixes are recognized case-insensitively without
+changing server, share or filename spelling, so network inputs cannot become
+current-directory-relative aliases. POSIX symlink targets retain literal
+Windows-looking backslashes and prefixes.
+Directory roots ending in `..` are normalized after their parent is resolved,
+so equivalent paths and relocated trees retain their fingerprint without
+duplicating files declared under both spellings.
+Missing or unreadable inputs and the existing symlink restrictions still fail
+closed.
 
 ## Why this is vendored, not a package
 

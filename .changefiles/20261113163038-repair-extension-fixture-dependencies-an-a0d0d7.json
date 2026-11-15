@@ -1,0 +1,9 @@
+{
+  "comment": "Consume the Core-owned SDK registration/delivery closure, notify root agents of pending input, and preserve native receipt evidence across transient event POST failures",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

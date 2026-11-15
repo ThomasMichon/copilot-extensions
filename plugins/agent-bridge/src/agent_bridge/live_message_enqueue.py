@@ -129,6 +129,15 @@ def _enrolled_admission(
         f"WHERE current=1 AND (session_id=? OR session_id={_CANON}) LIMIT 1",
         (request.session_id, request.session_id, request.session_id),
     ).fetchall()
+    if rows and rows[0]["installation"] == "compatible-inbox-v1":
+        if rows[0]["session_id"] != request.session_id:
+            raise RuntimeCustodyError("Native SDK inbox requires the exact native session id")
+        if (
+            request.delivery not in ("steer", "queue") or request.kind.casefold().startswith("control:")
+            or (request.kind.casefold().startswith("startup:") and not _ready_startup(conn, request))
+        ):
+            raise RuntimeCustodyError("Native SDK inbox control, startup or interrupt is unsupported")
+        return None
     if not rows:
         target = conn.execute(
             "SELECT venue FROM live_sessions WHERE session_id=? AND cli_mode=1",
@@ -183,7 +192,15 @@ def enqueue_fresh(
             if replay is not None:
                 return replay
             selected = _enrolled_admission(db, conn, request, admission, inbox_refusal)
-            return _insert(db, request, selected, conn.execute)
+            result = _insert(
+                db, request, selected, conn.execute,
+                verified_startup=_ready_startup(conn, request),
+            )
+            if result[0] is not None:
+                from .compatible_inbox import retain_message
+
+                retain_message(conn, result[0])
+            return result
     return _insert(
         db, request, admission,
         lambda statement, params: db._execute_runtime_admitted_write(statement, params, admission),
@@ -193,6 +210,7 @@ def enqueue_fresh(
 def _insert(
     db: Database, request: LiveMessageEnqueue, admission: RuntimeAdmission | None,
     execute: Callable[[str, tuple[object, ...]], sqlite3.Cursor],
+    *, verified_startup: bool = False,
 ) -> tuple[int | None, str | None]:
     association = admission_document(admission)
     cutoff = request.now - request.stale_seconds
@@ -231,7 +249,7 @@ def _insert(
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
             request.exact_session, request.session_id, request.expected_session_id,
             request.require_idle,
-            _requires_retained_admission(request),
+            _requires_retained_admission(request) and not verified_startup,
             association, request.session_id, request.session_id, request.session_id,
         ),
     )

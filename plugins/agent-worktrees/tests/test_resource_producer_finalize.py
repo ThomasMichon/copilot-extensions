@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,6 +30,7 @@ def _final_owner_seed(tmp_path_factory):
 
 
 def _copy_final_owner(seed, root, monkeypatch):
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: MACHINE)
     for name in ("anchor", "origin.git"):
         shutil.copytree(seed / name, root / name, copy_function=shutil.copyfile)
     records = root / f".{PROJECT}" / "worktrees"
@@ -38,7 +40,7 @@ def _copy_final_owner(seed, root, monkeypatch):
     monkeypatch.setattr(cfg, "install_dir", lambda: root / ".agent-worktrees")
     _git("remote", "set-url", "origin", str(root / "origin.git"), cwd=root / "anchor")
     config = cfg.Config(
-        srcroot=str(root), machine=MACHINE, platform="linux",
+        srcroot=str(root), machine=MACHINE, platform=cfg.detect_platform(),
         repo_name=PROJECT, repos={PROJECT: cfg.RepoConfig(
             anchor=str(root / "anchor"), worktree_root=str(root),
             default_branch="base", remote="origin",
@@ -47,7 +49,10 @@ def _copy_final_owner(seed, root, monkeypatch):
     _save_worktree(records, "owner")
     path = records / "owner.yaml"
     record = tracking.load_record(path)
+    config = replace(config, machine=record.execution_machine)
     record.repo = config.repo_name
+    record.platform = config.platform
+    record.worktree_path = str(root / "owner")
     tracking.save_record(record, path)
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
@@ -55,7 +60,7 @@ def _copy_final_owner(seed, root, monkeypatch):
 
 
 @pytest.fixture
-def final_owner(tmp_path, monkeypatch, _final_owner_seed):
+def final_owner(tmp_path, monkeypatch, _final_owner_seed, git_only_mux):
     return _copy_final_owner(_final_owner_seed, tmp_path, monkeypatch)
 
 
@@ -70,7 +75,7 @@ def _owner_snapshot(root):
 
 
 @pytest.mark.parametrize("attempt", range(2))
-def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, tmp_path, attempt):
+def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, tmp_path, attempt, git_only_mux):
     from agent_worktrees import claim_providers
 
     seed = _final_owner_seed
@@ -99,7 +104,7 @@ def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, 
         assert (anchor / "base.txt").read_text() == "base\n"
         record = tracking.load_record(path)
         assert record.status == "active" and record.resources == []
-        assert record.worktree_path == str(root / "gone-owner")
+        assert record.worktree_path == str(root / "owner")
         for relative, data in seed_before.items():
             if relative.parts[0] in {"anchor", "origin.git"}:
                 copied = root / relative
@@ -108,6 +113,7 @@ def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, 
                 assert not copied.samefile(seed / relative)
                 assert relative.name != "alternates"
     with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cfg.socket, "gethostname", lambda: MACHINE)
         patch.setattr(cfg, "tracking_dir", lambda: first_path.parent)
         patch.setattr(cfg, "project_dir", lambda name=None: first_path.parent.parent)
         patch.setattr(cfg, "install_dir", lambda: first_root / ".agent-worktrees")
@@ -182,6 +188,41 @@ def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
     assert current.status == "finalized" and current.resources[0].producer["phase"] == "closed"
 
 
+def test_retained_artifact_allows_actual_finalize_without_removing_bytes(final_owner, monkeypatch):
+    from agent_worktrees import claim_providers
+    from test_resource_producer_retention import retention
+
+    root, path, config = final_owner
+    owner_ref = tracking.format_claim_ref(config.machine, config.repo_name, "owner")
+    reserved = call(path, "reserve", {
+        "kind": "artifact", "namespace": "scratch", "lifetime": "artifact-owned",
+        "recovery": {"allocation": "fixture"},
+    }, ref=owner_ref)
+    assert reserved.get("ok"), reserved
+    permit = call(path, "begin", {"token": reserved["token"]}, ref=owner_ref)
+    assert permit.get("ok"), permit
+    allocated = root / "retained-diagnostics"
+    allocated.mkdir()
+    diagnostic = allocated / "failure.txt"
+    diagnostic.write_text("bounded useful evidence")
+    bound = call(path, "bind", {
+        "token": reserved["token"], "allocation_fence": permit["allocation_fence"],
+        "identity": {"allocation": str(allocated), "nonce": "fixture"},
+    }, ref=owner_ref)
+    assert bound.get("ok"), bound
+    assert finalize.validate_and_finalize("owner", config) is False
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda ref: retention(bound))
+    retained = call(path, "retain", {"token": reserved["token"]}, ref=owner_ref)
+    assert retained.get("ok"), retained
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
+    assert finalize.validate_and_finalize("owner", config) is True
+    record = tracking.load_record(path)
+    assert record.status == "finalized" and not record.resources[0].is_unsettled
+    assert record.resources[0].producer["phase"] == "retained"
+    assert diagnostic.read_text() == "bounded useful evidence"
+
+
 @pytest.mark.parametrize("layout", ["legacy", "legacy-exported", "managed"])
 def test_completed_finalize_retains_agenda_without_an_archive_dependency(
     final_owner, monkeypatch, layout,
@@ -190,7 +231,7 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
 
     root, path, config = final_owner
     anchor = root / "anchor"
-    checkout = root / "checkout"
+    checkout = root / "owner"
     _git("worktree", "add", "-q", str(checkout), "-b", "worktree/owner", "base", cwd=anchor)
     record = tracking.load_record(path)
     record.worktree_path = str(checkout)

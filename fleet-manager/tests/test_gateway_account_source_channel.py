@@ -3,14 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import time
 from pathlib import Path
+
+import pytest
 
 from fleet_manager.gateway_account_source import LEASE_CONTRACT
 from gateway_service_transport_fixtures import eventually, running
 from test_gateway_account_source import CAPABILITY, FIELDS, PIN, handler
 from test_gateway_service_handler import connect_handler
+
+
+@asynccontextmanager
+async def source_running(root, profile):
+    if profile == "jwt-pop-v1":
+        async with running(root) as rig:
+            yield rig
+        return
+    from test_gateway_enrolled_identity import EnrolledRig, RS256Harness
+
+    rig = EnrolledRig(root, RS256Harness)
+    try:
+        await rig.start(identity_provider=rig.h.provider)
+        yield rig
+    finally:
+        await rig.close()
 
 
 def custodian(tmp_path, monkeypatch):
@@ -45,11 +64,13 @@ def custodian(tmp_path, monkeypatch):
     return AccountRelay(str(policy)), calls, policy, document
 
 
-def test_real_source_request_renewal_denial_loss_and_reconnect(tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-rs256-pop-v1"])
+def test_real_source_request_renewal_denial_loss_and_reconnect(
+        tmp_path, monkeypatch, caplog, profile):
     source, calls, policy, document = custodian(tmp_path, monkeypatch)
 
     async def scenario():
-        async with running(tmp_path) as rig:
+        async with source_running(tmp_path, profile) as rig:
             await connect_handler(rig, handler(source).handle)
             async with await rig.request("/api/health", headers=PIN) as response:
                 support = await response.json()
@@ -100,11 +121,12 @@ def test_real_source_request_renewal_denial_loss_and_reconnect(tmp_path, monkeyp
     assert "synthetic-source-token-" not in caplog.text
 
 
-def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_path):
+@pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-rs256-pop-v1"])
+def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_path, profile):
     from test_gateway_account_source import Source
 
     async def scenario():
-        async with running(tmp_path) as rig:
+        async with source_running(tmp_path, profile) as rig:
             source = Source()
             entered, cancelled = asyncio.Event(), asyncio.Event()
 
@@ -145,11 +167,12 @@ def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_p
     asyncio.run(scenario())
 
 
-def test_installation_replacement_between_health_and_post_never_acquires(tmp_path):
+@pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-rs256-pop-v1"])
+def test_installation_replacement_between_health_and_post_never_acquires(tmp_path, profile):
     from test_gateway_account_source import Source
 
     async def scenario():
-        async with running(tmp_path) as rig:
+        async with source_running(tmp_path, profile) as rig:
             first, replacement = Source(), Source()
             await connect_handler(rig, handler(first).handle)
             async with await rig.request("/api/health", headers=PIN) as response:

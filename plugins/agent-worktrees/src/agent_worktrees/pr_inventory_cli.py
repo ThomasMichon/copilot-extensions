@@ -17,19 +17,23 @@ def dispatch(argv: list[str]) -> int:
     parser.add_argument("--contract", action="store_true")
     parser.add_argument("--config")
     parser.add_argument("--credential-command")
+    parser.add_argument("--expected-account")
     parser.add_argument("--max-pages", type=int, default=4)
     parser.add_argument("--max-pulls", type=int, default=200)
     parser.add_argument("--seconds", type=int, default=60)
     parser.add_argument("--json", action="store_true")
+    from .providers.observation_credentials import HTTP_PROFILES
+    parser.add_argument("--http-profile", choices=HTTP_PROFILES, default="legacy")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
         return int(error.code or 0)
     try:
         if args.contract:
-            if args.repo or args.config or args.credential_command:
+            if args.repo or args.config or args.credential_command or args.expected_account is not None:
                 raise ValueError("contract discovery cannot select repository or credentials")
             from .providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
+            from .providers.observation_http import contract
             print(json.dumps({
                 "protocol": "agent-worktrees.pr-inventory/v1",
                 "providers": ["github", "gitea"], "credential": "observe/per-request",
@@ -39,6 +43,12 @@ def dispatch(argv: list[str]) -> int:
                 "snapshot_credential_budget": {
                     "version": 1, "option": "--max-credential-requests",
                     "maximum": MAX_SNAPSHOT_REQUESTS,
+                },
+                "observation_http_profiles": contract(),
+                "observation_account_guard": {
+                    "version": 1, "option": "--expected-account", "providers": ["gitea"],
+                    "http_profiles": ["direct-v1"], "inventory_extra_requests": 1,
+                    "snapshot_within_credential_budget": True,
                 },
             }))
             return 0
@@ -52,6 +62,8 @@ def dispatch(argv: list[str]) -> int:
         deadline = time.monotonic() + args.seconds
         source = command_source(
             args.credential_command, remaining=lambda: deadline - time.monotonic(),
+            http_profile=args.http_profile,
+            expected_account=args.expected_account,
         )
         selected = load_binding(Path(args.config), args.repo)
         result = inventory(

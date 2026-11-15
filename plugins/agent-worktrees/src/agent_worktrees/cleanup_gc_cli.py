@@ -314,7 +314,12 @@ def _revalidate_cleanup_safety(
         with worktree_lifecycle.guard(yaml_path), tracking._RecordLock(
             yaml_path, require_sidecar=True,
         ):
-            latest = tracking.load_record(yaml_path)
+            from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
+
+            try:
+                latest = tracking.load_record(yaml_path)
+            except (ExecutionSpaceError, ValueError, OSError, cfg.yaml.YAMLError) as exc:
+                return RevalidationResult(False, f"record/reporting context unavailable: {exc}", "execution-space")
             if automatic and (
                 latest.dispatch_attempt is not None or latest.dispatch_attempt_opaque
             ):
@@ -322,7 +327,6 @@ def _revalidate_cleanup_safety(
                     False, "dispatch allocation requires owner conclusion and managed cleanup",
                     "dispatch-pending",
                 )
-            from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
             try:
                 require_cleanup_identity(latest, repo.anchor)
             except ExecutionSpaceError as exc:

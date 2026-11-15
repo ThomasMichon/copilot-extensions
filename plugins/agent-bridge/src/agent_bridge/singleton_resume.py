@@ -56,7 +56,7 @@ async def resume_singleton_anchor(
             and session.client is not None and session.client.is_running
         )
         if ready:
-            return _session_info(session)
+            return _session_info(session, manager)
         require_path_hosting(repo.path, operation="singleton resume")
         expected_native = session.acp_session_id
         held = db.execute_read(
@@ -111,4 +111,4 @@ async def resume_singleton_anchor(
     if not db.reserve_worktree_ownership(anchor, session.session_id, now=time.time()):
         raise _refuse("live_holder", "Singleton ownership changed during native acquisition")
     store.release_workspace_gate(anchor, delivery)
-    return _session_info(session)
+    return _session_info(session, manager)

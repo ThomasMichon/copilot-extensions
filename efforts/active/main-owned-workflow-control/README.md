@@ -65,6 +65,10 @@ suites to fast PR CI or transfer the promotion writer.
 
 - **Topology:** independent per-slice PRs, serial landing.
 - **Host (owns PRs):** Campaign driver, explicitly appointed by the operator.
+- **Attribution intake:** A7906-P/G and the local P7906/V7906 receiver
+  preserve the existing attribution, #6909/#7900 and promotion owners.
+  Planned receiving neither appoints an implementer nor authorizes a CI
+  rerun, failure injection, probe, renewed attempt or resource operation.
 - **Delegates:** bounded read-only audit evidence may be partitioned by workflow
   family. Implementation ownership must be accepted for one non-overlapping
   slice before editing; no competing implementation is assigned by this plan.
@@ -105,6 +109,13 @@ suites to fast PR CI or transfer the promotion writer.
   native-helper, runner/result and workflow edits before touching those files.
   Independent new-file witness/profile work does not wait for the whole Main
   PR to merge. A posted handoff is not acceptance or live activation.
+
+The finite #7075 continuation remains with the existing campaign/test-burndown,
+Handoff hosted-acceptance and distinct binding/publisher/concurrency/
+installation-identity custodians. Preserve #5245 containment, #2660
+identity-cost, native-repair, CI/release and capacity owners. No implementer,
+runtime action, new validation lane or generic signoff is appointed; the actual
+nonexpiring hosted claim remains until completed or authoritatively released.
 
 ## Context
 
@@ -624,6 +635,79 @@ authorizes critical main-path acceptance or a bounded administrative change.
   contract, and live Dependabot #6710 targets dev. Event-normalized invocation
   savings remain part of Phase 1 measurement, not an inferred result here.
 
+#### Finite faithful-fixture and comparable-measurement continuation - #7075
+
+- [ ] **FI7075-P1:** Retain real copied Handoff CLI mode-off, honest-unavailability
+  and non-fabrication behavior, all original eleven cases/assertions,
+  deterministic absence of sibling/runtime roots without network/provisioning/
+  ambient dependence, real handler/spawn behavior and four-second child bounds.
+  Do not disable production provisioning or replace execution with text matching;
+  preserve existing item/group/plugin/resource containment.
+- [ ] **FI7075-P2:** Retain the distinct inherited binding/lifecycle lane already
+  received by #7075: explicit synthetic guest-kind AND identity at real subprocess
+  boundaries, private profile/registration, actual publisher/concurrency
+  assertions, supported named-direct WSL with observed OR explicit distribution,
+  absence-of-registration alone not refusal, no-distribution/no-valid-registration
+  refusal, and original foreign/conflicting/native/container controls. Preserve
+  read-only admission/deadlines; no host registration, WSL skip or weakened fence.
+  Credit prior synthetic-guest/private-registration/native-home corrections,
+  with authoritative guest resolution and unrelated marketplace diagnosis kept
+  separate.
+- [ ] **FI7075-P3:** Keep one evidence record with separate lane rows for selected
+  inventory/exclusions, source, environment, outcomes and setup/call/teardown
+  timings. For incumbent Handoff retain run38977784933/job117234300776:
+  27 files/383 tests/375 pass/8 skip, 175.711s elapsed. The cases in
+  `plugins/context-handoff/tests/cli-parity.test.mjs` are
+  `CLI handoff commands are never refused for mode=off -- only for unrelated reasons`
+  at 100.038409s and
+  `list-sessions degrades honestly (never fabricates a chain) without agent-worktrees`
+  at 72.827613s. Obtain comparable hosted before/after with EACH named case under
+  5s and no lost assertions. Do not sum parallel durations into wall time.
+- [ ] **FI7075-P4:** For the inherited lane retain the complete payload-invocation
+  suite excluding `test_derived_diagnostic_cli.py` PLUS Index command-catalog
+  tests, equivalent complete WSL AND hosted-Linux selection and original
+  publisher/concurrency semantics. Preserve original 55 fail/130 pass/24 skip
+  in 151.12s versus 185 pass/24 skip in 218.20s as different environments AND
+  outcomes, not speedup. Later 139 pass/66 skip or recomposed partitions earn
+  only their actual scope; never combine this Python inventory with Node383.
+- [ ] **FI7075-P5:** Credit merged source and attributed Windows/native-Linux
+  eleven-case results without calling them comparable hosted acceptance.
+  Preserve the incumbent nonexpiring hosted-acceptance claim and the under
+  10min event-to-required-gate INCLUDING queues program metric; unrelated
+  release/native portfolios are not finite-lane prerequisites. Required
+  PR/promotion CI remains unit-only; optional/periodic/native/hosted duties stay
+  separately owed.
+
+##### Local Validation - #7075
+
+- [ ] **FI7075-LV1:** Read back EVERY P1-P5 and current #7075 original/edit/
+  discussion/inherited clause; exercise faithful real consumers, complete
+  inventory/assertions and negative controls at original lane tiers and unchanged
+  limits. Early refusal, job name, authored fixture or a local-container result
+  is not hosted PASS.
+- [ ] **FI7075-LV2:** Establish separately scoped valid before/after timing for
+  both lanes, each named Handoff case under 5s and truthful queues/program
+  metrics. Preserve failed, skipped, unavailable and differently selected
+  evidence; source/release/native/installed/hosted/whole completion are distinct.
+- [ ] **FI7075-LV3:** Preserve existing Handoff hosted claimant and binding/
+  publisher/concurrency/identity custodians. #7075 remains OPEN for unfinished
+  acceptance. Already settled subordinate tracking is not reopened, restudied
+  or recredited; this receiving amendment is not technical completion or
+  claim/resource release.
+
+#### Source-attribution server-failure receiving - #7906
+
+- [ ] **A7906-P:** Retain the four-clause planned source-attribution union in
+  [P7906/V7906](workflow-portfolio-audit.md#source-attribution-server-failure---7906):
+  only association HTTP 500/502/503/504 admits a complete paginated open-Dev
+  census; auth/rate/unclassified/incomplete/duplicate-head/moving-snapshot
+  cases fail closed; existing request budgets and the final stable-snapshot
+  fence remain. Credit #7907 source37/Main-helper delivery only at its actual
+  tier; the trusted affected-current-head failure-path consumer result remains
+  unverified. Preserve existing source-attribution, #6909/#7900 and promotion
+  owners. This is planned tracking receipt, not implementation, CI retry,
+  injected failure, probe, attempt renewal or owner/resource transfer.
+
 ### Phase 5a - Opt-in Maintainer merge and rebase stewardship
 
 _(Agent-recommended implementation of the October 18 operator request;
@@ -805,6 +889,24 @@ regressions, retained-owner seams and the completion gate.
   native local-backup-to-hosted cycle with enforced repository-owner delegation
   before periodic enablement.
 
+- [ ] **FI7075-G:** Resolve EVERY FI7075-P1-P5 AND FI7075-LV1-LV3 at its
+  original finite lane tier: real isolated CLI and guest/identity/publisher
+  consumers, complete equivalent selectors, exact baseline and valid separately
+  scoped hosted/WSL measurements, unchanged unit-only policy/limits, incumbent
+  hosted claim and all source/release/native/installed distinctions. No
+  whole-parent, every-host, new CI lane or extra acknowledgement prerequisite
+  is added; receiving review/merge/readback is not technical acceptance or
+  resource release.
+
+- [ ] **A7906-G:** Resolve A7906-P AND the local P7906/V7906 union at its
+  original attribution-consumer tier, preserving every admitted/refused HTTP
+  class, complete pagination, request bound and final snapshot fence. Keep
+  source/Main delivery separate from the actual trusted affected-current-head
+  result; unperformed qualification remains unchecked. Planned receiving may
+  retain unfinished tracking without claiming technical completion or an
+  operational effect. No generic ACK, all-host, unrelated portfolio or new
+  issue-OPEN condition is added.
+
 ## Proposal
 
 See [design.md](design.md). This is proposed behavior, not an as-is claim.
@@ -816,6 +918,8 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-14 UTC - Source-attribution receiving](journal/2026/11.14-attribution-receiving.md)
+- [2026-11-14 UTC - Finite fixture receiving](journal/2026/11.14-fixture-receiving.md)
 - [2026-11-09 - Installed Manager lifecycle contract](journal/2026/11.09-installed-manager-lifecycle.md)
 - [2026-10-12](journal/2026/10.12.md)
 - [2026-10-13](journal/2026/10.13.md)

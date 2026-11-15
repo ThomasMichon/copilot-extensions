@@ -76,6 +76,24 @@ tiers and all original process, time, storage and cleanup budgets unchanged.
 No new whole-portfolio, every-host or generic acknowledgement prerequisite
 is added to a finite family; this ROOT's own completion gate remains intact.
 
+The proposed finite #6747 classifier-startup investigation continues through
+the SAME primary maintainer, existing Phase 4 Logger wave and Phase 7
+migration-intake/domain review. Preserve the existing sole diagnosis
+claimant, OPEN #1303, all incumbent check states and the separate
+#5245/#6057/#6237/#7256/#7075 source, fixture, runner, native, release and
+resource custodians. The unfinished investigation remains open under its
+existing custodian; administrative tracking consolidation neither resolves
+its cause nor releases its claim. Normal review and actual complete direct
+Plan/local AND actual ROOT-global Validation/Coordination/Journal delivery,
+followed by permitted whole-current receiving/source/history/custody
+readback, precede a separate source judgment. No implementation appointment,
+generic ACK, execution enrollment or unrelated whole-portfolio prerequisite
+follows.
+
+#6747 is a separate finite investigation lane. The existing four-family
+fixture/runner grouping below remains exactly #7243/#9614/#9436/#10225;
+this amendment does not add a fifth member to that group.
+
 The four finite fixture/runner contracts below use the SAME primary
 maintainer and existing Phase 4 Logger/shared-fixture waves (#7243/#9614),
 Phase 5 owning runner/cache/disposal work (#9436/#10225), and Phase 7
@@ -100,6 +118,9 @@ and Phase4's owning fixture/runner/hygiene wave. Preserve the existing
 primary, installer/test/process/GUI/native, audit/cohort/periodic-failure,
 release and resource custodians, OPEN #1303 and #6237/#6747/#7256/#7075
 reservations. Its completed ten-adopter sweep and cache repair stay credited.
+The inherited #6675 registration-authority family retains #6682's exact
+fixture/186-case credit and the existing coordination owner's remaining-group
+coverage request OR attributed accepted narrowing/tracked disposition.
 Normal review, actual complete direct Plan/local AND global Validation/
 Coordination/Journal delivery and permitted whole-current source/receiver/
 custody readback precede any separate administrative judgment. No new
@@ -136,6 +157,26 @@ Validation/Coordination/Journal delivery and permitted whole-current
 readback precede any separate source judgment; intake is not technical
 PASS, implementation, acceptance or resource release.
 
+The complete #4217 family now proposed includes its directly inherited finite
+default-allocator lane from #8511, not only the older four-outcome enrollment
+request. Continue through the SAME primary maintainer, existing Phase 2/4
+scenario and owning clean-room wave and Phase 7 migration-intake/domain review.
+The existing rig/scenario/CI-portfolio/allocator, source, runner, native,
+periodic-failure, release and resource custodians retain their responsibilities.
+No container, credential, results directory, retained log, native execution or
+cleanup custody moves. #5921's missing-report/reducer family and #5922 remain
+independent; the existing statement keeping #8511 separate from that family is
+preserved, not silently deleted or treated as an enrollment dependency.
+
+Before any separate #4217 redundant-tracking judgment, normal review must
+deliver this whole addition to the actual ROOT Plan, local Validation,
+level-two global Validation, Coordination and dated Journal; read back the
+complete current receiving/source contracts and actual custody under the
+existing gate. Keep #4217 and #1303 OPEN now. A proposal, map, old intake merge,
+unfinished code or generic new ACK is not that acceptance or a new barrier.
+This tracking proposal authorizes no test, workflow, runtime, native, cleanup,
+resource allocation or implementation action.
+
 <!-- backlog-reconciliation:7556:qualified-sixteen:4128:Coordination -->
 
 The proposed #4128 family retains its finite filesystem-registry owner and
@@ -144,6 +185,25 @@ custodians. #1303 retains broad containment; closed #1906 is the distinct
 historical persistent OS-environment mechanism, not a live claim or another
 transfer. Existing Phase 4 wave/Phase 7 intake, all budget/effect/storage
 limits and actual source/resource holds remain; no executor is appointed.
+
+The later #4128/#10154 Manager runtime-source lane uses the SAME existing
+Phase 4 Worktrees/Manager wave and Phase 7 intake, under the incumbent
+primary maintainer and actual Worktrees-registry, Manager-source/delivery/
+provider/queue, fixture/runner/containment, native/source/audit/cohort/
+periodic-failure, release and resource custodians. Preserve OPEN #1303,
+every incumbent participant, requirement, alternative, check state and
+actual claim/hold. This does not activate an effort, appoint an implementer
+or create another registration authority.
+
+Normal review and actual direct Plan/local AND ROOT-global Validation/
+Coordination/dated-Journal delivery, followed by complete current source,
+discussion, receiver, provenance and custody readback, precede a separate
+#4128 tracking-retirement judgment. Redundant tracking retirement is not
+completion of either technical lane or source/resource release. Genuine
+intervening source-owner conditions remain; unfinished implementation,
+a generic new ACK or unrelated whole-portfolio completion is not an added
+intake prerequisite. This proposal performs no import, collection, test,
+native interaction, provider operation, registration repair or cleanup.
 
 The proposed finite #1012 conditional-field synchronization family below uses the
 existing Phase 4 Worktrees/Manager wave and Phase 7 intake, not a new timing
@@ -214,6 +274,41 @@ admission or budgets.
   plugin is active at a time.
 - **Handoff:** every slice updates the machine-readable inventory, contract map,
   disposition record, and effort journal before it is considered complete.
+
+The finite #6093/#6138 families enter through existing Phase 7
+deduplication and normal domain-Plan review into Phase 4 ONLY:
+Logger/Manager link-fixture capability and Budget portable-PowerShell
+timeout disposition remain distinct families under this same portfolio
+primary maintainer. Existing source/fixture/investigation custodians,
+OPEN #1303, all incumbent rows/check states, first unresolved gates,
+native/periodic/release/resource holds and historical Journal remain.
+
+#6093 retains all LF/LFV conditions, its inherited #9618 taking statement
+and FULL CURRENT OPEN parent readback before administrative retirement.
+Its held fixture source supplies no current-repair assertion.
+#6138 retains its existing investigator, actual-candidate-first
+source-correction OR bounded-same-SHA-retry alternative, original bounds
+and independent #6131/#6135 repair.
+
+Normal review must actually merge the complete direct Phase 4 Plan/local
+Validation, actual level-two global Validation, Coordination and dated
+Journal before domain receiving is accepted. Ledger publication alone is
+not acceptance. Separate permitted whole-current source/receiver/custody
+readback and each literal source condition govern any later administrative
+judgment. Both sources stay OPEN now; no generic ACK, implementation
+appointment, execution, activation, privilege change or custody release
+is introduced.
+
+The separate P7643/V7643/G7643 Phase 5 runner family enters through existing
+Phase 7 migration intake and normal domain-Plan review. It is not a fifth F4
+member or #10225 intake. Preserve the existing runner/group/sandbox owner,
+later exact-path cleanup custody, OPEN #1303 and all original bounds.
+The earlier independent-OPEN tracking placement remains historical evidence;
+a separate current whole-contract judgment may supersede that placement,
+never artifact custody or technical acceptance. Complete reviewed
+Plan/local AND actual global Validation, Coordination and dated Journal
+delivery precede a separate source judgment; no implementation appointment,
+claim expiry, resource release or generic ACK follows.
 
 ## Context
 
@@ -561,6 +656,157 @@ original and refinement. OPEN #1303 remains the live portfolio coordination
 token; historical source trackers are not required live claim tokens after
 a separately qualified administrative supersession.
 
+#### Finite PowerShell classifier-startup investigation from #6747
+
+Proposed receiving through the existing Phase 4 Logger wave and Phase 7
+domain-intake review. Preserve the original investigation and sole diagnosis
+custody; this is planned unresolved work, not a causal repair or accepted flake.
+
+- [ ] **N6747-P1:** Retain hosted Linux run38633055933/job116089425533 at
+  original source ee4e6b0063dff7eafed04942feec10974de4f52c:
+  `tests/test_install_binstub.py::test_windows_task_access_denied_classifier_downgrades_and_rethrows[pwsh]`
+  reached its unchanged 20-second real PowerShell child deadline without
+  stdout/stderr, with 475 other passes and 29 skips. Preserve exact
+  access-denied downgrade AND unrelated-error rethrow assertions,
+  containment and original process/item/group/plugin/resource limits.
+- [ ] **N6747-P2:** Through the existing diagnosis owner, establish the
+  actual fresh-process/startup/execution boundary and repair the proved
+  cause through ordinary source review and CI. Preserve meaningful real
+  consumer coverage; no deadline increase, skipped assertion, blind
+  publication retrigger or CI waiver substitutes for diagnosis and repair.
+  An unresolved cause remains explicitly unchecked in this family.
+- [ ] **N6747-P3:** Credit #6756 only at its reported controlled-startup,
+  isolated-root, noninteractive and immediate-entry-marker scope. Retain
+  the reported hosted logger suites of 476 and 823 passes and the older
+  unmodified-source passing run38637663769 as distinct observations, not
+  causal proof or flake acceptance. The separately repaired Resume mocks
+  and broader #5245 containment remain independent.
+- [ ] **N6747-P4:** Retain the distinct #6747 discussion of #7139 at
+  235e04d33c289c85f18af964e78946e5dd37c26f, run39038095790/
+  job117411887700:
+  `test_native_source_recovery_matches_explicit_python_selection[canonical-None-pwsh]`
+  reached its unchanged 15-second child deadline without output, with
+  95 other passes and 34 skips; a later unchanged-code local matrix passed
+  12 with six skips. Neither observation establishes a shared cause,
+  accepted flake or completion of the source-install/release owners'
+  independent duties.
+
+##### Local Validation
+
+- [ ] **N6747-V1:** When separately authorized in the existing faithful
+  bounded lane, qualify the actual selected PowerShell classifier consumer:
+  denied access warns/continues and unrelated errors rethrow. Retain
+  startup/entry/stream/stage evidence, original assertions, unchanged
+  20-second child limit and primary versus diagnostic/cleanup outcomes.
+- [ ] **N6747-V2:** Keep original failures, controlled diagnostic gains,
+  older-source hosted passes and the separate 15-second source-recovery
+  observation/local pass attributable and distinct. Passing retries,
+  suite totals or an entry marker do not explain the original timeout.
+- [ ] **N6747-V3:** Record the proved boundary, canonical correction and
+  meaningful regression/control evidence through the existing owner and
+  normal required CI. Until then retain the diagnosis as unresolved.
+  Preserve current unit-only required CI, quiesced hosted Windows execution,
+  proper separately admitted tiers and original limits; no native run,
+  retry, process operation or implementation occurs during intake.
+
+#### Finite Logger and HostProfile link-fixture capability from #6093
+
+Proposed Phase 4 Logger/Manager fixture-wave receiving through Phase 7
+migration-intake and domain-Plan review. The portfolio remains the single
+canonical domain owner; existing Logger and HostProfile source custodians
+retain their separate implementation scopes.
+
+The five original Logger nodes are
+`test_explicit_repo_config_env_rejects_symlinked_ancestor`,
+`test_explicit_repo_config_env_rejects_symlinked_non_git_root`,
+`test_explicit_repo_config_env_rejects_symlink_masked_by_dotdot`,
+`test_repo_config_rejects_symlinked_candidate`, and
+`test_repo_config_rejects_symlinked_ancestor_directory`.
+
+The inherited #9618 HostProfileTests controls are
+`test_linked_or_hardlinked_owned_profile_is_refused` and
+`test_incomplete_receipt_publication_and_linked_ancestor_are_refused`,
+including their direct promotion-unit packet invocation. Preserve that
+source's taking statement and unchanged nodes, effects and budgets.
+
+##### Direct Plan
+
+- [ ] LF1 (#6093) - Establish an explicit portable capability contract OR
+  native reparse/junction coverage that genuinely proves the five original
+  scaffold link-rejection boundaries: explicit env-config ancestor, non-Git
+  root, link masked by dotdot, config candidate and ancestor directory.
+  Correct the directory-link target_is_directory=True fixture declaration.
+  Do not require both alternatives or replace rejection with ordinary
+  relative-path acceptance.
+- [ ] LF2 (#9618) - Use the existing explicit Windows WinError-1314 skip
+  convention for actual symlink controls in the two named HostProfileTests
+  cases, including their direct promotion-packet invocation. Preserve
+  unrelated hardlink/incomplete-publication assertions even when only
+  symlink creation lacks capability; do not skip the whole composite test.
+- [ ] LF3 - Retain real POSIX link rejection, selected test nodes/effect
+  allowances/budgets, production trust rules and otherwise modeled host
+  policy. Report skipped/unreached assertions as such, never passes.
+  No automatic elevation, Developer Mode/host setting change, trust
+  relaxation or corpus-inventory change.
+
+##### Local Validation
+
+- [ ] LFV1 - Under separately authorized ordinary native Windows capability,
+  run the actual Logger scaffold and direct host-profile promotion-unit
+  paths without undeclared elevation. Show explicit unavailable symlink
+  controls, surviving independent assertions and completion of the selected
+  packet; retain real rejection coverage where symlinks/reparse controls
+  are supported and on POSIX.
+- [ ] LFV2 - Verify each original rejection boundary still runs when its
+  capability is present, including directory and dotdot masking cases.
+  Preserve genuine non-1314 failures and truthful pass/skip/failure results.
+  Historical suite counts and passing inventory behavior are not a fresh
+  fixture-repair receipt.
+- [ ] LFV3 - Keep the existing claimants, source/portfolio owners and gates;
+  read back the FULL current OPEN parent before administrative retirement.
+  Acceptance stays unchecked. This intake creates no link, runs no test
+  and changes no privilege, selected packet or production policy.
+
+#### Finite portable PowerShell spaced-path timeout disposition from #6138
+
+Proposed Phase 4 Budget fixture-wave receiving through Phase 7 intake and
+domain-Plan review. Preserve the existing bounded release-blocker
+investigator; #6131 / PR #6135's watch-generation repair remains independent.
+
+##### Direct Plan
+
+- [ ] **B6138-P1:** Retain actual Dev run38106720038, Budget
+  job114376374185, head e5990b0f0940e893c0dffca6c5707f11d4333d42:
+  `test_powershell_self_stage_preserves_spaced_paths_and_force`
+  exceeded the 30-second item limit while waiting for its PowerShell child;
+  the job reported 1 failed/52 passed. Diagnose the actual subprocess and
+  contained-test assumptions before budget edits or release retry.
+- [ ] **B6138-P2:** Preserve the owner's unchanged contained Linux
+  8.17-second pass as limited evidence, explicitly not CI-flake proof.
+  Inspect the attributable actual candidate result THEN choose a justified
+  source correction OR bounded same-SHA retry, not both. A genuine
+  regression requires a versioned fix-forward through normal review and
+  release gates; retry is not a substitute. Keep the original bounds and
+  existing investigator's decision custody.
+- [ ] **B6138-P3:** Preserve spaced profile/payload/runtime paths, actual
+  self-staging and Force forwarding. Credit real materialization and
+  bounded-copy fixture improvements at their delivered scopes. This is a
+  portable PowerShell case skipped on native Windows; native-only,
+  unrelated-plugin, absent-job, cancelled or skipped results do not prove
+  this consumer passed or its timeout was causally dispositioned.
+
+##### Local Validation
+
+- [ ] **B6138-V:** At the existing separately authorized finite portable
+  consumer boundary, retain exact candidate/source, invocation and selected
+  test, literal child/item outcomes and unchanged budgets, original failed
+  receipt and limited Linux pass. Record the investigator's justified
+  correction-OR-bounded-same-SHA-retry disposition without hiding failures,
+  assuming a flake or substituting native/unrelated green. Preserve
+  unit-only required CI, proper existing contained/periodic/native tiers,
+  owning cleanup and independent #6131/#6135 credit. Documentary intake
+  runs no installer, workflow or test and grants no retry or rollout.
+
 ### Phase 5 — Tiered developer and review workflows
 
 - [ ] Expose explicit commands for guards, hermetic units, contained components,
@@ -570,6 +816,52 @@ a separately qualified administrative supersession.
 - [ ] Record and enforce per-plugin runtime and resource budgets.
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
+
+#### Finite external image-mapping cleanup outcome - #7643
+
+- [ ] **P7643-1:** Preserve the original Windows ARM64 case: the copied x64
+  child completed, but its test-owned executable remained mapped by XtaCache
+  and cleanup failed. Retain the successful child assertions, failed
+  deletion-readiness evidence and distinction from a read-only file or a
+  still-running fixture child. Do not infer the current holder or claim a
+  fresh reproduction.
+- [ ] **P7643-2:** Choose bounded exact-ownership-scoped handling OR a
+  truthful retained-artifact outcome that the existing cleanup owner can
+  reconcile after the external mapping releases. Do not require both
+  alternatives, a new owner ACK, service restart, process kill or broad
+  directory deletion. Unknown release retains the artifact and uncertainty.
+- [ ] **P7643-3:** Report cleanup failure separately from the original
+  build/test result; failed cleanup is never a green whole run. Preserve
+  the primary error when cleanup also fails and record the exact residual
+  and custody for the existing cleanup owner.
+- [ ] **P7643-4:** Keep the owning runner/group/sandbox lifecycle and
+  `tools/plugin_test_containment.py` boundary, original containment and
+  item/group/plugin/resource limits. Installer #7494/#7686 retained-input
+  failures and #10225's distinct post-exit sharing-handle family stay separate.
+- [ ] **P7643-5:** Preserve the existing runner/group/sandbox owner and
+  separately authorized later exact-path cleanup. A successful child,
+  related theme or partial receiver is not whole-source acceptance. After
+  complete reviewed receiving/routing and current source readback, a separate
+  tracking judgment may supersede the earlier independent-OPEN placement
+  without declaring a repair or releasing custody. Intake is not a
+  source/resource transfer or implementation appointment.
+
+##### Local Validation
+
+- [ ] **V7643-1:** At the original bounded Windows ARM64 runner boundary,
+  exercise the selected P7643-2 outcome with a controlled owned artifact/
+  mapping fixture, preserving child-exit and original test assertions.
+  Do not touch the live XtaCache service or a host-owned executable.
+- [ ] **V7643-2:** Prove cleanup failure remains visible and the outer
+  whole-run status is non-green; retain the primary build/test error
+  separately. Cover successful child execution plus cleanup refusal and
+  the truthful retained-artifact outcome.
+- [ ] **V7643-3:** Preserve exact run-owned artifact identity; any permitted
+  cleanup is scoped to that artifact after its applicable release condition.
+  Unknown/foreign ownership remains retained, never deleted or passed.
+- [ ] **V7643-4:** Keep the finite case separate from #7494/#7686 and
+  #10225 at its existing bounded tier. No all-suite, every-host, broader
+  native, required-PR-CI or unrelated portfolio prerequisite is added.
 
 ### Phase 6 — Final assurance and steady-state governance
 
@@ -593,6 +885,10 @@ a separately qualified administrative supersession.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
 - [ ] Use synthetic fixtures and reproducible public test cases.
+- [x] **I7643:** Route the separate P7643/V7643/G7643 Phase 5 family through
+  this existing migration-intake deduplication/ownership and domain-review
+  process. Preserve its independent source status and existing cleanup
+  owner; this does not add #7643 to F4 or #10225, run a test or release custody.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -1232,6 +1528,54 @@ is not a finding that every test is uncontained or a live escape occurred._
   owned. No blanket context-disabling workaround, real OS mutation or
   whole-portfolio prerequisite substitutes for this finite authority proof.
 
+### Additive Manager runtime-source containment from #4128/#10154
+
+_Planned tracking intake only. Keep incumbent T4128-P1-P4 and T4128-V1,
+their check states, participants and source/resource duties unchanged.
+Filesystem-registry isolation and Manager real-update delivery are distinct
+consumers; neither completes the other._
+
+- [ ] **T4128-P5:** Isolate
+  `test_runtime_source.py::test_real_update_error_record_requires_explicit_missing_argument`
+  BEFORE its real `update_orchestration.run_update_steps`/error-record path,
+  including earlier import/collection/fixture work reaching those authorities.
+  Bind source/runtime selection, home, control-plane provider registry,
+  selected Manager installation and queue/global authority to runner-owned
+  synthetic state, not only a temporary Manager runtime root. Audit adjacent
+  runtime-source tests reaching registration, launcher, daemon or update-journal
+  side effects and contain the same boundaries.
+- [ ] **T4128-P6:** Preserve meaningful real-orchestration missing-argument
+  and error-record coverage; do not mock away the entire orchestration to
+  obtain containment. Temporary provider registration must not escape to
+  an outside selected installation or be consumed by a later ordinary update.
+  Credit #5122's distinct-caller repair without treating it as proof that this
+  module enters the sandbox. Preserve expected outputs/errors and actual
+  caller propagation.
+- [ ] **T4128-P7:** Propagate the same authority isolation into worker
+  subprocesses and restore temporary environment/configuration bindings
+  truthfully across normal and exceptional setup/teardown. Preserve primary
+  failures and truthful cleanup outcomes; never overwrite concurrent operator
+  state or reproduce against a live registry. Keep #10118 legacy upgrade,
+  normal queue recovery policy and persistent User/Machine environment effects
+  separately owned. Retain delivered Worktrees autouse/actual-writer/session-seed
+  and shared-runner protections at their actual scopes.
+
+#### Focused local validation for the Manager lane
+
+- [ ] **T4128-LV2:** Under hostile SYNTHETIC ambient/source/context input,
+  exercise the actual Manager runtime-source real-update/error-record
+  consumer and adjacent delivery paths without bypassing meaningful
+  orchestration. Seed outside-surrogate provider/selected-Manager/source/
+  queue state; verify its identity/content stays unchanged while intended
+  sandbox effects and expected missing-argument/error records occur. Verify
+  a later ordinary synthetic consumer cannot discover a leaked temporary
+  provider. Include wrong/unavailable authority refusal/noninterference,
+  exceptional setup/teardown and worker propagation/restoration controls.
+  Outside state is synthetic, never the live installation. Runtime-root
+  redirection, blanket context disabling or an isolated green retry is not
+  the whole proof. Use the original bounded faithful consumer tier and
+  existing execution/cleanup budgets, not a new every-platform/native programme.
+
 ### Proposed finite intake: clean-room enrollment and client warnings
 
 _(Agent-recommended documentary refinement; no test, CI, package or
@@ -1256,6 +1600,34 @@ implementation operation is authorized.)_
   failure/reporting/cleanup controls through existing authorized lanes.
   Preserve truthful unsupported/unavailable and original tiers; no broad
   required integration, new runner or every-platform/adopter program.
+- [ ] **T4217-P4:** Retain #4217's complete inherited #8511 finite default
+  host-results allocator contract as an independently progressable lane beside
+  T4217-P1/P2 enrollment. Atomically allocate an exclusive default results
+  directory for each simultaneous run, including same-second starts and
+  distinct container-name suffixes. BOTH `cr-report.json` AND copied `cr-logs/`
+  must remain attributable to their correct independent run; unique container
+  names alone do not provide independent artifact ownership. Preserve the
+  existing distinct explicit `CR_RESULTS_DIR` workaround outside the checkout
+  and its intended override semantics. Container-local retained logs remain
+  evidence only under their actual owners until authorized teardown.
+- [ ] **T4217-P5:** Check the corresponding PowerShell allocation path without
+  assuming either safety or an observed Windows incident. Preserve the actual
+  Linux collision separately from static PowerShell susceptibility, and add
+  the focused collision/concurrency regression without expanding required
+  native integration or waiting for the whole enrollment program.
+- [ ] **T4217-LV2:** Exercise simultaneous default allocations in the same
+  timestamp interval with different container suffixes. Verify distinct
+  exclusive destinations, correct independent report AND copied-log contents,
+  collision/refusal behavior, explicit-directory override and truthful printed
+  paths. A successful container execution, unique container name or shared
+  host report does not prove correct artifact attribution.
+- [ ] **T4217-LV3:** Record Linux observation, corresponding PowerShell source
+  findings, focused regression results and any independently authorized native
+  qualification as distinct evidence grades. Preserve original unit-only
+  required PR/promotion policy, existing periodic/explicit tiers, prerequisites,
+  budgets and owning cleanup. Missing capacity, skip, incomplete cleanup or
+  unexecuted native coverage remains unavailable/non-PASS.
+
 - [ ] **T4233-P1:** Retain only the exact original supported web-client
   dependency SET and public-suite deprecation outcome across supported
   platforms. Identify original warning/class, supported combination and
@@ -1432,6 +1804,16 @@ is delivered, not work reopened by these unchecked accounting rows.)_
   Preserve actual installer/subprocess/native/GUI coverage, inventory,
   assertions and current resource/deadline limits. No dropped boundaries,
   skip, timeout growth, CI waiver or new every-native-host programme.
+- [ ] **P5245-7:** Retain the complete inherited #6675 exact-session fixture
+  contract: use the shared configuration/registration-authority fixture,
+  preserve actual registrations and deterministic record ordering, and credit
+  merged #6682's established 186-case related family and exact fast guard.
+  The historical 15-group run stopped in group 11; it does not prove later
+  groups. Obtain the actual requested remaining registration-authority
+  family/remaining-group evidence OR an attributed accepted narrowing/tracked
+  disposition through its existing coordination owner. Do not reopen the
+  delivered fixture fix, waive that request or impose a universal new
+  native/full-plugin qualification requirement.
 - [ ] **V5245-1:** Keep an exact TEN-adopter delivered-versus-spot-check
   ledger and cache/two-cycle credit, naming the actual remaining diagnostic
   tail and custodian rather than reopening the original repairs.
@@ -1443,6 +1825,12 @@ is delivered, not work reopened by these unchecked accounting rows.)_
   launch, current required-unit/periodic and containing Linux release
   evidence separate. Current policy need not preserve every historical
   budget byte-for-byte; no relaxed retry or waiver is authorized.
+- [ ] **V5245-4:** Reconcile the inherited #6675 remaining-family/group
+  request against the already-passing 186-case family and exact real
+  registration/deterministic-order fixture. Record executed, blocked and
+  unexecuted boundaries separately. Later groups are not proved by the failed
+  historical run; any accepted narrowing/disposition is attributable to its
+  existing coordination owner, not inferred as a pass.
 
 ### Finite Logger interpreter, probe and retry fixtures from #7243
 
@@ -1618,8 +2006,12 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
   Preserve all #1303 body inheritance and live claims, original alternatives,
   checked foundations, actual ROOT global Validation and complete history.
   No new executor, blanket acknowledgement, claim expiry or handoff follows.
-- [ ] **F4-C2:** Preserve #7643 independently OPEN, #8521's explicit OPEN
-  diagnostic/private-cache residual and #9460/#9467's separate claimed
+- [ ] **F4-C2:** Preserve #7643's separate Phase 5 P7643/V7643/G7643 family
+  and original artifact/cleanup custody; I7643 records routing, not repair.
+  Its earlier independent-OPEN placement remains historical evidence for
+  the separate current whole-contract tracking judgment. Preserve #8521's
+  explicit OPEN diagnostic/private-cache residual and #9460/#9467's separate
+  claimed
   teardown-fixture/production guard. #9699 is finite completed fixture
   credit, not a production-guard relaxation or portfolio completion.
   The separate #9375/#10239 cases are not intake scope.
@@ -1672,6 +2064,16 @@ execution, independently admitted periodic/explicit/native tiers, original
 budgets, every incumbent check state and actual source/resource holders.
 They add no unrelated whole-parent prerequisite to a finite source outcome
 and waive none of this ROOT's own whole completion obligations.
+
+- [ ] **N6747-G:** Resolve EVERY N6747-P1-P4/local-V1-V3 and continuing
+  Coordination clause: exact real PowerShell classifier/downgrade/rethrow
+  boundary and unchanged 20 seconds, proved cause and canonical correction,
+  limited diagnostic credit and distinct 15-second source-recovery evidence.
+  Preserve the same diagnosis/source/release custodians and all incumbent
+  portfolio acceptance. Administrative intake is not causal repair, accepted
+  flake, executed PASS or source/resource release. Technical work remains
+  unchecked after any separately qualified tracking supersession; unrelated
+  whole-portfolio completion is not an added finite-family prerequisite.
 
 - [ ] **F7243-G:** Resolve EVERY F7243 Plan/local Validation and F4
   Coordination clause: both Bash reconcile cases, independent cold-store
@@ -1811,11 +2213,33 @@ every-host or release prerequisite is added to a finite family.
   family is not whole all-authority proof. No source transfer, live escape,
   native-every-host or new blanket ACK is inferred.
 
+- [ ] **T4128-V2:** Resolve ALL T4128-P5-P7 and local T4128-LV2 Manager
+  runtime-source clauses: before-work isolation across source/home/provider/
+  selected-installation/queue/global authorities and adjacent side-effect
+  paths; meaningful actual `run_update_steps`/missing-argument/error-record
+  behavior; intended temporary effects AND unchanged synthetic outside
+  provider/Manager/source/queue state; no later temporary-registration pickup;
+  correct worker propagation and normal/exceptional restoration. Preserve
+  original assertions, T4128-P1-P4/T4128-V1 and earned partial delivery, and
+  actual fixture/source/native/resource owners. Keep #10118, ordinary queue
+  recovery and persistent OS mechanisms separate. This is planned receiving,
+  not execution proof, a new runner/native admission or portfolio completion.
+
 - [ ] **T4217-G:** Resolve EVERY T4217 Plan/local Validation condition:
   all FOUR real scenario/job enrollment/reporting outcomes in authorized
   bounded periodic/disposable lanes, not rig/manual-run proxies. Preserve
   unit-only required CI, failure/cleanup/resource owners and unavailable
   states; documentary delivery is not CI coverage or parent completion.
+- [ ] **T4217-G2:** Resolve every T4217-P4/P5/LV2/LV3 inherited allocator
+  condition alongside the unchanged T4217-P1/P2/P3/LV/G all-four-outcome
+  enrollment family. Keep the lanes independently progressable: allocator
+  correction need not await enrollment completion, and enrollment cannot infer
+  reliable host artifacts merely because independent containers ran. Preserve
+  explicit-directory semantics, BOTH report/log ownership, Linux versus
+  PowerShell evidence grades, all existing source/resource/native owners and
+  original finite tiers. This is neither technical completion nor a new
+  every-platform/adopter or broad blocking native/release program.
+
 - [ ] **T4233-G:** Resolve EVERY T4233 Plan/local Validation condition:
   exact original warning/dependency-set attribution and supported-suite/
   platform outcome OR attributable requirement-preserving disposition.
@@ -1847,9 +2271,42 @@ every-host or release prerequisite is added to a finite family.
 - [ ] **G5245:** Resolve EVERY P5245/local Validation/continuing Coordination
   clause at its original finite scope: completed TEN-adopter sweep and cache
   repair credited, retained bounded diagnostic tail fixed OR explicitly
-  tracked, real controls/assertions/current tiers and limits preserved by
-  the same holders. Tracking intake is not a native full pass, accepted
+  tracked, complete inherited #6675 exact-registration/186-case credit and
+  remaining-family/group evidence OR attributed accepted narrowing retained,
+  real controls/assertions/current tiers and limits preserved by the same
+  holders. Tracking intake is not a native full pass, accepted
   flake, implementation, parent completion or custody/resource release.
+
+- [ ] **LF6093-G:** Resolve EVERY LF1-LF3 and LFV1-LFV3 condition:
+  all five original Logger rejection boundaries, directory-link declaration,
+  capability contract OR genuinely equivalent native reparse/junction proof,
+  both named HostProfile controls and their direct promotion packet,
+  surviving hardlink/incomplete-publication assertions, real POSIX rejection
+  and truthful capability-present/unavailable/non-1314 outcomes. Preserve
+  unchanged nodes, effects, budgets, production trust, source custodians,
+  OPEN #1303 and LFV3's FULL CURRENT OPEN parent readback condition.
+  Documentary receiving is not fixture repair, native PASS, privilege
+  authority, implementation appointment or source/resource release.
+- [ ] **B6138-G:** Resolve EVERY B6138 Plan/local Validation and continuing
+  Coordination condition at the original finite portable PowerShell
+  spaced-path/Force boundary: exact failed run/job/source and 30-second
+  budget, Linux8.17 not-flake distinction, actual-candidate inspection THEN
+  justified source correction OR bounded same-SHA retry, real caller/fixture
+  assertions and truthful result grades. Preserve the retained investigator,
+  independent #6131/#6135 work, genuine-regression fix-forward and normal
+  release gates, unit-only required CI and existing bounds/custodians.
+  No new native, whole-release or whole-portfolio prerequisite is added;
+  planning is not causal closure, execution or source/resource release.
+
+- [ ] **G7643:** Resolve EVERY P7643/V7643 clause at its original finite
+  Windows ARM64 runner/sandbox boundary: bounded exact-owned handling OR
+  truthful retained-artifact reconciliation, visible non-green whole-run
+  cleanup failure, distinct primary/cleanup errors and unchanged budgets.
+  Preserve #7494/#7686 and #10225 as independent contracts, proper existing
+  contained/periodic or separately admitted native tiers, unit-only required
+  CI, incumbent holds and the original primary/cleanup custodians. No service,
+  process, broad-delete, every-host or unrelated full-portfolio action or
+  acceptance bar is added.
 
 ## Proposal
 
@@ -1859,6 +2316,47 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-13 - Proposed completion of inherited #4217 allocator intake
+
+The current #4217 original, two eligible refinements, two non-null original
+versions and title history retain four-outcome deterministic CI enrollment AND
+the independent finite #8511 host-artifact allocator lane. Existing T4217
+enrollment credit and acceptance stay unchanged. The additive allocator rows
+retain same-second exclusivity, distinct container suffixes, BOTH report/log
+ownership, explicit-directory semantics, Linux versus PowerShell evidence and
+focused regression/cleanup controls. All new technical rows remain unchecked.
+Normal review, actual complete delivery/readback and a separate source-specific
+judgment remain pending; #4217 and #1303 are not closed by this proposal.
+No product or execution/resource effect occurred.
+
+### 2026-11-12 - Proposed inherited registration-family receiving
+
+Added unchecked P5245-7/V5245-4 and the corresponding actual global G5245
+and continuing Coordination clauses. The current #5245 union includes the
+entire #6675 fixture correction and its remaining-family/group request,
+which were not directly retained by the older hygiene/diagnostic family.
+#6682's real registration, deterministic ordering, 186-case family and exact
+guard remain credited. The failed historical group-11 stop does not prove
+later groups; requested evidence OR attributed accepted narrowing/tracked
+disposition remains with the existing coordination owner.
+
+All incumbent rows, checked credit, participants and source/resource
+reservations remain. This is documentary intake, not a fixture change,
+native/full-suite pass, waiver, implementation appointment, source closure
+or custody transfer. Actual reviewed delivery, current whole receiving and
+source-specific conditions precede any separate administrative judgment.
+
+### 2026-11-12 - Proposed Manager runtime-source containment intake
+
+The additive T4128-P5-P7/local-LV2/global-V2 and continuing Coordination retain
+the later #10154 contract adopted by #4128 alongside the earlier five
+filesystem-registry refinements. Meaningful real error-record coverage,
+before-work authority containment, synthetic noninterference and existing
+source/resource custody remain. All incumbent boxes and participants stay
+unchanged. This is a proposal, not implementation, execution, future receiving
+acceptance or source disposition. Actual reviewed merge and whole-current
+readback precede the separate tracking judgment.
 
 ### 2026-11-04 - Six finite timeout contracts retained directly
 
@@ -2122,3 +2620,86 @@ replacement tournament.
 - Added focused Linux and Windows contract coverage for admission and state
   isolation. Complete descendant cleanup after every exit mode remains the
   outstanding Phase 1 gate.
+
+### 2026-11-13 - Proposed finite link-capability and portable-timeout receiving
+
+Proposed complete #6093 original/inherited LF1-LF3/LFV1-LFV3 plus actual
+global LF6093-G, and #6138 B6138-P1-P3/local-V/actual-global-G, through
+existing Phase 7 intake into Phase 4 only. Twelve new technical rows remain
+unchecked; all 13 checked and 275 incumbent unchecked rows, original
+alternatives, first Plan/global gates, participants and source/resource
+custodians remain unchanged.
+
+The complete current ROOT, strict triage framework, linked historical
+Journal and intake ROOT/append-only ledger were read. Normal review of
+the accompanying complete domain amendment supplies domain acceptance,
+not this proposal or ledger alone. #6093's held fixture body remains
+unread and no current repair is asserted. #6138's failed portable receipt,
+limited Linux pass and candidate-first correction-OR-retry decision remain
+distinct. Both sources and #1303 stay OPEN. No implementation, import,
+collection, test, native/privilege probe, workflow retry, rollout or
+source/resource effect occurred.
+
+### 2026-11-13 - Proposed finite classifier-startup investigation receiving
+
+Proposed direct N6747 Plan/local Validation and actual global N6747-G through
+the existing Phase 4 Logger wave and Phase 7 domain-intake review. Preserve
+the sole diagnosis claimant, exact classifier assertions/20-second bound,
+reported diagnostic credit and separate 15-second source-recovery observation.
+All eight new technical rows remain unchecked; the investigation remains open
+under its existing custodian.
+
+The complete current ROOT, strict framework, linked historical Journal and
+migration-intake ROOT/append-only ledger were read. Existing N6662 direct
+Plan/local Validation/actual global Validation and Coordination already retain
+the distinct completion-wait family; no duplicate row is added. Preserve its
+original and October 22 campaign retention disposition as historical evidence,
+including the explicit attributed owner/provider choice of #6662 tracking.
+Any separate administrative judgment must acknowledge and supersede the
+physical placement while preserving the unresolved investigation and custody;
+do not infer causal repair, claim release or a new operator hold here.
+
+Verify normal domain-review delivery for that existing receiving content and
+fresh source/OPEN #1303 custody. Normal reviewed delivery of this amendment
+and permitted whole-current post-merge receiving/source/custody readback
+precede separate administrative judgments for either source, honoring any
+actual source-specific physical-OPEN restriction. No technical completion,
+accepted flake, execution, assignment, claim release or resource release
+is claimed.
+
+### 2026-11-14 UTC - Proposed independent runner-mapping intake
+
+The separate P7643/V7643/G7643 family and I7643 Phase 7 route retain the
+complete external-mapping cleanup union outside F4 and #10225. All eleven
+new technical/intake rows remain unchecked. Preserve bounded exact-owner
+handling OR truthful retained-artifact reconciliation, distinct primary and
+cleanup outcomes, original limits and actual later cleanup custody.
+The source remains OPEN during the proposal; no test, native reproduction,
+service/process action, file cleanup, implementation, technical acceptance
+or source/resource release is claimed.
+
+### 2026-11-14 UTC - Runner-mapping route recorded after reviewed delivery
+
+#12573 merged the complete direct P7643/V7643/G7643 domain Plan. Actual
+whole-current ROOT/strict-framework/intake-contract/ledger readback verified
+that delivery and found the missing intake record. The append-only
+[migration ledger](../migration-intake/ledger.md#finite-external-image-mapping-cleanup-intake-2026-11-14-utc)
+now records the single Phase 5 canonical owner and existing #7643 tracker.
+
+Only administrative I7643 is checked; all ten technical P7643/V7643/G7643
+rows remain unchecked. Earlier proposal-stage counts and OPEN placement
+remain dated history, not technical completion. Source-specific tracking
+judgment and original artifact/cleanup custody remain separate. No test,
+native reproduction, cleanup, service/process action, implementation or
+resource release occurred.
+
+The earlier campaign disposition on #7643 kept the whole original
+independently OPEN because the then-compared #3963 receiver did not directly
+accept this mapping/whole-run outcome; it rejected partial overlap as
+whole-source transfer and added no generic owner ACK. That historical
+placement is preserved, not reinterpreted as technical completion or an
+indefinite consent condition. The accepted dedicated Phase 5 union and its
+recorded routing now provide the complete alternative receiver. Normal
+review and complete current source/receiver readback precede any separate
+tracking supersession; original artifact custody and every technical row
+remain unchanged by that administrative judgment.

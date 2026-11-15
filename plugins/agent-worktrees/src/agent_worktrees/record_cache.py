@@ -180,6 +180,7 @@ def store(
         capture_before,
         legacy_snapshot=snapshot,
         legacy_bytes=size,
+        reporting_context=getattr(record, "_reporting_context", None),
     )
 
 

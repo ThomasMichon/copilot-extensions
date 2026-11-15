@@ -32,6 +32,9 @@ Supported operations are:
 | POST | `/tasks/{task_id}/heartbeat` | Extend owned task lease |
 | POST | `/tasks/{task_id}/complete` | Existing completion transition |
 | POST | `/tasks/{task_id}/abandon` | Existing abandonment transition |
+| GET | `/tasks/{task_id}/relevance-closeout` | Validated original-owner closeout or committed acknowledgement |
+| POST | `/tasks/{task_id}/relevance-closeout/prepare` | Independent readiness and exact original-claim settlement |
+| POST | `/tasks/{task_id}/relevance-closeout/finish` | Independent finalized observation and terminal acknowledgement |
 
 All other routes are denied, including global queue reads, directory discovery,
 event streams, arbitrary claim, token renewal, session adoption and
@@ -53,6 +56,13 @@ worker, native session, generation and epoch, and the start transaction
 requires the exact recovery revision and unexpired deadline. This exception
 does not authorize other suspended-worker routes or bypass a hold. See
 [affirmative suspended recovery](pool-claim-start.md#affirmative-suspended-recovery).
+
+The relevance closeout routes separately admit the captured original owner,
+including same-generation unassignment, submission and exact terminal replay;
+they do not restore generic task authority. Their
+[receiver](task-relevance.md#original-owner-http-provider) retains live-resource,
+expiry and fencing checks; the optional
+[worker command](relevance-closeout-worker.md) preserves pinned credentials.
 
 The supervisor must obtain a fresh grant before expiry. A restricted worker
 cannot renew its own grant using `start`. Signing-key rotation invalidates old

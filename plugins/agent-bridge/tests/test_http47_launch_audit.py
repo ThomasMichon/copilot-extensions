@@ -10,6 +10,7 @@ from bridge_http47_runtime import launch_role
 
 @pytest.mark.parametrize("role, arguments", [
     ("record-writer", [r"C:\fixture space\fixtures\worktree_record_owner.py", "quoted \"value"]),
+    ("roster-source", [r"C:\fixture space\fixtures\worktree_list_source.py", '{"worktrees": []}']),
     ("host", ["-m", "agent_bridge.session_host", "--state-dir", r"C:\fixture space\state"]),
     ("worker", [r"C:\fixture space\cold_recovery_worker.py", r"trailing\\"]),
     (None, ["-c", "print('not a contributing launch')"]),

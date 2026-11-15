@@ -113,6 +113,7 @@ class _Client(Protocol):
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None,
         allow_suspended_reembodiment: bool = False,
+        session_origin_transport: str | None = None,
     ) -> dict: ...
 
     def record_spawn_worktree(self, key: str, worktree: str, **kwargs: Any) -> dict: ...
@@ -235,11 +236,13 @@ def launch_interactive_embodiment(
     expected_generation = task.get("generation")
     expected_owner_session_id = task.get("owner_session_id")
     resuming = status == Status.SUSPENDED
+    from .session_origin import reservation_options
 
     reservation, reserved = _unwrap_reservation(
         client.reserve_spawn(
             task_id, reserved_by=supervisor,
             allow_suspended_reembodiment=resuming,
+            **(reservation_options(client) if task.get("source") != "ci-repair" else {}),
         )
     )
     if not reserved:

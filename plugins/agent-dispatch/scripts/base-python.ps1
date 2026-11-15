@@ -11,10 +11,16 @@ function Get-DispatchBasePreferencePath {
 }
 
 function Get-DispatchPythonIdentity {
-    param([Parameter(Mandatory)][string]$Python)
+    param([Parameter(Mandatory)][string]$Python, [string]$ExpectedBasePython)
     $diagnostic = ''
-    $probe = 'import json,platform,struct,sys; print(json.dumps(dict(implementation=sys.implementation.name,version=list(sys.version_info[:3]),machine=platform.machine(),bits=struct.calcsize("P")*8,executable=sys.executable,base_executable=sys._base_executable)))'
-    $output = Invoke-Hidden -FilePath $Python -ArgList @('-I', '-B', '-c', $probe) -ErrorOutput ([ref]$diagnostic)
+    $probe = 'import json,os,platform,struct,sys; identity=dict(implementation=sys.implementation.name,version=list(sys.version_info[:3]),machine=platform.machine(),bits=struct.calcsize("P")*8,executable=sys.executable,base_executable=sys._base_executable)'
+    if ($ExpectedBasePython) {
+        $probe += '; identity["base_matches"] = os.path.samefile(sys._base_executable, sys.argv[1])'
+    }
+    $probe += '; print(json.dumps(identity))'
+    $arguments = @('-I', '-B', '-c', $probe)
+    if ($ExpectedBasePython) { $arguments += $ExpectedBasePython }
+    $output = Invoke-Hidden -FilePath $Python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
     if ($LASTEXITCODE -ne 0) {
         throw "Dispatch base Python probe failed (exit ${LASTEXITCODE}): $output$diagnostic"
     }
@@ -31,6 +37,9 @@ function Get-DispatchPythonIdentity {
         -not [IO.Path]::IsPathRooted($identity.executable) -or
         -not [IO.Path]::IsPathRooted($identity.base_executable)) {
         throw 'Dispatch requires a supported 64-bit CPython 3.10+ interpreter'
+    }
+    if ($ExpectedBasePython -and $identity.base_matches -isnot [bool]) {
+        throw 'Dispatch base Python probe must report executable identity'
     }
     return $identity
 }
@@ -81,9 +90,8 @@ function Resolve-DispatchBasePython {
 function Assert-DispatchCandidateBase {
     param([Parameter(Mandatory)][string]$Python, [string]$BasePython)
     if (-not $BasePython) { return }
-    $identity = Get-DispatchPythonIdentity -Python $Python
-    if (-not [string]::Equals([IO.Path]::GetFullPath($identity.base_executable),
-        [IO.Path]::GetFullPath($BasePython), [StringComparison]::OrdinalIgnoreCase)) {
+    $identity = Get-DispatchPythonIdentity -Python $Python -ExpectedBasePython $BasePython
+    if (-not $identity.base_matches) {
         throw 'Dispatch candidate uses a different base Python; refusing to modify or reuse it'
     }
 }

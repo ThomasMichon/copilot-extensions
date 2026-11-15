@@ -141,14 +141,13 @@ class TestSessionstartDiagnostic:
         assert "not yet delivered" in result.detail
         assert calls[0] == {"breakaway": True}
         argv, kwargs = calls[1]
-        assert argv[:2] == [sys.executable, "-X"]
-        prefix = Path(argv[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
-        assert prefix.is_relative_to(runtime / "cache" / "python")
-        assert argv[3:7] == [
+        assert argv[:2] == [sys.executable, "-B"]
+        assert not (runtime / "cache" / "python").exists()
+        assert argv[2:6] == [
             "-m", "agent_worktrees.local_cache_worker",
             str(tmp_path.resolve()), str(tmp_path / "worker"),
         ]
-        assert len(argv[7]) == 32
+        assert len(argv[6]) == 32
         assert kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
         assert kwargs["start_new_session"]
@@ -332,8 +331,17 @@ class TestResumeWiring:
 
     def _patched_resume(self, tmp_path: Path, monkeypatch, sample_record, *, dry_run: bool):
 
-        config = self._config(tmp_path)
+        config = replace(self._config(tmp_path),
+                         machine=sample_record.machine, platform=sample_record.platform)
         monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
+        monkeypatch.setattr(m.cfg, "load_project_config", lambda *_a, **_k: config)
+        from agent_worktrees import config_authority
+
+        monkeypatch.setattr(config_authority, "load_project_authority_config",
+                            lambda *_a, **_k: config)
+        registry = Path(config.default_repo.anchor) / ".agent-worktrees"
+        registry.mkdir()
+        (registry / "machines.yaml").write_text("machines: {}\n", encoding="utf-8")
         worktree_path = tmp_path / "worktrees" / "wt-1"
         worktree_path.mkdir(parents=True)
         record = replace(
@@ -350,6 +358,12 @@ class TestResumeWiring:
             codename="test-record",
         )
 
+        project = tmp_path / "project"
+        ledger_dir = project / "worktrees"
+        ledger_dir.mkdir(parents=True)
+        monkeypatch.setattr(m.cfg, "project_dir", lambda *_a: project)
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda *_a: ledger_dir)
+        m.tracking.save_record(record, ledger_dir / f"{record.worktree_id}.yaml")
         monkeypatch.setattr(m.tracking, "load_record", lambda *_a, **_k: record)
         monkeypatch.setattr(m.tracking, "mark_resumed", lambda *_a, **_k: None)
         monkeypatch.setattr(m.tracking, "save_record", lambda *_a, **_k: None)
@@ -382,10 +396,6 @@ class TestResumeWiring:
     def _json_state(self, tmp_path, monkeypatch, record, config, args):
         from agent_worktrees import resolve_cli
 
-        tracking_dir = tmp_path / "tracking"
-        tracking_dir.mkdir()
-        (tracking_dir / f"{record.worktree_id}.yaml").touch()
-        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
         monkeypatch.setattr(resolve_cli.worktree_identity, "_resolve_worktree_id", lambda value: value)
         monkeypatch.setattr(resolve_cli, "_relocate_active_project_for_worktree", lambda value: False)
         monkeypatch.setattr(resolve_cli, "_resolve_profile", lambda *a: None)

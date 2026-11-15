@@ -33,6 +33,8 @@ From the source repository root, with Python and UV available:
 python tools/typecheck.py --prepare
 python tools/typecheck.py --enforced
 python tools/typecheck.py --changed --base origin/dev
+python tools/typecheck.py --new-code --base origin/dev --prepare
+python tools/typecheck.py --new-code --base origin/dev
 python tools/typecheck.py lib-worktree-identity
 python tools/typecheck.py lib-bootstrap-killswitch
 python tools/typecheck.py lib-config-migrate --prepare
@@ -66,6 +68,22 @@ python tools/typecheck.py agent-roles
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
+
+`--new-code` is a whole-file strict ratchet, including files under pending
+owners. Every selected file must pass strict checking; existing diagnostics are
+not grandfathered or filtered to changed lines. Staged, unstaged and untracked
+files are included, even when `--head` pins the comparison. Deleted files are
+not checked. PR CI compares its base with the checked-out merge commit, not
+the unmerged feature tip, so unrelated base-only files are not treated as
+developer drift. Known Installation Context, Harness and Payload Invocation
+compositions expand to their existing complete checker programs and declared
+analysis targets; changed shell/template inputs cannot omit those views.
+Missing physical owners refuse selection, and Invocation requires a full-body
+Python 3.11-or-later analysis target rather than only its Python 3.10 exit guard.
+Module-wide checker directives are refused. A successful ratchet qualifies
+these files only, without admitting their unchanged project or certifying
+unmodeled emitted programs. `--enforced` remains the independent admitted-cohort
+gate; exact-candidate enforcement of the ratchet is not yet activated.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.
@@ -492,6 +510,44 @@ still-owned outputs; unknown or replaced files/directories are retained and
 reported. Each view retains its own source correspondence. These safeguards do
 not execute the guard, admit its pending consumer, qualify emitted programs or
 extend the adapter to other hyphenated modules.
+
+### Invocation catalogs, binding bootstrap and shim selectors
+
+The pending `lib-payload-invocation` project selects its four complete physical
+source files plus four in-process catalog witnesses, one catalog-binding
+bootstrap view and two shim cache-selector views. The catalog declaration binds the real producer, validators
+and templates; its closed data witnesses cover single/multi-command and
+PowerShell/cmd variants. The bootstrap view preserves the actual PowerShell
+single-quote transport, both interpreter launch sites and real helper forwarding.
+Diagnostics map back to the canonical producer and its authored expression range.
+
+Normal Dev checks derive the bootstrap from canonical source without reading
+or refreshing derived consumer mirrors. Explicit materialized-consumer controls
+separately verify the actual emitted block and helper correspondence. Frozen
+checks use their candidate's inputs, with the same byte/membership custody and
+lease-bound cleanup as other source views. Neither path executes the bootstrap.
+
+The selector views preserve the actual PowerShell here-string and POSIX
+single-quoted `-c` argument, including their distinct newline transports.
+Their fixed launch arguments and real `cache_arguments` import/call must match.
+Embedded PowerShell here-string terminators are refused even inside otherwise
+valid Python string literals.
+The winning candidate-local `agent_procutil` provider and its ordinary source
+tree are captured and rechecked; first-party stubs cannot replace that helper.
+Selector diagnostics map to the original shim-template lines. The optional
+PowerShell prefix annotation preserves the existing `None` fallback and JSON
+output rather than coercing it to an empty string.
+The nineteen in-process correspondence controls are positively selected in
+the required unit packet. Real interpreter, Git and source/frozen frontdoor
+checks remain separate integration controls, not additional required-unit work.
+
+The production project keeps Python 3.10 plus persistent Python 3.11 analysis
+on both platforms. Python 3.10 checks the bootstrap's early exit guard only;
+Python 3.11 checks its full body. Strict admission refuses a declaration that
+omits that full-body target. These eleven analysis targets do not qualify native
+execution, interpreter availability, remaining embedded programs or consumer
+copies. Production remains pending; the independently strict test-source
+project does not activate these views.
 
 ## Exact-candidate release enforcement
 

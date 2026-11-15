@@ -421,7 +421,10 @@ def test_executing_cli_disclosure_matches_actual_parser(
         "schema": "agent-bridge.cli-contracts", "version": 1,
         "contracts": {
             "agent-bridge.create": {
-                "version": 1, "capabilities": ["keyed-worktree-writer"],
+                "version": 1, "capabilities": ["keyed-worktree-writer", "keyed-dispatch-origin"],
+            },
+            "agent-bridge.acquire": {
+                "version": 1, "capabilities": ["dispatch-acp-session-origin", "dispatch-cli-session-origin"],
             },
             "agent-bridge.status": {
                 "version": 1, "capabilities": [

@@ -1,0 +1,13 @@
+{
+  "comment": "Consume live reporter naming without changing selected source routes",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

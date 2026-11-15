@@ -49,6 +49,8 @@ def inspect(worktree_id: str, destination: str, config) -> dict:
         raise ValueError("move requires one exact managed worktree ID")
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     record = read_record(ledger)
+    from . import record_reporting
+    record_reporting.apply_context(record, record_reporting.current_context(config.repo_name))
     if record.worktree_id != worktree_id or record.repo != config.repo_name:
         raise ValueError("relocation record does not match the receiving ledger identity/project")
     relocation._ordinary_shape(record, ledger, allow_receiving=True)

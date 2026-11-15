@@ -160,6 +160,10 @@ def add_parsers(sub) -> None:
         help="Exact supervisor process provenance for this allocation",
     )
     p.add_argument(
+        "--dispatch-cohort", default=None,
+        help="Original assignment cohort JSON; requires complete dispatch allocation provenance",
+    )
+    p.add_argument(
         "--owner-ref",
         default=None,
         dest="owner_ref",
@@ -381,8 +385,11 @@ def cmd_create(args: argparse.Namespace) -> int:
         return 1
     if present_dispatch_fields:
         attempt = dispatch_fields["attempt"]
-        if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt <= 0:
-            message = "dispatch attempt must be a positive integer"
+        if (
+            not isinstance(attempt, int) or isinstance(attempt, bool)
+            or not 1 <= attempt <= tracking.MAX_PERSISTED_COUNTER
+        ):
+            message = f"dispatch attempt must be an integer between 1 and {tracking.MAX_PERSISTED_COUNTER}"
             if args.json:
                 return output._json_error(message)
             output.err(message)
@@ -408,6 +415,22 @@ def cmd_create(args: argparse.Namespace) -> int:
             if isinstance(value, str):
                 dispatch_fields[key] = value.strip()
     dispatch_attempt = dispatch_fields if present_dispatch_fields else None
+    raw_cohort = getattr(args, "dispatch_cohort", None)
+    if raw_cohort is not None:
+        from .dispatch_cohort import parse_json
+
+        try:
+            if dispatch_attempt is None:
+                raise ValueError("dispatch cohort requires complete dispatch allocation provenance")
+            dispatch_attempt["cohort"] = parse_json(
+                raw_cohort, task_id=dispatch_attempt["task_id"],
+                reservation_key=dispatch_attempt["reservation_key"],
+            ).to_dict()
+        except ValueError as exc:
+            if args.json:
+                return output._json_error(str(exc))
+            output.err(str(exc))
+            return 1
     with output.stdout_to_stderr():
         try:
             kind = creation_kind(args)
@@ -612,9 +635,6 @@ def _ensure_anchor_ledger(
 
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
     """Append the produced-resource claim to the caller's tracking record."""
-    claim = _claim_from_run_output(stdout)
-    if claim is None:
-        return None
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
@@ -640,6 +660,9 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         protected = existing_claim(record, stdout)
         if protected is not None:
             return protected
+        claim = _claim_from_run_output(stdout)
+        if claim is None:
+            return None
         # Idempotency contract matches `pr_ops._ensure_pr_claim`: capture
         # whether this ref is already an active `pr` claim BEFORE mutating
         # -- `add_resource_claim` reuses a matching ref rather than
@@ -755,11 +778,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     reused_allocation = False
+    claim = None
 
-    def _finish_pending(claim: tracking.ResourceClaim | None) -> bool:
-        nonlocal reused_allocation
+    def _finish_pending() -> bool:
+        nonlocal reused_allocation, claim
 
         if owner_path is None or not pending_ref:
+            claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
             return claim is not None
         try:
             with tracking._RecordLock(owner_path, require_sidecar=True):
@@ -770,6 +795,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 from .allocation_run import existing_claim
 
                 protected = existing_claim(owner_record, child_stdout)
+                if protected is None and child_stdout.strip():
+                    claim = _claim_from_run_output(child_stdout)
                 if claim is None and protected is None:
                     return False
                 owner_record.resources = [
@@ -824,8 +851,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     sys.stdout.write(child_stdout)
     sys.stdout.flush()
 
-    claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
-    if not _finish_pending(claim):
+    if not _finish_pending():
         if claim is None:
             output.err(
                 f"run: resource command exited {proc.returncode} but no claim could "

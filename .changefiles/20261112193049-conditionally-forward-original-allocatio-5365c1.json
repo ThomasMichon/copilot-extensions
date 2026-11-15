@@ -1,0 +1,9 @@
+{
+  "comment": "Conditionally forward original allocation cohorts to capable Worktrees creation runtimes",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

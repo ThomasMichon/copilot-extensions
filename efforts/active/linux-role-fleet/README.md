@@ -116,6 +116,29 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   transfer client lifecycle, credential/release, SSH, workload or ARC ownership.
   An offline role projection is not accepted as manager installation.
 
+- **Finite onboarding continuation:** F6030 retains the existing campaign,
+  deployment/adopter, #6240 release/construction, #6241 operation/admission,
+  Gateway/SSH, agent-ssh profile/registry, credential-provider and native/resource
+  owners. It neither takes the broader constructor reservation nor makes that
+  whole PR a prerequisite for the independently scoped installed consumer.
+  Existing source appointments, original-operation custody, source/release/
+  installed distinctions and separately authorized effects remain unchanged.
+  No enrollment, credential, service, network, capacity, migration or retirement
+  authority follows from this planning amendment.
+
+- **Finite conductor continuation:** #6464 keeps its existing single writer,
+  current required-selection and selected-project readiness contributors, exact
+  source reservations, and the complete direct repair Plan/local/global Validation
+  below. #1886 uninstall, #6274/#6389 serving, #6240 release, configuration and
+  native/resource custodians retain their separate scopes. Do not revive the
+  superseded #6499 pointer-publication approach or duplicate the conductor.
+  Broad Taking is not a new ACK requirement. The strict repair annex's explicit
+  #6464-OPEN-until-implementation-and-real-consumer-proofs condition remains:
+  receiving publication does not waive it or authorize NOT_PLANNED retirement.
+  Normal reviewed merge and whole-current ROOT/necessary-annex readback precede
+  any later separate source judgment; this amendment supplies neither actual
+  implementation acceptance nor resource transfer.
+
 ## Context
 
 The reviewed machine-fleet vision already separates driver reachability,
@@ -450,6 +473,113 @@ Implementation sequencing below is **agent-recommended**:
   and actual consuming setup remain open under #6464. Downstream plugins are
   not required to create core installation cells, and active-core apply remains
   unsupported.
+#### Finite installation-repair continuation (#6464)
+
+These unchecked rows receive the complete current conductor acceptance under
+its existing machine-setup owner. They refine the existing
+[repair contract](installation-repair-conductor.md), not a new executor or
+execution appointment. Ordinary-owner source delivered in #6944 is credited;
+remaining first-touch, active-core and actual consuming-setup duties are not
+completed by this tracking amendment.
+
+- [ ] **R6464-P1.** Keep default discovery/readiness/plan nonmutating and the
+  installer-readiness graph library execution-free. Resolve enabled payloads
+  through existing attributable activation/source admission, with ordinary or
+  supported legacy ownership distinct from already-active validated core cells.
+  No cache/PATH/root guessing, cross-cell capture, cell creation or automatic
+  session-start installation follows.
+- [ ] **R6464-P2.** Resolve the reported root-free ordinary-owner admission case:
+  identify the supported attributable protocol for a declared external-tool
+  owner OR coordinate the narrowly reviewed conductor/declaration correction.
+  Do not fabricate a runtime root, silently disable the declaration or use an
+  invented ownership model to block unrelated selected repair. Preserve actual
+  root-collision/source controls; honest refusal is not fulfillment of this case,
+  and the reported consumer finding is not an independently reproduced diagnosis.
+- [ ] **R6464-P3.** Retain explicit qualified module selection plus real
+  prerequisites; optional modules enter only as actual prerequisites. Preserve
+  the additive required-module selection reservation and complete enabled-owner
+  census: missing payloads or malformed declarations cannot be silently omitted.
+  An incomplete census refuses, without changing existing explicit selection.
+- [ ] **R6464-P4.** Bind plan/apply to exact platform, source/content/provenance,
+  enablement, declarations, graph, actions and applicable receipt generations.
+  Re-admit before effects and each selected action; changed input refuses rather
+  than replaying or silently replacing the accepted plan. Invoke only exact
+  absolute manifest-owned actions through existing bounded lifecycle primitives.
+- [ ] **R6464-P5.** Preserve the selected-project readiness-context correction
+  under its existing contributor: bind the requested project into qualified
+  admission and the plan, and use that context for read-only owner probes.
+  Installer cwd/authority, absolute action admission and each owner's readiness
+  judgment remain unchanged. Actual Index/Vault configuration refusals are not
+  reclassified as inactive or configuration-empty to obtain success.
+- [ ] **R6464-P6.** Independently observe each owner's readiness after its action;
+  report observed-before, selected, attempted, installer and observed-after
+  outcomes, blockers and restart obligations. Keep failed, unknown, timed-out,
+  unsupported, blocked, configuration-empty and ready states distinct. Only
+  explicitly dependency-satisfying empty results unblock dependents; independent
+  branches may continue. A successful build or installer exit is not readiness.
+- [ ] **R6464-P7.** Preserve bounded probes, action/output budgets, cancellation
+  and owned transient-descendant cleanup, while durable service lifetime,
+  convergence and recovery remain installer/lifecycle-owned. Unknown cleanup or
+  mutation is not successful completion or permission for duplicate operations.
+  No raw command API, credential discovery/escalation or wider retry is added.
+- [ ] **R6464-P8.** Preserve policy-denied absent/unconfigured runtime outcomes
+  without bypassing machine gates. When enabled payloads coexist with stale
+  selected/serving incumbents, expose unresolved state and the supported explicit
+  repair owner rather than implying whole-set convergence from payload success.
+  Authorized repair preserves configured owner/profile, state and live handlers,
+  and observes selected and serving generations independently where applicable.
+- [ ] **R6464-P9.** Complete the original supported Windows/Linux/WSL/macOS
+  first-touch and repeat-repair/config-preservation tiers, plus the separate
+  already-active core-cell fixture and declared-action support. Current refusal
+  of undeclared active-core actions is correct safety, not positive repair proof.
+  Keep unavailable lanes and the later fresh-environment TLS failure explicit;
+  an older clean-room pass does not replace that failed attempt.
+- [ ] **R6464-P10.** After the retained prerequisite gates, wire an actual
+  consuming setup through the same authority and prove a real missing/stale
+  enabled runtime becomes ready. Preserve the original serial delivery boundary;
+  source merge, release, graph planning or local installation alone does not
+  complete this consumer. No dormant capability, provisioning, uninstallation,
+  durable-data cleanup or live rollout is authorized by this amendment.
+
+##### Finite installation-repair local Validation
+
+- [ ] **R6464-LV1 (P1).** Prove whole-fixture nonmutation on default invocation,
+  supported ordinary/legacy and validated active-core admission, exact source
+  distinction, foreign-cell rejection and no implicit cell/installer creation.
+- [ ] **R6464-LV2 (P2).** Through the owning admission consumer, qualify the
+  reported synthetic root-free external-tool declaration plus a separately
+  selected ordinary runtime, preserving root-collision/source controls and
+  explicit malformed/unsupported/unknown refusals without fabricated roots.
+- [ ] **R6464-LV3 (P3).** Cover explicit and required-module selection, complete
+  enabled-owner census, actual prerequisite closure, optional exclusion,
+  missing/malformed payloads and malformed/cyclic graph refusal.
+- [ ] **R6464-LV4 (P4).** Exercise changed source/declaration/receipt/content and
+  executable/containment controls, digest-bound re-admission, exact Windows/POSIX
+  argument boundaries and per-action binding checks before any effect.
+- [ ] **R6464-LV5 (P5).** Strengthen the actual caller control to require the
+  selected project's cwd for configuration-aware read-only probes, keeping
+  installer context unchanged. Preserve genuine Index/Vault configuration
+  refusal and distinguish real backend discovery from activation readiness.
+- [ ] **R6464-LV6 (P6).** Exercise independent post-readiness, partial failures,
+  blocked dependencies with independent progress, unsatisfied/satisfying empty
+  outcomes, unknown probes, restart-required state and honest aggregate results.
+- [ ] **R6464-LV7 (P7).** Cover slow probes/actions, output limits, repeated
+  cancellation, interruption and retained descendants through existing owners;
+  keep durable services and unresolved custody distinct from transient cleanup.
+- [ ] **R6464-LV8 (P8).** Qualify policy-denied absent/unconfigured and enabled
+  stale-selected/serving cases without granting deployment authority from an
+  incumbent. Record owner/profile preservation and separately observed readiness;
+  historical authorized recovery is not continuing live permission.
+- [ ] **R6464-LV9 (P9).** Record exact native first-touch/repeat and fresh-source
+  evidence separately for Windows, Linux, WSL and macOS and the active-core
+  fixture. Credit established Windows/WSL and earlier Linux proofs only at their
+  actual revisions; retain later TLS failures and pending positive action/native
+  gates. Mock dispatch or another POSIX host is not a missing native receipt.
+- [ ] **R6464-LV10 (P10).** Prove the actual consuming setup's missing/stale-to-ready
+  flow only after the retained serial prerequisites, preserving independent
+  owner judgment, configuration and source/release/native/installed distinctions.
+  No test, build, setup or live action is run by this documentary intake.
+
 - [ ] Define controller-owned live configuration validation, atomic activation,
   last-valid-state recovery and explicit restart-required outcomes.
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
@@ -463,6 +593,59 @@ Implementation sequencing below is **agent-recommended**:
   existing manager, unrelated roles, settings and data unless separately approved.
 - [ ] Capture a fresh-environment receipt with exact release/images, commands,
   first readiness, remaining attended prerequisites and non-secret outcomes.
+
+#### Normal first-touch and installed SSH continuation
+
+These unchecked obligations refine the existing onboarding lane; they do not
+appoint another implementer or activate a fleet.
+
+- [ ] **F6030-P1.** Compose normal first touch through the existing supported
+  interpreter, explicitly activated configured-Vault and configuration-selected
+  transport/provider setup owners, including prerequisites and key enrollment.
+  Distinguish runtime installation, database registration, unlock, key availability
+  and readiness. Preserve explicit attended sign-in/unlock prerequisites, existing
+  keys and host trust, user-logon versus service lifetime, standalone use and
+  generic shared-owner tunnel/reconnect machinery; provider provisioning remains
+  behind its adapter. Do not assume a system agent or require a private executable
+  onboarding provider, second supervisor or implicit activation.
+- [ ] **F6030-P2.** Retain v1 token/proof, v2 external PEM and explicitly selected
+  v3 provider-owned continuity references through the existing finite ServiceCaller
+  and host lifetime. The provider owns protected-context validation, original
+  key/operation, requested machine/origin/principal/audience/service scope,
+  reference revision and selected CA comparison. Separate credential/reference
+  scopes from lease/writer ownership before key reads. Unsupported capability,
+  mixed forms or unsafe state refuses before effects; no private JWK parsing or
+  export, alternate issuer, PEM export, reenrollment, identity rotation or change
+  to enrollment/storage, SDK proof semantics or existing local writers.
+- [ ] **F6030-P3.** Complete the explicit selected Source/profile application and
+  SDK closure through the existing constructor and actual noneditable normal
+  Manager/selected-engine/Fleet SSH front door. Defaults remain inert; missing or
+  wrong selected sources/profile/capabilities refuse before identity or lifecycle
+  effects. Incoming readiness AND all applicable current selections are
+  authoritative: old-state provenance/recovery, missing predecessor proofs,
+  predecessor liveness or cleanup cannot veto them. Preserve current release
+  authentication/admission, the monotonic admitted floor, existing good state and
+  strict exact old-object deletion custody independently. No alternate installer,
+  test preinstall or development-support surrogate qualifies this lane; the whole
+  broader constructor PR is not its prerequisite.
+
+##### Normal first-touch and installed SSH local validation
+
+- [ ] **F6030-LV1.** Qualify the selected installed first-touch prerequisites and
+  explicit attended boundaries, key/trust preservation, configured versus ready
+  states and interactive/service lifetime through the original owners and native
+  tiers. Capability enablement or database discovery is not readiness.
+- [ ] **F6030-LV2.** Exercise v1/v2/v3 compatibility, protected provider-reference
+  revision/CA and scope checks, unsupported/mixed forms, original-operation
+  retry/UNKNOWN reconciliation and secret-free refusal without credential export,
+  issuer replacement or alternate fallback.
+- [ ] **F6030-LV3.** Exercise the actual noneditable normal Manager-to-selected-engine
+  Fleet SSH consumer with its selected application/SDK closure: source/payload
+  denial, inert default, first touch, failed-candidate preservation, repeat/update,
+  retained identity/operation, exact readiness and stop/cancellation. Prove healthy
+  incoming selection without predecessor-state veto while retaining current
+  authentication/admission and separate physical cleanup custody. Record native,
+  feed/source-independent installed, release and adopter tiers separately.
 
 ### Phase 3 - Named role deployment
 - [x] Supply explicit configuration-selected role/provider reference planning
@@ -698,6 +881,28 @@ All entries are **agent-recommended implementation gates**.
   fixtures, a count, SDK construction or old code slots alone do not prove
   these native/adopter outcomes.
 
+- [ ] **F6030-G.** Resolve the normal first-touch, credential-reference and
+  noneditable installed-frontdoor obligations above at their original selected
+  consumer/native tiers, including explicit attended prerequisites, keys/trust,
+  v1/v2/v3 refusal/UNKNOWN compatibility, authoritative incoming readiness AND all
+  applicable current selections, preserved good state and exact stop. Existing
+  lifecycle/provider/source owners and strict physical removal custody remain;
+  bounded source/native prerequisites are not containing release, installed
+  rollout, provider/adopter, mesh, migration or retirement acceptance.
+
+- [ ] **R6464-G.** Resolve the entire R6464-P1-P10/R6464-LV1-LV10 conductor
+  union at its original finite tiers: default nonmutation and qualified ordinary/
+  active-core admission; supported root-free ownership; complete selected/required
+  closure; exact source/digest/action and selected-project probe context;
+  independent readiness/dependency/restart/partial outcomes; bounded original-owner
+  process custody; machine-policy/stale-serving distinctions; each originally
+  supported native first-touch/repeat lane and positive declared-action fixture;
+  then actual consuming setup. Preserve credited source/native partials, failed
+  fresh-environment attempts, current contributors and the strict annex's OPEN
+  condition. No unrelated fleet/adopter programme or universal host gate is added;
+  planning, source delivery and separately authorized operational proof remain
+  distinct.
+
 ## Proposal
 
 [Safe fleet setup and refresh](fleet-setup-reconciliation.md).
@@ -707,6 +912,48 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-13 - Finite installation-repair continuation proposed
+
+The complete #6464 original and current discussion retain the existing default
+no-write/explicit qualified apply contract, ordinary-versus-core admission,
+source/digest and action fences, independent post-readiness and original serial
+native/consumer gates. Reported #6944 source and Windows/WSL progress stay
+credited at their recorded tiers; later fresh-environment TLS failure and
+pending active-core/native/consuming setup remain unresolved. The root-free
+ordinary-owner report, required-module census reservation, machine-policy/
+stale-serving distinction and selected-project read-only probe correction are
+now directly represented in Plan, paired local Validation and actual global
+Validation rather than only an annex/topic pointer.
+
+All twenty-one new technical/validation rows remain unchecked. Every incumbent
+row, check state, first unchecked item, Status, strict-annex condition and source/
+resource custodian remains unchanged. This is an agent-recommended unfinished
+tracking amendment, not implementation, acceptance, resource transfer, execution
+appointment or issue disposition. In particular #6464 remains OPEN under the
+annex's actual implementation-and-real-consumer-proof condition; publication
+alone cannot silently replace it with an administrative-fold condition.
+
+### 2026-11-13 - Finite normal first-touch and installed SSH intake
+
+The existing #6030 refinements through comment6702057494 retain normal
+first-touch setup, provider-owned v1/v2/v3 credential-reference composition and
+the actual noneditable Manager/selected-engine/Fleet SSH consumer. The additive
+Plan, local Validation and actual global Validation rows preserve the complete
+existing fleet/cohort contract, checked credit, incoming-first selection policy
+and current owners; no incumbent row or status changes.
+
+Bounded #10929/#10954/#11009/#11023/#11041/#11204/#11227 source and prerequisite
+credit remains credited, not reopened as missing implementation. Those results
+do not establish the containing release, installed rollout, provider/adopter,
+mesh, migration or retirement. The older development-supported witness is not
+the normal source-independent product cohort, and completion of the whole
+broader constructor PR is not this independent consumer's prerequisite.
+
+This is planned unfinished work, not an execution appointment, live
+qualification, accepted resource transfer or issue retirement. Existing #7192
+named-owner transfer and #5861-specific receiving conditions remain scoped to
+their actual contracts.
 
 ### 2026-11-09 UTC - Provider-effect review fixes under the existing source gate
 

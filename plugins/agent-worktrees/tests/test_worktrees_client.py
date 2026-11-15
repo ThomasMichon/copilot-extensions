@@ -26,13 +26,13 @@ from agent_worktrees.worktrees_refresh import record_identity
 def test_fresh_current_dispatch_cannot_acknowledge_bridge_live_refresh(
     tmp_path, monkeypatch, capfd, no_caller_compute,
 ) -> None:
+    monkeypatch.setattr(list_cli.cfg, "detect_platform", lambda: "windows")
     owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     owner.publish("project", [{"id": "one"}], observed_at=time.time())
     monkeypatch.setattr(client, "read_current", lambda payload, **kw: owner.handle(payload))
     monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: None)
     monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "project")
-    monkeypatch.setattr(list_cli.cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
     bridge_source = (
         Path(__file__).resolve().parents[2] / "agent-bridge" / "src"
@@ -150,7 +150,7 @@ def test_explicit_refresh_crosses_authenticated_resident_and_waits_for_its_publi
             tracking_status="all", all=True, include_other_platforms=True,
         )) == 0
         result = json.loads(capfd.readouterr().out)
-        assert result["worktrees"] == [{"id": "one"}]
+        assert result["worktrees"] == [{"id": "one", "platform": client.cfg.detect_platform()}]
         assert result["point_refresh"]["revision"] == result["projection"]["revision"] == 2
         worker.join(3)
         assert not worker.is_alive() and not errors
@@ -419,7 +419,7 @@ def test_json_list_waits_for_real_cold_resident_publication(
             assert all(frame["projection"]["quality"] == "current" for frame in frames)
         else:
             assert len(frames) == 1
-            assert frames[0]["worktrees"] == [{"id": "one"}]
+            assert frames[0]["worktrees"] == [{"id": "one", "platform": client.cfg.detect_platform()}]
             assert frames[0]["projection"]["quality"] == "current"
         assert all(not frame.get("availability") for frame in frames)
     finally:
@@ -618,7 +618,7 @@ def test_passive_list_falls_back_to_saved_roster_when_an_older_resident_rejects_
     try:
         rc, result = _passive_list(capfd)
         assert rc == 0
-        assert result["worktrees"] == [{"id": "saved"}]
+        assert result["worktrees"] == [{"id": "saved", "platform": client.cfg.detect_platform()}]
         assert result["availability"]["status"] == "advisory"
         assert "rejected the passive read" in result["availability"]["reason"]
         assert result["projection"]["quality"] == "advisory"
@@ -871,7 +871,9 @@ def test_worktrees_client_real_transport_uses_existing_auth_only(
         for extra in ({}, {"worktree_id": "one"}, {"codename": "quiet-knob"}):
             result = client.read_current(request(**extra))
             assert result["projection"]["quality"] == "current"
-            assert result["worktrees"] == [{"id": "worktree-one", "codename": "quiet-knob"}]
+            assert result["worktrees"] == [
+                {"id": "worktree-one", "codename": "quiet-knob", "platform": client.cfg.detect_platform()},
+            ]
     finally:
         server.close()
         owner.shutdown()

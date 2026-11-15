@@ -124,20 +124,26 @@ class TestJournalRunClaim:
     def _make_caller(self, tmp_path: Path, monkeypatch) -> tracking.WorktreeRecord:
         # The caller record lives in the active project's tracking dir; point
         # tracking_dir() at the temp dir so the lookup resolves there.
-        monkeypatch.setattr("agent_worktrees.config.tracking_dir",
-                            lambda: tmp_path)
         from agent_worktrees import config as cfg
 
+        records = tmp_path / "worktrees"
+        records.mkdir()
+        monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: records)
+        monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path)
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "anomalous-potato")
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
         project_dir = cfg.project_dir("test-chamber")
         project_dir.mkdir(parents=True, exist_ok=True)
         (project_dir / "config.yaml").write_text(json.dumps({
             "machine": "anomalous-potato", "platform": "wsl",
             "repo_name": "test-chamber",
-            "repos": {"test-chamber": {"anchor": str(tmp_path)}},
+            "repos": {"test-chamber": {
+                "anchor": str(tmp_path), "worktree_root": str(tmp_path),
+            }},
         }), encoding="utf-8")
         return tracking.create_new_record(
             "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
-            "anomalous-potato", "wsl", tmp_path,
+            "anomalous-potato", "wsl", records,
         )
 
     def test_journals_forward_claim(self, tmp_path: Path, monkeypatch):
@@ -147,7 +153,7 @@ class TestJournalRunClaim:
                                        "repo": "copilot-extensions"}})
         claim = m._journal_run_claim(owner_ref, out)
         assert claim is not None
-        reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
+        reloaded = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
         assert [c.ref for c in reloaded.resources] == \
             ["anomalous-potato/copilot-extensions/wt-B"]
 
@@ -158,7 +164,7 @@ class TestJournalRunClaim:
                                        "repo": "copilot-extensions"}})
         m._journal_run_claim(owner_ref, out)
         m._journal_run_claim(owner_ref, out)
-        reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
+        reloaded = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
         assert len(reloaded.resources) == 1
 
     def test_journals_pr_claim(self, tmp_path: Path, monkeypatch):
@@ -168,7 +174,7 @@ class TestJournalRunClaim:
                           "pr": {"ref": "https://github.com/o/r/pull/42"}})
         claim = m._journal_run_claim(owner_ref, out)
         assert claim is not None and claim.kind == "pr"
-        reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
+        reloaded = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
         assert [(c.kind, c.ref) for c in reloaded.resources] == \
             [("pr", "https://github.com/o/r/pull/42")]
 
@@ -185,7 +191,7 @@ class TestJournalRunClaim:
         events = claim_history.history_for_ref("https://github.com/o/r/pull/42")
         assert [e["event"] for e in events] == ["claimed"]
         assert events[0]["worktree_id"] == "wt-A"
-        assert events[0]["machine"] == "anomalous-potato"
+        assert events[0]["machine"] == "anomalous-potato-wsl"
 
     def test_journals_worktree_claim_does_not_feed_claim_history(
             self, tmp_path: Path, monkeypatch):
@@ -222,7 +228,7 @@ class TestJournalRunClaim:
         assert m._journal_run_claim("m/test-chamber/wt-A", out) is None
         self._make_caller(tmp_path, monkeypatch)
         assert m._journal_run_claim("anomalous-potato/test-chamber/wt-A", "junk") is None
-        reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
+        reloaded = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
         assert reloaded.resources == []
 
     def test_anchor_owner_lazily_creates_ledger(self, tmp_path: Path, monkeypatch):
@@ -239,7 +245,8 @@ class TestJournalRunClaim:
         monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
         monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
-                            lambda name=None: tmp_path)
+                            lambda name=None: tmp_path / "worktrees")
+        monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path)
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: config)
         monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
@@ -251,11 +258,11 @@ class TestJournalRunClaim:
         owner_ref = "anomalous-potato/spo-core/@anchor"
         out = json.dumps({"success": True, "pr_opened": True,
                           "pr": {"ref": "https://github.com/o/r/pull/7"}})
-        assert not (tmp_path / "@anchor.yaml").exists()
+        assert not (tmp_path / "worktrees" / "@anchor.yaml").exists()
         claim = m._journal_run_claim(owner_ref, out)
         assert claim is not None and claim.kind == "pr"
-        assert (tmp_path / "@anchor.yaml").exists()
-        reloaded = tracking.load_record(tmp_path / "@anchor.yaml")
+        assert (tmp_path / "worktrees" / "@anchor.yaml").exists()
+        reloaded = tracking.load_record(tmp_path / "worktrees" / "@anchor.yaml")
         assert reloaded.pair_kind == "anchor"
         assert [(c.kind, c.ref) for c in reloaded.resources] == \
             [("pr", "https://github.com/o/r/pull/7")]
@@ -270,10 +277,17 @@ class TestResolveAnchorOwnerRef:
         monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
         adir = tmp_path / "anchors" / "spo-core"
         adir.mkdir(parents=True)
+        from agent_worktrees import config as cfg
+
+        config = cfg.Config(
+            srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name="spo-core",
+            repos={"spo-core": cfg.RepoConfig(anchor=str(adir), worktree_root=str(tmp_path))},
+        )
         monkeypatch.setattr("agent_worktrees.config.load_config",
-                            lambda *a, **k: types.SimpleNamespace(
-                                machine="anomalous-potato", platform="wsl",
-                                repo_name="spo-core"))
+                            lambda *a, **k: config)
+        monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "anomalous-potato")
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
         monkeypatch.setattr("agent_worktrees.config.project_name",
                             lambda: "spo-core")
         monkeypatch.setattr("agent_worktrees.__main__._infer_worktree_id_from_cwd",
@@ -288,7 +302,7 @@ class TestResolveAnchorOwnerRef:
 
     def test_singleton_anchor_resolves_to_anchor_ref(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch, "singleton")
-        assert m._resolve_owner_ref() == "anomalous-potato/spo-core/@anchor"
+        assert m._resolve_owner_ref() == "anomalous-potato-wsl/spo-core/@anchor"
 
     def test_worktree_class_anchor_is_no_owner(self, tmp_path, monkeypatch):
         # The class == singleton gate is the worktree-class mis-fire guard.
@@ -306,9 +320,19 @@ class TestLocalClaimantAlive:
     only a positively-resolved gone owner returns False; cross-machine is None."""
 
     def _wire(self, tmp_path, monkeypatch, machine="anomalous-potato"):
-        import types
+        from agent_worktrees import config as cfg
+
+        config = cfg.Config(
+            srcroot=str(tmp_path), machine=machine, platform="windows", repo_name="test-chamber",
+            repos={"test-chamber": cfg.RepoConfig(
+                anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+            )},
+        )
         monkeypatch.setattr("agent_worktrees.config.load_config",
-                            lambda *a, **k: types.SimpleNamespace(machine=machine))
+                            lambda *a, **k: config)
+        monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: machine)
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
         # project_dir(project) -> tmp_path/.<project>
         monkeypatch.setattr("agent_worktrees.config.project_dir",
                             lambda name=None: tmp_path / f".{name}")
@@ -347,10 +371,10 @@ class TestLocalClaimantAlive:
     @pytest.mark.parametrize(
         "platform", [p for p in ("windows", "wsl", "linux") if p != m.cfg.detect_platform()],
     )
-    def test_foreign_platform_is_unconfirmed(self, tmp_path, monkeypatch, platform):
+    def test_historical_platform_does_not_override_current_local_owner(self, tmp_path, monkeypatch, platform):
         self._wire(tmp_path, monkeypatch)
         self._make_owner(tmp_path, "test-chamber", "wt-A", platform=platform)
-        assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A") is None
+        assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A") is True
 
     def test_empty_ref_is_none(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)

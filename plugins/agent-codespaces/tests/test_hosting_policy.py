@@ -50,6 +50,22 @@ async def test_unsupported_receiver_is_visible(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ssh_transport_failure_is_unavailable_not_refusal(monkeypatch):
+    execute = AsyncMock(return_value=SimpleNamespace(
+        exit_code=255, stdout="", stderr="kex_exchange_identification: Connection closed",
+    ))
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    with pytest.raises(RuntimeError) as raised:
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/harness", preflight=True,
+        )
+    message = str(raised.value)
+    assert "unavailable" in message and "exit 255" in message
+    assert "refused" not in message and "unsupported" not in message
+    assert execute.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_absent_receiver_uses_fresh_canonical_reader_before_any_provisioning(monkeypatch):
     import json
 

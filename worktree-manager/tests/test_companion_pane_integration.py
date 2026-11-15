@@ -71,7 +71,6 @@ def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeyp
     tail = ["-m", "worktree_manager.mux_companion", "--cli-pane", "%42", "--cwd", "space path"]
     command, env = companion_runtime.companion_command(tail)
     assert command == [str(python), "-I", "-S", "-B", "-X", "utf8",
-                       *companion_runtime.python_cache_args(tmp_path, runtime=prefix),
                        str(slot / ".runtime-bootstrap" / "runtime_launcher.py"), *tail]
     assert all(name not in env for name in names)
     assert env["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
@@ -256,7 +255,7 @@ def test_native_launcher_captures_cli_only_at_creation(tmp_path, created, expect
         "}\n", encoding="utf-8",
     )
     launch = (BIN / "launch-session.ps1").read_text(encoding="utf-8")
-    function = launch[launch.index("function Invoke-ManagedMuxRegister {"):launch.index("# Deliver a worktree")]
+    function = launch[launch.index("function Invoke-ManagedMuxRegister {"):launch.index("function Invoke-SeedDeliverySafe {")]
     registration = fixture_bin / "registration.ps1"
     registration.write_text(
         "$ErrorActionPreference='Stop'\n"
@@ -264,6 +263,9 @@ def test_native_launcher_captures_cli_only_at_creation(tmp_path, created, expect
         "$plan=@{worktree_id='one'}\n"
         "$script:AwPsmuxBin=Join-Path $PSScriptRoot 'fake-mux.ps1'\n"
         "function Write-SetupLog { throw ($args -join ' ') }\n"
+        "function Get-AwMuxObservation { param($Session)\n"
+        "    @{status='present'; incarnation='$7:100'; panes=@(@{pane_id='%42'; active=$true; dead=$false})}\n"
+        "}\n"
         + function + "\nInvoke-ManagedMuxRegister 'managed' 'workspace'"
         + (" -Created" if created else "") + "\n", encoding="utf-8",
     )
@@ -384,17 +386,18 @@ def test_register_reconnect_retains_cli_but_new_incarnation_clears_it(tmp_path, 
     monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *args, **kwargs: {"applied": True})
     def native(command, **kwargs):
         suffix = "\tworkspace" if "pane_current_path" in command[-1] else ""
-        return SimpleNamespace(returncode=0, stdout=f"%42\t0\tmanaged\t$7:100{suffix}\n")
+        return SimpleNamespace(returncode=0, stdout=f"%42\t0\tmanaged\t$7:100{suffix}\n", stderr="")
     monkeypatch.setattr(mux_daemon_cli, "run_mux_child", native)
     monkeypatch.setattr(mux_discovery, "run_mux_child", native)
+    monkeypatch.setattr(mux_discovery, "passive_cli_supported", lambda _: True)
     base = ["mux-daemon", "register", "--project=example", "--worktree-id=one",
-            "--worktree-path=workspace", "--mux-session=managed", "--mux-bin=psmux"]
+            "--worktree-path=workspace", "--mux-session=managed", "--mux-bin=tmux"]
     assert main([*base, "--session-incarnation=$7:100", "--cli-pane=%42"]) == 0
     assert main([*base, "--session-incarnation=$7:100"]) == 0
     entry = mux_mapping_registry.get_mapping("example", "one", root=tmp_path)
     assert entry["panes"] == [{"pane_id": "%42", "role": "cli", "live": True}]
     monkeypatch.setattr(mux_discovery, "run_mux_child", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout="managed\t1\t$8:200\tworkspace\n",
+        returncode=0, stdout="managed\t1\t$8:200\tworkspace\n", stderr="",
     ))
     assert main([*base, "--session-incarnation=$8:200"]) == 0
     entry = mux_mapping_registry.get_mapping("example", "one", root=tmp_path)

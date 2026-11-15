@@ -471,6 +471,276 @@ handling and bind any successful report to their actual selected command before
 supplying mandatory ownership arguments. Missing or stale discovery is not
 permission to replay a possibly accepted session.
 
+The explicit native pair and optional physical receiver are advertised on
+Windows and Linux. This provider-first declaration follows native bootstrap,
+actual-client consumption and joined physical-handover source qualification;
+it does not enable controlled production launcher capture or automatic caller
+adoption. Unsupported platforms and failed physical/native admission still
+report no support.
+
+On Windows, a pre-effect ordinary fallback starts the original command with
+explicitly inherited stdin, stdout and stderr handles, the restored original
+environment and unchanged cwd, then returns that command's exit status. It does
+not consume or relay application bytes. Windows does not use POSIX `exec` or
+claim same-PID replacement. Owner loss or mismatch refuses before fallback;
+after the admitted path may start work, failures remain terminal with no ordinary
+replay. The private physical handover packet's `receiver` case refuses any
+fallback and covers replacement, rollback, same-slot process replacement,
+uninterrupted upstream identity and one initialization. Native fallback controls
+separately cover small frames before EOF, argument/context fidelity, exit status
+and rejected owner identities. Installed Windows optional entry and its launcher
+remain unqualified.
+
+### Windows native-owner section provider
+
+The internal `owner_section` provider prepares a 4 KiB pagefile-backed section
+before the existing caller creates its native client. The caller must put
+`inherited_handle` in its explicit inherited-handle list, supply the actual
+creation handle and PID to `publish`, then resume the still-suspended child.
+The provider creates, resumes and supervises no process. Publication captures
+birth and principal through a duplicated creation handle, not a numeric-PID
+lookup or ancestor/session-file discovery. Publication is one-shot, including
+an uncertain write failure; close the failed provider rather than retrying it.
+
+The protected DACL admits only the current Windows user. The inherited handle
+has section-read access only. Its retained native handle keeps the section
+available after all producer handles close; closing the final handle removes
+the section without filesystem cleanup. A 256-bit private binding determines
+the local object name and must match the record. It prevents accidental
+cross-wiring, not a hostile equally privileged Windows principal.
+
+Version 1 uses an `AMO1` frame, a little-endian 32-bit JSON byte count and zero
+padding. ASCII JSON has exactly `schema`, integer `version`, `binding`, native
+`pid` and `birth`; the schema is `agent-mcp.windows-native-owner`. Unknown,
+duplicate, missing, oversized, malformed or differently bound records refuse.
+The section carries no credentials or durable ownership claim.
+`acquire(binding)` opens read-only and returns `owner_snapshot.WindowsOrigin`,
+which pins the native process and verifies birth, principal and liveness before
+returning. It exposes `pid`, `birth`, `require_alive()` and idempotent `close()`;
+its caller must close that observation. The complete `owner_snapshot.py`
+source uses only the Python standard library and can be copied into an
+anonymous startup snapshot without importing an installed MCP or shared
+runtime. Missing sections, birth mismatch and owner death never become an
+unowned ordinary call.
+
+The packaged `owner_section.cs` companion supplies
+`AgentMcp.NativeOwnerSection` for an existing in-process PowerShell/.NET creation
+owner. Load it once with `Add-Type -Path`, prepare the object before creation,
+include `InheritedHandle` in the native handle list, then call
+`Publish(creationHandle, pid, birth)` while the actual child is suspended.
+Only a true publication result permits the existing owner to resume. The
+publisher verifies the supplied PID/birth and current principal against the
+creation handle, writes once, and creates or waits for no process. Dispose its
+handles after publication; the child's explicitly inherited read-only handle
+retains the section. A headed coordinator's identity is not evidence of its
+eventual native client's identity.
+The existing native seed adapter's optional direct-client assertion is described
+in [its architecture](../../agent-worktrees/docs/architecture.md). It refuses a
+headed or substituted target before the publication callback, without changing
+ordinary launch selection.
+
+The focused `tests/test_owner_section.py` packet covers suspended native
+creation-handle capture, protected DACL, read-only inheritance, delayed reading
+after publisher-handle closure, collision, malformed/binding refusal, owner
+death before and after acquisition, and final-handle cleanup. The focused
+`tests/test_owner_snapshot.py` controls also run the C# publisher in the
+existing suspended-creation seam, close all publisher handles and exit its
+process before releasing a delayed, stdlib-only reader. They cover missing
+inheritance, protected DACL, read-only handle rights, mismatched and dead
+creation identities, one-shot publication and exact final-handle cleanup.
+These are source provider controls, not actual-client or installed-launcher
+qualification.
+The internal `owner_exec.windows_overlay` builder embeds that stdlib snapshot
+before the anonymous actual-start bootstrap and carries only its section
+binding, not a parent-guessed PID/birth. The bootstrap opens and pins the
+published native owner before querying any installed provider. Missing or dead
+owners refuse without running the query or ordinary command. An eligible
+provider supplies the physical interpreter used by the existing optional
+receiver; the bootstrap does not reconstruct `sys.prefix` or import the selected
+generation into its own interpreter.
+
+Windows has no POSIX exec. This MCP-connection shim creates one headless
+receiver child with the original inherited stdin/stdout/stderr, environment
+and cwd, then returns its actual exit code. An unsupported provider retains
+the ordinary command. Only failure to create the receiver permits fallback,
+after another native-owner liveness check; wait errors and nonzero exits after
+creation never replay the ordinary application. This is not a new native-client
+supervisor, lifetime daemon or owner-discovery process.
+`tests/test_owner_bootstrap_windows.py` qualifies this source boundary with
+independent physical interpreter prefixes, actual-start selection, small
+binary frames, EOF, context, native owner refusal and nonzero exits.
+`tests/test_owner_entry.py` also checks failed creation versus accepted-child
+wait failure without replay. These controlled packages do not qualify actual
+Copilot consumption or an installed handover.
+
+Windows automatic bootstrap adoption and production caller integration remain
+disabled. The section requires no new process, network request,
+filesystem scan or steady-state message work; installed launch/update latency
+remains unqualified until caller adoption.
+
+The opt-in native packet
+`tests/native/test_owner_bootstrap_copilot_windows.py` supplies actual offline
+Windows Copilot to that existing suspended-creation owner, publishes from its
+real creation handle and exits the publisher before ACP initialization or
+session creation. Actual delayed MCP startup must consume the anonymous
+bootstrap, select its physical interpreter and report the same native client
+PID/birth after a real upstream ping/client reply. An ordinary configuration
+in the same workspace supplies the context and settlement baseline. The packet
+observes the pinned publisher, client and physical receiver settle and the
+final section disappear; the bounded runner owns all fixture descendants.
+Late ACP session notifications are validated while draining through stream EOF.
+Client exit must be natural, not test-forced termination.
+The persisted launch plan uses a minimal Windows process-variable allowlist
+with explicit private home, application-data and temporary directories. It
+never copies the rest of the caller environment; a focused serialization
+control plants synthetic inherited credentials and requires their absence.
+Cleanup receives a process handle only after that same handle's native birth,
+principal and liveness are verified. A mismatched candidate is closed without
+becoming a cleanup target; a native negative control requires the mismatched
+fixture process to remain alive until its own input reaches EOF.
+
+The physical receiver's exit code and Python finalization/EOF witness must
+match that ordinary baseline. A native client that abruptly settles its MCP
+child on disconnect does not become a graceful upstream-EOF qualification.
+The JUnit properties retain that distinction and bounded launch/round-trip
+timings. This packet qualifies native configuration consumption and the
+creation-bound handoff, not installed custody, Windows physical-generation
+handover, productive caller enrollment or update latency. The existing optional
+source workflow pins the public client asset and runs this packet only on its
+Windows runner; required unit-only CI is unchanged.
+The packet additionally composes the section publisher with the existing native
+seed creation/wait owner. That owner remains alive while the actual native
+client starts MCP after publisher handles close; the receipt must name the
+client, not its waiting parent. Original ACP streams, fixture-provider context
+and settlement match the ordinary baseline. Preparation, admission and execution
+receipt responses are substituted, and this synthetic provider is not the
+production optional receiver. The independent publisher-exit control remains
+separate. These controls are not
+installed-runtime acceptance and enroll no default or headed production caller.
+
+The separate `tests/native/test_generation_handover_copilot.py` packet now
+composes that Windows caller with the selected physical receiver and shared
+custody. Replacement, rollback and same-slot replacement retain the original
+native client, conduit, keeper and upstream, including accepted in-flight
+tool calls, actual client ping replies and terminal unknown-delivery fencing
+without replay. Its private runtime uses the real provider declaration, not a
+test-only capability override. Windows independently runs that complete physical
+packet after publisher exit and through the retained native creation/wait owner.
+The latter still substitutes preparation, admission and execution receipt
+responses, not the physical receiver or custody protocol. The wait owner must
+remain alive through the physical transitions and exit naturally after its
+actual client settles. The pinned Windows and Linux source lanes remain
+separate from installed acceptance and productive caller enrollment.
+
+### Opt-in retained Windows headed receiver
+
+The explicit Python construction API
+`agent_mcp.owner_headed_bundle.prepare_headed_command` composes the section
+producer with the existing Driver headed creation owner. It accepts the
+original native command, session, attempt directory, Host state file and cwd,
+plus an existing absolute `configuration_path` and exact `names` selection.
+Dash-prefixed server/session identifiers remain literal receiver values; the
+original native argument vector is unchanged.
+The optional `agent-mcp[headed]` dependency supplies the independent Driver core;
+ordinary MCP installation does not require or enable it.
+
+The constructor requires the selected core's additive
+`headed_receivers: ["explicit-inprocess-v1"]` support before writing the
+receiver. It retains a fixed, content-addressed executable containing that
+core, the MCP producer and its native bindings. There is no serialized callback,
+caller-supplied module or configuration in the archive. The copied executable
+runs with a physical base Python under `-I -S`, without its original source
+checkout or virtual environment. Its `--support-json` additively declares
+`mcp_origin: ["windows-headed-native-v1"]`. An older undeclared core refuses;
+package versions do not imply support.
+
+At receiving time, the fixed MCP entrypoint reads the existing configuration
+and constructs only the explicitly selected literal local entries. Every
+selected entry must be eligible; partial selection refuses. The core retains
+its argument, repository-policy, original child, Job, streams, wait and cleanup
+owners. Publication uses the actual suspended native child's creation handle,
+PID and birth, never the receiving coordinator. The explicit inherited list
+contains the section's read handle and one synchronization-only namespace
+reservation handle; neither grants configuration-write authority.
+Authentication-wait execution, existing additional
+MCP overlays, literal delimiters, scripts and forwarding client launchers are
+not admitted by this opt-in path. Ordinary headed and MCP callers are unchanged.
+
+Configuration crosses to native Copilot through one private, local, first-instance
+named pipe, not argv, environment or a newly persisted plaintext overlay.
+Its protected DACL admits the current user, remote clients are rejected, and
+the connected reader must match the pinned original native creation identity
+before any JSON bytes are sent. A different same-user process receives no
+configuration. Before native creation, an occupied protected instance reserves
+the name and a second instance supplies the actual configuration stream.
+The native client explicitly inherits a synchronization-only reference to the
+occupied reservation. The publisher closes all its reservation handles after
+the actual suspended creation inherits that reference. Closing the separate
+writer therefore supplies EOF without releasing the name; even failed or
+cancelled transfer and parent cleanup cannot free it while the native owner
+retains its reference. The OS releases that final reservation on native exit.
+No configuration passes through the reservation, and no second listener worker
+or new lifetime supervisor is introduced.
+
+The shared native listener keeps its existing one-instance, first-instance
+defaults; this explicit owner alone selects two bounded instances and an
+additional instance of its already-protected name. Invalid/unlimited counts
+and non-boolean selection refuse before native effects. Its focused controls
+run with `python tools/run-plugin-tests.py zdd --test-file
+tests/test_private_windows.py -k "explicit_dacl_and_native_listener_flags or
+invalid_listener_reservation"`.
+
+The existing overlapped-I/O owner supplies one 15-second
+cancellable transfer deadline and a 1 MiB maximum. The one-use worker closes
+its own connected pipe and duplicated process reference, retaining its channel
+if either native release fails so the outer typed receipt can retry those exact
+handles. No worker survives the transfer. A failed transfer immediately emits
+one fixed, redacted diagnostic
+without cancelling the original native wait or taking over Job cleanup.
+Both resource finalizers are attempted. An already-active native cleanup or
+cancellation exception remains the primary exception; its optional
+`mcp_cleanup` receipt retains separately failed releases as an
+`OwnedCleanupError` with exact resource references and a bounded retry operation.
+Without an active error, failed finalization raises that receipt directly.
+The pre-existing input
+configuration retains its existing storage and permissions.
+
+The explicit `tests/native/test_owner_headed_windows.py` packet checks the
+actual copied receiver, native interactive Copilot, private mux and controlled
+MCP provider. It requires the same native child PID/birth at physical MCP
+startup, one initialization, preserved provider context, original Host
+attachment/termination and exact fixture settlement. Separate native controls
+check raw file consumption and a wrong-reader refusal with zero transferred
+bytes. Two native lifetime controls keep the protected name unavailable for
+replacement both before a delayed open and after successful consumption, then
+require its release only after original-owner settlement, with every publisher
+reservation handle already closed. These are source tests, not installed
+reattachment, package replacement,
+seed-prompt completion, default caller adoption or full Windows handover.
+They require explicit `COPILOT_NATIVE_TEST_EXECUTABLE`,
+`COPILOT_DRIVER_HEADED_MUX_E2E=1` and `PSMUX_TEST_BIN` selection through the
+bounded runner; skips supply no native qualification. Required unit-only CI
+is unchanged.
+
+The `retained-headed` case in
+`tests/native/test_generation_handover_copilot.py` joins that same copied
+producer to the real optional physical receiver and custody protocol. It uses
+the original headed session through the existing authenticated Session Host
+transport; it does not create another conversation with `session/new`. The
+fixture prepares its physical backend from the actual native MCP environment
+before releasing the existing pre-effect barrier, including when native MCP
+startup precedes the Host's running state. The original client, coordinator,
+extension, conduit, keeper and upstream must retain their native identities
+through physical replacement, rollback and same-code replacement. The shared
+packet requires seven completed tool calls, three accepted/in-flight handovers,
+fresh server-ping replies and a single accepted operation with lost output that
+is fenced without replay. Headed final-message evidence comes from that
+original session's native event journal, independently of streaming ACP text;
+the loopback model must also consume each real MCP result. Exact Host/mux and
+daemon-lifetime settlement remain required. This is opt-in source qualification,
+not installed acceptance, automatic caller adoption or qualification of
+non-streaming final-text delivery through the headed ACP adapter.
+
 ### Hosted originating-owner qualification
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the

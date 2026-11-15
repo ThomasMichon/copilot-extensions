@@ -1122,6 +1122,10 @@ def test_windows_gc_reclaims_junction_slot_under_nonzero_min_age(tmp_path):
 # fingerprint_source / check_admission (phase-3-runtime-admission, #5472/#5788)
 # ---------------------------------------------------------------------------
 
+def _fingerprint_logical_path(path):
+    return Path(vr._normalize_windows_extended_path(str(path)))
+
+
 @pytest.mark.parametrize("count", [4, 9])
 def test_fingerprint_reads_overlap_with_bounded_ordered_framing(tmp_path, monkeypatch, count):
     import hashlib
@@ -1146,15 +1150,16 @@ def test_fingerprint_reads_overlap_with_bounded_ordered_framing(tmp_path, monkey
 
     def observed_read(path):
         nonlocal active, maximum
-        if path not in files:
+        logical = _fingerprint_logical_path(path)
+        if logical not in files:
             return read_bytes(path)
         with lock:
             active += 1
             maximum = max(maximum, active)
-            reads.append(path)
+            reads.append(logical)
             workers.add(threading.current_thread())
         try:
-            if path in files[:4]:
+            if logical in files[:4]:
                 first_batch.wait(timeout=3)
             return read_bytes(path)
         finally:
@@ -1186,17 +1191,18 @@ def test_fingerprint_read_failure_keeps_label_order_and_settles_workers(tmp_path
 
     def failing_read(path):
         nonlocal active
-        if path not in files:
+        logical = _fingerprint_logical_path(path)
+        if logical not in files:
             return read_bytes(path)
         with lock:
             active += 1
-            reads.append(path)
+            reads.append(logical)
             workers.add(threading.current_thread())
         try:
-            if path == files[0]:
+            if logical == files[0]:
                 assert later_failed.wait(3)
                 raise PermissionError("first label refused")
-            if path == files[1]:
+            if logical == files[1]:
                 later_failed.set()
                 raise PermissionError("later label refused")
             return read_bytes(path)
@@ -1252,7 +1258,7 @@ def test_fingerprint_collects_file_digests_without_reopening_sources(tmp_path, m
     read_bytes = Path.read_bytes
 
     def count_read(path):
-        calls[path] += 1
+        calls[_fingerprint_logical_path(path)] += 1
         return read_bytes(path)
 
     monkeypatch.setattr(Path, "read_bytes", count_read)
@@ -1276,10 +1282,11 @@ def test_fingerprint_resolves_each_parent_once_per_call(tmp_path, monkeypatch):
     denied = False
 
     def count_resolve(path, *args, **kwargs):
-        if path in counts:
+        logical = _fingerprint_logical_path(path)
+        if logical in counts:
             if denied:
                 raise PermissionError("parent resolution refused")
-            counts[path] += 1
+            counts[logical] += 1
         return resolve(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", count_resolve)
@@ -1301,7 +1308,7 @@ def test_fingerprint_callback_receives_hashed_bytes_once_and_propagates_failure(
     reads = []
 
     def read_once(path):
-        reads.append(path)
+        reads.append(_fingerprint_logical_path(path))
         return read_bytes(path)
 
     observed = []

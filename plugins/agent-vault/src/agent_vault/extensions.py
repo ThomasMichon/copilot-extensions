@@ -195,7 +195,7 @@ class ExtensionRegistry:
     def register_cache_source(
         self, fn: CacheSource, *, priority: int = 100, name: str | None = None
     ) -> None:
-        """Register a source of entries to pre-warm via ``cache-populate``.
+        """Register configured targets for population and unlock-triggered warming.
 
         The callable receives an optional ``machine`` hint and returns an iterable
         of entries to cache -- each either a ``"path"`` string (defaults the field
@@ -361,29 +361,9 @@ class ExtensionRegistry:
         ``password``) or an ``(entry, field)`` pair. A source that raises is
         logged and skipped (fail-open).
         """
-        pairs: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for ranked in self._cache_sources:
-            try:
-                items = ranked.fn(machine)
-            except Exception as exc:
-                log.warning("Cache source %r raised: %s", ranked.name, exc)
-                continue
-            if not items:
-                continue
-            for item in items:
-                if isinstance(item, str):
-                    pair = (item, "password")
-                elif isinstance(item, (tuple, list)) and len(item) >= 1:
-                    entry = item[0]
-                    field = item[1] if len(item) >= 2 and item[1] else "password"
-                    pair = (str(entry), str(field))
-                else:
-                    continue
-                if pair[0] and pair not in seen:
-                    seen.add(pair)
-                    pairs.append(pair)
-        return pairs
+        from .cache_sources import collect
+
+        return collect((ranked.fn for ranked in self._cache_sources), machine).entries
 
     def apply_cli_commands(self, subparsers) -> None:
         """Let each registered CLI-command builder add its subparser(s).

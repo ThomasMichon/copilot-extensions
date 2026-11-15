@@ -2059,21 +2059,20 @@ if (Test-Path `$pidFile) {
     }
 }
 
-`$cacheId = [Guid]::NewGuid().ToString('N')
-`$cache = [IO.Path]::GetFullPath((Join-Path `$runtimeHome "cache\python\unsealed-`$cacheId"))
-if (-not `$cache.StartsWith('\\?\')) {
-    `$cache = if (`$cache.StartsWith('\\')) { '\\?\UNC\' + `$cache.Substring(2) } else { '\\?\' + `$cache }
-}
-# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+`$cacheArguments = @('-B')
 try {
-    `$_selectedCache = & `$launchPy -I -B -X ('pycache_prefix=' + `$cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$runtimeHome 2>`$null
+    `$_selectedCache = & `$launchPy -I -B -X utf8 -c "import json,sys; from agent_procutil.python_cache import POLICY_VERSION,policy_arguments; print(json.dumps(policy_arguments(sys.argv[1],runtime=sys.executable) if POLICY_VERSION==2 else ['-B']))" `$runtimeHome 2>`$null
     if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
-        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
-        if (`$_selectedCache) { `$cache = `$_selectedCache }
+        `$candidate = ConvertFrom-Json -InputObject ([string]`$_selectedCache)
+        if (`$candidate.Count -eq 2 -and `$candidate[0] -ceq '-X' -and
+            `$candidate[1] -is [string] -and `$candidate[1].StartsWith('pycache_prefix=') -and
+            `$candidate[1].Length -gt 15 -and `$candidate[1] -notmatch "[``r``n]" -and
+            `$candidate[1].IndexOf([char]0) -lt 0) {
+            `$cacheArguments = @('-X', ('"' + `$candidate[1] + '"'))
+        }
     }
 } catch {}
-`$cacheOption = '"pycache_prefix=' + `$cache + '"'
-`$proc = Start-Process -FilePath `$launchPy -ArgumentList '-X',`$cacheOption,'-m','agent_bridge','start' ``
+`$proc = Start-Process -FilePath `$launchPy -ArgumentList (`$cacheArguments + @('-m','agent_bridge','start')) ``
     -WorkingDirectory `$runtimeHome ``
     -NoNewWindow -PassThru ``
     -RedirectStandardOutput `$logFile ``

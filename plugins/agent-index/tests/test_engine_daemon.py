@@ -160,14 +160,15 @@ def test_failed_first_engine_activation_preserves_legacy_selection(monkeypatch, 
     runtime = daemon.importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runtime)
 
-    replace = runtime.os.replace
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    replace = publication.replace_selector
 
     def deny_selector(source, destination):
-        if Path(destination) == tmp_path / "current-version":
+        if Path(destination).name == "current-version" and Path(destination).parent.samefile(tmp_path):
             raise PermissionError("selector publication denied")
         return replace(source, destination)
 
-    monkeypatch.setattr(runtime.os, "replace", deny_selector)
+    monkeypatch.setattr(publication, "replace_selector", deny_selector)
     with pytest.raises(PermissionError, match="selector publication denied"):
         runtime.activate(tmp_path, "2.0.0", link_free=True)
     assert not (tmp_path / "current-version").exists()
@@ -197,13 +198,9 @@ def test_engine_endpoint_env(monkeypatch):
 
 def test_engine_command_targets_durable_venv(tmp_path):
     cmd = daemon.engine_command(tmp_path)
-    assert cmd[1] == "-X"
-    prefix = Path(cmd[2].removeprefix("pycache_prefix="))
-    cache_root = tmp_path / "cache" / "python"
-    cache_root.mkdir(parents=True)
-    assert os.path.samefile(prefix.parent, cache_root)
-    assert prefix.name.startswith("unsealed-")
-    assert cmd[3:] == ["-m", "agent_index_engine.app", "--host",
+    assert cmd[1] == "-B"
+    assert not (tmp_path / "cache").exists()
+    assert cmd[2:] == ["-m", "agent_index_engine.app", "--host",
                       daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
     assert str(tmp_path) in cmd[0]
 
@@ -474,7 +471,7 @@ def run(app, **kwargs):
 
 
 @pytest.mark.parametrize(("level", "expected"), [("warning", "warning"), (None, "info")])
-@pytest.mark.parametrize("external_cache", [False, True])
+@pytest.mark.parametrize("external_cache", [False, True, "no-write"])
 def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
     monkeypatch, tmp_path, level, expected, external_cache,
 ):
@@ -489,7 +486,10 @@ def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
     (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "app.py").write_text(_OLD_ENGINE_APP, encoding="utf-8")
     (tmp_path / "uvicorn.py").write_text(_FAKE_UVICORN, encoding="utf-8")
-    prefix = [sys.executable, *(python_cache_args(tmp_path) if external_cache else [])]
+    cache_args = ["-B"] if external_cache == "no-write" else (
+        python_cache_args(tmp_path) if external_cache else []
+    )
+    prefix = [sys.executable, *cache_args]
     cmd = daemon._with_log_level_bootstrap(
         [*prefix, "-m", "agent_index_engine.app", "--host", "127.0.0.1", "--port", "1"]
     )
@@ -507,7 +507,10 @@ def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
         assert result.returncode == 0, result.stderr
         assert f"LEVEL={expected}" in result.stdout
         assert "ARGS=--host 127.0.0.1 --port 1" in result.stdout
-        if external_cache:
+        if external_cache == "no-write":
+            assert not list(pkg.rglob("*.pyc"))
+            assert not (tmp_path / "cache").exists()
+        elif external_cache:
             assert not list(pkg.rglob("*.pyc"))
             cache_root = Path(prefix[2].partition("=")[2])
             caches = list(cache_root.rglob("*.pyc"))

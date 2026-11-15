@@ -329,7 +329,7 @@ async def test_controller_session_qualifier_survives_local_preparation(tmp_path,
         "id": "controller", "repo": "control", "machine": "synthetic",
         "path": str(controller), "status": "active",
     }]})
-    monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
+    monkeypatch.setattr("agent_bridge.acquisition_authority._run_worktree_command", owner)
     args, _, _ = await transport.resolve_local_launch(target)
     assert str(payload) in args
     owner.assert_awaited_once()

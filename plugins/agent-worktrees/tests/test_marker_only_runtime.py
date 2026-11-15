@@ -116,14 +116,16 @@ def test_native_resolver_executes_real_uv_environment(tmp_path, host, layout):
 @pytest.mark.parametrize("context_case", ["legacy", "valid", "invalid"])
 @pytest.mark.parametrize("native_shell", ["bash", "pwsh", "powershell.exe"])
 def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, context_case, native_shell):
+    from agent_worktrees.config import detect_platform
+
     if (native_shell == "bash") == (os.name == "nt"):
         pytest.skip("platform-native hook shell")
     uv = shutil.which("uv")
     shell = shutil.which(native_shell)
     if not uv or not shell:
         pytest.skip("uv and native hook shell required")
-    tmp_path = tmp_path / "caf\u00e9"
-    tmp_path.mkdir()
+    tmp_path = tmp_path.parent / hashlib.sha256(os.fsencode(tmp_path.name)).hexdigest()[:8] / "caf\u00e9"
+    tmp_path.mkdir(parents=True)
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0}
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
@@ -140,14 +142,15 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
         "import consumer_probe,json,sys\n"
         "print(json.dumps({'prefix':sys.prefix,'event':sys.argv[1],"
         "'payload':json.load(sys.stdin),'cache':consumer_probe.__cached__,"
-        "'value':consumer_probe.VALUE,'utf8':sys.flags.utf8_mode,"
+        "'value':consumer_probe.VALUE,'no_write':sys.dont_write_bytecode,'utf8':sys.flags.utf8_mode,"
         "'stdinEncoding':sys.stdin.encoding}))\n", encoding="utf-8",
     )
     home = tmp_path / "home"
     home.mkdir()
     root = home / ".agent-worktrees"
     env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
-           "COPILOT_PLUGIN_ROOT": str(payload), "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
+           "COPILOT_PLUGIN_ROOT": str(payload), "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252",
+           "LOCALAPPDATA": str(home / "os-cache"), "XDG_CACHE_HOME": str(home / "os-cache")}
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT",
                 "AGENT_RT_ROOT", "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"):
         env.pop(key, None)
@@ -212,10 +215,9 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
     probe_hash = hashlib.sha256((site / "consumer_probe.py").read_bytes()).digest()
     if context_case != "legacy":
         owner = site / "agent_procutil"
-        owner.mkdir()
-        shutil.copyfile(
-            _PLUGIN.parents[1] / "libs/agent-procutil/src/agent_procutil/python_cache.py",
-            owner / "python_cache.py",
+        shutil.copytree(
+            _PLUGIN.parents[1] / "libs/agent-procutil/src/agent_procutil",
+            owner, ignore=shutil.ignore_patterns("__pycache__"),
         )
         metadata = site / "consumer_probe-1.0.dist-info"
         metadata.mkdir()
@@ -243,7 +245,7 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
         "projects": {"example": {}},
     }))
     (root / "repos.yaml").write_text(json.dumps({
-        "repos": {"example": {"windows" if os.name == "nt" else "linux": str(workspace)}},
+        "repos": {"example": {detect_platform(): str(workspace)}},
     }))
     legacy = home / ".agent-worktrees/bin"
     legacy.mkdir(parents=True, exist_ok=True)
@@ -288,18 +290,17 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
         assert observed["value"] == 42
         assert observed["utf8"] == 1 and observed["stdinEncoding"].lower() == "utf-8"
         cached = Path(observed["cache"].removeprefix("\\\\?\\"))
-        assert cached.is_relative_to(root / "cache/python") and cached.is_file()
+        assert observed["no_write"] is True
+        assert not cached.exists()
+        assert not (root / "cache/python").exists()
         if context_case == "valid":
-            before = cached.stat().st_mtime_ns
             repeated = subprocess.run(
                 command, input=json.dumps(event, ensure_ascii=False), env=env,
                 capture_output=True, text=True, encoding="utf-8", timeout=30, **flags,
             )
             assert repeated.returncode == 0, repeated.stderr
             assert json.loads(repeated.stdout) == observed
-            assert cached.stat().st_mtime_ns == before
-            assert cached.relative_to(root / "cache/python").parts[0].startswith("installed-")
-            assert not list((root / "cache/python").glob("unsealed-*"))
+            assert not cached.exists()
         assert not list(slot.rglob("*.pyc"))
 
 

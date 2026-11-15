@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import math
 import sqlite3
@@ -39,7 +40,10 @@ class _QueueOwner(Protocol):
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
     def _now(self, now: float | None) -> float: ...
     def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None: ...
-    def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict: ...
+    def reconcile_task_relationship(
+        self, task_id: str, *, event_id: int | None = None,
+        authority_guard: Callable[[], None] | None = None,
+    ) -> dict: ...
     def _audit(
         self, conn: sqlite3.Connection, task_id: str, *, ts: float,
         from_status: str, to_status: str, worker: str | None, note: str,

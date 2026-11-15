@@ -346,6 +346,8 @@ def test_actual_same_process_alias_fold_retires_old_enrollment_without_inheritin
 
 
 def test_v31_history_index_migration_preserves_original_custody_and_requires_preparation(enrolled):
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
     db, owner, admission, consumer = enrolled
     message(*enrolled)
     successor = replace(consumer, incarnation="consumer-b")
@@ -356,6 +358,7 @@ def test_v31_history_index_migration_preserves_original_custody_and_requires_pre
     db.execute_write("UPDATE schema_version SET version=31")
     db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
     db.execute_write(schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1])
+    restore_prior_inbox_guards(db._get_conn(), version=31)
     tables = ("live_messages", "bridge_inbox_consumers", "bridge_runtime_epoch",
               "bridge_runtime_producers")
     before = {table: [dict(row) for row in db.execute_read(f"SELECT * FROM {table}")]
@@ -413,6 +416,8 @@ def test_prepared_storage_never_repairs_missing_enrollment_history(enrolled, dam
 
 
 def test_v30_migration_preserves_handoff_and_leaves_legacy_consumer_unenrolled(enrolled):
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
     db, owner, admission, consumer = enrolled
     original = message(*enrolled)
     # The prior schema had the same inbox owner but no enrollment storage.
@@ -421,6 +426,7 @@ def test_v30_migration_preserves_handoff_and_leaves_legacy_consumer_unenrolled(e
     db.execute_write("UPDATE schema_version SET version=30")
     db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
     db.execute_write(schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1])
+    restore_prior_inbox_guards(db._get_conn(), version=30)
     other = Database(db.db_path)
     try:
         validate_schema(other._get_conn())

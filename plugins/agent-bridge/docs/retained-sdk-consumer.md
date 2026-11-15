@@ -9,30 +9,84 @@ Omitting the setting preserves ordinary legacy delivery, including its existing
 default-on behavior. This source integration is not native-platform,
 installed-cohort or guarded-restoration qualification.
 
-An original Copilot Driver headed launch supplies the versioned private
-`COPILOT_DRIVER_HEADED_CLIENT` declaration and thereby selects retained
-delivery for that launch. The extension loads the client from the retained
-core assets and sends through the same Session Host/native SDK edge. It
-does not call its own SDK handle's `send` or fall back to the old standalone
-driver. Missing or unsupported selected support remains held.
+The [Core package](../../../libs/copilot-driver-core/README.md) owns the
+registration/delivery closure. Bridge keeps one SDK entrypoint, which supplies
+its original plugin root to the Core activation. Source checkouts select the
+canonical Core files; released payloads use the existing packaged-asset
+projection. Portable receiving reads those resources from its selected Core
+package, not a guest Bridge installation. A partial native projection refuses
+before SDK activation rather than falling back to source. The same original
+plugin root is checked against native loadout observations after relocation.
+No additional SDK join, default-mode change or permission declaration is added.
 
-That client preserves queue/steer urgency and the actual native message ID;
-it never authorizes abort or mutable session controls. The original state,
-nonce, native session/PID and first-controller support must match. A previous
-controller's buffered RPCs, changed state or lost acceptance do not permit
-reconnection or re-hooking. Native user input revokes control. A portable
-selection retains the existing exact native loadout checks before the common
-send; the new path does not waive duplicate/missing-root refusal. Read-only
-SDK metadata and history still serve original consumption recovery. Full
-controller restoration is a separate qualification, not an inferred grant.
+An original Copilot Driver headed launch supplies
+`COPILOT_DRIVER_HEADED_CLIENT` and thereby selects retained delivery for that
+launch. Ordinary receiving uses the already-joined public SDK session, not
+the private controller client. Missing or revoked private control cannot gate
+ordinary queue/steer messages or acquire a new controller. Mutation controls,
+launch replacement and controller restoration retain their independent owners.
+Portable startup still checks the exact native plugin loadout through the
+public SDK before the final send; duplicate/missing roots remain unsupported.
+
+## Post-tool pending-input notice
+
+The extension registers the public SDK's `onPostToolUse` and
+`onPostToolUseFailure` callbacks. Its existing off-loop inbox and original
+receipt reads populate a bounded in-memory set of pending message IDs before
+an SDK send can block. Root callbacks for the registered native session can
+then tell the agent to end its turn for queued steering. The callback performs
+no network, subprocess, file or history work and never awaits the drain.
+Nested/foreign callbacks, intentional `/peer` mute and unavailable current
+registration produce no notice. A repeated notice is coalesced for 30 seconds.
+No hook acknowledgement, peer reply or new delivery queue is required.
+
+SDK acceptance does not clear pending input. A native root input observation,
+or the retained consumer's existing exact original-receipt history check,
+clears its own observed ID. A session-binding change invalidates the old set.
+At the 1,000-ID bound, observation becomes explicitly incomplete rather than
+evicting known IDs or claiming the inbox is empty. Unknown overflow is not a
+reason to replay input; it does not itself demand an end-turn after all known
+pending IDs have cleared.
+
+This is best-effort steering from this extension's observed facts, not a fresh
+authoritative inbox read on every tool call. It cannot wake an idle receiver
+without a tool boundary, repair a hung SDK or certify callback support from a
+package version. The selected runtime must actually accept and invoke the
+public hooks; native hook-policy refusal is not bypassed. The model-free source
+controls do not qualify that native lane or an installed reload.
+
+No hook return, prompt-submitted callback or send reply is treated as model
+consumption. Timed content fallback remains unsupported until the native
+provider supplies enforceable pre-input duplicate suppression and evidence
+that the exact post-tool content reached model-facing input. Existing retained
+uncertainty, pending-native fences, original IDs and no-resend rules are unchanged.
+
+The legacy represented-event flusher separately preserves actual attributed
+root-input events across failed or unconfirmed event POSTs. It retries only
+that evidence, with the original native session and event identity, not an SDK
+send or message body. Ordinary representation remains best-effort. Bounded
+overflow evicts ordinary events first; an all-receipt overflow is reported off
+the SDK event loop and can leave original delivery receipts unknown. This is
+an in-memory retry inside the existing event buffer, not a durable outbox or
+restart guarantee. Re-registration never retags retained evidence as another
+session's input, and native hook/SDK acknowledgement alone creates no event.
+Sub-agent events likewise cannot change the parent session's registration or
+native binding; only root events can adopt a resumed conversation ID.
 
 ## Prerequisites and unsupported cases
 
-The selected consumer requires an advertised HTTP protocol of at least **50**,
-the admitted local endpoint, fresh exact registration and the existing
-installation/inbox owners. It never downgrades to legacy delivery when those
-prerequisites fail. Existing shared-token access remains unchanged; there is no
-new consumer credential. Proxy/container ingress remains unsupported.
+The current consumer requires HTTP protocol **50** or newer and the independently
+advertised `compatible_native_inbox: 1` capability from the actual serving
+daemon. It selects `receiving_api: "native-sdk-v1"` on the existing retained
+requests. Missing support refuses before enrollment or final admission; there
+is no automatic legacy or private-controller fallback. Older consumers omit the
+selector and retain their original installation-bound contract unchanged.
+Existing shared-token access, the admitted local endpoint, frontend readiness,
+writable prepared schema and fresh exact native registration remain required.
+Installation identity, epoch, process birth and PID are not ordinary message
+admission requirements. Current Core omits process diagnostics from new-mode
+requests; optional valid observations from other consumers remain advisory.
+Proxy ingress remains unsupported.
 
 The already-used `@github/copilot-sdk` session must expose `send()`, `getEvents()`
 and `rpc.metadata.snapshot()`. Its actual `sessionId`, metadata session ID and
@@ -48,30 +102,40 @@ With `readonly_plugin_controls: 1`, the extension polls only plugin observations
 through `controls?readiness_only=true`. This filter neither claims nor expires
 mutation controls. Interrupts, mode changes and history replay remain
 unsupported: selected retained delivery never aborts a turn or replays an
-in-flight cache. Pending legacy mutation controls and unassociated legacy
-messages can prevent enrollment or polling; they are not silently acknowledged
-or discarded.
+in-flight cache. Pending legacy mutation controls prevent enrollment. Unassociated legacy queue
+messages retain their original IDs and receive one immutable handoff before
+delivery. A previously claimed or begun message is never treated as a fresh
+offer, acknowledged or discarded.
 
 The [explicit portable mux receiver](repository-hosting.md#explicit-portable-mux-receiving)
-selects the same consumer with a `portable_launch` attempt observation and
-requires `portable_inbox: 1`. Its first remote enrollment must match the host's
-claimed launch reservation, exact native ID and endpoint. A same-process
-successor uses the existing predecessor CAS, not another native launch; another
-attempt or process cannot inherit it. Ordinary remote venues and proxy ingress
-remain unsupported. Portable prompts cannot enter the legacy inbox while
-enrollment is pending. The selected standalone driver supplies mutation control
-and its attributed source; Bridge does not gain a direct-SDK fallback.
+selects the same consumer with a `portable_launch` observation and additionally
+requires `portable_inbox: 1` and `readonly_plugin_controls: 1`. Original launch
+allocation and mutation controls remain separate from ordinary receiving.
+The same exact native session and admitted endpoint are required; this is not
+permission to create or resume a dormant target. Portable prompts cannot enter
+the legacy inbox while enrollment is pending.
+Its explicit unique-plugin/root selection is checked through readonly public SDK
+observations before begin and again at the SDK edge. A known missing or duplicate
+loadout therefore cannot consume the one-shot grant, and no private controller
+is constructed to perform that check.
 
 ## Invocation and recovery
 
 Registration remains independent of enrollment. Off the SDK event handler,
-the serialized consumer negotiates the actual installation and a fresh extension
-incarnation. A lost enrollment reply retries the original predecessor CAS,
+the serialized consumer observes the current receiver and registers a fresh
+extension receipt identifier. The returned binding is an opaque mode selector,
+not an installation or credential. A lost enrollment reply retries the original predecessor CAS,
 not a new negotiation that treats itself as its predecessor.
 If the frontend restarts while this consumer stays alive, a current-owner
-refusal triggers bounded renegotiation. The recovered installation/epoch and
+refusal triggers bounded renegotiation. The recovered mode binding and
 current-or-original-predecessor observations must still match; enrollment
 retries the exact original CAS. A new binding or foreign consumer remains held.
+
+Ordinary diagnostic metadata refresh does not retire a compatible receiver.
+If an actual registration loss retires it, a fresh observation of no current
+receiver can register a new opaque receipt identifier after liveness returns.
+Original handoffs keep their old identifiers and outcomes; this is neither
+native-session resume nor a new send opportunity for begun input.
 
 Polling requests at most one message. The existing SQLite owner retains its
 original handoff before exposing the payload. After checking the current native
@@ -79,8 +143,9 @@ context, the consumer requests one-shot final admission and checks the context
 again immediately before invoking the SDK. Only that invocation's true reply
 permits a send. A lost reply, false result or changed context grants no retry.
 
-Direct SDK sends retain `source: "agent-bridge"`; selected driver sends use their
-explicit `agent-remote-driver-<uuid>` source. Both retain a root envelope carrying the exact
+Direct SDK sends retain `source: "agent-bridge"`; recovery also recognizes the
+explicit `agent-remote-driver-<uuid>` source of earlier original sends.
+Both retain a root envelope carrying the exact
 native session, consumer incarnation, original handoff and message ID.
 SDK admission records `sdk_accepted`, not consumption or semantic completion.
 An ambiguous exception, missing SDK message ID or timeout records/retains
@@ -94,6 +159,11 @@ can record `consumed`. Sub-agent events, operator input, quoted envelopes,
 reused message IDs and missing attribution cannot settle it. The outcome uses
 the receipt's original consumer, including after an extension reload; it never
 substitutes the new process or incarnation.
+
+An unbegun original offer can survive a receiver reload and be delivered using
+its original receipt identifier and envelope. A sending, unknown or accepted
+handoff is observation-only across that reload: no new receiver obtains a
+second SDK invocation.
 
 Durable SDK history is read lazily, at most once per 30 seconds, and shared
 across the bounded receipt page. It is not an event-handler operation or a

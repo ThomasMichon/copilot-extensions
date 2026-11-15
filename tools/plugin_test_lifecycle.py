@@ -147,9 +147,7 @@ def run_contained(
                 lease=daemon_lease,
                 **(
                     {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                    if qualification is not None else (
-                        {"cleanup_results": lifecycle_results} if native_application else {}
-                    )
+                    if qualification is not None else {"cleanup_results": lifecycle_results}
                 ),
             ) as daemon_environment:
                 if pins is not None:
@@ -171,12 +169,12 @@ def run_contained(
             execution_error = error
             raise
         finally:
-            if native_application and (
+            if (
                 not teardown_complete
                 or any(outcome.status not in ("settled", "missing") for outcome in lifecycle_results)
             ):
                 raise owner.UnreapedProcessError(
-                    "Native application daemon cleanup remains unsettled."
+                    "Test daemon cleanup remains unsettled."
                 ) from execution_error
         if qualification is not None:
             qualification.boundary.require(owner.time.monotonic)

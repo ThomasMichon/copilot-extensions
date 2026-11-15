@@ -146,6 +146,9 @@ def test_schema_38_migration_preserves_legacy_rows_and_requires_writable_prepara
     tmp_db.execute_write(schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1])
     tmp_db.execute_write("ALTER TABLE live_messages DROP COLUMN exact_session")
     tmp_db.execute_write("UPDATE schema_version SET version=38")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=38)
     with pytest.raises(ValueError, match="writable preparation"):
         Database(tmp_db.db_path, read_only=True)
     migrated = Database(tmp_db.db_path)

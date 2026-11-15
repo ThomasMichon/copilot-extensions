@@ -232,11 +232,17 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
             args.spec,
             cli_argv=_reexec_argv(args),
             holder=args.holder,
+            **({"registration_id": args.registration_id}
+               if getattr(args, "registration_id", None) is not None else {}),
         )
         return 0
     if args.emitter_command == "tick":
         with _client(args) as client:
-            return _emit(emitter.run_tick(client, spec, holder=args.holder))
+            return _emit(emitter.run_tick(
+                client, spec, holder=args.holder,
+                **({"registration_id": args.registration_id}
+                   if getattr(args, "registration_id", None) is not None else {}),
+            ))
     raise SystemExit(f"unknown emitter command: {args.emitter_command!r}")
 
 
@@ -471,10 +477,12 @@ def register_producer_commands(subparsers: Any) -> None:
     ep = emitter_sub.add_parser("tick", help="run one lease-gated emitter tick")
     ep.add_argument("spec", help="path to the JSON command-emitter spec")
     ep.add_argument("--holder", required=True, help="this producer's machine identity")
+    ep.add_argument("--registration-id", help="actual registration for opt-in relevance checks")
     ep.set_defaults(func=_cmd_emitter)
     ep = emitter_sub.add_parser("serve", help="run a command emitter on its declared interval")
     ep.add_argument("spec", help="path to the JSON command-emitter spec")
     ep.add_argument("--holder", required=True, help="this producer's machine identity")
+    ep.add_argument("--registration-id", help="actual registration for opt-in relevance checks")
     ep.set_defaults(func=_cmd_emitter)
     ep = emitter_sub.add_parser(
         "side-load",

@@ -1,0 +1,13 @@
+{
+  "comment": "Retry original native wakes only after request-bound pre-admission unavailability proof",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

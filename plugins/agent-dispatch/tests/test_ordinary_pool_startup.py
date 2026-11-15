@@ -50,6 +50,7 @@ def ordinary(
     client = controls.connected(api, requests)
     placed = client.place_pool_task(
         requested.id, reserved_by="allocator", catalog_revision=revision, driver="ordinary-bridge",
+        **({"session_origin_transport": "prefer-origin-v1"} if getattr(request, "param", False) == "origin-v1" else {}),
     )
     snapshot = {**asdict(q.get(requested.id)), "spawn_reservation_key": placed["reservation"]["key"]}
     install_root = tmp_path / "dispatch-install"
@@ -79,6 +80,7 @@ def ordinary(
             "task_id": kwargs["task_id"], "reservation_key": kwargs["reservation_key"],
             "attempt": kwargs["attempt"], "driver": kwargs["driver"],
             "supervisor": kwargs["supervisor"], "creator_machine": "host-a", "ownership": "created",
+            **({"cohort": kwargs["allocation_cohort"]} if kwargs.get("cohort_transport") == "cohort-v1" else {}),
         }
         return {
             "worktree": ground["id"], "project": ground["repo"], "path": ground["path"],
@@ -138,7 +140,7 @@ def ordinary(
             if governed:
                 retained = q.get_reservation(placed["reservation"]["key"])
                 assert json.loads(kwargs["input"]) == retained.worktree_writer_requirement
-                assert argv[-2:] == ["--worktree-writer-file", "-"]
+                assert argv[argv.index("--worktree-writer-file") + 1] == "-"
                 assert q.task_relationship(requested.id)["state"] == "bound"
             else:
                 assert not kwargs.get("input")
@@ -193,6 +195,122 @@ def launch(ordinary: SimpleNamespace) -> dict:
     return ordinary_bridge.start(
         ordinary.task, client=ordinary.client, agent="local", project="example", prompt=seed,
     )
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_before_start_source_closeout_targets_the_original_ordinary_native(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import owner_wake_delivery
+    from agent_dispatch.queue_relevance import RelevanceScope
+    from tests.test_task_relevance import report
+
+    o = ordinary
+    result = launch(o)
+    assert result["native_session_id"] == "native-a"
+    key = o.placed["reservation"]["key"]
+    stored = o.q.get_reservation(key)
+    o.q.record_spawn(
+        key, session_handle=stored.session_handle, worktree=stored.worktree,
+        startup_complete=True, startup_revision=stored.startup_revision,
+    )
+    with o.q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET source='emitter', origin_ref='review-source' WHERE id=?",
+            (o.task["id"],),
+        )
+    before = o.q.get(o.task["id"])
+    accepted = report(
+        o.q, before.id, scope=RelevanceScope(before.repo, before.source, before.origin_ref),
+    )
+    [wake] = o.q.list_wakes(before.id)
+    assert accepted["wake_operation_id"] == wake.id
+    assert (wake.owner, wake.owner_session_id) == ("host-a/worktree-a", "native-a")
+    calls = []
+
+    def send(bridge_id: str, native_id: str, prompt: str, **kwargs: Any) -> bool:
+        calls.append((bridge_id, native_id, prompt, kwargs))
+        return True
+
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(owner_wake_delivery, "native_prompt", send)
+    assert owner_wake_delivery.deliver_owner_wake(
+        o.q, wake.owner, wake.owner_session_id, before.id, wake.message, wake.id,
+    )
+    [sent] = calls
+    assert sent[:2] == ("bridge-a", "native-a")
+    assert "do not start or resume the goal" in sent[2]
+    assert sent[3]["idempotency_key"] == wake.id
+    assert o.q.get(before.id).status == "claimed"
+    assert o.q.get(before.id).owner is o.q.get(before.id).owner_session_id is None
+    assert not o.q.attachment_history(before.id)
+
+
+@pytest.mark.parametrize("ordinary", ["origin-v1"], indirect=True)
+def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary, monkeypatch):
+    from agent_dispatch import session_origin
+
+    monkeypatch.setattr(session_origin, "retained_selection", lambda: ("bridge",))
+    monkeypatch.setattr(session_origin, "require_support", lambda _prefix, **kwargs: None)
+    original = ordinary_bridge.subprocess.run
+    seen = []
+
+    def run(argv, **kwargs):
+        if argv[2] == "create":
+            path = Path(argv[argv.index("--dispatch-origin-file") + 1])
+            origin = json.loads(path.read_text(encoding="utf-8"))
+            stored = ordinary.q.get_reservation(ordinary.placed["reservation"]["key"])
+            assert origin == stored.session_origin
+            assert json.loads(kwargs["input"]) == stored.worktree_writer_requirement
+            seen.append(path)
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
+    result = launch(ordinary)
+    assert result["native_session_id"] == "native-a"
+    assert len(seen) == 1 and not seen[0].exists()
+    assert any(argv[2] == "send" for argv, _ in ordinary.calls)
+
+
+def test_original_cohort_receipt_reaches_ordinary_initial_prompt(ordinary, monkeypatch):
+    from agent_dispatch import embody, worktree_cohort
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["/fixture/python", "-m", "agent_worktrees"])
+    monkeypatch.setattr(worktree_cohort, "_supports_cohort", lambda _prefix: True)
+    launch(ordinary)
+    stored = ordinary.q.get_reservation(ordinary.placed["reservation"]["key"])
+    assert stored.allocation_cohort_transport == "cohort-v1"
+    assert ordinary.creation_records[0]["dispatch_attempt"]["cohort"] == stored.allocation_cohort
+    assert any(argv[2] == "send" for argv, _ in ordinary.calls)
+
+
+@pytest.mark.parametrize("change", ["missing", "foreign", "ownership"])
+def test_cohort_receipt_keeps_original_allocation_checks(ordinary, monkeypatch, change):
+    from copy import deepcopy
+    from agent_dispatch import embody, worktree_cohort
+    from agent_dispatch.ordinary_pool_startup import created_workspace_record
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["/fixture/python", "-m", "agent_worktrees"])
+    monkeypatch.setattr(worktree_cohort, "_supports_cohort", lambda _prefix: True)
+    launch(ordinary)
+    stored = ordinary.client.get_reservation(ordinary.placed["reservation"]["key"])
+    record = deepcopy(ordinary.creation_records[0])
+    if change == "missing":
+        record["dispatch_attempt"].pop("cohort")
+    elif change == "foreign":
+        record["dispatch_attempt"]["cohort"]["pool"]["registration_id"] = "foreign"
+    else:
+        record["dispatch_attempt"]["ownership"] = "reused"
+    info = {
+        "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
+        "creation": {
+            "version": 1, "status": "complete", "native_session_id": "native-a",
+            "turn_index": None, "worktree": record,
+        },
+        "connection": {"native_session_id": "native-a", "worktree_id": "worktree-a", "repo": "example"},
+    }
+    with pytest.raises(TaskError, match="original sessionless allocation"):
+        created_workspace_record(ordinary.task, stored, info)
 
 
 @pytest.mark.parametrize("ordinary", [True], indirect=True)

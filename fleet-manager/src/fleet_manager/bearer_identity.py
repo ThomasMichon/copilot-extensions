@@ -118,6 +118,54 @@ def _key(value: object):
         raise IdentityError("invalid-key") from None
 
 
+def _requirements_valid(required: object) -> bool:
+    return (
+        type(required) is tuple and len(required) <= MAX_CLAIMS
+        and all(type(item) is ClaimRequirement and _claim(item.claim)
+                and (item.shape is None or (
+                    type(item.shape) is str and item.shape in ("scalar", "list")))
+                and _values(item.values) for item in required)
+        and len({item.claim for item in required}) == len(required)
+    )
+
+
+def _check_requirements(claims, required: tuple[ClaimRequirement, ...]) -> None:
+    for item in required:
+        actual = claims.get(item.claim)
+        if ((item.shape == "scalar" and type(actual) is not str)
+                or (item.shape == "list" and type(actual) is not list)):
+            raise IdentityError("required-claim-denied")
+        if isinstance(actual, str):
+            values = (actual,)
+        elif isinstance(actual, list):
+            values = tuple(actual)
+        else:
+            raise IdentityError("required-claim-denied")
+        if not _values(values) or not any(value in item.values for value in values):
+            raise IdentityError("required-claim-denied")
+
+
+def _rs256_claims(access_token: str, keys) -> dict[str, object]:
+    header, claims = _parts(access_token, MAX_ACCESS_BYTES)
+    if (not {"alg", "kid"} <= header.keys()
+            or header.keys() - {"alg", "typ", "kid", "x5t", "x5t#S256"}
+            or header["alg"] != "RS256" or header.get("typ", "JWT") != "JWT"
+            or not _text(header["kid"], 128)):
+        raise IdentityError("invalid-credential")
+    for name in ("x5t", "x5t#S256"):
+        if name in header:
+            _thumbprint_metadata(name, header[name])
+    key = keys.get(header["kid"])
+    if key is None:
+        raise IdentityError("unknown-key")
+    jwt, error, _ = _jose()
+    try:
+        jwt.decode(access_token, key, algorithms=["RS256"])
+    except (error, ValueError, TypeError):
+        raise IdentityError("invalid-signature") from None
+    return claims
+
+
 class BearerIdentityVerifier:
     """Pure pinned public trust and claim policy; real signature on every request.
 
@@ -133,12 +181,7 @@ class BearerIdentityVerifier:
         if (not _https(issuer) or not _text(audience, 512)
                 or not _time(trust_valid_until) or not callable(clock)
                 or not _claim(principal_claim)
-                or type(required_claims) is not tuple or len(required_claims) > MAX_CLAIMS
-                or any(type(item) is not ClaimRequirement or not _claim(item.claim)
-                       or (item.shape is not None and (
-                           type(item.shape) is not str or item.shape not in ("scalar", "list")))
-                       or not _values(item.values) for item in required_claims)
-                or len({item.claim for item in required_claims}) != len(required_claims)
+                or not _requirements_valid(required_claims)
                 or type(mappings) is not tuple or len(mappings) > MAX_MAPPINGS
                 or any(type(item) is not PrincipalMapping or not _text(item.subject)
                        for item in mappings)
@@ -188,23 +231,7 @@ class BearerIdentityVerifier:
                 or re.fullmatch(r"[A-Z]{1,16}", method) is None:
             raise IdentityError("invalid-request-context")
         self._now()
-        header, claims = _parts(access_token, MAX_ACCESS_BYTES)
-        if (not {"alg", "kid"} <= header.keys()
-                or header.keys() - {"alg", "typ", "kid", "x5t", "x5t#S256"}
-                or header["alg"] != "RS256" or header.get("typ", "JWT") != "JWT"
-                or not _text(header["kid"], 128)):
-            raise IdentityError("invalid-credential")
-        for name in ("x5t", "x5t#S256"):
-            if name in header:
-                _thumbprint_metadata(name, header[name])
-        key = self._keys.get(header["kid"])
-        if key is None:
-            raise IdentityError("unknown-key")
-        jwt, error, _ = _jose()
-        try:
-            jwt.decode(access_token, key, algorithms=["RS256"])
-        except (error, ValueError, TypeError):
-            raise IdentityError("invalid-signature") from None
+        claims = _rs256_claims(access_token, self._keys)
         if (claims.get("iss") != self._issuer or claims.get("aud") != self._audience
                 or not _time(claims.get("iat")) or not _time(claims.get("exp"))
                 or claims["exp"] <= claims["iat"] or "cnf" in claims):
@@ -212,19 +239,7 @@ class BearerIdentityVerifier:
         if "nbf" in claims and (
                 not _time(claims["nbf"]) or claims["nbf"] >= claims["exp"]):
             raise IdentityError("invalid-credential")
-        for item in self._required:
-            actual = claims.get(item.claim)
-            if ((item.shape == "scalar" and type(actual) is not str)
-                    or (item.shape == "list" and type(actual) is not list)):
-                raise IdentityError("required-claim-denied")
-            if isinstance(actual, str):
-                values = (actual,)
-            elif isinstance(actual, list):
-                values = tuple(actual)
-            else:
-                raise IdentityError("required-claim-denied")
-            if not _values(values) or not any(value in item.values for value in values):
-                raise IdentityError("required-claim-denied")
+        _check_requirements(claims, self._required)
         subject = claims.get(self._claim)
         if not _text(subject):
             raise IdentityError("unmapped-user")

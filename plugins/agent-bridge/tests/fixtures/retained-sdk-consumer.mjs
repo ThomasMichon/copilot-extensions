@@ -2,7 +2,7 @@
 // This is not native SDK qualification.
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { createRetainedInbox } from "../../extensions/agent-bridge/retained-delivery.mjs";
+import { createRetainedInbox } from "../../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
 
 const config = JSON.parse(process.argv[2]);
 const replies = new Map();
@@ -16,7 +16,9 @@ lines.on("line", (line) => {
 let sequence = 0;
 let clock = Date.now();
 const emit = (value) => process.stdout.write(JSON.stringify(value) + "\n");
-const identity = { pid: process.pid, process_started_at: Date.now() / 1000 - process.uptime() };
+const identity = config.omitProcess ? {} : {
+  pid: process.pid, process_started_at: Date.now() / 1000 - process.uptime(),
+};
 const durable = (path, value) => {
   const fd = openSync(path, "a");
   try {
@@ -64,6 +66,7 @@ if (!config.recoveryOnly) await request("POST", "/api/v1/live-sessions", {
 });
 const consumer = createRetainedInbox({
   session, request, processIdentity: identity, cwd: config.cwd,
+  receivingApi: config.receivingApi,
   incarnation: () => config.incarnation, now: () => clock,
   log: (message) => emit({ log: message }),
 });

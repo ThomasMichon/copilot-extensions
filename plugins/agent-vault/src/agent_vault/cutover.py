@@ -57,10 +57,10 @@ def build_auth_state(service: VaultService) -> dict:
     """Capture only unexpired unlocked masters, without resetting their clocks."""
     passwords = {}
     with service._credential_lock:
-        now = time.time()
         for kpdb in service.cli.unlocked_vaults():
             password = service.cli.get_password(kpdb)
             stamp = service._password_set_at.get(kpdb)
+            now = time.time()
             if not isinstance(password, str) or not _finite_time(stamp) or stamp > now:
                 continue
             deadline = service._password_expiration(kpdb, stamp)
@@ -108,25 +108,23 @@ def apply_auth_state(service: VaultService, payload: object) -> int:
 def build_handoff_payload(service: VaultService) -> dict:
     """Serialize the minimal warm state the new generation needs to avoid re-unlock.
 
-    Returns a plaintext-secret-bearing dict: the unlocked master password per
-    currently-unlocked vault, plus the password-TTL bookkeeping and the daemon's
-    ``ttl_override``. NEVER log the result.
+    Returns a plaintext-secret-bearing dict only for complete, unexpired clocks,
+    plus the daemon's ``ttl_override``. Unknown clocks are omitted rather than
+    granting the receiver a fresh lifetime. NEVER log the result.
     """
-    backend = service.cli
-    master_passwords: dict[str, str] = {}
-    for kpdb in backend.unlocked_vaults():
-        pw = backend.get_password(kpdb)
-        if isinstance(pw, str):
-            master_passwords[kpdb] = pw
-    return {
-        "master_passwords": master_passwords,
-        "password_set_at": {
-            kpdb: service._password_set_at.get(kpdb)
-            for kpdb in master_passwords
-            if service._password_set_at.get(kpdb) is not None
-        },
-        "ttl_override": service.ttl_override,
-    }
+    with service._credential_lock:
+        service._check_password_ttl()
+        state = build_auth_state(service)["passwords"]
+        now = time.time()
+        entries = {
+            kpdb: entry for kpdb, entry in state.items()
+            if entry["expires_at"] is None or entry["expires_at"] > now
+        }
+        return {
+            "master_passwords": {kpdb: entry["password"] for kpdb, entry in entries.items()},
+            "password_set_at": {kpdb: entry["set_at"] for kpdb, entry in entries.items()},
+            "ttl_override": service.ttl_override,
+        }
 
 
 def apply_handoff_payload(service: VaultService, payload: dict | None) -> int:
@@ -142,22 +140,23 @@ def apply_handoff_payload(service: VaultService, payload: dict | None) -> int:
     master_passwords = payload.get("master_passwords") or {}
     set_at = payload.get("password_set_at") or {}
     warmed = 0
-    if isinstance(master_passwords, dict):
-        for kpdb, pw in master_passwords.items():
-            if not (kpdb and isinstance(pw, str)):
-                continue
-            service.cli.set_password(kpdb, pw)
-            ts = set_at.get(kpdb) if isinstance(set_at, dict) else None
-            service._password_set_at[kpdb] = (
-                float(ts) if (isinstance(ts, (int, float))
-                              and not isinstance(ts, bool)) else time.time()
-            )
-            warmed += 1
-    ttl_override = payload.get("ttl_override")
-    # ttl_override is int|None with 0 meaning "persistent"; only adopt a real int
-    # (not a bool) so a malformed payload can't corrupt the daemon's TTL policy.
-    if isinstance(ttl_override, int) and not isinstance(ttl_override, bool):
-        service.ttl_override = ttl_override
+    with service._credential_lock:
+        if isinstance(master_passwords, dict):
+            for kpdb, pw in master_passwords.items():
+                if not (kpdb and isinstance(pw, str)):
+                    continue
+                service.cli.set_password(kpdb, pw)
+                ts = set_at.get(kpdb) if isinstance(set_at, dict) else None
+                service._password_set_at[kpdb] = (
+                    float(ts) if (isinstance(ts, (int, float))
+                                  and not isinstance(ts, bool)) else time.time()
+                )
+                warmed += 1
+        ttl_override = payload.get("ttl_override")
+        # ttl_override is int|None with 0 meaning "persistent"; only adopt a real int
+        # (not a bool) so a malformed payload can't corrupt the daemon's TTL policy.
+        if isinstance(ttl_override, int) and not isinstance(ttl_override, bool):
+            service.ttl_override = ttl_override
     return warmed
 
 
@@ -168,6 +167,7 @@ def handoff_export_response(service: VaultService, *, transport: str) -> dict:
     owner-gated local transport, so the master password never crosses an
     un-access-gated channel. On success returns the handoff payload under
     ``handoff`` (the caller applies it via :func:`apply_handoff_payload`).
+    Busy credential custody returns a retryable refusal without copying state.
     """
     if transport not in OWNER_GATED_TRANSPORTS:
         return {
@@ -179,7 +179,12 @@ def handoff_export_response(service: VaultService, *, transport: str) -> dict:
                 "never exposed over loopback TCP"
             ),
         }
-    return {"ok": True, "handoff": build_handoff_payload(service)}
+    if not service._credential_lock.acquire(blocking=False):
+        return {"ok": False, "retryable": True, "error": "service_busy"}
+    try:
+        return {"ok": True, "handoff": build_handoff_payload(service)}
+    finally:
+        service._credential_lock.release()
 
 
 def request_handoff_from_running_daemon() -> dict | None:

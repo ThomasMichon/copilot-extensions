@@ -15,6 +15,9 @@ visions:
 - **Umbrella issue:** [#9023](https://github.com/ThomasMichon/copilot-extensions/issues/9023)
 - **Existing correctness owners:** #4222 (source checkpoints), #4220 (durable
   source locks), #8733 (readers observing committed writes), #5302 (vector gaps)
+  — the closed #4220/#5302 tracking tokens retain their unfinished requirements
+  under [#5768's receiving effort](../agent-index-standalone-service/README.md),
+  sections I4220 and I5302; closure does not certify implementation or data repair.
 
 ## Guiding Intent
 
@@ -47,6 +50,14 @@ shared mechanisms instead of maintaining a second indexing pipeline.
 - **Admission:** implementation was admitted after the proposal merged.
   Consumer rollout retains its separate confirmation gate. A merged proposal
   is not evidence that any optimization has shipped.
+
+The incumbent effort and retrieval-slice claimants retain their work and every
+source/resource obligation. After any separately verified tracking supersession,
+#9023 remains historical provenance, not a required closed live claim token.
+Continuing coordination uses this same Active effort's Plan, Validation Plan
+and Journal plus eligible OPEN bounded-slice issues under those same owners.
+No claim expiry, reassignment, new implementation admission or rollout is
+created by this planning intake.
 
 ## Context
 
@@ -165,7 +176,25 @@ After the reviewed proposal, the operator admitted execution:
 - [x] Qualify release, actual consumed source and a separately authorized
   rollout. Keep merged, released, consumed and serving evidence distinct.
 
+- [ ] GP1 - Give shell-style file-path globs the same matching meaning in shared
+  FTS and hydrated hybrid results, including wildcard and literal-path cases.
+  Preserve source/repo/metadata filters; specify behavior rather than requiring
+  a particular SQL or Python converter.
+- [x] GP2 - Qualify matching eligibility and final result limits within the
+  finite candidate window. Nonmatches must not consume final eligible slots;
+  disclose window-induced underfill rather than claiming exhaustive top-N or
+  adding an unbounded scan. FTS and hybrid rankings need not be identical.
+- [x] GP3 - Keep this retrieval slice independent of acquisition, checkpoints,
+  deletion/reconciliation, upserts and embedding policy. Preserve the existing
+  #4222/#4220/#8733/#5302 owners and separate source, consumer, native, release
+  and serving evidence.
+
 ## Validation Plan
+
+- [ ] Resolve ALL GP1-GP3 retrieval Plan clauses AND the GPV1-GPV3 technical
+  cases in [validation.md](validation.md#cases). Keep every existing count-based,
+  correctness-owner and consumer/rollout gate; this bounded retrieval check
+  neither substitutes for them nor waits for whole-engine completion.
 
 - [ ] Pass the [count-based matrix](validation.md) at 100, 10,000 and 100,000
   unchanged synthetic items without ordinary work growing with corpus size.
@@ -195,6 +224,8 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-15 native Windows retrieval qualification](journal/2026/11.15%20windows-retrieval-qualification.md)
+- [2026-11-14 retrieval-glob intake](journal/2026/11.14-retrieval-glob-intake.md)
 - [2026-11-09 acceptance reconciliation](journal/2026/11.09%20acceptance-reconciliation.md)
 - [2026-10-27 checkpoint recovery](journal/2026/10.27%20checkpoint-recovery.md)
 - [2026-10-27 provider measurements](journal/2026/10.27%20provider-work-measurements.md)

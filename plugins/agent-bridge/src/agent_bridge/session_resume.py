@@ -128,10 +128,12 @@ class _SessionResumeMixin:
         acquisition_launch: AcquisitionLaunchOwner | None = None,
         recovery_operation: RetainedRecovery | None = None,
     ) -> Session:
-        """Resume a stopped session by spawning a new process.
+        """Recover a stopped session or an idle session with a lost transport.
 
         Uses AcpClient.load_session() to reattach to the persisted ACP
         session. The session is ready to receive prompts when this returns.
+        A disconnected idle session remains publicly idle until recovery
+        actually attaches or starts a process; transport loss is not a stop.
 
         ``drain`` (default True): once the session lands IDLE, deliver any
         durable ``pending_prompts`` queued for it -- this is how a queue that
@@ -263,7 +265,12 @@ class _SessionResumeMixin:
             allocation_recovery = can_resume_allocation(session)
             if not session.acp_session_id and retains_allocation(session):
                 allow_recreate = False
-            if session.status != SessionStatus.STOPPED and not (
+            disconnected_idle = (
+                session.status == SessionStatus.IDLE
+                and (session.client is None or not session.client.is_running)
+                and (session._prompt_task is None or session._prompt_task.done())
+            )
+            if not disconnected_idle and session.status != SessionStatus.STOPPED and not (
                 allocation_recovery and session.status == SessionStatus.FAILED
             ):
                 raise ValueError(

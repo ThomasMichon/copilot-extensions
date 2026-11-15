@@ -177,6 +177,84 @@ establish policy provenance, TLS, source custody or resource authorization;
 the service-policy path resolves real key thumbprints and performs those
 current-grant checks.
 
+## Explicit RS256 application-token profile
+
+The SDK also supports `enrolled-rs256-pop-v1` in complete service-policy
+**version `6`**. This is separate from version `3`'s ES256 profile and from
+caller-only `user-bearer-v1`; none is an implicit fallback for another.
+Version `5` user-caller composition may embed a version `6` remote `service`
+policy without changing its independent caller authentication.
+
+Version `6` has exactly the version `3` root fields plus `token_claims`.
+`identity` uses the same code-registered pure public-trust provider but selects
+`"profile": "enrolled-rs256-pop-v1"`. The callback still returns only
+`IdentityTrust`; its JWKS now contains bounded public RSA signing keys. The
+maintained RSA verification path is shared with the bearer verifier, not a
+second JOSE implementation. Keys require unique `kid`, 2048-4096-bit modulus,
+bounded exponent and supported signing metadata; private keys and key URLs
+refuse. No discovery, network refresh or credential acquisition occurs here.
+
+For example, the additional root field is:
+
+```json
+{
+  "token_claims": {
+    "subject_claim": "object_id",
+    "client_claim": "app_id",
+    "required_claims": [
+      {"claim": "roles", "values": ["gateway-client"], "shape": "list"},
+      {"claim": "realm", "values": ["realm-a"], "shape": "scalar"}
+    ]
+  }
+}
+```
+
+Both selectors and the `required_claims` list are mandatory. Selectors name
+exact signed claims, never a request field, provider name or username fallback.
+The selected subject and client match the existing enrollment's `subject` and
+`client_id` fields respectively; enrollment, kind, expected resource, canonical
+principal and exact resolved P-256 key remain independently approved.
+Claim names use the existing bounded claim-name syntax. There are at most 16
+distinct required claims; each has exactly `claim`, `values` and `shape`.
+`values` contains 1-64 distinct visible-ASCII strings of at most 256 characters.
+`shape` is exactly `scalar` or `list`, with no coercion. A matching claim must
+contain at least one approved value; lists must be nonempty, bounded, unique
+string lists. This is an allow-any value constraint, not an all-values or
+wildcard expression. An explicitly empty required-claims list adds no such
+constraints; it does not waive enrollment or either signature.
+
+The original compact token requires `alg=RS256`, nonempty `kid` and optional
+`typ=JWT`. Only optional validated `x5t`/`x5t#S256` metadata is accepted beyond
+those headers; unsupported critical headers, embedded keys, key URLs and
+other algorithms/types refuse. Exact issuer, allowlisted resource audiences,
+required `iat`/`exp`, optional `nbf` and clock fences remain mandatory. A
+present `cnf.jkt` must agree with the independently approved key; its absence
+does not make the token issuer-bound DPoP. The original bytes are never
+rewritten, re-signed or replaced before proof-token-hash verification.
+
+`EnrolledRS256IdentityVerifier` is the lower-level callable, taking the same
+arguments as `EnrolledIdentityVerifier` plus `subject_claim`, `client_claim`
+and an immutable tuple of `bearer_identity.ClaimRequirement` records.
+It returns `EnrolledIdentity` with `profile="enrolled-rs256-pop-v1"` and the
+verified admission kind. Downstream `AuthoritySnapshot.identity_profile` must
+select that exact profile too; verification still grants no operation permit.
+Pure callbacks cannot return identities, verifiers, grants or enrollment.
+
+Before selecting the policy in an independently installed host, inspect that
+**executing** SDK's `gateway_service_context.SERVICE_IDENTITY_PROFILES` for
+the exact profile and qualify `parse_context` with synthetic public trust and
+the host's actual registered provider. Missing declaration or refusal means
+unsupported: expand the provider first, retain the previous profile during
+the upgrade/rollback window and do not infer support from a package version
+or configuration label. No existing host is migrated by this source change.
+
+The normalized signed-claim policy participates in the existing trust epoch
+alongside issuer trust and enrollment. Equivalent requirement/value ordering
+preserves nonce/replay custody; changed selectors, requirements or bindings
+invalidate old handles and delayed results. Actual token issuance, provider
+interoperability, protected proof-key provisioning, authenticated publication,
+durable revision custody and deployment remain external responsibilities.
+
 ## Publication and limits
 
 The trust epoch includes normalized provider/profile/configuration/prepared

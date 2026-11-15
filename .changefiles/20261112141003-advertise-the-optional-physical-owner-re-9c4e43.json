@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise the optional physical owner receiver only on its supported Linux platform.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

@@ -287,6 +287,60 @@ transport-internal redirects/retries and external custodian work still need
 their own qualified bounds under the caller's original shared allowance.
 The declaration neither verifies credentials nor grants live effects.
 
+Typed GitHub/Gitea `snapshot` and `inventory` calls can explicitly select
+`--http-profile direct-v1`. Omission retains `legacy`: existing `gh`, proxy,
+curl configuration and ambient-account behavior are not silently changed.
+The option requires `--credential-command`; native Python callers can use
+`providers.observation_credentials.with_http_profile(source, "direct-v1")`.
+Other providers refuse this profile before credential acquisition.
+
+Typed Gitea `snapshot` and `inventory` can also select
+`--expected-account <login>` with `--http-profile direct-v1`. The selected
+provider first reads its authenticated `/user` through the same bounded GET
+owner. A missing, malformed, duplicate or nonmatching login refuses the whole
+operation without repository reads; login comparison is case-insensitive.
+Legacy tokens, missing typed/direct selection and unsupported providers refuse
+before credential acquisition. Omitting the option adds no actor request.
+
+Each later request still acquires and admits current credentials. Within a
+guarded operation, the token and complete forge binding must remain equal to
+the material used for actor verification. Rotation, withdrawal or expiry
+refuses before the next repository send, not a silent replacement or another
+actor query. The earliest reported material-use deadline is retained; a later
+expiry cannot extend it. Credential material is neither persisted nor included
+in diagnostics or results. Actor equality does not grant repository access.
+
+The actor read consumes one acquisition and native GET. Guarded inventory has
+at most `max_pages + 1` GETs; its actor read is not an inventory page. Snapshot
+verification stays **inside** the existing 64-acquisition maximum and any lower
+`--max-credential-requests` limit, including a limit exhausted by verification.
+Original deadlines and outer request reservations remain the caller's.
+Passive `inventory --contract` advertises the optional
+`observation_account_guard` version-1 object, including its option, Gitea and
+direct-v1 support, one extra inventory request and in-budget snapshot behavior.
+Discovery rejects account selection and acquires no credentials. Check the
+selected executable's declaration before emitting the option; rolled-back or
+absent support is unavailable, not permission to fall back unguarded. Result,
+storage and credential-envelope schemas are unchanged.
+
+The direct profile reuses the native provider's GET endpoints, parsing and
+per-page credential renewal, but invokes curl with `-q` first (no default
+configuration), HTTP/1.1, URL globbing off, proxies disabled, configured retries
+zero, redirects disabled and HTTPS-only URLs. Authorization goes through stdin,
+not process arguments or a token environment override. Captured responses remain
+byte-bounded; authorization loss aborts the observation without fallback.
+Caller-selected pages still make distinct requests. A redirect is an unsuccessful
+read, never permission to follow it with the credential.
+
+Passive `inventory --contract --json` adds `observation_http_profiles.direct-v1`
+with its option, supported providers, enforced transport settings and
+`requires_binary_qualification: true`. This receiver-first declaration is not
+proof about the selected curl executable, TLS backend, trust store, environment,
+credential issuer, or physical-send count. A consumer requiring bounded actual
+provider traffic must qualify that executing generation and include external
+issuance/verification requests in the original shared allowance. No old syntax
+is deprecated; consumers must discover support before sending the new option.
+
 For example, the prefix may invoke the separately installed
 [Fleet credential command](../../../fleet-manager/docs/gateway-runtime.md)
 with its explicit worker policy, source/account and exact `ForgeScope`.

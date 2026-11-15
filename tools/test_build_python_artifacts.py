@@ -1166,10 +1166,15 @@ def test_build_plugin_artifacts_rejects_missing_provenance_before_build(
     assert list((fake_repo / "dist").iterdir()) == []
 
 
+@pytest.mark.parametrize("relative", ["plugins/demo", ".marketplace/demo"])
 def test_build_plugin_artifacts_end_to_end(
-    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, relative,
 ):
-    plugin_dir = fake_repo / "plugins" / "demo"
+    plugin_dir = fake_repo / relative
+    if relative != "plugins/demo":
+        (fake_repo / "pyproject.toml").write_text(
+            f'[tool.copilot-extensions.python-projects]\ndemo = "{relative}"\n',
+        )
     _seed_valid_lib(fake_repo, "widget")
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
 
@@ -1188,6 +1193,8 @@ def test_build_plugin_artifacts_end_to_end(
 
     assert manifest["schema"] == bpa.MANIFEST_SCHEMA
     assert manifest["plugin"] == "demo"
+    if relative != "plugins/demo":
+        assert manifest["project_path"] == relative
     assert manifest["build_toolchain"] == {
         "packages": {"setuptools": "84.1.0", "wheel": "0.44.0"},
         "lock_id": _FAKE_TOOLCHAIN.lock_id,
@@ -1196,6 +1203,7 @@ def test_build_plugin_artifacts_end_to_end(
     assert manifest["python_tag"] == "py3"
     assert {e["role"] for e in manifest["wheels"]} == {"plugin", "vendored-lib"}
     assert len(manifest["wheels"]) == 2
+    assert next(row for row in manifest["wheels"] if row["role"] == "plugin")["source"] == relative
     for wheel_entry in manifest["wheels"]:
         # Regression: each wheel's OWN parsed tags must be recorded, not
         # just the artifact set's aggregate ones.

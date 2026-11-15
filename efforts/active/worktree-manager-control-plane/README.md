@@ -58,7 +58,24 @@
   [`plugins/agent-worktrees/docs/picker.md`](../../../plugins/agent-worktrees/docs/picker.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../../plugins/agent-worktrees/docs/architecture.md)
 
+## Goal
+
+Deliver the complete standalone installer/configurator and optional control
+plane described in the unchanged Guiding Intent below. Its ordinary update
+entry must also satisfy the [foreground-update/service-startup contract](../source-managed-runtime-installs/update-service-lifetimes.md):
+caller cancellation stops updater-owned work, not independently accepted
+service operations or their daemon/retention trees.
+
 ## Guiding Intent
+
+For installation and update, the
+[shared convergence map](../source-managed-runtime-installs/installation-convergence.md)
+connects Manager's existing bootstrap, prerequisite and onboarding owners to
+one incoming flow. Establish Manager first, derive the selected repository's
+required dependency/downstream-app closure, stage the required set, then let
+application owners activate it. Existing UI, setup, source and native owners
+and their acceptance gates remain unchanged; this is not another installer or
+a claim that the current onboarding UI already implements the complete flow.
 
 Deliver the **Worktree Manager** — the single, standalone, **out-of-plugin** app
 that (1) **bootstraps** a bare machine into a working harness, (2) **configures,
@@ -162,6 +179,9 @@ operator-visible end-state, not an indefinite dual-implementation state.
 
 ## Plan
 
+- [ ] Align the actual Manager update/control boundary with the shared
+  lifetime amendment; preserve existing UI, source, phase owners and holds.
+
 Phases are ordered by dependency, not calendar. Checked items are already
 realized in `main`; unchecked items are the remaining delta.
 
@@ -198,6 +218,16 @@ realized in `main`; unchecked items are the remaining delta.
       §`idempotent-and-re-runnable`, §`restart-aware`.
 
 ### Phase 3 — Extracted Picker over the engine boundary (In progress)
+
+- [ ] **WM4118-P:** Consume authoritative origin and interface independently
+  through the existing `agent-worktrees --json` boundary for Picker grouping,
+  filtering and visibility. Preserve user-origin ACP visibility and existing
+  system/delegate hide/reveal behavior; interface is not origin. Missing
+  legacy values remain unknown, with no historical backfill.
+- [ ] **WM4118-LV:** Exercise explicit axes independently, user-ACP and
+  system/delegate visibility controls, missing legacy fields and truthful
+  older-engine degradation through the real Picker consumer boundary.
+  Provenance tags grant no ownership, readiness or cleanup eligibility.
 - [x] `picker_app.py` Textual Picker reads live worktrees **only** via
       `engine_client` → `agent-worktrees --json`; owns no worktree state; injected
       source (live/fixture/demo); headless SVG capture. First state-view slice
@@ -982,6 +1012,11 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
 - [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
       documentation acceptance; reconcile Phase 7 preset scope to avoid a
       second implementation.
+- [ ] Receive #3939's finite
+      [terminal-theme mapping](phase-5-configuration-workbench.md#direct-terminal-theme-acceptance-from-3939)
+      for both Picker truecolor and Worktrees ANSI, with defaults, semantic
+      states and no-color behavior retained. Reuse the existing owner-declared
+      configuration framework and wave-specific global matrix.
 - [x] Installation and Updates (#8877, `ticking-compass`): delivered the bounded
       standing inventory and genuinely component-scoped durable updates in the
       [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877).
@@ -1349,6 +1384,13 @@ fixed with a dedicated `_applescript_quote` helper and regression test.
       shutdown capture, duplicate-safe restoration of original conversations,
       and an explicit restart/status-check seed. Implementation starts only
       after this plan clears review; host rollout remains separately authorized.
+
+    - [ ] **M4564-P - Independent restart-candidate sets:** retain the focused
+      plan's separately durable unexpected- and prepared-restart sets and their
+      shared exact-original restoration path. Prepared intent precedes quiescing;
+      ordinary deliberate exit stays dormant. Preserve the existing recovery
+      reservation, manual-restoration ownership, task/approval/owner holds and
+      separate rollout gate. This is planned receiving only; #4564 stays OPEN.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -1994,6 +2036,21 @@ The following outcomes remain independently tracked:
 
 #### Paired parent and indented companion rows from #4204
 
+- [ ] **M13-4204-P3:** For a sessionless child, display truthful state using
+  inherited lineage OR parent activity. Preserve own-session precedence,
+  visibility, exact controller navigation, orphan recovery and a genuinely
+  empty/unowned Open. Never copy parent conversation or fabricate child
+  history. Adjacent-lineage versus own-zero meaning remains an explicit
+  future decision before feature acceptance; tests must not choose it.
+- [ ] **M13-4204-V2:** Exercise the supported consumer path and empty/unowned
+  case, preserving precedence, visibility, exact navigation, orphan
+  recovery and no fabricated/copied history. Do not silently resolve the
+  lineage-versus-own-zero question in a test.
+- [ ] **M13-4204-C2:** Preserve the existing #4182 claimant and row/controller
+  owners. This is consumer display only, not a source/API custody transfer.
+  Keep #3791's real second-consumer/independent-width demand gate separate;
+  no hypothetical consumer or feature completion is claimed.
+
 <!-- backlog-reconciliation:7556:transfer:4204:to:efforts/active/worktree-manager-control-plane/README.md -->
 
 ##### Plan
@@ -2019,6 +2076,18 @@ The following outcomes remain independently tracked:
   This intake performs no pair mutation or implementation claim.
 
 #### Unavailable versus empty history from #5908
+
+- [ ] **M13-5908-P4:** Where results supply source, epoch, continuity, unknown
+  or truncation facts, preserve them through adapters, workers and both
+  consumers; never render unknown, truncated or unavailable history as
+  genuine empty. This does not take ownership of the source API.
+- [ ] **M13-5908-V2:** Exercise true empty and distinct unavailable,
+  malformed, failed, unknown and truncated results through the actual
+  consumer boundary. Preserve supplied source/epoch distinctions, without
+  render-triggered venue connection or API qualification claims.
+- [ ] **M13-5908-C2:** Keep Bridge history/API and database owners separate
+  from the Manager display consumer. No cursor, range, continuity or
+  cold-store ownership transfers.
 
 <!-- backlog-reconciliation:7556:transfer:5908:to:efforts/active/worktree-manager-control-plane/README.md -->
 
@@ -2574,7 +2643,94 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
   owners. Credit merged source only; planned intake is not acceptance or custody
   release.
 
+### Proposed finite capture-consumer and package-version intake
+
+These are planned, unchecked obligations, not implementation delivery. Reuse
+the existing Phase 3/3d Picker, engine JSON boundary, local reconcile batch and
+version-consistency guard; do not build competing mechanisms.
+
+- [ ] **P3418-MGR-1 — Production consumer:** Qualify actual adopted-project
+  capture through the existing `runner.capture`/`data_local`/`engine_client`
+  and engine JSON contracts. Demo, mock and legacy-app captures do not
+  substitute for the production consumer.
+- [ ] **P3418-MGR-2 — Source causal OR:** Preserve independent anchor probes
+  in parallel **OR** a bound for the whole operation **OR** an accepted
+  resident route under “warmth, not truth.” `agent-worktrees` retains the
+  source algorithm; a per-anchor timeout sum, fixture bypass or duplicate
+  Manager resolver is not its causal resolution.
+- [ ] **P3418-MGR-3 — Capture and truth:** Preserve target policy, knowledge
+  overlay, installation/project identity and per-fact freshness. Bound the
+  whole consumer operation and expose actionable unavailable/incomplete
+  outcomes; unreachable anchors are not confirmed absence or empty success.
+- [ ] **P3418-MGR-4 — Distinct fixes:** Keep the SSH-helper exception,
+  `heal=False`/anchor-heal exclusion, pivot materialization and separate
+  demo/preview fixture change distinct. None alone proves this outcome.
+- [ ] **P3418-MGR-5 — Evidence scope:** Preserve representative reachable
+  and partly-unreachable topology outcomes at the original applicable
+  contained/native tiers; record unavailable cases honestly. This planning
+  change performs no experiment.
+- [ ] **P3418-MGR-6 — Existing mesh gate:** Retain the Worktrees-pivot
+  #3307 real-mesh UX acceptance **OR** explicit operator acceptance of its
+  documented demo-only alternative. Reference that gate rather than
+  creating a competing UX contract.
+- [ ] **V3418-MGR-1:** Correlate an actual adopted project's production
+  Manager capture with the engine result; distinguish live source data
+  from preview/mock data.
+- [ ] **V3418-MGR-2:** Verify bounded whole-operation success and actionable
+  unavailable/incomplete outcomes with current project/installation identity
+  and freshness. First paint or source generation alone is not the outcome.
+- [ ] **V3418-MGR-3:** Preserve the original representative topology and
+  evidence distinctions, including honest unavailable lanes at their
+  applicable tier.
+- [ ] **V3418-MGR-4:** Honor #3307's existing real-mesh **OR** explicitly
+  operator-accepted demo-only disposition without adding a UX/native matrix.
+- [ ] **P3421-MGR-1 — Metadata authority:** Make available installed
+  distribution metadata for `copilot-extensions-worktree-manager`
+  authoritative for `worktree_manager.__version__`.
+- [ ] **P3421-MGR-2 — Degraded fallback:** Retain an explicit source fallback
+  only for the missing-distribution source-import case. It must not override
+  installed metadata or swallow unrelated metadata errors.
+- [ ] **P3421-MGR-3 — Consistency:** Reuse the existing guard to validate
+  the fallback against the declared project version. Matching literals or
+  promotion stamping alone is not metadata authority.
+- [ ] **P3421-MGR-4 — Finite tier:** Keep this package behavior source-only;
+  no new release, native, installation or running-state gate is required.
+- [ ] **V3421-MGR-1:** A focused source-level behavior check proves available
+  distribution metadata wins even when the fallback differs, and the fallback
+  is used only when distribution metadata is absent.
+- [ ] **V3421-MGR-2:** Retain consistency-check coverage for the fallback
+  and project declaration; source results do not claim installed, released,
+  native or running-state acceptance.
+
 ## Validation Plan
+
+- [ ] **M13-G4204-4182:** Resolve P3/V2/C2 as the #4182 consumer-display
+  slice only. Preserve its separate source claim, unresolved semantic
+  decision and #3791's conditional demand/materialization/readback duties.
+  This row establishes neither whole-source acceptance nor closure.
+- [ ] **M13-G5908-4193-consumer:** Resolve P4/V2/C2 as downstream result
+  rendering only, preserving truthful source/epoch/unknown/truncation
+  distinctions and current API/database/cold-store custodians. It does
+  not receive #4193's producer, paging, continuity or latency contract.
+
+- [ ] **WM4118-G:** Resolve only the Manager Picker Plan/local Validation
+  consumer slice of #4118. Preserve the existing engine/API boundary and
+  incumbent visibility rules. Worktrees/Dispatch/other creation stamps and
+  Bridge launch/API remain separately owned and unfinished; this intake
+  transfers no custody and adds no whole-producer/native-before-planned-
+  receipt prerequisite.
+
+- [ ] **G3418-MGR:** Resolve P3418-MGR-1 through P3418-MGR-6 and
+  V3418-MGR-1 through V3418-MGR-4 at the finite Manager consumer boundary,
+  without requiring unrelated phases, every host or a new native program.
+  The source-side cause and #3307's existing gate retain their own owners.
+- [ ] **G3421-MGR:** Resolve P3421-MGR-1 through P3421-MGR-4 and
+  V3421-MGR-1 through V3421-MGR-2 at the finite source tier without
+  requiring the rest of the Manager program.
+
+- [ ] Qualify the scope-applicable [L1-L6 lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  through the real Manager entry, including update cancellation versus accepted
+  service work, without treating a surviving observer as durable execution.
 
 - [x] **VSSTD:** Qualify every local
   [stream-drain control](stream-stderr-drain.md#validation-plan), preserving
@@ -2650,6 +2806,15 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 - [ ] Complete the [restart-recovery validation matrix](machine-restart-recovery.md#validation-plan),
       including clean exits, abrupt restart, daemon-only replacement and
       concurrent recovery. A process-launch receipt is not successful recovery.
+- [ ] **M4564-G - Candidate-set recovery:** exercise both independently durable
+      candidate sources and their distinct positive/negative exit, ownership,
+      supersession and identity cases; prepared intent before quiescing and
+      ordinary-exit dormancy; cross-set deduplication and survivor preference;
+      fenced original-conversation Resume, preserved holds, durable uncertain
+      outcomes, bounded independent admission and original-conversation
+      STATUS-FIRST acknowledgment before restored. Keep Windows and WSL results
+      separate and existing native/unsupported tiers explicit. This is scoped
+      #4564 acceptance, not a whole-Manager prerequisite or completion claim.
 
 - [ ] Complete the wave-specific [Configuration validation matrix](phase-5-configuration-workbench.md#validation-plan).
       No implementation wave is complete from a parser test or rendered
@@ -2791,6 +2956,35 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   coverage opportunity and all owner/resource boundaries.
 
 ## Coordination
+
+The finite #4118 intake below receives the Manager Picker consumer only.
+Worktrees creation/producer stamps and Bridge launch/session/API stay with
+their existing owners. Preserve all incumbent claims, source/resource
+custody and phase acceptance; this appoints no executor and initiates no
+launch or UI/native operation. #4118 remains OPEN for its whole producer and
+consumer contract; other producers need not finish before this planned
+consumer slice can be received.
+
+- **C3939-THEME:** Existing Manager presentation/configuration and Worktrees
+  configuration/output owners retain the finite theme mapping. Claim waves
+  under the Phase 5 contract before implementation; this planned intake
+  appoints no owner or second writer/store. Worktrees remains independent of
+  Manager. Normal review/current readback and source-specific judgment remain
+  separate; no settings, source or resource custody transfers.
+
+- **C3418-MGR-1:** The Manager owner retains its production capture
+  consumer; the existing `agent-worktrees` owner retains the `list --classify`
+  cause and implementation, and the Worktrees-pivot owner retains #3307.
+  Preserve incumbent claims and resources. The reported parser-wait
+  reservation release covers that finite leaf, not the issue or other claims.
+- **C3418-MGR-2:** Preserve the source causal OR and inherited capture
+  acceptance, including #3307's mesh OR. Do not duplicate the existing
+  Phase 3/3d Group C batch or the complete Worktrees-pivot UX plan.
+- **C3421-MGR:** The Manager package owner retains this finite version-reporting
+  work. Installer, release, singleton and native ownership remain unchanged;
+  this source-only intake does not authorize rollout or broaden their gates.
+  Keep future source implementation a deliberate, separately reviewed
+  version-reporting change rather than an unrelated bundle.
 
 The proposed #5611 finite deployment/readiness case retains actual installer,
 installation-status and relocated Manager-launcher/provider custodians.
@@ -2954,6 +3148,25 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-14 - Finite terminal-theme receiving proposal
+
+Added a direct Phase 5 link to #3939's both-consumer theme acceptance and its
+four unchecked subplan rows. The existing global Configuration matrix already
+covers those local rows; no duplicate global framework was added. Every
+incumbent line, check state and owner remains. This is planned configuration
+coverage, not a shipped setting, implementation appointment or source closure.
+
+### 2026-11-14 — Finite capture and version-authority intake
+
+The current Plan, Validation and Coordination were reconciled against
+#3418 and #3421. Existing injected/headless capture, the Group C reconcile
+batch and version-consistency work remain credited rather than duplicated.
+The eighteen new unchecked Plan/local/global Validation rows retain only
+the missing Manager consumer and source-version acceptance. They do not
+assign implementation, perform native work or close either source.
+#3342's lease-store/identity refusal remains with its actual engine owner.
+Normal review and separate source-specific receiving judgments remain required.
 
 ### 2026-11-12 - Registered-stream finite source accepted
 

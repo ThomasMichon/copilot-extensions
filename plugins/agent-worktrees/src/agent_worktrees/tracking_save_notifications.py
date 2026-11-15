@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from machine_transport import LocalExecutionContext
 
 from . import tracking_save_capture as capture
 
@@ -217,6 +218,7 @@ def committed(
     *,
     legacy_snapshot: capture.FrozenValue | None = None,
     legacy_bytes: int = 0,
+    reporting_context: LocalExecutionContext | None = None,
 ) -> None:
     with _registry_lock:
         legacy = tuple(_legacy)
@@ -237,7 +239,7 @@ def committed(
     if prepared is not None:
         try:
             after = (
-                capture.project(capture.parse(content, path))
+                capture.project(capture.parse(content, path, reporting_context=reporting_context))
                 if content is not None
                 else capture.omitted("saved-content-unavailable-or-oversized")
             )

@@ -509,7 +509,7 @@ def test_scheduled_task_launcher_resolves_slot_at_every_run() -> None:
     launcher_body = body[launcher_start : body.index('"@, [Text.UTF8Encoding]::new($true))', launcher_start)]
     assert "resolve-runtime.ps1" in launcher_body
     assert "$_py = $null" in launcher_body.replace("`$", "$")
-    assert '& `$_py -X "pycache_prefix=`$_pythonCache"' in launcher_body
+    assert '& `$_py @_cacheArguments' in launcher_body
     assert "`$_serviceArguments = @('--foreground', '--persistent')" in launcher_body
     assert "-m agent_vault.service @_serviceArguments @args" in launcher_body
 

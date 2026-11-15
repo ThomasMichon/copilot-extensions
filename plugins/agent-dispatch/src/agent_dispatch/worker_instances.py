@@ -242,21 +242,22 @@ def _validate_dependencies(
             _validate_command_dependency(
                 command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
             )
-        if declaration.kind == RegistrationKind.EMITTER and isinstance(
-            declaration.spec.get("side_load"), dict,
-        ):
+        for companion_key in ("side_load", "relevance"):
+            companion = declaration.spec.get(companion_key)
+            if declaration.kind != RegistrationKind.EMITTER or not isinstance(companion, dict):
+                continue
             from .producers.emitter import _render_command
 
             side_command = _render_command(
-                declaration.spec["side_load"]["command"], change_ref="{change_ref}",
+                companion["command"], change_ref="{change_ref}" if companion_key == "side_load" else None,
             )
-            if any(
+            if companion_key == "side_load" and any(
                 "{change_ref}" in side_command[index]
                 for index in execution_operand_indices(side_command)
             ):
                 raise RegistrarError("dynamic side-load execution dependencies cannot be validated safely")
             side_command = [
-                part if "{change_ref}" in part else resources.resolve(part)
+                part if companion_key == "side_load" and "{change_ref}" in part else resources.resolve(part)
                 for part in side_command
             ]
             directory = Path(resources.resolve(
@@ -265,6 +266,25 @@ def _validate_dependencies(
             _validate_command_dependency(
                 side_command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
             )
+        managed = declaration.spec.get("managed_producer")
+        if declaration.kind == RegistrationKind.EMITTER and isinstance(managed, dict):
+            from .producers.emitter import _render_command
+
+            try:
+                grant_command = [
+                    resources.resolve(part)
+                    for part in _render_command(managed["grant_command"])
+                ]
+                directory = Path(resources.resolve(
+                    str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+                ))
+                _validate_command_dependency(
+                    grant_command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+                )
+            except (OSError, ValueError, TypeError):
+                raise RegistrarError(
+                    "missing or invalid managed producer grant command dependency"
+                ) from None
         if declaration.kind == RegistrationKind.SUPERVISED_LANE:
             # The registrar validates named identities on composed issue loops.
             # A basic lane may name a custom body agent; do not fabricate a

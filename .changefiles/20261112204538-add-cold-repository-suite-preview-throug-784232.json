@@ -1,0 +1,9 @@
+{
+  "comment": "Add cold repository suite preview through the native recovery selector",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

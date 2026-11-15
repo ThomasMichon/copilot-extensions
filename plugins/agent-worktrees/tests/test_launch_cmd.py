@@ -660,9 +660,8 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
     rc = m.cmd_launch([])
 
     assert rc == 0
-    assert resolve_calls[0][0][:2] == [sys.executable, "-X"]
-    assert resolve_calls[0][0][2].startswith("pycache_prefix=")
-    assert resolve_calls[0][0][3:] == [
+    assert resolve_calls[0][0][:2] == [sys.executable, "-B"]
+    assert resolve_calls[0][0][2:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -677,9 +676,8 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
         tmp_path / "anchor"
     )
     assert child["env"]["COPILOT_THEME"] == "dark"
-    assert post_exit[0][0][:2] == [sys.executable, "-X"]
-    assert post_exit[0][0][2].startswith("pycache_prefix=")
-    assert post_exit[0][0][3:] == [
+    assert post_exit[0][0][:2] == [sys.executable, "-B"]
+    assert post_exit[0][0][2:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -1083,9 +1081,8 @@ def test_cmd_launch_passes_active_project_explicitly(monkeypatch, tmp_path):
     )
     rc = m.cmd_launch([])
     assert rc == 0
-    assert calls[0][0][:2] == [sys.executable, "-X"]
-    assert calls[0][0][2].startswith("pycache_prefix=")
-    assert calls[0][0][3:] == [
+    assert calls[0][0][:2] == [sys.executable, "-B"]
+    assert calls[0][0][2:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -1201,7 +1198,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     # PATH is prepended, and Copilot is exec'd (launcher owns the exec)
     assert 'export PATH="${SESSION_PATH}:${PATH}"' in text
     assert "_exec_copilot_backend copilot" in text
-    assert 'exec "$@" "${COPILOT_ARGS[@]}"' in text
+    assert 'exec "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}' in text
     assert '_exec_copilot_backend "$COPILOT_PATH_OVERRIDE"' in text
     # --stdio (ACP) mode keeps human output off the JSON-RPC channel
     assert "STDIO=true" in text
@@ -2612,10 +2609,8 @@ def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
         (runs[0][0], ["resolve", "--no-mux"]),
         (runs[1][0], ["post-exit", "wt1"]),
     ):
-        assert argv[:2] == [sys.executable, "-X"]
-        assert argv[2].startswith("pycache_prefix=")
-        assert Path(argv[2].split("=", 1)[1]).is_absolute()
-        assert argv[3:] == ["-m", "agent_worktrees", "--project", "example", *tail]
+        assert argv[:2] == [sys.executable, "-B"]
+        assert argv[2:] == ["-m", "agent_worktrees", "--project", "example", *tail]
     resolve_env = runs[0][1]["env"]
     assert resolve_env["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(cell_runtime)
     assert resolve_env["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(

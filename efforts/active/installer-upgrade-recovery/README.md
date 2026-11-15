@@ -9,6 +9,14 @@
 - **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653, #10996
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
+## Goal
+
+Recover affected older installations to the complete usable incoming state
+required by the unchanged Guiding Intent below. The
+[foreground-update/service-startup amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+adds caller-loss recovery that stops finite updater work without killing
+accepted service operations, keepers or protected connectivity.
+
 ## Guiding Intent
 
 Drive high-impact installer/update compatibility failures to a verified usable
@@ -46,6 +54,22 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
+The conditional #4122 intake below first resolves whether the reported
+Linux/WSL input belongs to this ROOT's existing supported incoming
+install/update path. Preserve the actual installer/source owner and #4123's
+separate fixture-cleanup scope; do not broaden the Goal or transfer
+implementation, cleanup or resource custody. #4122 remains OPEN until its
+exact supported-entry scope and receiving acceptance are established.
+Planned receipt does not require implementation or a native run first.
+
+The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
+uses this effort's affected-installation cases to qualify the same incoming
+path as a fresh install, not a separate legacy reconstruction algorithm.
+Complete staging precedes live compatibility checks, state transfer and
+activation. Preserve this effort's existing recovery/adopter/native owners,
+holds and all open acceptance; no old footprint is declared recovered by
+documentation or a completed package environment.
+
 - **Topology:** serial bounded source units, with normal independent PRs where
   their edit and acceptance scopes do not overlap.
 - **Host:** Workstream driver owns this effort, its PRs and completion gate.
@@ -55,6 +79,15 @@ These are coordination dependencies, not new assignments or ownership transfers.
   implementation. Reuse an existing issue rather than duplicate it. Preserve
   contributor expressions and active claims; coordinate an overlap before
   changing its implementation.
+- **Resident-companion intake:** the finite [#5820 lifecycle family](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle)
+  is planned here without changing its original implementation owners,
+  claims, holds or activation gates. Preserve delivered staging/source credit
+  and the complete version-slot/whole-lifecycle contract. #5827's CWD
+  prevention is not acceptance of the resident Windows companion chain.
+  #2395's temporary per-unit restart-inhibition/expiry remains separately
+  open unless implemented OR explicitly transferred to its rightful
+  supervision owner. This documentary intake neither accepts native proof
+  nor authorizes updater execution, live companion operations or custody transfer.
 - **Boundary:** this is a defect and upgrade-acceptance workstream, not a second
   installer, reset engine, artifact resolver, daemon, scheduler, provenance
   authority or repository-wide merge queue.
@@ -63,6 +96,16 @@ These are coordination dependencies, not new assignments or ownership transfers.
 - **Effects:** source development, contained tests and normal source publication
   only. Shared installations, credentials, services, queues, sessions and
   deployment are not changed by establishing this plan.
+
+The finite #7117 publication-lock/lifecycle/Manager/all-five caller-loss
+continuation retains the existing shared-lock source claimant and actual #5529
+conditional operation boundary, installation/queue/process/hook and original
+application/source/native custodians. Existing #6820, #7758, #10499, #9726, #9468
+and MCP-specific delivered reservations are not reassigned or reopened.
+Canonical construction/recovery remains under its existing owners; no held
+source-managed-runtime-installs ROOT/derived material is admitted through this
+amendment. No repair, source appointment, rollout, lock/request settlement or
+resource release is authorized.
 
 ## Context
 
@@ -101,6 +144,10 @@ authorize production updates, recovery mutations or new access.
 
 ## Plan
 
+- [ ] Add the scoped foreground-cancellation and independent-startup cases to
+  the existing upgrade-acceptance owner, preserving all prior failure evidence,
+  source claims, operational holds and the no-parallel-writer boundary.
+
 ### Phase 1 - Reviewed scope and issue ownership
 
 - [x] Establish #10377 and reconcile adjacent public workstreams before claiming
@@ -112,6 +159,23 @@ authorize production updates, recovery mutations or new access.
   Hoist only additional generic gaps that do not already have an upstream issue.
 
 ### Phase 2 - Priority fixes and latest-flow recovery
+
+- [ ] **IR4122-P0:** Establish whether the reported Linux/WSL dangling
+  generated `.pytmp` input occurs on the existing supported incoming
+  install/update entry covered by this ROOT, retaining the actual source
+  and installer owner. If it does not, keep #4122 outside this ROOT rather
+  than broadening the Goal or treating another receiver as absent.
+- [ ] **IR4122-P1:** If P0 confirms the boundary, safely exclude known
+  generated debris at an owned input boundary OR use another explicitly
+  accepted safe policy, without requiring manual deletion. Never follow,
+  read or delete a link target, or treat required missing/linked or foreign
+  inputs as harmless generated debris. If safe admission cannot be
+  established, preserve the prior healthy installation and precise refusal.
+- [ ] **IR4122-LV:** At the identified supported boundary, cover clean input,
+  known generated dangling `.pytmp` debris, unrelated/authored files,
+  required missing/linked inputs and failure. Verify prior healthy-state
+  preservation and truthful refusal without weakening incoming readiness,
+  ownership or required-payload admission.
 
 - [x] Select the first bounded, unclaimed reproducible source gap, or obtain
   explicit coordination with its existing owner. Record its old-footprint case
@@ -135,6 +199,142 @@ authorize production updates, recovery mutations or new access.
   Keep preparation/read failures distinct from absence, installation and caller
   adoption; U17's delivered source/release remains complete.
 
+### Whole installer and resident-companion lifecycle - #5820
+
+The complete finite family is retained in
+[L5820](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle).
+It closes an existing authoritative-runtime-replacement vision delta, not
+a new recovery/provenance veto on explicit incoming replacement.
+
+- [ ] S1: keep only fast payload copying in an attributable version-slot
+  OR equivalent pending candidate. Build, health, cutover and task waits
+  stay outside the replaceable payload throughout their lifetime; preserve
+  immutable completed slots.
+- [ ] S2: staging failure hard-fails OR uses an enforced bounded protected
+  attempt; never silently execute unprotected in place. The original
+  alternative does not require both implementations.
+- [ ] S3: independently bound background reconciliation and its descendants,
+  tree custody, uncertainty and owned cleanup. A staged child's UV timeout
+  alone is not the independent installer/reconciler lifecycle bound.
+- [ ] S4: cover the exact registered resident `dtssh` start/stop/health
+  command AND waiting PowerShell/host-helper descendants throughout
+  supervision, health, restart and update.
+- [ ] S5: retain selected source/provenance, argv/config/service identity,
+  containment, child exit, readiness/reporting, exact-generation ownership
+  and owned cleanup, without using old-state uncertainty to veto incoming
+  completion under the governing replacement contract.
+- [ ] S6: prove an ordinary native Windows plugin update while that companion
+  is actively supervised, without manual killing, a retry race or stopping
+  unrelated/shared trees; prove automatic post-update supervision/readiness.
+- [ ] S7: preserve inherited #2395's separate temporary per-unit
+  restart-inhibition/expiry acceptance unless implemented OR explicitly
+  transferred to the rightful supervision owner; no owner or resource release
+  follows from documenting this family.
+- [ ] V5820-L: distinguish payload exclusion, immutable-slot preservation,
+  staging-failure alternatives and independent installer/reconcile descendant
+  lifetime controls; retain all identity, exit, uncertainty and owned-cleanup
+  evidence without substituting a child UV timeout.
+- [ ] V5820-N: exercise the exact registered native Windows resident companion
+  AND its waiting descendants through ordinary update while actively supervised,
+  proving automatic post-update readiness and no manual/unrelated-tree stop.
+  Keep this witness distinct from rename/CWD fixtures and from #2395's
+  separately open inhibition/expiry acceptance.
+
+#### Finite interrupted-installer recovery continuation - #7117
+
+- [ ] **IR7117-P1:** Retain a supported standalone inspect/repair operation OR
+  exact actionable invocation for interrupted publication locks: exact
+  installation/lock and demonstrably inactive owner, retained evidence, refusal
+  of live/foreign/concurrent/ambiguous ownership; fresh-process interruption/
+  repair/ordinary update and safe complete-slot reuse, including reboot/PID-reuse/
+  incomplete-write controls. Original cause remains unestablished. Credit
+  delivered #7814 source/release; safe old-slot reuse is an optional result,
+  never a veto of authentic fresh incoming replacement.
+- [ ] **IR7117-P2:** Retain read-only exact pending unattributed lifecycle
+  reservation inspection and evidence-bound recovery: exact manifest/payload/
+  source/environment/policy under existing publication lock, unrelated fields
+  preserved, changed/foreign/live refusal and pending/not-ready until authorized
+  ordinary update completes. Credit #9474/#9490 source/release without
+  transferring retained candidates.
+- [ ] **IR7117-P3:** Preserve fresh-Manager legacy registered source/profile
+  capture BEFORE replacement acquisition. Authenticate source/environment/owner
+  without depending on unavailable incumbent publication/uninstall inventory;
+  preserve mutation checks, no invented historical profile or weakened uninstall.
+  Paused #6820 and #9623 teardown custody remain separate.
+- [ ] **IR7117-P4:** Retain ALL FIVE MCP/Containers/Dispatch/Machines/budget
+  sessionStart paths and original Windows SSH caller-Job loss, with environment/
+  configuration/consumer/hook budgets and Python-free budget hook. Through
+  existing attributed lifetime owners survive ALL caller-owned cleanup
+  boundaries OR report truthful recoverable state without indefinite installer
+  fencing. One escape flag/Job is insufficient; preserve test containment and
+  reject default WMI/scheduler/service/queue-reset or replay of uncertain
+  attempts.
+- [ ] **IR7117-P5:** Preserve independently authorized fresh incoming replacement
+  despite stale incumbent lock/provenance/recovery/queue state: durable
+  configuration/user/application/session/repo/worktree data and connectivity,
+  every requested ready runtime and applicable selector/route/launcher/service/
+  task registration. Automatic inhibition remains automatic-only. Incoming
+  authenticity/addressed-install authority/build/state compatibility/permission/
+  I/O/health failures remain failures.
+- [ ] **IR7117-P6:** Keep outgoing retirement independently restricted to
+  eligible obsolete CENTRAL services/registrations, never session hosts/session
+  processes/clients/connectivity; identity/role/then-current selection
+  revalidated. Retain actual installation/queue/process/hook/MCP/source/native
+  custodians and original alternatives. #10700/#10825 qualify their actual MCP
+  source/release/native slice, not all-five, #7758 whole completion or installed
+  rollout.
+
+##### Local Validation - #7117
+
+- [ ] **IR7117-LV1:** Resolve EVERY original/refined IR1-IR9/IRV1-IRV5 clause
+  against the actual existing publication/lifecycle/Manager/hook/incoming/
+  retirement consumers. Preserve exact owner birth/descendant/mixed-generation,
+  changed-source/foreign/live/concurrent/ambiguous, termination/reboot/PID-reuse/
+  incomplete-write and ordinary-update controls, with safe reuse OR fresh
+  replacement honored at its own scope.
+- [ ] **IR7117-LV2:** Exercise all five actual caller-loss boundaries and
+  environment/config preservation, including Python-free budget hook and
+  original Windows SSH case; survival OR truthful recoverability, no indefinite
+  fence or weakening of caller-owned cleanup/test containment. MCP-only delivered
+  results are not an all-five pass.
+- [ ] **IR7117-LV3:** Pair ready/current incoming selection with stale-lock/
+  queue/provenance, live-old-keeper/unknown-census/occupied-home controls and
+  genuine incoming failures; preserve automatic-only inhibition, protected
+  state/clients/connectivity and independent central-only retirement.
+- [ ] **IR7117-LV4:** Preserve the existing shared-lock source claim and actual
+  #5529 conditional operation boundary. Its exact underlying wording is not
+  established by this intake: resolve it through the current owner before any
+  affected repair/source appointment/operation or transfer judgment. This is
+  not a ban on reading eligible outer #7117, no newly invented condition, expiry
+  or ACK. #7117 stays OPEN pending its actual acceptance/custody conditions;
+  source/review/release/installed/native remain distinct.
+
+#### Existing-entry boundaries - #7743
+
+- [ ] **P7743-U1:** Retain the complete #7743 fresh-entry contract in
+  [U1-7743](acceptance.md): attributable incoming code before installed
+  Python/venv/package/Manager probes; ordinary command/source/ref/project/argv
+  and foreign protections; CMD/PowerShell/POSIX and headless/captured
+  wait/stream parity. Preserve NullString selector absence/restoration,
+  schema-3 candidate validation, read-only/revalidated legacy capture,
+  automatic-cell precedence, registered provider/package/root authority,
+  race snapshots and no redundant cross-component helper-byte admission.
+  Keep Windows execv replacement wait/stdio, `update_bootstrap._wait`,
+  Manager `engine_client.run_engine_passthrough` and
+  `runtime_install --settle-slot` as separate hops. Preserve confirmed
+  no-launch settlement, the primary error, fresh predecessor/routing and
+  custody of unknown partial effects. Native16 target success is not the
+  later consumer result; #6812 presentation/single-pass/missing-bin and
+  30-second item/300-second group controls, and #8370 logging, stay separate.
+  Marker-only POSIX selected-generation readiness is not broad lifetime,
+  reconcile or broker takeover. Do not presume `same_kernel_boot` after
+  reboot or renew quarantined results. The recorded 575.016-second exit-1
+  and 140.0-second stale-lock experiment remains unsettled: no quarantine
+  or replay before its original owner AND descendants meet the original
+  settlement condition. That experiment's hold is not a veto on independently
+  authorized incoming replacement. Preserve the existing source claim,
+  owners, alternatives and evidence tiers; no new ACK or rollout follows.
+
 ### Phase 3 - Release and completion
 
 - [ ] Drive each source PR through review, required CI, merge and containing
@@ -148,6 +348,17 @@ authorize production updates, recovery mutations or new access.
   only when this parent gate is satisfied.
 
 ## Validation Plan
+
+- [ ] **IR4122-G:** Resolve P0 before claiming this ROOT receives #4122,
+  then qualify P1 and its local controls at the original finite source-input
+  recovery tier. Keep #4123 fixture cleanup, tracked-link removal, ignore
+  rules, source publication and installed/native evidence distinct.
+  No broader platform matrix, owner transfer or runtime operation is
+  supplied by this conditional plan.
+
+- [ ] Exercise the relevant [L1-L5 caller-loss/handoff cases](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  through the latest normal entry with affected old footprints and same-boot
+  recovery. Do not equate cancelled observation or queue release with recovery.
 
 - [ ] For each selected incompatibility, start from representative broken or
   incompatible prior state and exercise the real latest entry, not only a
@@ -178,11 +389,39 @@ authorize production updates, recovery mutations or new access.
 - [ ] For changed peer boundaries, qualify current/prior callers and providers,
   supported rollback, missing metadata and unsupported requirements. Do not
   blindly replay an effectful operation with older syntax.
+- [ ] G5820: validate the complete [S1-S7 resident-companion family](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle):
+  payload exclusion throughout lifetime, immutable completed slots, hard-fail
+  OR bounded protected staging failure, independent installer/reconcile
+  descendant bounds and custody, exact registered native Windows `dtssh`
+  AND waiting helpers under active supervision during ordinary update,
+  identity/exit/readiness, automatic post-update supervision and owned cleanup.
+  Preserve #2395's separate inhibition/expiry implementation OR rightful-owner
+  transfer; rename/CWD or staged-child timeout evidence alone is insufficient.
 - [ ] Use focused unit checks, real subprocess/native fixtures and practical
   clean-room lanes. Keep broad native matrices opt-in, not added to required
   unit-only CI. State exact reasons for unavailable lanes.
 - [ ] Audit every issue, effort, test, example, PR and commit for public-safe
   scope. Do not attach private reports, raw logs or deployment identifiers.
+
+- [ ] **IR7117-G:** Resolve EVERY IR7117-P1-P6 AND IR7117-LV1-LV4 at the
+  original finite source/consumer/native tiers: standalone recovery OR actionable
+  invocation, exact pending lifecycle and fresh-Manager legacy-source/profile
+  safety, ALL FIVE caller-loss hooks with survival OR recoverability,
+  authoritative incoming selection and independent central-only retirement.
+  Preserve original custodians, delivered scope credit, existing #5529 operation
+  condition and every real source/resource hold. No generic acknowledgement,
+  whole-parent/every-host completion, new deployment or source-only-to-installed
+  inference is added.
+
+- [ ] **V7743-U1:** Resolve the complete P7743-U1 and local U1/U1-7743 union
+  through the real latest entry at the original finite tier. Distinguish all
+  ten entry/platform/selector/authority/helper/settlement/venue/adjacent-owner/
+  marker/reboot boundaries, source/release credit and actual consumer results.
+  Preserve original alternatives, primary failures, unknown partial effects
+  and the exact still-gated owner/descendant experiment. Existing incoming
+  readiness and complete selection remain the replacement bar; old recovery
+  or cleanup is not an incoming veto. No retry, quarantine, native invocation,
+  generic ACK, every-host or whole-parent prerequisite is authorized here.
 
 ## Proposal
 
@@ -193,6 +432,31 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### Proposed finite #7117 interrupted-installer receiving
+
+Proposed direct Phase 2 Plan, local Validation and actual ROOT-global Validation
+retain the full original/refined interrupted-publication, lifecycle,
+fresh-Manager and all-five caller-loss union alongside authoritative incoming
+replacement. Existing U12/U14/U15 and #7814/#9474/#9490 credits retain actual
+scope; no new missing-patch or all-five/installed claim follows. Every incumbent
+byte/check state/first gate/owner remains. The exact #5529 operational condition
+is unresolved, not waived or reconstructed; normal review, actual merge and
+whole-current receiving/source/custody readback precede any separately permitted
+judgment. No product/test/native, repair, queue, rollout or source/resource effect
+occurred.
+
+### 2026-11-13 - Resident-companion lifecycle intake proposed
+
+The direct #5820 Plan, local AND actual global Validation and strict
+[L5820 acceptance family](acceptance.md#l5820---whole-installer-and-resident-companion-lifecycle)
+retain S1-S7 under the existing workstream. All ten new rows remain unchecked.
+Delivered fail-closed MCP/Budget staging and narrower constructor/reconcile/
+lifetime source credit remain; #5827's CWD credit is not the exact resident
+Windows-chain witness. Original owners, holds, activation and the separate
+#2395 acceptance survive. Normal reviewed merge and whole-current receiving
+readback precede any separate source-tracking judgment; no product execution,
+technical completion, deployment, source retirement or custody transfer is claimed.
 
 ### 2026-11-03 - Workstream established
 
@@ -2877,3 +3141,12 @@ check the exact selected payload's advertised capability before migration.
 Caller fresh/prior-state policy preservation and whole-flow recovery remain
 under #11178, #5852 and the active #10377 acceptance matrix. No shared runtime,
 service, credentials, registration or installation is changed.
+
+### 2026-11-14 UTC - Proposed complete #7743 existing-entry receiving
+
+P7743-U1, the local U1-7743 matrix and actual global V7743-U1 retain the
+complete finite fresh-entry/refinement union under its existing recovery,
+entry, stdio and settlement owners. All new acceptance remains unchecked.
+The historical unsettled native experiment remains held without becoming a
+general incoming-replacement veto. No source-owner release, retry, execution,
+implementation, installed acceptance or resource transfer is claimed.

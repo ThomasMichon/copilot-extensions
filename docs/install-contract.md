@@ -20,6 +20,15 @@ This section is its normative installer contract, not a declaration that all
 existing installers comply. Per-component descriptions below record current
 mechanisms; legacy refusal/recovery descriptions do not redefine the target.
 
+The [foreground-update and independent-service-startup intent](../visions/installer/README.md#foreground-update-and-independent-service-startup)
+also governs this target. Ordinary updates and finite helpers are caller-owned
+and cancellable; accepted service setup/start, required persistent wrappers and
+runtime retention transfer to an independent lifecycle owner. Cancelling an
+update or readiness wait cannot kill that accepted work or daemon tree.
+Single-writer custody and durable outcomes remain required, but do not imply
+an ordinary detached whole-update worker. Existing background-driver mechanisms
+below are current adoption descriptions, not proof this target is implemented.
+
 An explicit/manual update installs admitted incoming runtime code independently
 of incumbent recovery, graceful/ZDD support, old ownership/custody/provenance,
 maintenance banners and stale installer transactions/queue fences. Such evidence
@@ -46,15 +55,26 @@ create persistent denial, indefinite queuing or a separate operator-recovery
 prerequisite. Actual OS I/O/permission failures remain failures; owner metadata
 alone is not one.
 
-Outgoing central daemons observe supersession, close admission, attempt drain
-and self-clean independently. Transfer or exclude conflicting work admission
-before incoming serving readiness where needed, without waiting for install
-completion, final exit or indefinite old-lease release.
-Neither predecessor drain/exit nor cleanup gates
-success or rolls back a healthy incoming generation. One optional finite
-asynchronous fallback may force-retire remaining outgoing central daemons and
-obsolete central-service schedules after a grace longer than expected cutover.
-Do not require a periodic resident reaper. At each mutation, revalidate native
+Incoming construction uses fast copying, the canonical pure UV/wheel-backed
+physical environment and simple app setup before cutover. Do not repeat source
+fingerprint/admission checks as installation-start or installation-success
+gates. Existing source selection, package/feed policy and real copy/build/setup
+failures remain with their current owners; this is not permission to execute
+unauthenticated inputs or suppress an actual error.
+
+Service replacement is kill by default; handoff is an optional reliable path.
+Without reliable handoff, force-stop the addressed outgoing central service and
+its owned daemon tree before incoming startup. Otherwise allow one bounded
+handoff attempt, then force-stop that tree if it does not settle. The attempt
+and cutoff share the existing caller deadline; wrappers cannot restart the
+budget. Old state locks, handoff/schema failures and drain delays cannot block
+incoming startup. Preserve durable application data and necessary incoming
+state compatibility. Transfer or exclude conflicting work before incoming
+mutable serving work, without indefinite old-lease waiting.
+Independent artifact/registration cleanup neither gates success nor rolls back
+a healthy incoming generation. A delayed cleanup fallback is not a substitute
+for this activation-time cutoff, and no periodic resident reaper is required.
+At each mutation, revalidate native
 identity, installation, explicit central-service role and then-current selection,
 including registrations: delayed cleanup must never kill a future or reselected
 generation. Session hosts/keepers, session-owned Bridge/agent processes,
@@ -154,6 +174,14 @@ no-build and hash-required. The existing native owner retains the candidate
 through health, activation, command/manifest publication and settlement;
 service cutover, task policy, disabled holds, data and recovery keep their
 existing owners. MCP keeps its nested environment; Manager remains independent.
+The closed-wheel invocation retains only `UV_CONCURRENT_INSTALLS`,
+`UV_CONCURRENT_DOWNLOADS` and `UV_CONCURRENT_BUILDS` from UV's ambient settings,
+so callers can bound resource parallelism without changing the retained input
+closure. Other UV settings, pip/Python overrides and active-environment routing
+are removed; the fixed offline, hash-required invocation remains authoritative.
+The existing single-command transaction remains unchanged. Resource controls
+do not bound every UV blocking worker, and splitting installation requires
+separate qualification of interpreter startup hooks in incomplete environments.
 Bootstrap readiness recognizes the completed profile generation rather than
 mistaking it for package-version drift. Package comparisons strip the generated
 profile suffix; recovery still requires an exact current/last-known-good

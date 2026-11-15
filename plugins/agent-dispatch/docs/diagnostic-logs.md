@@ -16,7 +16,8 @@ chain. They return before environment loading, changing directory, supervisor
 label checks, log writes or process startup; unresolved selection fails.
 This is routing evidence only, not service health or activation evidence.
 Normal coordinator and supervisor launches use the
-[external Python bytecode cache](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+[platform Python cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract),
+including its no-write fallback for unsealed or older providers.
 The supervisor launch description includes the actual interpreter cache option;
 the resolve-only path still creates no cache or starts a process.
 
@@ -79,11 +80,25 @@ invocation store/readback. Subprocess errors keep their original exception and
 primary result; timeout records do not invent an exit code. Nonzero exits retain
 selected structured errors and bounded stderr, never arbitrary stdout envelopes.
 
+An unresolved cross-owner relationship write emits `task_relationship_write`
+with its original task/generation, assignment audit event, reservation when
+present, and reserve/bind/close operation. Its bounded, filtered causal
+exception stays in the existing application log rather than being erased by
+the generic unresolved-request reply. The API reply and retained request are
+unchanged: this diagnostic neither proves absence nor authorizes retry,
+release, replacement or native admission.
+The separate pre-retirement inspection and admission guards outside that
+write callback do not emit this event; their existing error paths remain
+outside its coverage.
+
 Known credential values, credential assignments and supplied prompts are removed
 using the existing diagnostic-text owner. Raw task/environment/invocation
 envelopes are not copied into these records. These restrictions are not a reason
 to erase benign operation identities or causal errors. The existing optional
 `logs/bridge-cli` trace remains separate and default-off.
+Selected-owner refusal text is filtered before its formatter's text cap, so a
+credential crossing that cap cannot become an unrecognized literal fragment
+before the application event filter receives it.
 Exact supplied prompts/invocations are removed before bounded normalization, so
 a long input cannot leak a prefix merely because it was truncated before
 matching. Plain `[Errno N]`/`[WinError N]` causes remain diagnostic text, not JSON

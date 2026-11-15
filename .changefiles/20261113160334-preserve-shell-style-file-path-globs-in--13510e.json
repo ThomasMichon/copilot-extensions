@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve shell-style file-path globs in full-text search",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

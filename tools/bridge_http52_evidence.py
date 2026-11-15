@@ -1,11 +1,11 @@
 """HTTP-52 owner membership; all earlier generations remain immutable evidence."""
 
 from functools import partial
-import json
 from pathlib import Path
 
 import bridge_http51_evidence as retained
 import bridge_http_retained_evidence as common
+from launch_wrapper_assets_ref import load_manifest_groups
 
 previous = common.previous
 installation = common.installation
@@ -22,10 +22,25 @@ SCOPE = (
     "not wall-clock read qualification; portable launch joins actual archive/policy readers, "
     "ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, "
     "Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; "
+    "discovery consumes controlled source stdout with live reporter rename, withdrawal "
+    "and malformed-envelope retention controls; "
+    "native SDK receiving joins real Node/API/SQLite with controlled SDK events, "
+    "without installation or process admission; "
     "not native Copilot, mux, remote authentication or installed qualification"
 )
 POLICY = common.POLICY
-AFFECTED = (
+
+
+def _current_source(path: str) -> str:
+    if (
+        path.startswith("plugins/agent-bridge/extensions/agent-bridge/")
+        and not path.endswith("/extension.mjs")
+    ):
+        return "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/" + path.rsplit("/", 1)[1]
+    return path
+
+
+_RETAINED_AFFECTED = (
     *retained.AFFECTED,
     *(previous.PREFIX + name for name in (
         "acp_client.py", "acp_callbacks.py", "acp_current_requests.py",
@@ -66,7 +81,12 @@ AFFECTED = (
         "status_notices.py", "status_runtime.py", "status_remote.py",
         "status_carrier.py", "routes/status.py", "client_status.py",
         "events.py", "live_message_receipts.py", "remote_operations.py",
-        "restored_app.py", "app.py", "runtime_transfer.py",
+        "restored_app.py", "app.py", "runtime_transfer.py", "routes/execution_context.py",
+        "dispatch_origin.py", "dispatch_cli_origin.py", "persisted_session_views.py", "acquisition_plugins.py",
+        "acquisition_local_launch.py", "creation_local_launch.py",
+        "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
+        "routes/worktrees.py", "routes/worktree_reporting.py",
+        "compatible_inbox.py", "runtime_custody.py", "inbox_consumer_schema.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -74,6 +94,7 @@ AFFECTED = (
         "tracking_session_registration_write.py", "tracking_session_lifecycle_write.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
+    "plugins/agent-bridge/extensions/agent-bridge/machine-context.mjs",
     "plugins/agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
     "plugins/agent-bridge/extensions/agent-bridge/remote-driver.mjs",
     "plugins/agent-bridge/extensions/agent-bridge/questions.mjs",
@@ -81,9 +102,19 @@ AFFECTED = (
     "plugins/agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
     "plugins/agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs",
     "libs/venue-copilot/src/venue_copilot/portable_mux.py",
+    "libs/machine-transport/src/machine_transport/local_execution.py",
+)
+AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/__init__.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/announce.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/bridge-endpoint.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/plugin-readiness.mjs",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py",
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
+    "plugins/agent-bridge/tests/test_native_send_unavailable.py",
     "plugins/agent-bridge/tests/test_host_status.py",
     "plugins/agent-bridge/tests/test_host_status_remote.py",
     "plugins/agent-bridge/tests/test_host_status_clients.py",
@@ -93,11 +124,14 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_live_inbox_producer.py",
     "plugins/agent-bridge/tests/test_plugin_readiness.py",
     "plugins/agent-bridge/tests/test_receiving_bundle.py",
+    "plugins/agent-bridge/tests/test_plugin_readiness_extension.py",
+    "libs/copilot-driver-core/pyproject.toml",
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
     "plugins/agent-bridge/tests/test_acquisition_runtime.py",
     "plugins/agent-bridge/tests/test_acquisition_writer_inspection.py",
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
+    "plugins/agent-bridge/tests/test_worktree_source_evidence.py",
     "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
     "plugins/agent-bridge/tests/test_retained_host_recovery.py",
     "plugins/agent-bridge/tests/test_gc.py",
@@ -117,11 +151,27 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/docs/mux-question-answers.md",
     "plugins/agent-bridge/tests/questions.test.mjs",
     "plugins/agent-bridge/tests/retained-extension.test.mjs",
+    "plugins/agent-bridge/tests/test_execution_context.py",
+    "plugins/agent-bridge/tests/metadata.test.mjs",
+    "plugins/agent-bridge/tests/bridge-endpoint.test.mjs",
+    "libs/machine-transport/tests/test_local_execution.py",
     "plugins/agent-bridge/docs/live-question-answers.md",
     "plugins/agent-bridge/tests/test_workspace_creation.py",
+    "plugins/agent-bridge/tests/test_dispatch_session_origin.py",
+    "plugins/agent-bridge/tests/test_dispatch_cli_origin.py",
+    "plugins/agent-bridge/tests/test_dispatch_origin_cli.py",
+    "plugins/agent-bridge/tests/test_worktree_native_resume.py",
+    "plugins/agent-bridge/docs/dispatch-session-origin.md",
     "plugins/agent-bridge/docs/retained-acquisition-writer.md",
     "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
+    "plugins/agent-bridge/tests/fixtures/worktree_list_source.py",
+    "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
+    "plugins/agent-bridge/tests/test_inbox_custody.py",
+    "plugins/agent-bridge/tests/test_retained_sdk_recovery.py",
+    "plugins/agent-bridge/tests/fixtures/retained-sdk-consumer.mjs",
+    "plugins/agent-bridge/tests/legacy_inbox_schema.py",
+    "plugins/agent-bridge/tests/test_http47_launch_audit.py",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
     *(path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
@@ -129,15 +179,60 @@ EXTRA_PATHS = (
       for path in sorted(
           (Path(__file__).resolve().parents[1] / "plugins" / plugin / "src").rglob("*.py"),
       ) if "__pycache__" not in path.parts),
-    *(declaration["canonicalDir"] + "/" + name
+    *(declaration.source_relative(name)
       for manifest in ("packaged-assets.json", "launch-wrapper-assets.json")
-      for declaration in (json.loads(
-          (Path(__file__).resolve().parents[1] / "plugins/agent-bridge" / manifest).read_bytes(),
-      ),)
-      for name in declaration["files"]),
+      for declaration in load_manifest_groups(
+          Path(__file__).resolve().parents[1] / "plugins/agent-bridge", manifest_name=manifest,
+      )
+      for name in declaration.files),
 )
+EXTRA_PATHS = tuple(_current_source(path) for path in EXTRA_PATHS)
 PROBES = {
     **retained.PROBES,
+    "test_reporter_naming_overrides_stored_names_without_retargeting_agent": 3,
+    "test_invalid_reporting_context_does_not_replace_last_good_inventory": 11,
+    "test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes": 1,
+    "test_actual_sdk_facade_loads_the_core_without_suite_services": 5,
+    "test_core_extension_helper_contracts": 1,
+    "test_readiness_and_existing_delivery_node_contracts": 1,
+    "test_real_cli_reports_unavailable_before_constructing_native_admission": 2,
+    "test_other_commands_keep_existing_unavailable_client_behavior": 1,
+    "test_transport_distinguishes_preflight_from_a_lost_post_response": 3,
+    "test_origin_cli_reaches_actual_keyed_owner_without_acquisition": 2,
+    "test_origin_creation_client_composes_required_selected_peer_capabilities": 6,
+    "test_origin_creation_client_rechecks_after_cutover_without_baseline_replay": 1,
+    "test_origin_creation_client_invalid_scope_refuses_before_peer_discovery": 6,
+    "test_origin_cli_invalid_forms_refuse_before_connect": 10,
+    "test_origin_client_negotiates_mode_capability_before_acquisition": 10,
+    "test_connected_cli_creation_persists_before_delivery_and_replays": 1,
+    "test_unconfirmed_first_save_keeps_pending_effect_without_prompt_or_relaunch": 1,
+    "test_original_snapshot_survives_restart_heartbeat_alias_and_mutable_targeting": 1,
+    "test_resume_into_existing_conversation_preserves_its_stamp_or_absence": 2,
+    "test_resume_gate_never_stamps_provisional_or_legacy_identity": 1,
+    "test_incoherent_origin_refuses_registration_without_claiming_reservation": 3,
+    "test_foreign_driver_cannot_claim_origin_and_failed_fold_rolls_back_first_save": 1,
+    "test_legacy_and_opaque_storage_remain_unattributed": 1,
+    "test_schema45_upgrade_preserves_legacy_absence_and_requires_writable_preparation": 1,
+    "test_current_schema_without_origin_storage_is_not_silently_repaired": 2,
+    "test_origin_rejects_malformed_or_cross_assignment_evidence": 9,
+    "test_origin_detaches_nested_input_and_legacy_request_digest_is_unchanged": 1,
+    "test_acquisition_refuses_unqualified_modes_and_other_assignments": 3,
+    "test_acquisition_first_save_replay_restart_and_reassignment_keep_birth": 1,
+    "test_legacy_acquisition_reuse_never_backfills_origin": 1,
+    "test_keyed_http_creation_retains_origin_and_rejects_changed_or_dropped_stamp": 1,
+    "test_public_origin_requires_keyed_prepared_workspace": 5,
+    "test_unsupported_target_refuses_before_worktree_effects": 1,
+    "test_acquisition_venue_refusal_is_terminal_before_launch_gating": 3,
+    "test_worktree_resume_responses_keep_known_origin": 4,
+    "test_real_resolver_refuses_elevation_before_relay_start": 10,
+    "test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records": 1,
+    "test_standalone_uses_shared_unmapped_host_semantics": 3,
+    "test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster": 1,
+    "test_current_context_route_retains_bridge_authentication": 1,
+    "test_execution_context_extension_controls": 1,
+    "test_explicit_hostname_conflict_is_not_resolved_by_the_machine_key": 2,
+    "test_legacy_profiles_without_ssh_aliases_keep_native_guest_naming": 2,
+    "test_machine_rename_rollover_retains_alias_and_cli_claim": 1,
     "test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row": 1,
     "test_consumption_releases_wait_without_turn_end_or_reply": 1,
     "test_missing_partial_stale_or_reincarnated_observer_is_unknown": 1,
@@ -216,7 +311,18 @@ PROBES = {
     "test_portable_scope_never_leaks_a_seed_to_the_legacy_inbox_before_enrollment": 1,
     "test_portable_reload_keeps_its_native_binding_and_uses_the_existing_cas": 1,
     "test_remote_enrollment_requires_the_original_portable_reservation": 7,
-    "test_retained_startup_admission_requires_its_original_ready_input": 12,
+    "test_retained_startup_admission_requires_its_original_ready_input": 24,
+    "test_legacy_request_serialization_does_not_send_a_new_selector": 1,
+    "test_native_sdk_receiving_needs_no_installation_or_process_custody": 2,
+    "test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work": 2,
+    "test_native_inbox_preserves_real_target_and_ingress_boundaries": 10,
+    "test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade": 2,
+    "test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls": 2,
+    "test_native_poll_does_not_promote_unverified_legacy_startup_input": 2,
+    "test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work": 6,
+    "test_native_receiving_does_not_reacquire_custody_after_metadata_refresh": 6,
+    "test_native_sdk_process_recovery_uses_original_receipts_without_installation_context": 2,
+    "test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation": 1,
     "test_readonly_poll_never_claims_or_expires_mutation_controls": 1,
     "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
     "test_carrier_failures_settle_owned_tree_and_streams": 2,
@@ -280,6 +386,8 @@ PROBES = {
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
+    "dispatch_acp_session_origin": 1,
+    "dispatch_cli_session_origin": 1,
     "host_status_feed": 1,
     **retained.CAPABILITY_VERSIONS, "owner_membership": 52,
     "bridge-session-current-requests-v1": 1,
@@ -295,6 +403,7 @@ CAPABILITY_VERSIONS = {
     "live_question_answers": 1,
     "live_delivery_observation": 1,
     "mux_question_answers": 1,
+    "compatible_native_inbox": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

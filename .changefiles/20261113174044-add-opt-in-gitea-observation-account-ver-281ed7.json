@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in Gitea observation account verification with operation-local material continuity and existing request budgets",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

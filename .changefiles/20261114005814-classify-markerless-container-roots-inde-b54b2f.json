@@ -1,0 +1,29 @@
+{
+  "comment": "Classify markerless container roots independently of WSL host kernels and refuse ambiguous guest substrate.",
+  "changes": [
+    {
+      "plugin": "libs/machine-transport",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

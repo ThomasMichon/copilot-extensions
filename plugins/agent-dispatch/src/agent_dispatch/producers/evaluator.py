@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import subprocess
 import string
 from collections.abc import Callable, Sequence
@@ -36,6 +37,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..registrar import RegistrarError
+from ..relevance_evaluation import RelevanceJudgment
 from ..repository_resources import resolve_execution_resources, validate_resource_arguments
 from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
@@ -143,7 +145,7 @@ class Reject:
         return {"decision": "reject", "reason": self.reason, "feedback": self.feedback}
 
 
-Decision = Emit | NoOp | Confirm | Abandon | Reject
+Decision = Emit | NoOp | Confirm | Abandon | Reject | RelevanceJudgment
 
 
 def _safe_fmt(template: str, values: dict[str, Any]) -> str:
@@ -286,6 +288,13 @@ def decision_from_dict(value: object) -> Decision:
     if not isinstance(value, dict):
         raise EvaluatorError("script evaluator output must be a JSON object")
     decision = value.get("decision")
+    if decision == "relevance":
+        if set(value) != {"decision", "verdict", "reason", "observation_ref"}:
+            raise EvaluatorError("relevance decision needs verdict, reason and observation_ref")
+        try:
+            return RelevanceJudgment(value["verdict"], value["reason"], value["observation_ref"])
+        except ValueError as exc:
+            raise EvaluatorError(str(exc)) from exc
     if decision == "reject":
         extra = sorted(set(value) - {"decision", "reason", "feedback"})
         if extra:
@@ -327,7 +336,7 @@ def decision_from_dict(value: object) -> Decision:
             raise EvaluatorError("abandon decision 'reason' must be a string")
         return Abandon(reason=reason)
     raise EvaluatorError(
-        "decision must be one of emit/noop/confirm/abandon/reject"
+        "decision must be one of emit/noop/confirm/abandon/reject/relevance"
     )
 
 
@@ -443,7 +452,7 @@ class ScriptEvaluatorRegistry:
             timeout_seconds = float(timeout)
         except (TypeError, ValueError) as exc:
             raise EvaluatorError("'timeout_seconds' must be a number > 0") from exc
-        if timeout_seconds <= 0:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise EvaluatorError("'timeout_seconds' must be > 0")
         if timeout_seconds > MAX_SCRIPT_EVALUATOR_TIMEOUT:
             raise EvaluatorError(
@@ -567,6 +576,8 @@ def apply_decisions(
             else:
                 abandoned = abandoner(task_id, actor="evaluator", reason=d.reason)
                 results.append({"decision": "abandon", "abandoned": abandoned})
+        elif isinstance(d, RelevanceJudgment):
+            raise EvaluatorError("relevance requires coordinator-owned periodic reconsideration")
         elif isinstance(d, Reject):
             raise EvaluatorError(
                 "reject requires coordinator-owned whole-goal verification of an exact submission"

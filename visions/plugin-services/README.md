@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-09
+- **Last revised:** 2026-11-15
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -48,6 +48,22 @@ the one live daemon it needs, and exits — it is never itself the long-running
 thing, and it never spawns one just to be sure.
 
 ## Concepts & Components
+
+### Independent service startup lifetime
+
+Ordinary updater execution remains caller-controlled, but accepted service
+setup/start and the persistent service tree have their own lifecycle owner.
+Updater cancellation, ancestor termination or cleanup cannot kill that work,
+its required host/wrappers or its retained runtime. A cancellable control
+client may observe an independent operation; it must not be that operation's
+unacknowledged lifetime owner.
+
+The [Installer lifetime boundary](../installer/README.md#foreground-update-and-independent-service-startup)
+governs integrated updates and each application's standalone setup/start.
+Single-writer, data compatibility, activation/recovery and protected-session
+contracts still apply. A service-supervisor-owned Job or equivalent scope is
+valid; production startup never claims durability from caller-contained
+fallback or by weakening bounded helper/test cleanup.
 
 ### Reversible automatic-update inhibition
 
@@ -853,29 +869,24 @@ repo-altering effect is explicit, ownership-aware, and travels through the
 repository's normal contribution flow; it is never a side effect of deployment.
 
 ### zero-downtime-cutover
-Service handoffs are **best effort**. Zero downtime is the preferred compatible
-path, not an unconditional guarantee or a veto on replacement. Where contracts
-interoperate, health-gate the incoming owner, switch routing, hand off work and
-drain the predecessor before retirement. An incompatible, unavailable or
-non-settling handoff instead permits independent startup and cold recovery from
-reasonably durable state. A cooperative outgoing daemon observes the new current
-owner, stops the work and sub-daemons it owns and exits after incoming startup.
+Service replacement is **kill by default; hand off only when reliable**.
+Without reliable handoff, force-stop the outgoing central service and its owned
+daemons before starting its replacement. A reliable compatible path gets one
+bounded handoff attempt, then forced cutoff if the outgoing tree does not
+settle. Zero downtime is an optional result of that reliable path, never a
+replacement prerequisite. Recovery uses reasonably durable state.
 A transient outage, cut-off stream or
 interrupted in-memory unit is an expected failure mode, not by itself a reason
 to refuse the selected generation.
 
 Ordinary updates and repair/force-install start the incoming generation without
-requiring a prior-version existence check or matched handoff. Brief process
-overlap is preferred; it does not permit duplicate exclusive work ownership.
-The incoming owner starts and attempts handoff first. The outgoing owner sees
-that announcement and independently detects that its full generation is stale.
-Conflicting admission closes/transfers or is excluded before incoming serving
-readiness when needed, without waiting for installation completion or indefinite
-old-lease release. New installation completion follows all requested incoming
-readiness and all applicable current selections, not final old-process exit.
-Outgoing central drain/self-cleanup continue independently. One optional finite
-asynchronous fallback may retire remaining outgoing central daemons and obsolete
-central-service schedules after a longer-than-cutover grace. It rechecks native
+requiring a prior-version existence check or matched handoff. Process overlap
+is limited to the bounded reliable attempt; it never permits duplicate exclusive
+work ownership. Old state locks, handoff/schema failures and drain delays cannot
+block incoming startup. Conflicting admission closes/transfers or is excluded
+before incoming mutable serving work. New installation completion follows all
+requested incoming readiness and applicable current selections, not independent
+artifact/registration cleanup. Forced cutoff rechecks native
 identity, central role, installation and then-current selection at each mutation,
 never targeting future/reselected generations, session hosts/keepers,
 session-owned Bridge/agent processes, foreground clients or connectivity.
@@ -894,9 +905,9 @@ Supersession is identity inequality: an owner is displaced because its full
 generation identity is no longer current, not because another package version,
 source hash or generation sorts after it. Selecting a different completed
 generation starts that incoming owner through the same lifecycle in either
-direction, including rollback. Prefer healthy handoff and drain; old-owner
-self-retirement follows incoming startup on that compatible path. Bounded cold
-takeover instead establishes old-owner exclusion before exclusive recovery.
+direction, including rollback. The same kill-by-default rule applies in both
+directions; a reliable handoff cannot grow into repeated drain/recovery attempts.
+Bounded cold takeover establishes old-owner exclusion before exclusive recovery.
 An ambiguous marker read alone is not replacement
 authority. State compatibility still gates rollback; breaking an in-memory
 handoff contract is not the same as being unable to recover durable state.
@@ -910,7 +921,7 @@ through that same authority rather than repairing one another's live work.
 An unfinished transition is not automatically abandoned: recovery establishes
 that its owner is gone or has yielded before changing the serving generation,
 releasing its drain, or retiring its candidate.
-Repair follows the same preferred graceful lifecycle and bounded cold fallback
+Repair follows the same kill-by-default lifecycle and bounded reliable handoff
 as ordinary installation. Stale lifecycle markers cannot veto the new
 installation. Successful convergence leaves only the selected generation
 serving and old activation paths inert; unrelated services and application data

@@ -324,6 +324,12 @@ def test_run_composition_reuses_one_protected_claim_for_complete_and_uncertain_r
     record = SimpleNamespace(execution_machine="origin", repo="project", worktree_id="parent", resources=[claim])
     value = _run_response()
     assert run_composition.existing_claim(record, json.dumps(value)) is claim
+    for labels in ({}, {"machine": "obsolete", "machine_identity_version": "invalid"}):
+        unlabeled = copy.deepcopy(value)
+        for field in ("machine", "execution_machine", "platform", "environment", "machine_identity_version"):
+            unlabeled["worktree"].pop(field, None)
+        unlabeled["worktree"].update(labels)
+        assert run_composition.existing_claim(record, json.dumps(unlabeled)) is claim
     value.pop("worktree")
     value["allocation"].pop("receiving_status")
     value["creation"] = {"version": 1, "status": "pending", "repeat_new": False}

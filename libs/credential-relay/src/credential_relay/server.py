@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import hashlib
 import logging
 import os
 import time
@@ -165,6 +166,18 @@ _FAILFAST_RESPONSE = "quit=1\n\n"
 ACCESS_DENIED_RESPONSE = "error=access_denied\nreason=resource_not_allowed\n\n"
 
 
+#: Denials for one token fingerprint (or for requests with no token) within
+#: this many seconds that are reported as a retry storm.
+TOKEN_DENIAL_STORM_THRESHOLD = 5
+TOKEN_DENIAL_STORM_WINDOW = 60.0
+_TOKEN_DENIAL_KEYS_MAX = 64
+
+
+def token_fingerprint(token: str) -> str:
+    """Return a short, non-reversible identifier for logging a relay token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
+
+
 class ScopeDenied(Exception):
     """Raise from a ``token_authorizer`` to report an authenticated-but-
     scope-denied request, distinct from returning ``False`` (an unknown/
@@ -295,11 +308,43 @@ class CredentialRelayServer:
         self.token_authorizer = token_authorizer
         self.token_required_actions = token_required_actions or frozenset()
         self.account_relay = account_relay
+        # Recent denial times per token fingerprint, so one client retrying a
+        # stale token is reported once as a storm rather than only as noise.
+        self._token_denials: dict[str, list[float]] = {}
+        self._token_denial_warned: set[str] = set()
         # Default ADO host for bare `get-access-token` requests that carry no
         # host (e.g. npm/nuget via ado-auth-helper). Resolved from the explicit
         # arg or the CODESPACES_ADO_HOST env var; never hardcoded to a specific
         # organization.
         self.ado_host = ado_host or os.environ.get("CODESPACES_ADO_HOST")
+
+    def _note_token_denial(self, key: str, action: str, addr: object) -> None:
+        """Warn once when one credential keeps being denied in a short window.
+
+        A burst of identical denials usually means the client holds a token
+        from an older relay generation that was never re-delivered.
+        """
+        now = time.monotonic()
+        cutoff = now - TOKEN_DENIAL_STORM_WINDOW
+        for stale in [k for k, stamps in self._token_denials.items() if stamps[-1] < cutoff]:
+            del self._token_denials[stale]
+            self._token_denial_warned.discard(stale)
+        if key not in self._token_denials and len(self._token_denials) >= _TOKEN_DENIAL_KEYS_MAX:
+            oldest = min(self._token_denials, key=lambda k: self._token_denials[k][-1])
+            del self._token_denials[oldest]
+            self._token_denial_warned.discard(oldest)
+        stamps = [t for t in self._token_denials.get(key, []) if t >= cutoff]
+        stamps.append(now)
+        self._token_denials[key] = stamps[-TOKEN_DENIAL_STORM_THRESHOLD:]
+        if len(stamps) >= TOKEN_DENIAL_STORM_THRESHOLD and key not in self._token_denial_warned:
+            self._token_denial_warned.add(key)
+            log.warning(
+                "[%s] Token gate denied action=%s %d times in %.0fs (%s); the "
+                "client likely holds a stale or undelivered relay token. "
+                "Re-deliver the current relay token to that client or check "
+                "the relay token store.",
+                addr, action, len(stamps), TOKEN_DENIAL_STORM_WINDOW, key,
+            )
 
     @property
     def running(self) -> bool:
@@ -455,13 +500,21 @@ class CredentialRelayServer:
                     authorized = False
                     scope_denied = True
                 if not authorized:
+                    if scope_denied:
+                        denial = "recognized token, scope denied"
+                    elif not token:
+                        denial = "missing token"
+                    else:
+                        denial = f"unrecognized token fp={token_fingerprint(token)}"
                     log.warning(
-                        "[%s] Token gate denied action=%s (%s)",
-                        addr, action,
-                        "recognized token, scope denied" if scope_denied
-                        else "missing/invalid token",
+                        "[%s] Token gate denied action=%s (%s)", addr, action, denial,
                     )
                     self.stats.token_rejections += 1
+                    if not scope_denied:
+                        self._note_token_denial(
+                            f"fp={token_fingerprint(token)}" if token else "no token",
+                            action, addr,
+                        )
                     # A recognized token whose specific resource/scope is not
                     # permitted gets the same wire-visible denial az_login's
                     # own allowlist uses (#4367) -- an unknown/invalid token

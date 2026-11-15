@@ -10,6 +10,7 @@ import pytest
 
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_projection as projection
+from agent_worktrees import config as cfg
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
 
@@ -39,7 +40,7 @@ def test_elected_rollback_replaces_fenced_publisher(tmp_path):
     assert old.store is not fenced
     assert old.store.generation not in {fenced.generation, new.store.generation}
     old.publish("project", [{"id": "recovered"}], observed_at=3)
-    assert old.handle(_request())["worktrees"] == [{"id": "recovered"}]
+    assert old.handle(_request())["worktrees"] == [{"id": "recovered", "platform": cfg.detect_platform()}]
     assert old.health()["worktrees"]["status"] == "ready"
     with pytest.raises(projection.ProjectionUnavailable):
         fenced.publish("project", [{"id": "obsolete"}], observed_at=4)
@@ -229,7 +230,9 @@ def test_real_feed_recovers_across_repeated_elected_rollbacks(tmp_path):
         durations = []
         for _ in range(100):
             started = time.monotonic()
-            assert reader.worktrees_read(_request())["worktrees"] == [{"id": "current-9"}]
+            assert reader.worktrees_read(_request())["worktrees"] == [
+                {"id": "current-9", "platform": cfg.detect_platform()},
+            ]
             durations.append(time.monotonic() - started)
         assert sorted(durations)[94] <= 0.5
         print(
@@ -361,7 +364,9 @@ def test_orchestrator_restores_fenced_predecessor_after_promotion_failure(
         assert fenced_health == ["superseded"]
         assert routing.read_active_endpoint(tmp_path).port == servers[0].port
         assert owners[0].health()["worktrees"]["status"] == "ready"
-        assert owners[0].handle(_request())["worktrees"] == [{"id": "recovered"}]
+        assert owners[0].handle(_request())["worktrees"] == [
+            {"id": "recovered", "platform": cfg.detect_platform()},
+        ]
         with pytest.raises(projection.ProjectionUnavailable):
             owners[1].publish("project", [{"id": "obsolete"}], observed_at=4)
     finally:

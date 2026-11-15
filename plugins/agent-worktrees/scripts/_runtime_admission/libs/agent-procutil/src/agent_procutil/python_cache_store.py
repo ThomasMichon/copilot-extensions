@@ -85,10 +85,16 @@ def user_cache() -> Path:
     return native(base)
 
 
-def _directory(path: Path, permissions, *, private: bool = False, ancestor: bool = False) -> None:
+def _directory(
+    path: Path, permissions, *, private: bool = False, ancestor: bool = False, check_budget=None,
+) -> None:
+    check_budget = check_budget or (lambda: None)
+    check_budget()
     if not os.path.lexists(path):
-        _directory(path.parent, permissions, ancestor=True)
+        _directory(path.parent, permissions, ancestor=True, check_budget=check_budget)
+        check_budget()
         permissions.mkdir(path)
+    check_budget()
     permissions.check(path, private=private, ancestor=ancestor)
 
 
@@ -108,25 +114,38 @@ def _publish_record(record: Path, encoded: bytes, *, private_owner) -> None:
         temporary.unlink()
 
 
+def installation_root(root: Path, *, create: bool = False, check_budget=None) -> Path:
+    """Resolve the installation's shared cache metadata, optionally preparing it."""
+    check_budget = check_budget or (lambda: None)
+    check_budget()
+    location = user_cache()
+    permissions = component("python_cache_permissions") if create else None
+    if create:
+        _directory(location, permissions, check_budget=check_budget)
+        for parent in location.parents:
+            check_budget()
+            permissions.check(parent, ancestor=True)
+    key = hashlib.sha256(normalized(root).encode("utf-8")).hexdigest()
+    for part in ("copilot-extensions", "python", "v1", key):
+        location /= part
+        if create:
+            _directory(location, permissions, private=True, check_budget=check_budget)
+    return location
+
+
 def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
     """Create/reuse one matching private namespace outside the runtime."""
     permissions = component("python_cache_permissions")
-    base = user_cache()
-    _directory(base, permissions)
-    permissions.check_ancestors(base)
-    location = base
     root_text, target_text = normalized(root), normalized(target)
     owner = {
         "schema": SCHEMA, "version": 1, "runtime_root": root_text,
         "runtime": target_text, "installed_identity": identity,
     }
-    installation = hashlib.sha256(root_text.encode("utf-8")).hexdigest()
     key = hashlib.sha256(
         json.dumps(owner, sort_keys=True, separators=(",", ":")).encode("utf-8"),
     ).hexdigest()
-    for part in ("copilot-extensions", "python", "v1", installation, "installed-" + key):
-        location /= part
-        _directory(location, permissions, private=True)
+    location = installation_root(root, create=True) / ("installed-" + key)
+    _directory(location, permissions, private=True)
     record = location / "owner.json"
     encoded = (json.dumps(owner, sort_keys=True) + "\n").encode("utf-8")
     private_owner = component("_daemon_instance_owner")

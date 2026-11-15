@@ -24,6 +24,7 @@ def equivalence_config(
     config = _setup(
         tmp_path, monkeypatch, physical="desk", platform=request.param, execution="custom-space",
     )
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / (name or config.repo_name))
     monkeypatch.setattr(
         cfg, "tracking_dir",
@@ -46,6 +47,10 @@ def equivalence_config(
             "ssh": {"environments": [{"name": foreign_platform, "alias": "other-route"}]},
         },
     })
+    cfg.project_dir().mkdir(parents=True, exist_ok=True)
+    (cfg.project_dir() / "config.yaml").write_text(yaml.safe_dump({
+        "repos": {config.repo_name: {"anchor": config.default_repo.anchor}},
+    }), encoding="utf-8")
     return config
 
 
@@ -167,21 +172,17 @@ def test_actual_local_new_lookup_resume_without_enrollment(
     assert created["launch"]["action"] == "exec"
     row = created["worktree"]
     path = cfg.tracking_dir() / f"{row['id']}.yaml"
-    original = tracking._load_record_uncached(path)
+    original = tracking.load_record(path)
     assert original.creation_nonce
     assert original.platform == platform
-    if identity_mode == "legacy":
-        assert original.machine == config.machine
-        assert original.machine_identity is None
-        assert "machine_identity_version" not in row and "execution_machine" not in row
-    else:
-        physical = "raw-host" if map_kind in ("absent", "empty", "unrelated") else "friendly-host"
-        execution = "local-space" if map_kind == "matching" else physical + (
-            "-wsl" if platform == "wsl" else ""
-        )
-        expected = WorktreeMachineIdentity(physical, platform, execution)
-        assert original.machine_identity == expected
-        assert {key: row[key] for key in expected.to_record_fields()} == expected.to_record_fields()
+    physical = "raw-host" if map_kind in ("absent", "empty", "unrelated") else "friendly-host"
+    execution = "local-space" if map_kind == "matching" else physical + (
+        "-wsl" if platform == "wsl" else ""
+    )
+    expected = WorktreeMachineIdentity(physical, platform, execution)
+    assert original.machine_identity == expected
+    assert {key: row[key] for key in expected.to_record_fields()} == expected.to_record_fields()
+    assert not set(expected.to_record_fields()).intersection(yaml.safe_load(path.read_text()))
     before = path.read_bytes()
     monkeypatch.setattr(
         m.git_ops, "create_worktree", lambda *_a: pytest.fail("lookup/resume must not allocate"),
@@ -199,7 +200,7 @@ def test_actual_local_new_lookup_resume_without_enrollment(
     assert resumed["launch"]["worktree_id"] == original.worktree_id
     assert resumed["launch"]["work_dir"] == original.worktree_path
     assert "--admission-only" in resumed["launch"]["cmd"]
-    retained = tracking._load_record_uncached(path)
+    retained = tracking.load_record(path)
     assert retained.resume_count == original.resume_count + 1
     assert retained.creation_nonce == original.creation_nonce
     assert retained.machine_fields == original.machine_fields
@@ -224,9 +225,10 @@ def test_observed_selector_does_not_admit_foreign_records(
     path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     raw = yaml.safe_load(path.read_text())
     if defect == "platform":
-        raw["platform"] = "windows" if platform != "windows" else "wsl"
-        if identity_mode == "tuple-v1":
-            raw["environment"] = raw["platform"]
+        config_path = cfg.project_dir() / "config.yaml"
+        configured = yaml.safe_load(config_path.read_text())
+        configured["platform"] = "windows" if platform != "windows" else "wsl"
+        config_path.write_text(yaml.safe_dump(configured))
     elif defect == "project":
         raw["repo"] = "foreign-project"
     else:
@@ -293,7 +295,7 @@ def test_literal_observed_suffix_is_not_a_requested_environment(
     assert code == 0, created
     row = created["worktree"]
     path = cfg.tracking_dir() / f"{row['id']}.yaml"
-    original = tracking._load_record_uncached(path)
+    original = tracking.load_record(path)
     assert original.platform == platform
     if identity_mode == "tuple-v1":
         assert original.machine_identity == WorktreeMachineIdentity(
@@ -309,7 +311,7 @@ def test_literal_observed_suffix_is_not_a_requested_environment(
     code, resumed = _resolve(capfd, worktree_id=row["id"], machine=hostname)
     assert code == 0, resumed
     assert resumed["launch"]["work_dir"] == original.worktree_path
-    retained = tracking._load_record_uncached(path)
+    retained = tracking.load_record(path)
     assert retained.machine_fields == original.machine_fields
     assert retained.creation_nonce == original.creation_nonce
 
@@ -354,7 +356,7 @@ def test_actual_tuple_new_lookup_and_resume_agree(
     assert {key: resumed["worktree"][key] for key in expected.to_record_fields()} == (
         expected.to_record_fields()
     )
-    retained = tracking._load_record_uncached(path)
+    retained = tracking.load_record(path)
     assert retained.creation_nonce == nonce
     assert retained.resume_count == original.resume_count + 1
     assert retained.branch == original.branch
@@ -441,7 +443,7 @@ def test_actual_tuple_entry_points_keep_exact_keys_and_reject_declared_alias_col
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_actual_tuple_resume_cannot_borrow_same_physical_hosts_other_environment(
+def test_actual_tuple_resume_cannot_borrow_another_allocation_namespace(
     equivalence_config: cfg.Config, capfd: pytest.CaptureFixture, dry_run: bool,
 ) -> None:
     config = equivalence_config
@@ -457,7 +459,7 @@ def test_actual_tuple_resume_cannot_borrow_same_physical_hosts_other_environment
         capfd, worktree_id=record.worktree_id, machine="custom-space", dry_run=dry_run,
     )
     assert code == 3
-    assert "different execution space" in result["error"]
+    assert "namespace" in result["error"]
     assert record.yaml_path.read_bytes() == before
 
 

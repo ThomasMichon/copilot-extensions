@@ -416,6 +416,27 @@ def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
         db.close()
 
 
+def test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation(inbox):
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    db, _, _, _, _ = inbox
+    enqueue(inbox)
+    row, = poll(inbox)
+    assert begin(inbox, row)
+    original = dict(db.execute_read("SELECT * FROM live_messages")[0])
+    restore_prior_inbox_guards(db._get_conn(), version=46)
+    db.execute_write("UPDATE schema_version SET version=46")
+    with pytest.raises(ValueError, match="current schema"):
+        Database(db.db_path, read_only=True)
+    migrated = Database(db.db_path)
+    try:
+        assert dict(migrated.execute_read("SELECT * FROM live_messages")[0]) == original
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
+        assert begin(inbox, row) is False
+    finally:
+        migrated.close()
+
+
 def test_legacy_poll_and_lost_ack_cannot_expose_an_associated_body_before_handoff(inbox):
     db, _, _, _, consumer = inbox
     message_id = enqueue(inbox)

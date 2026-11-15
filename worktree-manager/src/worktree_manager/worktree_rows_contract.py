@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import math
 
-from worktree_identity import parse_machine_identity
-
 from . import worktree_observation_contract as observations
+from .worktree_reporting_contract import RECEIVER_FIELD, parse_reporting_context, row_identity
 _HISTORICAL_FIELDS = frozenset(
     {
         "resources",
@@ -24,6 +23,7 @@ _HISTORICAL_FIELDS = frozenset(
 )
 _RECEIVER_FIELDS = frozenset({
     "_projection", "_availability", "_observations", "_observation_derivations",
+    RECEIVER_FIELD,
 })
 
 
@@ -153,6 +153,7 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
     ):
         raise ValueError("engine returned unlabeled advisory rows")
     result = []
+    reporter = parse_reporting_context(obj)
     identities = set()
     facts = observations.validate_rows(
         rows, obj.get("observations"), revision, complete=complete,
@@ -167,7 +168,9 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
             raise ValueError("engine returned invalid or duplicate current-roster rows")
         identities.add(row["id"])
         _bounded(row)
-        parse_machine_identity(row)
+        if RECEIVER_FIELD in row:
+            raise ValueError("current-roster row includes receiver reporting metadata")
+        row_identity({**row, **({RECEIVER_FIELD: reporter} if reporter is not None else {})})
         if len(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 65536:
             raise ValueError("current-roster row exceeds its byte bound")
         result.append(
@@ -175,6 +178,7 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
                 **row,
                 "_projection": dict(head),
                 "_availability": dict(availability) if isinstance(availability, dict) else None,
+                **({RECEIVER_FIELD: dict(reporter)} if reporter is not None else {}),
                 **({"_observations": facts[row["id"]]["facts"],
                     "_observation_derivations": facts[row["id"]].get("derivations", {})}
                    if row["id"] in facts else {}),

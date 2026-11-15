@@ -1,9 +1,9 @@
 """Required resolver, hook, conduct and setup copies share exact-file publication."""
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -20,6 +20,7 @@ TARGETS = (
     ("resolve-runtime.sh", "scripts/resolve-runtime.sh", "bin/resolve-runtime.sh"),
     ("session-conduct.sh", "scripts/session-conduct.sh", "bin/session-conduct.sh"),
     ("default-setup.sh", "scripts/default-setup.sh", "scripts/default-setup.sh"),
+    ("native-seed-process.cs", "scripts/native-seed-process.cs", "scripts/native-seed-process.cs"),
     ("account-conduct.md", "scripts/conduct/account-conduct.md", "bin/conduct/account-conduct.md"),
 )
 
@@ -28,22 +29,19 @@ TARGETS = (
 def publication_transform(fault, shell, monkeypatch, asset):
     name, _source, _destination = asset
     def transform(content):
-        text = (content / "scripts/install.sh").read_text(encoding="utf-8")
-        hooks = re.search(r"    for script in (session-conduct.*?); do", text)
-        assert hooks
-        for hook in hooks[1].split():
-            if hook not in (name, "registry_root.py"):
+        module = ast.parse((content / "scripts/runtime_install_publication.py").read_text(encoding="utf-8"))
+        inventories = {
+            node.targets[0].id: ast.literal_eval(node.value)
+            for node in module.body
+            if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in {"HOOKS", "SETUP"}
+        }
+        for hook in inventories["HOOKS"]:
+            if hook not in (name, "versioned_runtime_native.ps1") and not hook.endswith(".py"):
                 source = content / ("src/agent_worktrees" if hook == "native_source_context.py" else "scripts") / hook
                 source.unlink(missing_ok=True)
         for source in (content / "scripts").glob("*"):
-            if source.name in {
-                "default-setup.ps1", "default-setup.sh", "launch-command.ps1", "launch-command.sh",
-                "native-seed-boundary.ps1",
-                "native-seed-reply.sh",
-                "native-seed-boundary.sh",
-                "native-seed-setup.sh",
-                "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
-            } and source.name != name:
+            if source.name in inventories["SETUP"] and source.name != name:
                 source.unlink()
         for source in (content / "scripts/conduct").glob("*.md"):
             if source.name != name:
@@ -53,7 +51,7 @@ def publication_transform(fault, shell, monkeypatch, asset):
 
 @pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
-@pytest.mark.parametrize("asset", TARGETS, ids=["resolver", "hook", "setup", "conduct"])
+@pytest.mark.parametrize("asset", TARGETS, ids=["resolver", "hook", "setup", "native-creation", "conduct"])
 @pytest.mark.parametrize("fault", ["healthy", "initial-directory", "directory-race", "partial-write"])
 @pytest.mark.timeout(90)
 def test_required_callback_file_publication(publication_case, asset, shell, executable, fault, monkeypatch):
@@ -61,21 +59,21 @@ def test_required_callback_file_publication(publication_case, asset, shell, exec
     name, source_path, relative = asset
     inject_copy_fault(driver, fault, name, monkeypatch)
     scope = "resolvers" if name.startswith("resolve-") else "wrappers"
-    bindings = driver.helper_publication.declared_copies(content, root, scope, shell, False)
-    helper_before = {}
-    for binding in bindings:
-        path = Path(binding["target"])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"previous\n")
-        helper_before[path] = path.read_bytes()
-    target = root / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"previous\n")
-    if fault == "initial-directory":
-        target.unlink()
-        target.mkdir()
-        (target / "sentinel").write_text("peer", encoding="utf-8")
     with admitted(driver, root, owner, content, monkeypatch) as (governance, _lease):
+        bindings = driver.helper_publication.declared_copies(content, root, scope, shell, False)
+        helper_before = {}
+        for binding in bindings:
+            path = Path(binding["target"])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"previous\n")
+            helper_before[path] = path.read_bytes()
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"previous\n")
+        if fault == "initial-directory":
+            target.unlink()
+            target.mkdir()
+            (target / "sentinel").write_text("peer", encoding="utf-8")
         for marker in ("current-version", "last-known-good"):
             (root / marker).write_text("previous\n", encoding="utf-8")
         before = {

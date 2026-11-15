@@ -104,6 +104,27 @@ def harness() -> Harness:
     return Harness()
 
 
+def test_internal_source_call_keeps_original_proof_and_requires_independent_scope():
+    h = Harness()
+    h.document["callers"][0]["slots"].append("service-b")
+    h.owner.reload()
+    grant = h.caller()
+    original = h.owner.revalidate_caller(grant)
+    assert h.owner.authorize_service_call(grant, slot="service-b").name == "service-b"
+    assert h.owner.revalidate_caller(grant) == original
+    assert grant.slot == "service-a" and grant.target_uri == TARGET
+    with pytest.raises(ServicePolicyError, match="invalid-grant"):
+        h.owner.authorize_service_call(replace(grant), slot="service-b")
+    h.owner.release_caller(grant)
+    with pytest.raises(ServicePolicyError, match="invalid-grant"):
+        h.owner.authorize_service_call(grant, slot="service-b")
+    h.document["callers"][0]["slots"] = ["service-a"]
+    h.update()
+    grant = h.caller()
+    with pytest.raises(ServicePolicyError, match="source-caller-denied"):
+        h.owner.authorize_service_call(grant, slot="service-b")
+
+
 def test_inert_owner_and_explicit_initial_publication(harness: Harness) -> None:
     assert harness.reads == 0
     assert harness.owner.status().revision is None

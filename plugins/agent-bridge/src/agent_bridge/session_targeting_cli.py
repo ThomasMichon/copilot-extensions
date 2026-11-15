@@ -146,7 +146,18 @@ def _send(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(2)
-    client = core._get_client()
+    native = getattr(args, "expected_native_session_id", None)
+    key = getattr(args, "idempotency_key", None)
+    if native is not None and key is not None:
+        from .client import BridgeConnectionError
+        from .native_bound_prompt import NativeSendNotAttempted
+
+        try:
+            client = core._get_client(require_available=True)
+        except BridgeConnectionError as exc:
+            raise NativeSendNotAttempted(args.target, native, key, str(exc)) from exc
+    else:
+        client = core._get_client()
     configure_client(client, args)
     from .hosting_admission_cli import configure_client as configure_hosting
     configure_hosting(client, args)
@@ -674,6 +685,7 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
+    dispatch_origin = workspace_creation_cli.validate_origin_arguments(args)
     worktree_writer = workspace_creation_cli.validate_arguments(args)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
@@ -714,6 +726,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
     if creation_key is not None:
         workspace_creation_cli.create(
             args, client, caller_id=caller_id, worktree_writer=worktree_writer,
+            **({"dispatch_origin": dispatch_origin} if dispatch_origin is not None else {}),
         )
         return
 

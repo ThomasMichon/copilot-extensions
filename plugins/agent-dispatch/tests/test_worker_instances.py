@@ -885,6 +885,79 @@ def test_missing_emitter_command_refused_before_effects():
     assert not instance_dir().exists()
 
 
+@pytest.mark.parametrize("command,message", [
+    (["nonexistent-relevance-fixture-command"], "missing command dependency"),
+    ([sys.executable, "missing-relevance.py"], "missing script dependency"),
+])
+def test_missing_relevance_checker_refused_before_worker_persistence(tmp_path, command, message):
+    with pytest.raises(RegistrarError, match=message):
+        save_instance(
+            "template:reviewer", digest(templates()["reviewer"]),
+            {"name": "review", "repo_root": str(tmp_path), "declaration": {
+                "repo": "github.com/example/project", "task_label": "review-work",
+                "emitter": {
+                    "command": [sys.executable, "-c", "print('[]')"],
+                    "interval_seconds": 60, "cwd": str(tmp_path), "task_output": "json",
+                    "relevance": {"command": command},
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}},
+            }},
+        )
+    assert not instance_dir().exists()
+
+
+@pytest.mark.parametrize("activate", [False, True])
+@pytest.mark.parametrize("command", [
+    ["nonexistent-grant-fixture-command"],
+    [sys.executable, "missing-grant-fixture.py"],
+])
+def test_missing_managed_reader_refused_without_grant_diagnostics(
+    tmp_path, command, activate,
+):
+    with pytest.raises(RegistrarError, match="managed producer grant command dependency") as error:
+        save_instance(
+            "template:reviewer", digest(templates()["reviewer"]),
+            {"name": "review", "repo_root": str(tmp_path), "declaration": {
+                "repo": "github.com/example/project", "task_label": "review-work",
+                "emitter": {
+                    "command": [sys.executable, "-c", "print('[]')"],
+                    "interval_seconds": 60, "cwd": str(tmp_path), "task_output": "json",
+                    "managed_producer": {"grant_command": command},
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}},
+            }}, activate=activate, consent=ACTIVATION_CONSENT if activate else None,
+        )
+    assert str(tmp_path) not in str(error.value)
+    assert all(part not in str(error.value) for part in command)
+    assert not instance_dir().exists()
+    assert not active_dir().exists()
+
+
+def test_worker_dependency_validation_does_not_execute_managed_reader(tmp_path):
+    marker = tmp_path / "reader-ran"
+    script = tmp_path / "grant.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).touch()\n"
+        "raise RuntimeError('grant reader must not run while saving')\n",
+        encoding="utf-8",
+    )
+    receipt = save_instance(
+        "template:reviewer", digest(templates()["reviewer"]),
+        {"name": "review", "repo_root": str(tmp_path), "declaration": {
+            "repo": "github.com/example/project", "task_label": "review-work",
+            "emitter": {
+                "command": [sys.executable, "-c", "print('[]')"],
+                "interval_seconds": 60, "cwd": str(tmp_path), "task_output": "json",
+                "managed_producer": {"grant_command": [sys.executable, str(script)]},
+            },
+            "evaluator": {"evaluator_spec": {"rules": []}},
+        }}, activate=True, consent=ACTIVATION_CONSENT,
+    )
+    assert receipt["activation"] == "pending"
+    assert not marker.exists()
+
+
 def test_reviewer_script_and_relative_cwd_keep_repository_context(tmp_path):
     script = tmp_path / "reviews.py"
     script.write_text("print('fixture only')\n", encoding="utf-8")

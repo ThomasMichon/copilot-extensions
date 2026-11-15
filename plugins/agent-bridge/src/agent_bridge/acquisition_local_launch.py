@@ -54,6 +54,8 @@ async def launch(
             model=req.model,
             effort=req.effort,
             env_overrides=request_env or None,
+            **({"dispatch_origin": req.dispatch_origin.model_dump(mode="json")}
+               if req.dispatch_origin is not None else {}),
             **({
                 "creation_session_id": selected.session_id, "acquisition_launch": selected,
             } if selected is not None else {}),

@@ -1,0 +1,9 @@
+{
+  "comment": "Direct new relevance closeout wakes through executing-CLI support discovery and the guarded original-worker caller.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

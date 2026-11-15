@@ -158,6 +158,7 @@ def create_app(
     replay_consumer_factory=None,
     cohort_sources: RegistrarSources | None = None,
     pool_publication_enabled: bool = False,
+    periodic_relevance_interval: float = 0.0,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -188,6 +189,10 @@ def create_app(
         raise ValueError("replay consumer requires waiter maintenance and active-owner authority")
     if cohort_sources is not None and not callable(wake_is_active):
         raise ValueError("configured cohort source requires active-owner authority")
+    from .periodic_relevance import validate_periodic_relevance
+    validate_periodic_relevance(
+        periodic_relevance_interval, cohort_sources, wake_is_active, control_token,
+    )
     if pool_publication_enabled and (
         cohort_sources is None or not control_token
         or not math.isfinite(sweep_interval) or sweep_interval <= 0
@@ -250,11 +255,16 @@ def create_app(
         bus.bind_loop(loop)
         from . import hibernation_claims
         from .verification_drain import drain_verification_requests
+        from .periodic_relevance import PeriodicRelevanceMaintenance
         from .wake import drain_wake_outbox
         from .run_waiter_wake import drain_run_waiter_wakes
 
         governance = LoopGovernance()
         verification_stop_event = asyncio.Event()
+        relevance_maintenance = PeriodicRelevanceMaintenance(
+            queue, sources=cohort_sources, bus=bus, interval=periodic_relevance_interval,
+            is_active=wake_is_active, gate=_app.state.drain_gate, governance=governance,
+        )
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         verification_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
@@ -800,6 +810,7 @@ def create_app(
                 from .telemetry import close_configured_retained_sink
 
                 close_configured_retained_sink()
+                await relevance_maintenance.close()
                 await waiter_maintenance.close()
                 queue.set_wake_notifier(None)
                 queue.set_owned_transition_notifier(None)

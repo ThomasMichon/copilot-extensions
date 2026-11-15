@@ -641,6 +641,38 @@ def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
         artifacts.bundle_wheels(manifest, wheel_dir, tmp_path)
 
 
+@pytest.mark.parametrize("relative", ["applications/demo", ".marketplace/demo"])
+def test_declared_project_manifest_keeps_the_selected_primary_source(tmp_path, relative):
+    manifest = _manifest(tmp_path / "wheels")
+    manifest["project_path"] = relative
+    manifest["wheels"][0]["source"] = relative
+    artifacts.validate_manifest(manifest)
+    manifest["wheels"][0]["source"] = "plugins/demo"
+    with pytest.raises(artifacts.PromotionArtifactError, match="provenance"):
+        artifacts.validate_manifest(manifest)
+
+
+@pytest.mark.parametrize("relative", ["../outside", "/outside", "C:/outside", "apps\\demo"])
+def test_declared_project_manifest_refuses_unsafe_source_root(tmp_path, relative):
+    manifest = _manifest(tmp_path / "wheels")
+    manifest["project_path"] = relative
+    with pytest.raises(artifacts.PromotionArtifactError, match="invalid manifest provenance"):
+        artifacts.validate_manifest(manifest)
+
+
+def test_declared_project_manifest_cannot_select_another_repository_location(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\ndemo = "applications/demo"\n',
+    )
+    manifest = _manifest(tmp_path / "wheels")
+    manifest["plugin"] = "demo"
+    manifest["project_path"] = "applications/different"
+    with pytest.raises(artifacts.PromotionArtifactError, match="project path differs"):
+        artifacts.validate_source_binding(manifest, root)
+
+
 @pytest.mark.parametrize("case", ["public-match", "wrong-source", "wrong-floor", "mixed-locks"])
 def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
     wheel_dir, directory = tmp_path / "wheels", tmp_path / "export"
@@ -759,11 +791,17 @@ def resolve_toolchain_lock(*args, **kwargs):
     for name in (
         "artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py",
         "core_python_artifacts.py", "promotion_bundle_members.py",
-        "python_project_inventory.py",
+        "python_project_inventory.py", "application_sources.py",
         "plugin_runtime_resources.py", "native_daemon_artifacts.py", "runtime_wheel_inspection.py",
         "artifact_attestation.py",
     ):
         shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
+    runtime_helpers = driver.parent / "libs" / "versioned-runtime"
+    runtime_helpers.mkdir(parents=True)
+    shutil.copy(
+        Path(artifacts.__file__).parents[1] / "libs" / "versioned-runtime" / "standalone_build.py",
+        runtime_helpers / "standalone_build.py",
+    )
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
     shutil.copy(Path(promotion.__file__).with_name("promotion_candidate.py"), driver / "promotion_candidate.py")
     for name in (

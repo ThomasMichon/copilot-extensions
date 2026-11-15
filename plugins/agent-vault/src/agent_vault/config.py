@@ -592,6 +592,8 @@ def within_group(entry: str, group: str | None) -> bool:
 def normalize_entry(entry: str, group: str | None = None) -> str:
     """Return a plain KeePass path, prefixing bare names with a configured group."""
     entry = entry.strip()
+    if entry.startswith("/"):
+        return entry.lstrip("/")
     effective_group = _clean_group(group)
     if group is None:
         effective_group = load_config().group

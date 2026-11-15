@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in bounded Controller token availability selection without interactive fallback",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

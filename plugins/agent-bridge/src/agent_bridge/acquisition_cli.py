@@ -35,11 +35,20 @@ def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:
     payload = request.model_dump(mode="json")
     payload["protocol_version"] = required
     send = client._request
+    capabilities = {}
     if request.worktree_writer is not None:
         from .acquisition_worktree_writer import CAPABILITY
+
+        capabilities[CAPABILITY] = 1
+    if request.dispatch_origin is not None:
+        from .dispatch_origin import CAPABILITY as ACP_ORIGIN
+        from .dispatch_cli_origin import CAPABILITY as CLI_ORIGIN
+
+        capabilities[CLI_ORIGIN if request.mode == "cli" else ACP_ORIGIN] = 1
+    if capabilities:
         from .client_protocol_floor import protocol_floored_request
 
-        send = protocol_floored_request(client, required, capabilities={CAPABILITY: 1})
+        send = protocol_floored_request(client, required, capabilities=capabilities)
     result = send("POST", "/api/v1/acquisitions", payload, request_timeout=max(240, request.verify_timeout + 240))
     return AcquisitionResult.model_validate(result)
 

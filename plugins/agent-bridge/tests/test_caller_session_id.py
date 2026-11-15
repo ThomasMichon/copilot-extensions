@@ -187,6 +187,8 @@ def test_migrates_existing_v24_database(tmp_path) -> None:
     Database(str(path)).close()
     conn = sqlite3.connect(str(path))
     conn.execute("ALTER TABLE sessions DROP COLUMN caller_session_id")
+    # A v24 input predates the later exact-native inbox guard.
+    conn.execute("DROP TRIGGER live_messages_handoff_input_immutable")
     conn.execute(
         "INSERT INTO sessions (id, name, caller_id, created_at, updated_at) "
         "VALUES ('old', 'legacy', '/wt', 1.0, 1.0)"

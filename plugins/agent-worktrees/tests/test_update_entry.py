@@ -11,16 +11,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from agent_procutil import no_window_kwargs, python_cache_args
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import project_command_templates
 
 
 def _assert_cache_arguments(arguments, root):
-    assert arguments[0] == "-X" and len(arguments) == 2
-    prefix = Path(arguments[1].removeprefix("pycache_prefix="))
-    assert prefix.parent == Path(python_cache_args(root)[1].partition("=")[2]).parent
-    assert prefix.name.startswith(("installed-", "unsealed-"))
+    assert arguments == ["-B"]
+    assert not (root / "cache" / "python").exists()
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -259,8 +257,8 @@ def test_selected_update_operation_refuses_implicit_posix_bootstrap(
     assert result.returncode == (19 if ready else 127), result.stderr.decode()
     if ready:
         args = _arguments(tmp / "python.args")
-        _assert_cache_arguments(args[:2], home / ".agent-worktrees")
-        assert args[2:] == [
+        _assert_cache_arguments(args[:1], home / ".agent-worktrees")
+        assert args[1:] == [
             "-m", "agent_worktrees", "--project", "sample", "update", *flags,
         ]
     else:

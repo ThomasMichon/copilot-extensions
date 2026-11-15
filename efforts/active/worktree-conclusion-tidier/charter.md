@@ -125,6 +125,26 @@ record the proposed decision in the audit report, or post it only under an
 approved apply-mode attention policy. Never create a recipient identity to
 pass a gate.
 
+#### Concluded checkout and continuing parent
+
+For step 6 and the finalize/cleanup authority row, a concluded checkout is
+distinct from completion of its entire parent effort. Following #6060
+comment6227498995, an Active parent need not prevent ordinary retirement of
+that checkout when the EXACT remaining Plan/Validation roster has a named
+durable receiver with operator-authorized OR recipient-accepted custody;
+ALL staged, unstaged, untracked and unlanded content is landed OR explicitly
+disposed of without loss under existing authority; and PR, resource-claim,
+liveness, ownership, pairing and ordinary lifecycle gates pass. Release an
+applicable checkout effort binding only through the supported transfer path.
+
+The parent objective and its remaining responsibilities stay open under their
+own completion gate; no parent Done or archive is inferred. Issue creation,
+an old merged PR, clean Git state or an archive is not accepted transfer or
+coverage of later local work. Unique content, unresolved claims, unknown
+ownership and unaccepted transfer remain concrete holds. This clarification
+does not authorize a live pilot, apply capability, forced removal, scheduling
+or new execution resources.
+
 ### Mutation fencing is an implementation gate
 
 Ordinary removal already re-checks its safety under the owning lifecycle

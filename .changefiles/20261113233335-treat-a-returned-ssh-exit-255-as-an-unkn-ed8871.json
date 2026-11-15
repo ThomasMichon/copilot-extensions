@@ -1,0 +1,9 @@
+{
+  "comment": "Treat a returned SSH exit 255 as an unknown relay probe or hosting-check result, not a dead relay or receiver refusal",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

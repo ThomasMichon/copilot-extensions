@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify original Dispatch origin discovery after session exit",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

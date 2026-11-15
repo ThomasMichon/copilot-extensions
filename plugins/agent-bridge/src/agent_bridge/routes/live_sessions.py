@@ -208,6 +208,8 @@ def _parse_venue(raw: Any) -> LiveSessionVenue | None:
 
 
 def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
+    from ..dispatch_cli_origin import inspect
+
     return LiveSessionInfo(
         session_id=row["session_id"],
         machine=row.get("machine"),
@@ -218,6 +220,7 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
         pid=row.get("pid"),
         role=row.get("role"),
         driven_by=row.get("driven_by"),
+        dispatch_origin=inspect(row),
         status=row.get("status") or "live",
         turn_state=row.get("turn_state"),
         last_activity_at=row.get("last_activity_at"),

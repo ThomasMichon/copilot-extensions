@@ -129,14 +129,17 @@ def test_relay_launch_env_prefers_cli_and_parses_json():
     ok = subprocess.CompletedProcess([], 0, '{"prelude": "export T=x", "port": 50123}', "")
     seen = {}
 
-    def _run(argv, **_kw):
+    def _run(argv, **kw):
         seen["argv"] = argv
+        seen["timeout"] = kw.get("timeout")
         return ok
 
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
          patch("agent_bridge.session_manager.run_captured", side_effect=_run):
         prelude, port = session_manager._resolve_relay_launch_env("my-cs", 50123)
     assert (prelude, port) == ("export T=x", 50123)
+    # A loaded host's provider launch chain alone can approach 15 seconds.
+    assert seen["timeout"] == 30
     assert seen["argv"] == [
         "/bin/agent-codespaces", "relay-launch-env", "my-cs", "--relay-port", "50123",
     ]

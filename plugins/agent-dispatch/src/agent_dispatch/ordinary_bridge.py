@@ -43,6 +43,11 @@ def reserve_for_backend(
                                     coordinator_launch=task.get("source") == "ci-repair")
     if task.get("source") == "ci-repair":
         return client.reserve_spawn(task["id"], reserved_by=supervisor_id, coordinator_launch=True)
+    if pool_driver == "cli":
+        from .session_origin import reservation_options
+        return client.reserve_spawn(
+            task["id"], reserved_by=supervisor_id, **reservation_options(client),
+        )
     return client.reserve_spawn(task["id"], reserved_by=supervisor_id)
 
 
@@ -243,12 +248,13 @@ def start(
 
     def run(
         argv: list[str], *, prompt_input: str | None = None, read_only: bool = False,
+        execution_prefix: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         from .ordinary_bridge_diagnostics import run as observed_run
 
         diagnostics.secrets["BRIDGE_INPUT_SECRET"] = prompt_input or ""
         return observed_run(
-            prefix, argv, diagnostics=diagnostics, runner=subprocess.run,
+            execution_prefix or prefix, argv, diagnostics=diagnostics, runner=subprocess.run,
             prompt_input=prompt_input, read_only=read_only, timeout=timeout,
         )
 
@@ -603,7 +609,8 @@ def start(
                         raise TaskError("coordinator did not retain the original ordinary writer requirement")
                     argv += ["--worktree-writer-file", "-"]
                     writer_input = json.dumps(writer_admission.requirement)
-                created = run(argv, prompt_input=writer_input)
+                from .session_origin import create as create_with_origin
+                created = create_with_origin(run, reservation, argv, prompt_input=writer_input)
                 if created.returncode:
                     raise CreatedAgentUnrecorded(created.stderr or created.stdout or "ordinary bridge create failed")
                 info = _json_result(created)

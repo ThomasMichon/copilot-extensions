@@ -20,6 +20,8 @@ from agent_worktrees import config as cfg
 def planning_record(tmp_path, monkeypatch):
     monkeypatch.setattr(relocation, "_native_supported", lambda: True)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "fixture")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     records = tmp_path / "worktrees"
     records.mkdir()
     monkeypatch.setattr(cfg, "tracking_dir", lambda _repo=None: records)
@@ -280,18 +282,14 @@ def test_generic_owned_ordinary_record_is_not_a_missing_receiving_receipt(planni
     assert before == (fixture.ledger.read_bytes(), parent.read_bytes())
 
 
-def test_ordinary_owner_reaches_existing_execution_authority_without_recovery(planning_record, monkeypatch):
+def test_ordinary_owner_still_requires_the_actual_receiving_ledger(planning_record, monkeypatch):
     fixture = planning_record
     _ordinary_owned(fixture)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     record, _, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
     monkeypatch.setattr(relocation.execution_spaces, "require_current_execution_space", lambda *_: None)
 
-    def authority(*_args):
-        raise ValueError("remaining native namespace authority")
-
-    monkeypatch.setattr(relocation.execution_spaces, "registry_for_config", authority)
-    with pytest.raises(ValueError, match="remaining native namespace authority"):
+    with pytest.raises(relocation.execution_spaces.ExecutionSpaceError, match="receiving ledger"):
         relocation.execution_spaces.require_record_mutation(record, fixture.config, recover_receiving=False)
 
 

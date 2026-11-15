@@ -14,13 +14,6 @@ def _path(project: str, worktree_id: str) -> Path:
     return cfg.tracking_dir(project) / f"{worktree_id}.paired-allocation.json"
 
 
-def _owner(machine: str, platform: str, identity) -> dict:
-    return {
-        "machine": machine, "platform": platform,
-        "machine_identity": identity.to_record_fields() if identity else None,
-    }
-
-
 def reserve(config, worktree_id: str, nonce: str, *, kind="session", no_pair=False, machine_identity=None, platform_name=None) -> None:
     if kind != "session" or no_pair or os.environ.get("AGENT_WORKTREES_NO_PAIR"):
         return
@@ -36,10 +29,6 @@ def reserve(config, worktree_id: str, nonce: str, *, kind="session", no_pair=Fal
     target = Path(receiving.default_repo.worktree_root) / f"{worktree_id}-k"
     if not target.is_absolute() or target.resolve() != target.absolute():
         raise ValueError("paired allocation root is relative or redirected")
-    owner = _owner(
-        machine_identity.machine if machine_identity else config.machine,
-        platform_name or config.platform, machine_identity,
-    )
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     if ledger.exists():
         from . import tracking
@@ -47,19 +36,22 @@ def reserve(config, worktree_id: str, nonce: str, *, kind="session", no_pair=Fal
         record = tracking.load_record(ledger)
         if record.creation_nonce != nonce:
             raise ValueError("paired allocation parent incarnation changed")
-        owner = _owner(record.machine, record.platform, record.machine_identity)
     data = {
         "schema": "agent-worktrees.paired-allocation-location.v1",
         "project": config.repo_name, "worktree_id": worktree_id,
         "creation_nonce": nonce, "repo": root.repo, "anchor": str(Path(root.path).resolve()),
         "path": str(target),
-        "owner": owner,
     }
     path = _path(config.repo_name, worktree_id)
     from .checkout_durability import files, replace
 
     if path.exists():
-        if path.is_symlink() or path.stat().st_size > 16 * 1024 or json.loads(path.read_text(encoding="utf-8")) != data:
+        if path.is_symlink() or path.stat().st_size > 16 * 1024:
+            raise ValueError("original paired allocation intent conflicts; retain owned recovery")
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(existing, dict):
+            existing.pop("owner", None)
+        if existing != data:
             raise ValueError("original paired allocation intent conflicts; retain owned recovery")
     else:
         staging = path.with_suffix(".reserving-" + secrets.token_hex(8))
@@ -85,12 +77,12 @@ def original(record, root, *, legacy: bool = True) -> Path | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(data, dict)
+        or set(data) - {"schema", "project", "worktree_id", "creation_nonce", "repo", "anchor", "path", "owner"}
         or data.get("schema") != "agent-worktrees.paired-allocation-location.v1"
         or any(data.get(key) != value for key, value in {
             "project": record.repo, "worktree_id": record.worktree_id,
             "creation_nonce": record.creation_nonce, "repo": root.repo,
             "anchor": str(Path(root.path).resolve()),
-            "owner": _owner(record.machine, record.platform, record.machine_identity),
         }.items())
     ):
         raise ValueError("original paired allocation conflicts with the retained parent or receiver")

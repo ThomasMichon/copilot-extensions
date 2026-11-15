@@ -145,6 +145,7 @@ line-length = 99
 
 [project.optional-dependencies]
 dev = [
+    "setuptools>=83.0.0",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
     "pytest-asyncio>=0.24",

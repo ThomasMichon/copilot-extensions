@@ -379,6 +379,19 @@ verb), so the round-trip preserves every overlay. A forward-compat guard test
 by a writer that touches only one field leaves all other overlays intact; if you
 add a field, extend that test.
 
+Full-record saves also compare the loaded receiving ledger, repository,
+worktree ID, checkout path, branch and start time with the current record before
+replacement. A stale snapshot cannot overwrite a different subject merely
+because its machine labels still match. This evidence is transient, refreshes
+after a successful save, and permits deliberate edits to a freshly loaded
+subject. The existing creation-nonce, receiving-allocation, relocation and
+machine-identity fences remain independent; this check does not authorize an
+allocation transfer or change the persisted identity format.
+Ledger spellings use the same lexical absolute-path key as the write lock;
+the original loaded path remains available for lookup. Start timestamps are
+quoted on write so YAML inference cannot change UTC spelling or precision
+between a cached snapshot and an uncached read.
+
 [Committed-save notifications](committed-save-notifications.md) describes the
 bounded optional capture and after-all-record/pair-holds delivery boundary.
 It does not make canonical persistence and observation history atomic.
@@ -702,22 +715,129 @@ are refused. Provider snapshots are immutable serialized values, not mutable
 dataclass references. Inspection matches all request/current binding fields,
 requires the exact durable intent/revision, and rereads owner/journal/store
 state after checking the supplied lease's conservative remaining lifetime.
-Restoration candidates additionally need the recorded newer authority revision
-and an owner-supplied settlement observation. Opaque lease IDs are not authority
+The binding also captures the retained provider's optional, opaque `native_scope`
+token at its original construction, not when an inspector is reopened.
+Supported providers expose this token and `scope_settled(original_token)` as
+passive same-object readers. Changed tokens refuse without value/PID matching.
+Restoration candidates additionally need the recorded newer authority revision,
+an owner-supplied settlement observation and an exact `True` from that original
+provider for its retained token. The observation alone is insufficient; missing,
+older, failed or unconfirmed provider support remains unknown. Ordinary passive
+intent inspection remains available with an older provider.
+Opaque lease IDs are not authority
 revisions. Changed, missing, revoked or ambiguous inputs remain held, unknown
 or marked for same-operation reconciliation; prior holds and unknown work
 are not cleared.
 
 The inspector invokes only the retained lease's local `remaining_seconds()`
-reader. It never acquires a grant, installs credentials, writes intent,
+reader and the provider's passive identity/status readers. It never waits for
+or requests cleanup, acquires a grant, installs credentials, writes intent,
 dispatches a native operation or reconstructs a lost custody handle.
 `candidate` means supplied owned inputs match, not that a real source/controller
-was verified or a provider scope independently settled. Every result keeps
+was verified or post-owner-loss custody was reacquired. A positive same-owner
+cleanup status does not qualify native recovery. Every result keeps
 `effects_wired: false`, `native_recovery: unqualified` and `replay: never`.
 Neither a result nor a reconstructed inspector is an admission certificate.
 No ordinary caller, observer, CLI or RPC is wired to it. Actual current-source
 verification, final-boundary serialization, durable provider reacquisition and
 native recovery qualification remain unimplemented.
+
+### Original-owner execution decision journal
+
+`launch_execution_permit.WorktreeExecutionPermit` records already-authorized,
+action-specific decisions from the original lifecycle owner. It does not issue
+permission or authenticate private approval evidence. The owner retains actual
+approvals and limits privately and supplies their bounded decision references
+independently of incoming recovery requests, credentials and launch receipts.
+No ordinary caller or native operation is wired to this source-only adapter.
+
+An immutable `ExecutionBinding` retains the original launch correlation and
+operation, worktree `OwnerIntent`, source/account/recipient/route/controller
+selection and historical conversation/environment/boot/scope/incarnation
+references. These references are bookkeeping inputs, not a complete historical
+publisher or live native identity. The guarded writer rechecks current owner
+intent, receiving execution-space authority and the original launch journal
+under the existing worktree-record lock. It performs no network or callbacks
+while holding that lock.
+
+The separate `worktree-launch-execution-decisions` version-1 document,
+`launch-execution-decisions.json`, uses the recovery store's same bounded,
+indirect-path-refusing, atomic durable publication primitive. Each permit begins
+with its owned start decision. Every authorization change, including revocation,
+appends a distinct owner decision reference and advances the revision once.
+Start approval does not authorize retirement or restoration. One original launch
+operation has one permit identity; reopening cannot replace that identity,
+rewrite history or reset ordering. Limits are 64 permits, 64 decisions each and
+2 MiB overall; full or invalid stores refuse without eviction or repair.
+
+The additive `launch_execution_decision_append` tracking-write verb is version 1.
+The actual running resident advertises support through its existing verb/version
+discovery. An unaware resident never receives new syntax: the documented
+pre-send path uses the same canonical owner implementation in the caller.
+No package-version equality or new service is required. After a possibly
+admitted write, lost acknowledgements remain ambiguous; reread the same permit
+and exact decision instead of issuing a replacement. A matching committed
+decision returns without another dispatch. Newer/invalid document contracts
+refuse without rewriting. Existing recovery v1 records and their
+`lease_revision`/`authority_revision` meanings remain unchanged.
+
+Passive `inspect` compares the exact current permit revision with an
+independently supplied owned decision, action, expiry and current approved
+source selection. A restoration candidate requires its own newer decision,
+not the initial start permission or a larger counter alone. Revocation,
+expiration, source changes, stale revisions and missing evidence never become
+candidates. A candidate only means supplied owner inputs match; it does not
+verify their private approvals, source lifetime, native binding or actual
+execution permission. Every result retains `effects_wired: false`,
+`native_recovery: unqualified`, `intent_contract: unavailable` and `replay: never`.
+The separate Core `PermitRecoveryIntent` data contract and the durable adapter
+below do not qualify this inspector or final action admission. Actual source
+verification and native scope reacquisition/settlement remain unimplemented.
+The journal cannot clear unknown work or legacy holds in the independent
+recovery store.
+
+### Permit-aware recovery intent data
+
+`launch_permit_recovery_intent.WorktreePermitRecoveryIntents` retains the separate
+strict `copilot-driver.headed-permit-recovery-intent` version-1 contract. Its
+constructor takes an independently retained `ExecutionBinding`. Under the same
+guarded owner-record lock, the writer checks the exact original launch,
+descriptor, recovery operation, current v1 phase/revision and permit identity.
+The referenced original permit decision must be an approved start, and the
+exact latest permit revision must carry the referenced approved retire or
+restore decision. These are stored-data checks, not authentication of approvals,
+expiry/current-source verification, native admission or scope settlement.
+
+The separate `launch-permit-recovery-intents.json` binds the worktree creation
+nonce and retains the complete execution binding with each encoded intent.
+Each operation appends at most its retire intent and then its resume intent,
+without replacing the descriptor, operation, permit or original permit revision.
+Only revisions within that permit are ordered. Source-lease references,
+receiver identity/revision and v1 lease/authority revisions retain their distinct
+meanings. The v1 recovery/decision documents are never rewritten, converted or
+resealed; v1 unknown work and holds remain authoritative and unchanged. A
+preexisting v1 resume cannot be retrofitted without its original permit-aware
+retire intent. Construction and reads create nothing.
+
+The additive version-1 `launch_permit_recovery_intent_record` writer advertises
+through the running resident's existing verb/version roster and optional
+`tracking_write_recovery_intent_contract` declaration. That declaration is
+`durable-intent-only`, with native recovery unqualified and effects unwired.
+An older resident lacks this optional capability, not all prior operations;
+the existing pre-send path selects the same current local writer. There is no
+new service, package-equality gate or effectful probe/replay. Existing callers
+can ignore the additive declaration. Core data-only support alone does not
+establish that this owner adapter is available.
+
+The bounded journal uses the existing atomic durable publisher, strict
+canonical-path/nonce checks, 64-entry and 2-MiB limits. Corrupt, future, full,
+conflicting or indirect state refuses without repair, eviction or overwrite.
+After a possibly admitted request, reread the same operation: an exactly matching
+saved phase returns without another dispatch, even if later decisions or phases
+have advanced. Acknowledgement loss does not select another writer or replay an
+effect. Actor-free and contained process/transport controls cover this source
+boundary only. No ordinary caller, passive admission consumer, native effect,
+credential acquisition, observer or rollout is enabled by it.
 
 ### Launch-owned pane assets and current boundary handlers
 
@@ -1246,6 +1366,57 @@ owners.
 
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait.
+An internal, opt-in `BeforeResume` callback can instead request suspended native
+creation inside that same owner. `native-seed-process.ps1` loads its sibling C#
+helper in-process; it starts no compiler process, launcher or additional waiter.
+The helper uses `CreateProcessW` with `CREATE_SUSPENDED` and an explicit inherited
+handle list, retaining the actual creation handle and birth before any child code
+runs. Only duplicated standard handles and explicitly supplied additional handles
+are inherited; unrelated inheritable handles are excluded. The callback receives
+that creation handle, PID and `windows:` birth and must return exactly boolean
+true before the owner resumes the child. Publication refusal settles only this
+unexecuted creation before recording `spawn-failed`; uncertain native resume is
+not relabeled as a definite spawn failure. Any resume attempt ends permission
+to terminate the child as an unexecuted creation. A zero suspend count retains
+the existing wait, actual exit and uncertain terminal receipt without retrying
+resume. Unconfirmed termination raises a distinct cleanup error, never the
+definite OS-spawn-failure class that permits seed restoration.
+An internal caller publishing the originating client can additionally request
+`RequireDirectClient`. This requires `BeforeResume` and, before creation or
+publication, refuses headed preparations, relative or substituted executable
+paths, non-`.exe` commands and missing native-image headers. The prepared target
+must be the caller's explicitly selected executable, not a coordinator discovered
+later. This is a direct-launch check, not an attestation of an arbitrary native
+executable's behavior. A refusal invokes the correlated `spawn-failed` callback
+to restore a prepared seed only while no child has been created; restoration
+never repeats the original seed or relaxes uncertain-creation handling.
+An independently updated caller must check the actual
+loaded function's parameter metadata before requesting it; older copied adapters
+do not acquire this optional support from a package-version comparison.
+The original byte transfers, admission,
+head-writer fence, wait and terminal callback remain with the shell.
+The canonical build selector and its trusted admission counterpart include the
+C# companion; wheel and source-distribution round trips retain all three native
+assets, not only the PowerShell loader.
+No production caller currently supplies this callback. It is not MCP capability
+advertisement, an anonymous owner bootstrap or automatic caller enrollment.
+The focused `tests/test_native_seed_process.py` and `tests/test_native_seed_shell.py`
+controls exercise actual birth, pre-execution refusal, literal arguments,
+environment/cwd/stdin/output/exit preservation, exclusive section inheritance,
+final-handle cleanup and the existing admission/wait path. The MCP source packet also runs actual offline native Copilot through this
+existing creation/wait owner with direct-client publication, delayed MCP startup,
+original byte streams, fixture-provider context parity and natural settlement.
+Preparation, admission and execution receipt responses are substituted, and the
+MCP provider implements a synthetic protocol rather than the production optional
+receiver. The separate physical-receiver/custody packet now independently
+exercises publisher exit and this retained wait owner. The latter keeps the
+same preparation/admission/execution receipt substitutions, but uses the real
+optional receiver and custody handover path, retaining the actual client,
+conduit, keeper and upstream across replacement and rollback. It requires the
+original wait owner to remain alive through those transitions and exit
+naturally with its client. Neither packet qualifies an installed
+adapter or production caller selection. Headed creation still belongs to its
+separate actual-client owner, not the shell's coordinator handle.
 The headed path discovers preparation/receipt support against one captured,
 completed immutable runtime slot for preparation, admission and spawn; each
 finite call independently refuses a changed current selection before effects.
@@ -1402,7 +1573,10 @@ resumable until an explicit lifecycle transition says otherwise.
 
 Registration's existing exact-session `worktree-binding.json` stamp can include
 `project`, `creationNonce` and an optional `sessionActivation` observation. The
-writer holds nonblocking record-sidecar ownership through its uncached
+association contains no machine or environment naming fields. Ordinary stamps
+replace legacy naming fields without a migration; consumers derive current
+execution naming from the reporting process and machine configuration.
+The writer holds nonblocking record-sidecar ownership through its uncached
 project/worktree/incarnation/lifecycle/head recheck and atomic publication.
 `sessionActivation` version 1 records the latest unique open interval's
 `ordinal`, `startedAt`, `startRecordedAt` and exact `sourceIdentity`. Missing,
@@ -1808,6 +1982,21 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   `finalize --abandon --handoff-to <recipient-or-flow>` re-homes
   still-unsettled obligations to a durable **orphanage** (not dropped);
   selective `claims cleanup <ref-or-source-worktree>` accepts/reclaims them.
+  Cleanup qualifies the actual receiving project/source record and its unique
+  released claim before a destructive callback; the source must be finalized or archived,
+  locally proven and free of a pending claim handoff. This also covers a retained
+  source record after its checkout is retired, without trusting old machine
+  labels. Missing/foreign/live source evidence and colliding orphan cleanup keys
+  remain unsettled; an unavailable source record is not proof of disposal
+  authority. The resource owner's independent reclaim and finalization checks
+  still apply. Apply holds the existing per-source cross-process record exclusion
+  from the fresh custody check through the bounded callback and per-entry orphan
+  settlement, so claim reactivation cannot slip between them. This is a deliberate
+  cleanup exclusion, not an ordinary metadata I/O hold or a persistent freeze.
+  Preview takes no write lock. Contended claim verbs return the existing
+  version-4 `rejected` result before mutation, including to older callers,
+  rather than reporting an unknown outcome; already-released parent settlement
+  remains a non-mutating no-op without reacquiring that source's write hold.
   *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*
 - **Derived output claims (`agent_worktrees.derived_claims`).** A producer that
   creates a regenerable directory inside the checkout journals it as a

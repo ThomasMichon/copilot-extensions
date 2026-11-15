@@ -105,6 +105,9 @@ def test_mux_storage_requires_writable_preparation_before_passive_adoption(tmp_p
             if storage == "previous":
                 # Mux storage was introduced at 43, independently of later additions.
                 conn.execute("UPDATE schema_version SET version=?", (42,))
+                from legacy_inbox_schema import restore_prior_inbox_guards
+
+                restore_prior_inbox_guards(conn, version=42)
             elif storage == "malformed":
                 conn.execute("CREATE TABLE mux_question_answers (inspection_id TEXT PRIMARY KEY)")
         before = path.read_bytes()

@@ -33,7 +33,7 @@ _GENERATED = {
 
 def fingerprint_entries(
     entries, *, label, root_label, roots, normalize_link, path_type, file_hashes, on_file,
-    on_progress=None,
+    on_progress=None, io_path=lambda path: path, reported_path=lambda path: path,
 ):
     """Hash validated entries with the unchanged ordered, length-framed format."""
     import hashlib
@@ -48,19 +48,21 @@ def fingerprint_entries(
         for start in range(0, len(ordered), 4):
             batch = ordered[start:start + 4]
             pending = {
-                entry: readers.submit(entry.read_bytes)
+                entry: readers.submit(io_path(entry).read_bytes)
                 for entry in batch if entries[entry] != "symlink"
             } if readers is not None else {}
             for entry in batch:
                 kind = entries[entry]
                 if kind == "symlink":
                     try:
-                        target = normalize_link(os.readlink(entry))
+                        target = normalize_link(os.readlink(io_path(entry)))
                     except OSError as exc:
                         raise OSError(f"fingerprint_source: could not read symlink {entry}: {exc}") from exc
                     if os.path.isabs(target):
                         try:
-                            resolved = path_type(target).resolve()
+                            resolved = path_type(normalize_link(str(
+                                io_path(path_type(target)).resolve(),
+                            )))
                         except OSError:
                             resolved = None
                         if resolved is not None and any(
@@ -70,13 +72,18 @@ def fingerprint_entries(
                     data = path_type(target).as_posix().encode("utf-8")
                 else:
                     try:
-                        data = pending[entry].result() if entry in pending else entry.read_bytes()
+                        data = (
+                            pending[entry].result() if entry in pending
+                            else io_path(entry).read_bytes()
+                        )
                     except OSError as exc:
                         raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
-                    if file_hashes is not None:
-                        file_hashes[entry] = hashlib.sha256(data).hexdigest()
-                    if on_file is not None:
-                        on_file(entry, data)
+                    if file_hashes is not None or on_file is not None:
+                        observed = reported_path(entry)
+                        if file_hashes is not None:
+                            file_hashes[observed] = hashlib.sha256(data).hexdigest()
+                        if on_file is not None:
+                            on_file(observed, data)
                 digest.update(frame(label(entry).encode("utf-8")))
                 digest.update(frame(kind.encode("utf-8")))
                 digest.update(frame(data))
@@ -694,45 +701,29 @@ if __name__ == "__main__":
 
 
 def fingerprint_source(
-    paths, *, _normalize_windows_extended_path, on_progress=None, file_hashes=None, on_file=None,
+    paths, *, _normalize_windows_extended_path, _native_path,
+    on_progress=None, file_hashes=None, on_file=None,
 ) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
-    Covers the FULL attributable runtime install input, not just one
-    manifest file -- an adopter must pass every path whose content changing
-    should be treated as "this version's payload changed" (e.g. a plugin's
-    whole ``src/`` tree plus its ``pyproject.toml``, not ``pyproject.toml``
-    alone -- a prior audit on this effort found exactly that narrower scope
-    on one adopter, #5472). Hashes each regular file's path (relative to
-    whichever declared root most specifically contains it, labeled by that
-    root's own path relative to the common ancestor of every declared root
-    -- never the root's bare basename, which is not unique across declared
-    roots, and never its absolute filesystem path, which would make the
-    digest depend on WHERE the checkout happens to live) and content, sorted
-    by label for determinism; a directory is walked recursively. Relocating
-    an entire checkout to a different absolute path -- a fresh clone, a
-    different OS, a renamed parent directory -- does not change the
-    fingerprint of logically-identical content, so long as the declared
-    roots' positions relative to EACH OTHER are unchanged.
+    Callers must declare the FULL attributable install input, not just one
+    manifest: e.g. both ``src/`` and ``pyproject.toml`` (#5472). Directories
+    are walked recursively. Regular files contribute their label and content
+    in label order. Each label is relative to the most specific declared root,
+    prefixed by that root's path relative to all roots' common ancestor.
+    Neither bare basenames (ambiguous across roots) nor absolute paths are
+    labels. Relocating a checkout, including across OSes, preserves its digest
+    when content and the roots' positions relative to EACH OTHER are unchanged.
 
-    Each ``(label, content)`` pair is framed with an explicit 8-byte
-    big-endian length prefix before hashing, so two different payloads can
-    never serialize to the same byte stream (a bare separator byte, even a
-    NUL, does not unambiguously frame arbitrary file content -- a label or
-    file ending in that same byte could make two distinct inputs collide).
+    Every label and content record has an explicit 8-byte big-endian length
+    prefix. Distinct inputs cannot serialize identically, even when labels or
+    content contain arbitrary separator bytes, including NUL.
 
-    Root matching is independent of the ORDER ``paths`` is passed in: roots
-    are tried longest-path-first (the most specific containing root always
-    wins over a shallower, overlapping one), and the same file reached
-    through more than one overlapping root is only ever hashed once
-    (deduplicated by its resolved absolute path). Swapping the order of
-    overlapping roots cannot change the result. Note this is strictly about
-    ORDER: declaring an additional, redundant child root that is already
-    covered by a passed parent root is a DIFFERENT, more specific
-    declaration (that child's own files are now labeled relative to it
-    instead of the parent) and is expected to change the result -- this
-    function does not treat "this subtree was separately named" as
-    equivalent to "this subtree was already covered".
+    Roots are matched longest-path-first, independently of input ORDER; the
+    most specific containing root wins. Files reached through overlapping roots
+    are hashed once, deduplicated by resolved absolute path. Adding a separately
+    declared child root DOES change the declaration: its files are now labeled
+    relative to that child rather than its parent, so the digest may change.
 
     Fails closed: a missing declared root, any unreadable file, or any
     directory that cannot be scanned/stat'd during the walk (e.g. a
@@ -743,55 +734,20 @@ def fingerprint_source(
     was validated". A caller that genuinely needs to fingerprint a
     partially-staged tree must check for that itself before calling this.
 
-    Symlinks are never silently resolved away: a discovered symlink (to a
-    file OR a directory) is hashed as ITS OWN entry -- its label, plus a
-    record of what it points to -- never collapsed with whatever it
-    happens to point at. Resolving a path and deduplicating by the
-    resolved path would let a symlink alias (``alias.py -> real.py``, both
-    under a declared root) vanish from the digest entirely once both paths
-    resolved the same way. A NESTED symlinked DIRECTORY (one discovered
-    mid-walk, not itself a declared root) is deliberately never
-    followed/walked into (cycle-unsafe, and ambiguous which identity --
-    the link or its target -- would own the nested names); instead the
-    link itself is hashed as a single entry recording where it points, so
-    re-pointing or adding/removing it still changes the digest even though
-    its nested contents, if any, are not separately walked.
+    A discovered symlink is its OWN entry: label, target and framed kind,
+    never deduplicated away into its target. Nested symlink directories are
+    not followed (cycle-unsafe); their pointer identity still detects
+    adding, removing or repointing the link. A nested target must lie inside
+    a DECLARED root whose separate walk covers its actual bytes, not merely
+    inside all roots' common ancestor. Undeclared targets raise; dangling
+    targets alone are allowed as identity-only. Lookup errors fail closed.
 
-    A NESTED symlink's target must itself fall inside one of the DECLARED
-    roots (so its actual bytes are already covered by that root's own,
-    separate walk) -- this raises otherwise, exactly like a symlinked
-    DECLARED ROOT does (below): hashing only a symlink's identity/pointer
-    is only safe when the content it points at is attributable some other
-    way, never when it is an undeclared external target whose bytes could
-    change invisibly to this digest. A DANGLING target (resolves to
-    nothing at all) is the one exception -- allowed through as identity-
-    only, since there is no actual content it could be hiding.
-
-    A symlink target is recorded as-is when relative (already stable under
-    whole-tree relocation, since it is interpreted relative to the
-    symlink's own location, which moves together with everything else).
-    An ABSOLUTE target is made relocation-invariant the same way a file
-    label is -- relative to the common ancestor of every declared root --
-    but ONLY when it actually falls inside one of the declared roots
-    themselves (never merely under their common ancestor, which can
-    include undeclared sibling paths); an absolute target outside every
-    declared root is rejected per the previous paragraph, so this
-    normalization step only ever runs for a target already known to be
-    covered.
-
-    A DECLARED ROOT that is itself a symlink is treated differently from a
-    nested one, and deliberately raises instead of silently succeeding: a
-    root is the caller's own attributable content declaration, so reducing
-    it to mere link-target identity -- never hashing what is actually read
-    through that path -- would recreate exactly the content-drift blind
-    spot this function exists to close (#5472: fingerprinting too little
-    of the real install input). The caller must declare the real resolved
-    content path (or the symlink's target) instead of a symlinked root.
-
-    Each entry's kind ("file" vs "symlink") is itself framed as its own
-    length-prefixed record alongside the label and content/target, so a
-    regular file can never hash identically to a symlink merely because
-    its raw bytes happen to equal some symlink's encoded target text.
+    Relative targets retain their platform-native text. Covered absolute
+    targets are labeled relative to the declared roots' common ancestor
+    for relocation invariance. A DECLARED root that is itself a symlink
+    always raises: the caller must declare its real resolved content path,
+    not just its pointer (#5472). Framed entry kinds keep a file distinct
+    from a symlink even when their content and encoded target bytes match.
     """
     import os as _os
 
@@ -802,13 +758,14 @@ def fingerprint_source(
         # lstat preserves the final link and propagates unreadable-entry errors;
         # Path.is_* can silently misclassify those failures as absence.
         try:
-            return _os.lstat(p).st_mode
+            return _os.lstat(_native_path(p)).st_mode
         except FileNotFoundError:
             raise
         except OSError as exc:
             raise OSError(f"fingerprint_source: could not stat {p} ({context})") from exc
 
     resolved_parents: dict[Path, Path] = {}
+    reported_roots: dict[Path, Path] = {}
 
     def _declared_root_path(p) -> Path:
         # Resolve the PARENT chain (handles relative paths, intermediate
@@ -817,13 +774,22 @@ def fingerprint_source(
         # it -- so a declared root that is itself a symlink is classified
         # with its own lstat identity below, instead of being silently
         # resolved through to whatever it points at.
-        raw = Path(p)
+        value = os.fspath(p)
+        raw = Path(_normalize_windows_extended_path(value) if os.name == "nt" else value)
         if not raw.is_absolute():
             raw = Path.cwd() / raw
         parent = raw.parent
         if parent not in resolved_parents:
-            resolved_parents[parent] = parent.resolve()
-        return resolved_parents[parent] / raw.name
+            resolved_parents[parent] = Path(_normalize_windows_extended_path(str(
+                _native_path(parent).resolve(),
+            )))
+        # Unlike a symlink name, '..' must match the root normalized by native I/O.
+        root = resolved_parents[parent] / raw.name
+        if os.name == "nt" and raw.name == "..":
+            root = resolved_parents[parent].parent
+        spelling = _native_path(root) if os.name == "nt" and value.startswith("\\\\?\\") else root
+        reported_roots.setdefault(root, spelling)
+        return root
 
     roots = [_declared_root_path(p) for p in paths]
     root_modes: dict[Path, int] = {}
@@ -865,7 +831,9 @@ def fingerprint_source(
         # to nothing at all) is allowed through as identity-only: there is
         # no actual content it could be hiding.
         try:
-            target_resolved = candidate.resolve(strict=True)
+            target_resolved = Path(_normalize_windows_extended_path(str(
+                _native_path(candidate).resolve(strict=True),
+            )))
         except FileNotFoundError:
             return  # dangling -- nothing to hide, allow identity-only.
         except OSError as exc:
@@ -917,7 +885,7 @@ def fingerprint_source(
             raise ValueError(
                 f"fingerprint_source: declared root is a symlink, not a "
                 f"resolved content path: {root_path} -> "
-                f"{_os.readlink(root_path)!r} -- declare the real target "
+                f"{_os.readlink(_native_path(root_path))!r} -- declare the real target "
                 f"path so its actual content is covered"
             )
         elif stat.S_ISDIR(mode):
@@ -928,8 +896,9 @@ def fingerprint_source(
             # fingerprint. followlinks=False is explicit: a symlinked
             # directory is never descended into (see docstring).
             for dirpath, dirnames, filenames in _os.walk(
-                root_path, onerror=_raise, followlinks=False
+                _native_path(root_path), onerror=_raise, followlinks=False
             ):
+                dirpath = _normalize_windows_extended_path(dirpath)
                 for dname in dirnames:
                     candidate = Path(dirpath) / dname
                     cmode = _lstat_mode(candidate, "nested directory entry")
@@ -979,6 +948,14 @@ def fingerprint_source(
                 f"directory, or symlink)"
             )
 
+    def _reported_path(entry: Path) -> Path:
+        if entry in reported_roots:
+            return reported_roots[entry]
+        for root_path in ordered_roots:
+            if entry.is_relative_to(root_path):
+                return reported_roots[root_path] / entry.relative_to(root_path)
+        return entry
+
     def _label(f: Path) -> str:
         # The root's path relative to the common ancestor of every declared
         # root (see `_root_label`), never the root's bare basename (not
@@ -994,6 +971,7 @@ def fingerprint_source(
 
     return fingerprint_entries(
         entries, label=_label, root_label=_root_label, roots=roots,
-        normalize_link=_normalize_windows_extended_path, path_type=Path,
+        normalize_link=_normalize_windows_extended_path if os.name == "nt" else str,
+        path_type=Path, io_path=_native_path, reported_path=_reported_path,
         file_hashes=file_hashes, on_file=on_file, on_progress=on_progress,
     )

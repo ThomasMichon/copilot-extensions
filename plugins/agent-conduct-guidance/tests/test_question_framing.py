@@ -53,8 +53,8 @@ def test_question_framing_module_renders_a_bounded_owned_projection(tmp_path):
 @pytest.mark.parametrize("clause", [
     "write the options at the scope of the real decision or operation class, "
     "not the narrowest next action",
-    '"exact", "one", "only", "single", "just", "read-only", "this time", "once" '
-    "or a version/revision pin",
+    '"exact", "one", "only", "single", "just", "read-only", "this time", "once", '
+    "a version/revision pin or an expiry or time window",
     "to option labels, the recommendation or the default",
     "state that reason inline and still offer the broader option",
     "the broadest choice that completes the goal within the authority being requested",
@@ -66,6 +66,10 @@ def test_question_framing_module_renders_a_bounded_owned_projection(tmp_path):
     "When the operator picks a narrower option over an offered broader one, "
     "that narrowing binds.",
     "ask once to widen it at class level; never re-ask for each step",
+    "prefer a resource bound -- CPU, memory, storage or wall time per run -- that "
+    "lasts until validation completes over an attempt or run count",
+    "Use a count only to protect a named scarce resource",
+    "State the current state plainly in the question",
 ])
 def test_kernel_frames_options_at_decision_scope(clause):
     assert clause in _normalized(_TEMPLATE)

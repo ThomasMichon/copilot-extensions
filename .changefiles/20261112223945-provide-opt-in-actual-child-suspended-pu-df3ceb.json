@@ -1,0 +1,13 @@
+{
+  "comment": "Provide opt-in actual-child suspended publication and preserve its complete retained receiving closure",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    }
+  ]
+}

@@ -579,6 +579,13 @@ publication and installed support retain their separate qualification.
 
 ### S3 - Bridge relationships and problem evidence
 
+- [ ] Receive the direct #8776 LR1-LR4 source/consumer contract in the
+  [parent Plan](README.md#direct-represented-session-creator-and-lifecycle-source-8776):
+  optional known creator registration/list/detail, caller-asserted rather
+  than authoritative relations, normalized subagent lifecycle/configured
+  metadata and bounded notifications. Bridge retains producer custody;
+  no inferred edge, new poller, permission or accepted ownership transfer.
+  Existing reported-event credits below do not complete this source contract.
 - [x] Deliver the Bridge-owned known-session observation/history provider and
   passive owning CLI. #10131 preserves existing local, represented and locally
   hosted remote evidence bounds; arbitrary federated handles, canonical head,
@@ -697,6 +704,18 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [ ] LRV1 (#8776). Exercise actual registration/persistence/list/detail and
+  launcher construction of the optional caller/creator link, old clients,
+  absent/invalid/unknown inputs and caller-asserted semantics. No invented
+  source actor or inferred origin, ownership, authority or accepted transfer.
+- [ ] LRV2 (#8776). Exercise actual source normalization and consumer mapping
+  of supported subagent start/completion/failure and configured metadata,
+  cross-turn background completion, notifications and tool-completion
+  negatives. Cover allowlisted, unsupported, unknown and permission-sensitive
+  payloads without control authority. Keep the issue's administrative LRV3
+  readback distinct; the [parent actual global Validation](README.md#validation-plan)
+  requires LR1-LR4 AND both technical rows, not a readback receipt alone.
 
 - [x] Use precise monotonic elapsed time for the bounded membership deadline
   without increasing its time/VM limits or excluding scheduling and blocking.

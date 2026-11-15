@@ -17,10 +17,24 @@ classification, user state and session keepers, and protect the then-current
 generation during central-only cleanup. Record remaining adoption work without
 rewriting historical journal evidence or treating a source merge as rollout.
 
+For the connected fresh-install/update delivery sequence, use the existing
+[Source-Managed Runtime Installs convergence map](active/source-managed-runtime-installs/installation-convergence.md).
+It links artifact/profile, Manager/onboarding, staging/sequencing, lifecycle,
+observability and upgrade-acceptance owners without merging their custody or
+declaring their remaining gates complete.
+
+The [foreground-update and independent-service-startup amendment](active/source-managed-runtime-installs/update-service-lifetimes.md)
+adds the current lifetime requirements to that map and its associated active
+efforts. Ordinary updates remain cancellable with their callers; accepted
+service setup/start and retained daemon trees survive caller cleanup. Historical
+background-driver credit and completed efforts are not qualification of this
+new behavior, nor permission to resume held implementation or deployment.
+
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Task Relevance Reconciliation](active/task-relevance-reconciliation/README.md) | Active; atomic receiver and original-owner closeout delivery merged, registered-source receiver/callers next | #12274; existing queue, wake, session and workspace owners; no runtime activation |
-| [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Active; design accepted, additive private user-cache provider under implementation; consumer migration and retirement/update relief remain | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |
+| [Bridge Queued Steering](active/bridge-queued-steering/README.md) | Draft; notification, exact submission receipt and nonduplicating timed fallback before implementation | Bounded #6394 follow-up; preserves #12487/#11448/#11445 and #10765 owners; no rollout or container-auth takeover |
+| [Compatible Agent Messaging](active/compatible-agent-messaging/README.md) | Draft; compatibility-first ordinary send contract before implementation | #12487; existing Bridge/Driver, receipt and discovery owners retained; no implicit resume or rollout |
+| [Task Relevance Reconciliation](active/task-relevance-reconciliation/README.md) | Active; source retirement and observation fences accepted; owner/cohort closeout, compatibility and adoption remain | #12274; existing queue, wake, session and workspace owners; no runtime activation |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Done; reviewed queue source merged and actual Main release verified; pending archive | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |
@@ -51,7 +65,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 | [Instruction Source Resolution](active/instruction-source-resolution/README.md) | Draft; review the compatibility repair before implementation | #9097; effective enabled-source verification, exact generated output, unchanged trust/maintenance boundaries; no rollout |
 | [Incremental Indexing Delta Pipeline](active/incremental-indexing-delta-pipeline/README.md) | Active; shared delta seam and normal-round reuse slice, complete acquisition/store/adoption gates open | #9023; preserves #4222/#4220/#8733/#5302 correctness owners; generic engine first, consumer adoption separate |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
-| [Vault Service](active/vault-service/README.md) | Draft; initial architecture and complete phased acceptance proposal only, implementation admission pending | #8729; Vault credential/transaction authority, stateless Manager, central/local/federated deployment; existing custody retained, no rollout |
+| [Vault Service](active/vault-service/README.md) | Active; bounded existing-service federated-relay slice admitted, complete transaction/platform acceptance retained | #8729; Controller-owned conduit, Vault service/provider/consumer flow, existing custody and native owners retained; no rollout |
 | [Installation-Independent Sessions](active/installation-independent-sessions/README.md) | Active; copied shells/current handlers merged, finite native seed boundary in progress; per-worktree concurrency and two-cycle live acceptance open | #8669 / #8864; retains #5579 and installer/updater owners; selected-host rollout gated |
 | [Native Anchor Custody](active/native-anchor-custody/README.md) | Draft; explicit current-custody claims proposal, no live repair | #4488 bounded claims slice; preserves contributor-owned #6009 and broader lineage/handoff scope |
 | [Bounded Passive Git Observation](active/bounded-passive-git-observation/README.md) | Active; R1a local deadline only admitted, R1b/R2 remain gated | #7944/#7945; preserves roster/publication, resident-control/storage and broader #2619/#6086 ownership; no rollout |
@@ -183,6 +197,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Python Bytecode Cache Lifecycle](<2026/11/14 python-bytecode-cache-lifecycle/README.md>) | Done; shared user-cache policy, indexed retirement, consumer migration and bounded legacy update relief merged; complete Main release #12613 verified | #10968 retains real-host adoption, 24-hour observation and unrelated tracks; #12609/#12013 retain native Manager qualification; no real-cache deletion or rollout |
 | [Standing Pairing and Lifetime](2026/11/12%20standing-pairing-lifetime/README.md) | Done for source scope; implementation #12213 merged after clean review, required CI, canonical 403-case capture and complete Linux/macOS/Windows native qualification | #12171 retains archive and exact source-worktree settlement; existing custody and finite pools preserved; no live enrollment or rollout |
 | [Dispatch Slot Service Launchers](2026/11/12%20dispatch-slot-service-launchers/README.md) | Done for source scope; implementation #12217 reviewed and merged, actual Main release #12265 verified as Dispatch 0.19.18-dev1 | #11875; preserves contributor-owned #11960 reader correction and native hold, #10847 retirement and #10377 upgrade owners; no host repair or rollout |
 | [Topology Dispatcher Integration](2026/11/11%20topology-dispatcher-integration/README.md) | Done for source scope; all six phases merged through #12139 with isolated native recovery and reserve-preserving admission evidence | #12009; Worktrees, Bridge and Dispatch custody retained; no live adoption, materialization or rollout |

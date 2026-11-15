@@ -92,15 +92,10 @@ def require_completed_record(
             return
     else:
         origin = validate_origin(receipt["execution_origin"])
-        expected = WorktreeMachineIdentity(
-            origin["machine"], origin["environment"], origin["execution_machine"],
-        )
         if (
             origin["hostname"].casefold() != context.hostname.casefold()
             or origin["environment"] != context.environment
             or origin["configured_machine"] != config.configured_machine
-            or (record.machine_identity is not None and record.machine_identity != expected)
-            or (record.machine_identity is None and record.machine != origin["legacy_machine"])
         ):
             raise execution_spaces.ExecutionSpaceError(
                 "Retained creation conflicts with its original execution origin",

@@ -786,7 +786,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 )
         return True
 
-    def _reap_host_record(self, rec: Any, reason: str) -> None:
+    def _reap_host_record(self, rec: Any, reason: str, *, remove_index: bool = True) -> None:
         """Reap a Session Host + its child and drop the durable index record.
 
         Kills the **child first** -- a POSIX SIGTERM to the host does not run its
@@ -820,8 +820,9 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 release_container_lock=False,
             )
             self._schedule_remote_reap(rec, reason)
-        with contextlib.suppress(Exception):
-            self._host_index.remove(rec.session_id)
+        if remove_index:
+            with contextlib.suppress(Exception):
+                self._host_index.remove(rec.session_id)
         # #4272 bridge-lock: best-effort clear the lattice lock at teardown.
         # Fire-and-forget (this reap path is sync); a lingering lock is already
         # ignored by the picker's reader once the child pid dies.

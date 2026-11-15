@@ -360,31 +360,15 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
     assert output["version"] == "1.2.3"
     assert Path(output["file"]).is_relative_to(runtime)
     assert output["args"] == ["argument with spaces", "\u2713"]
-    assert output["isolated"] == 1 and output["no_bytecode"] is False
+    assert output["isolated"] == 1 and output["no_bytecode"] is True
     cache = Path(output["cached"])
-    assert cache.is_relative_to(Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python") or (
-        os.name == "nt" and cache.is_relative_to(
-            Path("\\\\?\\" + env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
-        )
-    )
-    # Without a procutil selector the fixture has no sealed cache: waiting
-    # launchers remove the unsealed prefix they minted, exec launchers cannot.
-    cleaned = Path(argv[-1]).suffix in (".cmd", ".ps1")
     cache_root = Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
-    assert any(part.startswith("unsealed-") for part in cache.parts)
-    assert cache.is_file() is not cleaned
-    if cleaned:
-        assert list(cache_root.iterdir()) == []
-        cached_before = None
-    else:
-        cached_before = (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino)
+    assert not cache.exists()
+    assert not cache_root.exists()
     assert not Path(env["UV_PROJECT_ENVIRONMENT"]).exists()
     failed = _run(argv + ["--fail"], env=env, cwd=tmp_path)
     assert failed.returncode == 7, failed.stderr
-    if cleaned:
-        assert list(cache_root.iterdir()) == []
-    else:
-        assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+    assert not cache_root.exists()
     assert {
         str(path.relative_to(slot)): (
             path.read_bytes() if path.is_file() else None,
@@ -406,16 +390,14 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
     replacement = json.loads(replaced.stdout)
     assert replacement["version"] == "1.2.4"
     assert replacement["file"] == output["file"]
-    assert Path(replacement["cached"]) != cache
-    if cleaned:
-        assert list(cache_root.iterdir()) == []
-    else:
-        assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+    assert Path(replacement["cached"]) == cache
+    assert not cache.exists()
+    assert not cache_root.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native CMD compatibility")
 @pytest.mark.parametrize("launcher", ["cmd"], indirect=True)
-def test_native_cmd_unicode_root_fallback_removes_minted_cache(launcher, tmp_path):
+def test_native_cmd_unicode_root_fallback_never_allocates_cache(launcher, tmp_path):
     argv, env, slot = launcher
     root = Path(env["WORKTREE_MANAGER_ROOT"])
     unicode_root = root.with_name("manager \u03bb root")
@@ -435,16 +417,13 @@ def test_native_cmd_unicode_root_fallback_removes_minted_cache(launcher, tmp_pat
     )
     assert installed.returncode == 0, installed.stderr
 
-    # No selector helper: the native branch must keep its minted Unicode
-    # prefix (the selector prints nothing) rather than round-tripping it
-    # through ``set /p``, and remove it after the child exits.
     result = _run(argv, env=env, cwd=tmp_path)
 
     assert result.returncode == 0, result.stderr
-    cache = Path(json.loads(result.stdout)["cached"])
-    assert any(part.startswith("unsealed-") for part in cache.parts)
-    assert "manager \u03bb root" in cache.parts
-    assert list((unicode_root / "cache" / "python").iterdir()) == []
+    output = json.loads(result.stdout)
+    assert output["no_bytecode"] is True
+    assert not Path(output["cached"]).exists()
+    assert not (unicode_root / "cache").exists()
 
 
 def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
@@ -463,16 +442,19 @@ def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
     site = Path(_run([str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_paths()[\"purelib\"])"],
                      env=env, cwd=tmp_path).stdout.strip())
     procutil = site / "agent_procutil"
-    procutil.mkdir()
-    (procutil / "__init__.py").touch()
-    shutil.copyfile(
-        Path(__file__).resolve().parents[2] / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
-        procutil / "python_cache.py",
+    shutil.copytree(
+        Path(__file__).resolve().parents[2] / "libs" / "agent-procutil" / "src" / "agent_procutil",
+        procutil, ignore=shutil.ignore_patterns("__pycache__"),
     )
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
     }), encoding="utf-8")
-    cache_root = Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
+    home = tmp_path / "home"
+    home.mkdir()
+    cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else tmp_path / "user cache"
+    env.update(HOME=str(home), USERPROFILE=str(home),
+               LOCALAPPDATA=str(cache_base), XDG_CACHE_HOME=str(cache_base))
+    cache_root = cache_base / "copilot-extensions" / "python" / "v1"
     caches = []
     # CE_TERMINAL_LAUNCH forces the CMD launcher's native branch instead of
     # delegating to PowerShell.
@@ -484,7 +466,10 @@ def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
             cache = Path(json.loads(result.stdout)["cached"])
             caches.append(cache)
             assert cache.is_file()
-            assert [path.name.startswith("installed-") for path in cache_root.iterdir()] == [True]
+            assert cache.is_relative_to(cache_root) or (
+                os.name == "nt" and cache.is_relative_to(Path("\\\\?\\" + str(cache_root)))
+            )
+            assert not (Path(env["WORKTREE_MANAGER_ROOT"]) / "cache").exists()
     assert len(set(caches)) == 1
 
 

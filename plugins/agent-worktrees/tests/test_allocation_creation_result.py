@@ -63,7 +63,7 @@ def test_absent_original_result_remains_unknown_without_creating_history(receive
 @pytest.mark.parametrize("field,value", [
     ("id", "replacement"), ("repo", "other"), ("path", "/other/child"),
     ("branch", "worktree/other"), ("creation_nonce", "changed"),
-    ("execution_machine", "other"), ("owner_ref", "remote/parent/other"),
+    ("owner_ref", "remote/parent/other"),
 ])
 def test_consumer_rejects_an_ordinary_row_from_another_incarnation(receiver, field, value):
     config, admission, _ = receiver
@@ -72,6 +72,42 @@ def test_consumer_rejects_an_ordinary_row_from_another_incarnation(receiver, fie
     result["result"]["worktree"][field] = value
     with pytest.raises(ValueError, match="different receiving incarnation"):
         results.validate(result, metadata(admission))
+
+
+@pytest.mark.parametrize("names", [
+    {},
+    {"machine": "renamed-host", "execution_machine": "renamed-execution", "platform": "linux"},
+    {"machine": "obsolete-host", "execution_machine": None, "machine_identity_version": "invalid"},
+])
+def test_result_identity_comes_from_receiving_proof_not_row_names(receiver, names):
+    config, admission, _ = receiver
+    _, record = create(receiver)
+    value = receiver_api.receive("result", payload(admission), config)
+    proof = copy.deepcopy(value["allocation"])
+    row = value["result"]["worktree"]
+    for field in ("machine", "execution_machine", "platform", "environment", "machine_identity_version"):
+        row.pop(field, None)
+    row.update(names)
+    before = record.yaml_path.read_bytes()
+    assert results.validate(value, metadata(admission)) == value["result"]
+    assert value["allocation"] == proof
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("change", [
+    {"origin": "remote/parent/other"}, {"request_id": "other"}, {"token": "b" * 32},
+    {"target": {"machine": "other", "project": "demo-repo"}},
+    {"allocation_finished": False},
+])
+def test_machine_free_result_still_requires_original_receiving_proof(receiver, change):
+    config, admission, _ = receiver
+    create(receiver)
+    value = receiver_api.receive("result", payload(admission), config)
+    for field in ("machine", "execution_machine", "platform", "environment", "machine_identity_version"):
+        value["result"]["worktree"].pop(field, None)
+    value["allocation"].update(change)
+    with pytest.raises(ValueError, match="original request"):
+        results.validate(value, metadata(admission))
 
 
 def test_result_wire_bound_is_separate_from_the_unchanged_lifecycle_proof(receiver):

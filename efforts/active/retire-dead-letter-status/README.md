@@ -254,6 +254,33 @@ _Pending review._
 
 ## Journal
 
+### 2026-11-12 - Existing retirement source and CI evidence reconciled
+
+#4844 actually merged as `87cd6d2694e4edef50603e3dc8493c0abd0420bf`.
+The state retarget, ordinary terminal settlement admission, named
+all-three-column migration and its automatic queue-schema call, read
+compatibility, retirement/backup-repair note and migration crosslink are
+present. The existing cap regression uses a supported `max_attempts=3`
+override and checks ABANDONED, cleared owner/session and `completed_at`;
+the production default remains five. Actual historical CI run 36941175714
+at head `3026c3e460f7671fcaed179d95dd30ab48b34729` completed its
+agent-dispatch test step successfully. No test was re-executed here.
+
+This is stronger delivery credit than an absent PR narrative or unchecked
+rows. Exact BOTH ordinary settlement and migration/idempotent/restored-backup
+case coverage remains unbound in this slice: the relevant test-source author
+gaps are retained, not a claim that tests are absent. The historical successful
+test step is not independently bound here to every original suite selector
+or case.
+
+The qualified current Dev README at
+`f84f0ed50599db4534f3809406f9a9781e72e459` still says “clearing its ownership
+and completion metadata” in the State model while the code and migration
+record `completed_at`. Preserve that precise P4744-5 clarification alongside
+the original proof obligations, not a new runtime failure or host test
+programme. Draft status, all Plan/Validation states and actual custodians
+remain; neither #4744 nor this effort is declared complete.
+
 ### 2026-10-29 - Finite same-canonical reconciliation proposed
 
 - Added direct #4744 Plan/qualification/global Validation and continuing

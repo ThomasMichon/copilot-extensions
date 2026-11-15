@@ -332,11 +332,15 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
     if fault == "utf8-home-stock":
         alias = tmp_path / "base-\u7532\u57fa"
         base = Path(sys._base_executable).parent
-        setup = _run(tmp_path, "ps1", "\n".join((
-            "$ErrorActionPreference='Stop'",
-            f"New-Item -ItemType Junction -Path {_quote(alias)} -Target {_quote(base)} | Out-Null",
-        )), host=stock)
-        assert setup.returncode == 0, setup.stdout + setup.stderr
+        # A physical Unicode home tests decoding without RedirectionGuard's
+        # independent prohibition on traversing a fixture-created junction.
+        shutil.copytree(
+            base, alias, copy_function=shutil.copyfile,
+            ignore=shutil.ignore_patterns(
+                "site-packages", "__pycache__", "Scripts", "Doc", "tcl", "Tools",
+                "test", "tests", "include", "libs",
+            ),
+        )
         config.write_text("\n".join(
             f"home = {alias}" if line.startswith("home =") else line
             for line in config.read_text(encoding="utf-8").splitlines()
@@ -351,7 +355,11 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
         until = time.monotonic() + 5
         while not ready.exists() and process.poll() is None and time.monotonic() < until:
             time.sleep(.02)
-        assert ready.exists(), "synthetic redirector did not publish its child identity"
+        diagnostic = ""
+        if not ready.exists() and process.poll() is not None:
+            stdout, stderr = process.communicate(timeout=2)
+            diagnostic = f"exit={process.returncode}; stdout={stdout!r}; stderr={stderr!r}"
+        assert ready.exists(), "synthetic redirector did not publish its child identity; " + diagnostic
         child = json.loads(ready.read_text())
         assert child["pid"] != process.pid and child["ppid"] == process.pid
         if fault == "missing-config":
@@ -483,6 +491,7 @@ def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
 @pytest.mark.parametrize("leased", [False, True])
 @pytest.mark.parametrize("fault", [
     "none", "nt-prefix", "command", "source", "cache", "foreign-image", "foreign-base", "trailing-argument",
+    "no-bytecode", "no-bytecode-command",
 ])
 def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path, fault, leased):
     from agent_procutil._daemon_instance_child import _BOOTSTRAP
@@ -515,8 +524,13 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
         (slot / "pyvenv.cfg").write_text(f"home = {tmp_path}\n", encoding="utf-8")
     elif fault == "trailing-argument":
         command.append("--unexpected")
+    if fault.startswith("no-bytecode"):
+        if fault == "no-bytecode-command":
+            command[7] = "import time; time.sleep(20)"
+        command[1:3] = ["-B"]
     if not leased:
-        del command[3:6]
+        offset = 2 if command[1] == "-B" else 3
+        del command[offset:offset + 3]
     environment = dict(os.environ)
     if not leased:
         for key in (
@@ -536,7 +550,7 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) is (fault in {"none", "nt-prefix"})
+    assert json.loads(result.stdout) is (fault in {"none", "nt-prefix", "no-bytecode"})
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native image path observations")

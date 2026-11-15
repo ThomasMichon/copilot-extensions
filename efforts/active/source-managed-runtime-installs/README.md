@@ -21,6 +21,29 @@ Keep Copilot content delivery independent and establish one consented, bounded
 source-maintenance flow. Source merges do not qualify native lifecycle, release
 or installed adoption.
 
+Fresh installation and update share the same incoming bootstrap, Manager-first
+application construction and repository-derived required closure. The
+[installation convergence map](installation-convergence.md) connects existing
+efforts and owners to that outcome. Complete the required set's staging before
+activation; existing generations affect compatibility/state transfer, not a
+separate legacy construction route. This alignment changes no completed credit,
+source custody, operational hold or deployment authority.
+
+The [current lifetime clarification](update-service-lifetimes.md) is part of
+this Goal: ordinary updates are foreground-owned and cancellable, while accepted
+service setup/start and its retained process/runtime tree have independent
+ownership. Preserve the complete installation goal and all other acceptance
+rows; a documentation merge does not qualify this new behavior.
+
+The [latest construction and cutoff direction](fast-construction-and-outgoing-cutoff.md)
+requires the existing quick-copy, pure UV/wheel-backed environment and simple
+per-app setup path without extra fingerprint rejection gates during installation.
+Use kill-by-default service replacement: one bounded reliable handoff attempt,
+then force-kill the outgoing service and its daemons; without reliable handoff,
+kill the outgoing version first. Locks, handoff/schema failures and drain delays
+must not block incoming startup. Existing owners retain the per-app audit,
+ordinary caller, execution and deployment boundaries.
+
 **Finite-scope amendment: reviewed in #11708.** The consolidated
 Plan and global Validation Plan below replace duplicated acceptance inventories,
 not the operator's original request or later refinements. The
@@ -31,13 +54,22 @@ or installed operation is authorized by this proposal. The effort remains Active
 
 ## Guiding Intent
 
+The [foreground-update/service-startup amendment](update-service-lifetimes.md)
+adds the current cancellation and lifetime requirements to this complete
+effort, without narrowing its existing Goal. Ordinary updates remain
+caller-controlled; accepted service setup/start, daemon trees and required
+retention have independent ownership. The associated-owner matrix and L1-L6
+retain the cross-effort delivery/validation obligations and all existing holds.
+
 The governing completion target is
 [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
 explicit/manual update is independent of old recovery/ZDD, custody/provenance
 and stale installer fences; success is all requested incoming versions ready
-and all current selections updated. Outgoing central-daemon retirement and
-obsolete central schedules are independent, with at most one optional finite
-async fallback after a longer grace. Preserve sessions/keepers and user state;
+and all current selections updated. The
+[latest cutoff amendment](fast-construction-and-outgoing-cutoff.md) replaces the
+older preferred-start-first/long-grace policy with kill by default and at most
+one bounded reliable handoff attempt. Obsolete artifact/registration cleanup
+remains independent. Preserve sessions/keepers and user state;
 recheck then-current generation and role at cleanup. This supersedes conflicting
 legacy acceptance language below and in the linked transition/execution/app
 plans, not historical evidence or existing source ownership. Bounded manual
@@ -54,7 +86,8 @@ old/new coexistence. Index/Logger do not gate those independently releasable sli
 
 **Ideal flow:** trusted source/promotion inputs -> Manager first -> repo-derived
 wanted apps -> bounded parallel staging -> app/optional whole-toolset readiness
--> selected incoming startup -> verified serving result -> outgoing self-retire
+-> simple app setup and bounded outgoing cutoff -> selected incoming startup
+-> verified serving result -> independent obsolete-artifact cleanup
 and retained last-good recovery. Background preparation and cheap subsequent
 launches complete the target; they are not all implemented by the first pair.
 
@@ -63,7 +96,7 @@ prepared by a promotion flow producing a main-equivalent snapshot and matching
 prebuilt wheels. Consume the existing cached-source-wheel-assembly effort's
 UV-native, pyproject-strict factory rather than extending a competing raw-source
 installer. Every app separates candidate staging/readiness from active
-publication and launch; the incumbent sunsets after its successor starts.
+publication and launch; the current cutoff amendment governs incumbent termination.
 The [current refinement](inception-transcript.md#promotion-mediated-backing-checkouts-and-app-staging)
 governs the wheel-first transition, not a claim that the historical source lane
 or installed fleet has already migrated.
@@ -433,7 +466,7 @@ independent of Manager and other plugins. The detailed packaging, bootstrap
 admission and adapter sequence below are **agent-recommended implementation
 work**, not additional operator-selected mechanisms.
 
-**Execution-owner clarification (2026-10-22):** the operator requires one
+**Historical execution-owner clarification (2026-10-22):** the operator required one
 background installation driver, not merely independent per-installer locks.
 Ordinary callers submit durable requests; waiting observes the operation and
 does not become its installer. Direct execution is reserved for supervised
@@ -442,6 +475,12 @@ debugging under the same exclusive authority. The operator directed:
 someone else's PR". The [execution-driver slice](execution-driver.md) therefore
 proceeds against the existing canonical updater, independently of open staging,
 watchdog and recurring-maintenance changes, without superseding their owners.
+
+The later [foreground-update/service-startup clarification](update-service-lifetimes.md#request)
+supersedes the ordinary-background-worker-only requirement above, not its
+single-writer, request-history or delivered source credit. Direct foreground
+execution is no longer merely a debugging exception in the intended contract;
+this amendment does not claim that migration is already implemented.
 
 **Repair evidence clarification (2026-10-23), summary:** audited, request-bound
 pre-launch recovery is allowed, but an explicit operator order to repair,
@@ -483,6 +522,19 @@ retains the operator's wording. Manifest recognition is not an update-permission
 receipt; unknown compatibility selects fresh installation within declared
 disposable scope while preserving config and durable data.
 
+## Scope Approvals
+
+The [Manager/Worktrees native consumer slice](manager-worktrees-native-consumer.md#scope-approval)
+retains the operator's explicit reviewed, fixture-only Windows qualification
+approval. That approval left production rollout, maintenance enrollment and
+installation-survival testing paused, with original owners and bounds unchanged.
+That is the original fixture approval's limit, not a universal interpretation
+of the subsequent [release/install direction](fast-construction-and-outgoing-cutoff.md#intake-and-ownership).
+The later direction permits release/installation with existing host-update
+ownership. Reconcile the addressed target and unresolved effects through those
+owners; it does not reassign the separate per-app audit or implicitly resume
+other protected work.
+
 ## Plan
 
 **Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
@@ -500,9 +552,13 @@ preserves the complete pre-amendment record.
 - [ ] S2: Verify combined replacement coverage against preserved #11121 source
   before superseding its implementation; retain its history and ten-review-round
   limit. A small diff or passing review alone is not replacement completeness.
+  The original #11121 instead merged with its history preserved and no
+  supersession; [source and bounded native credit](journal/2026/11.13%20canonical-application-integration.md)
+  does not close combined whole-inventory or installed acceptance.
 
 ### Phase W — Wheel-first independent suite (proposal extension)
 
+- [ ] Reconcile and review the [fast-construction/cutoff amendment](fast-construction-and-outgoing-cutoff.md#receiving-plan-and-validation---agent-recommended), then realize and qualify it through the retained constructor, ordinary-caller, execution and lifecycle owners; consume the separate per-app audit without duplicating it.
 - [x] Qualify and release source-bound HTTPS feed/artifact redirects without
   mandatory CDN-origin enumeration, preserving explicit destination restrictions,
   exact file hashes, feed policy, credentials and bounded acquisition custody.
@@ -517,9 +573,22 @@ preserves the complete pre-amendment record.
   enabling unselected roles. Document the supported public recovery invocation
   without depending on healthy legacy tooling or introducing another
   constructor/cache/publisher.
+  Fresh and update entries use that same path, retaining the bootstrap
+  environment override, explicit source/ref and repository context, and
+  Manager-owned dependency/downstream-installable discovery.
+  The [bounded native consumer qualification](manager-worktrees-native-consumer.md)
+  tests this real path without claiming whole-inventory or productive adoption.
 - [ ] W2: Integrate stage/readiness and activation through existing app adapters
   for the declared installed inventory. Retain the selected activation strategy;
   qualify coordinated toolset selection only where that strategy is used.
+  Stage the complete required set before activation begins, without live
+  initialization, live service activation, handoff or data migration. Private
+  candidate readiness retains its existing passive contract, with live work
+  admission closed and no live publication or shared-data migration. Use the same
+  construction for absent and existing installations; activation owns
+  compatibility, one bounded reliable handoff where supported and forced
+  outgoing-service cutoff under the current amendment. Do not retain repeated
+  fingerprint/rejection gates in construction/setup or extend old drain budgets.
 
 ### Phase 0 - Review the intent and plan
 
@@ -597,9 +666,11 @@ adoption. Other completed source slices remain credited in the
 
 - [ ] P4bD: Complete the addressed installation's ordinary update, explicit
   repair and independent cold-foundation entry through #7758's one
-  caller-independent transaction owner, without requiring preexisting Python,
+  transaction owner: ordinary execution is foreground/cancellable, while
+  explicitly background execution and independently accepted service startup
+  retain their declared lifetimes. Do not require preexisting Python,
   Manager or a plugin runtime for foundation establishment. Preserve durable
-  outcomes, supervised-debug exclusivity and bounded manual continuation through
+  outcomes, execution-mode exclusivity and bounded manual continuation through
   stale/unsupported old state; do not replay uncertain work or require old-runtime
   approval.
 - [ ] P4bP: Connect the inventory's remaining actual installation publishers to
@@ -662,6 +733,10 @@ independent objectives, not recursively imported completion gates.
   command/serving identity, current footprint coverage and representative
   existing configuration/data.
   Qualify coordinated atomic selection only if the selected strategy uses it.
+  Inventory complete copied projects/locks/wheels/resources/local commands and
+  environments, not just package receipts. Compare fresh/existing entry
+  construction and prove a failed required stage prevents activation of the
+  addressed set, while no live data initialization or migration runs in staging.
 - [ ] V6: Qualify the selected ordinary-update and repair routes with independent
   incoming startup and truthful manual/automatic classification. Old recovery,
   unknown provenance, stale fences and predecessor cleanup cannot veto explicit
@@ -677,7 +752,8 @@ independent objectives, not recursively imported completion gates.
   outcomes; do not mandate mutation of a completed legacy venv, arbitrary old
   protocol compatibility or an exhaustive historical corruption matrix.
 - [ ] V8: Verify the required cold entry and actual transaction owner with
-  relevant native caller-loss/concurrency evidence, one writer and durable
+  the [L1-L6 cancellation and service-handoff evidence](update-service-lifetimes.md#validation-and-completion),
+  relevant native concurrency evidence, one writer and durable
   attributable results. Reuse qualified foundation components; an accepted
   request, recipe fixture or process spawn alone is not completed installation.
 - [ ] V9: Observe one unchanged regular maintenance cycle reusing the selected
@@ -701,6 +777,8 @@ independent objectives, not recursively imported completion gates.
   superseding #11121. Journal actual bounded outcomes and remaining approved
   adoption gates without claiming release/live state from a PR or transferring
   custody through a checklist disposition.
+  #11121 has current source review/CI, actual merge and containing Main credit
+  (#12353); remaining slices and adoption gates stay open in the latest journal.
 
 ## Proposal
 
@@ -726,6 +804,11 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-15 - Fast construction and bounded service cutoff reviewed](fast-construction-and-outgoing-cutoff.md#journal)
+- [2026-11-15 - Bounded Manager/Worktrees consumer qualification accepted](manager-worktrees-native-consumer.md#journal)
+- [2026-11-13 - Foreground update and service-start lifetime clarification](journal/2026/11.13%20foreground-update-service-startup.md)
+
+- [2026-11-13 - Original canonical application integration merged](journal/2026/11.13%20canonical-application-integration.md)
 - [2026-11-12 - Composition delivered and complete preparation integration](journal/2026/11.12%20complete-preparation.md)
 - [2026-11-11 - Bounded public metadata acquisition delivered](journal/2026/11.11%20bounded-metadata-acquisition.md)
 

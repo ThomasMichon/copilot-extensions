@@ -9,6 +9,10 @@ import yaml
 from . import config as cfg, repos
 
 
+class RepositoryUnconfigured(ValueError):
+    """No anchor exists for a standalone metadata reader."""
+
+
 def _mapping(path: Path) -> dict:
     try:
         text = path.read_text(encoding="utf-8")
@@ -96,10 +100,33 @@ def configured_repository_paths(
                     raise ValueError(f"Repository anchor must be absolute for hosting inspection: {name!r}")
             configured[name] = declared_path.resolve()
     if project not in configured:
-        raise ValueError(f"No repository configured for active project {project!r}")
+        raise RepositoryUnconfigured(f"No repository configured for active project {project!r}")
     return configured
 
 
 def configured_repositories(project: str) -> frozenset[str]:
     """Read declared membership without loading repository policy or Git."""
     return frozenset(configured_repository_paths(project))
+
+
+def configured_registry_anchor(project: str, anchor: Path) -> Path:
+    """Prefer the selected checkout, then an explicitly bound knowledge registry."""
+    if any((anchor / name).is_file() for name in (".agent-worktrees/machines.yaml", "machines.yaml")):
+        return anchor
+    from .config_dropins import read_operator_config_fragments
+    from .config_sources import knowledge_binding_value
+
+    root = cfg.project_dir(project)
+    machine = cfg._deep_merge(
+        read_operator_config_fragments(root / "config.d"), _mapping(root / "config.yaml"),
+    )
+    binding = knowledge_binding_value(machine, _mapping(cfg.global_config_path()))
+    if not binding:
+        return anchor
+    if not cfg._PROJECT_NAME_RE.fullmatch(binding):
+        raise ValueError("Knowledge registry binding must name a registered repository")
+    entry = repos.read_registry(strict=True).repos.get(binding)
+    path = entry.local_path(cfg.detect_platform()) if entry is not None else None
+    if not path:
+        raise ValueError("Knowledge registry binding has no local checkout")
+    return Path(path).expanduser().resolve()

@@ -8,13 +8,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  METADATA_REFRESH_CLI_TIMEOUT_MS, metadataRefresher, readSessionBinding, registrationMetadata,
-  resolveMetadataAsync, runCliAsync,
-} from "../extensions/agent-bridge/metadata.mjs";
+  METADATA_REFRESH_CLI_TIMEOUT_MS, metadataRefresher, readSessionBinding, refreshRegistrationMetadata,
+  registrationMetadata, resolveMachineAsync, resolveMetadataAsync, runCliAsync,
+} from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs";
+import { machineLookup, executionObservation } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/machine-context.mjs";
+import { serializedRegister } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
 
 test("selected receiving metadata keeps its provider scope without inventing guest ownership", async () => {
-  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+  const { metadataRefresher } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs");
   const meta = await resolveMetadataAsync({
+    extensionPluginRoot: fileURLToPath(new URL("../", import.meta.url)),
     cwd: process.cwd(), env: {
       AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: fileURLToPath(new URL("../", import.meta.url)),
       AGENT_BRIDGE_SCOPE_ID: "provider-workspace@selected-venue",
@@ -34,6 +37,7 @@ test("selected receiving metadata keeps its provider scope without inventing gue
 
 test("receiving metadata refuses another plugin root rather than querying guest Worktrees", async () => {
   await assert.rejects(resolveMetadataAsync({
+    extensionPluginRoot: fileURLToPath(new URL("../", import.meta.url)),
     env: {
       AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: fileURLToPath(new URL("../../agent-remote-driver/", import.meta.url)),
       AGENT_BRIDGE_SCOPE_ID: "scope",
@@ -213,15 +217,15 @@ test("resolveMetadataAsync does not invent a logical machine from a physical hos
 // still report the bit-identical start time, so the bridge can compare start
 // times exactly (no drift window a reused pid could slip through).
 test("a reloaded metadata module reports the same process start time exactly", async () => {
-  const first = (await import("../extensions/agent-bridge/metadata.mjs")).processIdentity();
-  const reloaded = await import(`../extensions/agent-bridge/metadata.mjs?reload=${Date.now()}`);
+  const first = (await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs")).processIdentity();
+  const reloaded = await import(`../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs?reload=${Date.now()}`);
   assert.equal(reloaded.processIdentity().process_started_at, first.process_started_at);
   assert.equal(reloaded.processIdentity().pid, process.pid);
 });
 
 
 test("metadataRefresher fills in a worktree the load-time lookup missed, with backoff", async () => {
-  const { metadataRefresher, METADATA_RETRY_MIN_MS } = await import("../extensions/agent-bridge/metadata.mjs");
+  const { metadataRefresher, METADATA_RETRY_MIN_MS } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs");
   const state = { meta: { machine: "m1", cwd: "/w", worktree_id: null, repo: null, branch: "b" } };
   let t = 0;
   const answers = [null, { worktree_id: null, repo: null }, { worktree_id: "wt-1", repo: "proj", machine: "other" }];
@@ -242,8 +246,8 @@ test("metadataRefresher fills in a worktree the load-time lookup missed, with ba
   assert.equal(calls, 3);
 });
 
-test("metadataRefresher never replaces a known identity", async () => {
-  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+test("metadataRefresher never replaces a known association", async () => {
+  const { metadataRefresher } = await import("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/metadata.mjs");
   const state = { meta: { machine: "m1", worktree_id: "pinned@cs", repo: "proj" } };
   let calls = 0;
   const refresh = metadataRefresher(state, async () => { calls += 1; return { worktree_id: "other" }; }, () => 0);
@@ -252,18 +256,25 @@ test("metadataRefresher never replaces a known identity", async () => {
   assert.equal(state.meta.worktree_id, "pinned@cs");
 });
 
-test("metadataRefresher recovers the logical machine even when worktree and project are known", async () => {
-  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
-  const state = { meta: { machine: null, worktree_id: "wt-1", repo: "proj" } };
-  let calls = 0;
-  const refresh = metadataRefresher(state, async () => {
-    calls += 1;
-    return { machine: "host-wsl", worktree_id: "other", repo: "other" };
-  }, () => 0);
-  assert.equal(await refresh(), true);
-  assert.deepEqual(state.meta, { machine: "host-wsl", worktree_id: "wt-1", repo: "proj" });
-  assert.equal(await refresh(), false);
-  assert.equal(calls, 1);
+test("every serialized registration refreshes machine naming before posting, including loss of mapping", async () => {
+  const state = { sessionId: "session", meta: { machine: "stale-native", worktree_id: "wt-1", repo: "proj" } };
+  const names = ["host-wsl", "renamed-guest", null];
+  const bodies = [];
+  const register = serializedRegister(state, async () => {
+    bodies.push(await refreshRegistrationMetadata(state, async () => names.shift()));
+    return true;
+  });
+  await register();
+  await register();
+  await register();
+  assert.deepEqual(bodies.map((body) => body.machine), ["host-wsl", "renamed-guest", null]);
+  assert.equal(bodies[1].worktree_id, "wt-1");
+  assert.equal(bodies[1].repo, "proj");
+  assert.equal(bodies[2].clear_targeting_metadata, true);
+  assert.equal(bodies[2].worktree_id, null);
+  assert.equal(state.meta.worktree_id, "wt-1");
+  await refreshRegistrationMetadata(state, async () => { throw new Error("offline"); });
+  assert.equal(state.meta.machine, null);
 });
 
 test("an unresolved machine cannot register an unqualified worktree lineage", () => {
@@ -289,8 +300,7 @@ test("incomplete project or worktree metadata also clears the old lineage", () =
   }
 });
 
-// --- sessionStart worktree binding (the identity agent-worktrees' hook
-// already stamped into this session's state folder) ---
+// --- sessionStart association (legacy naming fields are never authority) ---
 
 // A disposable Copilot home (COPILOT_HOME) and user home, so the binding
 // lookup never touches the real profile.
@@ -342,15 +352,19 @@ test("a timed-out CLI lookup no longer leaves the session untargetable when its 
   const sessionId = randomUUID();
 
   // Without a binding, every `agent-worktrees get` times out: no identity.
-  const before = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId, timeoutMs: 1_000 });
+  const before = await resolveMetadataAsync({
+    cwd: cli.cwd, env, sessionId, timeoutMs: 1_000, machineResolver: async () => null,
+  });
   assert.equal(cli.called(), true);
   assert.deepEqual([before.machine, before.worktree_id, before.repo], [null, null, null]);
   assert.equal(registrationMetadata(before).clear_targeting_metadata, true);
 
   write(sessionId, bindingFor(sessionId));
-  const after = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId, timeoutMs: 1_000 });
+  const after = await resolveMetadataAsync({
+    cwd: cli.cwd, env, sessionId, timeoutMs: 1_000, machineResolver: async () => "host-wsl",
+  });
   assert.equal(after.worktree_id, "wt-bound");
-  assert.equal(after.machine, "host-bound");
+  assert.equal(after.machine, "host-wsl");
   assert.equal(after.repo, "proj-bound");
   assert.equal(after.branch, "main");
   const wire = registrationMetadata(after);
@@ -364,9 +378,11 @@ test("a fully bound session spawns no agent-worktrees lookup at all", async (t) 
   const sessionId = randomUUID();
   write(sessionId, bindingFor(sessionId), { underUserHome: true });
 
-  const meta = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId });
+  const meta = await resolveMetadataAsync({
+    cwd: cli.cwd, env, sessionId, machineResolver: async () => "host-wsl",
+  });
 
-  assert.deepEqual([meta.machine, meta.worktree_id, meta.repo], ["host-bound", "wt-bound", "proj-bound"]);
+  assert.deepEqual([meta.machine, meta.worktree_id, meta.repo], ["host-wsl", "wt-bound", "proj-bound"]);
   assert.equal(cli.called(), false);
 });
 
@@ -395,10 +411,11 @@ test("a binding that lands after registration is picked up by the refresher with
   assert.equal(await refresh(), false);
   state.sessionId = lateId;
   assert.equal(await refresh(), true);
+  await refreshRegistrationMetadata(state, async () => "host-wsl");
 
   assert.equal(lookups.length, 1); // filled from the file, inside the CLI backoff
   assert.deepEqual(state.meta, {
-    machine: "host-bound", cwd: "/w", worktree_id: "wt-bound", repo: "proj-bound", branch: "b",
+    machine: "host-wsl", cwd: "/w", worktree_id: "wt-bound", repo: "proj-bound", branch: "b",
   });
   assert.equal(registrationMetadata(state.meta), state.meta);
   assert.equal(await refresh(), false);
@@ -418,8 +435,7 @@ test("a binding for another session, or a malformed one, is ignored", async (t) 
 
   // Unusable fields are dropped one by one; an anchor's identity stays the CLI's.
   write(sessionId, bindingFor(sessionId, { worktreeId: "@anchor", project: "../escape" }));
-  assert.deepEqual(await readSessionBinding(sessionId, { env }),
-    { worktree_id: null, machine: "host-bound", repo: null });
+  assert.equal(await readSessionBinding(sessionId, { env }), null);
 
   assert.equal(await readSessionBinding("../outside", { env }), null);
   assert.equal(await readSessionBinding(null, { env }), null);
@@ -438,9 +454,11 @@ test("AGENT_BRIDGE_SCOPE_ID still outranks the binding's worktree", async (t) =>
   const sessionId = randomUUID();
   write(sessionId, bindingFor(sessionId));
 
-  const meta = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId });
+  const meta = await resolveMetadataAsync({
+    cwd: cli.cwd, env, sessionId, machineResolver: async () => "host-wsl",
+  });
   assert.equal(meta.worktree_id, "anchor-example-web@cs-1");
-  assert.equal(meta.machine, "host-bound");
+  assert.equal(meta.machine, "host-wsl");
   assert.equal(meta.repo, "proj-bound");
   assert.equal(cli.called(), false);
 
@@ -463,4 +481,98 @@ test("an identity still incomplete after a few lookups is logged once", async ()
   }
   assert.equal(logs.length, 1);
   assert.match(logs[0], /after 3 lookups \(missing: worktree_id, repo\)/);
+});
+
+test("reporter observations distinguish native, guest and container substrates", async () => {
+  const observed = (options) => executionObservation({
+    host: "observed-host", kernel: "Microsoft WSL2",
+    read: async (path) => path.endsWith("cgroup") ? "0::/init.scope" : "",
+    isFile: async () => false, ...options,
+  });
+  assert.deepEqual(await observed({ platform: "win32" }), {
+    hostname: "observed-host", environment: "windows",
+  });
+  assert.equal((await observed({ platform: "linux", kernel: "generic" })).environment, "linux");
+  assert.equal((await observed({ platform: "linux" })).environment, "wsl");
+  assert.equal((await observed({ platform: "linux", isFile: async () => true })).environment, "linux");
+  assert.equal((await observed({
+    platform: "linux", read: async (path) => path.endsWith("cgroup") ? "/docker/id" : "",
+  })).environment, "linux");
+});
+
+test("private-cgroup container roots cannot inherit WSL naming or an unsafe legacy lookup", async (t) => {
+  const cli = useHangingAgentWorktrees(t);
+  for (const filesystem of ["overlay", "fuse.fuse-overlayfs"]) {
+    const observation = await executionObservation({
+      platform: "linux", host: "host", kernel: "Microsoft WSL2", isFile: async () => false,
+      read: async (path) => {
+        if (path.endsWith("cgroup")) return "0::/";
+        if (path.endsWith("mountinfo")) return `29 23 0:25 / / rw - ${filesystem} root rw`;
+        return "Microsoft WSL2";
+      },
+    });
+    assert.equal(observation.environment, "linux");
+    const lookup = machineLookup(async (_method, path) => {
+      assert.equal(path, "/api/v1/execution-context?hostname=host&environment=linux");
+      return { status: 404, ok: false };
+    }, { observe: async () => observation });
+    assert.equal(await resolveMachineAsync({ cwd: cli.cwd, lookup }), null);
+    assert.equal(cli.called(), false);
+  }
+});
+
+test("ambiguous private roots remain unresolved unless additional WSL evidence is present", async () => {
+  const options = {
+    platform: "linux", host: "host", kernel: "Microsoft WSL2",
+    read: async (path) => path.endsWith("cgroup") ? "0::/" : "",
+    isFile: async () => false,
+  };
+  assert.equal(await executionObservation(options), null);
+  assert.equal((await executionObservation({
+    ...options, isFile: async (path) => path.endsWith("/WSLInterop"),
+  })).environment, "wsl");
+});
+
+test("native Linux overlay roots retain the safe older-provider fallback", async () => {
+  const observation = await executionObservation({
+    platform: "linux", host: "host", kernel: "generic-linux", isFile: async () => false,
+    read: async (path) => path.endsWith("mountinfo")
+      ? "29 23 0:25 / / rw - overlay root rw" : "generic-linux",
+  });
+  assert.equal(observation.environment, "linux");
+  const lookup = machineLookup(async () => ({ status: 404, ok: false }), {
+    observe: async () => observation,
+  });
+  assert.equal(await lookup(), undefined);
+});
+
+test("live naming uses the reporter and permits CLI fallback only for an absent provider route", async (t) => {
+  const cli = useHangingAgentWorktrees(t);
+  const observation = { hostname: "host", environment: "wsl" };
+  const requests = [];
+  const responses = [
+    { status: 200, ok: true, json: async () => ({
+      schema: "agent-bridge.execution-context/v1",
+      context: { ...observation, execution_machine: "guest-one" },
+    }) },
+    { status: 503, ok: false },
+    { status: 200, ok: true, json: async () => ({ machine: "stale" }) },
+    { status: 200, ok: true, json: async () => ({
+      schema: "agent-bridge.execution-context/v1",
+      context: { ...observation, hostname: "different", execution_machine: "guest" },
+    }) },
+    { status: 404, ok: false },
+  ];
+  const lookup = machineLookup(async (method, path) => {
+    requests.push([method, path]);
+    return responses.shift();
+  }, { observe: async () => observation });
+  const resolve = () => resolveMachineAsync({ cwd: cli.cwd, timeoutMs: 1_000, lookup });
+  assert.equal(await resolve(), "guest-one");
+  for (let index = 0; index < 3; index += 1) assert.equal(await resolve(), null);
+  assert.equal(cli.called(), false);
+  assert.equal(await resolve(), null);
+  assert.equal(cli.called(), true);
+  assert.ok(requests.every(([method, path]) =>
+    method === "GET" && path === "/api/v1/execution-context?hostname=host&environment=wsl"));
 });

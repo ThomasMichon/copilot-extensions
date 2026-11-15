@@ -175,6 +175,7 @@ def test_legacy_adapter_controller_requires_exact_script_and_root(
     "ancestor-module", "additional-module", "without-custody",
     "cache-installed", "cache-unsealed", "cache-extended",
     "cache-foreign", "cache-invalid-generation", "cache-other-flag", "cache-extra-flag",
+    "no-write-isolated", "no-write-legacy", "no-write-extra-flag", "no-write-witness-mismatch",
 ))
 def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
@@ -305,6 +306,13 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
         (64206, [sys.executable, "-I", str(runner_source), str(Custody.root), request.id, witness, str(procutil)]),
         (64207, driver(original, "")), (64208, powershell(original)),
     ]
+    if mutation.startswith("no-write-"):
+        shim = next(argv for pid, argv in actors if pid == 64206)
+        shim[2:2] = ["-B"] if mutation == "no-write-legacy" else ["-S", "-B"]
+        if mutation == "no-write-extra-flag":
+            shim.insert(4, "-B")
+        elif mutation == "no-write-witness-mismatch":
+            shim[-2] = "not-the-scoped-fixture"
     if mutation.startswith("cache-"):
         shim = next(argv for pid, argv in actors if pid == 64206)
         scope = "unsealed-" + "a" * 32 if mutation == "cache-unsealed" else "installed-" + "b" * 64
@@ -388,6 +396,7 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     if mutation in {
         "none", "minimal", "self-stage", "sparse-census", "remove-runtime", "positional-original",
         "cache-installed", "cache-unsealed", "cache-extended",
+        "no-write-isolated", "no-write-legacy",
     }:
         MODULE.refuse_consumers(payload, "agent-worktrees", root, shell, profile, **kwargs)
         assert native_proofs and checks.count("driver") == 2 and checks.count("lease") == 2

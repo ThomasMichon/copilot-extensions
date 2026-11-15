@@ -91,6 +91,7 @@ class _SessionStartMixin:
         creation_session_id: str | None = None,
         creation_before_launch: Callable[[], Awaitable[None]] | None = None,
         acquisition_launch: LocalLaunchOwner | None = None,
+        dispatch_origin: dict | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -120,6 +121,9 @@ class _SessionStartMixin:
         """
         if self._draining:
             raise DaemonDrainingError("session")
+        from .dispatch_origin import capture
+
+        dispatch_origin = capture(dispatch_origin, target)
         from .protocol import FAILED_ACP_HANDSHAKE_FAULT
 
         if parity_fault not in {None, FAILED_ACP_HANDSHAKE_FAULT}:
@@ -306,8 +310,9 @@ class _SessionStartMixin:
                 "mcp_servers": session.mcp_servers,
                 **({"model_override": model} if model is not None else {}),
                 **({"effort_override": effort} if effort is not None else {}),
+                **({"dispatch_origin": dispatch_origin} if dispatch_origin is not None else {}),
             })
-            if session.mcp_servers or model is not None or effort is not None else None
+            if session.mcp_servers or model is not None or effort is not None or dispatch_origin is not None else None
         )
         self._db.create_session(
             session_id=session_id,

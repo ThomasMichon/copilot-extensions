@@ -1,0 +1,9 @@
+{
+  "comment": "Validate original allocation results through receiving proof instead of optional worktree machine labels",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

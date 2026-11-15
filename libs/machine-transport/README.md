@@ -57,8 +57,15 @@ resolved -- network call to reach a host that is actually the caller itself.
   to a qualified explicit identity because topology has no dedicated guest
   entry. Its platform detector also treats container roots identified by
   Docker/Podman markers or `/proc/1/cgroup` as plain `linux` even when the
-  shared kernel string mentions Microsoft/WSL, so containerized work on a
-  WSL host never acquires a spurious guest identity.
+  shared kernel string mentions Microsoft/WSL. Markerless private-cgroup
+  containers with an overlay or fuse-overlay root are also `linux`.
+  A Microsoft kernel with no container-root evidence and only root/missing
+  cgroup paths requires the actual `WSLInterop` proc entry; otherwise detection
+  raises `ValueError` rather than assigning an unconfirmed guest identity.
+  Inherited WSL environment variables are not evidence. Native Linux does not
+  need a mount-table read; confirmed container markers retain the fast path.
+  Worktrees' pre-runtime admission copy is generated from this same stdlib
+  module by [the admission-helper synchronizer](../../tools/sync-execution-platform.py).
 - **`transport`** -- `resolve_ssh_target()` (pick the best SSH alias/shell
   for an entry), `wrap_remote_command()` (POSIX login-shell wrapping via
   `remote_login_shell`, non-POSIX shells passed through untouched), and
@@ -90,6 +97,12 @@ facts: observed `hostname`, physical `machine`, actual `environment`, one-term
 `execution_machine` and optional `customization_key`. The caller supplies the
 current OS/substrate observations and, when applicable, its existing configured
 binding. Missing-file handling and configuration provenance remain caller-owned.
+With no explicit configured binding, a registry entry's declared hostname is
+authoritative for observation matching. A logical key, alias or physical-family
+sibling cannot override a different explicit hostname. An otherwise-derived
+name that collides with that foreign entry is rejected, not registered under
+the entry's identity. Explicit installation bindings retain their separate
+selection semantics.
 An empty map or a map containing only other machines does not deny this local
 context. A matching map can customize physical and execution names. An observed
 physical hostname resembling `-wsl`, `-win` or a parenthesized environment label

@@ -29,6 +29,15 @@ only protection of each machine's local copy is machine-bound.
 - **Delegates:** none
 - **Handoff:** effort pointer, current slice and outstanding validation
 
+- **Configured-vault continuation:** The attribution owner retains this effort;
+  Worktrees owns setup/status/verification and Vault exclusively owns key,
+  database, cache and unlock operations. Existing adopter/transport owners retain
+  their resources and original approvals. Later two-target cache/envelope
+  progress does not transfer custody or authorize additional operations; both
+  unknown diagnostics retain their original identities. Local standardized setup
+  remains independent of remote Gateway availability. No new transport, key,
+  credential, installation or rollout action follows from this intake.
+
 ## Context
 
 The root codename layer landed in #5458 and encrypted identity in #5578.
@@ -131,6 +140,46 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
   An existing configured agent-vault KeePass database is the starting point;
   private adopter scripts and remote transport are not required.
 
+#### Configured-vault consumer and continuing adoption clarification
+
+- [ ] **S6068-P1.** Reconcile the delivered standardized local setup source with
+  remaining promoted-release and authorized installed-consumer acceptance rather
+  than treating #6782 as missing implementation. Preserve the exact owning vault
+  invocation, named database/group/installation cell and nonsecret persistent
+  consumer configuration across fresh processes. Report conflicting overrides and
+  configured-source failure without legacy-key fallback. Verify the actual normal
+  cache-only key reader, locked-vault fresh-process consumption and portable
+  encryption; a bypassing probe or populated cache alone is insufficient.
+- [ ] **S6068-P2.** Retain first-owner initialization ONLY after separately
+  confirmed authoritative absence on the designated synchronized owner database,
+  using serialized create-only behavior and authoritative reread after ambiguous
+  writes. Subsequent machines reuse the common owner key. Missing, locked,
+  malformed, failed or unsynchronized state is not absence; never allocate a
+  divergent machine key, overwrite existing key material, export the master
+  password or expose secrets in argv, logs, receipts or plaintext files.
+- [ ] **S6068-P3.** Preserve the two historically authorized protected-cache,
+  common-key challenge and persisted-envelope partials without claiming persistent
+  normal-consumer configuration or fresh-process readiness. Resolve that remaining
+  evidence through existing custody. Reconcile both unknown diagnostic submissions
+  under their original identities before any separately authorized retry; do not
+  substitute new transport, credential or secret operations. Original approvals
+  retain their bounds, not a fresh grant inferred from these records.
+
+##### Configured-vault consumer local validation
+
+- [ ] **S6068-V1.** Distinguish configured local setup, existing-entry cache
+  population, exact vault/database/group/cell persistence and override visibility,
+  actual fresh-process locked-vault cache-only reading/portable encryption,
+  promoted release and authorized installed readiness. Preserve explicit
+  authoritative-absence initialization, serialized create-only/reuse-only behavior,
+  no-overwrite/UNKNOWN controls, legacy-token compatibility and secret-free errors;
+  record unavailable clean-room/native tiers honestly.
+- [ ] **S6068-V2.** Retain the independent shared-key multi-installation proof and
+  continuing adoption obligation. Existing remote cache/envelope results are not
+  persistent normal-consumer configuration proof. Verify retained evidence and
+  original unknown diagnostic custody before any separately authorized retry;
+  neither local fixture success nor a transport failure changes adoption authority.
+
 ## Validation Plan
 
 - [x] Root identity round trips from a multi-repo ownership chain while public
@@ -156,6 +205,15 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
 - [ ] Land every implementation PR, reconcile this plan and distinguish
   merged-to-`dev`, promoted-to-`main` and locally installed states.
 
+- [ ] **S6068-G.** Resolve the configured local setup, exact vault/database/group/
+  cell and override, normal fresh-process locked-vault cache-only/portable-token,
+  explicit first-owner/create-only/reuse-only and secret-free acceptance above AND
+  the independent shared-key multi-installation/adoption obligations. Credit
+  delivered source and historical two-target cache/envelope partials separately
+  from promoted release and authorized installed/normal-consumer readiness. Both
+  unknown diagnostics retain original custody and require reconciliation before a
+  separately authorized retry; no new transport or credential operation is granted.
+
 ## Proposal
 
 This proposal specifies behavior and validation
@@ -163,6 +221,29 @@ obligations, not a preselected encryption implementation or a deployment action.
 No production secret is read or written by the planning slice.
 
 ## Journal
+
+### 2026-11-13 - Configured consumer and adoption evidence retained
+
+The additive S6068 Plan/local/global Validation retains the configured local
+setup and continuing adoption contract without changing incumbent checks.
+#6782's delivered standardized setup source remains credited; source,
+containing release, authorized installed readiness and normal fresh-process
+consumer proof are distinct. Earlier pending-review/source-progress statements
+remain historical evidence, not grounds to recreate the delivered capability.
+
+Qualified #6068 comment6175373765 records later authorization and bounded
+protected-cache population on two remote targets, a common-key challenge and
+persisted-envelope decoding. Those partials supersede earlier no-population/
+no-authorization observations for that recorded operation, not the remaining
+persistent consumer-configuration and fresh-process proof. The two later
+diagnostic submissions remain UNKNOWN and must be reconciled by original
+identity before a separately authorized retry.
+
+The original approvals retain their resource, operation and safety bounds.
+Neither the historical blanket wording nor this receipt supplies a new grant:
+transport failure is not a standing adoption prohibition, and recorded success
+does not authorize fresh credential, transport, cache or key effects. Parent
+Active status, shared-key adoption and every remaining validation duty persist.
 
 ### 2026-10-10 — Reviewed plan and origin implementation
 

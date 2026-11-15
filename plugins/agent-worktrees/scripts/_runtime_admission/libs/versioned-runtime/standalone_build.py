@@ -14,6 +14,7 @@ RUNTIME_RESOURCES = {
     "versioned_runtime_construction.py": "versioned_runtime_construction.py",
     "versioned_runtime_publication.py": "versioned_runtime_publication.py",
     "versioned_runtime_source.py": "versioned_runtime_source.py",
+    "versioned_runtime_cache.py": "versioned_runtime_cache.py",
 }
 APPLICATION_RESOURCES = {
     "worktree_manager": (
@@ -26,6 +27,7 @@ APPLICATION_RESOURCES = {
         "scripts/runtime-source-tools/**/*",
         "scripts/runtime-input-provider/**/*",
         "scripts/libs/payload-invocation/*.py",
+        "scripts/libs/versioned-runtime/standalone_build.py",
         "bin/**/*",
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),
@@ -49,7 +51,7 @@ def application_resources(project, package):
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
         if path.is_file()
-        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk"}
+        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
     }
     sources.update({
         path.relative_to(project).as_posix(): path

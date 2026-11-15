@@ -96,6 +96,18 @@ jobs:
       if: steps.code-impact.outputs.run == 'true'
       timeout-minutes: 6
       run: python tools/typecheck.py --enforced
+    - name: Whole-file strict new-code ratchet
+      if: >-
+        steps.code-impact.outputs.run == 'true' &&
+        (github.event_name == 'pull_request' ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/dev'))
+      timeout-minutes: 6
+      env:
+        BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD: ${{ github.sha }}
+      run: |
+        python tools/typecheck.py --new-code --base "$BASE" --head "$HEAD" --prepare
+        python tools/typecheck.py --new-code --base "$BASE" --head "$HEAD"
     - name: Version consistency
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-version-consistency.py

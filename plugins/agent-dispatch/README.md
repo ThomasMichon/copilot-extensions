@@ -138,7 +138,8 @@ closed rather than falling back to ordinary coordinator discovery. Global
 options require their full spelling, so task-worker flags do not intercept
 existing subcommand flags such as `claim --task` or `doctor --task`.
 
-Only `show`, `payload`, `start`, `progress`, `heartbeat`, `complete`, and
+Only `show`, `payload`, `start`, `progress`, `heartbeat`, `complete`,
+[`relevance-closeout`](docs/relevance-closeout-worker.md), and
 `abandon --permit` are accepted, for the projected task only. `show` returns
 the authorized task snapshot without separate progress-history, attachment,
 or worktree-tracking reads. `heartbeat` retains its explicit worker positional;
@@ -146,7 +147,9 @@ other owner verbs use the projected worker when omitted. Task abandonment
 reports the worker's own failure directly, not a fleet/session cleanup request.
 Fleet/history/cleanup options are refused. The coordinator independently
 checks the signed task, owner, session, generation, expiry and fencing epoch
-on every request; terminal transitions invalidate the grant.
+on every request; terminal transitions invalidate ordinary task authority.
+The captured-original-owner closeout routes retain their documented exact
+acknowledgement-replay exception, not generic terminal-task access.
 Task-only `start` uses the already-bound native session and never returns a
 new credential; grant renewal remains a trusted-supervisor operation.
 The coordinator's fencing floor is retained in the task queue database.
@@ -492,14 +495,19 @@ status-core summary; agent-worktrees conduct and regular
 `agent-worktrees status --summary` remain authoritative for ongoing disposition
 and retain their normal cadence. Agent-dispatch maintains no parallel store.
 
-Focus reads use the shared dependency-free identity codec. For explicit
-version-1 Worktrees rows, `focus --list --machine <owner>` selects the execution
-owner, not the physical host shared by native and guest environments. Focus JSON
-keeps its one-term `machine` owner and includes the original validated tuple
-under `machine_identity`. Unversioned rows keep the historical output shape.
-Malformed explicit tuples fail visibly before filtering or summary omission,
-rather than returning an apparently empty or partial focus view. This changes
-neither stored worktree records nor task ownership, queues or transport routing.
+Focus reads take current names from Worktrees' optional version-1
+[`reporting_context`](../agent-worktrees/docs/engine-picker-contract.md#live-reporting-context),
+not from per-row machine/environment fields. `focus --list --machine <owner>`
+selects the serving host's execution owner, not the physical host shared by
+native and guest environments. Focus JSON keeps its one-term `machine` owner
+and projects the current tuple under `machine_identity` using the shared
+dependency-free codec. A rename takes effect on the next read without changing
+the rows. Older providers without the envelope use one live `get machine`
+probe for the entire local listing and omit the unavailable tuple. An invalid
+or unavailable envelope fails visibly before filtering or summary omission;
+it never revives stored names or falls back to another identity source.
+This changes neither stored worktree records nor task ownership, queues or
+transport routing.
 Checkout-based PowerShell stamping embeds the codec and rewrites its source
 mapping into the standalone snapshot; installer cache refresh includes the
 declared library on both platforms.
@@ -1298,6 +1306,12 @@ lookback window without double-creating.
 
 For election-versus-production diagnostics and explicit renewal-fenced
 migration recovery, see [Emitter recovery](docs/emitter-recovery.md).
+Task-authoring command emitters can opt into
+[retained-receipt relevance checks](docs/emitter-relevance.md) without a new daemon.
+Companion evaluators can opt into
+[coordinator-owned periodic reconsideration](docs/periodic-relevance.md).
+An opted-in [managed creation carrier](docs/managed-command-emitters.md) resolves
+an existing producer grant separately from credential-free source output.
 
 A domain producer that exposes an idempotent one-shot command can be declared as
 an **emitter** and run on a cadence by the singleton supervisor. The supervisor
@@ -2492,6 +2506,9 @@ explicit repository policy. An identity that cannot approve or land records a
 visible blocked/terminal outcome instead of retrying indefinitely.
 
 ### Emitter command receipts (`agent-dispatch emitter receipts`)
+
+For optional authoritative source checks over these receipts, see
+[emitter relevance](docs/emitter-relevance.md).
 
 A `task_output=json` command-emitter authors tasks on every tick, but the
 resulting ids are otherwise visible for exactly that tick and then gone. A

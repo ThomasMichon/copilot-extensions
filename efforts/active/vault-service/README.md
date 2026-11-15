@@ -4,9 +4,26 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** planning PR, then independently admitted per-slice PRs to `dev`
 - **Created:** 2026-10-24
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Vault service](../../../visions/vault/README.md), all Features and Behaviors
 - **Umbrella issue:** #8729
+
+## Goal
+
+Deliver the explicitly selected [federated-relay vertical
+slice](federated-relay.md) in the existing `agent-vault` service: consume a
+Controller-owned local Gateway conduit, establish the authenticated outbound
+service channel, advertise auth-request readiness and return authorized provider
+results to an actual bound consumer. Preserve independent local Vault operation
+and all remaining credential/transaction, interaction and deployment gates.
+The slice is not complete at a protocol declaration, library, connection or PR.
+
+Make the complete reviewed Vault credential/transaction and independent
+deployment vision realizable through the unchanged Guiding Intent below.
+The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
+requires accepted setup/start and the service tree to outlive updater
+cancellation. Outside the bounded slice this remains a proposal: architecture
+review, owner/slice admission, credential and deployment gates are not waived.
 
 ## Guiding Intent
 
@@ -16,34 +33,44 @@ lifecycle and durable authentication transactions; Manager remains stateless.
 The standard Gateway-backed Fleet supplies a central container, while local
 Vault remains independently installable and optionally federated.
 
-**This contribution is initial architecture and effort authoring only.**
-The proposed implementation sequence is not execution or deployment consent.
-The effort stays Draft until the operator accepts the architecture and admits
-implementation owners and slices. No login, browser/native interaction,
-credential mutation or service installation is authorized by this document.
+The initial contribution was architecture and effort authoring only, with
+implementation-owner admission pending. The 2026-11-14 direct
+implementation assignment now selects only the bounded federated-relay slice
+below for source implementation and isolated qualification after its plan clears
+normal review. It does not activate a deployed service, approve real credential
+enrollment or admit the remaining platform/UI/migration campaign by implication.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | `patient-dial` | Initial architecture and plan authoring/PR stewardship only | Planning PR and #8729 |
-| Implementation owners | Unassigned; admission pending, no execution claim | Future explicit assignment through #8729 |
+| Federated-relay implementer | Existing `agent-vault` service/channel/provider composition and isolated consumer qualification only | Scoped claim in #8729 and implementation PRs |
+| Implementation owners | Unassigned outside the bounded federated-relay slice | Future explicit assignment through #8729 |
 
 ## Coordination
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Coordination -->
 
-The proposed finite #3979 headless/provider-miss family retains the actual
+The separate proposed finite #3979 headless/provider-miss family retains the actual
 local Vault/provider credential custodian and optional standalone,
 transport, broker, browser and native-interaction owners. `patient-dial`
 still owns planning publication ONLY; P0 design/operator review and
-implementation-owner admission remain pending. A Draft plan neither grants
+implementation-owner admission for that family remain pending. A plan neither grants
 unlock permission nor transfers master material, credentials or resources.
+
+The inherited #3980/#3981/#5918/#5940/#5959 lanes retain their separate
+machine/SSH-routing, endpoint/provenance/cell, installer/runtime/singleton,
+transport and adopter custodians. This documentary intake assigns nobody
+and moves no claim. P0 operator design review and implementation admission
+remain design/execution gates, not prerequisites to recording these
+unchecked requirements.
 
 - **Topology:** one planning PR, then bounded per-slice PRs; source branches
   target `dev` and follow normal review and CI.
-- **Host (owns PRs):** `patient-dial` owns only this planning publication.
-  Implementation PR ownership must be assigned before work starts.
+- **Host (owns PRs):** `patient-dial` owned the initial planning publication;
+  the federated-relay implementer owns its admitted source PRs. Other
+  implementation PR ownership must be assigned before work starts.
 - **Delegates:** none. Existing credential, Fleet, installer, service and
   presentation owners retain custody; a plan is not a transfer.
 - **Handoff:** operator review accepts or revises the proposal, then names
@@ -51,6 +78,15 @@ unlock permission nor transfers master material, credentials or resources.
   No planning worktree is bound to the entire future implementation campaign.
 - **Tracker:** #8729 remains open across vision and planning merges.
   Planning completion never means the service is implemented or this effort Done.
+
+### Admitted federated-relay slice
+
+The 2026-11-14 source assignment and scoped issue claim admit the implementer
+above for [the bounded relay plan](federated-relay.md), not the entire P0-P8
+campaign or another contributor's native execution/custody work. Reuse
+`agent-vault`'s lifecycle and the existing Gateway channel/account custodian;
+the deployment Controller retains tunnel ownership. No source PR or isolated
+test grants live enrollment, interactive authentication, installation or rollout.
 
 ## Context
 
@@ -73,7 +109,7 @@ No `services/vault` implementation is established by this effort.
 
 ## Request
 
-The latest operator request, verbatim and public-safe:
+The initial operator request, verbatim and public-safe:
 
 > Right. Manager is intended to be a stateless UX surface, not the owner of the flow or the credentials. It should surface the request, show necessary information, and provide a way to launch a browser to perform interactive flows, or be able to launch the correct WAM-backed flow, such as flows through GCM or Windows-native Entra. But the Vault service itself should own the credential and transaction management.
 >
@@ -87,13 +123,29 @@ may retain physical custody under Vault's logical credential and transaction
 authority. These requirements are already captured in the reviewed vision and
 #8729. Planning does not authorize vendor login, native interaction or cutover.
 
+**2026-11-14 implementation assignment (public-safe summary):** build the auth
+relay in the existing `agent-vault` service as an explicitly selected
+federated-relay mode. The deployment Controller exposes its protected Gateway
+route locally; Vault consumes that conduit and announces auth-request readiness.
+Drive through an actual service/provider/consumer flow, not a connection-only
+or source-library milestone. Private adopter details are omitted rather than
+quoted into the public effort.
+
 ## Plan
+
+- [ ] Complete [R1-R4 federated-relay delivery](federated-relay.md#delivery)
+  through the real service/provider/consumer boundary; retain complete parent
+  transaction, platform, presentation and deployment acceptance separately.
+- [ ] Reflect independent accepted setup/start ownership in the proposed local
+  and central service lifecycle; retain P0 and every original implementation
+  admission gate rather than treating this alignment as permission to execute.
 
 **Agent-recommended proposal:** the phase decomposition, technical boundaries
 and validation design below are recommendations derived from the reviewed
-intent, not additional operator instructions. All implementation is unchecked
-and awaits explicit owner/slice admission. The proposed first vertical slice
-is a useful start, not a narrowing of the complete effort.
+intent, not additional operator instructions. Implementation outside the
+separately admitted R1-R4 relay slice still awaits explicit owner/slice admission.
+The original proposed local transaction slice and the admitted relay slice do
+not narrow the complete effort.
 
 ### P0 - Accept architecture and admit implementation
 
@@ -179,8 +231,10 @@ is a useful start, not a narrowing of the complete effort.
 
 ### Proposed finite headless provider-miss transaction contract
 
-_Agent-recommended P1/local transaction clarification. This effort stays
-Draft; no runtime, interaction, credential or implementation admission._
+_Agent-recommended P1/local transaction clarification. This finite family
+remains proposed outside the separately admitted federated-relay slice;
+no runtime, interaction, credential or implementation admission follows
+from retaining it._
 
 - [ ] **U3979-P1:** Keep provider-available, interactive controlling-terminal
   SSH and fully headless non-WSL SSH/provider-miss branches distinct.
@@ -198,11 +252,48 @@ Draft; no runtime, interaction, credential or implementation admission._
   exposing or relocating master material.
 - [ ] **U3979-P4:** Preserve narrowly owned local/provider/browser/native
   transactions, redacted input and honest unavailable/refused controls.
+  Preserve existing interactive unlock and cooldown behavior while
+  correcting the headless provider-miss branch.
   No mandatory broker, new executor/credential grant or whole central/
   federation/platform portfolio prerequisite is introduced for this
   finite branch.
 
+- [ ] **U3979-P5:** Resolve authorized tunnel targets (#3980) from existing
+  machine/SSH routing authority, not another registry. Fan out only after
+  verified source Vault unlock, retaining source/target authorization and
+  per-target success, denied, unknown, unreachable and partial outcomes.
+  Discovery, enrollment or an open port never authorizes master-material
+  broadcast.
+- [ ] **U3979-P6:** Preserve intentional origin-Vault selection over general
+  SSH reverse tunnels (#3981), correct database/provider-group storage
+  context, local/origin coexistence and selected-origin failure without
+  substitution of an unrelated local Vault. Keep unconfigured standalone use.
+- [ ] **U3979-P7:** For explicitly cell-scoped operations (#5918), carry and
+  validate attributable same-cell peer identity OR report unavailable.
+  Newest/unscoped advertisements, load order and missing identity are not
+  authority. Preserve ordinary unconfigured legacy WSL discovery and
+  evidenced deliberate recovery/management override.
+- [ ] **U3979-P8:** Acquire/reconcile cell-scoped process ownership before
+  socket removal, bind or endpoint/PID publication (#5940); preserve a
+  matching live incumbent. Revalidate exact owner, generation and
+  process-birth identity before retirement/cleanup, including contention,
+  PID reuse and mixed native-IPC/TCP outcomes. Preserve cold start,
+  explicit recovery and warm-secret handoff without exposing secret state.
+- [ ] **U3979-P9:** Carry bounded, secret-safe literal built-in and extension
+  transport failures through actual final command consumers (#5959).
+  Preserve later successful alternate transport and distinguish genuine
+  absence from denied, malformed, timed-out or failed routes. Generic
+  not-running output is not the cause; unknown effects permit no replay.
+
 ## Validation Plan
+
+- [ ] Qualify the [federated-relay matrix](federated-relay.md#validation):
+  actual service startup/channel/readiness/demand/result, exact grants,
+  standalone compatibility, disconnect/reconnect, uncertain delivery and
+  independently packaged installation; no source-only end-to-end claim.
+- [ ] Map the applicable [L1-L4 caller-loss cases](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
+  into the existing proposal's validation without using real credentials,
+  changing a live service or bypassing architecture/owner admission.
 
 All runtime acceptance below is **pending**, not evidence of an implementation.
 The [validation matrix](validation.md) is the detailed, agent-recommended plan.
@@ -229,22 +320,61 @@ The [validation matrix](validation.md) is the detailed, agent-recommended plan.
   needs-unlock/error/next-action counterpart, with no secret-bearing
   presentation. Boolean false/exit failure or invisible-dialog avoidance
   alone is not the result; neither is a daemon-only mock.
-- [ ] **U3979-V2:** Keep Draft/P0 design and implementation-owner admission,
+  Cover existing interactive unlock and cooldown controls without
+  weakening their behavior to make the headless case pass.
+- [ ] **U3979-V2:** Keep this family's P0 design and implementation-owner admission,
   optional standalone/broker/transport and credential/native custody
   intact. Separate source/fixture/native/installed results without making
   every unrelated parent item a finite-case prerequisite. No real unlock,
   operator ceremony, credential operation or policy selection is performed
   by this planning retention.
 
+- [ ] **U3979-V3:** Prove authorized dynamic target selection and fan-out
+  only after successful source unlock, including per-target success,
+  denied, unknown, unreachable and partial outcomes plus standalone use.
+  Plan with synthetic routing/descriptors; no live enumeration, SSH or unlock.
+- [ ] **U3979-V4:** Prove reverse-tunnel origin selection, local/origin
+  coexistence, selected-origin failure, correct storage context and
+  unconfigured standalone behavior.
+- [ ] **U3979-V5:** Cover explicit same-cell, unrelated-cell, unattributed
+  legacy, missing/corrupt record, unconfigured legacy and explicit-override
+  cases. Missing identity is not a pass.
+- [ ] **U3979-V6:** Prove custody precedes endpoint mutation under concurrent
+  acquisition, matching live incumbent, PID reuse, stale/partial/foreign
+  identity and mixed IPC/TCP binding; old cleanup cannot erase a successor.
+  Keep contained/source and separately authorized installed/native proof
+  distinct.
+- [ ] **U3979-V7:** Through actual final command consumers, cover successful
+  fallback and exhausted absent/denied/malformed/timed-out/failed routes,
+  bounded redaction and locked/scoped refusals. Installer diagnostics or
+  mocks bypassing the consumer do not satisfy this gate.
+
 ## Proposal
 
 [Architecture](architecture.md), [validation](validation.md) and
 [migration](migration.md) are the proposed initial design, not as-is service
 documentation. D1-D6 are tracked under #8729 with named validation obligations.
-The immediate next gate is operator design review and explicit implementation
-admission; publication alone does not start P1.
+The admitted relay slice has its own reviewed source and isolated-consumer
+qualification sequence. Outside it, operator design review and explicit
+implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
+
+### 2026-11-15 - Local transaction and admitted relay scopes distinguished
+
+The effort is Active for the separately admitted federated-relay slice.
+The finite U3979 family remains proposed under its own P0 design and
+implementation-owner admission; retaining its unchecked contract does not
+grant the relay implementer that other work or resume the whole campaign.
+The independent relay Goal, owner and Plan/Validation remain unchanged.
+
+### 2026-11-15 - Inherited tunnel, cell and transport lanes proposed
+
+Added ten unchecked U3979 Plan/global Validation rows and five supporting
+detailed-matrix cases for the inherited #3980/#3981/#5918/#5940/#5959 union.
+Existing headless OR acceptance, V1-V10, qualification levels, owners and
+P0/D1-D6 gates remain unchanged. Documentary review is not implementation,
+credential/native interaction, source retirement or resource transfer.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Journal -->
 

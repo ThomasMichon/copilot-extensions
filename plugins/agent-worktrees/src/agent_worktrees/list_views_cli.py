@@ -252,6 +252,16 @@ def _probe_host(
     if envelope is None:
         row["error"] = "unparseable or unexpected `list --json` output"
         return row
+    if "reporting_context" in envelope:
+        from . import worktrees_reporting
+
+        try:
+            worktrees_reporting.validate(envelope["reporting_context"])
+        except ValueError:
+            row["error"] = "malformed `list --json` reporting context"
+            row["reporting_context_error"] = True
+            return row
+        row["reporting_context"] = envelope["reporting_context"]
     row["reachable"] = True
     row[PROBE_STARTED_KEY] = started
     row["worktrees"] = envelope["worktrees"]

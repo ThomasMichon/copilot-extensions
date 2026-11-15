@@ -182,8 +182,9 @@ def test_native_parser_capability_discovery_is_passive_and_strict(capsys, monkey
 
 
 @pytest.mark.parametrize("kind", ["github", "gitea"])
+@pytest.mark.parametrize("profile", ["legacy", "direct-v1"])
 def test_actual_native_entry_and_executing_typed_credential_command(
-    tmp_path, monkeypatch, capsys, kind,
+    tmp_path, monkeypatch, capsys, kind, profile,
 ):
     from agent_worktrees import __main__ as main
 
@@ -212,22 +213,25 @@ def test_actual_native_entry_and_executing_typed_credential_command(
 
     def run(argv, **kwargs):
         reads.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, "[]" + ("\n200" if kind == "gitea" else ""), "")
+        suffix = "\n200" if kind == "gitea" or profile == "direct-v1" else ""
+        return subprocess.CompletedProcess(argv, 0, "[]" + suffix, "")
 
     monkeypatch.setattr(observation_inventory, "run_cli", run)
     monkeypatch.setattr(gitea, "run_cli", run)
     assert main.main([
         "pr-watch", "inventory", "owner/repo", "--config", str(tmp_path / "native.yaml"),
         "--credential-command", json.dumps([sys.executable, str(helper)]), "--json",
+        "--http-profile", profile,
     ]) == 0
     assert json.loads(capsys.readouterr().out)["outcome"] == "complete"
     assert len(reads) == 1
-    if kind == "github":
+    if kind == "github" and profile == "legacy":
         assert reads[0][1]["env"]["GH_TOKEN"] == material["token"]
     else:
         scheme = "Bear" + "er "
         assert reads[0][1]["input_text"] == "Authorization: " + scheme + material["token"] + "\n"
         assert material["token"] not in " ".join(reads[0][0])
+    assert reads[0][0][0] == ("curl" if kind == "gitea" or profile == "direct-v1" else "gh")
 
 
 def test_inventory_real_resolver_refuses_registry_only_target(tmp_path, monkeypatch):

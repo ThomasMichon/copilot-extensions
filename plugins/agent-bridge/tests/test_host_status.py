@@ -234,6 +234,9 @@ def test_owned_event_seam_and_fresh_database_migration(tmp_db):
     assert [e["scope"] for e in result["events"]] == ["root", "nested"]
     assert "private" not in str(result)
     tmp_db.execute_write("UPDATE schema_version SET version=43")
+    from legacy_inbox_schema import restore_prior_inbox_guards
+
+    restore_prior_inbox_guards(tmp_db._get_conn(), version=43)
     restored = Database(tmp_db._db_path)
     try:
         assert StatusStore(restored).page(after=0, epoch=result["epoch"])["events"] == result["events"]
@@ -323,6 +326,9 @@ def test_status_storage_requires_writable_preparation_and_preserves_prior_facts(
         conn.execute("DROP TABLE bridge_status_events")
         if storage == "prior":
             conn.execute("UPDATE schema_version SET version=43")
+            from legacy_inbox_schema import restore_prior_inbox_guards
+
+            restore_prior_inbox_guards(conn, version=43)
         elif storage == "malformed":
             conn.execute("CREATE TABLE bridge_status_events(id INTEGER)")
     before = path.read_bytes()

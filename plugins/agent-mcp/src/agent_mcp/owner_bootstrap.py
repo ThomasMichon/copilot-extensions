@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import subprocess
 import sys
 
+WINDOWS_ORIGIN = globals().get("WindowsOrigin")
 ENTRY_CAPABILITY = "optional-physical-owner-entry-v1"
 ENVIRONMENT_KEYS = (
     "AGENT_MCP_HOME", "AGENT_MCP_MARKETPLACE_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
@@ -102,13 +104,34 @@ def receiver(report):
     return entry
 
 
+def _windows_argv(command):
+    return [shutil.which(command[0]) or command[0], *command[1:]]
+
+
+def _windows_start(command, environment):
+    return subprocess.Popen(
+        _windows_argv(command), env=environment,
+        stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+        creationflags=subprocess.CREATE_NO_WINDOW,  # headless-guard: allow anonymous stdlib snapshot before provider imports
+    )
+
+
+def _ordinary(original, environment):
+    if sys.platform == "win32":
+        return _windows_start(original, environment).wait()
+    os.execvpe(original[0], original, environment)
+    raise RuntimeError("Ordinary MCP exec unexpectedly returned")
+
+
 def _start_owned(request, owner):
     original = request["original"]
     environment = os.environ.copy()
     try:
         result = subprocess.run(
-            request["query"], env={**environment, "AGENT_MCP_NO_SELFPROVISION": "1"},
+            _windows_argv(request["query"]) if sys.platform == "win32" else request["query"],
+            env={**environment, "AGENT_MCP_NO_SELFPROVISION": "1"},
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),  # headless-guard: allow anonymous stdlib snapshot before provider imports
         )
         report = json.loads(result.stdout)
         entry = receiver(report) if result.returncode == 0 else None
@@ -116,7 +139,7 @@ def _start_owned(request, owner):
         entry = None
     owner.require_alive()
     if entry is None:
-        os.execvpe(original[0], original, environment)
+        return _ordinary(original, environment)
     else:
         request["receiver"] = entry
         request["selection"] = report.get("selection")
@@ -124,26 +147,40 @@ def _start_owned(request, owner):
             entry["python"], "-I", "-m", "agent_mcp", "session-owner-entry",
             json.dumps(request, ensure_ascii=True),
         ]
+        if sys.platform == "win32":
+            try:
+                child = _windows_start(command, environment)
+            except OSError:
+                owner.require_alive()
+                return _ordinary(original, environment)
+            # Creation accepted the child. Exit/wait failure can never replay it.
+            return child.wait()
         try:
             os.execve(command[0], command, environment)
         except OSError:
             # A failed exec accepted no application bytes.
             owner.require_alive()
-            os.execvpe(original[0], original, environment)
+            return _ordinary(original, environment)
     raise RuntimeError("MCP entry exec unexpectedly returned")
 
 
 def start(request):
-    """Pin before probing and refuse owner loss on every pre-effect exec path."""
+    """Pin before probing and refuse owner loss on every pre-effect entry path."""
+    if sys.platform == "win32":
+        if WINDOWS_ORIGIN is None:
+            raise ValueError("Windows bootstrap requires an embedded native owner snapshot")
+        with WINDOWS_ORIGIN(request["binding"]) as owner:
+            request["pid"], request["birth"] = owner.pid, owner.birth
+            return _start_owned(request, owner)
     if not sys.platform.startswith("linux"):
-        raise ValueError("Anonymous owner entry bootstrap requires Linux")
+        raise ValueError("Anonymous owner entry bootstrap requires Linux or Windows")
     with Origin(request["pid"], request["birth"]) as owner:
-        _start_owned(request, owner)
+        return _start_owned(request, owner)
 
 
 if __name__ == "__main__":
     try:
-        start(json.loads(sys.argv[1]))
+        raise SystemExit(start(json.loads(sys.argv[1])))
     except (OSError, ValueError) as error:
         print(f"agent-mcp: owner bootstrap refused: {error}", file=sys.stderr)
         raise SystemExit(1)

@@ -119,6 +119,82 @@ async def test_stopped_context_uses_strict_resume_without_recreate(native_send):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_client", [False, True])
+async def test_exited_client_before_stopped_projection_resumes_original_native(
+    native_send, tmp_db, missing_client,
+):
+    manager, session, request = native_send
+    original_client = session.client
+    original_client.is_running = False
+    if missing_client:
+        session.client = None
+
+    async def resume(*args, **kwargs):
+        assert args == ("bridge-a",)
+        assert kwargs == {"drain": False, "allow_recreate": False}
+        assert session.status == SessionStatus.IDLE
+        assert session.turn_count == 0 and tmp_db.get_turns(session.session_id) == []
+        original_client.is_running = True
+        session.client = original_client
+        session.status = SessionStatus.IDLE
+        return session
+
+    manager.resume_session.side_effect = resume
+    receipt = await submit(manager, session.session_id, request)
+    await session._prompt_task
+    assert receipt["native_session_id"] == "native-a"
+    assert await submit(manager, session.session_id, request) == receipt
+    assert len(tmp_db.get_turns(session.session_id)) == 1
+    manager.resume_session.assert_awaited_once()
+    manager._run_prompt.assert_awaited_once_with(session, 0, request.prompt)
+    manager.handoff_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_disconnected_recovery_failure_keeps_operator_stop_effective(
+    native_send, monkeypatch, tmp_db, cancelled,
+):
+    from unittest.mock import AsyncMock, Mock
+
+    from agent_bridge import hosting_policy
+    from agent_bridge.session_manager import SessionManager
+    from agent_bridge.session_stop import run_stop
+
+    manager, session, request = native_send
+    session.client.is_running = False
+    original_client = session.client
+    monkeypatch.setattr(hosting_policy, "require_session_hosting", AsyncMock())
+    failure = asyncio.CancelledError() if cancelled else ValueError("reattach refused")
+    manager._try_reattach_live_host = AsyncMock(side_effect=failure)
+    manager.resume_session = SessionManager.resume_session.__get__(manager)
+    with pytest.raises(type(failure)):
+        await submit(manager, session.session_id, request)
+    assert session.status == SessionStatus.IDLE
+    assert tmp_db.get_session(session.session_id)["status"] == "idle"
+    assert session.client is original_client
+    assert session.turn_count == 0
+    provider = Mock()
+    provider.get_session.side_effect = [{"status": "idle"}, {"status": "stopped"}]
+    assert run_stop(provider, session.session_id, force=True)["outcome"] == "stopped"
+    provider.stop_session.assert_called_once_with(session.session_id, force=True, reap_host=False)
+
+
+@pytest.mark.asyncio
+async def test_no_resume_keeps_exited_client_refusal_before_stopped_projection(native_send, tmp_db):
+    from agent_bridge.session_prompts import SessionNotRunningError
+
+    manager, session, request = native_send
+    session.client.is_running = False
+    with pytest.raises(SessionNotRunningError):
+        await submit(manager, session.session_id, request.model_copy(update={"no_resume": True}))
+    assert session.status == SessionStatus.IDLE
+    assert tmp_db.get_turns(session.session_id) == []
+    manager.resume_session.assert_not_awaited()
+    manager._run_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race(
     native_send, monkeypatch, tmp_db,
 ):

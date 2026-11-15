@@ -9,6 +9,8 @@ libs/payload-invocation/templates/*.tmpl text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 .devcontainer/trusted-harness-base/** text eol=lf
+fleet-manager/containers/gateway/Dockerfile text eol=lf
+fleet-manager/containers/gateway/Dockerfile.dockerignore text eol=lf
 
 # Extensionless bash binstubs/launchers must stay LF (run on Linux/WSL).
 plugins/agent-worktrees/bin/agent-worktrees text eol=lf

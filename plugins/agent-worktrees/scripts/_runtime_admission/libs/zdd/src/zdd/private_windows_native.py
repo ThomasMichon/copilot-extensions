@@ -287,7 +287,15 @@ class Native:
         finally:
             self.close(token.value)
 
-    def listener(self, path: str) -> int:
+    def listener(
+        self, path: str, *, max_instances: int = 1, first_instance: bool = True,
+    ) -> int:
+        """Create a protected local instance; extra bounded instances are opt-in."""
+        if (
+            type(max_instances) is not int or not 1 <= max_instances <= 254
+            or type(first_instance) is not bool
+        ):
+            refuse(Refusal.UNAVAILABLE)
         sid = self.current_sid()
         descriptor = PTR()
         pipe: int | None = None
@@ -300,12 +308,12 @@ class Native:
             refuse(Refusal.PRINCIPAL)
         try:
             attributes = SECURITY_ATTRIBUTES(c.sizeof(SECURITY_ATTRIBUTES), descriptor, False)
-            # Duplex, overlapped, first instance; byte mode, reject remote clients.
+            # Duplex and overlapped; byte mode, reject remote clients.
             pipe = self.k.CreateNamedPipeW(
                 path,
-                3 | 0x40000000 | 0x80000,
+                3 | 0x40000000 | (0x80000 if first_instance else 0),
                 8,
-                1,
+                max_instances,
                 65536,
                 65536,
                 0,

@@ -7,10 +7,10 @@ agent-worktrees <subcommand> [options]
 ## Legacy management launchers
 
 Legacy global management launchers select external Python bytecode through the
-[canonical installed-cache helper](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+[canonical cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract).
 An unchanged completed installation reuses its recorded namespace; changed
-completion or distribution evidence selects another. Older runtimes without
-the helper retain fresh invocation caches. Native selector replies use
+completion or distribution evidence selects another. Unsealed runtimes and
+older providers use `-B`, without allocating an invocation cache. Native selector replies use
 ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
 This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
@@ -148,8 +148,16 @@ locally, and each remote one runs
 binstub.
 
 `--json` prints `{"version": 1, "hosts": [{"machine", "env", "reachable",
-"worktrees", "projection"?, "availability"?, "error"?}]}`. Each worktree row is
-the host's own `list --json` record:
+"worktrees", "projection"?, "availability"?, "reporting_context"?,
+"reporting_context_error"?, "error"?}]}`.
+Host-level `machine` / `env` identify the configured source route. An optional
+version-1 `reporting_context` supplies the serving host's current descriptive
+naming for its worktree rows; a rename appears on the next read, while explicit
+unavailability withdraws row names without changing source freshness. Absence
+in a successful response retains the older provider's row naming for presentation,
+not current identity. Malformed reporting is a coverage gap,
+not an authoritative empty inventory. The coordinator does not resolve its own
+hostname for remote rows. Other fields remain the host's `list --json` record:
 
 - **Live work** is the derived `state == "active"`. Lifecycle
   `status == "active"`, a nonempty `live_session_ids`, and `--glance` are not
@@ -204,14 +212,21 @@ Coverage is explicit, never inferred:
   client. Some SSH servers keep the remote command running after the client
   disconnects, so prefer this bounded reader to ad hoc remote scripts.
 
-## Native machine-record repair
+## Retired machine-record repair
 
 `doctor --repair-machine-record <exact-id> --from-machine <old>
 [--to-machine <configured-target>] [--fix] [--json]`, scoped with `-p <project>`,
-reports one record first. Existing linked checkouts retain Git ownership proof;
-removed checkouts require independent receiving registration/namespace proof.
-Same-machine reference aliases remain unchanged. See
-[admission, audit, relationship semantics and roster verification](machine-record-repair.md).
+returns a read-only compatibility notice in both report and `--fix` modes.
+Canonical naming is derived live; no record, checkout, historical audit or
+roster is inspected or rewritten. See
+[retirement, JSON compatibility and ordinary writes](machine-record-repair.md).
+
+Tracking-YAML corruption repair also omits legacy naming on an actual repair
+write, through the guarded original-byte backup and replacement owner. Targeted
+`--repair-record` and general integrity passes never migrate an already-valid
+legacy record. Legacy repaired mappings may be reformatted while preserving
+alias-referenced values; the exact original bytes remain in the private backup.
+See [scoped repair and byte/data preservation](../skills/repairing-worktrees/SKILL.md).
 
 ## Disposable producer ownership
 
@@ -385,8 +400,8 @@ returns the configured execution identifier.
 tracking YAML from the receiving project's configured tracking namespace.
 Use the repository's binstub, its current directory, or explicit `--project`
 to select that project. IDs are exact filename components, not suffixes or
-codenames; the command never searches another project, enumerates records or
-sessions, asks the resident, or computes live facts. A newly created record
+codenames; the command never searches another project, enumerates other records,
+discovers sessions, asks the resident, or computes live facts. A newly created record
 is readable even before the resident publishes it. Ordinary `list` projection
 authority and failure behavior are unchanged.
 Membership is read from the selected project's machine-local repository
@@ -404,6 +419,15 @@ unreadable selection metadata returns `project-unavailable` JSON with the
 underlying diagnostic, not an unstructured traceback.
 Registered bare anchors and their linked worktrees resolve the common Git
 directory itself before considering a non-bare checkout's parent.
+
+The additive `session_ids` field projects the identities already indexed in that
+same durable record: an array when indexed, including `[]` for known empty
+history, or null for unknown history. It is independent of `last_session_id`,
+which can be null for yielded or concluded sessions that remain in history.
+Consumers requiring exact native identity must treat a missing field from an
+older provider as unknown support, not derive identity from the count or head.
+`checkout_managed` retains its existing raw representation: null means the
+stored default-managed field was omitted; explicit false remains unmanaged.
 
 ### Trusted initialization directory
 
@@ -639,8 +663,9 @@ continue to work unchanged.
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
+| `get finalize-recovery` | Selected executable's additive finalization-recovery contract. Explicit [retired-parent recovery](retired-owner-finalization.md) preserves ordinary mutation refusal and independent finalization/removal gates. |
 | `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims add derived <path> --creator <tool>` creates a derived output directory with a `.derived-claim.json` marker (worktree id + nonce) and opens a `derived` claim on it, refusing any path that already exists without a matching marker; `claims settle <path> --reclaim [--dry-run]` deletes exactly that one derived directory -- only when its marker/nonce match the ledger, it is inside this worktree's checkout, holds no Git-tracked files, contains no symlink/junction/reparse point and no live process uses it -- and then settles the claim (any failed check refuses and leaves the claim open; finalize and `claims sweep` never delete derived directories); `claims release <ref> [--remove]` retires one (for a derived claim the directory is kept); `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
-| `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
+| `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. The reserved id `legacy` explicitly settles the old boolean flag: resolve requires `--result-ref`; dismiss requires `--reason`. See [legacy settlement](#legacy-follow-up-settlement) below. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
 | `cleanup` | List and remove orphaned or finalized worktrees. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
 | `gc` | Garbage-collect this project's worktrees on this machine: **claim-history mirror sync** (opt-in, `--mirror-claim-history` -- pushes not-yet-mirrored `claim_history` events to the shared store; runs FIRST, before any step below can delete the tracking records a legacy event's eligibility depends on) + tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + **orphaned launcher-shell reap** (`--no-reap-shells` to skip) + `git worktree prune` + optional **lease-ref squash** (`--lease-gc`). `--dry-run` lists without removing; `--json` reports the managed + orphan + shell + lease + claim-history-mirror sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
 | `reap-sessions` | Reap leaked `wt-<id>` tmux/psmux sessions whose worktree is finalized/gone/untracked **and** idle past the grace window (spares attached/active/busy) |
@@ -648,7 +673,7 @@ continue to work unchanged.
 | `reclaim` | Free the **exact** Copilot process(es) bound to a session/worktree, resolved from Copilot's own `inuse.<pid>.lock` claim -- precise, never splashing onto a sibling session or a worktree that merely shares a cwd. The primitive for **bare** orphans (a Copilot launched straight in a terminal, invisible to the `wt-<id>` mux fleet view; e.g. its terminal was closed/wedged). Target with `--session-id` / `--worktree-id` (infers from cwd) / `--all`, restrict with `--bare-only`. **Dry-run by default; `--yes` terminates.** Never reaps the process tree of the running command. Freeing an idle orphan loses nothing -- the session stays resumable |
 | `remux` | Restore a running **bare** (un-muxed) Copilot to the worktree's mux fleet. On Linux/WSL, reparent it into the `wt-<id>` tmux pane via `reptyr`, preserving the live process. On Windows, where ConPTY cannot adopt an arbitrary running process, preview the precise reclaim-before-resume plan and pass `--yes` to retire only the confirmed Stop-unreachable owner; the structured result says to resume next through the normal PSMux launcher. Target with `--session-id` / `--worktree-id` (infers from cwd). The Pickers expose the combined preparation + launch path as **Restore**. |
 | `backfill-sessions` | Explicitly scan legacy session state to populate empty registries and titles, derive legacy controller relations from authoritative creation fields, and inspect a bounded number of exact session projections (`--projection-budget N`). Local missing/stale projections are repaired; restored, foreign, ambiguous, colliding, and newer state remains report-only |
-| `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles, legacy controller metadata, bounded exact-ID projection drift (`--projection-budget N`), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. `--fix` repairs local authoritative/controller/projection state but keeps restored, foreign, ambiguous, colliding, and newer state report-only. `--repair-machine-record <exact-id> --from-machine <old-label> [--to-machine <configured-target>]` is a separate report-first scope: `--fix` changes only a proven local native record's machine label, with exact backups/audit and no ID, path, session or ownership rewrite. Existing checkouts retain selected-repository linked-Git proof; removed ones require canonical receiving registration/namespace evidence. Refuses foreign/guest identities, wrong stores and other repair selectors. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. `--json` emits the exhaustive report |
+| `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles, legacy controller metadata, bounded exact-ID projection drift (`--projection-budget N`), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. `--fix` repairs local authoritative/controller/projection state but keeps restored, foreign, ambiguous, colliding, and newer state report-only. The legacy `--repair-machine-record <exact-id> --from-machine <old-label> [--to-machine <key>]` scope is retired: report and `--fix` return a read-only compatibility notice, never restamp records or inspect historical audits, and refuse combined repair selectors. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. `--json` emits the exhaustive report |
 | `hygiene` | Detect (and with `--fix`, remove) stale **global-Python editable installs** left by a manual `pip install -e .` against a worktree checkout (a real, empirically-hit hazard: #2726) -- a `.pth` file permanently pinned to one worktree that silently shadows whichever worktree an `import`/console-script invocation actually intends, even after that worktree is deleted. Machine-wide; no project context needed. `--json` emits the report |
 | `status` | Show worktree git status; **write mode** (`--summary "<one-liner>"` / `--title "<headline>"` / `--follow-up` / `--resolved` / `--paused` / `--unpaused`) annotates THIS worktree's Picker disposition -- `--paused`/`--unpaused` is purely informational (never affects `finalize`'s obligation gate or any other gate, unlike `--follow-up`); **history mode** (`--history` `[--limit N]` `[--json]`) prints this worktree's durable disposition trajectory (summary/title over time). A `postToolUse` hook nudges you to refresh it as work drifts (`AGENT_WORKTREES_NUDGE=off` to silence) |
 | `recent-messages` | Show a worktree's latest session's last N message-bearing turns (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; includes per-turn `tool_names` plus an ending-state signal that distinguishes a cut-off assistant turn from a clean unanswered offer. Backs the picker's **Messages** viewer |
@@ -681,6 +706,38 @@ continue to work unchanged.
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
+
+### Legacy follow-up settlement
+
+`follow-ups resolve legacy --result-ref <ref> --worktree <id>` records accepted
+completion or a tracked transfer of the old boolean-only follow-up.
+`follow-ups dismiss legacy --reason <text> --worktree <id>` records an explicit
+decision that it needs no further action. Both clear only `follow_up`, retain a
+terminal `legacy` ledger entry with the supplied evidence, and leave the worktree
+status, summary, sessions, claims and other follow-ups unchanged. Settlement
+advances the existing record revision that protects the boolean from stale
+full-record saves. A retry after successful settlement returns the retained
+entry without another mutation while the flag remains cleared. If an owner
+subsequently reasserts the flag, reuse of `legacy` is refused: the new obligation
+requires its own owner reconciliation, not settlement with the old evidence.
+
+An active effort binding or a frozen (`finalizing`/`orphaned`) owner refuses this
+operation. Reconcile those through their own lifecycle first. Terminal managed
+owners are supported without weakening `status`'s late-writer fence. Settlement
+does not prove source landing, execution inactivity, task acceptance or cleanup
+eligibility; all independent finalization and cleanup checks still apply.
+
+Before using the reserved id, read `follow-ups <id> --json` from the selected
+executable. `legacy_resolution_supported: true` declares this additive CLI
+contract; absent metadata means that executable does not declare support.
+Ordinary item-id operations are unchanged. The existing tracking-write
+`follow_up_resolve` and `follow_up_dismiss` verbs advertise version 2 for legacy
+settlement. New callers require that version only for `legacy`; an older resident
+is never sent that request, and the existing pre-send, same-code locked fallback
+handles it without restarting the resident. Ordinary version-1 callers remain
+supported. A rolled-back executable without the declaration cannot settle the
+legacy flag: retain it pending upgrade, rather than editing metadata or using
+`status --resolved` as a bypass. No older command form is retired.
 
 ### Remote-free finalization
 
@@ -1021,6 +1078,36 @@ live publication ref; an open or unobservable PR still refuses. Remote branch
 deletion after merge is normal. Sync does not finalize or delete the local
 worktree branch, and preserves genuinely new local commits while pulling forward.
 Dry runs do not reconcile. Review/check/merge gates and rollout policy are unchanged.
+
+### Owner rewrite of a private PR branch
+
+The owning worktree may rebase, squash, amend or drop its own commits and
+republish with plain `push-changes` (or `git sync`) at any time; no operator
+form, confirmation fingerprint or `--rewrite-pr` flag is needed. When the
+bounded source-replay proof cannot be established, publication falls back to an
+owner rewrite only after every ordinary ownership check passes (owning checkout,
+publication ownership, open PR, saved head equal to the provider head, attested
+destination). The fallback still refuses when:
+
+- another worktree in any adopted project tracks a live PR on the same branch
+  name and destination (a same-branch collision is never overwritten);
+- the source has no commits beyond the upstream default branch;
+- the remote head moved to anything other than an ancestor of the source or a
+  clean refresh of the published head (its tree must equal the three-way merge
+  of the published head with the upstream point it incorporates), so a
+  reviewer's commit, a hand-resolved conflict or an edited merge is refused --
+  integrate it first;
+- a moved remote head is not confirmed by the provider as this PR's head, or a
+  head to be replaced cannot be fetched for backup.
+
+Routine reconciliation before `push-changes` defers to this path for a numbered
+PR under the same conditions instead of demanding retained publication
+evidence. The push is leased on the exact observed remote head. Before any
+rewrite, the published, remote and source heads are retained as local refs under
+`refs/agent-worktrees/backup/<branch>/<UTC stamp>/<label>`; only the newest five
+stamps per branch are kept. Recover a bad rewrite with
+`git for-each-ref refs/agent-worktrees/backup/<branch>/` and a normal branch
+reset to the retained commit. A backup write failure refuses the rewrite.
 
 ### Explicit operator recovery
 
@@ -1387,6 +1474,39 @@ inheritance rule now made programmatic: a delegate becomes finalizable once its
 host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
 explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
+Allocation IDs are opaque: their spelling never proves a missing caller's host.
+A qualified `machine/project/worktree` selector can locate an unambiguous
+live reporting host; cached row labels and configured routes cannot bind that
+identity. It never falls back to another host's matching ID. A matching ID
+under conflicting legacy or current names instead remains `unknown`
+(`host-identity-conflict`), not absent or silently retargeted. A bare ID
+can resolve an actually present, unique caller, but absence remains `unresolved`
+without a host selector. Physical selectors spanning multiple execution
+environments and duplicate reporter slots cannot prove a missing caller gone.
+A selected-project inventory leaves a missing caller in another project
+`unknown`; that project's absence was not observed.
+An unnamed source still participates in ambiguity: a matching caller ID there,
+or incomplete unnamed-source coverage, leaves a qualified caller `unknown`
+(`host-reporting-unavailable`). Withdrawing a guest's names cannot make an
+empty native roster prove the guest's active caller gone. Current complete
+unnamed inventories can still prove that an unrelated ID is absent, without
+restoring withdrawn names.
+Failed probes are incomplete unnamed coverage, never proof that their configured
+route is a current reporter name. They cannot establish a caller absent or a
+visible terminal caller unique. Bare caller IDs require current complete coverage
+from competing sources because their lookup is fleet-wide; successful legacy
+responses retain their naming fallback.
+Absence also requires complete cardinality: integer `selected_count` and
+`roster_count` must equal the number of unique returned IDs. A filtered current
+publication can prove an actually observed caller terminal, but cannot prove an
+unobserved caller gone. Missing or malformed count proof remains non-authoritative.
+Every competing source must currently exclude that caller ID before a terminal
+row can authorize inheritance or a selected source can prove absence. This uses
+actual source inventories, not cached names as a shortcut. Complete legacy
+inventories remain useful for ID exclusion and bare-ID status proof without
+claiming a current reporter identity. An advisory, expired or filtered guest source cannot disappear
+behind a current terminal native row; the execution freshness recheck applies
+the same rule.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
 "current"` with no `availability` label) whose `projection.freshness` proves a
@@ -1400,7 +1520,10 @@ authorizes finalization (`delegate_finalizable: false`, reason
 `host-roster-advisory`). `delegates --execute` repeats that check immediately
 before each finalization, so a caller roster that has outlived its bound since
 the snapshot leaves the remaining delegates unfinalized (an `errors` entry with
-reason `host-roster-advisory`).
+reason `host-roster-advisory`). The command destination comes from the delegate's
+containing configured fleet source, never its reported machine/platform.
+Execution results expose that destination separately as `source.machine` /
+`source.env`; reporter rename or withdrawal cannot retarget it.
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment
@@ -1431,12 +1554,15 @@ It renders three fields:
 
 | Field | Style | Source | Example |
 |-------|-------|--------|---------|
-| Machine | Black, bold | Tracking record `machine` (else live host detection) | `anomalous-potato` |
-| Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Platform short code, matching the worktree id | `win` |
+| Machine | Black, bold | Current reporting-host view (else live host detection), not a stored worktree label | `example-host` |
+| Environment | Badge: white on an OS-keyed background (win=blue, wsl=purple, linux=orange) | Current execution platform short code, independent of the historical worktree id | `win` |
 | Repo : id4 | Black | Record `repo` + the worktree id's 4-char suffix | `copilot-extensions:8e45` |
 
 Like the right segment, the watcher classifies the worktree by `--path` and
-stores the result in `@aw_ctx` (once -- identity is static for a session).
+stores its initial rendered view in `@aw_ctx`. This per-session presentation
+cache can retain the last rendering until refreshed; it is not persisted
+worktree identity or authority. Each new context render uses the
+[current reporter view](execution-identity.md#reporter-naming-and-tracking-data).
 Outside a tracked worktree it falls back to live machine/platform detection and
 omits the `repo:id4` field. Flags: `--path PATH`, `--plain` (no `#[style]`
 directives).
@@ -1694,13 +1820,24 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### Python bytecode caches (`python-cache prune`)
 
-Plugin launchers pass `-X pycache_prefix=<runtime-root>/cache/python/<namespace>`.
-A runtime with valid install evidence (`.install-complete.json` plus package
-`RECORD`s) reuses one sealed `installed-<digest>` namespace. Without that
-evidence a launcher mints a one-off `unsealed-<id>` namespace. Launchers that
-wait for their child delete the namespace they minted afterwards. Detached
-daemons and `exec`-style launchers cannot, so some `unsealed-*` directories
-still accumulate. `python-cache prune` reclaims them:
+Current launchers use the [shared platform-cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract):
+completed version slots reuse private OS-user-cache bytecode; unsealed or
+older providers disable writes with `-B`. New launchers do not mint
+`unsealed-*` directories. Source-injecting hooks and read-only bootstraps also
+disable writes.
+
+Older launchers used `<runtime-root>/cache/python/<namespace>` and could leave
+one `unsealed-*` directory per invocation. `python-cache prune` remains the
+explicit legacy inspection/removal command; it does not collect the new
+owned platform-cache namespaces.
+
+Normal updates additionally perform [bounded legacy relief](../../../libs/agent-procutil/README.md#legacy-update-relief)
+through the runtime owner's GC. Only bytecode affirmatively attributed to an
+exact, unprotected runtime slot that canonical GC has removed is eligible;
+base-interpreter, retained/current runtime and unknown content stays. The
+`gc: python-cache-legacy` report distinguishes actual removals, retained
+reasons and pending/budget-limited work. This never runs the manual age-only
+policy or deletes a whole prefix from process-visibility evidence alone.
 
 ```bash
 agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes
@@ -2485,11 +2622,11 @@ loudly rather than logging a `worktree_id: null` entry invisible to
 `activity --worktree-id <id>`.
 
 **Disk growth under `~/.agent-*/cache/python`.** Thousands of `unsealed-*`
-directories there usually come from a launcher that ran without valid install
-evidence, or from a detached or `exec`-style launcher that cannot clean up
-after its child. A persistently empty `installed-*` set for a runtime suggests
-its install evidence is missing or invalid. Reinstalling or updating that
-runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
+directories there come from older launchers, especially unsealed, detached or
+`exec`-style invocations. Current launchers use the shared OS-cache policy and
+disable writes when installation evidence is unavailable, stopping that new
+per-invocation growth. This does not itself remove the old backlog.
+Run `agent-worktrees python-cache prune` (dry run) to
 size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
 process scan exists, add `--allow-age-only` once no affected runtime is
 running). See

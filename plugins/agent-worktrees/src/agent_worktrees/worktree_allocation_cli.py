@@ -31,7 +31,7 @@ def add_parsers(sub) -> None:
 
 
 def capabilities(*, receiver: bool) -> dict:
-    from . import allocation_creation_result
+    from . import allocation_creation_result, dispatch_cohort
 
     return {
         "schema": allocation.SCHEMA, "version": allocation.VERSION,
@@ -43,6 +43,7 @@ def capabilities(*, receiver: bool) -> dict:
         "max_input_bytes": producer.MAX_INPUT_BYTES,
         "max_identity_bytes": allocation.MAX_IDENTITY_BYTES,
         "lifecycle_capacity_reserved": True,
+        "dispatch_cohort": dispatch_cohort.capability(),
         **({"creation_result": {
             "schema": allocation_creation_result.SCHEMA,
             "version": allocation_creation_result.VERSION,

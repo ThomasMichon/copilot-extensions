@@ -16,18 +16,15 @@ try {
     $_profileGeneration = ([BitConverter]::ToString($_profileHasher.ComputeHash(
         [IO.File]::ReadAllBytes($_profilePath)))).Replace('-', '').ToLowerInvariant()
 } finally { $_profileHasher.Dispose() }
-$_cacheId = [Guid]::NewGuid().ToString('N')
-$_cache = [IO.Path]::GetFullPath((Join-Path $_root "cache\python\unsealed-$_cacheId"))
-if (-not $_cache.StartsWith('\\?\')) {
-    $_cache = if ($_cache.StartsWith('\\')) { '\\?\UNC\' + $_cache.Substring(2) } else { '\\?\' + $_cache }
-}
-# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
-$_mintedCache = $_cache
+$_cacheArguments = @('-B')
 try {
-    $_selectedCache = & $_py -I -B -X ('pycache_prefix=' + $_cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" $_root 2>$null
+    $_selectedCache = & $_py -I -B -X utf8 -c "import json,sys; from agent_procutil.python_cache import POLICY_VERSION,policy_arguments; print(json.dumps(policy_arguments(sys.argv[1],runtime=sys.executable) if POLICY_VERSION==2 else ['-B']))" $_root 2>$null
     if ($LASTEXITCODE -eq 0 -and @($_selectedCache).Count -eq 1) {
-        $_selectedCache = [string]($_selectedCache | ConvertFrom-Json)
-        if ($_selectedCache) { $_cache = $_selectedCache }
+        $_candidate = ConvertFrom-Json -InputObject ([string]$_selectedCache)
+        if ($_candidate.Count -eq 2 -and $_candidate[0] -ceq '-X' -and
+            $_candidate[1] -is [string] -and $_candidate[1].StartsWith('pycache_prefix=') -and
+            $_candidate[1].Length -gt 15 -and $_candidate[1] -notmatch "[`r`n]" -and
+            $_candidate[1].IndexOf([char]0) -lt 0) { $_cacheArguments = $_candidate }
     }
 } catch {}
 $env:PYTHONUTF8 = '1'
@@ -126,7 +123,7 @@ if ($DescribeLaunch) {
     $description = @{
         version = 1
         executable = $_py
-        arguments = @('-X', ('pycache_prefix=' + $_cache), '-m', 'agent_dispatch') + $argsList
+        arguments = $_cacheArguments + @('-m', 'agent_dispatch') + $argsList
         log_path = $logFile
     } | ConvertTo-Json -Compress -Depth 4
     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($description))
@@ -152,10 +149,9 @@ $_encodedArguments = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
 $_ensure = 'import base64,json,sys; from pathlib import Path; from agent_dispatch.supervisor_lane_status import ensure; ensure(Path(sys.argv[1]),Path(sys.argv[2]),json.loads(base64.b64decode(sys.argv[3])),generation=sys.argv[4])'
 $_admissionLog = Resolve-WritableLog (Join-Path $InstallDir 'supervise-admission.log') $_slot
 try {
-    & $_py -I -B -X ('pycache_prefix=' + $_cache) -c $_ensure $InstallDir $_profilePath $_encodedArguments $_profileGeneration 2>&1 | Out-File -FilePath $_admissionLog -Append -Encoding utf8
+    & $_py -I -B -c $_ensure $InstallDir $_profilePath $_encodedArguments $_profileGeneration 2>&1 | Out-File -FilePath $_admissionLog -Append -Encoding utf8
 } catch {
     # A log failure does not select a different admission or lifetime owner.
-    & $_py -I -B -X ('pycache_prefix=' + $_cache) -c $_ensure $InstallDir $_profilePath $_encodedArguments $_profileGeneration *> $null
+    & $_py -I -B -c $_ensure $InstallDir $_profilePath $_encodedArguments $_profileGeneration *> $null
 }
-if ($_cache -eq $_mintedCache) { try { [IO.Directory]::Delete($_mintedCache, $true) } catch {} }
 exit $LASTEXITCODE

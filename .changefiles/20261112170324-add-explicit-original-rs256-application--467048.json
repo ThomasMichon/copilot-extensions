@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit original RS256 application-token verification with independently enrolled request proofs",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

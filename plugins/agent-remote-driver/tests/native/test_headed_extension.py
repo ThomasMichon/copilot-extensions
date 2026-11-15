@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import http.server
 import asyncio
+from collections.abc import AsyncIterator, Callable, Iterator
 import contextlib
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
+import importlib
 import inspect
 import json
 import os
@@ -14,38 +18,76 @@ import subprocess
 import sys
 import threading
 import time
-from types import SimpleNamespace
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
+from agent_procutil.owned_process import run_caller_owned
 import pytest
-from websockets.asyncio.client import connect
 
 from agent_remote_driver.headed.backend import HeadedBackend
+from agent_remote_driver.headed.launcher import _PaneChild
+from agent_remote_driver.headed.native_handoff import WindowsNativeHandoff
 from agent_remote_driver.headed.staging import stage_extension
+from agent_remote_driver.bridge_extension import extension_sources
 from agent_remote_driver.session_host.client import SessionHostClient
-from agent_remote_driver.session_host.host import SessionHost
+from agent_remote_driver.session_host.host import ChildProcess, SessionHost
 from agent_remote_driver.session_host.ws_transport import WebSocketTransport
 from agent_remote_driver.session_host.osutil import pid_alive
 
 
+class _WebSocketConnection(Protocol):
+    async def send(self, message: str) -> None: ...
+
+    async def recv(self) -> str | bytes: ...
+
+
+class _WebSocketClient(Protocol):
+    def connect(
+        self, url: str, *, proxy: None, subprotocols: list[str],
+    ) -> AbstractAsyncContextManager[_WebSocketConnection]: ...
+
+
+connect = cast(_WebSocketClient, importlib.import_module("websockets.asyncio.client")).connect
+
+
+@dataclass
+class _ResponseGate:
+    select: Callable[[dict[str, Any]], threading.Event | None]
+
+
+@dataclass
+class _OfflineCli:
+    executable: str
+    env: dict[str, str]
+    home: Path
+    workspace: Path
+    requests: list[dict[str, Any]]
+    logs: Path
+    responses: list[dict[str, Any]]
+    response_gate: _ResponseGate
+    pause_response: threading.Event
+    response_started: threading.Event
+    release_response: threading.Event
+
+
 @pytest.fixture
-def offline_cli(tmp_path):
+def offline_cli(tmp_path: Path) -> Iterator[_OfflineCli]:
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
         pytest.skip("Select an existing native Copilot executable for the offline acceptance lane")
     assert Path(executable).is_absolute() and Path(executable).is_file()
-    requests = []
-    responses = []
-    response_gate = SimpleNamespace(select=lambda _: None)
+    requests: list[dict[str, Any]] = []
+    responses: list[dict[str, Any]] = []
+    response_gate = _ResponseGate(select=lambda _: None)
     pause_response, response_started, release_response = (threading.Event() for _ in range(3))
 
     class Provider(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *_):
+        def log_message(self, *_: object) -> None:
             pass
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append(request)
             gate = response_gate.select(request)
@@ -96,7 +138,7 @@ def offline_cli(tmp_path):
         COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
     )
     try:
-        yield SimpleNamespace(
+        yield _OfflineCli(
             executable=executable, env=environment, home=home, workspace=workspace,
             requests=requests, logs=tmp_path / "logs",
             responses=responses,
@@ -111,15 +153,74 @@ def offline_cli(tmp_path):
         thread.join(timeout=5)
 
 
-def _logs(directory):
+def _logs(directory: Path) -> str:
     return "\n".join(
         path.read_text(encoding="utf-8", errors="replace")[-6000:]
         for path in directory.rglob("*.log")
     )
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native creation handoff")
+@pytest.mark.parametrize("refuse", [False, True], ids=["original-wait", "pre-execution-refusal"])
+@pytest.mark.asyncio
+async def test_actual_headed_child_creation_handoff_retains_native_handle_and_wait(
+    offline_cli: _OfflineCli, refuse: bool,
+) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    kernel.GetProcessId.argtypes, kernel.GetProcessId.restype = [wintypes.HANDLE], wintypes.DWORD
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel.GetProcessTimes.restype = wintypes.BOOL
+    created: list[tuple[subprocess.Popen[bytes], int]] = []
+
+    def publish(process: subprocess.Popen[bytes]) -> None:
+        handle = int(getattr(process, "_handle"))
+        assert kernel.GetProcessId(handle) == process.pid != os.getpid()
+        times = [wintypes.FILETIME() for _ in range(4)]
+        assert kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times))
+        assert times[0].dwHighDateTime or times[0].dwLowDateTime
+        assert process.poll() is None
+        created.append((process, handle))
+        if refuse:
+            raise ValueError("fixture publication refused")
+
+    owner = _PaneChild()
+    options = dict(
+        native_handoff=WindowsNativeHandoff(publish),
+        cwd=str(offline_cli.workspace), env=offline_cli.env,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        if refuse:
+            with pytest.raises(ValueError, match="fixture publication refused"):
+                owner.launch([offline_cli.executable, "--version"], **options)
+            assert owner.proc is None and len(created) == 1
+            assert created[0][0].poll() is not None
+            assert created[0][0].stdout is not None and created[0][0].stderr is not None
+            assert created[0][0].stdout.closed and created[0][0].stderr.closed
+        else:
+            owner.launch([offline_cli.executable, "--version"], **options)
+            assert owner.proc is not None
+            assert created == [(owner.proc, int(getattr(owner.proc, "_handle")))]
+            assert await asyncio.wait_for(owner.wait(), 30) == 0
+            assert owner.proc.stdout is not None
+            assert b"GitHub Copilot CLI" in owner.proc.stdout.read()
+            assert owner.job is None
+    finally:
+        if owner.proc is not None:
+            await owner.terminate()
+            assert owner.proc.stdout is not None and owner.proc.stderr is not None
+            owner.proc.stdout.close()
+            owner.proc.stderr.close()
+
+
 @pytest.mark.parametrize("configured", [False, True])
-def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, configured):
+def test_native_private_mux_executes_the_requested_pane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: bool,
+) -> None:
     if os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated Windows PSMux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -178,8 +279,10 @@ def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, c
             observed_pid = fixture.query("display-message", "-p", "-t", fixture.target, "#{pane_pid}")
             assert observed_pid.returncode == 0 and observed_pid.stdout.strip().isdigit()
             pid = int(observed_pid.stdout.strip())
+            shell = shutil.which("pwsh")
+            assert shell is not None
             detail = subprocess.run(
-                [shutil.which("pwsh"), "-NoProfile", "-Command",
+                [shell, "-NoProfile", "-Command",
                  f"Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' | "
                  "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"],
                 env=fixture.environment, capture_output=True, text=True, encoding="utf-8",
@@ -205,7 +308,9 @@ def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, c
                 assert fixture.query("kill-session", "-t", fixture.target).returncode == 0
 
 
-def test_native_launch_scoped_observer_needs_no_privileged_permission(tmp_path, offline_cli):
+def test_native_launch_scoped_observer_needs_no_privileged_permission(
+    tmp_path: Path, offline_cli: _OfflineCli,
+) -> None:
     plugin = tmp_path / "plugin"
     (plugin / "extensions" / "driver-fixture").mkdir(parents=True)
     (plugin / "plugin.json").write_text(
@@ -252,7 +357,9 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     assert not (offline_cli.home / "permissions-config.json").exists()
 
 
-def test_native_joined_session_reports_pending_read_support_without_permission_grants(tmp_path, offline_cli):
+def test_native_joined_session_reports_pending_read_support_without_permission_grants(
+    tmp_path: Path, offline_cli: _OfflineCli,
+) -> None:
     plugin = tmp_path / "pending-plugin"
     extension = plugin / "extensions" / "pending-fixture"
     extension.mkdir(parents=True)
@@ -312,7 +419,9 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     assert not (offline_cli.home / "permissions-config.json").exists()
 
 
-def test_native_joined_observer_close_returns_no_attributed_outcome(tmp_path, offline_cli):
+def test_native_joined_observer_close_returns_no_attributed_outcome(
+    tmp_path: Path, offline_cli: _OfflineCli,
+) -> None:
     plugin = tmp_path / "observer-plugin"
     extension = plugin / "extensions" / "observer-fixture"
     extension.mkdir(parents=True)
@@ -369,8 +478,8 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pane_owner", ["direct", "manager-wrapper"])
 async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identity(
-    tmp_path, offline_cli, monkeypatch, pane_owner,
-):
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch, pane_owner: str,
+) -> None:
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -383,16 +492,16 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
     )
     (offline_cli.home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
     class Owner:
-        pid = None
-        pane_pid = None
+        pid: int | None = None
+        pane_pid: int | None = None
         stops = 0
-        returncode = None
+        returncode: int | None = None
 
-        def __init__(self):
+        def __init__(self) -> None:
             self.started = asyncio.Event()
-            self.identity = None
+            self.identity: str | None = None
 
-        async def wait(self):
+        async def wait(self) -> int:
             await self.started.wait()
             while self.returncode is None:
                 result = await asyncio.to_thread(query, "has-session", "-t", target)
@@ -403,7 +512,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 await asyncio.sleep(0.2)
             return self.returncode
 
-        async def terminate(self):
+        async def terminate(self) -> None:
             if self.identity is not None and self.returncode is None:
                 observed = await asyncio.to_thread(
                     query, "display-message", "-p", "-t", target, "#{session_id}:#{session_created}|#{pane_id}",
@@ -446,7 +555,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
     fixture = FixtureMux(binary, offline_cli.home, environment)
     target, query = fixture.target, fixture.query
 
-    async def launch():
+    async def launch() -> None:
         absent = await asyncio.to_thread(query, "has-session", "-t", target)
         assert absent.returncode == 1, "The fixture target must be absent before creation"
         result = await asyncio.to_thread(
@@ -489,7 +598,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 await asyncio.sleep(0.05)
             else:
                 pytest.fail("Original native seed did not complete: " + _logs(offline_cli.logs))
-            host = SessionHost(backend, nonce="front-private", lifetime_policy="cli")
+            host = SessionHost(cast(ChildProcess, backend), nonce="front-private", lifetime_policy="cli")
             port = await host.serve()
             websocket = WebSocketTransport(port, "front-private")
             await websocket.serve()
@@ -525,7 +634,8 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 "params": {"sessionId": native, "prompt": [{"type": "text", "text": prompts[2]}]},
             }) + "\n").encode())
             while True:
-                cursor, frame = await asyncio.wait_for(anext(client.frames()), 30)
+                frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                 message = json.loads(frame)
                 await client.ack(cursor)
                 if message.get("id") == 3:
@@ -566,15 +676,15 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delivery", ["ordinary", "receiving", "original-owner", "bridge-client"])
 async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_pane(
-    tmp_path, offline_cli, monkeypatch, delivery,
-):
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch, delivery: str,
+) -> None:
     await _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
 
 
 @pytest.mark.asyncio
 async def test_native_headed_startup_seed_observation_precedes_controlled_send(
-    tmp_path, offline_cli, monkeypatch,
-):
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     await asyncio.wait_for(
         _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, "startup-seed"), 120,
     )
@@ -582,8 +692,8 @@ async def test_native_headed_startup_seed_observation_precedes_controlled_send(
 
 @pytest.mark.asyncio
 async def test_native_headed_startup_no_seed_is_not_an_idle_claim(
-    tmp_path, offline_cli, monkeypatch,
-):
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     await asyncio.wait_for(
         _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, "startup-no-seed"), 120,
     )
@@ -591,14 +701,14 @@ async def test_native_headed_startup_no_seed_is_not_an_idle_claim(
 
 @pytest.mark.asyncio
 async def test_native_headed_startup_cold_resume_preserves_history(
-    tmp_path, offline_cli, monkeypatch,
-):
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     await asyncio.wait_for(
         _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, "startup-cold-resume"), 120,
     )
 
 
-def _startup_observation_stage(attempt_directory):
+def _startup_observation_stage(attempt_directory: Path) -> Path:
     from agent_remote_driver.headed.staging import stage_extension
 
     plugin = stage_extension(attempt_directory)
@@ -656,7 +766,9 @@ adapter.handle = async (request) => {
     return plugin
 
 
-async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery):
+async def _native_coordinator_flow(
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch, delivery: str,
+) -> None:
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -666,8 +778,23 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
         pytest.skip("The native coordinator fixture requires existing Windows PSMux")
     startup = delivery.startswith("startup-")
     no_seed, cold_resume = delivery == "startup-no-seed", delivery == "startup-cold-resume"
-    if (delivery == "bridge-client" or startup) and not shutil.which("node"):
+    node = shutil.which("node")
+    if (delivery == "bridge-client" or startup) and not node:
         pytest.skip("Node is required for the retained Bridge client")
+    wrapper = None
+    if delivery == "bridge-client" or startup:
+        assert node is not None
+        wrapper = tmp_path / "bridge-consumer" / "remote-driver.mjs"
+        wrapper.parent.mkdir()
+        wrapper.write_bytes(dict(extension_sources())[wrapper.name])
+        imported = await asyncio.to_thread(
+            run_caller_owned, [node, "--input-type=module", "-e",
+                "const client=await import(" + json.dumps(wrapper.as_uri()) + ");"
+                "if(typeof client.createHeadedDriverSession!=='function')"
+                "throw Error('Missing actual Bridge headed consumer');"],
+            timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+        assert imported.returncode == 0, imported.stderr
     (offline_cli.home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(offline_cli.workspace)]}), encoding="utf-8",
     )
@@ -677,8 +804,7 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
     if no_seed:
         prompts = prompts[1:]
     if cold_resume:
-        result = await asyncio.to_thread(
-            subprocess.run,
+        result = await asyncio.to_thread(lambda: subprocess.run(
             [
                 offline_cli.executable, "--session-id", session_id, "-p", prompts[0],
                 "--no-auto-update", "--disable-builtin-mcps", "--no-custom-instructions",
@@ -686,7 +812,7 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
             ],
             cwd=offline_cli.workspace, env=offline_cli.env, capture_output=True,
             timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
-        )
+        ))
         assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
         assert len(offline_cli.requests) == 1
     if delivery == "startup-seed":
@@ -702,7 +828,7 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
         offline_cli.executable,
         *(["-i", prompts[0]] if not (no_seed or cold_resume) else []),
         "--resume" if cold_resume else "--session-id", session_id,
-        "--screen-reader", "--no-auto-update", "--disable-builtin-mcps",
+        "--no-auto-update", "--disable-builtin-mcps",
         "--no-custom-instructions", "--no-color", "--no-ask-user",
         "--log-dir", str(offline_cli.logs),
     ]
@@ -745,7 +871,8 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
     )
     if startup:
         script = (
-            inspect.getsource(_startup_observation_stage)
+            "from __future__ import annotations\n"
+            + inspect.getsource(_startup_observation_stage)
             + "\nimport agent_remote_driver.headed.launcher as headed\n"
             "from agent_remote_driver.session_host.launcher import main\n"
             "headed.stage_extension = _startup_observation_stage\n"
@@ -757,8 +884,8 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
         ]
     fixture = FixtureMux(binary, offline_cli.home, {
         **offline_cli.env, "HOME": str(offline_cli.home), "USERPROFILE": str(offline_cli.home),
-        "PSMUX_DATA_DIR": str(tmp_path / "psmux-data"), "PSMUX_CONFIG_FILE": os.devnull,
-        "PSMUX_NO_WARM": "1",
+        "PSMUX_DATA_DIR": str(offline_cli.home / ".psmux"), "PSMUX_CONFIG_FILE": os.devnull,
+        "PSMUX_NO_WARM": "1", "PSMUX_SERVER_DEBUG": "1",
         "AGENT_BRIDGE_SESSION_HOST_NONCE": receipt_nonce,
         **({
             "DRIVER_STARTUP_HELD": str(held_file), "DRIVER_STARTUP_RELEASE": str(release_file),
@@ -774,7 +901,10 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
             query, "new-session", "-d", "-s", target, "-c", str(offline_cli.workspace),
             "--", *coordinator_argv,
         )
-        assert launched.returncode == 0, launched.stderr
+        assert launched.returncode == 0, "\n".join((
+            launched.stdout, launched.stderr, _logs(offline_cli.logs)[-8192:],
+            _logs(offline_cli.home / ".psmux")[-8192:],
+        ))
         observed = await asyncio.to_thread(
             query, "display-message", "-p", "-t", target, "#{session_id}:#{session_created}|#{pane_id}",
         )
@@ -813,9 +943,11 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
             }
             assert owner_pid != state["pid"] and pid_alive(owner_pid)
         else:
+            coordinator_birth = process_start_time(state["pid"])
+            assert coordinator_birth is not None
             assert native_child(
                 state_file, coordinator_pid=state["pid"],
-                coordinator_birth=process_start_time(state["pid"]),
+                coordinator_birth=coordinator_birth,
                 session_id=session_id, nonce=receipt_nonce,
             ) == (state["child_pid"], process_start_time(state["child_pid"]))
         event_file = offline_cli.home / "session-state" / session_id / "events.jsonl"
@@ -847,12 +979,7 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
                             assert "result" in response, response
                             break
         elif delivery == "bridge-client" or startup:
-            from agent_procutil.owned_process import run_caller_owned
-
-            wrapper = (
-                Path(__file__).resolve().parents[4] / "plugins" / "agent-bridge" /
-                "extensions" / "agent-bridge" / "remote-driver.mjs"
-            )
+            assert node is not None and wrapper is not None
             declaration = {
                 "contract": "copilot-driver.headed-client", "version": 1,
                 "sessionId": session_id, "cwd": str(offline_cli.workspace), "stateFile": str(state_file),
@@ -874,7 +1001,7 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
                 "finally {client.close();}\n"
             )
             client_operation = asyncio.create_task(asyncio.to_thread(
-                run_caller_owned, [shutil.which("node"), "--input-type=module", "-e", script],
+                run_caller_owned, [node, "--input-type=module", "-e", script],
                 timeout=20, max_stdout_bytes=4096, max_stderr_bytes=4096,
             ))
             if delivery == "startup-seed":
@@ -947,7 +1074,8 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
                         "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
                     }) + "\n").encode())
                     while True:
-                        cursor, frame = await asyncio.wait_for(anext(client.frames()), 30)
+                        frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                        cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                         response = json.loads(frame)
                         await client.ack(cursor)
                         if response.get("id") == request_id:

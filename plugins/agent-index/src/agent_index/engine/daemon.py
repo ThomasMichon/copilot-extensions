@@ -27,14 +27,16 @@ import sys
 import time
 from pathlib import Path
 
+import agent_procutil
 from agent_procutil import (
-    python_cache_args,
     spawn_daemon,
     windowless_python,
     windowless_python_env,
 )
 
 from .generation import current_engine_generation
+
+python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
 
 def engine_home() -> Path:
@@ -175,6 +177,8 @@ _LOG_LEVEL_BOOTSTRAP = (
 
 def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
     offset = 3 if len(cmd) > 2 and cmd[1] == "-X" and cmd[2].startswith("pycache_prefix=") else 1
+    if cmd[1:2] == ["-B"]:
+        offset = 2
     if cmd[offset:offset + 2] == ["-m", "agent_index_engine.app"]:
         return [*cmd[:offset], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[offset + 2:]]
     return list(cmd)

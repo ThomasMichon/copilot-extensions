@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: drive agents by outcome-shaped root goals (operator-goal precedence, alignment and projected progress) with standing, bounded authority for monitors and equivalent supervisors to nudge goal establishment and charter lodging",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "minor"
+    }
+  ]
+}

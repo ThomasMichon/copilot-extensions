@@ -22,7 +22,7 @@ $ErrorActionPreference = 'Stop'
 
 # copilot-extensions:recovery-source-contract=1
 if ($args.Count -eq 1 -and $args[0] -ceq '--describe-recovery-source') {
-    [Console]::Out.WriteLine('{"schema":"copilot-extensions.recovery-source-capability","version":1,"capabilities":["request-file","preview","install","main","commit","configured-main-pin","legacy-install-flow","prepared-install-source"]}')
+    [Console]::Out.WriteLine('{"schema":"copilot-extensions.recovery-source-capability","version":1,"request_versions":[1,2],"capabilities":["request-file","preview","install","main","commit","configured-main-pin","legacy-install-flow","prepared-install-source","repository-preview"]}')
     exit 0
 }
 

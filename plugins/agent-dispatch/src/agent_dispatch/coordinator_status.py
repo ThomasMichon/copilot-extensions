@@ -123,8 +123,15 @@ def register_status_routes(
             ),
             "pool_placement": pool_placement_contract(),
             "task_relationships": {
-                "version": 1, "enabled": queue._relationship_writer is not None,
+                "version": 1, "enabled": (
+                    queue._relationship_writer is not None
+                    or queue._ordinary_relationship_writer is not None
+                ),
                 "assignment_request": 2, "authority": queue._relationship_authority,
+                "scope": (
+                    "all" if queue._relationship_writer is not None else "local-ordinary"
+                    if queue._ordinary_relationship_writer is not None else None
+                ),
             },
             "standing_charters": standing_capability(queue),
             CLAIM_HELD_REARM_CAPABILITY: 1,

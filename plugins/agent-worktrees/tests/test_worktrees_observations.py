@@ -10,10 +10,10 @@ from dataclasses import replace
 import pytest
 
 from agent_worktrees import __main__ as core
-from agent_worktrees import git_ops, reclaim, sessions, tracking
+from agent_worktrees import config as cfg, git_ops, reclaim, sessions, tracking
 from agent_worktrees import worktrees_observation_contract as contract
 from agent_worktrees import worktrees_producer as producer
-from agent_worktrees.worktrees_client import validate_result
+from agent_worktrees.worktrees_client import saved_result, validate_result
 from agent_worktrees.worktrees_feed import publication_frames
 from agent_worktrees.worktrees_feed_client import FeedReceiver
 from agent_worktrees.worktrees_projection import WorktreesProjection, read_advisory
@@ -27,7 +27,7 @@ def request(version=2):
 
 def row(title="Title", at=10, quality="current"):
     return {
-        "id": "one", "title": title, "activity_at": "important-time",
+        "id": "one", "platform": cfg.detect_platform(), "title": title, "activity_at": "important-time",
         "fact_provenance": {"session": {"quality": quality, "observed_at": at}},
     }
 
@@ -62,7 +62,7 @@ def wire_bytes(value):
 
 
 def sized_row(size, revision, *, non_ascii=False, facts=False):
-    value = {"id": "one", "claims_assets": {
+    value = {"id": "one", "platform": cfg.detect_platform(), "claims_assets": {
         f"padding{i}": "é" * 2048 if non_ascii else "x" * 4096 for i in range(15)
     }}
     if facts:
@@ -143,6 +143,24 @@ def test_complete_wire_budget_rejects_65558_before_durable_publication(tmp_path,
         owner.shutdown()
 
 
+@pytest.mark.parametrize("version", [1, 2])
+def test_transient_platform_bytes_are_checked_before_any_publication(tmp_path, version):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    before = publication_tables(owner.store.db_path)
+    value = sized_row(65536, 1, facts=version == 1)
+    value.pop("platform")
+    value["claims_assets"]["tail"] = ""
+    body = value if version == 1 else {**contract.semantic_row(value), "semantic_revision": 1}
+    value["claims_assets"]["tail"] = "x" * (65536 - wire_bytes(body))
+    try:
+        with pytest.raises(ProjectionError, match="byte bound"):
+            owner.publish("project", [value], observed_at=1)
+        assert publication_tables(owner.store.db_path) == before
+    finally:
+        owner.shutdown()
+
+
 @pytest.mark.parametrize("revision", [1, 9, 10, 2**63 - 1])
 @pytest.mark.parametrize("non_ascii", [False, True])
 @pytest.mark.parametrize("size", [65536, 65537])
@@ -179,7 +197,9 @@ def test_complete_wire_budget_real_publication_to_manager(
             manager.receive(decoded)
         assert engine.current["worktrees"] == result["worktrees"]
         assert manager.rows[0] == parsed
-        assert read_advisory(owner.store.db_path, "project", contract_version=2)[
+        assert read_advisory(
+            owner.store.db_path, "project", contract_version=2, wire_platform=cfg.detect_platform(),
+        )[
             "worktrees"
         ] == result["worktrees"]
         assert owner.handle(request(1))["worktrees"] == [value]
@@ -270,7 +290,9 @@ def test_complete_wire_budget_keeps_full_v1_capacity_with_observation_metadata(t
         owner.publish("project", [value], observed_at=1)
         assert owner.handle(request(1))["worktrees"] == [value]
         assert wire_bytes(owner.handle(request())["worktrees"][0]) < 65536
-        assert read_advisory(owner.store.db_path, "project")["worktrees"] == [value]
+        assert read_advisory(
+            owner.store.db_path, "project", wire_platform=cfg.detect_platform(),
+        )["worktrees"] == [value]
     finally:
         owner.shutdown()
 
@@ -281,6 +303,8 @@ def test_complete_wire_budget_older_writer_keeps_full_v1_capacity(tmp_path):
     store = WorktreesProjection(tmp_path / "legacy.sqlite3")
     store.activate()
     value = sized_row(65558, 1, non_ascii=True)
+    value.pop("platform")
+    value["claims_assets"]["tail"] += "x" * (65536 - wire_bytes(value))
     assert wire_bytes(value) == 65536
     with sqlite3.connect(store.db_path) as conn:
         conn.execute("INSERT OR REPLACE INTO worktrees_projection_owner VALUES (1, ?, ?)",
@@ -294,6 +318,7 @@ def test_complete_wire_budget_older_writer_keeps_full_v1_capacity(tmp_path):
         SelectionIndex([value]).persist(conn, "project")
     before = publication_tables(store.db_path)
     assert read_advisory(store.db_path, "project", contract_version=1)["worktrees"] == [value]
+    assert saved_result(request(1), "fixture rollback", db_path=store.db_path)["worktrees"] == [value]
     with pytest.raises(ProjectionError, match="byte bound"):
         read_advisory(store.db_path, "project", contract_version=2)
     assert publication_tables(store.db_path) == before
@@ -320,7 +345,10 @@ def test_closure_observation_reconstruction_drops_removed_timestamp(
         assert writes(owner.store.db_path) == []
         assert publications[2]["worktrees"][0]["semantic_revision"] == 1
         for result in (
-            publications[1], read_advisory(owner.store.db_path, "project", contract_version=1),
+            publications[1], read_advisory(
+                owner.store.db_path, "project", contract_version=1,
+                wire_platform=cfg.detect_platform(),
+            ),
         ):
             assert result["worktrees"] == [current]
         for version in (1, 2):
@@ -385,7 +413,10 @@ def test_publication_snapshots_reusable_row_generator(tmp_path, manager_contract
                 for frame in frames:
                     managers[version].receive(json.loads(json.dumps(frame)))
                 assert [value["id"] for value in managers[version].rows] == ["one", "two"]
-                assert read_advisory(owner.store.db_path, "project", contract_version=version)[
+                assert read_advisory(
+                    owner.store.db_path, "project", contract_version=version,
+                    wire_platform=cfg.detect_platform(),
+                )[
                     "worktrees"
                 ] == result["worktrees"]
                 if wave == 2 and version == 2:
@@ -473,7 +504,9 @@ def test_real_producer_thousand_rows_ten_observations_and_one_title(tmp_path, mo
         assert [f["wt"]["id"] for f in frames if f["type"] == "worktree"] == ["tree-0017"]
         assert writes(owner.store.db_path) == [("UPDATE", "tree-0017")]
         assert owner.store._projects["project"].index is index
-        advisory = read_advisory(owner.store.db_path, "project", contract_version=2)
+        advisory = read_advisory(
+            owner.store.db_path, "project", contract_version=2, wire_platform=cfg.detect_platform(),
+        )
         assert advisory["worktrees"] == current["worktrees"]
         assert advisory["observations"] == current["observations"]
         qualified = True

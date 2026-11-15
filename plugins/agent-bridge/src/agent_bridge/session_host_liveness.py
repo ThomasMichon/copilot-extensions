@@ -22,6 +22,43 @@ if TYPE_CHECKING:
 class _HostLivenessMixin:
     """Boundary-aware Session Host liveness checks and settle."""
 
+    async def _settle_exited_host_client(self, session: Session, rec: Any, client: Any) -> None:
+        """Settle an observed exit without clearing a concurrently recovered host."""
+        async with session._lifecycle_lock:
+            def still_current() -> bool:
+                return (
+                    self._sessions.get(session.session_id) is session
+                    and session.client is client
+                    and self._host_index is not None
+                    and self._host_index.get(session.session_id) == rec
+                    and client.host_child_exit_code is not None
+                )
+
+            if not still_current():
+                return
+            with contextlib.suppress(Exception):
+                await client.shutdown()
+            if not still_current():
+                return
+            with self._host_index.retiring_current(rec) as admitted:
+                if not admitted:
+                    return
+                self._reap_host_record(
+                    rec, "Session Host child exit observed by attached client", remove_index=False,
+                )
+                session.client = None
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(
+                    session.session_id, SessionStatus.STOPPED.value, time.time(),
+                )
+                if session.event_log:
+                    session.event_log.append("session_state_changed", {
+                        "status": SessionStatus.STOPPED.value,
+                        "host_child_exited": True,
+                        "exit_code": client.host_child_exit_code,
+                    })
+                self._clear_disconnected_reattach_retry_state(session.session_id)
+
     def _rec_host_alive(self, rec: Any) -> bool:
         """Is a Session Host still alive? Boundary-aware.
 

@@ -17,7 +17,7 @@ import pytest
 from agent_codespaces import connection_owner as owner
 
 
-def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp_path):
+def test_unsealed_owner_startup_disables_cache_writes(monkeypatch, tmp_path):
     import agent_procutil
     from agent_codespaces import owner_startup
 
@@ -37,7 +37,7 @@ def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp
     monkeypatch.setattr(agent_procutil, "spawn_daemon", spawn)
     owner_startup.spawn_owner_process(root, source=__file__, installed=True)
     command = captured["command"]
-    selected_prefix = command[command.index("-X") + 1].removeprefix("pycache_prefix=")
+    assert command[1:3] == ["-I", "-B"]
     assert captured["env_overrides"]["AGENT_CODESPACES_HOME"] == str(root)
     program = (
         "import json,sys;sys.path.insert(0,sys.argv[1]);import owner_cache_probe;"
@@ -48,7 +48,6 @@ def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp
     command = [*command[:command.index("-m")], "-c", program, str(slot)]
     env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
     env["PYTHONPYCACHEPREFIX"] = str(tmp_path / "wrong ambient cache")
-    previous = None
     for _cycle in range(2):
         result = subprocess.run(
             command, env=env, capture_output=True, text=True, check=True, timeout=30,
@@ -56,15 +55,11 @@ def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp
         )
         observed = json.loads(result.stdout)
         cache = Path(observed["cached"])
-        assert observed["enabled"] and observed["value"] == 7
+        assert not observed["enabled"] and observed["value"] == 7
         assert observed["isolated"] == 1
-        assert cache.is_relative_to(Path(observed["prefix"])) and cache.is_file()
-        assert observed["prefix"] == selected_prefix
-        assert os.path.samefile(Path(selected_prefix).parent, root / "cache" / "python")
-        current = cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino
-        if previous is not None:
-            assert current == previous
-        previous = current
+        assert not cache.exists()
+        assert observed["prefix"] is None
+        assert not (root / "cache").exists()
     assert not list(slot.rglob("*.pyc"))
     assert (module.read_bytes(), module.stat().st_mtime_ns, module.stat().st_ino) == before
     assert dict(os.environ) == caller_env
@@ -102,7 +97,7 @@ def test_source_owner_launch_preserves_package_discovery(tmp_path, monkeypatch, 
         "import json,os,sys\nfrom pathlib import Path\n"
         "Path(os.environ['AGENT_CODESPACES_HOME']).joinpath('witness.json').write_text("
         "json.dumps({'module':__file__,'cwd':os.getcwd(),'isolated':sys.flags.isolated,"
-        "'cache':sys.pycache_prefix,'args':sys.argv[1:]}))\n", encoding="utf-8",
+        "'readonly':sys.dont_write_bytecode,'args':sys.argv[1:]}))\n", encoding="utf-8",
     )
     with daemon_test_lifecycle(owner="source-owner-launch", registry_root=tmp_path / "instances"):
         child, log_path = owner_startup.spawn_owner_process(root, source=owner.__file__)
@@ -112,9 +107,8 @@ def test_source_owner_launch_preserves_package_discovery(tmp_path, monkeypatch, 
             assert Path(witness["module"]).parent == package
             assert Path(witness["cwd"]) == Path.home()
             assert witness["isolated"] == 0 and witness["args"] == ["owner"]
-            prefix = Path(witness["cache"])
-            assert os.path.samefile(prefix.parent, root / "cache" / "python")
-            assert prefix.name.startswith("unsealed-")
+            assert witness["readonly"] is True
+            assert not (root / "cache").exists()
             assert not list(package_root.rglob("*.pyc"))
         finally:
             if child.poll() is None:
@@ -559,7 +553,7 @@ while not (root / "stop").exists() and time.monotonic() < deadline:
 
     def spawn_fixture(argv, **kwargs):
         if argv != [
-            sys.executable, *agent_procutil.python_cache_args(tmp_path),
+            sys.executable, *agent_procutil.python_cache_policy_args(tmp_path),
             "-m", "agent_codespaces", "owner",
         ]:
             return real_spawn(argv, **kwargs)

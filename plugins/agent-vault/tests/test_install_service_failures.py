@@ -83,6 +83,7 @@ systemctl() {
     script = f"""
 set -euo pipefail
 INSTALL_DIR={shlex.quote(str(root))}
+SCRIPT_DIR={shlex.quote(str(INSTALLER.parent))}
 UNIT_DIR={shlex.quote(str(units))}
 RUN_DIR="$INSTALL_DIR/run"
 SYSTEMD_UNIT=agent-vault-fixture.service
@@ -134,8 +135,10 @@ if {action}; then exit 0; else exit 19; fi
         empty_bin = tmp_path / "empty-bin"
         empty_bin.mkdir()
         env["PATH"] = str(empty_bin)
+    program = tmp_path / "service-publication.sh"
+    program.write_text(script, encoding="utf-8")
     result = subprocess.run(
-        [bash, "-c", script], env=env, capture_output=True, text=True, timeout=10,
+        [bash, str(program)], env=env, capture_output=True, text=True, timeout=10,
     )
     commands = calls.read_text().splitlines() if calls.exists() else []
     return result, target, commands
@@ -171,12 +174,17 @@ def test_conditional_service_publication_preserves_documented_best_effort(tmp_pa
         assert "--user daemon-reload" in commands
         assert "--user enable agent-vault-fixture.service" in commands
         assert "--user restart agent-vault-fixture.service" in commands
-        assert f"ExecStart={tmp_path / 'runtime-python'}" in target.read_text()
+        assert (
+            f'ExecStart=/bin/sh "{tmp_path / "runtime/bin/vault-service.sh"}" '
+            f'"{tmp_path / "runtime-python"}" "{tmp_path / "runtime"}" '
+        ) in target.read_text()
         assert f'Environment="AGENT_VAULT_CONFIG={tmp_path / "selected.json"}"' in target.read_text()
         assert (
-            f'-X "pycache_prefix={tmp_path / "runtime/cache/python"}/unsealed-${{INVOCATION_ID}}" '
-            "-m agent_vault.service --foreground --persistent --handoff-stdin"
+            "--foreground --persistent --handoff-stdin"
         ) in target.read_text()
+        assert (tmp_path / "runtime/bin/vault-service.sh").read_bytes() == (
+            INSTALLER.with_name("vault-service.sh").read_bytes()
+        )
         assert ("WARN:" if scenario == "unsupported-manager" else "OK:") in result.stdout
 
 

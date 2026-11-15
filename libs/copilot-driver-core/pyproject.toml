@@ -36,6 +36,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "agent_remote_driver.headed" = ["*.mjs"]
+"agent_remote_driver.bridge_extension" = ["*.mjs"]
 
 [tool.ruff]
 target-version = "py310"
