@@ -3955,6 +3955,18 @@ tracking retirements already happened, and reads #6076's existing Phase 6
 ordering rather than inventing another acquisition journal. Only #6086's
 scoped local preparation comparison receives paired unchecked Plan/Validation
 clauses; no new issue closure, claim release or technical completion follows.
+The [reviewed local comparison and next input boundary](journal/2026/11.15-portable-receiving-boundaries.md#reviewed-local-comparison-and-the-next-input-boundary)
+records #12737's actual merge, unchanged technical acceptance and the complete
+841-open census. #6187/#6236 have complete maps; #6143/#6283 retain precise
+discussion gaps, and four further qualified unions receive the direct review below.
+No new tracker retirement, resource release or parent completion is inferred.
+The [finite Dispatch tracking distinction](journal/2026/11.15-portable-receiving-boundaries.md#finite-dispatch-source-retirement-boundaries)
+separates #6184/#6187/#6189's complete planned receiving from historical keep-open
+assessments. Their technical acceptance and custody remain independent of a
+later source-specific tracking disposition; #6177 stays canonical and #6190's
+opposing expectation remains unresolved. #6236's canonical V2 receiver gains
+only paired unchecked PR-service interface acceptance; it does not absorb
+#6189's distinct Dispatch behaviors or transfer the serving owner's work.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
