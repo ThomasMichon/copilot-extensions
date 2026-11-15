@@ -119,6 +119,8 @@ def load(root: Path) -> Selection | None:
         raise ValueError("relay-configuration-invalid")
     for name in ("fleet", "gateway", "slot", "installation", "service", "prefix", "gateway_origin"):
         text(value[name])
+    if len(value["slot"]) > 128:
+        raise ValueError("relay-slot-invalid")
     uri = urlsplit(value["gateway_origin"])
     if (uri.scheme != "https" or not uri.hostname or uri.username is not None
             or uri.password is not None or uri.path or uri.query or uri.fragment):

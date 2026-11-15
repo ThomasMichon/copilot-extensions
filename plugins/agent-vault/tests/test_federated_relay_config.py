@@ -56,3 +56,14 @@ def test_native_selection_retains_exact_references_and_rejects_duplicate_fields(
                     '"mode":"federated-relay"}')
     with pytest.raises(ValueError, match="duplicate"):
         load(tmp_path)
+
+
+@pytest.mark.parametrize("length", [128, 129])
+def test_federated_slot_matches_connector_length_bound(tmp_path: Path, length: int) -> None:
+    value = selection(tmp_path) | {"slot": "s" * length}
+    (tmp_path / "federated-relay.json").write_text(json.dumps(value))
+    if length == 128:
+        assert load(tmp_path) == value
+    else:
+        with pytest.raises(ValueError, match="relay-slot-invalid"):
+            load(tmp_path)

@@ -796,8 +796,6 @@ def test_connections_close_does_not_wait_forever_on_stalled_server(
 
 
 def test_connections_close_still_retries_and_reports_server_close_errors() -> None:
-    from agent_vault.service_connections import VaultConnections
-
     class FlakyServer:
         attempts = 0
 
@@ -1565,7 +1563,10 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native successor cleanup")
-def test_invalid_relay_successor_preserves_running_predecessor_endpoints(tmp_path: Path) -> None:
+@pytest.mark.parametrize("failure", ["invalid-mode", "oversized-slot"])
+def test_invalid_relay_successor_preserves_running_predecessor_endpoints(
+    tmp_path: Path, failure: str,
+) -> None:
     for identity in ("newer", "older"):
         _stage_generation(tmp_path, identity)
     (tmp_path / "current-version").write_text("newer")
@@ -1576,18 +1577,60 @@ def test_invalid_relay_successor_preserves_running_predecessor_endpoints(tmp_pat
         before = _required_endpoint(tmp_path)
         pid_file = tmp_path / "vault.pid"
         previous_pid = pid_file.read_bytes()
-        (tmp_path / "federated-relay.json").write_text(json.dumps({
+        relay: dict[str, Any] = {
             "schema": "agent-vault.federated-relay", "version": 1, "mode": "invalid",
-        }))
+        }
+        expected_error = "relay-configuration-invalid"
+        if failure == "oversized-slot":
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+            grant = {
+                "principal": "caller-a", "source": "local", "account": "account-a",
+                "recipient": "consumer-a", "host": "github.com", "action": "get-github-token",
+            }
+            relay = {
+                "schema": "agent-vault.federated-relay", "version": 1, "mode": "federated-relay",
+                "fleet": "fleet-a", "gateway": "gateway-a", "slot": "s" * 129,
+                "installation": "vault-test", "service": "vault-available-v1", "prefix": "/api",
+                "gateway_origin": "https://gateway.invalid", "gateway_ca": None,
+                "conduit_file": str(tmp_path / "conduit.json"),
+                "proof_key_file": str(tmp_path / "proof.pem"),
+                "account_policy_file": str(tmp_path / "policy.json"), "grants": [grant],
+                "auth": {"kind": "machine", "principal": "service-a", "audience": "gateway"},
+            }
+            (tmp_path / "capability").write_text("synthetic-explicit-source-capability-0001")
+            (tmp_path / "policy.json").write_text(json.dumps({
+                "schema": "credential-relay.account-policy", "version": 1,
+                "providers": {"native": {
+                    "kind": "gh-auth", "account": "account-a", "host": "github.com",
+                }},
+                "grants": [grant | {
+                    "provider": "native", "capability_file": str(tmp_path / "capability"),
+                    "expires_at": time.time() + 300, "source_lease_seconds": 60,
+                }],
+            }))
+            key = ec.generate_private_key(ec.SECP256R1())
+            (tmp_path / "proof.pem").write_bytes(key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ))
+            (tmp_path / "conduit.json").write_text(json.dumps({
+                "schema": "fleet-manager.gateway-conduit", "version": 2,
+                "gateway_origin": relay["gateway_origin"], "connect_host": "127.0.0.1",
+                "connect_port": 1, "generation": "synthetic-controller-generation",
+                "state": "ready", "expires_at": time.time() + 9,
+            }))
+            expected_error = "relay-slot-invalid"
+        (tmp_path / "federated-relay.json").write_text(json.dumps(relay))
         (tmp_path / "current-version").write_text("older")
         failed = _start(tmp_path, "older", 0, "bounded-successor")
         children.append(failed)
         _, error = failed.communicate(timeout=10)
-        assert failed.returncode != 0 and "relay-configuration-invalid" in error
         assert old.poll() is None
         assert pid_file.read_bytes() == previous_pid
         assert _endpoint(tmp_path) == before
         assert _send(_target(before), {"action": "ping"})["pid"] == before["pid"]
+        assert failed.returncode != 0 and expected_error in error
         if os.name != "nt":
             assert (tmp_path / "vault.sock").is_socket()
     finally:
