@@ -182,7 +182,7 @@ class FilteredProjection:
                         row["projected"][str(number)] = {
                             "number": number, "facts": copy.deepcopy(facts),
                             "observed_at": observed_at if number in prepared else (
-                                row["projected"].get(str(number)) or cached[number]
+                                cached.get(number) or row["projected"][str(number)]
                             )["observed_at"],
                         }
                     else:

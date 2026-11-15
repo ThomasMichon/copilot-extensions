@@ -515,3 +515,18 @@ def test_blocked_large_projection_does_not_prevent_smaller_owner_from_progressin
     assert events(selected, "broad", broad) == retained
     result = execute(selected, "narrow", "query", registration(narrow))["baseline"]
     assert [pull["number"] for pull in result["pulls"]] == [8]
+
+
+def test_cache_catchup_preserves_the_timestamp_of_the_facts_it_copies(selected):
+    subscribe(selected, "first", {"repo": ["owner/repo"]})
+    observe(selected, {7: facts()})
+    captured = selected[3].demands(expires_at=10000)[selected[2].key]
+    joined = subscribe(selected, "joined", {"repo": ["owner/repo"]})
+    selected[0][0] = 102
+    observe(selected, {7: facts(tags=["changed"])}, demand=captured)
+    selected[0][0] = 103
+    observe(selected, outcome="unavailable", error="provider_unavailable")
+    result = execute(selected, "joined", "query", registration(joined))["baseline"]
+    assert result["pulls"][0]["facts"]["tags"] == ["changed"]
+    assert result["pulls"][0]["observed_at"] == 102
+    assert result["inventory"]["outcome"] == "unavailable"
