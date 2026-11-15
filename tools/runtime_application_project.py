@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from runtime_application_binstubs import slot_binstubs  # noqa: E402
+from runtime_application_install import callback_timeouts  # noqa: E402
 
 _ROOTS = {
     "worktree-manager": ("WORKTREE_MANAGER_ROOT", ".worktree-manager"),
@@ -47,7 +48,8 @@ def install_callbacks(
     if "application" in settings:
         declaration = settings["application"]
         if (
-            not isinstance(declaration, dict) or set(declaration) != {"setup", "start"}
+            not isinstance(declaration, dict)
+            or set(declaration) - {"callback_timeout_seconds"} != {"setup", "start"}
             or any(
                 not isinstance(declaration[key], list)
                 or any(not isinstance(argument, str) or "\0" in argument for argument in declaration[key])
@@ -55,6 +57,7 @@ def install_callbacks(
             )
         ):
             raise ValueError("application declaration requires setup and start argument lists")
+        callback_timeouts(declaration)
         return list(declaration["setup"]), list(declaration["start"])
     if name == "worktree-manager":
         return [], []
@@ -110,6 +113,7 @@ def emit(
     requirements: list[str] | None = None,
     source_fallbacks: dict[str, Path] | None = None,
     construction: dict | None = None,
+    callback_timeout_seconds: dict | None = None,
 ) -> Path:
     """First-party wheel paths are relative; uv creates/checks the actual lock."""
     if not commands:
@@ -178,6 +182,9 @@ def emit(
         "setup": setup, "start": start,
         "construction": construction,
     }
+    if callback_timeout_seconds is not None:
+        declaration["callback_timeout_seconds"] = dict(callback_timeout_seconds)
+    callback_timeouts(declaration)
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "wheels").mkdir()
     for name, path in wheels.items():
@@ -211,6 +218,9 @@ def emit(
     for directory in (canonical, ROOT / "libs" / "versioned-runtime"):
         for source in directory.glob("*.py"):
             shutil.copyfile(source, runtime / source.name)
+    from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
+
+    (runtime / ARCHIVE_NAME).write_bytes(lifecycle_archive(ROOT))
     if runtime_source is not None:
         (destination / "runtime-source.json").write_text(
             json.dumps(runtime_source, sort_keys=True) + "\n", encoding="utf-8", newline="\n",

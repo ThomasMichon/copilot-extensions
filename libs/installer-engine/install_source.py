@@ -28,6 +28,7 @@ MANIFEST = "install-source.json"
 APPLICATION_INSTALL_CONTRACT = {
     "schema": "copilot-extensions.prepared-application-install",
     "version": 1,
+    "capabilities": ["callback-timeouts/v1"],
 }
 
 
@@ -452,6 +453,10 @@ def install_application(
             raise ValueError("application installation requires a prepared application project")
         application = _member(snapshot, selected.project["application"])
         declaration = _read(application / "application.json")
+        from runtime_application_install import _validate_application, application_install_timeout
+
+        _validate_application(declaration)
+        install_timeout = application_install_timeout(declaration)
         if declaration.get("construction") != application_inputs(selected, inputs):
             raise ValueError("application declaration differs from its retained Source/profile")
         if declaration.get("name") == "worktree-manager":
@@ -563,7 +568,7 @@ def install_application(
                     *command,
                 ],
                 inputs=frozen, descriptor=candidate.descriptor,
-                timeout=180, cwd=cwd, candidate=candidate.slot,
+                timeout=install_timeout, cwd=cwd, candidate=candidate.slot,
                 allow_breakaway=True,
             )
             inputs.verify()

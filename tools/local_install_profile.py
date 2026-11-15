@@ -312,6 +312,9 @@ def _write_snapshot(
             application, distribution=metadata["name"], version=metadata["version"],
             requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
             commands=commands, setup=setup, start=start,
+            callback_timeout_seconds=project_metadata.get("tool", {}).get(
+                "copilot-extensions", {},
+            ).get("application", {}).get("callback_timeout_seconds"),
             wheels={row["name"]: wheels / row["filename"] for row in profile_record["wheels"]},
             runtime_source=selected.identity.document(), target_environment=environment,
             target_tags=profile_record["target"]["tags"],

@@ -214,6 +214,56 @@ def install_transaction(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.parametrize("budgets,expected", [
+    (None, [180, 180]),
+    ({"setup": 240, "start": 600}, [240, 600]),
+    ({"start": 600}, [180, 600]),
+])
+def test_install_callback_budgets_reach_actual_subprocess_boundary(
+    install_transaction, monkeypatch, budgets, expected,
+):
+    fixture = install_transaction
+    fixture.record["setup"] = ["--setup"]
+    if budgets is not None:
+        fixture.record["callback_timeout_seconds"] = budgets
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
+    invocations = []
+
+    def run(argv, **options):
+        invocations.append((argv, options))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(runtime_application_install.subprocess, "run", run)
+    runtime_application_install.install(
+        fixture.slot, stage=False, global_bin=fixture.global_bin,
+    )
+    assert [options["timeout"] for _, options in invocations] == expected
+    assert [argv[-1] for argv, _ in invocations] == ["--setup", "--start"]
+    assert (fixture.slot / "install-success.json").is_file()
+
+
+def test_emitted_application_retains_callback_budget_contract(tmp_path):
+    wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"fixture")
+    application = emit(
+        tmp_path / "application", distribution="fixture-app", version="1.0.0",
+        requires_python=">=3.10", commands={"fixture-app": "fixture_app:main"},
+        wheels={"fixture-app": wheel}, setup=["prepare"], start=["serve"],
+        callback_timeout_seconds={"setup": 240, "start": 600},
+    )
+    record = runtime_application_install._application(application)
+    assert record["callback_timeout_seconds"] == {"setup": 240, "start": 600}
+    assert runtime_application_install.application_install_timeout(record) == 1500
+    assert (application / "install.py").read_bytes() == Path(
+        runtime_application_install.__file__,
+    ).read_bytes()
+    from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
+
+    assert (application / "runtime" / ARCHIVE_NAME).read_bytes() == lifecycle_archive(
+        Path(__file__).resolve().parents[1],
+    )
+
+
 @pytest.mark.parametrize("ending", [b"\n", b"\r\n"])
 @pytest.mark.parametrize("changed", [
     None, "current-version", "last-known-good", "command", "receipt", "completion",
@@ -292,7 +342,7 @@ def test_current_publication_reenters_configuration_and_readiness_owners(
     (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
     calls = []
 
-    def owner(_record, command, root, slot):
+    def owner(_record, command, root, slot, **_kwargs):
         assert root == fixture.root and slot == fixture.slot
         if command:
             calls.append(tuple(command))
@@ -331,7 +381,7 @@ def test_install_transaction_before_start_failure_restores_prior_state(
             previous[name] = b"unrecognized old launcher: " + name.encode() + b"\r\n"
             (fixture.global_bin / name).write_bytes(previous[name])
 
-    def command(_record, arguments, _root, _slot):
+    def command(_record, arguments, _root, _slot, **_kwargs):
         if arguments == ["--setup"]:
             raise RuntimeError("setup refused")
         if arguments:
@@ -394,7 +444,7 @@ def test_install_replaces_all_declared_old_launchers_without_incumbent_provenanc
     data.write_bytes(b"preserved application state")
     starts = []
 
-    def command(_record, arguments, root, slot):
+    def command(_record, arguments, root, slot, **_kwargs):
         if arguments:
             assert (root / "current-version").read_text().strip() == slot.name
             assert all((fixture.global_bin / name).read_bytes() == text.encode()
@@ -425,7 +475,7 @@ def test_install_replacement_preserves_launcher_changed_during_setup(
     command.write_bytes(b"old launcher\n")
     calls = []
 
-    def setup(_record, arguments, _root, _slot):
+    def setup(_record, arguments, _root, _slot, **_kwargs):
         calls.append(arguments)
         command.write_bytes(b"concurrent replacement\n")
 
@@ -452,7 +502,7 @@ def test_install_replacement_refuses_nonordinary_or_unbounded_launcher(
     else:
         command.write_bytes(b"x" * 65537)
     calls = []
-    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: calls.append(True))
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: calls.append(True))
     with pytest.raises(RuntimeError, match="not an ordinary file"):
         runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
     assert not calls
@@ -523,7 +573,7 @@ def test_install_transaction_verifies_inputs_outside_selector_update(
         yield engine.runtime, unchanged
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
-    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: None)
     runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
     assert verified
     assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
@@ -537,7 +587,7 @@ def test_install_transaction_unknown_start_retains_selection_not_last_good(
     serving = fixture.root / "serving-fixture"
     cause = subprocess.TimeoutExpired(["fixture-start"], 180)
 
-    def start(_record, arguments, root, slot):
+    def start(_record, arguments, root, slot, **_kwargs):
         if not arguments:
             return
         assert (root / "current-version").read_text().strip() == slot.name
@@ -565,7 +615,7 @@ def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
     fixture = install_transaction
     winner = b"concurrent owner's command\n"
 
-    def start(_record, arguments, root, _slot):
+    def start(_record, arguments, root, _slot, **_kwargs):
         if not arguments:
             return
         if changed_selection:
@@ -592,7 +642,7 @@ def test_install_transaction_pre_start_failure_preserves_concurrent_winner(
     install_transaction, monkeypatch,
 ):
     fixture = install_transaction
-    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: None)
 
     def publication(root, *_):
         (root / "current-version").write_bytes(b"3.0\n")
@@ -648,7 +698,7 @@ def test_failed_update_recovers_before_another_installer_can_commit(
         write(path, content)
 
     monkeypatch.setattr(engine.runtime, "_publication_lease", competing_update)
-    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: None)
     if phase == "publication":
         monkeypatch.setattr(fixture.publication, "publish_selectors", failed_publication)
     else:
@@ -694,7 +744,7 @@ def qualified(*a,**k):
     yield runtime,lambda:None
 app._qualified=qualified
 app._load=lambda *a:SimpleNamespace(global_binstubs=global_binstubs)
-app._run=lambda *a:None
+app._run=lambda *a,**kw:None
 lease=runtime._publication_lease
 @contextlib.contextmanager
 def entered(root):
@@ -726,7 +776,7 @@ print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
         write(path, content)
 
     monkeypatch.setattr(runtime_application_install, "_write", fail_after_competitor_enters)
-    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: None)
     try:
         with pytest.raises(RuntimeError, match="launcher refused"):
             runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
@@ -779,7 +829,7 @@ def test_install_without_start_commits_one_update_after_unlocked_verification(
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
     monkeypatch.setattr(engine.runtime, "_publication_lease", update)
     monkeypatch.setattr(fixture.publication, "publish_selectors", published)
-    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_, **_kw: None)
     runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
     assert checks and len(updates) == 1
     assert (fixture.root / "current-version").read_bytes() == b"2.0\n"
@@ -798,7 +848,7 @@ def test_fleet_client_install_publishes_without_a_host_callback(install_transact
     )
     (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
 
-    def refuse_callback(_record, arguments, *_):
+    def refuse_callback(_record, arguments, *_, **_kwargs):
         if arguments:
             pytest.fail("ordinary Fleet client installation must not invoke a hosting callback")
 
@@ -816,7 +866,7 @@ def test_install_transaction_cancelled_start_retains_selection(
     fixture = install_transaction
     cancellation = KeyboardInterrupt()
 
-    def start(_record, arguments, _root, _slot):
+    def start(_record, arguments, _root, _slot, **_kwargs):
         if arguments:
             raise cancellation
 
@@ -837,7 +887,7 @@ def test_install_transaction_last_good_follows_start_acknowledgement(
     fixture = install_transaction
     starts = []
 
-    def start(_record, arguments, root, slot):
+    def start(_record, arguments, root, slot, **_kwargs):
         if arguments:
             assert (root / "current-version").read_text().strip() == slot.name
             assert (root / "last-known-good").read_bytes() == b"0.9\n"
@@ -866,7 +916,7 @@ def test_manager_regular_install_routes_to_its_owner_before_generic_publication(
     )
     calls = []
 
-    def owner(record, command, root, selected):
+    def owner(record, command, root, selected, **_kwargs):
         calls.append((command, root, selected))
         if failure:
             raise RuntimeError("finite installation owner refused")
@@ -1001,6 +1051,9 @@ def application(tmp_path, monkeypatch, request):
             "    if '--start' in sys.argv:\n"
             "        root = Path(os.environ['FIXTURE_APP_HOME'])\n"
             "        assert (root / 'current-version').is_file()\n"
+            "        if '--slow-start' in sys.argv:\n"
+            "            import time\n"
+            "            time.sleep(0.5)\n"
             "        (root / 'started.json').write_text('started')\n"
             "    if '--unicode-output' in sys.argv:\n"
             "        print('\\u2192\\u03b1')\n"
@@ -1344,6 +1397,33 @@ def test_regular_install_callbacks_can_update_selection_without_parent_lock(appl
     assert (root / "current-version").read_text().strip() == slot.name
     assert (root / "last-known-good").read_text().strip() == slot.name
     assert (slot / "install-success.json").is_file()
+
+
+@pytest.mark.parametrize("start_budget,succeeds", [(0.1, False), (10, True)])
+def test_real_application_callback_obeys_selected_finite_budget(
+    application, start_budget, succeeds,
+):
+    root, slot, caller, environment = application
+    environment["UV_PYTHON"] = sys.executable
+    path = slot / "application.json"
+    record = json.loads(path.read_text())
+    record.update(
+        start=["--start", "--slow-start"],
+        callback_timeout_seconds={"start": start_budget},
+    )
+    path.write_text(json.dumps(record))
+    result = invoke(
+        slot / ("install.ps1" if os.name == "nt" else "install.sh"),
+        [], caller, environment,
+    )
+    assert (result.returncode == 0) is succeeds, result.stdout + result.stderr
+    assert (root / "current-version").read_text().strip() == slot.name
+    assert (slot / "install-success.json").is_file() is succeeds
+    assert (root / "last-known-good").is_file() is succeeds
+    assert (root / "started.json").is_file() is succeeds
+    if not succeeds:
+        assert "startup outcome is unknown" in result.stderr
+        assert "TimeoutExpired" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows legacy path-length behavior")

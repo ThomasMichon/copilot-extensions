@@ -2338,7 +2338,11 @@ def prepare_native_source_inputs(tmp_path, request):
         '[project.optional-dependencies]\nbootstrap=["agent-procutil"]\n'
         '[tool.uv.sources]\nagent-procutil={path="' +
         ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n' +
-        ('[tool.copilot-extensions.application]\nsetup=["--setup"]\nstart=["--start"]\n' if entry else ""),
+        ('[tool.copilot-extensions.application]\nsetup=["--setup"]\nstart=["--start"]\n' if entry else "") +
+        (
+            'callback_timeout_seconds={setup=240,start=600}\n'
+            if entry and isinstance(options, dict) and options.get("budgets") else ""
+        ),
     )
     callback = {}
     if isinstance(options, dict) and options.get("callback"):
@@ -3185,7 +3189,7 @@ def application_adapter(tmp_path, monkeypatch):
     fixture = SimpleNamespace(
         root=root, old=old, application=application, inputs=inputs, versions=[],
         failures=[], children=[], child_error=None, exit_error=None, source=source,
-        selection=selection, candidate_options=[],
+        selection=selection, candidate_options=[], child_options=[],
     )
 
     @contextmanager
@@ -3214,6 +3218,7 @@ def application_adapter(tmp_path, monkeypatch):
     def child(_argv, **options):
         slot = options["candidate"]
         fixture.children.append(slot.name)
+        fixture.child_options.append(options)
         if fixture.child_error:
             raise fixture.child_error
         (slot / "install-success.json").write_text(json.dumps({
@@ -3233,6 +3238,26 @@ def application_adapter(tmp_path, monkeypatch):
         expected_version=version, expected_hash=selection["payload_hash"], **options,
     )
     return fixture
+
+
+@pytest.mark.parametrize("declared,expected", [
+    (None, 180),
+    ({"setup": 240, "start": 600}, 1500),
+    ({"start": 600}, 1440),
+])
+def test_application_adapter_encloses_declared_callback_budgets(
+    application_adapter, declared, expected,
+):
+    fixture = application_adapter
+    for location in (fixture.application, fixture.old):
+        path = location / "application.json"
+        record = json.loads(path.read_text())
+        if declared is not None:
+            record["callback_timeout_seconds"] = declared
+        path.write_text(json.dumps(record))
+    fixture.install()
+    options, = fixture.child_options
+    assert options["timeout"] == expected
 
 
 @pytest.mark.parametrize("repair,arguments", [
@@ -3435,10 +3460,11 @@ def test_application_adapter_refuses_incomplete_or_changed_inputs_before_constru
     "native_source", [
         {"entry": True}, {"entry": True, "standalone": True},
         pytest.param({"entry": True, "legacy_bootstrap": False}, id="no-legacy-bootstrap"),
+        pytest.param({"entry": True, "budgets": True}, id="callback-budgets"),
     ], indirect=True,
 )
 def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
-    native_source, tmp_path, tmp_path_factory, monkeypatch,
+    native_source, tmp_path, tmp_path_factory, monkeypatch, request,
 ):
     source, snapshot = native_source
     run_owned = source.engine.run_owned
@@ -3458,6 +3484,8 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     path = application / "application.json"
     record = json.loads(path.read_text())
     assert record["setup"] == ["--setup"] and record["start"] == ["--start"]
+    if request.node.callspec.params["native_source"].get("budgets"):
+        assert record["callback_timeout_seconds"] == {"setup": 240, "start": 600}
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -3486,7 +3514,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert {helper.name for helper in helpers} == {
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
-        "versioned_runtime_publication.py",
+        "versioned_runtime_publication.py", "versioned_runtime_cache.py",
     }
     for helper in helpers:
         assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()

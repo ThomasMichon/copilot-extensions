@@ -182,3 +182,31 @@ def test_project_owned_callbacks_refuse_incomplete_or_nonargument_values(declara
         install_callbacks("example-worker", metadata={
             "tool": {"copilot-extensions": {"application": declaration}},
         })
+
+
+@pytest.mark.parametrize("budgets", [
+    None, [], False, {"other": 60}, {"start": False}, {"start": "600"},
+    {"start": 0}, {"setup": -1}, {"start": float("inf")},
+    {"start": float("nan")}, {"setup": 3601}, {"start": 10 ** 400},
+])
+def test_project_callback_budgets_refuse_invalid_values_before_emission(budgets):
+    from runtime_application_project import install_callbacks
+
+    with pytest.raises(ValueError, match="callback timeouts"):
+        install_callbacks("example-worker", metadata={
+            "tool": {"copilot-extensions": {"application": {
+                "setup": ["prepare"], "start": ["serve"],
+                "callback_timeout_seconds": budgets,
+            }}},
+        })
+
+
+def test_project_callback_budgets_preserve_declared_arguments():
+    from runtime_application_project import install_callbacks
+
+    assert install_callbacks("example-worker", metadata={
+        "tool": {"copilot-extensions": {"application": {
+            "setup": ["prepare"], "start": ["serve"],
+            "callback_timeout_seconds": {"start": 600},
+        }}},
+    }) == (["prepare"], ["serve"])

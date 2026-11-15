@@ -5,6 +5,7 @@ import argparse
 from contextlib import ExitStack, contextmanager
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -15,6 +16,9 @@ import tempfile
 import time
 from types import SimpleNamespace
 from typing import NamedTuple
+
+_QUALIFICATION_TIMEOUT = 600
+_PUBLICATION_ALLOWANCE = 60
 
 
 class ApplicationStartupUncertain(RuntimeError):
@@ -112,13 +116,40 @@ def _application(slot: Path) -> dict:
     return _validate_application(json.loads(raw))
 
 
+def callback_timeouts(record: dict) -> dict[str, float]:
+    """Read finite per-phase process budgets without changing legacy defaults."""
+    declared = record.get("callback_timeout_seconds", {})
+    if (
+        not isinstance(declared, dict)
+        or set(declared) - {"setup", "start"}
+        or any(
+            type(value) not in (int, float)
+            or not 0 < value <= 3600 or not math.isfinite(value)
+            for value in declared.values()
+        )
+    ):
+        raise ValueError("application callback timeouts must be finite seconds in (0, 3600]")
+    return {"setup": 180, "start": 180, **declared}
+
+
+def application_install_timeout(record: dict) -> float:
+    """Leave publication/qualification room outside explicitly budgeted callbacks."""
+    budgets = callback_timeouts(record)
+    if "callback_timeout_seconds" not in record:
+        return 180
+    return _QUALIFICATION_TIMEOUT + _PUBLICATION_ALLOWANCE + sum(
+        budgets[phase] for phase in budgets if record.get(phase)
+    )
+
+
 def _validate_application(record: dict) -> dict:
     fields = {
         "name", "module", "commands", "root_environment", "default_directory",
         "setup", "start", "construction",
     }
-    if not isinstance(record, dict) or set(record) != fields:
+    if not isinstance(record, dict) or set(record) - {"callback_timeout_seconds"} != fields:
         raise ValueError("invalid application install declaration")
+    callback_timeouts(record)
     if (
         not isinstance(record["module"], str)
         or not re.fullmatch(
@@ -340,7 +371,7 @@ def qualify_installed_application(
 def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
     runtime_path = slot / "runtime"
     runtime, engine = _resources(slot)
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + _QUALIFICATION_TIMEOUT
     association = _construction_inputs(slot, record, runtime, engine, deadline)
     inputs, source = association.inputs, association.source
     wheels, origins, proof = association.wheels, association.origins, association.proof
@@ -433,7 +464,9 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
             unchanged()
 
 
-def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
+def _run(
+    record: dict, command: list[str], root: Path, slot: Path, *, timeout: float = 180,
+) -> None:
     if not command:
         return
     environment = {**os.environ, record["root_environment"]: str(root)}
@@ -455,7 +488,7 @@ def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
         ]
     result = subprocess.run(
         [python, "-I", "-X", "utf8", "-B", *target, *command],
-        executable=python, cwd=cwd, env=environment, timeout=180,
+        executable=python, cwd=cwd, env=environment, timeout=timeout,
         stdout=sys.stdout, stderr=sys.stderr,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -516,12 +549,13 @@ def install(
         raise ValueError("regular install requires an owned version-slot layout")
     root = slot.parent.parent
     record = _application(slot)
+    budgets = callback_timeouts(record)
     if record["name"] == "worktree-manager":
         if arguments:
             raise ValueError("Manager installation does not accept application configuration arguments")
         if global_bin is not None and global_bin != Path.home() / ".local" / "bin":
             raise ValueError("Manager installation requires its owned global command directory")
-        _run(record, ["self-install", "--apply"], root, slot)
+        _run(record, ["self-install", "--apply"], root, slot, timeout=budgets["start"])
         return {"state": "installed", "slot": str(slot)}
     global_bin = global_bin or Path.home() / ".local" / "bin"
     replacements = _global_replacements(slot, record, global_bin)
@@ -540,7 +574,7 @@ def install(
         ):
             unchanged()
             return {"state": "installed", "slot": str(slot)}
-        _run(record, setup, root, slot)
+        _run(record, setup, root, slot, timeout=budgets["setup"])
         unchanged()
         if not runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"]):
             raise RuntimeError("application publication requires canonical completed construction")
@@ -596,7 +630,7 @@ def install(
         if not start:
             return {"state": "installed", "slot": str(slot)}
         try:
-            _run(record, start, root, slot)
+            _run(record, start, root, slot, timeout=budgets["start"])
             unchanged()
             with runtime._publication_lease(root), publication.target_leases(root, list(replacements)):
                 if (
