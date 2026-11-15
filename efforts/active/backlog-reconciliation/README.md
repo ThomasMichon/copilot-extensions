@@ -3881,6 +3881,24 @@ existing efforts. Literal alternatives, explicit OPEN-token conditions,
 #5686's separate parent-receipt condition, completed credit and independent
 rollback remain. This is documentary receiving, not technical fulfillment
 or a disposition of those sources.
+The [reviewed reconciliation](journal/2026/11.15-title-bound-ready-frontier.md#reviewed-reconciliation-and-separate-tracking-retirement)
+records #12727's actual merge and a separately audited `NOT_PLANNED` retirement
+of #4744's redundant tracking. Its whole technical contract remains in the same
+Draft effort; all seven new #5340/#5549 checks remain unchecked and those tokens
+stay OPEN. The complete 12:59:32 UTC census verifies 841 whole open, 112 above
+fixed 729, distinguishing the one campaign departure from one unrelated closure.
+Eleven next original studies continue; this does not complete the parent effort.
+Their [current admission and receiving qualification](journal/2026/11.15-title-bound-ready-frontier.md#next-mapped-contracts-and-receiving-qualification)
+retain eight complete requirement maps, three source-limited primaries and
+the actual normalized-versus-raw receipt distinction. Two disjoint comparisons
+use seven qualified sources; dormant triggers, canonical programmes and current
+custody remain distinct from accepted receiving or technical completion.
+The [broader wrapper and same-canonical state proposal](journal/2026/11.15-title-bound-ready-frontier.md#broader-wrapper-scope-and-a-same-canonical-state-receipt)
+adds three unchecked #5579 clauses and a direct #5664 tracking crosswalk.
+The diagnostic suggestion, literal alternatives, current drivers and every
+operation's prerequisites remain. #5559/#5708 stay current keepers; only
+#5664 advances to separate reviewed tracking adjudication, not technical
+completion, claim release or a decision on #4127.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
