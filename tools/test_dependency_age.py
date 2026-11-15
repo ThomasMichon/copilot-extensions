@@ -1207,13 +1207,13 @@ def test_native_uv_seven_day_boundary_and_stronger_settings(value: str) -> None:
 
 @pytest.mark.parametrize("value", [None, False, "", "0", "6 days", "604799 seconds", "tomorrow",
                                          "-7 days", "2026-10-07", "2026-10-06T00:00:00"])
-def test_native_uv_missing_disabled_weaker_or_unknown_policy(value: str) -> None:
+def test_native_uv_missing_disabled_weaker_or_unknown_policy(value: str | bool | None) -> None:
     with pytest.raises(age.DeclarationError):
         age.check_uv_policy({"tool": {"uv": {"exclude-newer": value}}}, NOW)
 
 
 @pytest.mark.parametrize("override", [False, "", "0 days", "6 days", "2026-10-07"])
-def test_native_uv_package_override_cannot_disable_or_weaken(override: str) -> None:
+def test_native_uv_package_override_cannot_disable_or_weaken(override: str | bool) -> None:
     with pytest.raises(age.DeclarationError):
         age.check_uv_policy({"tool": {"uv": {"exclude-newer": "7 days",
                                            "exclude-newer-package": {"demo": override}}}}, NOW)
@@ -1231,7 +1231,7 @@ def test_native_uv_stronger_global_and_pip_policy_cannot_be_weakened() -> None:
 
 
 @pytest.mark.parametrize("override", [False, "", "1 day", "21 days", "2026-09-01"])
-def test_index_specific_cutoffs_rejected_even_if_nominally_stronger(override: str) -> None:
+def test_index_specific_cutoffs_rejected_even_if_nominally_stronger(override: str | bool) -> None:
     with pytest.raises(age.DeclarationError, match="index-specific"):
         age.check_uv_policy({"tool": {"uv": {"exclude-newer": "7 days",
                                            "index": [{"name": "example", "exclude-newer": override}]}}}, NOW)

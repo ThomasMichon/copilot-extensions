@@ -30,6 +30,7 @@ else:
 
 P = ParamSpec("P")
 T = TypeVar("T")
+R = TypeVar("R")
 
 
 class GroupPlan(Protocol):
@@ -40,6 +41,11 @@ class GroupPlan(Protocol):
 
 CodespacesPlan = tuple[Path, Path, GroupPlan]
 ManagerAcceptance = tuple[ModuleType, list[bool]]
+
+
+def recorded(calls: list[T], value: T, result: R) -> R:
+    calls.append(value)
+    return result
 
 SCRIPT = Path(__file__).resolve().parent / "run-plugin-tests.py"
 _previous_path = sys.path.copy()
@@ -56,13 +62,13 @@ try:
         from tools import pytest_portfolio_guard as portfolio_guard
         from tools import _admission_protocol as admission
         from tools import _devcontainer_network_scope as network_scope
-        from tools.plugin_test_containment import TestSandbox
+        from tools.plugin_test_containment import TestSandbox as _TestSandbox
     else:
         import plugin_test_containment as containment
         import pytest_portfolio_guard as portfolio_guard
         import _admission_protocol as admission
         import _devcontainer_network_scope as network_scope
-        TestSandbox = runner._TestSandbox
+        _TestSandbox = runner._TestSandbox
 finally:
     sys.path[:] = _previous_path
 
@@ -182,7 +188,7 @@ def test_short_temp_alias_reaches_real_daemon_registry(
     import ctypes
 
     buffer = ctypes.create_unicode_buffer(32768)
-    length = ctypes.windll.kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
+    length = getattr(ctypes, "windll").kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
     if not length or length >= len(buffer) or Path(buffer.value) == tmp_path:
         pytest.skip("filesystem has no short alias for the temporary parent")
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", buffer.value)
@@ -217,7 +223,7 @@ def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(requested))
     parents = []
 
-    class CanonicalSandbox(TestSandbox):
+    class CanonicalSandbox(_TestSandbox):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             parent = Path(kwargs["dir"])
             assert parent == parent.resolve(strict=True)
@@ -239,7 +245,7 @@ def test_plugin_budget_includes_final_sandbox_cleanup(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cleanup_runner: Callable[[], int],
 ) -> None:
     clock = [0.0]
-    class Directory(TestSandbox):
+    class Directory(_TestSandbox):
         def __exit__(self, *args: Any) -> bool | None:
             result = cast(Callable[..., bool | None], super().__exit__)(*args)
             clock[0] = 61.0
@@ -256,7 +262,7 @@ def test_budget_exhausted_between_groups_still_reports_final_cleanup(
 ) -> None:
     clock = [0.0]
     calls = []
-    class Directory(TestSandbox):
+    class Directory(_TestSandbox):
         def __exit__(self, *args: Any) -> bool | None:
             result = cast(Callable[..., bool | None], super().__exit__)(*args)
             clock[0] = 65.0
@@ -543,6 +549,7 @@ def test_cleanup_cancellation_precedes_errors_but_not_unreaped_ownership(
     class Pool(ThreadPoolExecutor):
         def submit(self, fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) -> Future[T]:
             name = args[0]
+            assert isinstance(name, (str, os.PathLike))
             future = super().submit(fn, *args, **kwargs)
             if Path(name).name == "g2":
                 result = future.result
@@ -739,7 +746,7 @@ def test_declared_manager_tooling_preparation_imports_in_own_runtime() -> None:
             "'module':pydantic.__file__}))",
         ],
         capture_output=True, text=True, check=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     observed = json.loads(process.stdout)
     assert Path(observed["prefix"]).resolve() == Path(proof["environment"]).resolve()
@@ -808,7 +815,10 @@ def test_source_only_cache_invalidates_the_previous_tooling_selection() -> None:
 def test_preparation_selects_same_checkout_fleet_dependency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, extra: str,
 ) -> None:
-    import plugin_test_environment as preparation
+    if TYPE_CHECKING:
+        from tools import plugin_test_environment as preparation
+    else:
+        import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -840,7 +850,7 @@ def test_preparation_selects_same_checkout_fleet_dependency(
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
-        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+        lambda command, **kwargs: recorded(calls, command, subprocess.CompletedProcess(command, 0)),
     )
     retained = []
 
@@ -887,7 +897,10 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(
 def test_manager_bridge_is_prepared_only_by_the_test_runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bridge_fails: bool, cached_editable: bool,
 ) -> None:
-    import plugin_test_environment as preparation
+    if TYPE_CHECKING:
+        from tools import plugin_test_environment as preparation
+    else:
+        import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
@@ -958,7 +971,6 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(
 
 
 def test_ssh_optional_sdk_is_not_misattributed_as_a_canonical_library() -> None:
-    import tomllib
 
     metadata = tomllib.loads(
         (runner.REPO / "plugins" / "agent-ssh" / "pyproject.toml").read_text(encoding="utf-8"),
@@ -980,7 +992,6 @@ def test_vault_sdk_preserves_canonical_library_attribution() -> None:
 def test_windows_editable_metadata_is_retained_near_all_sources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import tomllib
 
     policy = sys.modules[runner.run_uv_install.__module__]
     checkout = tmp_path / "checkout"
@@ -1278,6 +1289,7 @@ def test_manager_acceptance_cleans_settled_sandbox(
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
         )
         if contract == "runtime":
+            assert acceptance.__file__ is not None
             assert commands[-1] == [
                 str(python), str(Path(acceptance.__file__).resolve()),
                 "--runtime-group", str(observed[0]), "--runtime-python", str(python),
@@ -1549,7 +1561,7 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
 ) -> None:
     monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **kw: Path(sys.executable))
     calls = []
-    monkeypatch.setattr(runner, "run_contained", lambda command, **kw: calls.append(command) or 0)
+    monkeypatch.setattr(runner, "run_contained", lambda command, **kw: recorded(calls, command, 0))
     assert runner.run_plugin(
         "example", "unused", reinstall=False, kexpr="example",
         test_files=("tests/test_selected.py",), limits=runner.Limits(),
@@ -1653,7 +1665,7 @@ def test_bridge_historical_partitions_share_the_original_plugin_deadline(
     seen = []
     monkeypatch.setattr(
         runner, "run_contained",
-        lambda _command, **kwargs: seen.append(kwargs["limits"].wall_seconds) or 0,
+        lambda _command, **kwargs: recorded(seen, kwargs["limits"].wall_seconds, 0),
     )
     assert runner.run_plugin(
         "agent-bridge", "unused", reinstall=False, kexpr="http48",
@@ -1901,7 +1913,7 @@ def test_codespaces_partitions_share_the_unchanged_plugin_aggregate(
     seen = []
     monkeypatch.setattr(
         runner, "run_contained",
-        lambda command, **kw: seen.append(kw["limits"]) or first_result,
+        lambda command, **kw: recorded(seen, kw["limits"], first_result),
     )
     assert runner.run_plugin(
         "agent-codespaces", "unused", reinstall=False, kexpr=None,
@@ -1920,7 +1932,7 @@ def test_assertion_aggregation_does_not_mask_fatal_group_status(
     calls = []
     monkeypatch.setattr(
         runner, "run_contained",
-        lambda command, **kwargs: calls.append(command) or next(returns),
+        lambda command, **kwargs: recorded(calls, command, next(returns)),
     )
     assert runner.run_plugin(
         "agent-codespaces", "unused", reinstall=False, kexpr=None,
@@ -2160,7 +2172,7 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch: pytest.MonkeyPat
         calls.append((command, kwargs))
         return subprocess.CompletedProcess(command, 7)
 
-    monkeypatch.setattr(containment.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert containment._worker_main([str(ready), "command", "argument"]) == 7
     assert calls == [
         (
@@ -2175,7 +2187,10 @@ def test_fresh_preparation_attributes_repository_sources(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_project: bool,
 ) -> None:
     import agent_procutil.owned_process as owned_process
-    import plugin_test_environment as preparation
+    if TYPE_CHECKING:
+        from tools import plugin_test_environment as preparation
+    else:
+        import plugin_test_environment as preparation
     monkeypatch.setattr(owned_process, "run_caller_owned",
                         lambda *args, **kwargs: pytest.fail("pure preparation test attempted native execution"))
     monkeypatch.setattr(preparation, "capture_preparation_auth",
@@ -2209,7 +2224,7 @@ def test_fresh_preparation_attributes_repository_sources(
 
     def prepare(uv: str, arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert kwargs["trusted_source_roots"] == (tmp_path,)
-        return admitted(uv, arguments, **kwargs)
+        return cast(subprocess.CompletedProcess[str], admitted(uv, arguments, **kwargs))
 
     def command(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if arguments[1] == "venv":
@@ -2295,7 +2310,7 @@ def test_containment_owner_launch_preserves_process_contract(monkeypatch: pytest
             captured["job_closed"] = True
 
     monkeypatch.setattr(containment, "no_window_kwargs", lambda: {"creationflags": 123})
-    monkeypatch.setattr(containment.subprocess, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     monkeypatch.setattr(containment, "_WindowsJob", Job)
     monkeypatch.setattr(containment, "_terminate_posix_group", lambda *args: None)
     monkeypatch.setattr(containment, "_posix_group_identity", lambda pid: (pid, pid))
@@ -2441,7 +2456,7 @@ Path({str(streams)!r}).write_text(json.dumps({{
     roots: set[int] = set()
     if desktop:
         session = wintypes.DWORD()
-        assert ctypes.windll.kernel32.ProcessIdToSessionId(
+        assert getattr(ctypes, "windll").kernel32.ProcessIdToSessionId(
             os.getpid(), ctypes.byref(session),
         )
         assert session.value != 0, "desktop observation cannot run in Windows session zero"
@@ -2511,7 +2526,7 @@ Path({str(streams)!r}).write_text(json.dumps({{
     assert not identity["window"]
     if timeout:
         assert "wall-clock limit exceeded" in captured["stderr"]
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
@@ -2523,7 +2538,7 @@ Path({str(streams)!r}).write_text(json.dumps({{
             finally:
                 kernel32.CloseHandle(handle)
         else:
-            assert ctypes.get_last_error() == 87  # PID no longer exists.
+            assert getattr(ctypes, "get_last_error")() == 87  # PID no longer exists.
     else:
         assert "nested-stdout" in captured["stdout"]
         assert "nested-stderr" in captured["stderr"]
@@ -2692,12 +2707,12 @@ def test_run_holds_one_environment_lease_at_a_time(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait, root: events.append(f"acquire:{root.name}") or Lease(),
+        lambda _wait, root: recorded(events, f"acquire:{root.name}", Lease()),
     )
     monkeypatch.setattr(
         runner,
         "run_plugin",
-        lambda name, *_args, **_kwargs: events.append(f"run:{name}") or 0,
+        lambda name, *_args, **_kwargs: recorded(events, f"run:{name}", 0),
     )
 
     assert runner.main(["alpha", "beta"]) == 0
@@ -2719,7 +2734,7 @@ def test_unexpected_runner_error_does_not_wedge_remaining_plugins(monkeypatch: p
         def release(self) -> None:
             events.append("release")
 
-    def _run_plugin(name: str, *_args, **_kwargs) -> int:
+    def _run_plugin(name: str, *_args: Any, **_kwargs: Any) -> int:
         if name == "beta":
             raise MemoryError("simulated unexpected failure, not ContainmentError")
         events.append(f"run:{name}")
@@ -2730,7 +2745,7 @@ def test_unexpected_runner_error_does_not_wedge_remaining_plugins(monkeypatch: p
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait, root: events.append(f"acquire:{root.name}") or Lease(),
+        lambda _wait, root: recorded(events, f"acquire:{root.name}", Lease()),
     )
     monkeypatch.setattr(runner, "run_plugin", _run_plugin)
 
@@ -2757,7 +2772,7 @@ def test_guards_also_take_environment_admission(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda wait, root: acquire_calls.append(wait) or Lease(),
+        lambda wait, root: recorded(acquire_calls, wait, Lease()),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
@@ -2778,7 +2793,7 @@ def test_collect_only_also_takes_environment_admission(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda wait, root: acquire_calls.append(wait) or Lease(),
+        lambda wait, root: recorded(acquire_calls, wait, Lease()),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
@@ -2836,8 +2851,8 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
 ) -> None:
     commands = []
     monkeypatch.setattr(
-        network_scope.subprocess, "run",
-        lambda command: commands.append(command) or SimpleNamespace(returncode=0),
+        subprocess, "run",
+        lambda command: recorded(commands, command, SimpleNamespace(returncode=0)),
     )
     arguments = [
         "agent-codespaces", *profile_arguments,
@@ -2861,7 +2876,7 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
     ("agent-ssh", "tests/test_snapshot_windows_visibility.py"),
 ])
 def test_codespaces_functional_profile_budgets_and_caps(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], profile: str,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], profile: str | None,
     tmp_path: Path, plugin: str, target: str,
 ) -> None:
     class Lease:
@@ -2871,7 +2886,7 @@ def test_codespaces_functional_profile_budgets_and_caps(
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
     monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
     observed = []
-    monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: observed.append(kw) or 0)
+    monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: recorded(observed, kw, 0))
     files = [target]
     arguments = [plugin, "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
     if profile is not None:
@@ -3017,7 +3032,7 @@ def test_ssh_functional_profile_keeps_full_inventory_and_isolates_environment(
     ("standard", 0, False), ("busy-host-functional", 1, True),
 ])
 def test_codespaces_functional_profile_runs_assertions_despite_ambient_collect_only(
-    monkeypatch: pytest.MonkeyPatch, profile: str, status: int, executed: int,
+    monkeypatch: pytest.MonkeyPatch, profile: str, status: int, executed: bool,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="profile-assertion-") as directory:
         root = Path(directory).resolve()
@@ -3061,7 +3076,7 @@ def test_prepare_only_takes_environment_admission(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda wait, root: acquire_calls.append(wait) or Lease(),
+        lambda wait, root: recorded(acquire_calls, wait, Lease()),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
@@ -3129,7 +3144,7 @@ def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch: pytest.Monkey
     ensure_venv_calls: list[tuple[str, bool]] = []
     monkeypatch.setattr(
         runner, "_ensure_venv",
-        lambda name, uv, *, reinstall: ensure_venv_calls.append((name, reinstall)) or Path("fake-py"),
+        lambda name, uv, *, reinstall: recorded(ensure_venv_calls, (name, reinstall), Path("fake-py")),
     )
     monkeypatch.setattr(
         runner, "run_contained",
