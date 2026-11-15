@@ -4034,8 +4034,12 @@ acceptance. The later qualification pause and unpublished candidate stay parked.
 The [next six owners and preparation discriminator](journal/2026/11.15-owned-release-boundaries.md#reviewed-finite-discriminators-and-six-continuing-owners)
 preserve distinct configuration, reattachment, native-read and portable-allocation
 acceptance. A [finite #10126 completion proposal](journal/2026/11.15-owned-release-boundaries.md#proposed-finite-completion-of-manager-preparation-progress)
-connects its source delivery to separately admitted installed producer evidence;
-review and the source-specific provider judgment remain pending.
+connects its source delivery to separately admitted installed producer evidence.
+It cleared review before the separate source-specific provider judgment.
+The [subsequent verified disposition](journal/2026/11.15-owned-release-boundaries.md#verified-manager-preparation-progress-completion)
+records #12754's reviewed merge, the exact public acknowledgment and independently
+verified `COMPLETED` state for #10126. The whole queue is 837, still 108 above
+the fixed checkpoint; #10159's qualification pause and all parent gates remain.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
