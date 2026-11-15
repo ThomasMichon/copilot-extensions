@@ -206,6 +206,12 @@ The tracked-file protection remains a filesystem safeguard, not a content gate.
 - [ ] Retain progress and elapsed-time reporting instead of introducing broad
   startup ceilings. Preserve machine preferences, async mux registration and
   the minimal pane-to-Copilot process/lifetime boundary.
+- [ ] **L6086-P:** Retain the newer local New/Resume preparation aim reported
+  in #6086: no more than approximately five seconds overhead beyond direct
+  Copilot startup. Coordinate the existing #6600 timing owner; this is a
+  scoped comparison target, not a broad startup timeout or permission to
+  weaken prompt at-most-once, PID identity, tracked-file safety or explicit
+  unsafe-state refusal. It changes no maintenance or updater authority.
 - [ ] Review, merge and verify the bounded ordering change through the normal
   release flow; keep the parent campaign Active for its remaining work.
 
@@ -270,6 +276,12 @@ _(Agent-recommended tracking refinement; no guard or launch is run here.)_
   process or a mandatory daemon bridge.
 - [ ] Failure-path checks retain recoverable worktree identities, surface
   preparation errors and preserve existing update/ownership safeguards.
+- [ ] **L6086-V:** Compare actual local New/Resume entrypoints with direct
+  Copilot readiness under offline, maintenance-busy, concurrent-creation,
+  large-history and daemon-down conditions. Report preparation delta against
+  L6086-P honestly, including Git work that itself exceeds the aim; nested
+  phase durations are not additive. An audit, sequencing proposal or source
+  merge is not a measured five-second result or broader churn acceptance.
 - [ ] Static publication works without the packaged projection engine, its
   runtime-assets manifest, sibling runtime or network access. Existing
   untracked generated files are replaced; tracked and staged-added
