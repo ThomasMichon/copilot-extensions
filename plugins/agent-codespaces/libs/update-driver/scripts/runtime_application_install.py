@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -13,14 +15,17 @@ import subprocess
 import sys
 import tempfile
 import time
-from types import SimpleNamespace
-from typing import NamedTuple
+from types import ModuleType, SimpleNamespace
+from typing import Any, Callable, Iterator, NamedTuple, cast
+
+_QUALIFICATION_TIMEOUT = 600
+_PUBLICATION_ALLOWANCE = 60
 
 
 class ApplicationStartupUncertain(RuntimeError):
     """Startup was invoked; only its application owner can reconcile its effects."""
 
-    def __init__(self, slot: Path):
+    def __init__(self, slot: Path) -> None:
         self.slot = slot
         super().__init__(
             "application startup outcome is unknown; selection and launchers retained "
@@ -28,7 +33,7 @@ class ApplicationStartupUncertain(RuntimeError):
         )
 
 
-def _load(path: Path, name: str):
+def _load(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"application runtime resource is unavailable: {path.name}")
@@ -69,7 +74,7 @@ def _write(path: Path, content: bytes, *, executable: bool = False) -> None:
 
 
 def _materialize_interpreter(slot: Path) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         return
     environment = slot / ".venv"
     directory = environment / "bin"
@@ -105,20 +110,47 @@ def _materialize_interpreter(slot: Path) -> None:
         os.close(descriptor)
 
 
-def _application(slot: Path) -> dict:
+def _application(slot: Path) -> dict[str, Any]:
     raw = _read(slot / "application.json", limit=4 << 20)
     if raw is None:
         raise RuntimeError("the copied application has no install declaration")
     return _validate_application(json.loads(raw))
 
 
-def _validate_application(record: dict) -> dict:
+def callback_timeouts(record: dict[str, Any]) -> dict[str, float]:
+    """Read finite per-phase process budgets without changing legacy defaults."""
+    declared = record.get("callback_timeout_seconds", {})
+    if (
+        not isinstance(declared, dict)
+        or set(declared) - {"setup", "start"}
+        or any(
+            type(value) not in (int, float)
+            or not 0 < value <= 3600 or not math.isfinite(value)
+            for value in declared.values()
+        )
+    ):
+        raise ValueError("application callback timeouts must be finite seconds in (0, 3600]")
+    return {"setup": 180, "start": 180, **declared}
+
+
+def application_install_timeout(record: dict[str, Any]) -> float:
+    """Leave publication/qualification room outside explicitly budgeted callbacks."""
+    budgets = callback_timeouts(record)
+    if "callback_timeout_seconds" not in record:
+        return 180
+    return _QUALIFICATION_TIMEOUT + _PUBLICATION_ALLOWANCE + sum(
+        budgets[phase] for phase in budgets if record.get(phase)
+    )
+
+
+def _validate_application(record: dict[str, Any]) -> dict[str, Any]:
     fields = {
         "name", "module", "commands", "root_environment", "default_directory",
         "setup", "start", "construction",
     }
-    if not isinstance(record, dict) or set(record) != fields:
+    if not isinstance(record, dict) or set(record) - {"callback_timeout_seconds"} != fields:
         raise ValueError("invalid application install declaration")
+    callback_timeouts(record)
     if (
         not isinstance(record["module"], str)
         or not re.fullmatch(
@@ -150,7 +182,7 @@ class InstalledApplicationSource(NamedTuple):
     profile_lock_id: str
 
 
-def _resources(slot: Path):
+def _resources(slot: Path) -> tuple[ModuleType, ModuleType]:
     runtime_path = slot / "runtime"
     runtime = _load(runtime_path / "versioned_runtime.py", "versioned_runtime")
     previous = sys.path[:]
@@ -162,7 +194,9 @@ def _resources(slot: Path):
     return runtime, engine
 
 
-def _construction_inputs(slot: Path, record: dict, runtime, engine, deadline: float):
+def _construction_inputs(
+    slot: Path, record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
+) -> SimpleNamespace:
     inputs = record["construction"]
     fields = {
         "identity", "runtime_version", "payload_hash", "source_hash", "wheel_inputs",
@@ -230,17 +264,20 @@ def _construction_inputs(slot: Path, record: dict, runtime, engine, deadline: fl
     )
 
 
-def _unchanged_application(slot: Path, association, engine):
+def _unchanged_application(slot: Path, association: SimpleNamespace, engine: ModuleType) -> None:
+    proof = _read(slot / ".runtime-input-origins.json", limit=4 << 20)
     if (
         _read(slot / "runtime-source.json") != association.source_bytes
         or _read(slot / "application.json", limit=4 << 20) != association.declaration
-        or json.loads(_read(slot / ".runtime-input-origins.json", limit=4 << 20)) != association.proof
+        or proof is None or json.loads(proof) != association.proof
     ):
         raise RuntimeError("application construction inputs changed before publication")
     engine.verify_application_wheels(association.wheels, slot)
 
 
-def _inspect_application_wheels(slot: Path, association, engine, deadline: float):
+def _inspect_application_wheels(
+    slot: Path, association: SimpleNamespace, engine: ModuleType, deadline: float,
+) -> None:
     from installer_wheel_inputs import WheelLimits, inspect_archive
 
     wheels, receipt = association.wheels, association.receipt
@@ -304,8 +341,10 @@ def qualify_installed_application(
     runtime, engine = _resources(slot)
     python = runtime.slot_python(root, slot.name)
 
-    def normalized(path):
-        return os.path.normcase(runtime._normalize_windows_extended_path(os.path.abspath(path)))
+    def normalized(path: Path | str) -> str:
+        return os.path.normcase(cast(
+            str, runtime._normalize_windows_extended_path(os.path.abspath(path)),
+        ))
 
     if (
         python is None or normalized(sys.executable) != normalized(python)
@@ -337,20 +376,24 @@ def qualify_installed_application(
 
 
 @contextmanager
-def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
+def _qualified(
+    slot: Path, record: dict[str, Any], *, verify_on_exit: bool = True,
+) -> Iterator[tuple[ModuleType, Callable[[], None]]]:
     runtime_path = slot / "runtime"
     runtime, engine = _resources(slot)
-    deadline = time.monotonic() + 600
+    started = time.monotonic()
+    deadline = started + _QUALIFICATION_TIMEOUT
     association = _construction_inputs(slot, record, runtime, engine, deadline)
     inputs, source = association.inputs, association.source
     wheels, origins, proof = association.wheels, association.origins, association.proof
 
-    def unchanged():
+    def unchanged() -> None:
         _unchanged_application(slot, association, engine)
 
-    def run(argv):
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         command = list(argv)
-        executable, cwd = command[0], slot
+        executable = command[0]
+        cwd: Path | str = slot
         if os.name == "nt":
             # CreateProcess rejects long cwd values, including extended paths.
             # Enter the physical slot inside the same isolated probe interpreter.
@@ -364,7 +407,7 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
             command, executable=executable, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=max(0.1, min(180, deadline - time.monotonic())),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if result.returncode:
             print(result.stderr, file=sys.stderr, end="")
@@ -428,12 +471,18 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
             retention.enter_context(runtime.retention_lease(
                 root, slot.name, payload_hash=inputs["payload_hash"], timeout=180,
             ))
+        if "callback_timeout_seconds" in record:
+            association.wheels = replace(
+                association.wheels, deadline=started + application_install_timeout(record),
+            )
         yield runtime, unchanged
         if verify_on_exit:
             unchanged()
 
 
-def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
+def _run(
+    record: dict[str, Any], command: list[str], root: Path, slot: Path, *, timeout: float = 180,
+) -> None:
     if not command:
         return
     environment = {**os.environ, record["root_environment"]: str(root)}
@@ -441,7 +490,8 @@ def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
         [str(slot / (record["name"] + ".py"))] if ":" in record["module"]
         else ["-m", record["module"]]
     )
-    python, cwd = sys.executable, None
+    python = sys.executable
+    cwd: str | None = None
     if os.name == "nt":
         _, engine = _resources(slot)
         python, cwd = engine._native_retained_path(python), slot.anchor
@@ -455,18 +505,20 @@ def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
         ]
     result = subprocess.run(
         [python, "-I", "-X", "utf8", "-B", *target, *command],
-        executable=python, cwd=cwd, env=environment, timeout=180,
+        executable=python, cwd=cwd, env=environment, timeout=timeout,
         stdout=sys.stdout, stderr=sys.stderr,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode:
         raise RuntimeError(f"application command failed with exit code {result.returncode}")
 
 
-def _global_replacements(slot: Path, record: dict, global_bin: Path | None) -> dict[Path, bytes]:
+def _global_replacements(
+    slot: Path, record: dict[str, Any], global_bin: Path | None,
+) -> dict[Path, bytes]:
     root = slot.parent.parent
     launchers = _load(slot / "runtime_application_binstubs.py", "_application_binstubs")
-    globals_text = {}
+    globals_text: dict[str, str] = {}
     for name in record["commands"]:
         globals_text.update(launchers.global_binstubs(
             name, record["root_environment"], record["default_directory"], root=root,
@@ -475,7 +527,9 @@ def _global_replacements(slot: Path, record: dict, global_bin: Path | None) -> d
     return {directory / name: text.encode("utf-8") for name, text in globals_text.items()}
 
 
-def _publication_current(slot: Path, record: dict, *, global_bin: Path | None = None) -> bool:
+def _publication_current(
+    slot: Path, record: dict[str, Any], *, global_bin: Path | None = None,
+) -> bool:
     """Verify publication only; the caller retains and health-gates the candidate."""
     root = slot.parent.parent
     runtime, _engine = _resources(slot)
@@ -497,7 +551,7 @@ def _publication_current(slot: Path, record: dict, *, global_bin: Path | None = 
 def install(
     slot: Path, *, stage: bool, global_bin: Path | None = None,
     arguments: tuple[str, ...] = (),
-) -> dict:
+) -> dict[str, str]:
     """UV has synchronized the environment before this entry runs."""
     slot = slot.resolve()
     if (
@@ -516,12 +570,13 @@ def install(
         raise ValueError("regular install requires an owned version-slot layout")
     root = slot.parent.parent
     record = _application(slot)
+    budgets = callback_timeouts(record)
     if record["name"] == "worktree-manager":
         if arguments:
             raise ValueError("Manager installation does not accept application configuration arguments")
         if global_bin is not None and global_bin != Path.home() / ".local" / "bin":
             raise ValueError("Manager installation requires its owned global command directory")
-        _run(record, ["self-install", "--apply"], root, slot)
+        _run(record, ["self-install", "--apply"], root, slot, timeout=budgets["start"])
         return {"state": "installed", "slot": str(slot)}
     global_bin = global_bin or Path.home() / ".local" / "bin"
     replacements = _global_replacements(slot, record, global_bin)
@@ -540,7 +595,7 @@ def install(
         ):
             unchanged()
             return {"state": "installed", "slot": str(slot)}
-        _run(record, setup, root, slot)
+        _run(record, setup, root, slot, timeout=budgets["setup"])
         unchanged()
         if not runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"]):
             raise RuntimeError("application publication requires canonical completed construction")
@@ -577,26 +632,28 @@ def install(
                 for path, content in written.items():
                     if _read(path) != content:
                         raise RuntimeError(f"application publication changed during recovery: {path}")
-                    if previous[path] is None:
+                    original = previous[path]
+                    if original is None:
                         path.unlink()
                     else:
-                        _write(path, previous[path])
+                        _write(path, original)
                 if publishing:
                     for path in selectors:
-                        content = _read(path)
-                        if content == selector_before[path]:
+                        selected_before = selector_before[path]
+                        observed = _read(path)
+                        if observed == selected_before:
                             continue
-                        if content != selector_content:
+                        if observed != selector_content:
                             raise RuntimeError(f"application selector changed during recovery: {path}")
-                        if selector_before[path] is None:
+                        if selected_before is None:
                             path.unlink(missing_ok=True)
                         else:
-                            _write(path, selector_before[path])
+                            _write(path, selected_before)
                 raise
         if not start:
             return {"state": "installed", "slot": str(slot)}
         try:
-            _run(record, start, root, slot)
+            _run(record, start, root, slot, timeout=budgets["start"])
             unchanged()
             with runtime._publication_lease(root), publication.target_leases(root, list(replacements)):
                 if (

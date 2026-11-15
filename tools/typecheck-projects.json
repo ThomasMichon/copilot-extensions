@@ -165,6 +165,10 @@
       "include": [
         "libs/installer-engine"
       ],
+      "import_roots": [
+        "libs/installer-engine",
+        "libs/versioned-runtime"
+      ],
       "exclude": [],
       "level": "pending"
     },
@@ -648,6 +652,11 @@
       "name": "repository-tools",
       "include": [
         "tools"
+      ],
+      "import_roots": [
+        "tools",
+        "libs/installer-engine",
+        "libs/versioned-runtime"
       ],
       "exclude": [
         "tools/typecheck.py",

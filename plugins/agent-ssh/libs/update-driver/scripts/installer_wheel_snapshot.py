@@ -1,17 +1,20 @@
 """Exact-set byte custody under the installer's existing temporary-input owner."""
 from __future__ import annotations
 
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import stat
+import sys
 from types import MappingProxyType
-from typing import BinaryIO, Mapping
+from typing import Any, BinaryIO, Mapping
 import zipfile
 import zlib
 
@@ -22,28 +25,53 @@ from installer_wheel_inputs import (
 
 
 @contextmanager
-def retain_wheel_inputs(archives, expected, **limits):
+def retain_wheel_inputs(
+    archives: Mapping[str, Path], expected: Mapping[str, str], *,
+    max_wheels: int, max_archive_bytes: int, max_total_bytes: int,
+    max_snapshot_bytes: int, deadline: float, retention_deadline: float | None = None,
+) -> Iterator[WheelSnapshot]:
     """Own exact byte snapshots, not profile approval or an installation."""
     import installer_dependency_policy as policy
 
-    with policy._temporary_inputs(None) as temporary:
-        root = policy._private_retained_root(Path(temporary)).resolve()
-        with open_wheel_snapshot(root, archives, expected, **limits) as snapshot:
+    temporary_inputs: Callable[[None], AbstractContextManager[str]] = policy._temporary_inputs
+    private_root: Callable[[Path], Path] = policy._private_retained_root
+    with temporary_inputs(None) as temporary:
+        root = private_root(Path(temporary)).resolve()
+        with open_wheel_snapshot(
+            root, archives, expected, max_wheels=max_wheels,
+            max_archive_bytes=max_archive_bytes, max_total_bytes=max_total_bytes,
+            max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
+            retention_deadline=retention_deadline,
+        ) as snapshot:
             yield snapshot
 
 
 @contextmanager
-def retain_wheel_bundle(bundle, expected, **limits):
+def retain_wheel_bundle(
+    bundle: Path, expected: Mapping[str, str], *,
+    bundle_sha256: str, max_bundle_bytes: int, max_wheels: int,
+    max_archive_bytes: int, max_total_bytes: int, max_snapshot_bytes: int,
+    deadline: float,
+) -> Iterator[WheelSnapshot]:
     """Unpack an already selected transport into the existing snapshot owner."""
     import installer_dependency_policy as policy
 
-    with policy._temporary_inputs(None) as temporary:
-        root = policy._private_retained_root(Path(temporary)).resolve()
-        with open_wheel_bundle_snapshot(root, bundle, expected, **limits) as snapshot:
+    temporary_inputs: Callable[[None], AbstractContextManager[str]] = policy._temporary_inputs
+    private_root: Callable[[Path], Path] = policy._private_retained_root
+    with temporary_inputs(None) as temporary:
+        root = private_root(Path(temporary)).resolve()
+        with open_wheel_bundle_snapshot(
+            root, bundle, expected, bundle_sha256=bundle_sha256,
+            max_bundle_bytes=max_bundle_bytes, max_wheels=max_wheels,
+            max_archive_bytes=max_archive_bytes, max_total_bytes=max_total_bytes,
+            max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
+        ) as snapshot:
             yield snapshot
 
 
-def _selected_hashes(expected, max_wheels, deadline):
+def _selected_hashes(
+    expected: Mapping[str, str], max_wheels: int, deadline: float,
+) -> dict[str, str]:
     hashes = dict(expected)
     if not hashes or len(hashes) > max_wheels:
         raise WheelError("wheel snapshot count limit exceeded or empty set")
@@ -68,7 +96,7 @@ def open_wheel_bundle_snapshot(
     bundle_sha256: str, max_bundle_bytes: int, max_wheels: int,
     max_archive_bytes: int, max_total_bytes: int, max_snapshot_bytes: int,
     deadline: float,
-):
+) -> Iterator[WheelSnapshot]:
     """Retain exact ``wheels/<filename>`` members, not release/feed authority.
 
     The caller owns a private root and cleanup, as with open_wheel_snapshot.
@@ -85,7 +113,8 @@ def open_wheel_bundle_snapshot(
     if not isinstance(bundle_sha256, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", bundle_sha256):
         raise WheelError("invalid wheel bundle digest")
     hashes = _selected_hashes(expected, max_wheels, deadline)
-    root = Path(native_retained_path(root))
+    retained_path: Callable[[Path], str] = native_retained_path
+    root = Path(retained_path(root))
     bundle = Path(os.path.abspath(bundle))
     before = _ordinary(bundle)
     if before.st_size > max_bundle_bytes:
@@ -153,7 +182,9 @@ def open_wheel_bundle_snapshot(
         yield snapshot
 
 
-def _unchanged(path, before, stream, *, opened=None):
+def _unchanged(
+    path: Path, before: os.stat_result, stream: BinaryIO, *, opened: os.stat_result | None = None,
+) -> os.stat_result:
     after = os.fstat(stream.fileno())
     changed = []
     if _identity(after) != _identity(before):
@@ -167,7 +198,9 @@ def _unchanged(path, before, stream, *, opened=None):
     return after
 
 
-def _digest(stream, limit, deadline, destination=None):
+def _digest(
+    stream: BinaryIO, limit: int, deadline: float, destination: BinaryIO | None = None,
+) -> tuple[str, int]:
     stream.seek(0)
     digest = hashlib.sha256()
     size = 0
@@ -188,8 +221,8 @@ def _digest(stream, limit, deadline, destination=None):
     return "sha256:" + digest.hexdigest(), size
 
 
-def _open(path):
-    if os.name == "nt":
+def _open(path: Path) -> BinaryIO:
+    if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
         import msvcrt
@@ -207,7 +240,8 @@ def _open(path):
         close.restype = wintypes.BOOL
         # Deny writers and deletion for the entire held-input lifetime. Windows
         # change time can move on reads when NTFS last-access updates are enabled.
-        handle = create(_native_retained_path(path), 0x80000000, 1, None, 3, 0x00200000, None)
+        retained_path: Callable[[Path], str] = _native_retained_path
+        handle = create(retained_path(path), 0x80000000, 1, None, 3, 0x00200000, None)
         if handle == ctypes.c_void_p(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
         try:
@@ -232,7 +266,7 @@ class WheelSnapshot:
 
     paths: Mapping[str, Path]
     archives: Mapping[str, BinaryIO]
-    _records: Mapping[str, tuple]
+    _records: Mapping[str, tuple[os.stat_result, os.stat_result, str, int]]
     _deadline: float
 
     @property
@@ -256,7 +290,7 @@ class WheelSnapshot:
             self._deadline,
         )
 
-    def verify(self):
+    def verify(self) -> None:
         """Recheck custody before a caller's construction/publication boundary."""
         for name, path in self.paths.items():
             _check_deadline(self._deadline)
@@ -281,9 +315,10 @@ class WheelReuseInputs:
     canonical_json: str
     deadline: float
 
-    def receipt(self) -> dict:
+    def receipt(self) -> dict[str, Any]:
         self.verify()
-        return json.loads(self.canonical_json)
+        record: dict[str, Any] = json.loads(self.canonical_json)
+        return record
 
     @property
     def distributions(self) -> tuple[tuple[str, str, str, str], ...]:
@@ -348,8 +383,8 @@ class WheelInstallInputs:
     def deadline(self) -> float:
         return self.snapshot._deadline
 
-    def receipt(self) -> dict:
-        result = {
+    def receipt(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "construction": "closed-wheels",
             "lock_id": "sha256:" + hashlib.sha256(self.binding_json.encode("ascii")).hexdigest(),
             "binding": json.loads(self.binding_json),
@@ -365,9 +400,10 @@ class WheelInstallInputs:
             }
         return result
 
-    def _acquisition(self) -> dict:
+    def _acquisition(self) -> dict[str, Any]:
         try:
-            record = json.loads(self.acquisition_json)
+            acquisition_json: Any = self.acquisition_json
+            record: dict[str, Any] = json.loads(acquisition_json)
             counters = {
                 "metadata_bytes", "wheel_bytes", "request_count", "redirect_count",
                 "control_bytes", "temporary_highwater_bytes",
@@ -462,18 +498,25 @@ class WheelInstallInputs:
 def open_wheel_snapshot(
     root: Path, archives: Mapping[str, Path], expected: Mapping[str, str], *,
     max_wheels: int, max_archive_bytes: int, max_total_bytes: int,
-    max_snapshot_bytes: int, deadline: float,
-):
+    max_snapshot_bytes: int, deadline: float, retention_deadline: float | None = None,
+) -> Iterator[WheelSnapshot]:
     """Copy beneath a private invocation-owned root; its caller owns cleanup.
 
     Budgets are inclusive. Storage counts only the copied archive bytes: no
     extraction, cache population, resolution or backend execution occurs here.
-    All limits and the one deadline come from the caller, not runtime defaults.
+    Acquisition uses the original deadline. An optional later finite deadline
+    bounds retained verification only after the complete set has been acquired.
     """
     from installer_dependency_config import native_retained_path
 
-    root = Path(native_retained_path(root))
+    retained_path: Callable[[Path], str] = native_retained_path
+    root = Path(retained_path(root))
     _check_deadline(deadline)
+    if retention_deadline is not None and (
+        type(retention_deadline) not in (int, float)
+        or not math.isfinite(retention_deadline) or retention_deadline < deadline
+    ):
+        raise WheelError("wheel snapshot retention deadline must be finite and not earlier than acquisition")
     if any(type(value) is not int or value <= 0 for value in (
         max_wheels, max_archive_bytes, max_total_bytes, max_snapshot_bytes,
     )):
@@ -500,7 +543,9 @@ def open_wheel_snapshot(
     _check_deadline(deadline)
     directory = root / "wheels"
     directory.mkdir(mode=0o700)
-    retained, streams, records = {}, {}, {}
+    retained: dict[str, Path] = {}
+    streams: dict[str, BinaryIO] = {}
+    records: dict[str, tuple[os.stat_result, os.stat_result, str, int]] = {}
     with ExitStack() as opened:
         with ExitStack() as sources:
             actual = 0
@@ -532,9 +577,10 @@ def open_wheel_snapshot(
             opened_info = _unchanged(path, before, stream)
             streams[name] = stream
             records[name] = before, opened_info, hashes[name], before.st_size
+        _check_deadline(deadline)
         snapshot = WheelSnapshot(
             MappingProxyType(retained), MappingProxyType(streams),
-            MappingProxyType(records), deadline,
+            MappingProxyType(records), deadline if retention_deadline is None else retention_deadline,
         )
         snapshot.verify()
         yield snapshot

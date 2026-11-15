@@ -7,15 +7,33 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from types import TracebackType
+from typing import Any, BinaryIO, IO, Protocol, TypedDict, cast
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_wheel_snapshot as snapshots
 import installer_dependency_policy as policy
+from installer_wheel_inputs import _check_deadline
 
 
-def inputs(tmp_path):
+class _RetainOptions(TypedDict, total=False):
+    max_wheels: int
+    max_archive_bytes: int
+    max_total_bytes: int
+    max_snapshot_bytes: int
+    deadline: float
+    retention_deadline: float | None
+
+
+class _WheelBytes(Protocol):
+    def __call__(self, *, metadata: bytes) -> bytes: ...
+
+
+def inputs(tmp_path: Path) -> tuple[dict[str, Path], dict[str, str]]:
     paths = {}
     for name, data in (("one-1-py3-none-any.whl", b"first"), ("two-1-py3-none-any.whl", b"second")):
         path = tmp_path / name
@@ -25,17 +43,22 @@ def inputs(tmp_path):
     return paths, hashes
 
 
-def retain(paths, hashes, **options):
+def retain(
+    paths: dict[str, Path], hashes: dict[str, str], *,
+    max_wheels: int = 2, max_archive_bytes: int = 6, max_total_bytes: int = 11,
+    max_snapshot_bytes: int = 11, deadline: float | None = None,
+    retention_deadline: float | None = None,
+) -> AbstractContextManager[snapshots.WheelSnapshot]:
     return snapshots.retain_wheel_inputs(
-        paths, hashes, **({
-            "max_wheels": 2, "max_archive_bytes": 6, "max_total_bytes": 11,
-            "max_snapshot_bytes": 11, "deadline": time.monotonic() + 10,
-        } | options),
+        paths, hashes, max_wheels=max_wheels, max_archive_bytes=max_archive_bytes,
+        max_total_bytes=max_total_bytes, max_snapshot_bytes=max_snapshot_bytes,
+        deadline=time.monotonic() + 10 if deadline is None else deadline,
+        retention_deadline=retention_deadline,
     )
 
 
 @pytest.mark.parametrize("origin", ["fresh", "cache"])
-def test_snapshot_is_exact_readonly_and_independent(tmp_path, origin):
+def test_snapshot_is_exact_readonly_and_independent(tmp_path: Path, origin: str) -> None:
     directory = tmp_path / origin
     directory.mkdir()
     paths, hashes = inputs(directory)
@@ -50,14 +73,14 @@ def test_snapshot_is_exact_readonly_and_independent(tmp_path, origin):
             assert stream.read() == paths[name].read_bytes()
             paths[name].write_bytes(b"caller changed")
         with pytest.raises(TypeError):
-            snapshot.paths["other"] = retained[0]
+            cast(dict[str, Path], snapshot.paths)["other"] = retained[0]
         snapshot.verify()
     assert all(not path.exists() for path in retained)
     assert all(path.read_bytes() == b"caller changed" for path in paths.values())
     assert all(stream.closed for stream in snapshot.archives.values())
 
 
-def test_snapshot_subset_borrows_original_handles_and_owner_lifetime(tmp_path):
+def test_snapshot_subset_borrows_original_handles_and_owner_lifetime(tmp_path: Path) -> None:
     paths, hashes = inputs(tmp_path)
     selected = next(iter(paths))
     with retain(paths, hashes) as snapshot:
@@ -69,7 +92,7 @@ def test_snapshot_subset_borrows_original_handles_and_owner_lifetime(tmp_path):
         subset.verify()
         for invalid in ((), (selected, selected), ("missing.whl",), [selected], (1,)):
             with pytest.raises(ValueError, match="subset"):
-                snapshot.subset(invalid)
+                snapshot.subset(cast(tuple[str, ...], invalid))
     assert subset.archives[selected].closed
     assert not subset.paths[selected].exists()
 
@@ -81,16 +104,98 @@ def test_snapshot_subset_borrows_original_handles_and_owner_lifetime(tmp_path):
     ("max_total_bytes", -1, "positive"), ("max_snapshot_bytes", 1.5, "positive"),
     ("deadline", float("inf"), "deadline"), ("deadline", 0, "deadline"),
 ])
-def test_snapshot_limits(tmp_path, option, value, message):
+def test_snapshot_limits(tmp_path: Path, option: str, value: object, message: str) -> None:
     paths, hashes = inputs(tmp_path)
     with pytest.raises(ValueError, match=message):
-        with retain(paths, hashes, **{option: value}):
+        with retain(paths, hashes, **cast(_RetainOptions, {option: value})):
             pytest.fail("over-budget snapshot admitted")
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(paths)
 
 
+@pytest.mark.parametrize("retention_deadline", [9.0, float("inf"), float("nan"), True])
+def test_snapshot_refuses_invalid_retention_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retention_deadline: float,
+) -> None:
+    paths, hashes = inputs(tmp_path)
+    monkeypatch.setattr("installer_wheel_inputs.time.monotonic", lambda: 1.0)
+    with pytest.raises(ValueError, match="retention deadline"):
+        with retain(paths, hashes, deadline=10.0, retention_deadline=retention_deadline):
+            pytest.fail("invalid retention deadline admitted")
+
+
+def test_snapshot_retention_deadline_does_not_extend_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, hashes = inputs(tmp_path)
+    clock = [1.0]
+    monkeypatch.setattr("installer_wheel_inputs.time.monotonic", lambda: clock[0])
+    digest = snapshots._digest
+
+    def expired(
+        stream: BinaryIO, limit: int, deadline: float, destination: BinaryIO | None = None,
+    ) -> tuple[str, int]:
+        clock[0] = 10.0
+        return digest(stream, limit, deadline, destination)
+
+    monkeypatch.setattr(snapshots, "_digest", expired)
+    with pytest.raises(ValueError, match="deadline"):
+        with retain(paths, hashes, deadline=10.0, retention_deadline=20.0):
+            pytest.fail("expired acquisition admitted")
+    assert all(path.exists() for path in paths.values())
+
+
+@pytest.mark.parametrize("extended", [False, True])
+def test_snapshot_retention_deadline_bounds_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extended: bool,
+) -> None:
+    paths, hashes = inputs(tmp_path)
+    clock = [1.0]
+    monkeypatch.setattr("installer_wheel_inputs.time.monotonic", lambda: clock[0])
+    verify = snapshots.WheelSnapshot.verify
+
+    def after_acquisition(snapshot: snapshots.WheelSnapshot) -> None:
+        clock[0] = max(clock[0], 11.0)
+        verify(snapshot)
+
+    monkeypatch.setattr(snapshots.WheelSnapshot, "verify", after_acquisition)
+    yielded = False
+    with pytest.raises(ValueError, match="deadline"):
+        with retain(
+            paths, hashes, deadline=10.0, retention_deadline=20.0 if extended else None,
+        ) as snapshot:
+            yielded = True
+            snapshot.verify()
+            assert extended
+            subset = snapshot.subset((next(iter(paths)),))
+            subset.verify()
+            clock[0] = 20.0
+            # Context exit must still verify against the finite retained bound.
+    assert yielded is extended
+
+
+@pytest.mark.parametrize("change", ["bytes", "identity"])
+def test_snapshot_retention_deadline_preserves_mutation_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    paths, hashes = inputs(tmp_path)
+    clock = [1.0]
+    monkeypatch.setattr("installer_wheel_inputs.time.monotonic", lambda: clock[0])
+    with pytest.raises((ValueError, PermissionError), match="changed|digest|denied"):
+        with retain(paths, hashes, deadline=10.0, retention_deadline=20.0) as snapshot:
+            clock[0] = 11.0
+            retained = next(iter(snapshot.paths.values()))
+            if change == "bytes":
+                retained.chmod(0o600)
+                retained.write_bytes(b"other")
+            else:
+                replacement = tmp_path / "replacement"
+                replacement.write_bytes(retained.read_bytes())
+                os.replace(replacement, retained)
+            snapshot.verify()
+
+
 @pytest.mark.parametrize("change", ["missing", "extra", "digest", "traversal", "case", "device"])
-def test_snapshot_refuses_inexact_claims(tmp_path, change):
+def test_snapshot_refuses_inexact_claims(tmp_path: Path, change: str) -> None:
     paths, hashes = inputs(tmp_path)
     name = next(iter(paths))
     if change == "missing":
@@ -108,9 +213,9 @@ def test_snapshot_refuses_inexact_claims(tmp_path, change):
             pytest.fail("invalid snapshot admitted")
 
 
-def test_snapshot_cancel_cleans_only_owned_paths(tmp_path):
+def test_snapshot_cancel_cleans_only_owned_paths(tmp_path: Path) -> None:
     paths, hashes = inputs(tmp_path)
-    retained = []
+    retained: list[Path] = []
     with pytest.raises(KeyboardInterrupt):
         with retain(paths, hashes) as snapshot:
             retained.extend(snapshot.paths.values())
@@ -119,7 +224,7 @@ def test_snapshot_cancel_cleans_only_owned_paths(tmp_path):
     assert all(path.exists() for path in paths.values())
 
 
-def test_snapshot_detects_retained_mutation(tmp_path):
+def test_snapshot_detects_retained_mutation(tmp_path: Path) -> None:
     paths, hashes = inputs(tmp_path)
     with pytest.raises((ValueError, PermissionError), match="changed|digest|denied"):
         with retain(paths, hashes) as snapshot:
@@ -130,7 +235,7 @@ def test_snapshot_detects_retained_mutation(tmp_path):
     assert all(path.exists() for path in paths.values())
 
 
-def test_snapshot_refuses_hardlinks(tmp_path):
+def test_snapshot_refuses_hardlinks(tmp_path: Path) -> None:
     paths, hashes = inputs(tmp_path)
     os.link(next(iter(paths.values())), tmp_path / "alias")
     with pytest.raises(ValueError, match="unlinked"):
@@ -138,12 +243,14 @@ def test_snapshot_refuses_hardlinks(tmp_path):
             pytest.fail("hardlinked source admitted")
 
 
-def test_snapshot_refuses_source_replacement_before_open(tmp_path, monkeypatch):
+def test_snapshot_refuses_source_replacement_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths, hashes = inputs(tmp_path)
     original = snapshots._open
     source = next(iter(paths.values()))
 
-    def replaced(path):
+    def replaced(path: Path) -> BinaryIO:
         if path == source:
             replacement = tmp_path / "replacement"
             replacement.write_bytes(path.read_bytes())
@@ -156,12 +263,14 @@ def test_snapshot_refuses_source_replacement_before_open(tmp_path, monkeypatch):
             pytest.fail("replacement admitted")
 
 
-def test_snapshot_refuses_mutation_of_earlier_source(tmp_path, monkeypatch):
+def test_snapshot_refuses_mutation_of_earlier_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths, hashes = inputs(tmp_path)
     first, second = paths.values()
     original = snapshots._open
 
-    def changed(path):
+    def changed(path: Path) -> BinaryIO:
         if path == second:
             first.write_bytes(b"other")
         return original(path)
@@ -172,16 +281,18 @@ def test_snapshot_refuses_mutation_of_earlier_source(tmp_path, monkeypatch):
             pytest.fail("earlier source changed before exact set was retained")
 
 
-def test_snapshot_compares_change_time_only_between_handle_stats(tmp_path, monkeypatch):
+def test_snapshot_compares_change_time_only_between_handle_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths, hashes = inputs(tmp_path)
     original = os.fstat
 
     class HandleStat:
-        def __init__(self, info):
+        def __init__(self, info: os.stat_result) -> None:
             self.info = info
             self.st_ctime_ns = info.st_ctime_ns + 1
 
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> Any:
             return getattr(self.info, name)
 
     # Windows 3.12 separates handle change time from path creation time.
@@ -189,13 +300,13 @@ def test_snapshot_compares_change_time_only_between_handle_stats(tmp_path, monke
         snapshots, "_identity",
         lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns),
     )
-    monkeypatch.setattr(snapshots.os, "fstat", lambda fd: HandleStat(original(fd)))
+    monkeypatch.setattr(os, "fstat", lambda fd: HandleStat(original(fd)))
     with retain(paths, hashes) as snapshot:
         snapshot.verify()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows read-sharing custody")
-def test_windows_snapshot_denies_writes_and_replacement_but_allows_readers(tmp_path):
+def test_windows_snapshot_denies_writes_and_replacement_but_allows_readers(tmp_path: Path) -> None:
     paths, hashes = inputs(tmp_path)
     with retain(paths, hashes) as snapshot:
         path = next(iter(snapshot.paths.values()))
@@ -216,28 +327,31 @@ def test_windows_snapshot_denies_writes_and_replacement_but_allows_readers(tmp_p
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows access-time metadata")
-def test_windows_read_guard_does_not_treat_access_metadata_as_byte_mutation(tmp_path, monkeypatch):
+def test_windows_read_guard_does_not_treat_access_metadata_as_byte_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths, hashes = inputs(tmp_path)
     original = os.fstat
 
     class AccessUpdate:
-        def __init__(self, info):
+        def __init__(self, info: os.stat_result) -> None:
             self.info = info
             self.st_birthtime_ns = getattr(info, "st_birthtime_ns", info.st_ctime_ns)
             self.st_ctime_ns = info.st_ctime_ns + 1
 
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> Any:
             return getattr(self.info, name)
 
     with retain(paths, hashes) as snapshot:
         with monkeypatch.context() as patch:
-            patch.setattr(snapshots.os, "fstat", lambda fd: AccessUpdate(original(fd)))
+            patch.setattr(os, "fstat", lambda fd: AccessUpdate(original(fd)))
             snapshot.verify()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length file opens")
-def test_windows_read_guard_preserves_long_input_paths(tmp_path):
-    directory = Path(policy._native_retained_path(tmp_path / ("long-" + "x" * 180)))
+def test_windows_read_guard_preserves_long_input_paths(tmp_path: Path) -> None:
+    native_path: Callable[[Path], str] = policy._native_retained_path
+    directory = Path(native_path(tmp_path / ("long-" + "x" * 180)))
     directory.mkdir()
     paths, hashes = inputs(directory)
     assert all(len(str(path)) > 260 for path in paths.values())
@@ -246,45 +360,50 @@ def test_windows_read_guard_preserves_long_input_paths(tmp_path):
 
 
 class Reader:
-    def __init__(self, stream, read):
+    def __init__(self, stream: BinaryIO, read: Callable[[int], bytes]) -> None:
         self.stream, self.read = stream, read
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.stream, name)
 
-    def __enter__(self):
+    def __enter__(self) -> Reader:
         return self
 
-    def __exit__(self, *args):
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.stream.close()
 
 
 @pytest.mark.parametrize("failure", ["grow", "copy", "eof-deadline"])
-def test_snapshot_partial_failure_cleanup(tmp_path, monkeypatch, failure):
+def test_snapshot_partial_failure_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     paths, hashes = inputs(tmp_path)
     original = snapshots._open
     source = next(iter(paths.values()))
-    private = policy._private_retained_root
-    roots = []
+    private: Callable[[Path | None], Path] = policy._private_retained_root
+    roots: list[Path] = []
     expired = False
-    check = snapshots._check_deadline
+    check = _check_deadline
 
-    def root(parent):
+    def root(parent: Path | None) -> Path:
         path = private(parent)
         roots.append(path)
         return path
 
-    def deadline(value):
+    def deadline(value: float) -> None:
         if expired:
             raise ValueError("wheel inspection deadline exhausted")
         check(value)
 
-    def opened(path):
+    def opened(path: Path) -> BinaryIO | Reader:
         stream = original(path)
         if path != source:
             return stream
 
-        def read(size):
+        def read(size: int) -> bytes:
             nonlocal expired
             if failure == "grow":
                 with source.open("ab") as writer:
@@ -308,26 +427,31 @@ def test_snapshot_partial_failure_cleanup(tmp_path, monkeypatch, failure):
     assert all(path.exists() for path in paths.values())
 
 
-def test_snapshot_write_failure_preserves_inputs(tmp_path, monkeypatch):
+def test_snapshot_write_failure_preserves_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths, hashes = inputs(tmp_path)
     original = Path.open
-    retained = []
+    retained: list[Path] = []
 
     class Output:
-        def __init__(self, stream):
+        def __init__(self, stream: IO[bytes]) -> None:
             self.stream = stream
 
-        def __enter__(self):
+        def __enter__(self) -> Output:
             return self
 
-        def __exit__(self, *args):
+        def __exit__(
+            self, exc_type: type[BaseException] | None, exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
             self.stream.close()
 
-        def write(self, data):
+        def write(self, data: bytes) -> None:
             self.stream.write(data[:1])
             raise OSError("synthetic storage failure")
 
-    def opened(path, mode="r", *args, **kwargs):
+    def opened(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> IO[Any] | Output:
         stream = original(path, mode, *args, **kwargs)
         if mode == "xb" and path.suffix == ".whl":
             retained.append(path)
@@ -343,14 +467,15 @@ def test_snapshot_write_failure_preserves_inputs(tmp_path, monkeypatch):
         assert "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() == hashes[name]
 
 
-def test_snapshot_composes_with_complete_profile_verifier(tmp_path):
+def test_snapshot_composes_with_complete_profile_verifier(tmp_path: Path) -> None:
     from packaging.markers import default_environment
     from runtime_profile import SCHEMA, validate_profile
     from runtime_profile_wheels import verify_profile_wheels
     from wheel_input_fixture import wheel_bytes
 
+    make_wheel: _WheelBytes = wheel_bytes
     path = tmp_path / "demo_pkg-1.0-py3-none-any.whl"
-    path.write_bytes(wheel_bytes(metadata=b"Metadata-Version: 2.4\nName: demo-pkg\nVersion: 1.0\n\n"))
+    path.write_bytes(make_wheel(metadata=b"Metadata-Version: 2.4\nName: demo-pkg\nVersion: 1.0\n\n"))
     hashes = {path.name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
     profile = validate_profile({
         "schema": SCHEMA, "version": 1,
@@ -376,7 +501,7 @@ def test_snapshot_composes_with_complete_profile_verifier(tmp_path):
         snapshot.verify()
 
 
-def test_snapshot_bootstrap_has_no_site_dependencies(tmp_path):
+def test_snapshot_bootstrap_has_no_site_dependencies(tmp_path: Path) -> None:
     paths, hashes = inputs(tmp_path)
     code = """
 import pathlib, sys, time
@@ -395,6 +520,6 @@ assert not owned.exists()
         [sys.executable, "-I", "-S", "-c", code, str(Path(snapshots.__file__).parent),
          name, str(paths[name]), hashes[name]],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=policy._HEADLESS,
     )
     assert result.returncode == 0, result.stdout + result.stderr

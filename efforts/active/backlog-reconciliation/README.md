@@ -3839,6 +3839,48 @@ contracts and two explicitly partial Manager consumer maps. #4199's literal
 implementation OR exact-complete-authorized-receiving condition remains.
 Other source claims, unfinished producer lanes and #4195's coverage gap are
 not retired by this proposal.
+The [reviewed ordered-outcome follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md#reviewed-ordered-outcomes-and-three-separate-tracking-judgments)
+records #12716's actual merge, current relevant receiving readback and three
+separately audited `NOT_PLANNED` retirements: #4186, #4194 and #4199. All
+nineteen acceptance checks remain unchecked. The complete 10:42:55 UTC
+census verifies 842 whole open, 113 above fixed 729: 453 original-cohort and
+389 inflow issues. One metadata-only arrival offsets part of the three
+campaign departures; no implementation, query, credential or landing occurred.
+The [title-bound ready frontier](journal/2026/11.15-title-bound-ready-frontier.md)
+preserves three current metadata-only keepers and assigns twelve next ready
+original/title/discussion unions in two disjoint studies. Research and
+bookkeeping receipts neither transfer custody nor add closure credit.
+Its [finite receiving clarification](journal/2026/11.15-title-bound-ready-frontier.md#two-source-restart-candidate-clarification)
+adds seven unchecked #4564 Plan/local/global Validation rows to the existing
+Manager restart plan. Unexpected and prepared restarts retain distinct durable
+candidate sets, shared exact-original restoration and original-conversation
+acknowledgment. #4564 and the other eleven sources remain OPEN; the existing
+reservation, source-admission gaps and independent programmes are unchanged.
+The [reviewed delivery](journal/2026/11.15-title-bound-ready-frontier.md#reviewed-candidate-set-delivery)
+records #12723's actual merge and equal reviewed/merged/current document blobs.
+All seven checks stay unchecked, with no new source retirement. The complete
+12:06:43 UTC census remains 842 whole open, 113 above fixed 729; the next eight
+original studies continue without changing the campaign completion gate.
+The [next keeper distinctions](journal/2026/11.15-title-bound-ready-frontier.md#separate-cleanup-and-canonical-migration-keepers)
+retain #4675's historical cleanup separately from CI enforcement and #5293
+as its own canonical migration programme, with incumbent requirements and
+custody unchanged. Neither needs a forced receiving amendment or retirement.
+Eleven next qualified original/discussion unions are assigned independently;
+#5472 remains metadata-only and the held #5356 source is not reacquired.
+The [per-clause tracking reconciliation](journal/2026/11.15-title-bound-ready-frontier.md#per-clause-retirement-tracking-reconciliation)
+retains #4744's complete direct P/V contract, dated delivery credit and
+explicitly tracked residuals in its existing Draft effort. Redundant tracking
+and technical fulfillment remain separate judgments; no source is retired by
+this proposal. The existing cadence's complete 12:40:23 UTC census records
+843 whole open, 114 above fixed 729, with two arrivals and one unrelated
+departure. Ten next complete maps and one discussion-source gap remain distinct;
+all parent acceptance and custody gates stay open.
+The [finite selector and engine clarification](journal/2026/11.15-title-bound-ready-frontier.md#finite-selector-and-engine-acceptance-clarification)
+adds seven unchecked #5340/#5549 Plan/Validation clauses in their relevant
+existing efforts. Literal alternatives, explicit OPEN-token conditions,
+#5686's separate parent-receipt condition, completed credit and independent
+rollback remain. This is documentary receiving, not technical fulfillment
+or a disposition of those sources.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
