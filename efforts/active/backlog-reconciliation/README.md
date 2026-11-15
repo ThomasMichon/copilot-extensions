@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [reviewed planned-intake and Manager-source unit](journal/2026/11.14-planned-intake-and-manager-source.md)
+verifies existing receiving delivery and retires #3323 and #3372 as redundant
+planned tracking, not technical completion. It proposes eighteen unchecked
+Manager Plan/local/global Validation rows for the finite #3418 consumer and
+source-only #3421 package contract; source causes and incumbent custody remain
+separate. The complete 2026-11-15 02:00:27Z census is 847 open, 118 above fixed
+729, with two audited campaign departures and no inflow.
+
 The [review-convergence and source-contract unit](journal/2026/11.14-review-convergence-and-source-keepers.md)
 retains ten complete original/discussion unions and two metadata-only stops.
 It proposes 24 unchecked reviewer-intake Plan/local/global Validation rows,

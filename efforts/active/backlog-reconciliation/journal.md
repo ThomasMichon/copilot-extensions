@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-14 - Reviewed planned intake and finite Manager-source contracts](journal/2026/11.14-planned-intake-and-manager-source.md)
+
 - [2026-11-14 - Review convergence and retained source contracts](journal/2026/11.14-review-convergence-and-source-keepers.md)
 
 - [2026-11-14 - Lifecycle, selector and custody frontier](journal/2026/11.14-lifecycle-and-selector-frontier.md)

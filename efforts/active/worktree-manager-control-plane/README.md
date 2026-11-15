@@ -2594,7 +2594,74 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
   owners. Credit merged source only; planned intake is not acceptance or custody
   release.
 
+### Proposed finite capture-consumer and package-version intake
+
+These are planned, unchecked obligations, not implementation delivery. Reuse
+the existing Phase 3/3d Picker, engine JSON boundary, local reconcile batch and
+version-consistency guard; do not build competing mechanisms.
+
+- [ ] **P3418-MGR-1 — Production consumer:** Qualify actual adopted-project
+  capture through the existing `runner.capture`/`data_local`/`engine_client`
+  and engine JSON contracts. Demo, mock and legacy-app captures do not
+  substitute for the production consumer.
+- [ ] **P3418-MGR-2 — Source causal OR:** Preserve independent anchor probes
+  in parallel **OR** a bound for the whole operation **OR** an accepted
+  resident route under “warmth, not truth.” `agent-worktrees` retains the
+  source algorithm; a per-anchor timeout sum, fixture bypass or duplicate
+  Manager resolver is not its causal resolution.
+- [ ] **P3418-MGR-3 — Capture and truth:** Preserve target policy, knowledge
+  overlay, installation/project identity and per-fact freshness. Bound the
+  whole consumer operation and expose actionable unavailable/incomplete
+  outcomes; unreachable anchors are not confirmed absence or empty success.
+- [ ] **P3418-MGR-4 — Distinct fixes:** Keep the SSH-helper exception,
+  `heal=False`/anchor-heal exclusion, pivot materialization and separate
+  demo/preview fixture change distinct. None alone proves this outcome.
+- [ ] **P3418-MGR-5 — Evidence scope:** Preserve representative reachable
+  and partly-unreachable topology outcomes at the original applicable
+  contained/native tiers; record unavailable cases honestly. This planning
+  change performs no experiment.
+- [ ] **P3418-MGR-6 — Existing mesh gate:** Retain the Worktrees-pivot
+  #3307 real-mesh UX acceptance **OR** explicit operator acceptance of its
+  documented demo-only alternative. Reference that gate rather than
+  creating a competing UX contract.
+- [ ] **V3418-MGR-1:** Correlate an actual adopted project's production
+  Manager capture with the engine result; distinguish live source data
+  from preview/mock data.
+- [ ] **V3418-MGR-2:** Verify bounded whole-operation success and actionable
+  unavailable/incomplete outcomes with current project/installation identity
+  and freshness. First paint or source generation alone is not the outcome.
+- [ ] **V3418-MGR-3:** Preserve the original representative topology and
+  evidence distinctions, including honest unavailable lanes at their
+  applicable tier.
+- [ ] **V3418-MGR-4:** Honor #3307's existing real-mesh **OR** explicitly
+  operator-accepted demo-only disposition without adding a UX/native matrix.
+- [ ] **P3421-MGR-1 — Metadata authority:** Make available installed
+  distribution metadata for `copilot-extensions-worktree-manager`
+  authoritative for `worktree_manager.__version__`.
+- [ ] **P3421-MGR-2 — Degraded fallback:** Retain an explicit source fallback
+  only for the missing-distribution source-import case. It must not override
+  installed metadata or swallow unrelated metadata errors.
+- [ ] **P3421-MGR-3 — Consistency:** Reuse the existing guard to validate
+  the fallback against the declared project version. Matching literals or
+  promotion stamping alone is not metadata authority.
+- [ ] **P3421-MGR-4 — Finite tier:** Keep this package behavior source-only;
+  no new release, native, installation or running-state gate is required.
+- [ ] **V3421-MGR-1:** A focused source-level behavior check proves available
+  distribution metadata wins even when the fallback differs, and the fallback
+  is used only when distribution metadata is absent.
+- [ ] **V3421-MGR-2:** Retain consistency-check coverage for the fallback
+  and project declaration; source results do not claim installed, released,
+  native or running-state acceptance.
+
 ## Validation Plan
+
+- [ ] **G3418-MGR:** Resolve P3418-MGR-1 through P3418-MGR-6 and
+  V3418-MGR-1 through V3418-MGR-4 at the finite Manager consumer boundary,
+  without requiring unrelated phases, every host or a new native program.
+  The source-side cause and #3307's existing gate retain their own owners.
+- [ ] **G3421-MGR:** Resolve P3421-MGR-1 through P3421-MGR-4 and
+  V3421-MGR-1 through V3421-MGR-2 at the finite source tier without
+  requiring the rest of the Manager program.
 
 - [ ] Qualify the scope-applicable [L1-L6 lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
   through the real Manager entry, including update cancellation versus accepted
@@ -2816,6 +2883,18 @@ tiers without imposing every-host or native-on-every-leaf requirements.
 
 ## Coordination
 
+- **C3418-MGR-1:** The Manager owner retains its production capture
+  consumer; the existing `agent-worktrees` owner retains the `list --classify`
+  cause and implementation, and the Worktrees-pivot owner retains #3307.
+  Preserve incumbent claims and resources. The reported parser-wait
+  reservation release covers that finite leaf, not the issue or other claims.
+- **C3418-MGR-2:** Preserve the source causal OR and inherited capture
+  acceptance, including #3307's mesh OR. Do not duplicate the existing
+  Phase 3/3d Group C batch or the complete Worktrees-pivot UX plan.
+- **C3421-MGR:** The Manager package owner retains this finite version-reporting
+  work. Installer, release, singleton and native ownership remain unchanged;
+  this source-only intake does not authorize rollout or broaden their gates.
+
 The proposed #5611 finite deployment/readiness case retains actual installer,
 installation-status and relocated Manager-launcher/provider custodians.
 Preserve current Participants, Phase7/#7305/restart/configuration scopes,
@@ -2978,6 +3057,17 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-14 — Finite capture and version-authority intake
+
+The current Plan, Validation and Coordination were reconciled against
+#3418 and #3421. Existing injected/headless capture, the Group C reconcile
+batch and version-consistency work remain credited rather than duplicated.
+The eighteen new unchecked Plan/local/global Validation rows retain only
+the missing Manager consumer and source-version acceptance. They do not
+assign implementation, perform native work or close either source.
+#3342's lease-store/identity refusal remains with its actual engine owner.
+Normal review and separate source-specific receiving judgments remain required.
 
 ### 2026-11-12 - Registered-stream finite source accepted
 
