@@ -3745,6 +3745,23 @@ completion. The latest complete census is 848 whole, 119 above fixed 729;
 follows from this new proposal before actual receiving readback and separate
 source-specific adjudication.
 
+The [accepted-receiver follow-through](journal/2026/11.14-accepted-receivers-and-owner-frontier.md)
+records #12672's actual reviewed merge, complete relevant receiving readback
+and four independently audited `NOT_PLANNED` tracking retirements: #3421,
+#3507, #3584 and #3585. All 25 new acceptance checks remain unchecked;
+#954 and this campaign remain OPEN. The complete 04:43:32 UTC census is
+844 whole, 115 above fixed 729, with 463 original-cohort issues and 381
+inflow open. The next eleven complete original/discussion unions are
+current-bound research inputs, not eleven accepted receivers or fixes.
+Exact source holds and the acquisition errors remain explicit; neither
+tracking consolidation nor source qualification changes resource custody.
+The same unit adds 35 unchecked finite receiving rows across the existing
+Worktrees cutover, Manager theme, Dispatch held-log and captured-owner GC plans, preserving all
+incumbent acceptance and owners. #3938's whole programme stays OPEN;
+native/installed proof is planned, not manufactured or required before
+planned receiving. The monitor handoff intake retains the actual captured-owner
+and pending/acknowledged transition contract, not an implementation-first rejection.
+
 ### Phase 2b - Vision-linked stabilization roadmap
 
 - [x] _(Agent-recommended)_ Establish the reviewed research method and

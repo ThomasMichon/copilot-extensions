@@ -1002,6 +1002,11 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
 - [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
       documentation acceptance; reconcile Phase 7 preset scope to avoid a
       second implementation.
+- [ ] Receive #3939's finite
+      [terminal-theme mapping](phase-5-configuration-workbench.md#direct-terminal-theme-acceptance-from-3939)
+      for both Picker truecolor and Worktrees ANSI, with defaults, semantic
+      states and no-color behavior retained. Reuse the existing owner-declared
+      configuration framework and wave-specific global matrix.
 - [x] Installation and Updates (#8877, `ticking-compass`): delivered the bounded
       standing inventory and genuinely component-scoped durable updates in the
       [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877).
@@ -2883,6 +2888,13 @@ tiers without imposing every-host or native-on-every-leaf requirements.
 
 ## Coordination
 
+- **C3939-THEME:** Existing Manager presentation/configuration and Worktrees
+  configuration/output owners retain the finite theme mapping. Claim waves
+  under the Phase 5 contract before implementation; this planned intake
+  appoints no owner or second writer/store. Worktrees remains independent of
+  Manager. Normal review/current readback and source-specific judgment remain
+  separate; no settings, source or resource custody transfers.
+
 - **C3418-MGR-1:** The Manager owner retains its production capture
   consumer; the existing `agent-worktrees` owner retains the `list --classify`
   cause and implementation, and the Worktrees-pivot owner retains #3307.
@@ -3059,6 +3071,14 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-14 - Finite terminal-theme receiving proposal
+
+Added a direct Phase 5 link to #3939's both-consumer theme acceptance and its
+four unchecked subplan rows. The existing global Configuration matrix already
+covers those local rows; no duplicate global framework was added. Every
+incumbent line, check state and owner remains. This is planned configuration
+coverage, not a shipped setting, implementation appointment or source closure.
 
 ### 2026-11-14 — Finite capture and version-authority intake
 
