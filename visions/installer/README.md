@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-13
+- **Last revised:** 2026-11-15
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -162,6 +162,11 @@ compatibility mechanism must not redefine the goal.
   central services and publish their current-version selections and invocation/
   service registrations. Reuse, old-runtime/footprint recovery or migration and
   zero-downtime handoff are best-effort optimizations, not prerequisites.
+  Construction uses the existing fast copy and wheel-backed environment path,
+  followed by simple application setup before cutover. Already-selected inputs
+  do not face repeated fingerprint or attestation rejection gates during that
+  construction/setup phase. Authentic source selection and real construction
+  failures remain distinct from redundant admission machinery.
   Durable-state compatibility or necessary state-preserving application-data/
   schema migration is required before admitting incoming mutable serving work
   and is part of safe readiness; it does not depend on old-runtime permission.
@@ -178,19 +183,19 @@ compatibility mechanism must not redefine the goal.
   proof is not whole-installation success. Report real acquisition, build,
   authentication, permission, I/O and incoming-health failures honestly; never
   activate a failed candidate or call a partial result complete.
-- **Retirement is independent of success.** Outgoing central daemons detect
-  that they are no longer current, close admission, attempt handoff/drain and
-  clean up their own obsolete runtime registrations. Admission closure and
-  transfer/exclusion of conflicting work may precede incoming serving readiness;
-  neither waits for installation completion. An uncooperative predecessor is
-  handled through the incoming owner's bounded transition, not an indefinite
-  old-lease wait. Final predecessor exit and cleanup remain independent.
-  The installer does not
-  wait for or fence success on their drain, exit or cleanup. It may launch
-  one finite asynchronous fallback for the addressed replacement, after a
-  grace period longer than expected cutover, to force-retire remaining
-  outgoing central daemons and obsolete central-service schedules. This is
-  optional, not a periodic resident reaper or another installer.
+- **Replacement is kill by default; handoff only when reliable.** With no
+  reliable handoff, the replacement owner force-stops the outgoing central
+  service and its owned daemons before incoming service startup. Where handoff
+  is reliable, allow one bounded attempt, then force-stop the outgoing tree if
+  it does not settle. Nested callers do not multiply that attempt or its budget.
+  Old runtime-state locks, handoff/schema failures and drain delays cannot
+  withhold incoming startup. Preserve durable user state and perform necessary
+  incoming data compatibility work; killing the old service is not data reset.
+  Conflicting exclusive work is excluded before incoming mutable serving work.
+  Installation success still requires incoming readiness and complete selection,
+  not a cleanup receipt. Obsolete files and registrations may be reclaimed
+  independently; neither a long-grace fallback nor a periodic reaper substitutes
+  for the bounded outgoing cutoff needed by this replacement.
 - **Retirement is role- and generation-scoped.** Session hosts, session keepers,
   session-owned Bridge/agent processes, foreground clients and protected
   connectivity are never fallback targets. A central service's name does not
@@ -429,10 +434,13 @@ footprints without initializing live runtime data, activating live services,
 publishing current selections or attempting handoff. App-owned private
 candidate readiness may use the existing passive contract, with live work
 admission closed and no live publication or shared-data migration. This is
-not service activation. Activation then checks state
-compatibility and lets incoming versions observe incumbents and attempt
-supported state transfer, start and cut over. Existing versions do not select
-a separate legacy construction flow. Outgoing retirement remains independent
+not service activation. The simple application preparation needed before
+cutover follows that same fast construction path, without repeated fingerprint
+admission gates. Active-state setup stays with the activation owner, not stage.
+Activation then checks state compatibility and applies
+[kill-by-default replacement](#authoritative-runtime-replacement), with at most
+one bounded reliable state-transfer attempt. Existing versions do not select
+a separate legacy construction flow. Obsolete artifact cleanup remains independent
 under [authoritative-runtime-replacement](#authoritative-runtime-replacement).
 
 A directly requested update owns its recovery and completion: it performs a
@@ -618,19 +626,15 @@ Ordinary updates and repair/force-install publish and start the incoming
 generation independently of the old version's existence, health or cooperation.
 Construction does not require uninstalling, deleting or unregistering the old
 runtime first. Current binstubs and applicable task registrations select the new
-generation. The incoming owner starts first and attempts handoff with the outgoing
-owner. The predecessor recognizes both that announcement and its independently
-observable staleness. Close/transfer or exclude conflicting work admission as
-needed before incoming serving readiness; do not make that transfer depend on
-installation completion or indefinite old-lease release. Once all requested
-incoming readiness and current selections are established, declare completion
-without waiting for final predecessor exit or cleanup. Outgoing self-retirement
-and self-cleanup continue independently.
-An optional single finite asynchronous fallback may retire remaining outgoing
-central daemons and obsolete central-service schedules after a longer grace
-period, under [authoritative-runtime-replacement](#authoritative-runtime-replacement).
-Do not introduce a periodic resident retirement reaper.
-Brief overlap is expected, without duplicate exclusive work ownership.
+generation. The replacement owner applies
+[kill-by-default cutoff](#authoritative-runtime-replacement): no reliable
+handoff means stopping the outgoing service tree before incoming startup;
+reliable handoff gets one bounded attempt before forced cutoff.
+Close/transfer or exclude conflicting work admission before incoming mutable
+serving work. Once all requested incoming readiness and current selections are
+established, declare completion without waiting for unrelated artifact or
+obsolete-registration cleanup. Brief overlap is permitted only for the reliable
+handoff attempt, without duplicate exclusive work ownership.
 Missing handoff support or failed drain does not veto the new installation or
 require another force/repair flag; interrupted work and unconfirmed cleanup
 remain explicit.
@@ -641,9 +645,9 @@ rollback is reserved for failure of the incoming generation itself to start.
 Replacement preserves configuration, durable application data, unrelated
 installations and protected session/connectivity dependencies. Readiness,
 current routing and confirmed predecessor exit are distinct observed facts.
-Incoming routing/admission prevents duplicate exclusive work without making
-predecessor exit or old custody evidence an activation prerequisite. Unknown
-ownership is not permission to kill. Actual incoming readiness failures remain
+Incoming routing/admission and bounded cutoff prevent duplicate exclusive work
+without making an old cooperation or cleanup receipt an activation prerequisite.
+Unknown ownership is not permission to kill. Actual incoming readiness failures remain
 explicit partial outcomes, never claims that an unready service is healthy.
 Explicit uninstall or independently scoped historical reclamation is a separate
 operation, not a prerequisite for updating.
@@ -811,19 +815,19 @@ the default convergence path; recognizers enable incremental/ZDD optimization.
 Absent reuse evidence, stale control records or an incompatible old runtime do
 not require a separate force/repair request merely to complete the selected
 update. The same execution owner preserves exclusive installation custody; competing
-callers never become concurrent writers. That serialization does not require
-outgoing service-runtime teardown before incoming startup.
+callers never become concurrent writers. Construction does not wait on outgoing
+service teardown; activation applies the bounded cutoff contract.
 Blocking acquisition, I/O, permission or execution failures leave explicit
 failed-candidate state without activating a failed version. Compatible handoff
-is preferred, not a veto on bounded cold replacement.
+is optional and limited to one bounded reliable attempt, not a veto on replacement.
 
 Explicit force/repair installation gives any intact authorized installer a
 bounded way to request disruptive recovery or an explicit replacement target.
 It is not the switch that enables the normal fresh fallback. Agents request
 operator approval before a concrete disruptive host operation. Once replacement
 is authorized, ordinary and repair installation use the same lifecycle:
-prefer start-first/self-retirement, falling back to bounded identity-checked
-cold takeover when the old owner cannot cooperate or settle. No extra repair
+kill by default, with one bounded reliable handoff attempt before identity-checked
+forced cutoff where supported. No extra repair
 mode is needed solely because graceful cutover is unsupported. An old runtime
 cannot veto construction or activation merely by lacking the new handoff contract.
 An active old installer is handled by bounded internal wait/join or replacement
