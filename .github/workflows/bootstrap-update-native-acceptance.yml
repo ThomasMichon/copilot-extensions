@@ -97,6 +97,23 @@ jobs:
           (not test_update_bootstrap.py or prepared_repair_uses_declared_installer_entry) and
           (not test_recovery_source.py or unattributable_engine_uses_native_fresh_installation) and
           (not test_bootstrap_update.py or observer_modes_share)"
+  bootstrap-update-windows:
+    name: Whole bootstrap update (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: *bootstrap-update-steps
+
+  bootstrap-python-linux:
+    name: Prepared Python handoff (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: &bootstrap-python-steps
+      - *bootstrap-update-checkout
+      - *bootstrap-update-python
+      - *bootstrap-update-uv
+      - *bootstrap-update-source
       - name: Qualify prepared Python handoff through the native SDK
         run: >-
           python tools/run-plugin-tests.py installation-context --test-file tests/test_powershell_bootstrap.py -k "uses_prepared_python or positional_arguments" --allow-explicit-tiers
@@ -104,12 +121,12 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_bootstrap_python.py -k prepared_python --allow-explicit-tiers
 
-  bootstrap-update-windows:
-    name: Whole bootstrap update (Windows)
+  bootstrap-python-windows:
+    name: Prepared Python handoff (Windows)
     runs-on: windows-latest
     timeout-minutes: 5
     env: *bootstrap-update-env
-    steps: *bootstrap-update-steps
+    steps: *bootstrap-python-steps
 
   bootstrap-retention-linux:
     name: Declared source retention (Linux)

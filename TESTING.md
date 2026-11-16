@@ -2021,8 +2021,11 @@ execution and the required unit-only CI packet.
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
 and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
-Hosted acceptance runs complementary behavioral and full-retention selections
-in separate jobs on each platform; no case is removed from acceptance. The
+Hosted acceptance runs complementary behavioral, full-retention and prepared
+Python handoff selections in separate jobs on each platform; no case is removed
+from acceptance. The SDK and evaluator handoff packets share their own job,
+not the behavioral packet's remaining cold-preparation budget. All jobs use the
+same exact-source checkout and tool setup. The
 behavioral jobs also run `tests/test_update_python_path.py` with fake registry
 state to check waited completion, excluded observer modes and publication failures.
 They select the source-anchor-loss dispatch controls and standalone prepared-source
