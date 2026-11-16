@@ -136,6 +136,87 @@ def build_dependencies() -> None:
             sys.path.append(path)
 
 
+def host_uv(repository_root: Path, purpose: str) -> str:
+    from worktree_manager import runtime_source_repository
+
+    current_directory = Path.cwd()
+    runtime_source_repository._ordinary(current_directory)
+    for location in os.get_exec_path():
+        directory = Path(location.strip('"'))
+        if (
+            not directory.is_absolute() or ".." in directory.parts
+            or str(directory).replace("\\", "/").startswith("//")
+        ):
+            continue
+        try:
+            runtime_source_repository._ordinary(directory)
+            if directory.samefile(current_directory) or any(
+                parent.samefile(repository_root) for parent in (directory, *directory.parents)
+            ):
+                continue
+            candidate = directory / ("uv.exe" if os.name == "nt" else "uv")
+            runtime_source_repository._ordinary(candidate)
+        except (OSError, ValueError):
+            continue
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    raise ValueError(f"{purpose} requires UV on an absolute host tool path")
+
+
+def tool_requirements(repository: Path) -> list[str]:
+    """Keep the external constraints of both source applications and their libraries."""
+    import installer_engine
+
+    tomllib = importlib.import_module("tomllib")
+    roots = set(
+        installer_engine._package_roots(repository / "worktree-manager")
+    ) | set(installer_engine._package_roots(repository / "plugins" / "agent-worktrees"))
+    projects = [
+        tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        for root in roots
+    ]
+    def identity(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    local_names = {identity(project["name"]) for project in projects}
+    requirements: set[str] = set()
+    for project in projects:
+        for requirement in project.get("dependencies", []):
+            if not isinstance(requirement, str):
+                raise ValueError("Recovery toolkit has an invalid declared tool dependency")
+            name = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement)
+            if name is None:
+                raise ValueError("Recovery toolkit has an invalid declared tool dependency")
+            if identity(name[1]) not in local_names:
+                requirements.add(requirement)
+    return sorted(requirements)
+
+
+def prepare_tool_dependencies(workspace: Path) -> Path:
+    """Prepare request-private tools before borrowing installation execution custody."""
+    import agent_procutil
+    from installer_dependency_policy import retain_uv_install
+    from installer_engine_process import run_owned
+
+    requirements = tool_requirements(REPOSITORY)
+    target = workspace / "tool-dependencies"
+    target.mkdir(exist_ok=False)
+    if requirements:
+        uv = host_uv(Path.cwd(), "Native recovery tool preparation")
+        deadline = time.monotonic() + 120
+        with retain_uv_install(
+            uv, ["--python", sys.executable, "--target", str(target),
+                 "--only-binary=:all:", "--link-mode", "hardlink", *requirements],
+            cwd=REPOSITORY / "worktree-manager", trusted_source_roots=(REPOSITORY,),
+            deadline=deadline,
+        ) as transaction:
+            run_owned(
+                list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,
+                timeout=120, deadline=deadline, procutil=agent_procutil, construction_fd=None,
+            )
+    return target
+
+
 def repository_declaration(repository_root: Path | None, workspace: Path) -> Document:
     """Interpret adopter data using only the current toolkit's declared parser."""
     from worktree_manager import runtime_source_repository
@@ -160,31 +241,7 @@ def repository_declaration(repository_root: Path | None, workspace: Path) -> Doc
     ]
     if not yaml_requirements:
         raise ValueError("Trusted recovery toolkit does not declare its YAML parser")
-    uv = None
-    current_directory = Path.cwd()
-    runtime_source_repository._ordinary(current_directory)
-    for location in os.get_exec_path():
-        directory = Path(location.strip('"'))
-        if (
-            not directory.is_absolute() or ".." in directory.parts
-            or str(directory).replace("\\", "/").startswith("//")
-        ):
-            continue
-        try:
-            runtime_source_repository._ordinary(directory)
-            if directory.samefile(current_directory) or any(
-                parent.samefile(repository_root) for parent in (directory, *directory.parents)
-            ):
-                continue
-            candidate = directory / ("uv.exe" if os.name == "nt" else "uv")
-            runtime_source_repository._ordinary(candidate)
-        except (OSError, ValueError):
-            continue
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            uv = str(candidate)
-            break
-    if uv is None:
-        raise ValueError("Repository suite interpretation requires UV on an absolute host tool path")
+    uv = host_uv(repository_root, "Repository suite interpretation")
     parser_root = workspace / "repository-parser"
     parser_root.mkdir(parents=True, exist_ok=False)
     python = Path(getattr(sys, "_base_executable", sys.executable))
@@ -560,6 +617,24 @@ def apply(
     return rc
 
 
+def child_outcome(request: Any, selection: Document, *, completed: bool) -> Document:
+    with request.log_path.open("rb") as stream:
+        stream.seek(max(0, request.log_path.stat().st_size - (1 << 20)))
+        lines = stream.read().splitlines()
+    if not lines:
+        raise ValueError("Native recovery returned no outcome receipt")
+    outcome = json.loads(lines[-1], object_pairs_hook=_unique)
+    if (
+        not isinstance(outcome, dict) or outcome.get("schema") != RESULT_SCHEMA
+        or outcome.get("selection") != selection
+        or type(outcome.get("exit_code")) is not int
+        or (completed and outcome["exit_code"] != request.exit_code)
+        or outcome.get("driver_request", request.id) != request.id
+    ):
+        raise ValueError("Native recovery outcome differs from the admitted selection")
+    return outcome
+
+
 def admitted_apply(
     request: Document, resolved: ResolvedSource, workspace: Path, source: Path,
     rows: dict[str, Document], report: Document,
@@ -568,6 +643,8 @@ def admitted_apply(
     runtime_install = importlib.import_module("runtime_install")
     from worktree_manager.update_driver_cli import _CONTEXT_KEYS, request_context
 
+    report["stage"] = "tool-preparation"
+    report["tool_dependencies"] = str(prepare_tool_dependencies(workspace))
     driver = runtime_install._execution_driver(REPOSITORY / "worktree-manager")
     invocation = str(Path.cwd())
     plan = workspace / "execution.json"
@@ -582,47 +659,51 @@ def admitted_apply(
     plan.write_bytes(content)
     digest = hashlib.sha256(content).hexdigest()
     report["stage"] = "native-admission"
-    result = driver.run_explicit(
-        driver.RequestSpec(
-            "source-recovery", ("install", resolved.commit, resolved.tree),
-            project=request["project"] or "", cwd=invocation, source=digest,
-            context=tuple({
-                **request_context(capture_engine=False), "WORKTREE_MANAGER_ROOT": report["manager_root"],
-            }.items()),
-        ),
-        runner=driver.TrustedRunner(
-            (
-                sys.executable, "-I", "-S", "-B", "-X", "utf8", str(Path(__file__).resolve()),
-                "--execute-plan", str(plan), "--plan-sha256", digest,
+    try:
+        result = driver.run_explicit(
+            driver.RequestSpec(
+                "source-recovery", ("install", resolved.commit, resolved.tree),
+                project=request["project"] or "", cwd=invocation, source=digest,
+                context=tuple({
+                    **request_context(capture_engine=False), "WORKTREE_MANAGER_ROOT": report["manager_root"],
+                }.items()),
             ),
-            invocation, context_keys=_CONTEXT_KEYS,
-        ),
-    )
+            runner=driver.TrustedRunner(
+                (
+                    sys.executable, "-I", "-S", "-B", "-X", "utf8", str(Path(__file__).resolve()),
+                    "--execute-plan", str(plan), "--plan-sha256", digest,
+                ),
+                invocation, context_keys=_CONTEXT_KEYS,
+            ),
+        )
+    except BaseException as error:
+        request_id = getattr(error, "request_id", None)
+        if request_id:
+            report["driver_request"] = request_id
+            try:
+                failed = driver.status(request_id)
+                report["native_state"] = failed.state
+                report["native_exit_code"] = failed.exit_code
+                outcome = child_outcome(failed, report["selection"], completed=False)
+                report["child_outcome"] = {
+                    key: outcome[key] for key in ("stage", "error", "exit_code", "effects") if key in outcome
+                }
+            except Exception as observation_error:
+                report["child_observation_error"] = type(observation_error).__name__
+        raise
     report["driver_request"] = result.id
     report["native_exit_code"] = result.exit_code
     driver.wait(result.id, output=sys.stderr)
     if result.state != "completed" or result.exit_code is None:
         raise ValueError(f"Native recovery execution is {result.state}; settlement remains with its owner")
-    with result.log_path.open("rb") as stream:
-        stream.seek(max(0, result.log_path.stat().st_size - (1 << 20)))
-        lines = stream.read().splitlines()
-    if not lines:
-        raise ValueError("Native recovery returned no outcome receipt")
-    outcome = json.loads(lines[-1], object_pairs_hook=_unique)
-    if (
-        not isinstance(outcome, dict) or outcome.get("schema") != RESULT_SCHEMA
-        or outcome.get("selection") != report["selection"]
-        or outcome.get("exit_code") != result.exit_code
-        or outcome.get("driver_request", result.id) != result.id
-    ):
-        raise ValueError("Native recovery outcome differs from the admitted selection")
+    outcome = child_outcome(result, report["selection"], completed=True)
     report.update(outcome, driver_request=result.id)
     return cast(int, result.exit_code)
 
 
 def execute_plan(path: Path, digest: str, report: Document) -> int:
     runtime_install = importlib.import_module("runtime_install")
-    from worktree_manager.runtime_source import ResolvedSource
+    from worktree_manager.runtime_source import ResolvedSource, _ordinary
     from worktree_manager.runtime_source_config import RuntimeSource
 
     _absolute(str(path), "execution plan", nullable=False)
@@ -655,6 +736,11 @@ def execute_plan(path: Path, digest: str, report: Document) -> int:
             RuntimeSource(**value["selection"]), Path(value["checkout"]),
             value["commit"], value["tree"], value["branch_tip"],
         )
+        tools = Path(plan["workspace"]) / "tool-dependencies"
+        _ordinary(tools)
+        if not tools.is_dir():
+            raise ValueError("Native recovery tool dependencies are unavailable")
+        sys.path.append(str(tools))
         return apply(
             plan["request"], resolved, Path(plan["workspace"]),
             Path(plan["source"]), plan["rows"], report,
@@ -722,7 +808,6 @@ def main(argv: list[str] | None = None) -> int:
             if not args.plan_sha256 or re.fullmatch(r"[0-9a-f]{64}", args.plan_sha256) is None:
                 raise ValueError("Native recovery execution requires its admitted plan digest")
             source_modules(REPOSITORY)
-            build_dependencies()
             report["exit_code"] = execute_plan(args.execute_plan, args.plan_sha256, report)
             print(json.dumps(report, sort_keys=True), flush=True)
             return cast(int, report["exit_code"])

@@ -53,6 +53,21 @@ An already-loaded different utility copy is refused rather than reloaded.
 Application build inputs, utility-origin checks and native participant custody
 remain unchanged.
 
+For apply, the toolkit first prepares the ordinary external dependencies declared
+by its Manager, Worktrees and local-library source closure into the request's
+private `tool-dependencies` directory. This uses the existing UV dependency owner
+and seasoning policy, before native installation admission. The isolated child
+uses that directory after its source and standard-library paths; it does not
+rely on a warmed parent, execute site startup hooks or install into an existing
+runtime. These are the fresh controller's tools, not a change to the selected
+application's dependency profile. Preview does not publish application runtimes
+or activate services and may report footprint observation unavailable.
+
+An exception escaping native execution custody still leaves cleanup unconfirmed.
+The parent retains a matching child outcome as diagnostic evidence alongside the
+native interrupted state and null native exit; it does not convert that receipt
+into cleanup, completion or replay authority.
+
 ## Native composition
 
 The fresh toolkit composes the existing immutable acquisition, local source
