@@ -182,18 +182,18 @@
       }
     }
   },
-  "expected": {
-    "native_send_settlement": {
-      "capability": 1,
-      "cli": {
-        "version": 1,
-        "capabilities": [
-          "native-send-settlement"
-        ]
-      },
-      "accepted": "accepted",
-      "unadmitted": "not_admitted"
+  "native_send_settlement": {
+    "capability": 1,
+    "cli": {
+      "version": 1,
+      "capabilities": [
+        "native-send-settlement"
+      ]
     },
+    "accepted": "accepted",
+    "unadmitted": "not_admitted"
+  },
+  "expected": {
     "compatible_native_inbox": 1,
     "live_question_answers": 1,
     "mux_question_answers": 1,

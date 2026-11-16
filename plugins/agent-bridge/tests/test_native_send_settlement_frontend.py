@@ -34,7 +34,7 @@ PATH = "/api/v1/sessions/bridge-a/turns/native-bound/send/settle"
 def _expected() -> dict[str, Any]:
     path = Path(__file__).resolve().parents[1] / "contract/inputs/http52/owner-membership.json"
     value: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    expected: dict[str, Any] = value["expected"]["native_send_settlement"]
+    expected: dict[str, Any] = value["native_send_settlement"]
     return expected
 
 
