@@ -82,6 +82,11 @@ and fix how it is wired.
   familiar single-command `curl … | bash` / `iex …` shape) that fetches and runs
   the installer directly, independent of any plugin or prior harness tooling. It
   is the front door the inert-plugin failure mode requires.
+- **Native seed and finite installation controller** — the operating system's
+  shell establishes the minimal tooling and stages the real setup entrypoints.
+  A finite program/library then coordinates installation; its execution does
+  not live in or require a Manager/application daemon. Manager presents and
+  composes that controller without becoming its prerequisite.
 - **Prerequisite layer** — the step that ensures the machine's foundational
   tools and the prerequisites of the user's selected session hosts exist,
   installing what is missing and **pausing for a restart when it changes the
@@ -272,6 +277,32 @@ payloads, an old runtime command or interactive shell initialization. Default
 selection follows live upstream Main; explicit locally promoted installation
 snapshots and admitted source checkouts/commits remain supported. Last-known-good
 Main ancestors retain their own release identity.
+
+### finite-installation-controller
+
+Bootstrap has a minimal native seed followed by a finite installation
+controller. On Windows, PowerShell uses the supported package-manager owners
+to establish or update uv, performs core Git acquisition and file staging,
+and invokes the real per-application setup entrypoints. Other platforms use
+their native shell equivalents. The seed can obtain the declared managed
+Python before loading Python-backed installer, context or process helpers;
+those helpers cannot be prerequisites for acquiring their own interpreter.
+
+The controller is a directly invocable program/library, not an always-running
+daemon. It can install, update and repair Manager while Manager and its daemon
+are absent or unavailable. Durable requests, single-writer coordination and
+explicit background work do not make a resident installation service mandatory.
+Its finite execution and any accepted application-service handoff have the
+separate lifetimes defined by the installation owner.
+
+The standard Manager journey establishes Manager as the first selected
+application, then uses setup helpers to resolve the selected repository's
+expected applications and plugins through their existing owners. Independent
+component setup remains available without Manager. A separately packaged
+finite install helper is an implementation option when independent delivery
+requires it, not another installer algorithm or a second mandatory product.
+Reuse the canonical installation machinery rather than creating a parallel
+stack. Installed applications may still run their own declared services.
 
 ### staged-repository-onboarding
 
@@ -1069,6 +1100,10 @@ ownership and unsettled effects.
 
 ## Non-Goals / Boundaries
 
+- **Installation management is not a daemon dependency.** Neither the native
+  seed nor the finite controller requires an already-running Manager,
+  application or installation daemon to establish or repair the installation.
+  A graphical control surface does not become the exclusive execution owner.
 - **It is not a plugin, and must not be delivered through the plugin pipe.** It
   must not depend on a plugin being installed or a session being active to run.
   (Stated as a negative deliberately: this app must never be folded back into the

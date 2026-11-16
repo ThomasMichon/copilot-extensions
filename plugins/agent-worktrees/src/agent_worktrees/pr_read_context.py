@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
+if TYPE_CHECKING:
+    from .config import Config, PRConfig, RepoConfig
+    from .pr_config import ForeignRepoResolution
 
-def scoped_read_dispatch(dispatch):
+
+def scoped_read_dispatch(dispatch: Callable[[list[str]], int]) -> Callable[[list[str]], int]:
     @wraps(dispatch)
-    def scoped(argv):
+    def scoped(argv: list[str]) -> int:
         if argv[:1] and argv[0] in ("snapshot", "status", "threads", "diff", "inventory", "population"):
             from .config_cache import ConfigCacheSession
             from .inrepo_config_source import resolution_budget
@@ -28,20 +34,27 @@ def scoped_read_dispatch(dispatch):
     return scoped
 
 
-def resolve_read_repo_config(config, repository, *, explicit=False):
+def resolve_read_repo_config(
+    config: Config, repository: str, *, explicit: bool = False,
+) -> ForeignRepoResolution:
     from . import pr_config
     from .pr_related_binding import resolve_related_binding
 
     if explicit:
-        repo, name, error = resolve_related_binding(config, repository, include_control_plane=False)
+        resolve: Callable[..., tuple[RepoConfig | None, str, str]] = resolve_related_binding
+        repo, name, error = resolve(config, repository, include_control_plane=False)
         if repo is not None or error:
             return pr_config.ForeignRepoResolution(repo, name, error=error)
     return pr_config.resolve_repo_config_for_slug(config, repository)
 
 
-def read_report(verb, prcfg, repo, number, *, api_base="", token=None):
+def read_report(
+    verb: str, prcfg: PRConfig, repo: str, number: int, *,
+    api_base: str = "", token: str | None = None,
+) -> dict[str, Any]:
     """Resolve on-demand reports under the same selected target binding."""
     from .providers import account_token_for_slug, get_provider
+    read: Callable[..., dict[str, Any]]
     if verb == "threads":
         from .pr_thread_report import thread_report as read
     elif verb == "diff":
@@ -53,7 +66,7 @@ def read_report(verb, prcfg, repo, number, *, api_base="", token=None):
     return read(provider, repo, number, api_base=api_base or prcfg.api_base, token=selected_token)
 
 
-def read_explicit_config(path):
+def read_explicit_config(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise ValueError("explicit PR configuration file is unavailable")
     try:
@@ -72,7 +85,7 @@ def read_explicit_config(path):
     return raw
 
 
-def load_read_config(path=None):
+def load_read_config(path: Path | None = None) -> Config:
     from . import config, related, repos
     if path is not None:
         read_explicit_config(path)
@@ -82,8 +95,25 @@ def load_read_config(path=None):
     anchor = related.find_control_plane_anchor()
     if not anchor:
         raise ValueError("PR read needs an explicit --project or --config with a resolvable target binding")
+    anchor_path = Path(anchor).resolve()
     matches = [entry.name for entry in repos.list_repos()
-               if entry.local_path() and Path(entry.local_path()).resolve() == Path(anchor).resolve()]
+               if (local_path := entry.local_path()) and Path(local_path).resolve() == anchor_path]
     if len(matches) != 1:
         raise ValueError("PR read control-plane configuration is unavailable or ambiguous; pass --project")
     return config.load_project_config(matches[0])
+
+
+def explicit_observation_config(path: Path, repository: str) -> Config:
+    """Resolve typed snapshot reads through the existing passive selected-file owner."""
+    from . import config
+    from .pr_inventory_config import load_binding
+
+    try:
+        selected = load_binding(
+            path.absolute(), repository, providers=("github", "gitea", "azure-devops"),
+            allow_default_github_endpoint=True,
+        )
+    except OSError:
+        raise ValueError("explicit snapshot configuration is unavailable") from None
+    target = config.RepoConfig(anchor="", worktree_root="", pr=selected)
+    return config.Config(srcroot="", machine="", platform="", explicit_pr_target=target)

@@ -3875,6 +3875,28 @@ replace the ambient-Python prerequisite with per-project `uv` management.
 The [implementation and qualification plan](../efforts/active/source-managed-runtime-installs/managed-python.md)
 retains the existing setup, engine, bootstrap and application owners.
 
+The [finite-controller target](../visions/installer/README.md#finite-installation-controller)
+separates three stages. The native shell seed establishes tooling and stages
+sources; the prepared managed interpreter runs finite installation management;
+installed applications then use their own runtime/service owners. On Windows,
+PowerShell reaches the existing package-manager uv prerequisite owner, performs
+core Git checkout/copies and invokes the real per-app setup entrypoints.
+Do not require a Python-backed SDK to acquire that first Python, or require
+an installed/running Manager/application daemon to run the controller.
+The normal Manager entry establishes Manager first and then composes the
+selected repository's declared apps/plugins. Independent per-app setup remains
+available. A separately packaged helper is optional and reuses the same engine,
+not another installation algorithm or mandatory service.
+
+This staging preserves native foreground-command ownership, failure,
+cancellation/deadline and cleanup obligations. The seed is not a substitute
+implementation of later Python/helper pipe, process/Job or installation
+protocols; after the execution base exists, their existing owners retain them.
+Source/feed/seasoning, repository hosting policy-before-acquisition and OS
+execution policy remain in force. Application service activation is a separate
+accepted handoff, not an installation-controller startup prerequisite.
+This is the required layering, not a qualification of current cold-entry paths.
+
 - An installable Python project declares compatibility in `pyproject.toml`
   (`requires-python`). Its release/setup inputs select a compatible version;
   locks and native wheel targets must agree with the selected interpreter.

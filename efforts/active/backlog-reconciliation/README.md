@@ -374,6 +374,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [finite status/catalog/roster receiving proposal](status-catalog-roster-receiving.md)
+preserves #918's ten complete requirement families directly in existing
+OPEN #3761, with paired Validation and independent Coordination obligations.
+It prospectively reconciles only #918's reference-only tracking condition
+after review and actual complete receiving; all 38 incumbent unchecked
+states, other source tokens, actual claims and the conditional ROOT gate
+remain. No receiving receipt, issue retirement or technical completion is
+claimed yet. The [dated record](journal/2026/11.16-status-catalog-roster-receiving.md)
+also journals #12895's actual merge and the complete 20:49:49 UTC census:
+859 whole open, 130 above fixed 729, with no new closure credit.
+
 The [accepted ZDD tracking and current-contract unit](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
 records #12888's actual reviewed merge, complete direct #4477 receiving and
 the independently verified #870 `NOT_PLANNED` tracking retirement. All eight
