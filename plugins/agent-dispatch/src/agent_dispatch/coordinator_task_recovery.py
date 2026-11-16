@@ -1,17 +1,22 @@
 """Operator recovery routes, separate from worker-scoped lifecycle authority."""
 
-from typing import Literal
+from __future__ import annotations
+
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from .coordinator_auth import _make_control_auth
 from .events import EventBus
-from .queue import TaskError, TaskQueue
+from .queue import TaskQueue
+from .queue_records import TaskError
 
 RECOVERY_CONTRACT = {
     "protocol": "task_recovery/v1",
-    "operations": ["detach_agent", "reset_proposed", "reset_queued", "reconcile_wake"],
+    "operations": [
+        "detach_agent", "reset_proposed", "reset_queued", "reconcile_wake", "settle_wake",
+    ],
 }
 
 
@@ -32,6 +37,7 @@ class ReconcileWakeBody(BaseModel):
     expected_revision: str = Field(strict=True, min_length=1, max_length=128)
     actor: str = Field(strict=True, min_length=1, max_length=256)
     reason: str = Field(strict=True, min_length=1, max_length=4096)
+    settle_native_send: bool = Field(default=False, strict=True)
 
 
 def register_task_recovery_routes(
@@ -46,7 +52,7 @@ def register_task_recovery_routes(
     )
 
     @app.get("/tasks/{task_id}/diagnostics")
-    def diagnostics(task_id: str) -> dict:
+    def diagnostics(task_id: str) -> dict[str, Any]:
         try:
             return {
                 **queue.task_diagnostics(task_id),
@@ -62,7 +68,7 @@ def register_task_recovery_routes(
     def recover(
         task_id: str, operation: Literal["detach_agent", "reset_proposed", "reset_queued"],
         body: RecoveryBody,
-    ) -> dict:
+    ) -> dict[str, Any]:
         try:
             result = queue.recover_task(task_id, operation=operation, **body.model_dump())
         except TaskError as exc:
@@ -72,7 +78,7 @@ def register_task_recovery_routes(
         return result
 
     @app.post("/tasks/{task_id}/wakes/reconcile", dependencies=[Depends(control)])
-    def reconcile(task_id: str, body: ReconcileWakeBody) -> dict:
+    def reconcile(task_id: str, body: ReconcileWakeBody) -> dict[str, Any]:
         from .task_wake_recovery import reconcile_wake
         try:
             result = reconcile_wake(queue, task_id, **body.model_dump())

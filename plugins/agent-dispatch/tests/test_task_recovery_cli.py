@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -79,7 +80,7 @@ def test_strict_commands_use_exact_recovery_body(
     requests: list[httpx.Request],
     command: list[str],
     route: str,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert core.main(command) == 0
     assert json.loads(capsys.readouterr().out) == {"fixture": True}
@@ -162,7 +163,7 @@ def test_diagnostics_and_wake_reconciliation(requests: list[httpx.Request]) -> N
 def test_missing_or_conflicting_strict_fields_fail_before_client_resolution(
     monkeypatch: pytest.MonkeyPatch,
     argv: list[str],
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     def unexpected(args: object) -> DispatchClient:
         pytest.fail("invalid strict recovery must not resolve or start a coordinator")
@@ -192,7 +193,7 @@ def test_invalid_or_unknown_arguments_are_parser_errors(argv: list[str]) -> None
 
 def test_unsupported_provider_is_reported_without_post(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     recorded = []
 
@@ -238,7 +239,7 @@ def test_unsupported_provider_is_reported_without_post(
 def test_task_only_cli_authority_cannot_use_recovery(
     requests: list[httpx.Request],
     argv: list[str],
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     projection = [
         "--task-token",
@@ -253,3 +254,33 @@ def test_task_only_cli_authority_cannot_use_recovery(
     assert core.main([*projection, *argv]) == 1
     assert "outside the projected task authority" in capsys.readouterr().err
     assert requests == []
+
+
+def test_explicit_settlement_flag_reaches_only_capable_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        recorded.append(request)
+        health: dict[str, Any] = {
+            "task_recovery": {"protocol": "task_recovery/v1", "operations": ["settle_wake"]},
+        }
+        return httpx.Response(
+            200, json=health if request.method == "GET" else {"outcome": "not_sent"},
+        )
+
+    def client(args: object, **kwargs: object) -> DispatchClient:
+        assert kwargs == {"ensure": False, "allow_ssh_failover": False}
+        return DispatchClient("https://dispatch.invalid", transport=httpx.MockTransport(handle))
+
+    monkeypatch.setattr(core, "_client", client)
+    assert core.main([
+        "reconcile-wake", "task-a", "--outbox", "wake_outbox", "--wake-id", "wake-a",
+        "--expected-revision", "revision-a", "--actor", "operator", "--reason", "settle",
+        "--settle-native-send",
+    ]) == 0
+    assert [(r.method, r.url.path) for r in recorded] == [
+        ("GET", "/health"), ("POST", "/tasks/task-a/wakes/reconcile"),
+    ]
+    assert json.loads(recorded[-1].content)["settle_native_send"] is True
