@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Complete machine-state receiving reconciliation](journal/2026/11.16-complete-machine-state-receiving.md)
+
 - [2026-11-16 - Complete supported-UV receiving proposal](journal/2026/11.16-complete-supported-uv-receiving.md)
 
 - [2026-11-16 - Complete standalone-consumer receiving and canonical boundaries](journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md)

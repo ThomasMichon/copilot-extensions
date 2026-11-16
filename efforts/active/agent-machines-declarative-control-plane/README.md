@@ -74,6 +74,22 @@ owning-umbrella condition at its original Phase 3 acceptance scope; neither
 closed #1418 nor this documentary intake satisfies it or turns it into a
 universal migration-planning gate.
 
+For complete #3983 planned receiving, this existing Active effort retains the
+whole scaffold/core, settings, conflict-validation and restore-migration union,
+including all inherited #3984 and exact #6342 pack acceptance. Schema host/
+reviewer, module/provider, parity, machine/adopter and settings-pack source
+custodians remain unchanged. No old entrypoint or shadow configuration may
+retire before the actual capability parity and owner acceptance already
+required by M3983; administrative issue tracking is a different decision.
+
+Normal review, actual receiving merge and complete current Plan/local/global
+Validation, Coordination and Journal readback establish planned receiving, not
+permission to retire #3983. Its current source explicitly requires it OPEN
+until its entire original scope and validation resolve; preserve that actual
+condition alongside capability parity/owner acceptance before legacy retirement.
+This does not open or satisfy #3115's separate LIVE owning umbrella, appoint an
+implementer, release a claim or add a new generic ACK/native prerequisite.
+
 ## Context
 
 Machine setup commonly drifts into parallel inventories: declared hosts,
@@ -408,6 +424,12 @@ deduplication/ownership route, not accepted conversions or permission to run
 restore. Reuse Phase 1 provenance/authority and Phase 3 selected-scope
 plan/apply/verify/report contracts rather than adding another registry.
 
+- [ ] **M3983-P0:** Retain the complete original FOUR-workstream outcome:
+  portable plugin scaffold/engine core, Copilot settings surface, conflict
+  validator AND migration of existing restore scripts, for settings, tools,
+  preferences and configuration on Windows, Linux AND WSL. Credit the
+  delivered engine, settings, authority and provider foundations without
+  treating them as whole-programme or adopter/platform completion.
 - [ ] **M3983-P1:** Inventory prior restore entrypoints/per-machine
   declarations and every existing capability under its current owner.
   Map each to an engine-managed surface, typed resource or explicit module,
@@ -586,6 +608,11 @@ unchanged. These are two distinct outcomes, not a source-to-source fold._
 
 ### Validation of the proposed #3983 migration family
 
+- [ ] **M3983-V0:** Map all four original workstreams AND every directly
+  inherited #3984/#6342 clause to current source credit, retained technical
+  work or an explicitly tracked gap. Qualify complete settings/tools/
+  preferences/configuration behavior and Windows/Linux/WSL applicability;
+  neither a single provider example nor the named pack subsumes migration.
 - [ ] **M3983-V1:** Map the complete prior-capability inventory to retained
   declarations/modules or named gaps; prove no behavior silently disappears
   when a legacy route is retired.
@@ -614,6 +641,23 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+### 2026-11-16 - Complete migration-family receiving reconciliation
+
+Read this entire current ROOT and the complete #3983 original and both
+discussions, including all seven inherited #3984 migration rows and the five
+#6342 rows with its preserved finite original. Added explicit original
+four-workstream Plan/Validation mapping so a settings pack or provider example
+cannot silently replace the whole portable-machine programme.
+
+Complete planned receiving does not resolve actual capability conversion or
+legacy-entrypoint retirement: the latter still requires the accepted capability
+inventory, parity and original owner acceptance. The source also explicitly
+requires #3983 OPEN until its entire original scope and validation resolve;
+planned receiving and its review do not waive that independent condition.
+#3115's LIVE owning-umbrella condition stays independently unsatisfied.
+No implementation claimant, settings change, restore/migration, legacy
+retirement or resource transfer occurred.
 
 ### 2026-11-15 - Restore migration and exact opt-in pack proposed
 

@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from .catalog import find_repo_root
+from .prereqs import bootstrap_python
 from . import agent_plugin_runtime
 
 
@@ -128,7 +132,10 @@ def install_command(repo_root: Path | None = None) -> list[str] | None:
     if script is None:
         return None
     if script.suffix == ".ps1":
-        return ["pwsh", "-NoProfile", "-File", str(script), "install"]
+        return [
+            "pwsh", "-NoProfile", "-File", str(script), "install",
+            "-BootstrapPython", bootstrap_python(),
+        ]
     return ["bash", str(script), "install"]
 
 
@@ -164,7 +171,12 @@ def install_core(
     if dry_run:
         return CoreInstallResult(planned_command=cmd, ran=False, reason="dry-run")
     try:
-        r = subprocess.run(cmd)  # noqa: S603 (installer-owned, no shell)
+        r = subprocess.run(
+            cmd,
+            stdout=sys.stdout, stderr=sys.stderr,
+            env={**os.environ, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": bootstrap_python()},
+            **no_window_kwargs(),
+        )  # noqa: S603 (installer-owned, no shell)
         return CoreInstallResult(planned_command=cmd, ran=True, returncode=r.returncode)
     except OSError as exc:  # pragma: no cover - environment dependent
         return CoreInstallResult(planned_command=cmd, ran=False, reason=str(exc))

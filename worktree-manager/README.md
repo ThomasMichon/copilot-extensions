@@ -690,16 +690,12 @@ machine with `--apply`. Apply rechecks prerequisites after provisioning and
 continues in the same invocation when they are available. Failed provisioning
 or unresolved prerequisites stop before the core installer; a PATH-changing
 install that still leaves a gap requests a shell restart. Re-running is
-idempotent and can heal a partial install. Required Python must return a
-successful, supported version from the exact discovered executable. Detection
-continues through the existing `python3`/`python` aliases and their PATH entries
-when an earlier Python is unusable or too old, without executing WindowsApps
-Store aliases. If none qualifies, the first candidate remains the diagnostic
-path and Python remains a prerequisite gap. Fallback lookup stays within each
-PATH directory, tries remaining Windows PATHEXT matches, and retains the
-current-directory meaning of empty entries.
-Detection does not change PATH,
-acquire Python, search private runtimes or add launcher/install-root discovery.
+idempotent and can heal a partial install. Baseline Python readiness qualifies
+the running Manager's prepared **base interpreter** against the Python 3.11
+helper floor, without requiring `python`, `python3` or `py` on PATH. An unusable
+prepared interpreter remains a prerequisite gap, not permission to fall back
+to another Python. Detection does not change PATH, acquire Python, search private
+runtimes or guess a uv storage location.
 Windows also requires a working PowerShell 7 (`pwsh`) host for the native core
 installer. A missing, older or unqualified host stops setup before core or
 repository work. As with Git, setup reports a manual system-package command;
@@ -708,7 +704,13 @@ reported package, open a fresh terminal, and retry. POSIX setup does not require
 PowerShell.
 The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
-`install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
+`install.{ps1,sh}`, carrying that prepared base interpreter explicitly through
+the finite installer handoff. This CLI does not need the Manager daemon.
+The headless child forwards the CLI's stdout and stderr, preserving native
+progress and failure diagnostics.
+The handoff selects the setup evaluator without waiving application/project,
+lock or ABI compatibility checks or selecting an installed generation.
+Core detection uses the same read-only, installation-context-
 qualified runtime selection as the engine client. Empty runtime/versions
 directories and a leftover global stub cannot satisfy it; a selected complete
 runtime does not require a legacy global stub. This is installed-runtime
