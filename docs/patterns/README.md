@@ -112,6 +112,22 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Python belongs to the project installation, not ambient PATH.** Each
+  independently installed Python project declares its interpreter requirement;
+  its setup owner uses `uv`-managed Python to construct the environment.
+  Bootstrap/helpers establish their own declared foundation before running
+  Python-dependent code. Every app launcher resolves `uv` from PATH and
+  delegates Python selection to it, without assuming any installed Python
+  directory, including uv storage.
+  Installed commands reach their declared project environment without
+  rediscovering system/user Python, and status/ordinary launch never download
+  an interpreter. Different project requirements coexist; no global Python
+  upgrade or mandatory sibling service is implied. Preserve OS execution policy,
+  package admission and process custody. See the
+  [managed-Python install contract](../install-contract.md#project-owned-managed-python).
+  (Serves *Vision installer* `package-managed-python` and *Vision
+  plugin-services* `setup-owned-python-prerequisite`.)
+
 - **Explicit runtime replacement is independent of the incumbent.** Apply
   [authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement):
   incoming authenticity/readiness and complete current selection define

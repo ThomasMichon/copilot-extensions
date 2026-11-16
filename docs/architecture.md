@@ -160,6 +160,29 @@ repair-versus-code-patching boundaries, use the
 [installation footprint reference](installation-footprint.md).
 Its inventory routes to existing owners; it is not a claim of complete migration.
 
+### Python installation: target and current adoption
+
+The [managed-Python contract](install-contract.md#project-owned-managed-python)
+requires each Python project to declare its version and explicit setup to let
+`uv` manage the interpreter and environment, independent of system/user PATH
+Python. This includes the foundation needed before Python installation helpers
+can run. Runtime dispatch still uses the selected completed environment, not
+ambient Python or an interpreter-acquiring ordinary launch.
+
+Every app launcher is a migration target: use `uv` from PATH and let it select
+Python for the declared project, rather than assuming any installed Python
+location. Application-generation resolution and interpreter selection are
+separate responsibilities.
+
+**Current implementation is mixed:** wheel/application construction already has
+explicit interpreter inputs, while legacy evaluator and pre-runtime bootstrap
+paths still select or require host Python. This architecture revision does not
+change those paths. Their migration and cold/offline/version-coexistence
+qualification remain open in the existing
+[installation plan](../efforts/active/source-managed-runtime-installs/managed-python.md);
+the [legacy selector description](install-contract.md#path-python-evaluator-bootstrap)
+records current behavior, not an exemption from the target.
+
 ### Replacement lifecycle: target and current adoption
 
 The installer's

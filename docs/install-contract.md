@@ -3814,6 +3814,60 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
+### Project-owned managed Python
+
+**Required target; not a claim that existing launchers have migrated.** The
+[installer vision](../visions/installer/README.md#package-managed-python) and
+[binding invariant](patterns/README.md#design-invariants-binding-contracts)
+replace the ambient-Python prerequisite with per-project `uv` management.
+The [implementation and qualification plan](../efforts/active/source-managed-runtime-installs/managed-python.md)
+retains the existing setup, engine, bootstrap and application owners.
+
+- An installable Python project declares compatibility in `pyproject.toml`
+  (`requires-python`). Its release/setup inputs select a compatible version;
+  locks and native wheel targets must agree with the selected interpreter.
+  A shared library uses its consuming project's environment, not another
+  independently installed interpreter.
+- Explicit setup first resolves `uv` from PATH, establishing it through the
+  existing prerequisite owner when absent, without executing Python.
+  It asks `uv` for managed Python
+  matching the addressed project's requirement, reusing an existing compatible
+  managed installation or acquiring one through the supported setup path.
+  A bare `uv venv`/`uv run` default that can choose system Python is insufficient:
+  managed-only selection and the project requirement must be explicit.
+- Bootstrap standard-library helpers have declared setup inputs too. Establish
+  that managed foundation before the first Python-dependent evaluator,
+  installation-context, process or dependency helper. Neither an installed
+  application nor the Manager is a prerequisite for obtaining it.
+- Retain the selected interpreter/version in construction inputs and normal
+  runtime records; create the package's isolated environment and use the
+  existing uniform runtime resolver to choose the completed application
+  generation afterward. Every app launcher invokes PATH `uv` with that
+  generation's declared project/environment inputs and delegates interpreter
+  selection to it. Never assume a Python installation path, reverse-engineer
+  `uv`'s storage layout or select Python from PATH, a launcher registry or a
+  sibling runtime. A discovered path recorded as evidence is not a hardcoded
+  deployment location. Different projects can use different versions;
+  compatible managed base installations may be shared without sharing mutable
+  package environments.
+- Read-only status/discovery and ordinary launch use already-prepared
+  environments only. Missing environments produce an actionable setup result,
+  not a download, implicit repair or fallback to ambient Python. Explicit
+  installation owns permitted acquisition, offline reuse and clear network,
+  unavailable-version, unsupported-platform or OS-policy failure outcomes.
+- Preserve existing artifact/dependency admission, seasoning and OS execution
+  policy. Managed Python is not permission to disable code integrity, compile
+  native helpers or add per-launch interpreter-attestation gates. Ordinary
+  updates must not remove a managed base interpreter still used by a retained
+  environment or live process.
+
+### Legacy PATH evaluator adoption
+
+The following describes the existing selector, not the target above. Its PATH
+requirement is remaining migration work; it must not be copied into new setup
+plans as an architectural prerequisite. Historical source and native validation
+credit remain valid only for the behavior they actually exercised.
+
 ### PATH Python evaluator bootstrap
 
 `bootstrap-python.ps1` is a standalone, read-only selector for the existing
@@ -3827,11 +3881,13 @@ lookup, preserving PATH order without executing candidates, compiling native
 code, consulting the registry, verifying signatures or pinning interpreter files.
 Aliases and functions do not override the application. The compatibility
 `-ExcludedRoots` parameter is accepted but does not filter interpreters.
-The [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
-assigns supported Python provisioning and durable PATH hygiene to upfront harness
-setup; standalone use retains an explicit Python 3.10+ prerequisite. Temporary
-and worktree interpreters should not be placed on durable PATH by setup, not
-rejected by a per-launch interpreter allowlist.
+The earlier compiler-free amendment assigned supported Python provisioning and
+durable PATH hygiene to upfront setup; this implementation still has that
+Python prerequisite. The
+[current amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+instead requires setup-owned, project-declared managed Python. It preserves the
+removal of per-launch interpreter attestation; it does not qualify this existing
+PATH selector as migrated.
 
 The result retains `Status`, `Reason`, `Python` and `Guard` for caller
 compatibility. `selected` / `path-python` returns the resolved application path

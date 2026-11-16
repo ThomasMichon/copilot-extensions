@@ -144,6 +144,25 @@ and fix how it is wired.
 
 ## Features
 
+### package-managed-python
+
+Each Python project installation declares the interpreter version it needs;
+`uv` manages its acquisition and environment on the user's behalf. Fresh setup,
+update and repair do not require a supported Python on system or user PATH.
+Projects with different requirements coexist without a machine-wide Python
+selection or changes to unrelated environments.
+
+All application launchers use PATH `uv` and delegate Python version installation
+and selection to it; scripts do not assume any installed Python location.
+
+The standalone bootstrap establishes this foundation before Python-dependent
+helpers or the Manager run. It does not depend on an already-working runtime,
+the optional control-plane or another plugin service. Existing managed
+interpreters can be reused; acquisition belongs to explicit setup, not status
+or ordinary application launch. Offline or unsupported acquisition fails with
+an actionable setup result, without silently switching to ambient Python,
+compiling a helper or weakening OS execution policy.
+
 ### authoritative-runtime-replacement
 
 This is the durable completion contract for installation, explicit/manual
