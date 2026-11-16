@@ -13,7 +13,7 @@ import os
 import socket
 import sys
 import urllib.error
-from typing import Any, Callable, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar, cast
 
 uvicorn = importlib.import_module("uvicorn")
 
@@ -22,6 +22,9 @@ _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
 
 class _DaemonDecorator(Protocol):
     def __call__(self, function: _CallableT, /) -> _CallableT: ...
+
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(Callable[..., _DaemonDecorator], daemon_entrypoint)
 
 
 def _core() -> Any:
@@ -112,9 +115,7 @@ def _cmd_source_start(_args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-@cast(_DaemonDecorator, daemon_entrypoint(
-    "agent-bridge", source=__file__, purpose="production",
-))
+@daemon_entrypoint("agent-bridge", source=__file__, purpose="production")
 def _cmd_start(
     args: argparse.Namespace, *,
     required_runtime_environment: tuple[str, ...] | None = None,

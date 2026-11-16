@@ -36,7 +36,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar, cast
 
 from agent_procutil import (
     contained_test_mode,
@@ -67,6 +67,9 @@ _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
 
 class _DaemonDecorator(Protocol):
     def __call__(self, function: _CallableT, /) -> _CallableT: ...
+
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(Callable[..., _DaemonDecorator], daemon_entrypoint)
 
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
@@ -586,9 +589,7 @@ async def _spawn_child(
     )
 
 
-@cast(_DaemonDecorator, daemon_entrypoint(
-    "agent-bridge-session-host", source=__file__, purpose="production",
-))
+@daemon_entrypoint("agent-bridge-session-host", source=__file__, purpose="production")
 async def run_host(
     child_argv: list[str],
     *,

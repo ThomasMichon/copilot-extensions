@@ -96,6 +96,11 @@ and absent or unqualified times are unknown. Request state is
 `success/failure/not-terminal/unknown`. A successful `end_turn` is a reported
 turn result, never proof the operator's whole objective is done.
 
+A tool start supplies elapsed time, not update evidence. A clipped window
+without a retained turn/handoff boundary cannot rule out an older blocking
+request: request state remains unknown unless retained input already proves
+it blocked. Inspection does not scan older history to infer an empty queue.
+
 Every projection names source, observation time, scope/proof and a reasoned
 unknown result. Declared markers remain distinct from derived request state.
 Coverage and truncation are explicit; contradictory or malformed observations
@@ -106,6 +111,8 @@ When retained evidence has an existing resolvable event form, `evidence.referenc
 is the same opaque token consumed by `result <session> --expand <reference>`;
 its scope is that event, not the entire projection. Empty, discontinuous,
 redacted or unsupported evidence is unavailable, not an invented reference.
+Captured tails that the existing dense-history detail reader cannot resolve
+also withhold references; the inspection reader does not redefine their identity.
 Existing detail readers retain rebuild, retention and redaction behavior; no
 new public event authority/epoch/sequence contract or store is defined here.
 All inspection/reference reads leave delivery cursors and session ownership

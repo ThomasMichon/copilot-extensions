@@ -28,7 +28,7 @@ from agent_remote_driver.session_host.host import ChildProcess, SessionHost
 from agent_bridge import __main__ as cli
 from agent_bridge.client import BridgeClient
 from agent_bridge.db import Database
-from agent_bridge.events import EventLog
+from agent_bridge.events import EventLog, SseEvent
 from agent_bridge.session_status import SessionStatus
 from agent_bridge.routes.sessions import router
 from agent_bridge.session_inspection import _age, _iso, _semantic
@@ -311,7 +311,7 @@ def test_semantic_projection_is_bounded_content_free_and_not_ping_progress() -> 
     session.progress = {"phase": "compiling", **{str(i): "x" * 1000 for i in range(30)}}
     result = _semantic(session, "running", now, {"state": "responsive"})
     assert result["freshness"] == "fresh" and result["truncation"] == "truncated"
-    assert result["request_state"] == "running" and result["terminal_result"] == "not-terminal"
+    assert result["request_state"] == "unknown" and result["terminal_result"] == "unknown"
     assert result["current_phase"] == "compiling"
     assert result["active_tool"]["elapsed_s"] == 100
     assert result["active_tool"]["update_age_s"] is None
@@ -326,7 +326,7 @@ def test_semantic_projection_is_bounded_content_free_and_not_ping_progress() -> 
     assert datetime.fromisoformat(result["observed_at"]).timestamp() == pytest.approx(now, rel=0, abs=.000001)
     assert result["scope"] == "bounded-retained-window-not-task-completion"
     assert result["milestones"]["declared"][0]["basis"] == "declared"
-    assert result["unknown_result"] == "no-semantic-result"
+    assert result["unknown_result"] == "clipped-pending-input-history"
     assert log.latest_id == 82
 
 
@@ -410,6 +410,57 @@ def test_requested_blocked_and_quiet_tool_metadata(status: str, expected: str) -
     assert result["freshness"] == "stale"
     assert result["terminal_result"] == "not-terminal"
     assert result["milestones"]["derived"][0]["basis"] == "derived"
+
+
+def test_tool_start_is_not_update_evidence() -> None:
+    session = _session()
+    now = time.time()
+    session.event_log.append(
+        "tool_call_start", {"tool_call_id": "build", "title": "Build"}, timestamp=now - 100,
+    )
+    tool = _semantic(session, "running", now, {})["active_tool"]
+    assert tool["elapsed_s"] == 100
+    assert tool["update_age_s"] is None
+    assert tool["update_evidence"] == "no-retained-update"
+
+
+@pytest.mark.parametrize("boundary", [False, True])
+def test_clipped_window_cannot_rule_out_older_blocking_input(boundary: bool) -> None:
+    session = _session()
+    now = time.time()
+    session.event_log.append("ask_user_request", {"tool_call_id": "old"}, timestamp=now - 1)
+    for _ in range(64):
+        session.event_log.append("agent_message", {"text": "fixture"}, timestamp=now)
+    if boundary:
+        session.event_log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=now)
+    result = _semantic(session, "idle" if boundary else "running", now, {})
+    assert result["truncation"] == "truncated"
+    if boundary:
+        assert result["request_state"] == "complete" and result["terminal_result"] == "success"
+    else:
+        assert result["request_state"] == "unknown" and result["terminal_result"] == "unknown"
+        assert result["unknown_result"] == "clipped-pending-input-history"
+
+
+@pytest.mark.parametrize("retained", [list(range(101, 165)), [1, *range(101, 165)]])
+def test_captured_tail_references_require_the_existing_detail_reader(
+    retained: list[int], tmp_db: Database,
+) -> None:
+    session = _session()
+    now = time.time()
+    tmp_db.create_session("inspection", "fixture", None, ".", "local", "running", now)
+    events = [SseEvent(index, "agent_message", {"text": "fixture"}, now) for index in retained]
+    for event in events:
+        tmp_db.append_event("inspection", event.id, event.event, event.data, event.timestamp)
+    tmp_db.flush()
+    session.event_log = EventLog.from_captured_events(
+        events, 165, db=tmp_db, session_id="inspection", acp_session_id=None, worktree_id=None,
+    )
+    assert session.event_log.snapshot_observation(limit=64)[3][-1].id == 164
+    result = _semantic(session, "running", now, {})
+    assert result["evidence"] == {
+        "availability": "unavailable", "reference": None, "reason": "detail-reader-unavailable",
+    }
 
 
 @pytest.mark.parametrize("value", [10**400, -(10**400)])

@@ -60,7 +60,8 @@ def _semantic(
     latest = root[-1] if root else None
     age = _age(latest.timestamp, now) if latest is not None else None
     freshness = "unknown" if age is None else ("fresh" if age <= FRESH_SECONDS else "stale")
-    truncated = bool(events and (floor > 1 or events[0].id > floor))
+    history_clipped = bool(events and (floor > 1 or events[0].id > floor))
+    truncated = history_clipped
     contiguous = all(right.id == left.id + 1 for left, right in zip(events, events[1:]))
     evidence = {
         "availability": "unavailable", "reference": None,
@@ -69,7 +70,11 @@ def _semantic(
     referable = [
         event for event in root if _event_parts(event.event, event.data) is not None
     ]
-    if referable and continuity and contiguous:
+    detail_continuity, detail = (
+        log.snapshot_event(referable[-1].id, durable=True)
+        if referable and continuity and contiguous else (None, None)
+    )
+    if detail is not None and detail_continuity == continuity:
         evidence = {
             "availability": "available",
             "reference": _event_ref(
@@ -78,6 +83,8 @@ def _semantic(
             "reason": None,
             "scope": "latest-resolvable-retained-event-not-entire-projection",
         }
+    elif referable and continuity and contiguous:
+        evidence["reason"] = "detail-reader-unavailable"
     elif events:
         evidence["reason"] = (
             "redacted-or-unsupported-evidence" if continuity and contiguous
@@ -89,14 +96,14 @@ def _semantic(
     if active:
         updates = [
             event for event in root
-            if event.event in {"tool_call_start", "tool_call_update"}
+            if event.event == "tool_call_update"
             and event.data.get("tool_call_id") == active.get("tool_call_id")
         ]
         tool = {
             "title": _text(active.get("title")),
             "elapsed_s": _age(active.get("started_at"), now),
             "update_age_s": _age(updates[-1].timestamp, now) if updates else None,
-            "update_evidence": "retained-event" if updates else "outside-retained-window",
+            "update_evidence": "retained-event" if updates else "no-retained-update",
         }
     thoughts = [event for event in root if event.event == "agent_thought"]
     declarations = list(islice(session.progress.items(), 17))
@@ -121,8 +128,10 @@ def _semantic(
     pending: dict[tuple[str, str, str], Any] = {}
     unkeyed: list[Any] = []
     last_end = None
+    boundary_seen = False
     for event in root:
         if event.event in _TURN_ENDS:
+            boundary_seen = True
             pending.clear()
             unkeyed.clear()
             last_end = event if event.event == "turn_complete" else None
@@ -159,6 +168,9 @@ def _semantic(
             terminal, request_state, reason = "failure", "complete", None
         else:
             terminal, reason = "unknown", "terminal-outcome-not-reported"
+    pending_history_unknown = history_clipped and not boundary_seen and not has_pending
+    if pending_history_unknown:
+        request_state, terminal = "unknown", "unknown"
     snapshot = host.get("snapshot") or {}
     contradictory = (
         (snapshot.get("child_alive") is False and status == "running")
@@ -167,6 +179,8 @@ def _semantic(
     if contradictory or malformed or not contiguous:
         request_state, terminal = "unknown", "unknown"
         reason = "contradictory-sources" if contradictory else "malformed-or-partial-projection"
+    elif pending_history_unknown:
+        reason = "clipped-pending-input-history"
     elif freshness != "fresh" and terminal != "success" and terminal != "failure":
         reason = "stale-semantic-signal" if freshness == "stale" else "no-semantic-signal"
     return {
