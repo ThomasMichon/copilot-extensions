@@ -539,7 +539,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         if verb == "snapshot":
             from .pr_credential_command import snapshot_source
             credential_source = snapshot_source(args)
-        if read_only:
+        selected_snapshot = credential_source is not None and args.repo is not None and args.config
+        if selected_snapshot:
+            from .pr_read_context import explicit_observation_config
+            config = explicit_observation_config(Path(args.config), args.repo)
+        elif read_only:
             from .pr_read_context import load_read_config
             if args.repo is None and not cfg.active_project():
                 raise ValueError("Specify the target repository for a context-free PR read")

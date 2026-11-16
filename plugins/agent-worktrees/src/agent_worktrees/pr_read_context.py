@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from functools import wraps
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from .config import Config
 
 
 def scoped_read_dispatch(dispatch):
@@ -87,3 +91,16 @@ def load_read_config(path=None):
     if len(matches) != 1:
         raise ValueError("PR read control-plane configuration is unavailable or ambiguous; pass --project")
     return config.load_project_config(matches[0])
+
+
+def explicit_observation_config(path: Path, repository: str) -> Config:
+    """Resolve typed snapshot reads through the existing passive selected-file owner."""
+    from . import config
+    from .pr_inventory_config import load_binding
+
+    selected = load_binding(
+        path, repository, providers=("github", "gitea", "azure-devops"),
+        allow_default_github_endpoint=True,
+    )
+    target = config.RepoConfig(anchor="", worktree_root="", pr=selected)
+    return config.Config(srcroot="", machine="", platform="", explicit_pr_target=target)

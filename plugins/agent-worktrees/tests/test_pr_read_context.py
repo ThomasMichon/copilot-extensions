@@ -117,6 +117,102 @@ def test_context_free_read_refuses_missing_control_plane(monkeypatch):
         pr_read_context.load_read_config()
 
 
+@pytest.mark.parametrize("provider,endpoint", [
+    ("github", "https://api.github.com"),
+    ("github", ""),
+    ("gitea", "https://forge.example/api/v1"),
+    ("azure-devops", "https://dev.azure.com/example"),
+])
+def test_typed_explicit_snapshot_needs_no_anchor_or_layered_configuration(
+    monkeypatch, tmp_path, capsys, provider, endpoint,
+):
+    from agent_worktrees import __main__ as main, pr_credential_command
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "active_project", lambda: None)
+    monkeypatch.setattr(main, "_resolve_active_project", lambda explicit: (None, None))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: pytest.fail("layered project load"))
+    monkeypatch.setattr(main, "_ensure_cluster_loaded", lambda: pytest.fail("lifecycle load"))
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned",
+                        lambda *a, **k: pytest.fail("configuration acquired credentials"))
+    selected = {"provider": provider, "repository": "owner/repository"}
+    if endpoint:
+        selected["api_base"] = endpoint
+    path = tmp_path / "read.json"
+    path.write_text(json.dumps({"repos": {"selected": {"pr": selected}}}), encoding="utf-8")
+    calls = []
+
+    def fetch(prcfg, repository, number, **kwargs):
+        assert callable(kwargs["credential_source"])
+        calls.append((prcfg.provider, prcfg.api_base, repository, number))
+        return lambda: PRSnapshot(head_sha="head")
+
+    monkeypatch.setattr(pr_watch, "build_fetch", fetch)
+    assert main.main([
+        "pr-watch", "snapshot", "owner/repository", "7", "--config", str(path),
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 0
+    assert calls == [(provider, endpoint, "owner/repository", 7)]
+    assert json.loads(capsys.readouterr().out)["provider"] == provider
+
+
+@pytest.mark.parametrize("payload", [
+    json.dumps({"repos": {name: {"pr": {
+        "provider": "gitea", "api_base": "https://forge.example",
+        "repository": "owner/repository",
+    }} for name in ("first", "second")}}),
+    '{"repos":{"a":{"pr":{"provider":"gitea","repository":"owner/repository"}}}}',
+    '{"repos":{"a":{"pr":{"provider":"gitea","api_base":42,"repository":"owner/repository"}}}}',
+    '{"repos":{"a":{"pr":{"provider":"gitea","api_base":"https://forge.example","repository":"other/repository"}}}}',
+    '{"repos":{"a":{},"a":{}}}',
+    '{"repos":null}',
+])
+def test_invalid_typed_explicit_snapshot_refuses_before_material_or_provider(
+    monkeypatch, tmp_path, capsys, payload,
+):
+    from agent_worktrees import pr_credential_command
+
+    path = tmp_path / "read.json"
+    path.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: pytest.fail("layered project load"))
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned",
+                        lambda *a, **k: pytest.fail("invalid config acquired credentials"))
+    monkeypatch.setattr(pr_watch, "build_fetch", lambda *a, **k: pytest.fail("invalid provider selected"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--config", str(path),
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 2
+    captured = capsys.readouterr()
+    assert str(path) not in captured.out + captured.err
+
+
+def test_legacy_explicit_snapshot_keeps_its_layered_read_owner(monkeypatch, tmp_path, capsys):
+    path = tmp_path / "read.yaml"
+    loaded = object()
+    calls = []
+    repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig())
+
+    def load(selected):
+        assert selected == path
+        calls.append(selected)
+        return loaded
+
+    def resolve(selected, repository, *, explicit):
+        assert selected is loaded and repository == "owner/repository" and explicit
+        return pr_config.ForeignRepoResolution(repo, "target")
+
+    monkeypatch.setattr(pr_read_context, "load_read_config", load)
+    monkeypatch.setattr(pr_read_context, "resolve_read_repo_config", resolve)
+    monkeypatch.setattr(pr_read_context, "explicit_observation_config",
+                        lambda *a, **k: pytest.fail("legacy read changed selection owner"))
+    monkeypatch.setattr(pr_watch, "build_fetch", lambda *a, **k: lambda: PRSnapshot(head_sha="head"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--config", str(path), "--json",
+    ]) == 0
+    assert calls == [path]
+    capsys.readouterr()
+
+
 def test_one_shot_snapshot_has_no_mutating_or_durable_claimant_requirement(monkeypatch, capsys):
     repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig())
     monkeypatch.setattr(config, "active_project", lambda: None)
