@@ -71,6 +71,15 @@ direction. It extends existing owners, not another installer or broker.
    prerequisite owner's durable command exposure and provision the PATH used
    by fresh terminals, hooks and service/task environments. Do not depend on
    inherited setup state or interactive profile loading.
+   Preserve Bridge's existing
+   [guest policy-before-setup boundary](../../../plugins/agent-bridge/docs/repository-hosting.md):
+   initial repository-hosting policy evaluation must not depend on acquiring
+   the managed tooling it gates. A denied or unresolved policy cannot trigger
+   uv/Python setup, plugin preparation or execution. Supported admitted guest
+   bootstrap may establish its declared prerequisites through the existing
+   owner, without installing a guest coordination suite. Ordinary receiving
+   launch remains acquisition-free; report missing setup rather than bypass
+   policy or fall back to ambient Python.
 3. **Construct each addressed package environment.** Pass the declared project
    version/managed selection explicitly through the existing canonical engine
    and wheel/application path. Preserve wheel ABI/platform and lock matching,
@@ -130,6 +139,11 @@ acceptance cases; this plan records no technical passes.
 - [ ] After setup exits, fresh terminal, hook and service/task consumers resolve
   `uv` without setup's inherited PATH or an interactive profile. Include the
   first invocation after restart/logon and missing-`uv` diagnostics.
+- [ ] On a guest without prepared managed tooling, Bridge evaluates repository
+  hosting policy before prerequisite acquisition, plugin preparation or
+  execution. Denied/unresolved policy causes no setup effects; admitted explicit
+  bootstrap and later acquisition-free launch retain the supported receiving
+  contract without installing a guest coordination suite.
 - [ ] With no PATH/launcher Python, uninstall and dry-run use PATH uv plus
   already-prepared managed tooling outside every removable root. Preserve
   executable/prefix/base closure and no-download/no-repair controls; unavailable
