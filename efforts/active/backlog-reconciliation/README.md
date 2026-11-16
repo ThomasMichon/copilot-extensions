@@ -368,8 +368,9 @@ The complete 2026-11-16 12:12:30 UTC census is 850 whole open, 121 above
 fixed 729; these partial-delivery observations add no closure credit.
 The subsequent #12857 whole finite source-repair comparison supports #12841's
 audited `COMPLETED` disposition without settling its earlier live request or
-broader convergence owners. At 2026-11-16 12:36:14 UTC, one excluded arrival
-offsets that verified inflow departure: 851 whole open, 122 above fixed 729.
+broader convergence owners. At 2026-11-16 12:36:14 UTC, two excluded arrivals
+since the preceding published 850-open census exceed that verified inflow
+departure by one: 851 whole open, 122 above fixed 729.
 
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
