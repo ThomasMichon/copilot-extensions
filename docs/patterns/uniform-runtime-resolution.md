@@ -176,8 +176,11 @@ Notes:
   [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)) is a
   separate, intentional runtime and keeps its explicit venv — annotate it with
   `# runtime-resolution: allow` if a launch line names it.
-- **Bootstrap python ≠ launch python.** `command -v python3` to *create* the venv
-  is fine; a service *launched* under `python3` is the violation.
+- **Construction and launch both delegate Python selection.** The former
+  allowance for `command -v python3` during construction is superseded by the
+  managed-Python target. Use PATH `uv` with the project's declared requirement
+  for construction and launch; never copy a guessed managed-Python location
+  into a script. Application-generation selection remains uniform.
 - **Self-contained binstubs.** A binstub may run before anything is deployed
   (confined-host self-provision), so it embeds the canonical snippet rather than
   depending on a not-yet-deployed resolver file.

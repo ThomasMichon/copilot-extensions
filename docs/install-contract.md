@@ -2176,10 +2176,15 @@ construction, interruption and prior-runtime preservation contracts.
    one uniform method for every binstub, hook, service unit, and agent
    (`versioned_runtime.resolve_python` for Python callers,
    `libs/versioned-runtime/resolve-runtime.sh`/`.ps1` for shell):
-   - **Linux/WSL:** `exec` the marker-resolved slot interpreter
+   These direct-interpreter adapters describe **legacy adoption**, not the
+   [managed-Python launcher target](#project-owned-managed-python). Migration
+   preserves this same generation selection while every app launcher delegates
+   interpreter selection to PATH `uv`; new launchers must not copy a Python
+   location from these historical examples.
+   - **Legacy Linux/WSL:** `exec` the marker-resolved slot interpreter
      `…/versions/<v>/bin/python -m <pkg>` — a shebang interpreter, no Smart App
      Control concern.
-   - **Windows:** launch `…\versions\<v>\Scripts\python.exe -m <pkg>` (resolved via
+   - **Legacy Windows:** launch `…\versions\<v>\Scripts\python.exe -m <pkg>` (resolved via
      the `current-version` marker — there is no `.venv` junction), **never** the
      generated `…\Scripts\<name>.exe` console-script trampoline. That trampoline
      is an unsigned, zero-reputation PE that Smart App Control blocks
@@ -3479,15 +3484,23 @@ Both fail with `CodeIntegrity` event **3077** ("did not meet the Enterprise
 signing level requirements"). Because these plugins ship publicly on GitHub, the
 fix must **not** require downloaders to disable SAC.
 
-### Rules (Windows `install.ps1` / `init.ps1`)
+### Legacy adoption (Windows `install.ps1` / `init.ps1`)
 
 The signature-driven Python discovery below describes the current legacy
 implementation. The [setup-owned Python prerequisite](../visions/plugin-services/README.md#setup-owned-python-prerequisite)
 and [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
-replace that discovery with trusted PATH Python supplied by upfront setup.
-Windows code-integrity enforcement, copied-venv construction and avoiding
-console-script trampolines remain separate from per-helper signature checks.
-The source migration is not complete merely because that intent is recorded.
+now require project-declared, `uv`-managed Python and PATH-`uv` app launchers,
+not trusted PATH Python or signed-system-Python discovery. The numbered
+construction/launch steps below preserve legacy implementation evidence only;
+they are not an exception allowing new launchers to assume Python locations.
+Windows code-integrity enforcement and avoiding console-script trampolines
+remain independent requirements. Before migrating SAC-enforcing hosts, the
+[setup plan](../efforts/active/source-managed-runtime-installs/managed-python.md#validation-and-completion)
+requires successful managed-Python cold setup and launch with policy enforcing,
+or explicit resolution of the supported-distribution/platform constraint.
+A refusal-only test is not Windows success; neither policy disablement nor
+ambient/signed-system fallback satisfies the target. The source migration is
+not complete merely because that intent is recorded.
 
 1. **Build the venv from a PSF-signed base Python via `--copies`.** Resolve a
    signed interpreter (`py -3.x` whose `Get-AuthenticodeSignature` reports
@@ -3835,6 +3848,9 @@ retains the existing setup, engine, bootstrap and application owners.
   managed installation or acquiring one through the supported setup path.
   A bare `uv venv`/`uv run` default that can choose system Python is insufficient:
   managed-only selection and the project requirement must be explicit.
+  The prerequisite owner must make `uv` available in fresh terminal, hook and
+  service/task PATH environments after setup exits; a temporary PATH change
+  around a privately vendored executable is not durable command exposure.
 - Bootstrap standard-library helpers have declared setup inputs too. Establish
   that managed foundation before the first Python-dependent evaluator,
   installation-context, process or dependency helper. Neither an installed
@@ -3860,6 +3876,8 @@ retains the existing setup, engine, bootstrap and application owners.
   native helpers or add per-launch interpreter-attestation gates. Ordinary
   updates must not remove a managed base interpreter still used by a retained
   environment or live process.
+  SAC-enforcing Windows migration requires a successful supported managed
+  interpreter path under that policy, not only an actionable refusal.
 
 ### Legacy PATH evaluator adoption
 

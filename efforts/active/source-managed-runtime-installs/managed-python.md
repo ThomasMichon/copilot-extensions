@@ -62,13 +62,23 @@ direction. It extends existing owners, not another installer or broker.
    version when compatible; permit downloads only inside the authorized setup
    operation. Do not repair PATH or require `python`, `python3`, `py`, an old
    Manager or a sibling plugin to reach this step.
+   Existing private-root `ensure_uv` helpers and a temporary setup-process PATH
+   change alone are insufficient: publish `uv` through the existing
+   prerequisite owner's durable command exposure and provision the PATH used
+   by fresh terminals, hooks and service/task environments. Do not depend on
+   inherited setup state or interactive profile loading.
 3. **Construct each addressed package environment.** Pass the declared project
    version/managed selection explicitly through the existing canonical engine
    and wheel/application path. Preserve wheel ABI/platform and lock matching,
    dependency/feed policy and seasoning. Record the resolved interpreter and
    reuse compatible managed base installations without sharing mutable venvs.
    OS policy failures are setup failures, not permission to fall back to another
-   distribution or disable enforcement.
+   distribution or disable enforcement. Before migrating SAC-enforcing Windows
+   hosts, qualify successful managed-Python cold setup and launch with policy
+   enforcing, or explicitly resolve the supported distribution/platform
+   constraint through the existing setup owner. The legacy signed-system-Python
+   workaround is not an allowed managed-only implementation; an expected
+   refusal alone does not qualify supported Windows operation.
 4. **Connect every launcher and real consumer.** Inventory all application
    launcher sources and their generated CMD, PowerShell and POSIX copies,
    including Manager, project/standalone entrypoints, payload-local connectors
@@ -85,7 +95,12 @@ direction. It extends existing owners, not another installer or broker.
    installation boundary; explicit setup owns missing-interpreter installation.
    Setup/readiness diagnostics name the missing project environment and setup
    owner. Preserve strict Job containment, headlessness and caller/service
-   lifetime boundaries.
+   lifetime boundaries. Apply the existing
+   [performance-measurement contract](../../../docs/patterns/performance-measurement.md)
+   to this added blocking `uv` stage: capture work counts and native before/after
+   cold/warm command, service-start and composed-hook measurements. Avoid
+   repeated installation/dependency work; fewer Python-discovery branches alone
+   do not establish lower latency.
 5. **Qualify then adopt.** Expand preparation/provider support before migrating
    independently updated callers. Preserve required skew/recovery behavior and
    explicit incoming replacement through the existing fresh entry, not an
@@ -104,6 +119,9 @@ acceptance cases; this plan records no technical passes.
   builds the addressed environment and runs the actual installed command.
 - [ ] The standalone first entry also works with neither Python nor `uv`
   preinstalled, using its supported shell-native prerequisite acquisition.
+- [ ] After setup exits, fresh terminal, hook and service/task consumers resolve
+  `uv` without setup's inherited PATH or an interactive profile. Include the
+  first invocation after restart/logon and missing-`uv` diagnostics.
 - [ ] An old/incompatible or otherwise usable system Python first on PATH does
   not affect selection. Two projects requiring different Python versions
   install and run correctly; installing/updating one does not change the other.
@@ -111,6 +129,11 @@ acceptance cases; this plan records no technical passes.
   Missing offline versions, blocked downloads, incompatible declarations,
   unsupported platform/ABI and OS-policy startup refusal remain explicit
   failures; none selects ambient Python or compiles a helper.
+- [ ] Native Windows with Smart App Control enforcing successfully completes
+  managed-Python cold setup and installed launch without ambient/signed-system
+  Python fallback, policy disablement or console-script trampolines. Any
+  unavailable supported managed distribution is a migration blocker requiring
+  an explicit support decision, not a passing refusal test.
 - [ ] Warm status, discovery, hook and ordinary command/service launch neither
   acquire Python nor run a dependency-resolution/download transaction; missing environments
   give actionable setup diagnostics. Installed dispatch survives unrelated PATH
@@ -120,6 +143,12 @@ acceptance cases; this plan records no technical passes.
   the owning project's version/environment inputs. Custom uv storage locations
   work without script changes; absent `uv` gives a setup diagnostic, never
   Python fallback. Guard canonical generators as well as shipped copies.
+- [ ] Deterministic work-count checks bound added `uv` execution and rule out
+  repeated setup/dependency work. Native before/after cold/warm and composed-hook
+  reports retain individual samples, workload/cardinality, source/environment
+  identity, wall/CPU/spawn coverage and tail statistics under the existing
+  performance owner. Preserve the complete two-second hook budget and existing
+  Picker budgets; missing native evidence is not a performance pass.
 - [ ] Native Windows and supported POSIX clean-room lanes exercise the actual
   shell-to-helper-to-runtime order, process custody, caller loss and no-window
   guarantees. Unit mocks and a venv created from an already-running test Python
