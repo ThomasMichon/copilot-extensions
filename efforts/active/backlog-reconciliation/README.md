@@ -4068,6 +4068,11 @@ The [distinct-controller read proposal](journal/2026/11.15-owned-release-boundar
 maps a third finite source/regression request independently of an excluded
 test-file history. Four later keepers retain their own acceptance; no issue
 effect, resource release or parent completion follows from the proposal.
+The [verified three-source outcomes](journal/2026/11.15-owned-release-boundaries.md#verified-three-source-completions-and-current-whole-queue)
+record reviewed #12768, separate fresh fulfillment judgments, exact public
+acknowledgments and independently verified COMPLETED states for #12384,
+#12514 and #12666. The complete whole queue is 834, still 105 above fixed 729;
+the three tail keepers and every incumbent parent completion state remain.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
