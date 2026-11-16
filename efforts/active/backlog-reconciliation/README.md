@@ -4138,10 +4138,19 @@ closure credit, resource release or parent checkbox change follows.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
+  The [2026-11-15 route refresh](roadmap-current-qualification.md#2026-11-15-routing-and-completed-nomination-correction)
+  adds #4220's accepted Index/#5768 route and qualifies #9377's completed
+  original agenda-companion source nomination, removing stale Phase 1 admission
+  from the continuing queue. It preserves all twelve unfinished selected routes,
+  exact alternatives, owners and the historical 145 relationships.
+  The [dated evidence and census](journal/2026/11.15-roadmap-route-refresh.md)
+  distinguish these corrections from new source findings, issue effects or
+  completion of this broader sequencing item.
   The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
   routes nine retired tracking identities to their audited receiving slices
-  and leaves #9377 explicitly unqualified. Historical relationship counts,
-  scoped alternatives, actual owners and all completion gates remain unchanged.
+  and left #9377 explicitly unqualified at that observation; the route refresh
+  above resolves that gap. Historical relationship counts, scoped alternatives,
+  actual owners and all completion gates remain unchanged.
 - [x] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.

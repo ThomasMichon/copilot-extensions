@@ -25,6 +25,53 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-15 routing and completed-nomination correction
+
+The twelve selections still identify twelve unfinished contribution routes,
+not twelve open original tracking tokens. The complete **2026-11-16
+02:03:59 UTC (2026-11-15 18:03:59 PST)** metadata-only inventory contains
+nine original selections and the three receivers below. This refresh changes
+tracking destinations, not priorities, source findings or execution authority.
+
+| Historical selection | Continuing route | Acceptance and sequencing retained |
+|---|---|---|
+| #9323 | OPEN #9295, through the previously audited transfer below | Original permission-chain claimant and finite permission/refusal slice; unrelated SSH admission remains independent. |
+| #3002 | OPEN #2879, through the previously audited transfer below | Routable binding OR alternate exact-owner route OR explicit not-ready/undeliverable handling; historical acceptance and later observation remain distinct. |
+| #4220 | OPEN #5768 and the Active [Index standalone-service effort](../agent-index-standalone-service/README.md), through the [audited receiving disposition](https://github.com/ThomasMichon/copilot-extensions/issues/4220#issuecomment-6838380274) | Direct I4220-P1-P5, local I4220-LV and ROOT-global I4220-G retain acquisition-through-cursor AND GC custody, canonical-family alias consistency, the A/B/C REVERT case, and shared completed watermark OR explicit stale-alias repair. Existing #9023 and data/worker/GC owners remain. |
+
+#4220 is provider-confirmed CLOSED `NOT_PLANNED`, not technically completed.
+The existing receiving assessment and reviewed #10353 are reused, not repeated:
+the actual receiving clauses preserve mixed-generation participation, safe
+drain/isolation/adoption, owning-process validation and independent corpus,
+canary, rollback and deployment duties. No indexing, migration, claim release
+or new source characterization follows. This adds a tracking route, not a
+146th prerequisite relationship.
+
+The separate historical **#9377 manual-aide nomination is no longer waiting
+for Phase 1 admission**. Its qualified complete original and five discussions
+record the explicit planning-to-implementation amendment and the incumbent's
+[source closeout](https://github.com/ThomasMichon/copilot-extensions/issues/9377#issuecomment-6479268351).
+The [canonical archive](../../2026/10/28%20effort-agenda-companion/README.md)
+is Done with every Plan/Validation item checked or explicitly transferred.
+All six cited planning, spike, guidance, helper and archive PRs
+(#9380/#9383/#9415/#9421/#9429/#9434) are actually merged and ancestors of the
+inspected source. The provider records #9377 CLOSED `COMPLETED` since
+2026-10-28 20:02:50 UTC (13:02:50 PDT).
+
+Do not schedule that original guidance/helper source work again. The archive's
+release transfer to #3336 and the incumbent's later reported promotion are
+separate historical observations; this pass verifies no installed rollout or
+current helper behavior. It adopts no agenda, transfers no experiment/resource
+custody and provides no new completion credit.
+
+Fresh complete author/editor/comment/event/source metadata and two equal
+twelve-person rosters qualified #9377, #4220 and #5768 before new text.
+Only #9377's original/discussions and its independently source-qualified archive
+were newly read. The other nine selections and the two earlier receivers use
+the complete issue-only inventory for OPEN status, not renewed nested-content
+or current-source qualification. Existing source holds and every broader
+[parent gate](README.md#plan) remain unchanged.
+
 ## 2026-11-09 tracking-route correction
 
 The qualifications below remain pinned historical findings, not claims about

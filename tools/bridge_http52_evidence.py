@@ -5,10 +5,11 @@ from pathlib import Path
 
 import bridge_http51_evidence as retained
 import bridge_http_retained_evidence as common
+import bridge_http47_evidence as previous
+import bridge_http48_installation
 from launch_wrapper_assets_ref import load_manifest_groups
 
-previous = common.previous
-installation = common.installation
+installation = bridge_http48_installation
 GENERATION = 52
 VECTOR_SCHEMA = "http52-owner-membership-cases-v1"
 INPUT = common.CONTRACT + "inputs/http52/owner-membership.json"
@@ -51,6 +52,7 @@ _RETAINED_AFFECTED = (
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
+        "retained_writer_transport.py",
         "acquisition_worktree_writer.py", "acquisition_writer_inspection.py", "acquisition_authority.py",
         "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
@@ -133,6 +135,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
     "plugins/agent-bridge/tests/test_worktree_source_evidence.py",
     "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
+    "plugins/agent-bridge/tests/test_retained_writer_transport.py",
     "plugins/agent-bridge/tests/test_retained_host_recovery.py",
     "plugins/agent-bridge/tests/test_gc.py",
     "plugins/agent-bridge/tests/test_creation_writer_resume.py",
