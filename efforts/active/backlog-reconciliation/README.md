@@ -374,6 +374,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [complete first-adoption receiving record](journal/2026/11.16-first-adoption-receiving-and-inflow.md)
+records #12904's actual reviewed merge, ENTIRE current Manager ROOT and
+complete Phase 5/source readback, and the separate #356 `NOT_PLANNED`
+tracking retirement. All FA356 technical rows, incumbent check states,
+bounded #8545 transfer and other owners remain. The complete 21:28:09 UTC
+census is 858 whole open, 129 above fixed 729: #356's campaign departure
+and independently owned #12896 departure are partly offset by eligible
+#12905 inflow. #12900 and #12905 retain distinct current claims and whole
+unfinished contracts; no implementation, rollout or parent completion follows.
+
 The [finite status/catalog/roster receiving proposal](status-catalog-roster-receiving.md)
 preserves #918's ten complete requirement families directly in existing
 OPEN #3761, with paired Validation and independent Coordination obligations.
@@ -3411,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
+  preserves #2729's five-package AND inherited #2726 contract in the existing
+  Active Installer Engine Plan/local/global Validation and Coordination.
+  Its receiving review, actual merge/current readback and separate source
+  disposition remain distinct from all unchecked technical work, paused
+  adopters and interpreter/resource custody.
   The [auth, typing and cache-admission intake](journal/2026/11.14-auth-typing-and-cache-intake.md)
   directly preserves #12466/#9177/#12600 in their existing canonical domains,
   with nine unchecked Plan/local/actual-global technical rows. Original
