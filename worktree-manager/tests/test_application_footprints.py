@@ -257,7 +257,7 @@ def test_apply_uses_existing_finite_driver_not_a_worktrees_installer(
     assert not (tmp_path / "installed").exists()
 
 
-@pytest.mark.parametrize("rejected_input", ["source", "versions", "slot", "trailing-dot"])
+@pytest.mark.parametrize("rejected_input", ["source", "versions", "slot", "trailing-dot", "unreadable"])
 def test_rejected_input_does_not_fence_a_corrected_request_on_the_same_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejected_input: str,
 ) -> None:
@@ -267,7 +267,7 @@ def test_rejected_input_does_not_fence_a_corrected_request_on_the_same_queue(
     log = tmp_path / "setup-events"
     monkeypatch.setenv("FOOTPRINT_TEST_LOG", str(log))
     target = tmp_path / "installed"
-    if rejected_input == "source":
+    if rejected_input in {"source", "unreadable"}:
         rejected = source / "apps" / "example" / "src" / "example" / "state" / "linked"
         rejected.mkdir(parents=True)
     elif rejected_input == "versions":
@@ -287,15 +287,22 @@ def test_rejected_input_does_not_fence_a_corrected_request_on_the_same_queue(
     original = Path.lstat
     def indirect(path: Path, *args: object, **kwargs: object) -> object:
         info = original(path)
-        if path == rejected:
+        if path == rejected and rejected_input != "unreadable":
             return SimpleNamespace(
                 st_mode=info.st_mode,
                 st_file_attributes=getattr(info, "st_file_attributes", 0) | 0x400,
             )
         return info
     arguments = [str(source), "--apps-root", str(target), "--apply", "--stage"]
+    scandir = os.scandir
+    def readable(path: str | os.PathLike[str]) -> object:
+        if Path(path) == rejected:
+            raise PermissionError("fixture source directory is unreadable")
+        return scandir(path)
     with monkeypatch.context() as rejection:
         rejection.setattr(Path, "lstat", indirect)
+        if rejected_input == "unreadable":
+            rejection.setattr(os, "scandir", readable)
         assert footprints.main(arguments) == 1
     after = sorted(path.relative_to(target) for path in target.rglob("*")) if target.exists() else None
     assert after == before

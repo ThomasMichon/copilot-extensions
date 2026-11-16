@@ -162,7 +162,9 @@ def plan(
 def _verify_copy(path: Path, application: Application) -> None:
     if _read(path / "application.json") != application.declaration:
         raise ValueError(f"application declaration changed before setup: {application.name}")
-    for directory, children, files in os.walk(path, followlinks=False):
+    def unreadable(error: OSError) -> None:
+        raise error
+    for directory, children, files in os.walk(path, followlinks=False, onerror=unreadable):
         for name in (*children, *files):
             member = _ordinary(Path(directory) / name)
             mode = member.lstat().st_mode
