@@ -85,6 +85,27 @@ async def test_original_journal_survives_both_execution_boundaries(
     assert original.document() == saved
 
 
+@pytest.mark.parametrize("spelling_owner", ["retained", "serving"])
+def test_equivalent_bridge_root_keeps_original_writer(
+    retained_prefix: tuple[str, ...], monkeypatch: pytest.MonkeyPatch, spelling_owner: str,
+) -> None:
+    root_index = 6 if retained_prefix[4] == "-m" else 11
+    root = Path(retained_prefix[root_index])
+    equivalent = root / ".." / root.name
+    prefix = list(retained_prefix)
+    if spelling_owner == "retained":
+        prefix[root_index] = str(equivalent)
+    else:
+        monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: equivalent)
+    saved = tuple(prefix)
+    actual = execution_prefix(prefix)
+    assert actual[0] == sys.executable
+    pinned_index = prefix.index("--pinned-runtime")
+    actual_pinned = actual.index("--pinned-runtime")
+    assert actual[actual_pinned:actual_pinned + 4] == prefix[pinned_index:pinned_index + 4]
+    assert tuple(prefix) == saved
+
+
 def test_foreign_bridge_is_not_adopted(
     retained_prefix: tuple[str, ...], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
