@@ -47,7 +47,8 @@ def admission(tmp_path: Path):
     program = (
         "param([string]$BootstrapPython='',[string]$ProjectName='',[string]$Owner='',"
         "[string]$RuntimeSourceDescriptor='',[switch]$RuntimeOnly,[string]$InstallSource='',"
-        "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig)\n"
+        "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig,"
+        "[string]$WheelProfile,[string]$WheelDirectory,[string]$WheelPython,[string]$WheelUv)\n"
         "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
         ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')\n"
