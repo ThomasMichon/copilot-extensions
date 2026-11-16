@@ -72,6 +72,10 @@ any activates; dependencies activate before consumers. Stage failure prevents
 all activation. Failure after activation starts remains partial, not automatic
 rollback or permission to replay unrelated work. Existing busy/unsettled driver
 outcomes remain explicit.
+Apply performs no-effect source, existing-slot and prerequisite validation
+before request admission and again before execution scope. A rejected footprint
+therefore does not fence a later corrected request; mutation-time rechecks and
+unknown cleanup retain their execution scope.
 Installation executes inside the Driver's registered execution scope. Confirmed
 nonzero setup exits retain their native status after normal cleanup settlement;
 timeouts and unknown cleanup retain the Driver's interruption/recovery boundary.

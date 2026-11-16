@@ -178,23 +178,35 @@ def _selection_key(footprint: Path, applications: tuple[Application, ...]) -> st
     return "footprint:" + digest.hexdigest()
 
 
-def install(
-    applications: tuple[Application, ...], *, stage: bool, deadline: float,
-) -> None:
-    """App setup owns environment construction, selection and actual readiness."""
+def _preflight(applications: tuple[Application, ...]) -> tuple[Any, str]:
+    """Reject known no-effect failures before admitting execution custody."""
     from .self_install import _runtime_installer
 
+    if len({app.environment for app in applications}) != len(applications):
+        raise ValueError("application root-environment declarations conflict")
+    for application in applications:
+        _verify_copy(application.source, application)
+        _ordinary(application.root)
+        if os.path.lexists(application.slot):
+            _verify_copy(application.slot, application)
     installer_factory: Callable[[], Any] = _runtime_installer
     installer = installer_factory()
-    runtime = installer.runtime
-    construction = runtime._runtime_component("versioned_runtime_construction")
-    process = installer.engine
     shell = shutil.which("pwsh" if os.name == "nt" else "sh")
     if shell is None:
         raise ValueError("application setup requires PowerShell 7 or a POSIX shell")
+    return installer, shell
+
+
+def install(
+    applications: tuple[Application, ...], *, stage: bool, deadline: float,
+    prepared: tuple[Any, str] | None = None,
+) -> None:
+    """App setup owns environment construction, selection and actual readiness."""
+    installer, shell = prepared if prepared is not None else _preflight(applications)
+    runtime = installer.runtime
+    construction = runtime._runtime_component("versioned_runtime_construction")
+    process = installer.engine
     roots = {app.environment: str(app.root) for app in applications}
-    if len(roots) != len(applications):
-        raise ValueError("application root-environment declarations conflict")
 
     def remaining() -> float:
         value = deadline - time.monotonic()
@@ -252,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--app", action="append", default=[])
     parser.add_argument("--stage", action="store_true")
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--timeout", type=float, default=1800)
+    parser.add_argument("--timeout", type=float, default=1800.0)
     arguments = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(arguments)
     if not math.isfinite(args.timeout) or not 0 < args.timeout <= 7200:
@@ -276,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
                 "slots": [str(app.slot) for app in applications],
             }))
             return 0
+        prepared = _preflight(applications)
         custody = driver.borrowed_custody()
         if custody is not None:
             with custody:
@@ -290,7 +303,10 @@ def main(argv: list[str] | None = None) -> int:
                 failure = None
                 with custody.execution_scope():
                     try:
-                        install(applications, stage=args.stage, deadline=time.monotonic() + args.timeout)
+                        install(
+                            applications, stage=args.stage,
+                            deadline=time.monotonic() + args.timeout, prepared=prepared,
+                        )
                     except subprocess.CalledProcessError as error:
                         # The canonical child owner confirmed exit and descendant settlement.
                         failure = error
@@ -316,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
         if error.stderr:
             print(error.stderr[-65536:], end="", file=sys.stderr)
         return error.returncode
-    except (driver.DriverError, driver.ParticipantError, OSError, ValueError, RuntimeError,
+    except (driver.DriverError, driver.ParticipantError, ImportError, OSError, ValueError, RuntimeError,
             subprocess.SubprocessError) as error:
         print(f"Application installation: {error}", file=sys.stderr)
         return 1

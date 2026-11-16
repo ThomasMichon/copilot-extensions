@@ -257,6 +257,40 @@ def test_apply_uses_existing_finite_driver_not_a_worktrees_installer(
     assert not (tmp_path / "installed").exists()
 
 
+def test_rejected_source_does_not_fence_a_corrected_request_on_the_same_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import update_driver
+
+    source = application_set(tmp_path, [("example", "1.0", [])])
+    log = tmp_path / "setup-events"
+    monkeypatch.setenv("FOOTPRINT_TEST_LOG", str(log))
+    target = tmp_path / "installed"
+    rejected = source / "apps" / "example" / "src" / "example" / "state" / "linked"
+    rejected.mkdir(parents=True)
+    original = Path.lstat
+    def indirect(path: Path, *args: object, **kwargs: object) -> object:
+        info = original(path)
+        if path == rejected:
+            return SimpleNamespace(
+                st_mode=info.st_mode,
+                st_file_attributes=getattr(info, "st_file_attributes", 0) | 0x400,
+            )
+        return info
+    arguments = [str(source), "--apps-root", str(target), "--apply", "--stage"]
+    with monkeypatch.context() as rejection:
+        rejection.setattr(Path, "lstat", indirect)
+        assert footprints.main(arguments) == 1
+    assert not target.exists()
+    assert not (update_driver.default_root() / "queue.sqlite3").exists()
+    assert footprints.main(arguments) == 0
+    requests = update_driver.status()
+    assert isinstance(requests, tuple)
+    assert len(requests) == 1
+    assert requests[0].state == "completed" and requests[0].exit_code == 0
+    assert log.read_text(encoding="utf-8").splitlines() == ["example:stage"]
+
+
 @pytest.mark.parametrize("entry,fail_stage", [("console", False), ("console", True), ("module", False)])
 def test_real_cli_driver_and_slot_setup_complete_without_worktrees(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str, fail_stage: bool,
