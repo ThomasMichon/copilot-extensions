@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
+  preserves #2729's five-package AND inherited #2726 contract in the existing
+  Active Installer Engine Plan/local/global Validation and Coordination.
+  Its receiving review, actual merge/current readback and separate source
+  disposition remain distinct from all unchecked technical work, paused
+  adopters and interpreter/resource custody.
   The [auth, typing and cache-admission intake](journal/2026/11.14-auth-typing-and-cache-intake.md)
   directly preserves #12466/#9177/#12600 in their existing canonical domains,
   with nine unchecked Plan/local/actual-global technical rows. Original
