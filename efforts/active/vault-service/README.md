@@ -361,6 +361,34 @@ implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
 
+### 2026-11-16 - Source-lease consumer join accepted
+
+PR #12818 merged to `dev` at `2026-11-16T06:47:50Z` as
+`d123d0b93d1b4d3cd3886343bb2692174a0692eb`, from exact head
+`02533b1e636ffcf5b19a4de43ced7d62cabd5707`. Copilot review `5915977280`
+approved without active issues; original and metadata-triggered required CI
+passed. The managed merge used the authorized additional code-owner
+exception, not a findings or CI exception. The umbrella remains open.
+
+The explicit normal-fetch profile now carries custodian-issued source
+authorization through Gateway selection into Bridge's finite acquire port
+and existing native account-file adapter. Serving-peer negotiation precedes
+consumer capability reads. Gateway and custodian installation pins remain
+independent; unknown token expiry is not a lease or native execution authority.
+Old callers retain their meanings and unknown POSTs have no replay/downgrade.
+
+The exact published head passed 183 Fleet and 46 Bridge regressions, with
+20 POSIX-only skips on Windows. The actual HTTP/TLS/PoP/channel/custodian path
+uses synthetic credentials; this run does not claim POSIX file effects or
+native CLI reload. All nine changed Python files passed strict Linux/Windows
+analysis. Lint, install/docs, dependency-age and required CI gates passed.
+
+Only this R2 consumer source contract is accepted. Native optional-profile
+construction/distribution, installed adoption, actual provider renewal,
+deliberate interaction, proper cache/provider evolution and remaining R2-R4
+and parent acceptance stay open. No live credentials, login, enrollment,
+tunnel, installed runtime or shared service changed.
+
 ### 2026-11-16 - Initial normal-retrieval source accepted
 
 PR #12807 merged to `dev` at `2026-11-16T05:43:43Z` as

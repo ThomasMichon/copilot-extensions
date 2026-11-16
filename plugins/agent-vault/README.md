@@ -100,8 +100,9 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
 
 ## Dependency profiles
 
-Native setup can explicitly select `base` or `ssh`. SSH key generation and pair
-validation need the `ssh` profile; ordinary Vault use does not. It supplies
+Native setup can explicitly select `base`, `ssh`, `federated-relay`, or
+`ssh-federated-relay`. SSH key generation and pair validation need an SSH
+profile; ordinary Vault use does not. It supplies
 `pycryptodomex` in the isolated `Cryptodome` namespace, with native Windows ARM64
 support, and also supports the existing Fernet cache and AES-GCM envelope formats.
 Existing records, wrapped keys and DPAPI caches are not converted or rotated.
@@ -115,18 +116,32 @@ pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install -Profile ssh
 bash plugins/agent-vault/scripts/install.sh install --profile ssh
 ```
 
+The relay profile selects the existing `federated-relay` extra; the combined
+profile selects both that extra and `ssh`. The relay closure includes the
+standalone Fleet Manager service SDK and credential-relay library. Fleet Manager
+is a first-party application artifact, not a vendored library: the canonical
+application-source declaration associates it with `standalone:fleet-manager`.
+Native construction needs those first-party artifacts in its configured feed;
+it does not copy an installed Fleet Manager or install a Bridge service.
+Prepared application production can select `federated-relay` (and optionally
+`ssh`) through its existing `--application-extras` input. The separate native
+closed-wheel adapter currently accepts only the base dependency profile and
+refuses other selections; it never silently drops their extras.
+
 The same selection works with `stamp`, `provision` and `update`. Stamping records
 the desired profile without acquiring dependencies. With no active runtime,
 first use constructs it; an existing runtime remains active after stamping.
 Use `provision` or `update` to apply a changed profile before using its capabilities.
 The installation-owned `runtime-profile.json` preserves selection across ordinary
 updates. With no explicit or recorded selection, existing base setup is unchanged.
-Use `base` explicitly to select a new base runtime without the optional crypto
-dependency; existing encrypted-cache/KEK consumers may still need that dependency.
+Use `base` explicitly to select a new base runtime without optional dependencies;
+existing encrypted-cache/KEK consumers may still need an SSH profile.
 Profile construction requires an existing Python 3.11+ bootstrap interpreter.
 
 Profiles use separate immutable version slots and the canonical retained-input
-constructor. A failed SSH build never selects a base substitute or modifies a
+constructor. Dependency health checks import the selected closure without reading
+relay policy, keys or credentials, connecting a channel or starting a service.
+A failed optional-profile build never selects a base substitute or modifies a
 completed runtime. Package metadata remains unchanged; `deploy-manifest.json`
 records the actual `runtime_version` and `runtime_profile`. Prepared deployments
 retain their original `runtime_source` receipt separately from the profile.

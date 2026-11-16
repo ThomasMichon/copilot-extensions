@@ -32,8 +32,9 @@ HTTP reference.
 
 ## Dependency selection
 
-The native installer's `-Profile base|ssh` / `--profile base|ssh` selection is
-installation policy, not a database selector or portable `.agent-vault.json`
+The native installer's `-Profile` / `--profile` selection accepts `base`, `ssh`,
+`federated-relay`, and `ssh-federated-relay`. This is installation policy, not
+a database selector or portable `.agent-vault.json`
 field. It is persisted under the selected runtime home as `runtime-profile.json`:
 
 ```json

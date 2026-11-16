@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 import importlib.util
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -16,7 +18,7 @@ import stat
 import sys
 import time as time
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 SOURCE_FILE = "runtime-source.json"
 SOURCE_SCHEMA = "copilot-extensions.runtime-source"
@@ -32,13 +34,18 @@ _GENERATED = {
 
 
 def fingerprint_entries(
-    entries, *, label, root_label, roots, normalize_link, path_type, file_hashes, on_file,
-    on_progress=None, io_path=lambda path: path, reported_path=lambda path: path,
-):
+    entries: Mapping[Path, str], *, label: Callable[[Path], str],
+    root_label: Callable[[Path], str], roots: Collection[Path],
+    normalize_link: Callable[[str], str], path_type: Callable[[str], Path],
+    file_hashes: MutableMapping[Path, str] | None, on_file: Callable[[Path, bytes], None] | None,
+    on_progress: Callable[[], None] | None = None,
+    io_path: Callable[[Path], Path] = lambda path: path,
+    reported_path: Callable[[Path], Path] = lambda path: path,
+) -> str:
     """Hash validated entries with the unchanged ordered, length-framed format."""
     import hashlib
 
-    def frame(data):
+    def frame(data: bytes) -> bytes:
         return len(data).to_bytes(8, "big") + data
 
     ordered = sorted(entries, key=label)
@@ -100,7 +107,7 @@ class RedirectPublicationError(RuntimeError):
     """Redirect publication or its recovery could not finish safely."""
 
 
-def add_runtime_cli_commands(subparsers: argparse._SubParsersAction) -> None:
+def add_runtime_cli_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     redirects = subparsers.add_parser(
         "publish-redirects", help="atomically publish source redirects with failure recovery",
     )
@@ -326,7 +333,7 @@ def publish_runtime_redirects(
                         if receipt is not None:
                             fd = os.open(backup, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
                             try:
-                                created = publication.state_fd(fd)
+                                created = cast(ModuleType, publication).state_fd(fd)
                                 if (created.device, created.inode) != owned[backup]:
                                     raise RedirectPublicationError("Recovery stage lost its created identity")
                                 receipt.created(path, fd, content=old.content, phase="recovery")
@@ -395,7 +402,10 @@ def package_version(slot_name: str) -> str:
     )
 
 
-def version_key(version: str):
+def version_key(version: str) -> (
+    tuple[int, int, int, int, int, int, str, str]
+    | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
+):
     """Order package releases and profiles before generated identities."""
     supported = re.fullmatch(
         r"(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?",
@@ -463,7 +473,7 @@ def _runtime() -> ModuleType:
     return module
 
 
-def assembly_hash(payload: Path, *, on_progress=None) -> str:
+def assembly_hash(payload: Path, *, on_progress: Callable[[], None] | None = None) -> str:
     files: list[Path] = []
 
     def scan_error(error: OSError) -> None:
@@ -503,9 +513,9 @@ def assembly_hash(payload: Path, *, on_progress=None) -> str:
                 on_progress()
     if not files:
         raise SourceIdentityError("Materialized runtime payload is empty")
-    return runtime.fingerprint_source(
+    return cast(str, runtime.fingerprint_source(
         files, **({"on_progress": on_progress} if on_progress is not None else {}),
-    )
+    ))
 
 
 def payload_package_version(payload: Path, plugin: str) -> str:
@@ -524,7 +534,7 @@ def payload_package_version(payload: Path, plugin: str) -> str:
     if plugin in standalone or (
         not plugin_manifest.exists() and not plugin_manifest.is_symlink()
     ):
-        import tomllib
+        tomllib = import_module("tomllib")
 
         data = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
         manifest = data.get("project")
@@ -584,7 +594,7 @@ def parse_source_identity(
 
 def read_source_identity(
     payload: Path, package_version: str, *, plugin: str | None = None,
-    on_progress=None,
+    on_progress: Callable[[], None] | None = None,
 ) -> SourceIdentity | None:
     path = payload / SOURCE_FILE
     try:
@@ -615,7 +625,8 @@ def manifest_fields(identity: SourceIdentity | None) -> dict[str, object]:
 
 
 def publish_source_snapshot(
-    payload: Path, root: Path, identity: SourceIdentity, *, on_progress=None,
+    payload: Path, root: Path, identity: SourceIdentity, *,
+    on_progress: Callable[[], None] | None = None,
 ) -> Path:
     """Serialize complete source publication without directory-nesting moves."""
     payload = Path(os.path.abspath(payload))
@@ -639,10 +650,10 @@ def publish_source_snapshot(
     snapshots = root / "snapshots"
     snapshots.mkdir(parents=True, exist_ok=True)
     runtime = _runtime()
-    return runtime._runtime_component("versioned_runtime_construction").publish_source_snapshot(
+    return cast(Path, runtime._runtime_component("versioned_runtime_construction").publish_source_snapshot(
         payload, snapshots, identity.runtime_version, runtime=runtime, verify=verify,
         on_progress=on_progress,
-    )
+    ))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -655,7 +666,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot-root", type=Path)
     parser.add_argument("--format", choices=("version", "json", "shell-fields"), default="version")
     args = parser.parse_args(argv)
-    on_progress = lambda: print("source-runtime: completed source work", file=sys.stderr, flush=True)
+    last_progress: float | None = None
+
+    def on_progress() -> None:
+        nonlocal last_progress
+        now = time.monotonic()
+        if last_progress is None or now - last_progress >= 0.5:
+            print("source-runtime: completed source work", file=sys.stderr, flush=True)
+            last_progress = now
+
     try:
         if not _PACKAGE_VERSION.fullmatch(args.package_version):
             raise SourceIdentityError("Source deployment requires a supported package version")
@@ -701,8 +720,12 @@ if __name__ == "__main__":
 
 
 def fingerprint_source(
-    paths, *, _normalize_windows_extended_path, _native_path,
-    on_progress=None, file_hashes=None, on_file=None,
+    paths: Iterable[str | os.PathLike[str]], *,
+    _normalize_windows_extended_path: Callable[[str], str],
+    _native_path: Callable[[Path], Path],
+    on_progress: Callable[[], None] | None = None,
+    file_hashes: MutableMapping[Path, str] | None = None,
+    on_file: Callable[[Path, bytes], None] | None = None,
 ) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
@@ -767,7 +790,7 @@ def fingerprint_source(
     resolved_parents: dict[Path, Path] = {}
     reported_roots: dict[Path, Path] = {}
 
-    def _declared_root_path(p) -> Path:
+    def _declared_root_path(p: str | os.PathLike[str]) -> Path:
         # Resolve the PARENT chain (handles relative paths, intermediate
         # symlinks, '..' components) to get a canonical absolute path, but
         # preserve the final component exactly as declared -- never follow
