@@ -5,23 +5,38 @@ import sys
 import importlib.metadata
 import importlib.util
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Any, Literal
+from collections.abc import Callable
+import socket
 
 import pytest
+from fastapi import FastAPI
 
 import agent_bridge
 from agent_bridge import __main__ as main
 from agent_bridge.serving_reconcile import ServingReconcileError
+from zdd import diagnostics
 from zdd.routing import Endpoint
 
 pytestmark = pytest.mark.guard
+Runtime = tuple[Path, SimpleNamespace, SimpleNamespace, ModuleType]
+
+
+def _app(**state: Any) -> FastAPI:
+    app = FastAPI()
+    for key, value in state.items():
+        setattr(app.state, key, value)
+    return app
 
 
 @pytest.mark.parametrize("ready", [True, False])
-def test_application_start_uses_installed_callback_and_retains_failure(monkeypatch, ready):
+def test_application_start_uses_installed_callback_and_retains_failure(
+    monkeypatch: pytest.MonkeyPatch, ready: bool,
+) -> None:
     calls = []
 
-    def start():
+    def start() -> bool:
         calls.append("start")
         return ready
 
@@ -42,20 +57,20 @@ GENERATION = "0.4.1-dev3+source." + "a" * 40 + "." + "b" * 16 + ".profile." + "c
 
 
 @pytest.fixture
-def runtime(tmp_path, monkeypatch):
+def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Runtime:
     from agent_bridge import config, source_start
 
     (tmp_path / "current-version").write_text(GENERATION, encoding="utf-8")
     state = SimpleNamespace(endpoint=None, ready=True, launches=[], releases=[])
 
-    def health(_port, *, host):
+    def health(_port: int, *, host: str) -> dict[str, Any]:
         endpoint = state.endpoint
         return {
             "version": endpoint.version, "ready": state.ready,
             "slot": {"pid": endpoint.pid, "role": "active", "active": endpoint.to_dict()},
         }
 
-    def launch(argv, **options):
+    def launch(argv: list[str], **options: Any) -> SimpleNamespace:
         state.launches.append((argv, options))
         state.endpoint = Endpoint(
             bind="127.0.0.1", port=int(argv[-1]), pid=20, generation=2,
@@ -73,15 +88,15 @@ def runtime(tmp_path, monkeypatch):
     probe = SimpleNamespace(bind=lambda _: None, getsockname=lambda: ("127.0.0.1", 32001))
 
     class Socket:
-        def __enter__(self):
+        def __enter__(self) -> SimpleNamespace:
             return probe
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> Literal[False]:
             return False
 
-    monkeypatch.setattr(source_start.socket, "socket", lambda *_: Socket())
+    monkeypatch.setattr(socket, "socket", lambda *_: Socket())
     monkeypatch.setattr(source_start, "_core", lambda: core)
-    monkeypatch.setattr(source_start.diagnostics, "process_start_time", lambda pid: str(pid))
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: str(pid))
     monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(bind="127.0.0.1"))
     monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(tmp_path))
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", core._INSTALL_DIR)
@@ -91,19 +106,20 @@ def runtime(tmp_path, monkeypatch):
 
 
 def test_selected_source_creates_separate_configuration_before_real_ensure_lock(
-    runtime, monkeypatch,
-):
+    runtime: Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
+    from agent_bridge.service_process_cli import _acquire_ensure_lock, _release_ensure_lock
 
     root, state, core, source_start = runtime
     configuration = Path(core._INSTALL_DIR)
     lock = configuration / "ensure.lock"
     monkeypatch.setattr(main, "_ENSURE_LOCK", str(lock))
-    core._acquire_ensure_lock = main._acquire_ensure_lock
-    core._release_ensure_lock = main._release_ensure_lock
+    core._acquire_ensure_lock = _acquire_ensure_lock
+    core._release_ensure_lock = _release_ensure_lock
     launch = core._launch_bridge_daemon
 
-    def launch_with_real_lock(argv, **options):
+    def launch_with_real_lock(argv: list[str], **options: Any) -> Any:
         assert lock.read_text() == str(os.getpid())
         return launch(argv, **options)
 
@@ -118,8 +134,8 @@ def test_selected_source_creates_separate_configuration_before_real_ensure_lock(
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("root_override", [False, True])
 def test_installed_application_starts_its_slot_not_the_healthy_predecessor(
-    runtime, monkeypatch, nested, root_override,
-):
+    runtime: Runtime, monkeypatch: pytest.MonkeyPatch, nested: bool, root_override: bool,
+) -> None:
     from agent_bridge import install_paths
 
     root, state, core, source_start = runtime
@@ -127,8 +143,10 @@ def test_installed_application_starts_its_slot_not_the_healthy_predecessor(
     prefix = slot / ".venv" if nested else slot
     path = prefix / "lib" / "agent_bridge" / "source_start.py"
     path.parent.mkdir(parents=True)
+    assert source_start.__file__ is not None
     path.write_bytes(Path(source_start.__file__).read_bytes())
     spec = importlib.util.spec_from_file_location("agent_bridge._application_callback_test", path)
+    assert spec is not None and spec.loader is not None
     callback = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(callback)
     monkeypatch.setattr(callback, "_core", lambda: core)
@@ -154,7 +172,9 @@ def test_installed_application_starts_its_slot_not_the_healthy_predecessor(
     assert len(state.launches) == 1
 
 
-def test_selected_but_unready_application_waits_without_duplicate_launch(runtime, monkeypatch):
+def test_selected_but_unready_application_waits_without_duplicate_launch(
+    runtime: Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, state, _, source_start = runtime
     state.endpoint = Endpoint(
         bind="127.0.0.1", port=32001, pid=20, generation=2,
@@ -168,7 +188,7 @@ def test_selected_but_unready_application_waits_without_duplicate_launch(runtime
     assert state.launches == []
 
 
-def test_displaced_or_forwarded_selection_cannot_start_local_application(runtime):
+def test_displaced_or_forwarded_selection_cannot_start_local_application(runtime: Runtime) -> None:
     root, state, core, source_start = runtime
     core._active_endpoint_is_forward = lambda: True
     assert not source_start.start_selected_source()
@@ -182,8 +202,8 @@ def test_displaced_or_forwarded_selection_cannot_start_local_application(runtime
 @pytest.mark.parametrize("selected", [True, False])
 @pytest.mark.parametrize("root_override", [False, True])
 def test_source_route_uses_installation_selector_not_separate_configuration(
-    tmp_path, monkeypatch, selected, root_override,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool, root_override: bool,
+) -> None:
     import os
 
     from agent_bridge import install_paths
@@ -215,11 +235,11 @@ def test_source_route_uses_installation_selector_not_separate_configuration(
             publish_daemon_route_unless_forwarded(
                 config, bind="127.0.0.1", port=32001, pid=os.getpid(), version=GENERATION,
             )
-        assert routing.read_table(config)["active"] == previous.to_dict()
+        assert (routing.read_table(config) or {})["active"] == previous.to_dict()
 
 
-async def _eventually(predicate):
-    async def wait():
+async def _eventually(predicate: Callable[[], bool]) -> None:
+    async def wait() -> None:
         while not predicate():
             await asyncio.sleep(.01)
 
@@ -230,8 +250,8 @@ async def _eventually(predicate):
 @pytest.mark.parametrize("displaced", [False, True])
 @pytest.mark.parametrize("relay_enabled", [False, True])
 async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
-    tmp_path, monkeypatch, displaced, relay_enabled,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, displaced: bool, relay_enabled: bool,
+) -> None:
     from agent_bridge import app as app_module, runtime_version
     from agent_bridge.agent_registry_resolver import AgentResolver
     from agent_bridge.models import ServiceConfig
@@ -261,17 +281,17 @@ async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
     seed.create_turn("incumbent-work", 1, "unfinished work", 1)
     seed.close()
     ready, attached, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    calls = []
-    listeners = []
-    maintenance = []
+    calls: list[tuple[Any, ...]] = []
+    listeners: list[bool] = []
+    maintenance: list[str] = []
     beats = 0
 
-    async def recover_cold(*_args, **_kwargs):
+    async def recover_cold(*_args: Any, **_kwargs: Any) -> int:
         nonlocal beats
         beats += 1
         return 0
 
-    async def maintain(_self):
+    async def maintain(_self: SessionManager) -> None:
         maintenance.append("session")
 
     monkeypatch.setattr(app_module, "_HEARTBEAT_INTERVAL_S", .01)
@@ -284,21 +304,24 @@ async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
     ):
         monkeypatch.setattr(SessionManager, method, maintain)
 
-    async def resolver_work(function, *args):
+    async def resolver_work(function: Callable[..., Any], *args: Any) -> AgentResolver:
         assert function is app_module.daemon_resolver
         await ready.wait()
         return AgentResolver({}, {})
 
-    async def reattach(self, *, recover_cold):
+    async def reattach(self: SessionManager, *, recover_cold: bool) -> int:
         calls.append(("attach", recover_cold))
         attached.set()
         return 0
 
-    async def relay(_app, *, start_listener=True):
+    async def relay(_app: FastAPI, *, start_listener: bool = True) -> None:
         listeners.append(start_listener)
         return None
 
-    async def retire(app, old, current, *, initial_recovery_task):
+    async def retire(
+        app: FastAPI, old: Endpoint, current: Endpoint, *,
+        initial_recovery_task: asyncio.Task[Any],
+    ) -> None:
         assert old == previous and current.version == GENERATION
         await initial_recovery_task
         calls.append(("retire",))
@@ -325,7 +348,7 @@ async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
         assert maintenance == []
         assert app.state.db.get_session("incumbent-work")["status"] == "running"
         assert app.state.db.get_turns("incumbent-work")[0]["completed_at"] is None
-        assert routing.read_table(root)["active"] == previous.to_dict()
+        assert (routing.read_table(root) or {})["active"] == previous.to_dict()
         assert marker.read_bytes() == previous_identity and calls == []
         assert not app.state.cold_recovery_ready
         ready.set()
@@ -333,14 +356,14 @@ async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
         assert listeners == [False]
         assert app.state.db.get_session("incumbent-work")["status"] == "running"
         assert app.state.db.get_turns("incumbent-work")[0]["completed_at"] is None
-        assert routing.read_table(root)["active"] == previous.to_dict()
+        assert (routing.read_table(root) or {})["active"] == previous.to_dict()
         assert marker.read_bytes() == previous_identity and calls == []
         if displaced:
             (root / "current-version").write_text("rolled-back", encoding="utf-8")
         app.state.uvicorn_server.started = True
         if displaced:
             await _eventually(lambda: app.state.uvicorn_server.should_exit)
-            assert routing.read_table(root)["active"] == previous.to_dict()
+            assert (routing.read_table(root) or {})["active"] == previous.to_dict()
             assert marker.read_bytes() == previous_identity and calls == []
         else:
             await asyncio.wait_for(attached.wait(), 5)
@@ -350,7 +373,7 @@ async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
             assert maintenance == []
             assert app.state.db.get_session("incumbent-work")["status"] == "running"
             assert app.state.db.get_turns("incumbent-work")[0]["completed_at"] is None
-            assert routing.read_table(root)["active"]["version"] == GENERATION
+            assert (routing.read_table(root) or {})["active"]["version"] == GENERATION
             assert calls == [("attach", False), ("retire",)]
             assert not app.state.cold_recovery_ready
             assert listeners == [False]
@@ -370,8 +393,8 @@ async def test_source_lifespan_defers_route_identity_and_attachment_until_ready(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("predecessor", [False, True])
 async def test_source_adopts_tcp_relay_only_after_fresh_start_or_predecessor_exit(
-    tmp_path, monkeypatch, predecessor,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, predecessor: bool,
+) -> None:
     from agent_bridge import app as app_module, runtime_version, source_start
     from zdd import routing
 
@@ -385,27 +408,30 @@ async def test_source_adopts_tcp_relay_only_after_fresh_start_or_predecessor_exi
     calls = []
     waiting, exited = asyncio.Event(), asyncio.Event()
 
-    async def retire(app, _previous, _current, *, initial_recovery_task):
+    async def retire(
+        app: FastAPI, _previous: Endpoint, _current: Endpoint, *,
+        initial_recovery_task: asyncio.Task[Any],
+    ) -> None:
         await initial_recovery_task
         calls.append("retire")
         waiting.set()
         await exited.wait()
         app.state.cold_recovery_ready = True
 
-    async def reattach(**_kwargs):
+    async def reattach(**_kwargs: Any) -> None:
         calls.append("reattach")
 
-    async def adopt_relay():
+    async def adopt_relay() -> None:
         calls.append("relay")
 
     monkeypatch.setattr(app_module, "_retire_previous_daemon", retire)
-    app = SimpleNamespace(state=SimpleNamespace(
+    app = _app(
         uvicorn_server=SimpleNamespace(started=True, should_exit=False),
         ready=True, shutting_down=False, bound_port=32001,
         config=SimpleNamespace(bind="127.0.0.1", enable_credential_relay=True),
         session_manager=SimpleNamespace(_generation_id="new", reattach_session_hosts=reattach),
         adopt_relay=adopt_relay,
-    ))
+    )
     initial = asyncio.create_task(asyncio.sleep(0))
     task = asyncio.create_task(source_start.complete_source_start(app, asyncio.Event(), initial))
     try:
@@ -424,8 +450,8 @@ async def test_source_adopts_tcp_relay_only_after_fresh_start_or_predecessor_exi
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reattach_error", [False, True])
 async def test_source_retries_host_attachment_after_native_exit_without_stopping_ready_frontend(
-    tmp_path, monkeypatch, reattach_error,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reattach_error: bool,
+) -> None:
     from agent_bridge import app as app_module, runtime_version, source_start
     from zdd import routing
 
@@ -437,35 +463,38 @@ async def test_source_retries_host_attachment_after_native_exit_without_stopping
     routing.publish_active(tmp_path, bind="127.0.0.1", port=32000, pid=101, version="old")
     calls = []
 
-    async def reattach(*, recover_cold):
+    async def reattach(*, recover_cold: bool) -> int:
         assert recover_cold is False
         calls.append("reattach")
         if reattach_error:
             raise OSError("host temporarily unavailable")
         return 1
 
-    async def retire(app, _previous, _current, *, initial_recovery_task):
+    async def retire(
+        app: FastAPI, _previous: Endpoint, _current: Endpoint, *,
+        initial_recovery_task: asyncio.Task[Any],
+    ) -> None:
         await initial_recovery_task
         calls.append("retire")
         app.state.cold_recovery_ready = True
 
     monkeypatch.setattr(app_module, "_retire_previous_daemon", retire)
-    app = SimpleNamespace(state=SimpleNamespace(
+    app = _app(
         uvicorn_server=SimpleNamespace(started=True, should_exit=False),
         ready=True, shutting_down=False, bound_port=32001,
         config=SimpleNamespace(bind="127.0.0.1", enable_credential_relay=False),
         session_manager=SimpleNamespace(_generation_id="new", reattach_session_hosts=reattach),
-    ))
+    )
     published = asyncio.Event()
     initial = asyncio.create_task(asyncio.sleep(0))
     await source_start.complete_source_start(app, published, initial)
     assert calls == ["retire", "reattach"]
     assert published.is_set() and app.state.cold_recovery_ready
     assert not app.state.uvicorn_server.should_exit
-    assert routing.read_table(tmp_path)["active"]["version"] == GENERATION
+    assert (routing.read_table(tmp_path) or {})["active"]["version"] == GENERATION
 
 
-def test_settled_native_call_finishes_when_asyncio_run_cancels_pending_tasks():
+def test_settled_native_call_finishes_when_asyncio_run_cancels_pending_tasks() -> None:
     import subprocess
     import textwrap
 

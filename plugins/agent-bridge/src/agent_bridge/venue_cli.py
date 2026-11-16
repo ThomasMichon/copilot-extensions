@@ -11,6 +11,8 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from types import ModuleType
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -18,14 +20,13 @@ if TYPE_CHECKING:
     from .serving_reconcile import ServingRuntime
 
 from .parity_harness import (
-    CONTAINER_RECREATE_FAULT,
-    FAILED_ACP_HANDSHAKE_FAULT,
     FRONTEND_RESTART_HOSTINDEX_LOSS,
     RELAY_INTERRUPTION,
 )
+from .protocol import CONTAINER_RECREATE_FAULT, FAILED_ACP_HANDSHAKE_FAULT
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -127,7 +128,7 @@ def _fault_frontend_restart_hostindex_loss(
     if not frontend_pid_before:
         raise RuntimeError("could not identify the running frontend")
 
-    def quiet_service_call(action) -> None:
+    def quiet_service_call(action: Callable[[], object]) -> None:
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             action()
@@ -202,10 +203,10 @@ def _cmd_deploy(
             if observed is None:
                 raise ServingReconcileError("required cutover has no verified live local predecessor")
             if compare_serving_version(observed.version, __version__) == "current":
-                result = {"ok": True, "serving_reconcile": "current", "skipped": False}
+                current_result = {"ok": True, "serving_reconcile": "current", "skipped": False}
                 if getattr(args, "json", False):
                     core = _core()
-                    core._json_out(result)
+                    core._json_out(current_result)
                 else:
                     print("[OK] Required graceful cutover: verified serving runtime is current.")
                 return
@@ -283,11 +284,11 @@ def _cmd_deploy(
         s.bind((host, 0))
         port = s.getsockname()[1]
         s.close()
-        return port
+        return int(port)
 
     candidate = None
 
-    def spawn_passive(port: int):
+    def spawn_passive(port: int) -> Any:
         nonlocal candidate
         cmd = [sys.executable, "-m", "agent_bridge", "start", "--port", str(port), "--passive"]
         if serving is not None:
@@ -340,7 +341,8 @@ def _cmd_deploy(
         if serving is not None:
             from .serving_reconcile import guarded_client
 
-            return guarded_client(serving, base_url, token, int(args.drain_timeout) + 60)
+            client: BridgeClient = guarded_client(serving, base_url, token, int(args.drain_timeout) + 60)
+            return client
         return BridgeClient(base_url, token, timeout=int(args.drain_timeout) + 60)
 
     # Serving convergence is not stale-cutover repair: retain any existing
@@ -391,7 +393,7 @@ def _cmd_deploy(
         raw = table.get("active")
         ordinary_predecessor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
 
-    def refuse_ordinary(active: dict | None) -> str | None:
+    def refuse_ordinary(active: dict[str, Any] | None) -> str | None:
         if active_route_is_forward(active):
             return forwarded_skip
         expected = ordinary_predecessor.to_dict() if ordinary_predecessor is not None else None
@@ -401,7 +403,7 @@ def _cmd_deploy(
         nonlocal ordinary_successor
         ordinary_successor = endpoint
 
-    def retire_ordinary(endpoint: routing.Endpoint) -> dict:
+    def retire_ordinary(endpoint: routing.Endpoint) -> dict[str, Any]:
         from .central_retirement import retire_predecessor
 
         if ordinary_successor is None or endpoint != ordinary_predecessor:
@@ -413,7 +415,8 @@ def _cmd_deploy(
             ),
         )
 
-    def refuse_serving(active: dict | None) -> str | None:
+    def refuse_serving(active: dict[str, Any] | None) -> str | None:
+        assert serving is not None
         if successor_published and isinstance(active, dict) and (
             type(active.get("generation")) is int
             and active["generation"] >= serving.route["generation"]
@@ -625,7 +628,7 @@ def add_deploy_cutover_flags(
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
 
 
-def register_venue_commands(sub: argparse._SubParsersAction) -> None:
+def register_venue_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parity_p = sub.add_parser("parity", help="Run redacted launch/auth/reattach acceptance for a remote venue")
     parity_p.add_argument("target", help="Remote agent target (container: or codespace:)")
     parity_p.add_argument("--expect-workspace")

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from agent_procutil import process_retirement
+from agent_procutil import _daemon_instance_identity, process_retirement
 from zdd import diagnostics, process_exit, routing
 from zdd.routing import Endpoint
 
@@ -22,7 +22,7 @@ def retire_predecessor(
     make_client: Callable[[Endpoint], _Client], graceful_timeout: float = 5.0,
 ) -> dict[str, Any]:
     """Keep cleanup failure separate from the incoming generation's readiness."""
-    from . import __main__ as core
+    from .service_process_cli import _pid_is_agent_bridge
 
     def verify_route() -> None:
         table = routing.read_table(root, strict=True) or {}
@@ -32,6 +32,7 @@ def retire_predecessor(
             or table.get("previous") != previous.to_dict()
             or successor.generation <= previous.generation
             or successor.pid == previous.pid
+            or successor.pid is None
             or not successor.process_start_time
             or diagnostics.process_start_time(successor.pid) != successor.process_start_time
         ):
@@ -41,7 +42,7 @@ def retire_predecessor(
         if (
             not previous.pid or not previous.process_start_time
             or diagnostics.process_start_time(previous.pid) != previous.process_start_time
-            or not core._pid_is_agent_bridge(previous.pid, timeout=2.0)
+            or not _pid_is_agent_bridge(previous.pid, timeout=2.0)
         ):
             raise RuntimeError("central predecessor identity is unavailable")
 
@@ -61,7 +62,7 @@ def retire_predecessor(
             or slot.get("role") != "active" or slot.get("active") != successor.to_dict()
         ):
             raise RuntimeError("central successor is not ready")
-        birth = process_retirement.birth_identity(previous.pid)
+        birth = _daemon_instance_identity.birth_identity(previous.pid)
         with process_retirement.PinnedProcess(previous.pid, birth) as pinned:
             verify_previous()
             verify_route()

@@ -7,13 +7,22 @@ import functools
 import logging
 import sys
 import threading
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, ParamSpec, TypeVar
+
+from fastapi import FastAPI
 
 from agent_procutil.daemon_instances import admit_daemon_instance
+from .db import Database
 
 log = logging.getLogger(__name__)
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
-async def settled_thread_call(function, *args, **kwargs):
+async def settled_thread_call(
+    function: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs,
+) -> _T:
     """Keep native side effects owned until their worker finishes on cancellation."""
     owner = asyncio.get_running_loop().run_in_executor(
         None, functools.partial(contextvars.copy_context().run, function, *args, **kwargs),
@@ -30,9 +39,10 @@ async def settled_thread_call(function, *args, **kwargs):
     return result
 
 
-async def start_credential_relay(app, *, start_listener: bool = True):
+async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -> Any:
     """Register credential sources and idempotently start the shared listener."""
     from .app import _run_in_daemon_thread
+    run_in_daemon_thread: Callable[..., Awaitable[object]] = _run_in_daemon_thread
 
     existing = getattr(app.state, "credential_relay", None)
     if start_listener and existing is not None and getattr(existing, "running", False):
@@ -46,7 +56,7 @@ async def start_credential_relay(app, *, start_listener: bool = True):
 
         builder = RelayBuilder()
         register_sources = register_credential_sources if start_listener else register_http_credential_sources
-        await _run_in_daemon_thread(register_sources, builder)
+        await run_in_daemon_thread(register_sources, builder)
         manager = getattr(app.state, "session_manager", None)
         if manager is not None and manager._remote_credential_policy is not None:
             manager._remote_credential_policy.register_sources(builder.http_sources)
@@ -85,14 +95,14 @@ async def start_credential_relay(app, *, start_listener: bool = True):
     return None
 
 
-def writer_running(db) -> bool:
+def writer_running(db: Database) -> bool:
     """Observe the existing database writer under its native ownership lock."""
     with db._writer_state_lock:
         thread = db._writer_thread
         return thread is not None and thread.is_alive()
 
 
-def _close_database(db, completed):
+def _close_database(db: Database, completed: threading.Event) -> None:
     pause = threading.Event()
     try:
         while True:
@@ -113,7 +123,7 @@ def _close_database(db, completed):
         completed.set()
 
 
-async def close_database(db):
+async def close_database(db: Database) -> None:
     """Keep one native close owner alive through cancellation and writer timeout."""
     completed = threading.Event()
     owner = asyncio.get_running_loop().run_in_executor(None, _close_database, db, completed)
@@ -137,7 +147,7 @@ async def close_database(db):
 
 
 @asynccontextmanager
-async def lifespan(app):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Retain admission through application startup, service and shutdown."""
     with admit_daemon_instance("agent-bridge", source=__file__, purpose="production"):
         from .app import _lifespan

@@ -8,15 +8,22 @@ from pathlib import Path
 import socket
 import sys
 import time
+from types import ModuleType
+from typing import Any
+
+from fastapi import FastAPI
 
 from zdd import diagnostics
+from zdd.routing import Endpoint
 
 from .serving_reconcile import ServingReconcileError
 
 log = logging.getLogger("agent-bridge")
 
 
-async def complete_source_start(app, published: asyncio.Event, initial_recovery_task) -> None:
+async def complete_source_start(
+    app: FastAPI, published: asyncio.Event, initial_recovery_task: asyncio.Task[Any] | None,
+) -> None:
     """Publish a ready frontend, then bound central retirement and adopt resources."""
     from . import __version__, lifecycle_hooks
     from .app import _retire_previous_daemon
@@ -79,7 +86,7 @@ async def complete_source_start(app, published: asyncio.Event, initial_recovery_
         server.should_exit = True
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -94,8 +101,8 @@ def _check_selection(root: Path, version: str) -> None:
         raise ServingReconcileError("executing source runtime is no longer selected")
 
 
-def _selected_endpoint(core, version: str):
-    endpoint = core._active_endpoint()
+def _selected_endpoint(core: ModuleType, version: str) -> Endpoint | None:
+    endpoint: Endpoint | None = core._active_endpoint()
     if (
         endpoint is None or endpoint.version != version
         or type(endpoint.pid) is not int or endpoint.pid <= 0
@@ -106,9 +113,11 @@ def _selected_endpoint(core, version: str):
     return endpoint
 
 
-def _healthy_selected(core, version: str, *, pid: int | None = None, port: int | None = None) -> bool:
+def _healthy_selected(
+    core: ModuleType, version: str, *, pid: int | None = None, port: int | None = None,
+) -> bool:
     endpoint = _selected_endpoint(core, version)
-    if endpoint is None or (
+    if endpoint is None or endpoint.pid is None or (
         pid is not None and endpoint.pid != pid
         or port is not None and endpoint.port != port
     ):
@@ -145,7 +154,7 @@ def start_selected_source(
         return True
     deadline = time.monotonic() + timeout
 
-    def wait(*, pid=None, port=None) -> bool:
+    def wait(*, pid: int | None = None, port: int | None = None) -> bool:
         while time.monotonic() < deadline:
             _check_selection(root, selected)
             if core._active_endpoint_is_forward():

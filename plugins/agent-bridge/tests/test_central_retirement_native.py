@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_procutil import process_retirement, spawn_sync_in_kill_on_close_job
+from agent_procutil import _daemon_instance_identity, process_retirement, spawn_sync_in_kill_on_close_job
 from zdd import diagnostics, routing
 
 pytestmark = [
@@ -24,8 +24,10 @@ pytestmark = [
 ]
 
 
-def test_native_central_retirement_preserves_child_identity(tmp_path, monkeypatch):
-    from agent_bridge import __main__ as core
+def test_native_central_retirement_preserves_child_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge import service_process_cli
     from agent_bridge.central_retirement import retire_predecessor
 
     receipt = tmp_path / "child.pid"
@@ -44,7 +46,7 @@ def test_native_central_retirement_preserves_child_identity(tmp_path, monkeypatc
         while not receipt.exists() and time.monotonic() < deadline:
             time.sleep(.01)
         child_pid = int(receipt.read_text())
-        birth = process_retirement.birth_identity(child_pid)
+        birth = _daemon_instance_identity.birth_identity(child_pid)
         child = process_retirement.PinnedProcess(child_pid, birth)
         old = routing.publish_active(
             tmp_path, bind="127.0.0.1", port=41001, pid=process.pid, version="fixture-old",
@@ -54,9 +56,9 @@ def test_native_central_retirement_preserves_child_identity(tmp_path, monkeypatc
             tmp_path, bind="127.0.0.1", port=41002, pid=os.getpid(), version="fixture-new",
             process_start_time=diagnostics.process_start_time(os.getpid()), demote_existing=True,
         )
-        monkeypatch.setattr(core, "_pid_is_agent_bridge", lambda pid, **_: pid == process.pid)
+        monkeypatch.setattr(service_process_cli, "_pid_is_agent_bridge", lambda pid, **_: pid == process.pid)
 
-        def shutdown():
+        def shutdown() -> None:
             raise OSError("synthetic predecessor does not settle")
 
         client = SimpleNamespace(
@@ -72,8 +74,9 @@ def test_native_central_retirement_preserves_child_identity(tmp_path, monkeypatc
         assert outcome == {"exit_confirmed": True, "forced": True}
         process.wait(timeout=5)
         assert not child.exited()
-        assert process_retirement.birth_identity(child_pid) == birth
-        assert routing.read_table(tmp_path)["active"] == current.to_dict()
+        assert _daemon_instance_identity.birth_identity(child_pid) == birth
+        table = routing.read_table(tmp_path)
+        assert table is not None and table["active"] == current.to_dict()
     finally:
         if child is not None:
             child.terminate()
