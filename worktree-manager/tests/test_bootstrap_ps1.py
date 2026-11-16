@@ -549,7 +549,7 @@ def test_bootstrap_reuses_supported_uv_later_on_path(
     assert "preparing it" not in result.stderr
     assert (tmp_path / "uv-versions").read_text(encoding="utf-8-sig").splitlines() == [
         str(tmp_path / "shadow-tools" / "uv.ps1"),
-        str(tmp_path / "fake-bin" / "uv.ps1"),
+        str(tmp_path / "fake-bin" / ("uv.ps1" if os.name == "nt" else "uv")),
     ]
 
 
