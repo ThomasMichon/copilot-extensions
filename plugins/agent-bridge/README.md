@@ -1269,6 +1269,12 @@ the package version or Copilot's plugin-content source. The `runtime-source`
 bounded suite exercises the actual Windows and POSIX identity/manifest
 functions; this optional source path does not change ordinary installation.
 
+For an externally stopped Windows closed-wheel update, the native installer
+supports [`-NoService`](docs/architecture.md#installer-actions) on `install` and
+`update` with complete wheel inputs. It prepares the runtime without changing
+service lifetime or scheduled-task holds; the caller must restore and verify
+the services it stopped. Ordinary standalone behavior is unchanged.
+
 ## Docs
 
 | Document | Description |

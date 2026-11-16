@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
 
 def _extract_function(name: str) -> str:
     text = _INSTALL_PS1.read_text(encoding="utf-8")
-    start = text.index(f"function {name}")
+    start = text.index(f"function {name} {{")
     brace_start = text.index("{", start)
     depth = 0
     i = brace_start
@@ -33,7 +33,7 @@ def _extract_function(name: str) -> str:
     raise AssertionError(f"unbalanced braces extracting {name!r}")
 
 
-def _write_forward(tmp_path: Path, active: dict) -> None:
+def _write_forward(tmp_path: Path, active: dict[str, object]) -> None:
     install_dir = tmp_path / "agent-bridge"
     install_dir.mkdir()
     (install_dir / "active.json").write_text(
@@ -41,7 +41,9 @@ def _write_forward(tmp_path: Path, active: dict) -> None:
     )
 
 
-def _run_harness(tmp_path: Path, functions: list[str], extra: str) -> subprocess.CompletedProcess:
+def _run_harness(
+    tmp_path: Path, functions: list[str], extra: str,
+) -> subprocess.CompletedProcess[str]:
     install_dir = tmp_path / "agent-bridge"
     link_python = tmp_path / "python.exe"
     link_python.write_text("stub", encoding="utf-8")
@@ -70,12 +72,14 @@ def _run_harness(tmp_path: Path, functions: list[str], extra: str) -> subprocess
         + "\n",
         encoding="utf-8",
     )
+    assert _PWSH is not None
     return subprocess.run(
         [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         capture_output=True,
         text=True,
         timeout=30,
         check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -88,7 +92,7 @@ def _run_harness(tmp_path: Path, functions: list[str], extra: str) -> subprocess
     ],
 )
 def test_install_ps1_recognizes_forwarded_active_routes(
-    tmp_path: Path, active: dict, expected: bool,
+    tmp_path: Path, active: dict[str, object], expected: bool,
 ) -> None:
     _write_forward(tmp_path, active)
     result = _run_harness(
@@ -110,7 +114,7 @@ def test_install_ps1_recognizes_forwarded_active_routes(
     ],
 )
 def test_install_ps1_pins_the_active_daemon_route(
-    tmp_path: Path, active: dict, expected: str,
+    tmp_path: Path, active: dict[str, object], expected: str,
 ) -> None:
     _write_forward(tmp_path, active)
     result = _run_harness(
@@ -157,7 +161,7 @@ def test_install_ps1_update_checks_forward_before_lifecycle_actions() -> None:
         "\n}\n\nfunction Invoke-UpdateStart", 1
     )[0]
     body = text.split("function Invoke-Update {", 1)[1].split("\n}\n\n# -- Dispatch", 1)[0]
-    forward_at = body.index("$activeForward = Test-ActiveIsForward")
+    forward_at = body.index("$activeForward = (-not $NoService) -and (Test-ActiveIsForward)")
     revalidate_at = body.index("Invoke-UpdateDrainStop")
     start_at = body.index("Invoke-UpdateStart")
     assert forward_at < revalidate_at < start_at
@@ -167,7 +171,7 @@ def test_install_ps1_update_checks_forward_before_lifecycle_actions() -> None:
         < helper.rindex("Test-UpdateLifecycleStillTargetsPredecessor")
         < helper.index("Invoke-Stop")
     )
-    assert "$wasRunning = (-not $activeForward) -and" in body
+    assert "$wasRunning = (-not $NoService) -and (-not $activeForward) -and" in body
     assert "if ($activeForward) {" in body
     assert "Forwarded host bridge route appeared during update -- skipping drain/stop/start" in text
     assert "Active route changed during update -- skipping drain/stop/start" in text

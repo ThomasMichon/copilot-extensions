@@ -606,6 +606,18 @@ for the compatibility, cwd and acceptance boundaries.
 | `status` | Show service status |
 | `uninstall` | Remove service (`--remove-config` for config too; `-DryRun`/`--dry-run` previews without changing anything) |
 
+Windows closed-wheel `install` and `update` accept `-NoService` when all four
+wheel inputs are supplied. This mode retains normal slot admission, construction,
+import health, completion, activation, binstub and manifest publication, but does
+not probe or transition a serving predecessor, migrate a legacy service, reconcile a
+scheduled task, write/clear a service-update marker, start a daemon or collect old
+slots. A same-content runtime is retained without requiring a serving daemon.
+The caller owns stopping services beforehand, restoring only those previously
+running, and verifying them afterward; installer success is runtime readiness,
+not serving readiness. Other actions, partial wheel inputs, source repair,
+`-RequireGracefulCutover`, `-NonInteractive` and `-ForceTaskRepair` are refused
+before execution. Ordinary standalone install/update behavior is unchanged.
+
 Completed numbered runtime slots are immutable for both `install` and `update`.
 Before anything drains, stops, or rebuilds, the installer asks the shared
 `versioned_runtime.py check-admission` primitive about `versions/<v>/`: an
