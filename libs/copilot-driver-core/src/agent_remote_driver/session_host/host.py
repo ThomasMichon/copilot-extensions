@@ -20,6 +20,9 @@ from agent_procutil.daemon_instances import admit_daemon_instance
 import asyncio
 import json
 import logging
+import os
+import secrets
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -29,6 +32,8 @@ from . import osutil
 from . import protocol as proto
 
 if TYPE_CHECKING:
+    from agent_procutil.daemon_instances import DaemonInstanceGuard
+
     from .acp_boundary import AcpWireBoundary
 
 log = logging.getLogger("agent-bridge.session-host")
@@ -97,6 +102,8 @@ class SessionHost:
             raise ValueError("CLI lifetime requires its exact native termination owner")
         self._lifetime_policy = lifetime_policy
         self._child = child
+        self._inspection_generation = secrets.token_hex(16)
+        self._last_child_frame_at: float | None = None
         self._preference_receipt = validate_receipt(preference_receipt, child.pid or 0)
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
@@ -110,12 +117,12 @@ class SessionHost:
         self._on_child_exit = on_child_exit
         self._child_done = asyncio.Event()
         self._server: asyncio.base_events.Server | None = None
-        self._reader_task: asyncio.Task | None = None
+        self._reader_task: asyncio.Task[None] | None = None
         self._closing = False
         self._lifecycle_lock = asyncio.Lock()
-        self._instance_guard = None
-        self._close_task: asyncio.Task | None = None
-        self._connections: dict[asyncio.Task, asyncio.StreamWriter] = {}
+        self._instance_guard: DaemonInstanceGuard | None = None
+        self._close_task: asyncio.Task[None] | None = None
+        self._connections: dict[asyncio.Task[None], asyncio.StreamWriter] = {}
         # Auto-reap of an idle child once the front is lost (#51). The front
         # continuously reports whether the child is REAPABLE (its turn completed
         # with no active background tasks) via STATUS, and signals a *graceful*
@@ -162,7 +169,7 @@ class SessionHost:
         # or drops them, and any unparseable/unknown frame leaves the state
         # unchanged (fail-safe: uncertainty biases toward "in a turn" -> hold).
         self._inflight_prompt_ids: set[object] = set()
-        self._self_reap_task: asyncio.Task | None = None
+        self._self_reap_task: asyncio.Task[None] | None = None
 
     # -- introspection (tests / diagnostics) -------------------------------
     @property
@@ -202,6 +209,7 @@ class SessionHost:
             if not line:
                 break
             self._max_seq += 1
+            self._last_child_frame_at = time.monotonic()
             self._frames[self._max_seq] = line
             if self._private_acp_boundary is not None:
                 self._private_acp_boundary.observe(line, to_child=False)
@@ -238,7 +246,7 @@ class SessionHost:
 
     async def _run_front(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         tasks = []
-        async def disconnected():
+        async def disconnected() -> None:
             await asyncio.shield(writer.wait_closed())
 
         try:
@@ -317,6 +325,24 @@ class SessionHost:
         except proto.ProtocolError:
             log.warning("malformed frontend attachment; rejecting")
             writer.close()
+            return
+        if first is not None and first[0] == proto.MsgType.PING:
+            from .inspection import CONTRACT, encode, request
+
+            inspection_nonce = request(first[1], self._nonce)
+            if inspection_nonce is not None:
+                await proto.write_message(writer, proto.MsgType.PONG, encode({
+                    "contract": CONTRACT, "version": 1, "nonce": inspection_nonce,
+                    "host_pid": os.getpid(), "host_generation": self._inspection_generation,
+                    "child_pid": self._child.pid or 0, "child_alive": self.child_alive,
+                    "turn_in_flight": self._turn_in_flight,
+                    "max_seq": self._max_seq, "frontend_ack": self._ack_cursor,
+                    "last_child_frame_age_s": (
+                        max(0.0, time.monotonic() - self._last_child_frame_at)
+                        if self._last_child_frame_at is not None else None
+                    ),
+                    "buffer_depth": len(self._frames),
+                }))
             return
         if first is None or first[0] != proto.MsgType.ATTACH:
             log.warning("frontend did not present ATTACH; rejecting")
@@ -663,7 +689,7 @@ class SessionHost:
                     )
                 self._reader_task = asyncio.create_task(self._reader_loop())
                 await self._server.start_serving()
-                return self._server.sockets[0].getsockname()[1]
+                return int(self._server.sockets[0].getsockname()[1])
         except BaseException:
             if self._instance_guard is guard:
                 await self.close()
@@ -687,7 +713,7 @@ class SessionHost:
             self._close_task = asyncio.create_task(self._close(asyncio.current_task()))
         await asyncio.shield(self._close_task)
 
-    async def _close(self, caller: asyncio.Task | None) -> None:
+    async def _close(self, caller: asyncio.Task[Any] | None) -> None:
         async with self._lifecycle_lock:
             self._cancel_reap_timer()
             if self._private_attachment is not None:
@@ -698,7 +724,7 @@ class SessionHost:
                 writer.close()
             tasks = set(self._connections)
             tasks.update(task for task in (self._reader_task, self._self_reap_task) if task is not None)
-            if caller is self._self_reap_task:
+            if caller is not None and caller is self._self_reap_task:
                 tasks.discard(caller)
             for task in tasks:
                 task.cancel()

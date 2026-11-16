@@ -66,6 +66,52 @@ Lost acknowledgement can mean an uncertain outcome, not failed execution.
 Read/event reconnects retain their existing cursor and replay rules; no new
 retry policy is introduced by this procedure.
 
+## Exact-session inspection
+
+`agent-bridge status <session> --json` and its `inspect` alias use the existing
+`GET /api/v1/sessions/<session>/status` route. The global `--json` spelling
+remains supported. `--full` still selects metadata-only SessionInfo.
+The additive `inspection` object declares `agent-bridge.session-inspection`
+version 1 and separates daemon API, existing provider/SSH route, Session Host,
+Copilot process, ACP prompt and semantic observations. Existing `liveness`,
+`last_output_at` and `last_heartbeat_at` remain available. No observer poller,
+forward repair, actor restart, lifecycle operation or prompt is started.
+
+For compatible ordinary Hosts, the canonical Core performs one authenticated
+nonce/PONG round trip over a separate read-only connection. Its fixed snapshot
+and RTT remain independent of frontend bulk delivery. Private providers and
+older Hosts without this interface remain explicitly unsupported; a timeout
+leaves child/turn state unknown rather than dead. An older serving Bridge
+without the additive field is reported as unsupported by the new inspect alias;
+the existing status command preserves that older daemon's output unchanged.
+
+Semantic metadata reads at most 64 retained events, not the transcript. It
+bounds phase, active-tool elapsed/update ages, retained-window event-sequence
+delta, thought age/chunk count and declared milestones. The delta compares
+the first and last retained events in that window, **not two status requests**
+or a progress rate. Missing tool updates are unknown, not proof a quiet tool
+stopped. Signals at most 60 seconds old are fresh; older signals are stale,
+and absent or unqualified times are unknown. Request state is
+`requested/running/blocked/complete/unknown`; terminal result is
+`success/failure/not-terminal/unknown`. A successful `end_turn` is a reported
+turn result, never proof the operator's whole objective is done.
+
+Every projection names source, observation time, scope/proof and a reasoned
+unknown result. Declared markers remain distinct from derived request state.
+Coverage and truncation are explicit; contradictory or malformed observations
+cannot assert completion. Thought text stays omitted. The existing explicit
+`read <session> --range A:B --expand thoughts` path remains available.
+
+When retained evidence has an existing resolvable event form, `evidence.reference`
+is the same opaque token consumed by `result <session> --expand <reference>`;
+its scope is that event, not the entire projection. Empty, discontinuous,
+redacted or unsupported evidence is unavailable, not an invented reference.
+Existing detail readers retain rebuild, retention and redaction behavior; no
+new public event authority/epoch/sequence contract or store is defined here.
+All inspection/reference reads leave delivery cursors and session ownership
+unchanged. PING, a process PID, a cached status or a socket alone does not
+establish semantic progress, action acceptance or completion.
+
 ## Interpreting available diagnostics
 
 The shared [ssh-manager](../../../libs/ssh-manager/README.md) implementation

@@ -2,6 +2,11 @@
 
 [Configuration reference](docs/configuration.md)
 
+Exact-session `status/inspect --json` provides
+[layered read-only inspection](docs/transport-diagnostics.md#exact-session-inspection)
+through the standalone Core without attaching another controller or adding a
+poller. Liveness, semantic evidence and unavailable-provider results stay distinct.
+
 The optional [known-session semantic observation/history reads](docs/session-observations.md)
 reuse admitted retained event logs without starting an actor. Runtime capability
 negotiation, partial coverage and cursor/lifetime qualification remain explicit.
