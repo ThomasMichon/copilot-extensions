@@ -140,9 +140,12 @@ the full roster. Actual cold/warm deployed latency and provider settlement
 need their separately authorized integration lane; contained synthetic-channel
 tests are not production performance qualification.
 
-This API does not compose the [available-token coordinator](gateway-vault-available.md)
-with a real source custodian, expose a Gateway Vault token route, implement
-auth-needed fan-out/local UX, activate subscriptions or establish deployed
-Controller readiness. Those remaining integrations are tracked by
+The opt-in [normal account-fetch owner](gateway-account-source.md#explicit-normal-fetch-selection)
+now composes current offers, this dispatch API, the bounded selector and a real
+account custodian. It exposes a code-registered SDK route with ordinary
+provider-retrieval semantics; it does not claim the stricter
+[available-only coordinator](gateway-vault-available.md) port is backed by a
+cache-only provider. Auth-needed fan-out/local UX, subscriptions and deployed
+Controller readiness remain separate. Those integrations are tracked by
 [the Gateway effort](../../efforts/active/linux-role-fleet/README.md) and
 [the credential coordination issue](https://github.com/ThomasMichon/copilot-extensions/issues/8729).

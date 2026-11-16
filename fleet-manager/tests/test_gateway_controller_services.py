@@ -1,36 +1,51 @@
 """Controller offers cross real TLS, authentication and the owned channel."""
 
+from __future__ import annotations
+
 import asyncio
 import copy
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
-from aiohttp import web
+from aiohttp import ClientResponse, web
 
 from fleet_manager.gateway_controller_services import (
     ControllerService, ControllerSourceBinding, services,
 )
-from fleet_manager.gateway_local_handler import LocalHandlerBinding
-from fleet_manager.gateway_manifest import GatewayManifest
+from fleet_manager.gateway_local_handler import LocalHandlerBinding, LocalServiceRequest
+from fleet_manager.gateway_manifest import GatewayManifest, ServiceSlot
 from fleet_manager.gateway_service_channel import TransportError
-from fleet_manager.gateway_service_connector import ServiceConnector
-from fleet_manager.gateway_service_handler import HandlerBinding, ServiceResponse
+from fleet_manager.gateway_service_connector import Exchange, ServiceConnector
+from fleet_manager.gateway_service_handler import (
+    BoundedServiceResponse, HandlerBinding, ServiceRequest, ServiceResponse,
+)
 from fleet_manager.gateway_service_server import ServiceRuntime
 from fleet_manager.machine_identity import (
     PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof,
 )
-from gateway_service_transport_fixtures import Rig, eventually
+from gateway_service_transport_fixtures import Rig as _Rig, eventually as _eventually
 from test_runtime_identity import AUDIENCE
 
 
 VAULT = "vault-available-v1"
 NOTICE = "device-notice-v1"
 
+# The transport rig is a shared, dynamically configured test fixture.
+Rig: Any = _Rig
+eventually: Callable[[Callable[[], bool]], Awaitable[None]] = _eventually
+RemoteHandler = Callable[
+    [ServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse | None],
+]
+LocalHandler = Callable[[LocalServiceRequest], Awaitable[ServiceResponse]]
+
 
 @asynccontextmanager
-async def controllers(root):
+async def controllers(root: Path) -> AsyncIterator[Any]:
     rig = Rig(root)
     rig.h.document["manifest"]["slots"][0]["routes"].append({
         "prefix": "/tools", "methods": ["GET", "POST"], "capabilities": ["http"],
@@ -42,25 +57,31 @@ async def controllers(root):
         await rig.close()
 
 
-async def connect(rig, index=0, offers=None, handle=None):
+async def connect(
+    rig: Any, index: int = 0, offers: tuple[ControllerService, ...] | None = None,
+    handle: RemoteHandler | None = None,
+) -> ServiceConnector:
     if offers is None:
         offers = (ControllerService(VAULT, "/api" if index == 0 else "/assets"),)
 
-    async def default(request):
+    async def default(request: ServiceRequest) -> ServiceResponse:
+        assert request.service is not None
         return ServiceResponse(200, body=(request.service + ":" + request.target).encode())
 
-    async def access():
-        return rig.access("service-a" if index == 0 else "service-b", index + 1)
+    async def access() -> str:
+        token: str = rig.access("service-a" if index == 0 else "service-b", index + 1)
+        return token
 
+    fixture_handle: Any = handle or default
     connector = ServiceConnector(
         slot="service-a" if index == 0 else "service-b", gateway_origin=rig.origin,
-        handler=HandlerBinding("fleet-a", "gateway-a", handle or default),
+        handler=HandlerBinding("fleet-a", "gateway-a", fixture_handle),
         services=offers, access_token_callback=access,
         proof_key=rig.h.keys[index + 1].get_op_key("sign"), gateway_ca=rig.ca)
-    task = asyncio.create_task(connector.connect_once())
+    task: asyncio.Task[None] = asyncio.create_task(connector.connect_once())
     rig.connectors.append(connector)
     rig.tasks.append(task)
-    ready = asyncio.create_task(connector.connected.wait())
+    ready: asyncio.Task[bool] = asyncio.create_task(connector.connected.wait())
     try:
         done, _ = await asyncio.wait({task, ready}, timeout=3,
                                      return_when=asyncio.FIRST_COMPLETED)
@@ -73,8 +94,8 @@ async def connect(rig, index=0, offers=None, handle=None):
     return connector
 
 
-def test_multiple_services_share_one_current_authenticated_controller_channel(tmp_path):
-    async def scenario():
+def test_multiple_services_share_one_current_authenticated_controller_channel(tmp_path: Path) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
             first = await connect(rig, offers=(
                 ControllerService(VAULT, "/api"), ControllerService(NOTICE, "/tools")))
@@ -111,8 +132,8 @@ def test_multiple_services_share_one_current_authenticated_controller_channel(tm
     asyncio.run(scenario())
 
 
-def test_replacement_and_disconnect_fence_previous_connection_observations(tmp_path):
-    async def scenario():
+def test_replacement_and_disconnect_fence_previous_connection_observations(tmp_path: Path) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
             await connect(rig)
             old = rig.state.service_offers(VAULT)[0]
@@ -131,12 +152,12 @@ def test_replacement_and_disconnect_fence_previous_connection_observations(tmp_p
     asyncio.run(scenario())
 
 
-def test_withdrawal_racing_an_inflight_request_does_not_close_other_services(tmp_path):
-    async def scenario():
+def test_withdrawal_racing_an_inflight_request_does_not_close_other_services(tmp_path: Path) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
-            received = []
+            received: list[str | None] = []
 
-            async def handle(request):
+            async def handle(request: ServiceRequest) -> ServiceResponse:
                 received.append(request.service)
                 return ServiceResponse(200)
 
@@ -146,7 +167,7 @@ def test_withdrawal_racing_an_inflight_request_does_not_close_other_services(tmp
             original = channel.update_services
             arrived, release = asyncio.Event(), asyncio.Event()
 
-            async def delayed(value):
+            async def delayed(value: dict[str, Any]) -> None:
                 arrived.set()
                 await release.wait()
                 await original(value)
@@ -155,14 +176,14 @@ def test_withdrawal_racing_an_inflight_request_does_not_close_other_services(tmp
             retired = asyncio.Event()
             original_retire = connector._retire
 
-            def retire(exchange):
+            def retire(exchange: Exchange) -> None:
                 original_retire(exchange)
                 retired.set()
 
-            connector._retire = retire
-            task = asyncio.create_task(
+            setattr(connector, "_retire", retire)
+            task: asyncio.Task[None] = asyncio.create_task(
                 connector.advertise((ControllerService(NOTICE, "/tools"),)))
-            pending = None
+            pending: asyncio.Task[ClientResponse] | None = None
             try:
                 await asyncio.wait_for(arrived.wait(), 3)
                 # The Gateway has not observed withdrawal; its old request is
@@ -187,13 +208,13 @@ def test_withdrawal_racing_an_inflight_request_does_not_close_other_services(tmp
     asyncio.run(scenario())
 
 
-def test_offer_withdrawal_cancels_pending_and_preserves_original_caller(tmp_path):
-    async def scenario():
+def test_offer_withdrawal_cancels_pending_and_preserves_original_caller(tmp_path: Path) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
             started, stopped = asyncio.Event(), asyncio.Event()
-            received = []
+            received: list[ServiceRequest] = []
 
-            async def handle(request):
+            async def handle(request: ServiceRequest) -> None:
                 received.append(request)
                 started.set()
                 try:
@@ -202,7 +223,7 @@ def test_offer_withdrawal_cancels_pending_and_preserves_original_caller(tmp_path
                     stopped.set()
 
             connector = await connect(rig, handle=handle)
-            task = asyncio.create_task(rig.request("/api/token"))
+            task: asyncio.Task[ClientResponse] = asyncio.create_task(rig.request("/api/token"))
             try:
                 await asyncio.wait_for(started.wait(), 3)
                 assert received[0].context.principal == "caller-a"
@@ -223,24 +244,27 @@ def test_offer_withdrawal_cancels_pending_and_preserves_original_caller(tmp_path
     asyncio.run(scenario())
 
 
-def test_withdraw_readd_while_post_body_waits_never_dispatches_the_cancelled_request(tmp_path):
-    async def scenario():
+def test_withdraw_readd_while_post_body_waits_never_dispatches_the_cancelled_request(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
-            received = []
+            received: list[str] = []
             started, release = asyncio.Event(), asyncio.Event()
 
-            async def handle(request):
+            async def handle(request: ServiceRequest) -> ServiceResponse:
                 received.append(request.method)
                 return ServiceResponse(200)
 
-            async def payload():
+            async def payload() -> AsyncIterator[bytes]:
                 yield b"{"
                 started.set()
                 await release.wait()
                 yield b"}"
 
             connector = await connect(rig, handle=handle)
-            task = asyncio.create_task(rig.request("/api/token", "POST", data=payload()))
+            task: asyncio.Task[ClientResponse] = asyncio.create_task(
+                rig.request("/api/token", "POST", data=payload()))
             try:
                 await asyncio.wait_for(started.wait(), 3)
                 await eventually(lambda: rig.state.pending == 1)
@@ -265,8 +289,8 @@ def test_withdraw_readd_while_post_body_waits_never_dispatches_the_cancelled_req
 
 
 @pytest.mark.parametrize("when", ["admission", "update"])
-def test_controller_cannot_offer_another_slots_namespace(tmp_path, when):
-    async def scenario():
+def test_controller_cannot_offer_another_slots_namespace(tmp_path: Path, when: str) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
             if when == "admission":
                 with pytest.raises(TransportError, match="gateway-admission-refused"):
@@ -282,8 +306,8 @@ def test_controller_cannot_offer_another_slots_namespace(tmp_path, when):
     asyncio.run(scenario())
 
 
-def test_unauthenticated_admission_cannot_enumerate_slot_route_mappings(tmp_path):
-    async def scenario():
+def test_unauthenticated_admission_cannot_enumerate_slot_route_mappings(tmp_path: Path) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
             results = []
             for slot, prefix in (("service-a", "/api"), ("service-a", "/assets"),
@@ -299,8 +323,8 @@ def test_unauthenticated_admission_cannot_enumerate_slot_route_mappings(tmp_path
     asyncio.run(scenario())
 
 
-def test_policy_revocation_and_caller_denial_are_not_overridden_by_offers(tmp_path):
-    async def scenario():
+def test_policy_revocation_and_caller_denial_are_not_overridden_by_offers(tmp_path: Path) -> None:
+    async def scenario() -> None:
         async with controllers(tmp_path) as rig:
             await connect(rig)
             offer = rig.state.service_offers(VAULT)[0]
@@ -317,8 +341,10 @@ def test_policy_revocation_and_caller_denial_are_not_overridden_by_offers(tmp_pa
     asyncio.run(scenario())
 
 
-def test_selected_controller_profile_also_retains_machine_body_and_resource_auth(tmp_path):
-    async def scenario():
+def test_selected_controller_profile_also_retains_machine_body_and_resource_auth(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
         rig = Rig(tmp_path)
         rig.h.document["version"] = 4
         rig.h.document["identity"] = {
@@ -330,9 +356,9 @@ def test_selected_controller_profile_also_retains_machine_body_and_resource_auth
              "key_source": name, "expires_at": rig.h.clock.value + 600}
             for name, kind in (("service-a", "service"), ("caller-a", "caller"))
         ]}
-        received = []
+        received: list[ServiceRequest] = []
 
-        async def handle(request):
+        async def handle(request: ServiceRequest) -> ServiceResponse:
             received.append(request)
             return ServiceResponse(200)
 
@@ -344,7 +370,7 @@ def test_selected_controller_profile_also_retains_machine_body_and_resource_auth
                 services=(ControllerService(VAULT, "/api"),),
                 proof_key=rig.h.keys[1], gateway_ca=rig.ca,
                 machine_principal="service-a", machine_audience=AUDIENCE)
-            task = asyncio.create_task(connector.connect_once())
+            task: asyncio.Task[None] = asyncio.create_task(connector.connect_once())
             rig.tasks.append(task)
             await asyncio.wait_for(connector.connected.wait(), 3)
             proof = make_machine_proof(
@@ -370,26 +396,26 @@ def test_selected_controller_profile_also_retains_machine_body_and_resource_auth
                                        {"nonce": "x" * 42, "profile": "controller-services-v1"},
                                        {"nonce": "+" * 43, "profile": "controller-services-v1"}])
 def test_legacy_or_unsupported_running_peer_refuses_before_credentials_or_admission(
-    tmp_path, declaration,
-):
-    async def scenario():
+    tmp_path: Path, declaration: dict[str, Any] | None,
+) -> None:
+    async def scenario() -> None:
         rig = Rig(tmp_path)
-        invoked = []
+        invoked: list[str] = []
 
-        async def discovery(request):
+        async def discovery(request: web.Request) -> web.Response:
             invoked.append("discovery")
             return (web.json_response(declaration) if declaration is not None
                     else web.Response(status=404))
 
-        async def admission(request):
+        async def admission(request: web.Request) -> web.Response:
             invoked.append("admission")
             return web.Response(status=500)
 
-        async def access():
+        async def access() -> str:
             invoked.append("credentials")
             return "unused"
 
-        async def handle(request):
+        async def handle(request: ServiceRequest) -> NoReturn:
             raise AssertionError("not dispatched")
 
         app = web.Application()
@@ -425,19 +451,19 @@ def test_legacy_or_unsupported_running_peer_refuses_before_credentials_or_admiss
     [{"service": "bad value", "prefix": "/api"}],
     [{"service": f"service-{i}", "prefix": f"/route-{i}"} for i in range(17)],
 ])
-def test_offer_parser_is_strict_and_bounded(value):
+def test_offer_parser_is_strict_and_bounded(value: object) -> None:
     with pytest.raises(TransportError):
         services(value)
 
 
-def test_maximum_inventory_has_one_authority_check_per_channel_and_constant_offer_lookup():
-    checks = []
+def test_maximum_inventory_has_one_authority_check_per_channel_and_constant_offer_lookup() -> None:
+    checks: list[str] = []
 
-    def revalidate(grant):
+    def revalidate(grant: str) -> SimpleNamespace:
         checks.append(grant)
         return SimpleNamespace(principal=grant)
 
-    runtime = object.__new__(ServiceRuntime)
+    runtime: Any = object.__new__(ServiceRuntime)
     runtime.stopping = False
     runtime.authority = SimpleNamespace(revalidate_service=revalidate)
     runtime.channels = {}
@@ -455,8 +481,13 @@ def test_maximum_inventory_has_one_authority_check_per_channel_and_constant_offe
 
 
 @asynccontextmanager
-async def gateway_owner(root, handle, *, allowed=("service-a", "service-b"),
-                        caller_sources=("service-a", "service-b"), controller_routes=None):
+async def gateway_owner(
+    root: Path, handle: LocalHandler | Callable[[LocalServiceRequest], None], *,
+    allowed: tuple[str, ...] = ("service-a", "service-b"),
+    caller_sources: tuple[str, ...] = ("service-a", "service-b"),
+    controller_routes: list[dict[str, Any]] | None = None,
+    binding_factory: Callable[[ServiceSlot], LocalHandlerBinding] | None = None,
+) -> AsyncIterator[Any]:
     rig = Rig(root)
     if controller_routes is not None:
         rig.h.document["manifest"]["slots"][0]["routes"] = controller_routes
@@ -467,9 +498,12 @@ async def gateway_owner(root, handle, *, allowed=("service-a", "service-b"),
     rig.h.document["manifest"]["slots"].append(slot)
     rig.h.document["callers"][0]["slots"] = ["vault", *caller_sources]
     declared = GatewayManifest.load(rig.h.document["manifest"])
+    fixture_handle: Any = handle
     binding = LocalHandlerBinding(
-        next(item for item in declared.slots if item.name == "vault"), handle,
+        next(item for item in declared.slots if item.name == "vault"), fixture_handle,
         (ControllerSourceBinding(VAULT, allowed),))
+    if binding_factory is not None:
+        binding = binding_factory(binding.slot)
     try:
         await rig.start(local_handlers=(binding,))
         yield rig
@@ -477,11 +511,12 @@ async def gateway_owner(root, handle, *, allowed=("service-a", "service-b"),
         await rig.close()
 
 
-def test_local_owner_dispatch_uses_real_channels_and_retains_original_admission(tmp_path):
-    async def scenario():
-        received, retained = [], []
+def test_local_owner_dispatch_uses_real_channels_and_retains_original_admission(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        received: list[ServiceRequest] = []
+        retained: list[LocalServiceRequest] = []
 
-        async def local(request):
+        async def local(request: LocalServiceRequest) -> ServiceResponse:
             retained.append(request)
             offers = request.service_offers(VAULT)
             assert len(offers) == 2
@@ -489,7 +524,7 @@ def test_local_owner_dispatch_uses_real_channels_and_retains_original_admission(
                 offer, target="/available", body=request.request.body) for offer in offers]
             return ServiceResponse(200, body=b",".join(item.body for item in responses))
 
-        async def remote(request):
+        async def remote(request: ServiceRequest) -> ServiceResponse:
             received.append(request)
             return ServiceResponse(200, body=request.context.slot.encode())
 
@@ -507,6 +542,7 @@ def test_local_owner_dispatch_uses_real_channels_and_retains_original_admission(
                 assert request.service == VAULT and request.method == "POST"
                 assert request.target == "/available"
                 assert request.body == b'{"principal":"forged"}'
+                assert request.origin is not None
                 assert request.origin.slot == "vault"
                 assert request.origin.method == "POST"
                 assert request.origin.target_uri == rig.origin + "/vault/token"
@@ -519,15 +555,17 @@ def test_local_owner_dispatch_uses_real_channels_and_retains_original_admission(
 
 
 @pytest.mark.parametrize("denial", ["caller", "binding", "forged-offer"])
-def test_internal_dispatch_requires_independent_caller_source_and_binding_grants(tmp_path, denial):
-    async def scenario():
-        received = []
+def test_internal_dispatch_requires_independent_caller_source_and_binding_grants(
+    tmp_path: Path, denial: str,
+) -> None:
+    async def scenario() -> None:
+        received: list[ServiceRequest] = []
 
-        async def remote(request):
+        async def remote(request: ServiceRequest) -> ServiceResponse:
             received.append(request)
             return ServiceResponse(200)
 
-        async def local(request):
+        async def local(request: LocalServiceRequest) -> ServiceResponse:
             offers = request.service_offers(VAULT)
             if denial == "caller":
                 assert not offers
@@ -550,20 +588,21 @@ def test_internal_dispatch_requires_independent_caller_source_and_binding_grants
     asyncio.run(scenario())
 
 
-def test_unadvertised_service_with_missing_epoch_cannot_borrow_a_post_route(tmp_path):
-    async def scenario():
-        received = []
+def test_unadvertised_service_with_missing_epoch_cannot_borrow_a_post_route(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        received: list[ServiceRequest] = []
 
-        async def remote(request):
+        async def remote(request: ServiceRequest) -> ServiceResponse:
             received.append(request)
             return ServiceResponse(200)
 
-        async def local(request):
+        async def local(request: LocalServiceRequest) -> ServiceResponse:
             offer = request.service_offers(VAULT)[0]
+            malformed_generation: Any = None
             return await request.call_service(
-                replace(offer, prefix="/tools", generation=None), target="/available")
+                replace(offer, prefix="/tools", generation=malformed_generation), target="/available")
 
-        routes = [
+        routes: list[dict[str, Any]] = [
             {"prefix": "/api", "methods": ["GET"], "capabilities": ["http"]},
             {"prefix": "/tools", "methods": ["POST"], "capabilities": ["http"]},
         ]
@@ -580,12 +619,14 @@ def test_unadvertised_service_with_missing_epoch_cannot_borrow_a_post_route(tmp_
 
 
 @pytest.mark.parametrize("stop", ["timeout", "caller", "offer", "replacement"])
-def test_internal_pending_is_fenced_by_deadline_caller_offer_and_connection(tmp_path, stop):
-    async def scenario():
+def test_internal_pending_is_fenced_by_deadline_caller_offer_and_connection(
+    tmp_path: Path, stop: str,
+) -> None:
+    async def scenario() -> None:
         started, stopped = asyncio.Event(), asyncio.Event()
-        received = []
+        received: list[ServiceRequest] = []
 
-        async def remote(request):
+        async def remote(request: ServiceRequest) -> None:
             received.append(request)
             started.set()
             try:
@@ -593,14 +634,14 @@ def test_internal_pending_is_fenced_by_deadline_caller_offer_and_connection(tmp_
             finally:
                 stopped.set()
 
-        async def local(request):
+        async def local(request: LocalServiceRequest) -> ServiceResponse:
             return await request.call_service(
                 request.service_offers(VAULT)[0], target="/available",
                 timeout=0.1 if stop == "timeout" else 3)
 
         async with gateway_owner(tmp_path, local) as rig:
             connector = await connect(rig, handle=remote)
-            task = asyncio.create_task(rig.request("/vault/token"))
+            task: asyncio.Task[ClientResponse] = asyncio.create_task(rig.request("/vault/token"))
             try:
                 await asyncio.wait_for(started.wait(), 3)
                 if stop == "caller":

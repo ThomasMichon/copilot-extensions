@@ -2,7 +2,8 @@
 
 Back to [the effort](README.md). Authority comes from the
 [reviewed Vault vision](../../../visions/vault/README.md) and #8729.
-**All composition, contracts and sequencing proposed here are
+**Except for the selected directions explicitly recorded below and in the
+federated-relay slice, composition, contracts and sequencing here remain
 agent-recommended, not implemented or independently operator-approved.**
 
 ## Source-grounded reuse assessment
@@ -27,6 +28,16 @@ The initial proposal suggested `services/vault`. The subsequently assigned
 That selected source placement does not claim the entire transaction/UI
 architecture implemented or authorize live adoption. Backend independence and
 the existing Gateway/Manager owners remain unchanged.
+
+The selected scope also makes Vault's protected credential cache independent of
+KeePassXC, with local or centralized broker use and code-registered drivers for
+standard sources such as `gh`, `az` and GCM. KeePassXC remains one physical store.
+This accepts that architectural direction, not every proposed transaction,
+storage or interaction contract below, and does not authorize runtime adoption.
+The first federated selection may use ordinary provider retrieval and its
+normal refresh behavior; perfect cache-only semantics are not its prerequisite.
+Cache-only support and actual credential-expiry evidence remain explicit
+provider capabilities, separate from source leases and cache retention.
 
 ## Contracts and ownership
 
@@ -62,6 +73,51 @@ Gateway authenticates/enrolls and authorizes the service route through its
 existing owner. Vault also enforces credential-specific consumer/provider
 policy at the operation boundary. The two layers are complementary, not
 competing issuers or interchangeable permission checks.
+
+### Cache and standard-provider contract
+
+The independent cache is a Vault capability, not a second issuer or an alias
+for an unlocked KeePass database. Its store protects material or custody handles
+under its own selected backend, account/access binding and retention policy.
+KeePassXC can supply stored credentials; standard authentication drivers can
+supply provider-owned access without creating a KeePass entry or copying their
+refresh secrets. The central broker and standalone local service compose the
+same logical contract; neither makes a requesting UI the cache owner.
+
+The proposed provider operations distinguish:
+
+- **Cache inspection:** a supported existing-credential lookup without refresh
+  or interactive effects. Unsupported means unsupported, not ordinary retrieval.
+- **Normal retrieval:** the standard selected provider path, including its
+  normal refresh behavior. This is the initial `gh-auth` source flow and is not
+  blocked on implementing cache-only inspection.
+- **Explicit renewal or authorized use:** admitted only when that driver can
+  perform the requested noninteractive operation for the exact binding.
+  Nonexportable providers expose authorized use rather than invented token bits.
+- **Attended authentication:** a separate, explicit transaction action. A miss,
+  expired refresh credential or failed normal retrieval cannot select it.
+
+Driver support belongs to the actual selected source/runtime, not a package
+name or the mere presence of `gh`, `az` or GCM. Drivers retain the exact account,
+tenant where applicable, host/resource/audience and requested action; no ambient
+account switch or unrestricted command string is an integration mechanism.
+The initial source supports `gh-auth` account retrieval only. Azure and GCM
+remain separately implemented/qualified drivers, not inferred compatibility.
+
+Results distinguish a protected credential or use handle from its non-secret
+provider/operation/binding evidence. Actual credential expiry is optional and
+explicitly unknown when unavailable; cache retention, observation age, source
+lease and the operation deadline remain separate. Known expired/revoked access
+cannot be served, and unknown expiry does not attest validity. A provider
+generation/change indicator is useful only when the driver really supplies it;
+Vault must not fabricate one by parsing undocumented private store formats.
+Current consumer/source grants and relevant provider evidence are rechecked
+before delivery. Cache hits do not waive those checks.
+
+This is the proposed cache/provider evolution under D1, not a claim that the
+full cache or durable transaction layer exists. The initial distinct normal-fetch
+contract carries honest unknown expiry and ordinary retrieval now, while
+preserving the stricter available-only port and future driver qualification.
 
 ### Three distinct execution locations
 

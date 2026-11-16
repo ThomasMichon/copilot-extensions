@@ -3,7 +3,7 @@
 - **Subject:** Portable credential lifecycle and authentication transaction authority
 - **Scope:** leaf (cross-cutting service)
 - **Status:** Active
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-15
 - **Reality docs:** [agent-vault](../../plugins/agent-vault/README.md),
   [credential relay](../../libs/credential-relay/README.md)
 
@@ -29,6 +29,9 @@ acts through Manager, another attended client, or no currently connected UI.
   issuance and physical custody, including local vaults and OS/provider stores,
   under Vault's logical lifecycle authority. Provider identity policy and
   revocation remain authoritative; Vault is not merely a metadata router.
+- **Independent credential cache and broker:** protected, bounded cache and
+  authorized broker capabilities independent of any particular backing store.
+  KeePassXC is one store, not a prerequisite for provider-backed token access.
 - **Authentication transaction:** the durable relationship between requested
   access, its consumer, selected provider and any necessary interaction, through
   to verified consumer readiness or an explicit unresolved outcome.
@@ -58,6 +61,21 @@ an authorized custody agent. That placement does not move lifecycle
 responsibility to Manager or reduce Vault to pass-through coordination.
 Provider restrictions, refresh limitations and revocation govern what Vault
 can legitimately obtain, retain or serve.
+
+### independent-cache-and-standard-auth-providers
+
+Vault's cache is a first-class capability, usable without a KeePass database or
+unlock ceremony. The same logical authority can serve local consumers or act as
+a centralized credential broker through explicitly admitted access paths.
+Placement does not imply copying provider refresh secrets into another store.
+
+Code-registered drivers integrate standard authentication sources, including
+GitHub CLI (`gh`), Azure CLI (`az`) and Git Credential Manager (GCM). They retain
+the selected account, provider policy and physical custody while exposing their
+actual retrieval, refresh and interaction capabilities. Ordinary provider
+retrieval may perform its normal refresh; a cache-only or guaranteed
+noninteractive promise requires explicit provider support, not an assumption
+about the tool's name.
 
 ### durable-client-independent-transactions
 
@@ -160,6 +178,14 @@ readiness are different facts. Vault reports success only when the intended
 consumer can use the correctly bound access; opening a browser, receiving a
 callback or obtaining approval alone does not establish it. Missing consumer
 evidence remains pending or unknown rather than success.
+
+### honest-credential-freshness
+
+Provider-reported credential expiry, cache retention, source availability and
+delivery leases are different facts. Unknown credential expiry remains unknown;
+neither a cache timestamp nor a source lease establishes token validity.
+Retrieval success alone does not establish consumer readiness. Discovery never
+silently escalates a cache miss or failed refresh into an attended login.
 
 ### dismiss-is-not-cancel
 
