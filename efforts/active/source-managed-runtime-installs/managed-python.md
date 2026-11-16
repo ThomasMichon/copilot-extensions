@@ -42,11 +42,20 @@ consumes this same interpreter boundary rather than creating a second provider.
 
 The [installer vision](../../../visions/installer/README.md#finite-installation-controller)
 requires a native bootstrap seed followed by a daemon-independent installation
-controller. Windows uses PowerShell for package-manager uv preparation, core
-Git acquisition/copies and dispatch to each application's real setup entry.
+controller. Windows uses PowerShell for uv preparation through a supported
+package manager or Astral's official standalone installer, core Git
+acquisition/copies and dispatch to each application's real setup entry.
 The seed establishes the declared managed interpreter before any Python-backed
 SDK that needs it. It does not import the later process/installation framework
 as a prerequisite for obtaining that framework's interpreter.
+
+Operator clarification, verbatim:
+
+> Astral's installer script for uv is acceptable
+
+The existing official-script acquisition path is not a defect solely because
+it does not use WinGet. This accepts the acquisition method, not permission
+to install or update prerequisites on a particular host.
 
 Installation management is a finite CLI/library, not an always-running daemon
 or an exclusive API inside Manager's daemon. The preferred Manager journey
