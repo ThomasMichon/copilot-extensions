@@ -342,6 +342,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [cold-bootstrap source and keeper unit](journal/2026/11.16-cold-bootstrap-source-completion.md)
+verifies #12824's complete narrow source/regression fulfillment in merged
+#12832 and its separate acknowledged `COMPLETED` disposition. #5900 retains
+its owning-token condition despite already accepted telemetry planning;
+#12819 and #12834 retain unmerged-provider and owner boundaries. The complete
+09:08:02 UTC census is 841 whole open, 112 above fixed 729. No installation,
+interrupted-recovery replay or source/resource release follows.
+
 The [reviewed planned-intake and Manager-source unit](journal/2026/11.14-planned-intake-and-manager-source.md)
 verifies existing receiving delivery and retires #3323 and #3372 as redundant
 planned tracking, not technical completion. It proposes eighteen unchecked
@@ -4209,6 +4217,15 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [cold-bootstrap completion audit](journal/2026/11.16-cold-bootstrap-source-completion.md#12824---completed-narrow-recovery-bootstrap-correction)
+retains the complete original-to-delivery crosswalk, qualified description
+and source histories, isolated published-layout success/failure and utility
+origin controls, actual current-head approval/check metadata, final completion
+qualification and exact acknowledgment/terminal readback. Source fixtures
+do not establish Main publication, live installation or custody release.
+The complete census counts new inflow and excluded authors without assigning
+unrelated reductions to the campaign; all incumbent checklist states remain.
 
 The [eighteen-row intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md#evidence-and-preservation)
 adds only direct Plan/local/global Validation, Coordination and dated-Journal
