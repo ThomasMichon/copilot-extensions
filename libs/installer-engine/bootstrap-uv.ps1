@@ -19,10 +19,10 @@ function Resolve-UvBootstrapPython {
     }
     $bytes = [IO.File]::ReadAllBytes($request.FullName)
     $requirement = [Text.Encoding]::ASCII.GetString($bytes)
-    if ($requirement -cnotmatch '\Acpython@3\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\n\z') {
+    if ($requirement -cnotmatch '\Acpython@3\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\r?\n\z') {
         throw 'Bootstrap Python request must declare one exact stable CPython version.'
     }
-    $requirement = $requirement.TrimEnd([char]10)
+    $requirement = $requirement.TrimEnd([char]13, [char]10)
     $commands = @(Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)
     if (-not $commands.Count) {
         return [pscustomobject]@{

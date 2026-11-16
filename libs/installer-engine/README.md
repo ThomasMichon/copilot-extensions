@@ -66,9 +66,10 @@ payload instead. Materialization does not install or update a running runtime.
 `bootstrap-uv.ps1` is a separately delivered provider for Worktrees' future
 pre-lifecycle adoption, not a change to the discovery-only
 `bootstrap-python.ps1` evaluator. `Resolve-UvBootstrapPython` reads the exact
-Invocation-produced `bootstrap-python-version.txt` request without Python or
-TOML, qualifies the first PATH `uv` application (0.8.0+), and asks uv for that
-managed-only version without project discovery or downloads. Missing uv or a
+Invocation-produced `bootstrap-python-version.txt` request (one LF or CRLF
+terminator) without Python or TOML, qualifies the first PATH `uv` application
+(0.8.0+), and asks uv for that managed-only version without project discovery or
+downloads. Missing uv or a
 not-yet-prepared interpreter is an explicit unavailable result. `Prepare` is a
 separate, explicit setup operation: it requests `uv python install --no-bin
 --no-registry` before the same acquisition-free lookup. No production caller

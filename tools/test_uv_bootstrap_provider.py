@@ -99,16 +99,21 @@ FIND = [
 ]
 
 
-@pytest.mark.parametrize("operation", ["Inspect", "Prepare", "prepare"])
+@pytest.mark.parametrize("operation,line_ending", [
+    ("Inspect", b"\n"), ("Inspect", b"\r\n"), ("Prepare", b"\n"), ("prepare", b"\r\n"),
+])
 def test_managed_selection_preserves_exact_request_and_operation(
-    host: str, tmp_path: Path, operation: str,
+    host: str, tmp_path: Path, operation: str, line_ending: bytes,
 ) -> None:
     prepare = operation.lower() == "prepare"
     responses = [_result("uv 0.8.0\n")]
     if prepare:
         responses.append(_result(stderr="installation progress is not a Python path\n"))
     responses.append(_result("PYTHON", stderr="diagnostic is not a Python path\n"))
-    result = _run(host, tmp_path, responses, operation=operation)
+    result = _run(
+        host, tmp_path, responses,
+        operation=operation, request=b"cpython@3.11.11" + line_ending,
+    )
     assert result["Selected"] == {
         "Status": "selected", "Reason": "uv-managed-python",
         "Uv": str(tmp_path / "uv application"), "Python": str(tmp_path / "managed python"),
@@ -140,7 +145,7 @@ def test_missing_uv_does_not_discover_python(host: str, tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("declaration", [
     b"cpython@3.11\n", b"3.11.11\n", b"cpython@03.11.11\n",
-    b"cpython@3.11.11\nextra", b"cpython@3.11.11", b"x" * 65,
+    b"cpython@3.11.11\nextra", b"cpython@3.11.11", b"cpython@3.11.11\r\r\n", b"x" * 65,
 ])
 def test_invalid_declaration_refuses_before_uv(
     host: str, tmp_path: Path, declaration: bytes,
@@ -195,7 +200,7 @@ def test_real_uv_lookup_uses_production_capture_without_path_python(
     if not uv:
         pytest.skip("This read-only native witness requires existing uv; it never installs it.")
     request_file = tmp_path / "bootstrap-python-version.txt"
-    request_file.write_bytes(b"cpython@3.11.11\n")
+    request_file.write_bytes(b"cpython@3.11.11\r\n")
     script = tmp_path / "native-lookup.ps1"
     script.write_text(
         r"""
