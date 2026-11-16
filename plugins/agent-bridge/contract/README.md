@@ -275,7 +275,8 @@ acquisition-runtime custody. Host and native process I/O remain controlled
 fixtures, not installed-runtime or native Copilot evidence. Historical
 generations and their captures remain unchanged.
 
-Three read-only inspection controls bring the current portfolio to 405 cases.
+Three read-only inspection controls extend the current source-bound portfolio,
+which contains 629 cases at this checkpoint.
 They join both CLI aliases and the authenticated route to a copied Core Host,
 preserve cursors and child input, refuse unsupported older daemons without a
 retry, and distinguish bounded semantic observations from Host responsiveness.
