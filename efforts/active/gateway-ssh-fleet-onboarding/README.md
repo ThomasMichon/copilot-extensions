@@ -805,6 +805,12 @@ completion is asserted.
 - This is review-first planned receiving. Source disposition requires actual
   reviewed delivery, current readback and a separate eligibility/whole-contract
   judgment. All seven new technical acceptance rows remain unchecked.
+- #12842 subsequently merged the intake at
+  `06401c3e3e347c4b59d7e17f62f4a059ea1f50d0` after current-head approval and
+  required checks. Complete receiving readback and a separate source judgment
+  retired #4201 as `NOT_PLANNED`, not technically completed. Its original
+  requirements remain in the four Plan and three Validation rows above;
+  standalone provisioning, existing owners and all technical gates remain.
 
 ### 2026-11-07 - Encrypted disposable key through native Windows askpass
 
