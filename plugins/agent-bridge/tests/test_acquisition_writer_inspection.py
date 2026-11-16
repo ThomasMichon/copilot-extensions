@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import argparse
 import copy
 import json
@@ -25,7 +28,7 @@ pytestmark = pytest.mark.contract("agent_bridge.acquisition.runtime")
 
 
 @pytest.fixture
-def rig(tmp_db, tmp_path, monkeypatch):
+def rig(tmp_db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     request = AcquisitionRequest.model_validate({
         "version": 3, "target": "worker", "mode": "acp", "task_id": "task-a",
         "task_generation": 1, "worktree_id": "worktree-a", "allocation": "reused",
@@ -39,6 +42,7 @@ def rig(tmp_db, tmp_path, monkeypatch):
             "creation_nonce": "original-incarnation",
         },
     })
+    assert request.worktree_writer is not None
     state = SimpleNamespace(ready=True)
     manager = SimpleNamespace(is_draining=False)
     runtime = AcquisitionRuntime(manager, None, tmp_db, state)
@@ -67,7 +71,7 @@ def rig(tmp_db, tmp_path, monkeypatch):
     }
     calls = []
 
-    async def command(args, project, *, owner_prefix=None):
+    async def command(args: Any, project: Any, *, owner_prefix: Any=None) -> Any:
         assert project == request.project
         assert owner_prefix == ("original-owner", "original-build")
         calls.append(args)
@@ -80,7 +84,9 @@ def rig(tmp_db, tmp_path, monkeypatch):
     from agent_bridge import session_lifecycle_cli
     monkeypatch.setattr(
         session_lifecycle_cli, "_agent_worktrees_pinned_selection",
-        Mock(side_effect=AssertionError("inspection must not select a replacement")),
+        Mock(return_value=(
+            ("original-owner", "original-build"), tmp_path / "owner", tmp_path / "python",
+        )),
     )
     return SimpleNamespace(
         runtime=runtime, request=request, db=tmp_db, manager=manager, state=state,
@@ -88,7 +94,7 @@ def rig(tmp_db, tmp_path, monkeypatch):
     )
 
 
-def snapshot(db):
+def snapshot(db: Any) -> Any:
     return {
         name: [dict(row) for row in db.execute_read(f"SELECT * FROM {name}")]
         for name in (
@@ -99,7 +105,7 @@ def snapshot(db):
 
 
 @pytest.mark.asyncio
-async def test_live_observation_recovers_original_writer_without_writes_or_reselection(rig, monkeypatch):
+async def test_live_observation_recovers_original_writer_without_writes(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     before = snapshot(rig.db)
     monkeypatch.setattr(rig.db, "execute_write", Mock(side_effect=AssertionError("inspection wrote")))
     legacy = await rig.runtime.inspect_pending(rig.request.delivery_id)
@@ -122,7 +128,7 @@ async def test_live_observation_recovers_original_writer_without_writes_or_resel
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["creation_nonce", "repo", "path", "id"])
-async def test_changed_original_workspace_never_yields_writer_evidence(rig, changed):
+async def test_changed_original_workspace_never_yields_writer_evidence(rig: Any, changed: Any) -> None:
     before = snapshot(rig.db)
     rig.record[changed] = "different"
     with pytest.raises(AcquisitionRefused):
@@ -132,10 +138,10 @@ async def test_changed_original_workspace_never_yields_writer_evidence(rig, chan
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["identity", "contract", "scope", "session-writes", "unavailable"])
-async def test_old_unknown_or_changed_executing_serializer_refuses_before_record(rig, monkeypatch, changed):
+async def test_old_unknown_or_changed_executing_serializer_refuses_before_record(rig: Any, monkeypatch: pytest.MonkeyPatch, changed: Any) -> None:
     before = snapshot(rig.db)
     if changed == "identity":
-        rig.support["writer_identity"]["runtime_generation"] = "b" * 32
+        rig.support["writer_identity"]["installation_root"] = "/foreign-owner"
     elif changed == "contract":
         rig.support.pop("writer_contract")
     elif changed == "scope":
@@ -143,7 +149,7 @@ async def test_old_unknown_or_changed_executing_serializer_refuses_before_record
     elif changed == "session-writes":
         rig.support.pop("retained_session_writes")
     else:
-        async def unavailable(*args, **kwargs):
+        async def unavailable(*args: Any, **kwargs: Any) -> None:
             raise AcquisitionRefused("owner_operation_pending", "original writer did not answer")
         monkeypatch.setattr(acquisition_authority, "worktree_command", unavailable)
     with pytest.raises(AcquisitionRefused):
@@ -154,10 +160,10 @@ async def test_old_unknown_or_changed_executing_serializer_refuses_before_record
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["instance", "journal", "draining", "not-ready"])
-async def test_changes_during_observation_invalidate_the_result(rig, monkeypatch, changed):
+async def test_changes_during_observation_invalidate_the_result(rig: Any, monkeypatch: pytest.MonkeyPatch, changed: Any) -> None:
     original = rig.command
 
-    async def command(args, *a, **kwargs):
+    async def command(args: Any, *a: Any, **kwargs: Any) -> Any:
         result = await original(args, *a, **kwargs)
         if args[0] == "record":
             if changed == "instance":
@@ -184,11 +190,11 @@ async def test_changes_during_observation_invalidate_the_result(rig, monkeypatch
 @pytest.mark.parametrize("operation", ["resource-relationship", "record"])
 @pytest.mark.parametrize("failure", [FileNotFoundError, PermissionError])
 def test_unavailable_retained_command_is_a_structured_read_only_refusal(
-    rig, monkeypatch, operation, failure,
-):
+    rig: Any, monkeypatch: pytest.MonkeyPatch, operation: Any, failure: Any,
+) -> None:
     original = rig.command
 
-    async def command(args, *a, **kwargs):
+    async def command(args: Any, *a: Any, **kwargs: Any) -> Any:
         if args[0] == operation:
             raise failure("unavailable original launcher")
         return await original(args, *a, **kwargs)
@@ -212,7 +218,7 @@ def test_unavailable_retained_command_is_a_structured_read_only_refusal(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["missing", "legacy", "refused", "passive"])
-async def test_unqualified_original_owner_is_not_repaired_or_adopted(rig, changed):
+async def test_unqualified_original_owner_is_not_repaired_or_adopted(rig: Any, changed: Any) -> None:
     delivery = rig.request.delivery_id
     if changed == "missing":
         delivery = "unknown-delivery"
@@ -239,14 +245,14 @@ async def test_unqualified_original_owner_is_not_repaired_or_adopted(rig, change
 
 @pytest.mark.parametrize("supported", ["current", "prior", "rollback"])
 def test_cli_negotiates_and_round_trips_optional_inspection_through_http(
-    rig, monkeypatch, capsys, supported,
-):
+    rig: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], supported: Any,
+) -> None:
     app = FastAPI()
     app.include_router(router)
     app.state.acquisition_runtime = rig.runtime
 
     @app.get("/health")
-    def health():
+    def health() -> Any:
         return {
             "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
             "capabilities": {module.CAPABILITY: 1} if supported != "prior" else {},
@@ -255,7 +261,7 @@ def test_cli_negotiates_and_round_trips_optional_inspection_through_http(
     with TestClient(app) as http:
         client = BridgeClient("http://unused", "unused", connect_grace=0)
 
-        def send(method, path, *args, **kwargs):
+        def send(method: Any, path: Any, *args: Any, **kwargs: Any) -> Any:
             if supported == "rollback":
                 path = path.partition("?")[0]
             response = http.request(method, path)
@@ -263,7 +269,7 @@ def test_cli_negotiates_and_round_trips_optional_inspection_through_http(
                 raise BridgeClientError(response.status_code, response.json()["detail"])
             return response.json()
 
-        client._request = send
+        setattr(client, "_request", send)
         from agent_bridge import __main__ as core
         monkeypatch.setattr(core, "_get_client", lambda: client)
         parser = argparse.ArgumentParser()

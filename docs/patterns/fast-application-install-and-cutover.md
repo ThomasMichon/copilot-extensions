@@ -9,6 +9,14 @@ examples; other applications still require the qualification recorded in the
 That matrix owns progress and assignments; this page owns the common support
 and test contract. Neither grants host installation or fleet rollout authority.
 
+The [Manager-owned application-footprint vision](../../visions/installer/application-footprints/README.md)
+and [receiving amendment](../../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+define the current convergence target. Generic install/update orchestration
+moves out of Worktrees into Manager. Main promotion produces wholly-copyable
+app directories; pinned Dev and frozen WIP use that same promotion flow locally,
+including vendoring and local version assignment, before orchestration. Existing
+bounded examples do not establish the requested first fully converted component.
+
 Read this alongside the [install contract](../install-contract.md),
 [graceful cutover](graceful-daemon-cutover.md),
 [service contract evolution](service-contract-evolution.md), and
@@ -29,13 +37,15 @@ establish that complete contract.
 
 ```text
 trusted upstream installer / explicit manual recovery entry
-    -> select official Main or configured backing Git commit once
-    -> existing promotion owner supplies snapshot + matching wheels/locks
+    -> select Main, pinned Dev or explicit frozen WIP once
+    -> same promotion owner supplies complete app footprint + wheels/locks
+       (local Dev/WIP preparation includes vendoring and local versions)
     -> install and verify Manager only
     -> read selected/registered repositories and derive wanted local apps
-    -> copy complete application projects into immutable version slots
+    -> Manager copies complete app directories into immutable version slots
     -> stage selected apps with bounded parallelism (incumbents unchanged)
     -> qualify every member required by the chosen activation strategy
+    -> select/ready required IPC providers before consumer full setup calls them
     -> run simple app setup through its owner before cutover
     -> kill outgoing service trees; one bounded handoff only when reliable
     -> start selected incoming services through their existing lifecycle owner
@@ -135,16 +145,33 @@ Neither mode is a new release-approval token or installation-completion claim.
 
 | Boundary | Required behavior | Existing implementation home |
 |----------|-------------------|------------------------------|
-| Source and dependencies | Consume the canonical promoted snapshot, associated first-party wheels and target-compatible lock/profile. Keep `pyproject.toml` authoritative, configured feeds and seven-day seasoning intact. Reuse complete outputs for an unchanged selected Git commit only when their existing compatibility/completion checks pass. Local promotion does not increment package versions. Missing outputs go back through their promotion owner; corrupt outputs are not a source-fallback signal. | [Project emitter](../../tools/runtime_application_project.py), [profile preparation](../../tools/runtime_profile.py), [promotion](../pipelines.md) |
+| Source and dependencies | Consume a promotion-produced copyable app directory and target-compatible lock/profile. Promotion closes embedded first-party code through vendoring and assigns local output versions for pinned Dev/frozen WIP. IPC providers are separately installed dependencies, not imported implementation packages. Keep `pyproject.toml`, configured feeds and seasoning authoritative; optional wheels use explicit association. Reuse only compatible complete outputs. | [Project emitter](../../tools/runtime_application_project.py), [profile preparation](../../tools/runtime_profile.py), [promotion](../pipelines.md) |
 | Copyable slot | Carry the complete project, lock, wheels, resources and all declared entry points into the version slot. Use a nested `.venv`; no editable runtime or deployed dependency on the original checkout, payload or staging path. | [Application installer](../../libs/installer-engine/runtime_application_install.py), [immutable runtime](durable-vs-versioned-runtime.md) |
-| Slot-local front doors | App and `install` launchers run through the same locked UV project. Preserve arguments and exit codes in CMD, PowerShell and POSIX shells. Resolve the physical installation consistently when root overrides are absent; keep install, configuration/data and socket/control roots distinct where supported. Ambient Python/UV settings must not select another environment. | [Canonical launcher generator](../../libs/installer-engine/runtime_application_binstubs.py) |
-| Stage only | `install --stage` prepares the candidate environment without changing global commands, current/last-good markers, provider/service registrations, active routes, durable live work or incumbent ownership. Target full staging also admits app-owned candidate readiness without publishing live work. A private candidate listener is allowed only through its existing passive/ownership contract. | Generated `install` entry; application candidate/readiness owner |
+| Slot-local front doors | App and `setup` launchers run through the same locked UV project. Preserve arguments and exit codes in CMD, PowerShell and POSIX shells. Resolve the physical installation consistently when root overrides are absent; keep install, configuration/data and socket/control roots distinct where supported. Ambient Python/UV settings must not select another environment. | [Canonical launcher generator](../../libs/installer-engine/runtime_application_binstubs.py); current `install` entry is a predecessor |
+| Stage only | `setup --stage` prepares the candidate environment without changing global commands, current/last-good markers, provider/service registrations, active routes, durable live work or incumbent ownership. Target full staging also admits app-owned candidate readiness without publishing live work. A private candidate listener is allowed only through its existing passive/ownership contract. | App setup target; current generated `install` entry and application candidate/readiness owner |
 | Setup | Make app-specific setup repeatable, use declared arguments, preserve existing configuration/secrets/data and distinguish an absent optional integration from a broken required one. Stage cannot call a setup action that mutates active state. A CLI-only app may have no setup callback. | `application.json` setup declaration and owning app |
-| Activate/start | Normal `install` may compose missing preparation. Reuse the qualified slot, publish through the existing transaction/selection owner, invoke the declared startup action and verify the actual installed generation. Return an explicit failed/partial outcome when readiness fails; an import, open TCP port or child PID alone is not success. | Application installer, existing app setup/start callbacks |
+| Activate/start | Normal `setup` may compose missing preparation. Reuse the qualified slot and the existing app startup/selection owner; successful incoming V2 startup is the roll-forward commit point for services, followed by coherent current selection and neutral commands. Return an explicit failed/partial outcome when readiness fails; a pointer, import, open port or child PID alone is not success. | Application installer, existing app setup/start callbacks; rollout qualification remains open |
 | Stable commands/registrations | Global management front doors select the current slot and delegate; they must not contain a mutable checkout or payload dependency. Preserve attributable payload-local agent commands and installation-cell rules. Migrate owned task/unit/provider registrations through their owner; preserve edited or foreign registrations. | Existing command, installation and service owners |
 | Repeat and rollback | Reinstalling an unchanged healthy selected generation reuses its native owner, route, data handle and completion, rather than restarting it. Preserve a state-compatible last-good generation and an independently usable manual recovery path. | Versioned runtime plus app currentness/recovery |
 | Plugin connector | Loading a plugin may discover/report the installed backend and emit bounded guidance. It must not build, install, repair, stamp, register providers or start services merely on session start. Exact selected commands remain attributable. | Owning plugin hook and command declarations |
 | Timing and diagnostics | Measure the real cold, repeat and update front doors, including required preparation. Respect the actual caller deadline; the bounded core ordinary-install lane uses its existing 300-second budget. Report phase/child failure and elapsed time. Do not fix timeouts by lengthening waits or timing only an already-built inner step. | Existing installer and test runners |
+
+The forward app entry is slot-local `bin/setup` with platform shims:
+`setup --stage` prepares only the candidate; normal setup establishes readiness,
+current selection and neutral app/global redirects. Current slot-root `install`
+entries are implementation predecessors, not another required forward flow.
+Manager calls the incoming slot directly rather than invoking a neutral setup
+that still selects the incumbent. A wheel convention must bind the selected app
+and dependency inputs explicitly; dropping unrelated wheels beside a package is
+not selection. Marker spelling remains a source-contract choice.
+
+Embedded code libraries are promotion-materialized in each consumer. Declared
+shared runtime dependencies, such as SSH Manager, have their own copyable
+footprints, setup and versions. Manager stages providers before consumer full
+setup; required neutral IPC calls also need a compatible selected/ready provider.
+Consumers never import provider implementation or reach into private slots.
+The existing successful-V2 startup/roll-forward contract remains the activation
+commit point; a pointer write alone is not readiness.
 
 ### Repository-declared project locations
 
@@ -265,9 +292,12 @@ and [Python virtual environments](https://docs.python.org/3/library/venv.html).
 
 Manager's wheel embeds the selected first-party library core under its normal
 import names, preserving class identity, required package resources and notices.
-This includes the imported `agent_procutil`, `zdd`, `update_driver` and
-`ssh_manager` code. A shared library's name is not evidence of an independent
-service. Actual external tools and service hosts retain their existing owners.
+This applies only to declared in-process dependencies. Promotion materializes
+that code into the consuming app; the shared SSH Manager implementation and
+other declared IPC runtime providers instead have their own installation/setup
+and are reached through neutral binstubs and IPC, never implementation imports.
+Current import-based compositions are historical adoption, not qualification
+of that target. Actual external tools and service hosts retain their owners.
 
 Third-party packages remain ordinary locked distributions. Preserve their
 `Requires-Dist`, extras, marker-dependent closure, native compatibility,
@@ -295,7 +325,9 @@ For update/controller survival, prefer the existing exact-generation
 `runtime_command` and slot-local native retention bootstrap. Preserve physical
 interpreter/completion identity, retention before imports, process custody,
 admission, drain and eventual retirement. Do not copy or relocate a ready venv
-or introduce per-library services, permanent venvs or a satellite framework.
+or split embedded utilities into per-library services merely for updater
+survival. Declared IPC providers keep their own independently installed runtime;
+consumers do not create duplicate provider environments or a satellite framework.
 Source/provider-resource parity and import-only checks do not prove the final
 artifact, actual serving or cutover survival.
 

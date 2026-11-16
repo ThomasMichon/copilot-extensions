@@ -23,6 +23,19 @@ requirements remain binding.
 
 ## Authoritative replacement and completion
 
+The [Manager-owned application-footprint vision](../visions/installer/application-footprints/README.md)
+adds the forward packaging and setup boundary: promotion produces whole-copy
+app directories, local Dev/WIP preparation assigns local output versions, and
+Manager orchestrates dependency staging and app setup rather than depending on
+Worktrees installation code. Slot-local `setup --stage` selects nothing; full
+setup establishes actual readiness, selection and neutral app/global commands.
+Shared IPC components are separate installations, not consumer imports.
+The [receiving plan and verbatim snapshot](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+retain pending conversion/qualification. Current native installers, generated
+`install` entries and import-based shared implementations below are legacy
+adoption for this boundary; this documentation does not change their code or
+weaken their independent safety and durable-state contracts.
+
 The canonical intent is
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
 This section is its normative installer contract, not a declaration that all
@@ -3875,6 +3888,28 @@ replace the ambient-Python prerequisite with per-project `uv` management.
 The [implementation and qualification plan](../efforts/active/source-managed-runtime-installs/managed-python.md)
 retains the existing setup, engine, bootstrap and application owners.
 
+The [finite-controller target](../visions/installer/README.md#finite-installation-controller)
+separates three stages. The native shell seed establishes tooling and stages
+sources; the prepared managed interpreter runs finite installation management;
+installed applications then use their own runtime/service owners. On Windows,
+PowerShell reaches the existing package-manager uv prerequisite owner, performs
+core Git checkout/copies and invokes the real per-app setup entrypoints.
+Do not require a Python-backed SDK to acquire that first Python, or require
+an installed/running Manager/application daemon to run the controller.
+The normal Manager entry establishes Manager first and then composes the
+selected repository's declared apps/plugins. Independent per-app setup remains
+available. A separately packaged helper is optional and reuses the same engine,
+not another installation algorithm or mandatory service.
+
+This staging preserves native foreground-command ownership, failure,
+cancellation/deadline and cleanup obligations. The seed is not a substitute
+implementation of later Python/helper pipe, process/Job or installation
+protocols; after the execution base exists, their existing owners retain them.
+Source/feed/seasoning, repository hosting policy-before-acquisition and OS
+execution policy remain in force. Application service activation is a separate
+accepted handoff, not an installation-controller startup prerequisite.
+This is the required layering, not a qualification of current cold-entry paths.
+
 - An installable Python project declares compatibility in `pyproject.toml`
   (`requires-python`). Its release/setup inputs select a compatible version;
   locks and native wheel targets must agree with the selected interpreter.
@@ -3941,8 +3976,13 @@ helper hint independent of a retired Manager package environment; managed-base
 retention remains with the toolchain owner.
 Manager cold/passive resident launches remove the finite hint through their
 existing environment scrubber instead of retaining the updater's selection.
-The installation-context caller-owned adapter and the evaluator selector
-below consume it without rediscovering PATH Python. Their optional `-Python`
+The installation-context caller-owned adapter, PowerShell daemon-instance
+transport and the evaluator selector below consume it without rediscovering
+PATH Python. The process transport applies the hint only at its existing lazy
+helper startup: a live helper retains its original interpreter and custody,
+and a conflicting nonempty hint refuses before another request without
+breaking that owner.
+The installation-context and evaluator adapters' optional `-Python`
 argument overrides the inherited value. Invalid paths and interpreter execution
 failures are terminal, not permission to fall back. The original process,
 private-pipe, Job/group, startup/deadline and cleanup protocols are unchanged.
@@ -5903,13 +5943,15 @@ effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
 ### Python-owned construction foundation
 
-For the earlier, Python-free Windows admission boundary, the canonical
+For the earlier pre-runtime Windows admission boundary, the canonical
 `agent-procutil` package also carries native daemon/owned-child helpers, and
 `single-instance-lease` carries the native counterpart of `OperationLock`.
 They reuse WMI outside-Job admission and the exact existing kernel lock
 protocol; owned writers enter their strict Job atomically at creation.
 Their API and qualification boundary are in the
-[procutil bootstrap reference](../libs/agent-procutil/README.md#python-free-windows-bootstrap-admission).
+[procutil bootstrap reference](../libs/agent-procutil/README.md#windows-bootstrap-and-shell-admission).
+Those helpers still require setup-provided Python; they do not supply the
+Python-free first-toolchain stage required by the managed-Python target.
 They do not themselves construct a driver foundation or migrate any first-use
 publisher. Bootstrap source admission, durable interruption fencing and
 immutable publication remain consumer obligations.

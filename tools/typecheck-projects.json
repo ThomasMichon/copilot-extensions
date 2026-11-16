@@ -526,7 +526,8 @@
         "plugins/agent-worktrees"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "ai-attribution",

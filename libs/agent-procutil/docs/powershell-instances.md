@@ -16,8 +16,17 @@ AppDomain state and a process-wide monitor serialize concurrent runspaces;
 subsequent calls share that channel and the original instance's nested guard
 references. Source-only distributions carry the complete
 `daemon_instance_runtime.pyz` beside the adapter, including installed dtssh and
-WSL keepalive entrypoints. Python is resolved normally from PATH, without
-interpreter attestation or download.
+WSL keepalive entrypoints. When the existing finite setup handoff supplies
+`COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`, helper startup uses that absolute
+executable without PATH discovery. Invalid paths, execution aliases, startup
+failure and unsupported versions are terminal; they never select another
+interpreter. The helper does not change or persist the hint. An already-open
+helper retains its original interpreter and custody; a different nonempty
+hint refuses before sending a request, without replacing or breaking that
+live owner. Use a fresh PowerShell process for a different selection.
+Without the handoff, the legacy compatibility
+path resolves Python normally from PATH. Neither path attests or downloads
+an interpreter.
 
 The kernel's input-pipe server PID and the same retained process handle/birth
 authenticate the original shell. The helper is never registered as that shell's
