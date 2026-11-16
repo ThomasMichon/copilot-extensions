@@ -88,7 +88,8 @@ jobs:
           (not test_bootstrap_ps1.py or managed_python or
           python_lookup_rejects_empty_success or bootstrap_retains_physical_uv or
           bootstrap_prepares_compatible_uv or hands_selected_python or
-          reuses_supported_uv_later_on_path or uv_discovery_preserves_explicit_os_policy_refusal) and
+          reuses_supported_uv_later_on_path or uv_discovery_preserves_explicit_os_policy_refusal or
+          refuses_unknown_uv_handoff) and
           (not test_bootstrap_sh.py or bootstrap_uses_managed_python or
           reuses_supported_uv_later_on_path) and
           (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and

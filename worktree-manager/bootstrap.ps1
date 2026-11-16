@@ -570,6 +570,14 @@ $PreviousSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
 $PreviousBootstrapPython = $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
 try {
     $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $BootstrapSourceAnchor
+    if ($installerArgs -notcontains '--recover-for-repair') {
+        $entry = Join-Path $PWD 'scripts\runtime_install.py'
+        if (-not (Select-String -LiteralPath $entry -CaseSensitive -Quiet `
+            -Pattern '^# copilot-extensions:bootstrap-uv=1$')) {
+            throw 'Selected Manager source does not support qualified UV handoff. Select a newer source; installation was not started.'
+        }
+        $installerArgs += @('--bootstrap-uv', $Uv)
+    }
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $Python
     $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))

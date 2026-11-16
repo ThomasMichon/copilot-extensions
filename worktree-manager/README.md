@@ -838,6 +838,17 @@ hide a supported later copy. On Windows, an explicit OS-policy refusal
 (`WinError 448` / `os error 448`) remains fatal rather than selecting another
 copy. Only when no supported candidate is found does bootstrap use its existing
 user-local prerequisite installation path, then repeat qualification.
+The same qualified UV path reaches runtime construction through the explicit
+`--bootstrap-uv` installation input, including queued installation and update
+participants. It is not a worker-environment hint or a second PATH lookup.
+The selected source's `scripts/runtime_install.py` declares this receiver
+contract with the exact line `# copilot-extensions:bootstrap-uv=1`. Bootstrap
+reads that declaration before sending the new argument; a missing or unknown
+generation refuses installation with an instruction to select a newer source.
+It never probes an effectful legacy invocation or retries installation with
+weaker tool selection. Older callers retain the existing default discovery
+behavior on the new provider. Repair-recovery does not take this installation
+input, and independent native-wheel inputs keep their own UV selection.
 The selected explicit interpreter is passed into construction, where the engine
 retains the source/dependency/configuration inputs and constructs a non-editable
 runtime. Governed `uv pip install` selects runtime dependencies for this platform,

@@ -1,9 +1,11 @@
-"""Helpers use their queued application's interpreter, not a draining worker's hint."""
+"""Bootstrap retains explicit Python and UV rather than a draining worker's selection."""
 
 from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,6 +22,77 @@ from worktree_manager import update_driver_cli as manager
 
 
 KEY = "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_installation_keeps_bootstraps_uv_through_the_real_constructor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prepared: bool,
+) -> None:
+    import source_acquisition
+    from worktree_manager import self_install
+
+    installer_factory: Callable[[], Any] = self_install._runtime_installer
+    adapter = installer_factory()
+    payload, root, uv = tmp_path / "payload", tmp_path / "manager", tmp_path / "uv"
+    package = payload / "src" / "worktree_manager"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "1.2.3"\n', encoding="utf-8")
+    (package / "__main__.py").touch()
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.2.3"\n', encoding="utf-8",
+    )
+    uv.touch()
+    seen: list[Path] = []
+
+    @contextmanager
+    def candidate(actual_root: Path, version: str, **options: Any) -> Iterator[SimpleNamespace]:
+        seen.append(options["uv"])
+        yield SimpleNamespace(slot=actual_root / "versions" / version, reused=False)
+
+    @contextmanager
+    def selected_source(*args: Any) -> Iterator[tuple[Any, dict[str, Any]]]:
+        yield (SimpleNamespace(payload=payload) if prepared else payload), {}
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    monkeypatch.setenv("PATH", str(tmp_path / "unusable-ambient-tools"))
+    monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(
+        self_install, "_complete_candidate",
+        lambda ready, *args, **kwargs: self_install.SelfInstallResult(
+            "1.2.3", "installed", str(root), slot=str(ready.slot),
+        ),
+    )
+    if prepared:
+        monkeypatch.setattr(adapter, "prepared_manager_inputs", selected_source)
+        monkeypatch.setattr(source_acquisition, "manager_payload", lambda *args: pytest.fail(
+            "prepared installation must not acquire another source",
+        ))
+    else:
+        monkeypatch.setattr(source_acquisition, "manager_payload", selected_source)
+    args = SimpleNamespace(
+        bootstrap_uv=uv, root=root, recover_adopted=None, payload=payload,
+        source_digest=None, repair_update=False, skip_instance_reconcile=True,
+        install_source=tmp_path / "snapshot" if prepared else None,
+    )
+    assert adapter._install(args) == root / "versions" / "1.2.3"
+    assert seen == [uv]
+
+
+@pytest.mark.parametrize("extra", [
+    ["--describe-source-inputs"], ["--describe-install"], ["--recover-for-repair"],
+    ["--uninstall"], ["--wheel-uv", "another-tool"],
+])
+def test_bootstrap_uv_cannot_change_read_only_recovery_or_native_wheel_inputs(
+    tmp_path: Path, extra: list[str],
+) -> None:
+    from worktree_manager import self_install
+
+    installer_factory: Callable[[], Any] = self_install._runtime_installer
+    uv = tmp_path / "uv"
+    uv.touch()
+    with pytest.raises(SystemExit) as refusal:
+        installer_factory().main(["--bootstrap-uv", str(uv), *extra])
+    assert refusal.value.code == 2
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows bootstrap installation participant")
@@ -39,12 +112,24 @@ def test_foreground_install_selects_its_python_for_the_real_queued_participant(
     root = tmp_path / "manager"
     slot = root / "versions" / "1.2.3"
     slot.mkdir(parents=True)
+    payload = tmp_path / "payload"
+    (payload / "src" / "worktree_manager").mkdir(parents=True)
+    (payload / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "1.2.3"\n', encoding="utf-8",
+    )
+    (payload / "src" / "worktree_manager" / "__main__.py").touch()
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.2.3"\n', encoding="utf-8",
+    )
+    uv = tmp_path / "qualified-uv"
+    uv.touch()
     adapter.runtime.mark_complete(root, slot.name, payload_hash="b" * 64)
     queue = tmp_path / "queue"
     report = tmp_path / "participant.json"
     sdk = Path(__file__).resolve().parents[2] / "libs" / "installation-context" / "installation-context.ps1"
     (scripts / "runtime_install.py").write_text(f"""
 import json,os,subprocess,sys
+from contextlib import contextmanager
 from pathlib import Path
 sys.path[:0]={sys.path!r}
 from agent_procutil import no_window_kwargs
@@ -54,6 +139,14 @@ adapter=self_install._runtime_installer()
 core.default_root=lambda:Path({str(queue)!r})
 adapter._execution_driver=lambda payload:core
 report={{"before":os.environ.get({KEY!r})}}
+@contextmanager
+def candidate(root, version, **options):
+    from types import SimpleNamespace
+    report["uv"]=str(options["uv"])
+    yield SimpleNamespace(slot=Path({str(slot)!r}),reused=False)
+adapter.engine.numbered_candidate=candidate
+self_install._complete_candidate=lambda ready,*a,**k:self_install.SelfInstallResult(
+    "1.2.3","installed",{str(root)!r},slot=str(ready.slot))
 def install(args):
     report["during"]=os.environ.get({KEY!r})
     result=subprocess.run([
@@ -65,7 +158,9 @@ def install(args):
     report.update(code=result.returncode,stdout=result.stdout,stderr=result.stderr)
     if result.returncode:
         raise RuntimeError(result.stdout+result.stderr)
-    return Path({str(slot)!r})
+    return adapter._install_selected_payload(
+        args,args.payload,before_publish=lambda:None,reconcile=False,
+        wheel_inputs=None,local_packages=None,application=None,native_wheel_inputs=None)
 adapter._install=install
 try:
     code=adapter.main(sys.argv[1:])
@@ -80,19 +175,59 @@ raise SystemExit(code)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv(KEY, "different-worker-selection")
     args = SimpleNamespace(
-        payload=root, root=root, command=[], repair_update=False, recover_adopted=None,
-        skip_instance_reconcile=False,
+        payload=payload, root=root, command=[], repair_update=False, recover_adopted=None,
+        skip_instance_reconcile=False, bootstrap_uv=uv,
     )
     assert adapter._foreground_install(args, update_driver.core) == slot
     result = json.loads(report.read_text(encoding="utf-8"))
     assert result["before"] is None and result["after"] is None
     assert result["during"] == getattr(sys, "_base_executable", sys.executable)
     assert result["code"] == 0 and result["stderr"] == "", result
+    assert Path(result["uv"]) == uv
     assert json.loads(result["stdout"])["canonical"] == "opaque:install"
     assert os.environ[KEY] == "different-worker-selection"
     requests = update_driver.status(root=queue)
     assert isinstance(requests, tuple) and len(requests) == 1
     assert KEY not in dict(requests[0].spec.context)
+
+
+def test_bootstrap_update_carries_uv_in_participant_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import bootstrap_inputs
+    import bootstrap_update
+    from update_driver.authority import UpdateAuthority
+    from worktree_manager import update_python_path
+
+    payload = tmp_path / "source"
+    payload.mkdir()
+    runners: list[Any] = []
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, *a, **k: (payload, True))
+    monkeypatch.setattr(manager, "request_context", lambda: {})
+    monkeypatch.setattr(manager, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(manager, "_update_context_directory", lambda context: None)
+    monkeypatch.setattr(update_python_path, "finish_update", lambda command, code: code)
+
+    def enqueue(spec: Any, *, runner: Any, **kwargs: Any) -> SimpleNamespace:
+        runners.append(runner)
+        assert not any("BOOTSTRAP_UV" in key for key, value in spec.context)
+        return SimpleNamespace(id="fixture", log_path=tmp_path / "update.log")
+
+    driver = SimpleNamespace(
+        RequestSpec=update_driver.RequestSpec, TrustedRunner=update_driver.TrustedRunner,
+        current_authority=lambda **kwargs: UpdateAuthority(),
+        default_root=lambda: tmp_path, enqueue=enqueue, drain=lambda: None,
+        wait=lambda *args, **kwargs: SimpleNamespace(state="completed", exit_code=0),
+    )
+    args = SimpleNamespace(
+        payload=payload, root=tmp_path / "manager", install_source=None,
+        command=["update", "--supervised-debug"], repair_update=False,
+        bootstrap_uv=tmp_path / "qualified-uv",
+    )
+    execute: Callable[..., int] = bootstrap_update.execute
+    assert execute(args, driver, source_digest="a" * 64) == 0
+    arguments = runners[0].argv
+    assert arguments[arguments.index("--bootstrap-uv") + 1] == str(args.bootstrap_uv)
 
 
 @pytest.mark.parametrize("previous", [None, "different-worker-selection"])

@@ -204,10 +204,16 @@ def _create_untrusted_junction(target: Path, link: Path) -> None:
             kernel.CloseHandle(handle)
 
 
-def _source_repo(root: Path, *, long_path: bool = False) -> Path:
+def _source_repo(root: Path, *, long_path: bool = False, uv_contract: str | None = "1") -> Path:
     repo = root / "source"
     (repo / "worktree-manager").mkdir(parents=True)
     (repo / "worktree-manager" / "README.md").write_text("payload\n", "utf-8")
+    scripts = repo / "worktree-manager" / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime_install.py").write_text(
+        "# legacy strict installer\n" if uv_contract is None
+        else f"# copilot-extensions:bootstrap-uv={uv_contract}\n", encoding="utf-8",
+    )
     if long_path:
         entry = repo / _LONG_SOURCE_PATH
         entry.parent.mkdir(parents=True)
@@ -231,6 +237,7 @@ def _fake_tools(
             "@echo off\r\n"
             'if defined BOOTSTRAP_PYTHON_HANDOFF >"%BOOTSTRAP_PYTHON_HANDOFF%" '
             "echo %COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON%\r\n"
+            'if defined BOOTSTRAP_ARGUMENT_HANDOFF >"%BOOTSTRAP_ARGUMENT_HANDOFF%" echo %*\r\n'
             f"exit /b {python_exit}\r\n",
             "utf-8",
         )
@@ -258,6 +265,9 @@ def _fake_tools(
             "#!/bin/sh\n"
             'if [ -n "${BOOTSTRAP_PYTHON_HANDOFF:-}" ]; then\n'
             '  printf "%s\\n" "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" > "$BOOTSTRAP_PYTHON_HANDOFF"\n'
+            "fi\n"
+            'if [ -n "${BOOTSTRAP_ARGUMENT_HANDOFF:-}" ]; then\n'
+            '  printf "%s\\n" "$@" > "$BOOTSTRAP_ARGUMENT_HANDOFF"\n'
             "fi\n"
             f"exit {python_exit}\n",
             "utf-8",
@@ -316,8 +326,9 @@ def _run(
     uv_version: str = "0.13.7",
     handoff: bool = False,
     shadow_uv: str | None = None,
+    uv_contract: str | None = "1",
 ) -> subprocess.CompletedProcess[str]:
-    repo = _source_repo(tmp_path, long_path=long_path)
+    repo = _source_repo(tmp_path, long_path=long_path, uv_contract=uv_contract)
     root = tmp_path / "manager-root"
     root.mkdir()
     if retained_sparse:
@@ -358,6 +369,7 @@ def _run(
     if handoff:
         env["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = "previous-selection"
         env["BOOTSTRAP_PYTHON_HANDOFF"] = str(tmp_path / "python-handoff")
+        env["BOOTSTRAP_ARGUMENT_HANDOFF"] = str(tmp_path / "argument-handoff")
     installer_mock = ""
     if shadow_uv:
         shadow = tmp_path / "shadow-tools"
@@ -551,6 +563,20 @@ def test_bootstrap_reuses_supported_uv_later_on_path(
         str(tmp_path / "shadow-tools" / "uv.ps1"),
         str(tmp_path / "fake-bin" / ("uv.ps1" if os.name == "nt" else "uv")),
     ]
+    arguments = (tmp_path / "argument-handoff").read_text(encoding="utf-8")
+    assert "--bootstrap-uv" in arguments
+    assert str(tmp_path / "fake-bin" / ("uv.ps1" if os.name == "nt" else "uv")) in arguments
+
+
+@pytest.mark.parametrize("uv_contract", [None, "2"])
+def test_bootstrap_refuses_unknown_uv_handoff_before_legacy_installation(
+    tmp_path: Path, uv_contract: str | None,
+) -> None:
+    result = _run(tmp_path, uv_exit=0, handoff=True, uv_contract=uv_contract)
+    assert result.returncode != 0
+    assert "does not support qualified UV handoff" in result.stderr
+    assert not (tmp_path / "argument-handoff").exists()
+    assert not (tmp_path / "manager-root" / "current-version").exists()
 
 
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])

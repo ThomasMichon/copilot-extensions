@@ -297,6 +297,13 @@ cd "$payload_parent/worktree-manager"
 export WORKTREE_MANAGER_SOURCE_ANCHOR="$source_anchor"
 # Version-install the fetched payload (idempotent, version-gated): publishes the
 # versions/<ver> slot + current-version marker + ~/.local/bin binstub.
+if [ "$recovery_only" -eq 0 ]; then
+    if ! grep -qx '# copilot-extensions:bootstrap-uv=1' scripts/runtime_install.py; then
+        _bootstrap_progress 'Selected Manager source does not support qualified UV handoff. Select a newer source; installation was not started.' failed
+        exit 2
+    fi
+    installer_args+=(--bootstrap-uv "$UV")
+fi
 if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
     "$UV" python install --no-bin --no-registry 3.11
     PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11)"

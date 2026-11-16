@@ -174,8 +174,11 @@ def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_p
 
 
 @pytest.mark.parametrize("shadow_uv", ["old", "malformed", "failed"])
-def test_bootstrap_reuses_supported_uv_later_on_path(tmp_path: Path, shadow_uv: str) -> None:
-    repo = _source_repo(tmp_path)
+@pytest.mark.parametrize("uv_contract", ["1", None, "2"])
+def test_bootstrap_reuses_supported_uv_later_on_path(
+    tmp_path: Path, shadow_uv: str, uv_contract: str | None,
+) -> None:
+    repo = _source_repo(tmp_path, uv_contract=uv_contract)
     root = tmp_path / "manager-root"
     root.mkdir()
     (root / "config.toml").write_text(
@@ -207,15 +210,23 @@ def test_bootstrap_reuses_supported_uv_later_on_path(tmp_path: Path, shadow_uv: 
             "PATH": os.pathsep.join((str(shadow), str(tools), os.environ.get("PATH", ""))),
             "BOOTSTRAP_PYTHON_HANDOFF": str(tmp_path / "python-handoff"),
             "BOOTSTRAP_UV_VERSION_TRACE": str(tmp_path / "uv-versions"),
+            "BOOTSTRAP_ARGUMENT_HANDOFF": str(tmp_path / "argument-handoff"),
         },
         cwd=tmp_path, capture_output=True, text=True, timeout=20,
     )
+    if uv_contract != "1":
+        assert result.returncode != 0
+        assert "does not support qualified UV handoff" in result.stderr
+        assert not (tmp_path / "argument-handoff").exists()
+        return
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "python-handoff").read_text(encoding="utf-8").strip() == str(tools / "fake-python")
     assert "preparing it" not in result.stderr
     assert (tmp_path / "uv-versions").read_text(encoding="utf-8").splitlines() == [
         str(shadow / "uv"), str(tools / "uv"),
     ]
+    arguments = (tmp_path / "argument-handoff").read_text(encoding="utf-8").splitlines()
+    assert arguments[arguments.index("--bootstrap-uv") + 1] == str(tools / "uv")
 
 
 def test_bootstrap_progress_frames_each_physical_message_line() -> None:

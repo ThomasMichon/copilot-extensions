@@ -1,4 +1,5 @@
 """Standalone Manager adapter over the canonical Python installer engine."""
+# copilot-extensions:bootstrap-uv=1
 
 from __future__ import annotations
 
@@ -550,6 +551,9 @@ def _foreground_install(args: argparse.Namespace, driver: ModuleType) -> Path | 
         source_path = str(args.install_source)
         arguments.extend(["--install-source", source_path])
         identity.extend(["install-source", source_path])
+    if getattr(args, "bootstrap_uv", None) is not None:
+        arguments.extend(["--bootstrap-uv", str(args.bootstrap_uv)])
+        identity.extend(["bootstrap-uv", str(args.bootstrap_uv)])
     if getattr(args, "wheel_profile", None) is not None:
         for name in ("wheel_profile", "wheel_directory", "wheel_profile_sha256", "wheel_python", "wheel_uv"):
             arguments.extend(["--" + name.replace("_", "-"), str(getattr(args, name))])
@@ -742,6 +746,8 @@ def _install_selected_payload(
         )
         if application is not None:
             source_options["_application"] = application
+        if getattr(args, "bootstrap_uv", None) is not None:
+            source_options["_uv"] = args.bootstrap_uv
         if native_wheel_inputs is not None:
             source_options.update(
                 _native_wheel_inputs=native_wheel_inputs,
@@ -828,28 +834,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-digest", help=argparse.SUPPRESS)
     parser.add_argument("--skip-instance-reconcile", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--bootstrap-uv", type=Path)
     for name in ("wheel-profile", "wheel-directory", "wheel-python", "wheel-uv"):
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--wheel-profile-sha256", help=argparse.SUPPRESS)
     parser.add_argument("--describe-source-inputs", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    from runtime_install_inputs import admit_native_wheels
-
+    from runtime_install_inputs import admit_bootstrap_uv, admit_native_wheels, describe_source_inputs
+    admit_bootstrap_uv(args, parser)
     admit_native_wheels(args, parser)
-    if args.describe_source_inputs:
-        if any((
-            args.root, args.install_source, args.command, args.uninstall, args.apply,
-            args.recover_adopted, args.describe_recovery, args.repair_update,
-            args.recover_for_repair, args.json, args.install_only, args.update_participant,
-            args.source_digest,
-            args.skip_instance_reconcile, args.describe_install, args.stage_only,
-        )):
-            parser.error("Source-input discovery cannot be combined with an operation")
-        print(json.dumps({
-            "schema": "copilot-extensions.manager-source-inputs", "version": 1,
-            "capabilities": ["install-source"],
-        }))
+    if describe_source_inputs(args, parser):
         return 0
     if args.describe_install:
         if (
