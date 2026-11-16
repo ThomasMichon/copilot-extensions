@@ -5,8 +5,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import sysconfig
 from types import SimpleNamespace
+from typing import Any
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -15,11 +17,11 @@ pytestmark = [pytest.mark.real_installer_processes, pytest.mark.timeout(60)]
 
 
 @pytest.fixture
-def native_launch(tmp_path):
+def native_launch(tmp_path: Path) -> SimpleNamespace:
     home, anchor = tmp_path / "home", tmp_path / "repository"
     worktrees = tmp_path / "worktrees"
 
-    def write(path, value):
+    def write(path: Path, value: object) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value), encoding="utf-8")
 
@@ -47,7 +49,7 @@ def native_launch(tmp_path):
     )
     assert entry.is_file()
 
-    def invoke(*arguments):
+    def invoke(*arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(entry), "--project", "sample", *arguments],
             cwd=anchor, env=environment, capture_output=True, text=True, timeout=20,
@@ -60,7 +62,9 @@ def native_launch(tmp_path):
     )
 
 
-def test_native_new_refuses_unresolved_binding_without_allocating(native_launch):
+def test_native_new_refuses_unresolved_binding_without_allocating(
+    native_launch: SimpleNamespace,
+) -> None:
     fixture = native_launch
     home, anchor, worktrees = fixture.home, fixture.anchor, fixture.worktrees
     invoke = fixture.invoke
@@ -107,8 +111,8 @@ def test_native_new_refuses_unresolved_binding_without_allocating(native_launch)
 
 @pytest.mark.parametrize("protocol", ["ordinary", "manager", "request-v1", "request-v2"])
 def test_native_unbound_new_tracks_one_workspace_and_preserves_dependent_gates(
-    native_launch, protocol,
-):
+    native_launch: SimpleNamespace, protocol: str,
+) -> None:
     fixture = native_launch
     for arguments in (
         ["init", "--template=", "--initial-branch=main"],
@@ -123,10 +127,11 @@ def test_native_unbound_new_tracks_one_workspace_and_preserves_dependent_gates(
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
-    def plan(*arguments):
+    def plan(*arguments: str) -> dict[str, Any]:
         result = fixture.invoke("resolve", "--json", *arguments)
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        payload: dict[str, Any] = json.loads(result.stdout)
+        return payload
 
     if protocol in {"ordinary", "manager"}:
         arguments = ["--new", "--no-mux"]
@@ -136,8 +141,9 @@ def test_native_unbound_new_tracks_one_workspace_and_preserves_dependent_gates(
             ])
     else:
         version = int(protocol[-1])
+        request_id = str(version) * 32
         request = {
-            "version": version, "request_id": str(version) * 32, "kind": "new",
+            "version": version, "request_id": request_id, "kind": "new",
             "worktree_id": None, "text": "First task", "no_mux": True,
         }
         if version == 2:
@@ -166,8 +172,34 @@ def test_native_unbound_new_tracks_one_workspace_and_preserves_dependent_gates(
     if protocol.startswith("request-"):
         assert plan(*arguments)["worktree_id"] == worktree_id
         assert len(list(fixture.worktrees.iterdir())) == 1
+        # Settle the synthetic consumer before testing completed-session Resume.
+        delivered = subprocess.run(
+            [sys.executable, "-c", """
+import json
+import sys
+from pathlib import Path
+from agent_worktrees import config, launch_seed_state
+config.set_active_project("sample")
+path = Path(sys.argv[1])
+receipt = launch_seed_state.take(path, seed_id=sys.argv[2], kind="new")
+assert receipt["seed"]["text"] == "First task"
+assert launch_seed_state.finish(path, receipt) == {"finished": True}
+assert launch_seed_state.peek(path) is None
+print(json.dumps({"seed_id": receipt["seed"]["seed_id"], "finished": True}))
+""", str(records[0]), request_id],
+            cwd=fixture.anchor, env=fixture.environment, capture_output=True,
+            text=True, timeout=20, **no_window_kwargs(),
+        )
+        assert delivered.returncode == 0, delivered.stdout + delivered.stderr
+        assert json.loads(delivered.stdout) == {
+            "seed_id": request["request_id"], "finished": True,
+        }
+        replay = fixture.invoke("resolve", "--json", *arguments)
+        assert replay.returncode != 0, replay.stdout + replay.stderr
+        assert "completed or superseded" in json.loads(replay.stdout)["error"]
     resumed = plan("--worktree-id", worktree_id, "--no-mux")
     assert resumed["launch"]["cmd"] and resumed["worktree"]["id"] == worktree_id
+    assert resumed["launch"]["seed_pending"] is False
 
     for command in ("state-root", "coordination-readiness"):
         result = fixture.invoke(command, "--json") if command == "state-root" else (

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .config import Config
     from .state_root import ConfigRoot
 
 
@@ -37,21 +38,22 @@ class LaunchPreflightError(RuntimeError):
     """A launch plan cannot be built without mutating unsafe state."""
 
 
-def new_knowledge_error(config, *, source: str) -> str | None:
+def new_knowledge_error(config: Config, *, source: str) -> str | None:
     """Validate selected knowledge without requiring a binding for local New."""
     from .state_root import coordination_readiness
 
     readiness = coordination_readiness(config, cwd=source)
     if not readiness.ready and readiness.code != "knowledge_binding_required":
+        assert readiness.error is not None
         return "New authoring requires knowledge readiness before allocation. " + readiness.error
     return None
 
 
-def new_authoring_error(config, *, source: str) -> str | None:
+def new_authoring_error(config: Config, *, source: str) -> str | None:
     return new_authoring_preflight(config, source=source).error
 
 
-def new_authoring_preflight(config, *, source: str) -> LaunchPreflight:
+def new_authoring_preflight(config: Config, *, source: str) -> LaunchPreflight:
     """Keep configured-knowledge validation and checked staging input together."""
     from .application_admission import new_application_preflight
 

@@ -5,17 +5,22 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import state_root
+from agent_worktrees import (
+    activity, codename_tracking, git_ops, output, sessions, state_root, tracking,
+)
+from agent_worktrees.codename_config import CodenameConfig
 from agent_worktrees import worktree_identity
 
 
-def _config(tmp_path) -> cfg.Config:
+def _config(tmp_path: Path) -> cfg.Config:
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     return cfg.Config(
@@ -36,7 +41,9 @@ def _config(tmp_path) -> cfg.Config:
     )
 
 
-def _unsafe_root(config, *, cwd=None, project=None):
+def _unsafe_root(
+    config: cfg.Config, *, cwd: str | None = None, project: str | None = None,
+) -> state_root.ConfigRoot:
     return state_root.ConfigRoot(
         None,
         "machine_local",
@@ -48,9 +55,9 @@ def _unsafe_root(config, *, cwd=None, project=None):
 
 
 def test_launch_preflight_uses_active_project_for_config_root(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     base = _config(tmp_path)
     config = cfg.Config(
         srcroot=base.srcroot,
@@ -59,10 +66,12 @@ def test_launch_preflight_uses_active_project_for_config_root(
         repo_name="selected-repo",
         repos={"selected-repo": base.repos["demo"]},
     )
-    captured = {}
-    monkeypatch.setattr(m.cfg, "active_project", lambda: "control-project")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(cfg, "active_project", lambda: "control-project")
 
-    def resolve(config_arg, *, cwd=None, project=None):
+    def resolve(
+        config_arg: cfg.Config, *, cwd: str | None = None, project: str | None = None,
+    ) -> state_root.ConfigRoot:
         captured.update(config=config_arg, cwd=cwd, project=project)
         return state_root.ConfigRoot(
             str(tmp_path / ".control-project"),
@@ -72,7 +81,7 @@ def test_launch_preflight_uses_active_project_for_config_root(
             True,
         )
 
-    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", resolve)
+    monkeypatch.setattr(state_root, "resolve_config_root", resolve)
     args = argparse.Namespace(recovery=False)
 
     preflight = m._preflight_launch(
@@ -103,10 +112,10 @@ def _create_args(
 
 
 def test_new_authoring_refuses_required_knowledge_before_allocation(
-    tmp_path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     config = replace(_config(tmp_path), knowledge_repo="knowledge")
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         state_root, "resolve_state_root",
         lambda *_a, **_k: state_root.StateRoot(
@@ -127,18 +136,19 @@ def test_new_authoring_refuses_required_knowledge_before_allocation(
 
 @pytest.mark.parametrize("requirement", ["stateless", "requires_external_state_root"])
 def test_unbound_new_keeps_storage_and_coordination_unavailable(
-    tmp_path, monkeypatch, requirement,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requirement: str,
+) -> None:
     from agent_worktrees import application_admission, launch_preflight
 
     base = _config(tmp_path)
-    config = replace(base, repos={
-        base.repo_name: replace(base.default_repo, **{requirement: True}),
-    })
+    repo = replace(base.default_repo, stateless=True) if requirement == "stateless" else replace(
+        base.default_repo, requires_external_state_root=True,
+    )
+    config = replace(base, repos={base.repo_name: repo})
     checked = launch_preflight.LaunchPreflight(checked_profile="selected-profile")
     observed = []
 
-    def applications(config_arg, *, source):
+    def applications(config_arg: cfg.Config, *, source: str) -> launch_preflight.LaunchPreflight:
         observed.append((config_arg, source))
         return checked
 
@@ -156,8 +166,8 @@ def test_unbound_new_keeps_storage_and_coordination_unavailable(
 
 
 def test_unbound_new_still_refuses_unready_required_applications(
-    tmp_path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     from agent_worktrees import application_admission
 
     base = _config(tmp_path)
@@ -166,9 +176,9 @@ def test_unbound_new_still_refuses_unready_required_applications(
             base.default_repo, stateless=True, require_application_readiness=True,
         ),
     })
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
 
-    def unavailable(**kwargs):
+    def unavailable(**kwargs: object) -> None:
         raise ValueError("owner unavailable")
 
     monkeypatch.setattr(application_admission, "_selected_runtime", unavailable)
@@ -187,14 +197,14 @@ def test_unbound_new_still_refuses_unready_required_applications(
     ["resolve", "--new", "--no-mux"],
 ])
 def test_unresolved_project_configuration_has_a_controlled_admission_error(
-    monkeypatch, capfd, arguments,
-):
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], arguments: list[str],
+) -> None:
     from configuration_layers import ConfigurationError
 
-    def unavailable(*_a, **_k):
+    def unavailable(*_a: object, **_k: object) -> None:
         raise ConfigurationError("explicit knowledge binding is unresolved")
 
-    monkeypatch.setattr(m.cfg, "load_config", unavailable)
+    monkeypatch.setattr(cfg, "load_config", unavailable)
     if arguments[0] == "coordination-readiness":
         result = m.cmd_coordination_readiness_dispatch([])
     else:
@@ -211,12 +221,12 @@ def test_unresolved_project_configuration_has_a_controlled_admission_error(
 
 @pytest.mark.parametrize("external", [False, True], ids=["self-hosted", "bound-knowledge"])
 def test_new_authoring_reads_native_readiness_in_the_allocation_source(
-    tmp_path, monkeypatch, external,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, external: bool,
+) -> None:
     config = _config(tmp_path)
     observed = []
 
-    def resolve(config_arg, *, cwd=None):
+    def resolve(config_arg: cfg.Config, *, cwd: str | None = None) -> state_root.StateRoot:
         observed.append((config_arg, cwd))
         return state_root.StateRoot(
             str(tmp_path), "knowledge_repo" if external else "launch_repo",
@@ -243,8 +253,8 @@ def test_new_authoring_reads_native_readiness_in_the_allocation_source(
 
 @pytest.mark.parametrize("recovery", [False, True], ids=["existing-session", "recovery"])
 def test_existing_session_and_recovery_keep_their_knowledge_admission(
-    tmp_path, monkeypatch, recovery,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovery: bool,
+) -> None:
     config = _config(tmp_path)
     worktree = tmp_path / "existing-worktree"
     worktree.mkdir()
@@ -267,27 +277,27 @@ def test_existing_session_and_recovery_keep_their_knowledge_admission(
     assert result.error is None
 
 
-def _forbid_create_mutations(monkeypatch) -> None:
-    def forbidden(*_args, **_kwargs):
+def _forbid_create_mutations(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("launch preflight failure reached a create mutation")
 
-    monkeypatch.setattr(m.git_ops, "git", forbidden)
-    monkeypatch.setattr(m.git_ops, "prepare_worktree_base", forbidden)
-    monkeypatch.setattr(m.git_ops, "create_worktree", forbidden)
-    monkeypatch.setattr(m.tracking, "create_new_record", forbidden)
+    monkeypatch.setattr(git_ops, "git", forbidden)
+    monkeypatch.setattr(git_ops, "prepare_worktree_base", forbidden)
+    monkeypatch.setattr(git_ops, "create_worktree", forbidden)
+    monkeypatch.setattr(tracking, "create_new_record", forbidden)
     monkeypatch.setattr(m.permissions, "clone_permissions", forbidden)
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", forbidden)
 
 
-def _stub_successful_create(monkeypatch, tmp_path) -> None:
+def _stub_successful_create(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        m.git_ops,
+        git_ops,
         "git",
         lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
     )
-    monkeypatch.setattr(m.git_ops, "resolve_start_point", lambda *_a, **_k: "HEAD")
+    monkeypatch.setattr(git_ops, "resolve_start_point", lambda *_a, **_k: "HEAD")
     monkeypatch.setattr(
-        m.git_ops,
+        git_ops,
         "prepare_worktree_base",
         lambda *_a, **_k: SimpleNamespace(
             start_point="HEAD",
@@ -300,16 +310,16 @@ def _stub_successful_create(monkeypatch, tmp_path) -> None:
             ),
         ),
     )
-    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    monkeypatch.setattr(git_ops, "create_worktree", lambda *_a, **_k: None)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path / "tracking")
     monkeypatch.setattr(
-        m.tracking,
+        tracking,
         "create_new_record",
         lambda **kwargs: SimpleNamespace(receiving_allocation_present=False, **kwargs),
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
-    monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m,
         "_worktree_to_dict",
@@ -324,15 +334,15 @@ def _stub_successful_create(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.parametrize("json_output", [False, True])
 def test_create_preflight_failure_has_zero_mutations_and_no_traceback(
-    tmp_path,
-    monkeypatch,
-    capfd,
-    json_output,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
     """Seeded creation prepares authoring; plain source allocation does not."""
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
-    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(state_root, "resolve_config_root", _unsafe_root)
     _forbid_create_mutations(monkeypatch)
 
     args = _create_args(json_output=json_output)
@@ -351,13 +361,13 @@ def test_create_preflight_failure_has_zero_mutations_and_no_traceback(
 
 @pytest.mark.parametrize("json_output", [False, True])
 def test_system_create_skips_unsafe_launch_preflight_and_emits_path_only(
-    tmp_path,
-    monkeypatch,
-    capfd,
-    json_output,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         m,
         "_preflight_launch",
@@ -388,11 +398,11 @@ def test_system_create_skips_unsafe_launch_preflight_and_emits_path_only(
 
 
 def test_source_only_allocation_does_not_acquire_new_authoring_readiness(
-    tmp_path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     base = _config(tmp_path)
     config = replace(base, repos={"demo": replace(base.default_repo, stateless=True)})
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         m, "_preflight_launch",
         lambda *_a, **_k: pytest.fail("Source-only allocation acquired authoring preflight"),
@@ -408,13 +418,13 @@ def test_source_only_allocation_does_not_acquire_new_authoring_readiness(
 
 
 def test_resolve_json_new_preflight_failure_has_zero_mutations(
-    tmp_path,
-    monkeypatch,
-    capfd,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
-    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(state_root, "resolve_config_root", _unsafe_root)
     _forbid_create_mutations(monkeypatch)
     args = m.build_parser().parse_args(["resolve", "--json", "--new"])
 
@@ -428,10 +438,10 @@ def test_resolve_json_new_preflight_failure_has_zero_mutations(
 
 
 def test_resolve_json_new_codename_policy_error_is_a_clean_json_error(
-    tmp_path,
-    monkeypatch,
-    capfd,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """PR #3037 review finding: `CodenameAttributionPolicyError` must reach
     `resolve --json --new`'s caller as a clean JSON error, not a raw
     traceback -- that CLI path's error handling only caught `RuntimeError`,
@@ -449,19 +459,19 @@ def test_resolve_json_new_codename_policy_error_is_a_clean_json_error(
                 anchor=str(anchor),
                 worktree_root=str(tmp_path / "worktrees"),
                 pr=cfg.PRConfig(enabled=True, source_attribution_configured=False),
-                codename=cfg.CodenameConfig(
+                codename=CodenameConfig(
                     wordlist_path=str(tmp_path / "custom-wordlist.json"),
                     wordlist_path_configured=True,
                 ),
             )
         },
     )
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         m,
         "_create_worktree_core",
         lambda *_a, **_k: (_ for _ in ()).throw(
-            m.codename_tracking.CodenameAttributionPolicyError(
+            codename_tracking.CodenameAttributionPolicyError(
                 "PR-active repo 'demo' has a custom codename wordlist "
                 "configured but pr.source_attribution is not explicit"
             )
@@ -478,10 +488,10 @@ def test_resolve_json_new_codename_policy_error_is_a_clean_json_error(
 
 
 def test_resolve_plain_new_codename_policy_error_is_a_clean_cli_error(
-    tmp_path,
-    monkeypatch,
-    capfd,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Round-6 review finding: the non-JSON `resolve --new` route calls
     `_resolve_new` (-> `_create_worktree_core`) without catching
     `CodenameAttributionPolicyError`, and `main()`'s own top-level dispatch
@@ -491,12 +501,12 @@ def test_resolve_plain_new_codename_policy_error_is_a_clean_cli_error(
     a clean CLI error.
     """
     config = _config(tmp_path)
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(
         m,
         "_resolve_new",
         lambda *_a, **_k: (_ for _ in ()).throw(
-            m.codename_tracking.CodenameAttributionPolicyError(
+            codename_tracking.CodenameAttributionPolicyError(
                 "PR-active repo 'demo' has a custom codename wordlist "
                 "configured but pr.source_attribution is not explicit"
             )
@@ -513,11 +523,11 @@ def test_resolve_plain_new_codename_policy_error_is_a_clean_cli_error(
 
 
 def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
-    tmp_path,
-    monkeypatch,
-    capfd,
-    sample_record,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    sample_record: tracking.WorktreeRecord,
+) -> None:
     config = _config(tmp_path)
     tracking_dir = tmp_path / "tracking"
     tracking_dir.mkdir()
@@ -531,13 +541,13 @@ def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
         worktree_path=str(tmp_path / "worktrees" / "wt-1"),
     )
     (tmp_path / "worktrees" / "wt-1").mkdir(parents=True)
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_dir)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda _value: "wt-1")
-    monkeypatch.setattr(m.tracking, "load_record", lambda _path: record)
-    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
+    monkeypatch.setattr(tracking, "load_record", lambda _path: record)
+    monkeypatch.setattr(state_root, "resolve_config_root", _unsafe_root)
     monkeypatch.setattr(
-        m.tracking,
+        tracking,
         "_RecordLock",
         lambda *_args, **_kwargs: pytest.fail(
             "preflight failure reached tracking mutation"
@@ -559,11 +569,11 @@ def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
 
 
 def test_interactive_resume_preflight_failure_precedes_all_mutations(
-    tmp_path,
-    monkeypatch,
-    capfd,
-    sample_record,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    sample_record: tracking.WorktreeRecord,
+) -> None:
     config = _config(tmp_path)
     record = replace(
         sample_record,
@@ -575,17 +585,17 @@ def test_interactive_resume_preflight_failure_precedes_all_mutations(
         branch="worktree/wt-1",
     )
     (tmp_path / "worktrees" / "wt-1").mkdir(parents=True)
-    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
-    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda _record: None)
+    monkeypatch.setattr(state_root, "resolve_config_root", _unsafe_root)
+    monkeypatch.setattr(sessions, "verify_worktree_active", lambda _record: None)
 
-    def forbidden(*_args, **_kwargs):
+    def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("launch preflight failure reached a resume mutation")
 
-    monkeypatch.setattr(m.tracking, "_RecordLock", forbidden)
-    monkeypatch.setattr(m.tracking, "stamp_mux_live", forbidden)
-    monkeypatch.setattr(m.tracking, "stamp_bound_live", forbidden)
-    monkeypatch.setattr(m.git_ops, "fast_forward_worktree", forbidden)
-    monkeypatch.setattr(m.activity, "log_event", forbidden)
+    monkeypatch.setattr(tracking, "_RecordLock", forbidden)
+    monkeypatch.setattr(tracking, "stamp_mux_live", forbidden)
+    monkeypatch.setattr(tracking, "stamp_bound_live", forbidden)
+    monkeypatch.setattr(git_ops, "fast_forward_worktree", forbidden)
+    monkeypatch.setattr(activity, "log_event", forbidden)
     args = argparse.Namespace(
         recovery=False,
         dry_run=False,
@@ -597,7 +607,7 @@ def test_interactive_resume_preflight_failure_precedes_all_mutations(
         copilot_args=[],
     )
 
-    with m.output.stdout_to_stderr():
+    with output.stdout_to_stderr():
         rc = m._resolve_resume(record, config, args)
 
     captured = capfd.readouterr()
@@ -611,12 +621,12 @@ def test_interactive_resume_preflight_failure_precedes_all_mutations(
 
 
 def test_base_launch_preflight_failure_is_controlled(
-    tmp_path,
-    monkeypatch,
-    capfd,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     config = _config(tmp_path)
-    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
+    monkeypatch.setattr(state_root, "resolve_config_root", _unsafe_root)
     args = m.build_parser().parse_args(["resolve", "--base"])
 
     rc = m._resolve_base_repo(config, args)
@@ -632,10 +642,12 @@ def test_base_launch_preflight_failure_is_controlled(
     }
 
 
-def test_recovery_launch_skips_config_root_preflight(tmp_path, monkeypatch):
+def test_recovery_launch_skips_config_root_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _config(tmp_path)
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "resolve_config_root",
         lambda *_args, **_kwargs: pytest.fail("recovery ran config-root preflight"),
     )
