@@ -9,12 +9,12 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from .owner_membership_signal import MembershipSignal, commit as commit_membership
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 47
+SCHEMA_VERSION = 48
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -335,6 +335,9 @@ CREATE INDEX IF NOT EXISTS idx_pending_prompts_session
 class _CoreMixin:
     """Connection, schema-bootstrap, and low-level query helpers."""
 
+    if TYPE_CHECKING:
+        def _init_schema(self) -> None: ...
+
     def __init__(self, db_path: str | Path, *, read_only: bool = False) -> None:
         self._db_path = Path(db_path).expanduser()
         self._read_only = read_only
@@ -374,6 +377,7 @@ class _CoreMixin:
                 from .mux_question_schema import validate_schema as validate_mux_question_schema
                 from .status_schema import validate_schema as validate_status_schema
                 from .dispatch_cli_origin import validate_schema as validate_cli_origin_schema
+                from .native_send_settlement_schema import validate_schema as validate_send_settlement
 
                 validate_schema(self._get_conn())
                 validate_cold_recovery_schema(self._get_conn())
@@ -389,6 +393,7 @@ class _CoreMixin:
                 validate_status_schema(self._get_conn())
                 validate_exact_live_schema(self._get_conn())
                 validate_cli_origin_schema(self._get_conn())
+                validate_send_settlement(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                     raise ValueError("Read-only database changed during preparation")
@@ -438,7 +443,7 @@ class _CoreMixin:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn
-        return self._local.conn
+        return cast(sqlite3.Connection, self._local.conn)
 
     def start_writer(self) -> None:
         """Start the background event writer thread if it is not already running."""
@@ -525,7 +530,7 @@ class _CoreMixin:
                     self._drain_event_queue_for_stop()
                     return
 
-                batch = [item]
+                batch = [cast(_EventWriteItem, item)]
                 deadline = time.monotonic() + _EVENT_BATCH_WINDOW_SECS
                 while len(batch) < _EVENT_BATCH_MAX:
                     remaining = deadline - time.monotonic()
@@ -540,7 +545,7 @@ class _CoreMixin:
                         self._event_write_q.task_done()
                         self._drain_event_queue_for_stop()
                         return
-                    batch.append(item)
+                    batch.append(cast(_EventWriteItem, item))
 
                 self._commit_event_batch(batch)
         finally:
@@ -550,7 +555,7 @@ class _CoreMixin:
                 self._local.conn = None
 
     def _drain_event_queue_for_stop(self) -> None:
-        batch: list[_EventWriteItem | object] = []
+        batch: list[_EventWriteItem] = []
         while True:
             try:
                 item = self._event_write_q.get_nowait()
@@ -559,13 +564,13 @@ class _CoreMixin:
             if item is _EVENT_WRITE_SENTINEL:
                 self._event_write_q.task_done()
                 continue
-            batch.append(item)
+            batch.append(cast(_EventWriteItem, item))
             if len(batch) >= _EVENT_BATCH_MAX:
                 self._commit_event_batch(batch)
                 batch = []
         self._commit_event_batch(batch)
 
-    def _commit_event_batch(self, batch: list[_EventWriteItem | object]) -> None:
+    def _commit_event_batch(self, batch: list[_EventWriteItem]) -> None:
         if not batch:
             return
         try:
@@ -577,7 +582,7 @@ class _CoreMixin:
             for _ in batch:
                 self._event_write_q.task_done()
 
-    def _write_event_batch(self, batch: list[_EventWriteItem | object]) -> None:
+    def _write_event_batch(self, batch: list[_EventWriteItem]) -> None:
         conn = self._get_conn()
         with self._write_lock:
             try:
@@ -604,7 +609,7 @@ class _CoreMixin:
                 raise
 
     def _write_event_batch_rowwise(
-        self, conn: sqlite3.Connection, batch: list[_EventWriteItem | object]
+        self, conn: sqlite3.Connection, batch: list[_EventWriteItem]
     ) -> None:
         """Insert events one-by-one, skipping constraint-violating rows.
 

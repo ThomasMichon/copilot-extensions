@@ -431,6 +431,8 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+- [2026-11-16 - uv-managed Python intent and adoption](journal/2026/11.16%20uv-managed%20Python.md)
+
 - [2026-11-01 - merged finite source and non-UI safety preparation](journal/2026/11.01%20non-ui-process-safety.md)
 
 - [2026-10-30 - compiler-free finite process custody](journal/2026/10.30%20finite-owned-process.md)

@@ -28,6 +28,8 @@ on:
       - worktree-manager/tests/test_install_source.py
       - worktree-manager/tests/test_bootstrap_inputs.py
       - worktree-manager/tests/test_bootstrap_update.py
+      - worktree-manager/tests/test_bootstrap_ps1.py
+      - worktree-manager/tests/test_bootstrap_sh.py
       - worktree-manager/tests/test_application_input_provider.py
       - worktree-manager/tests/test_update_bootstrap.py
       - worktree-manager/tests/test_recovery_source.py
@@ -73,7 +75,13 @@ jobs:
           --test-file tests/test_update_bootstrap.py
           --test-file tests/test_recovery_source.py
           --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
+          --test-file tests/test_bootstrap_ps1.py
+          --test-file tests/test_bootstrap_sh.py
           -k "not full_declared_repository_inputs_reach_immutable_retention and
+          (not test_bootstrap_ps1.py or managed_python or
+          python_lookup_rejects_empty_success or bootstrap_retains_physical_uv or
+          bootstrap_prepares_compatible_uv) and
+          (not test_bootstrap_sh.py or bootstrap_uses_managed_python) and
           (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
           (not test_install_source or standalone_prepared_updates) and
           (not test_bootstrap_inputs or first_touch_retention or unresolved_source_selection or

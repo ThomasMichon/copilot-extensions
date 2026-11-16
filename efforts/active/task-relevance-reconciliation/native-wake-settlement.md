@@ -2,7 +2,7 @@
 
 Part of [Task Relevance Reconciliation](README.md), continuing
 [#9532](https://github.com/ThomasMichon/copilot-extensions/issues/9532).
-**Status: proposed; review before implementation.** This is a bounded recovery
+**Status: proposal reviewed in #12789; implementation qualification remains open.** This is a bounded recovery
 prerequisite, not a new task lifecycle, activation policy or permission grant.
 
 ## Established gap
@@ -118,3 +118,9 @@ request comparison; diagnostic/public results must not export it.
 These are implementation obligations, not claimed passes. In particular,
 shipping the new path does not retroactively qualify an original operation
 whose history cannot satisfy its proof requirements.
+
+The first [internal owner foundation](../../../plugins/agent-bridge/docs/native-send-settlement.md)
+keeps public front doors and Dispatch consumption unwired. Its selected
+private-container controls exercise the persistent turn-write boundary with
+independent processes; they do not establish native-runtime or installed
+qualification and do not close this slice's aggregate acceptance.
