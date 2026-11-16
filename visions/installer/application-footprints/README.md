@@ -79,6 +79,25 @@ imports of provider implementation or access to a provider's private
 environment. Promotion keeps these edges distinct from embedded code libraries.
 Independent consumer removal cannot invalidate another live dependency.
 
+### clean-break-layout-and-state-lifetimes
+
+Installed apps occupy a common suite-owned application hierarchy, distinct from
+legacy per-tool footprints. Old and new code can coexist without changing which
+installation receives commands; global command activation is an explicit
+boundary, not a staging side effect.
+
+Version code and setup inputs remain immutable after construction. Configuration
+and data that must survive updates belong outside version slots, scoped to the
+application and its rightful owner. A version may keep only its own disposable
+execution state in a clearly separated slot-local state directory: disk caches
+and temporary databases are examples, not stores required by a successor.
+Concurrent versions neither share that disposable state nor gain authority to
+write the same durable data merely because their code coexists.
+
+Repository configuration and worktrees converge on a separate repository
+namespace within the same hierarchy. Application replacement does not require
+moving every existing repository or repurposing marketplace delivery identity.
+
 ## Behaviors
 
 - **One preparation model:** Main, pinned development and explicit frozen WIP
@@ -89,6 +108,9 @@ Independent consumer removal cannot invalidate another live dependency.
   activation are visible, not success-shaped fallback to a legacy installer.
 - **Separated durable state:** version replacement does not discard
   configuration, secrets, databases, sessions or protected connectivity.
+- **Disposable means version-owned:** losing an inactive version's private
+  execution state does not lose user data or prevent update/recovery. Live
+  process ownership still protects its slot from premature retirement.
 
 ## Non-Goals / Boundaries
 
