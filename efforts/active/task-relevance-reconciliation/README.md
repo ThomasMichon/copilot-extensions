@@ -139,6 +139,9 @@ merged plan does not establish running adoption.
       existing build-bound records without replaying unknown operations.
       Source accepted in #12892; the distinct runtime, concurrent-adoption
       and rollback qualifications below remain open.
+      Already-missing managed metadata additionally follows the proposed
+      [retained metadata recovery slice](retained-metadata-recovery.md);
+      preserving source cleanup is not recovery of deleted history.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -308,6 +311,9 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Retained conversation versus failed-attempt cleanup](journal/2026/11.16-retained-conversation-cleanup.md)
+  records the queue-owned preservation correction and bounded controls;
+  missing-metadata recovery and native acceptance remain open.
 - [Retained-writer contract adaptation](journal/2026/11.16-retained-writer-contract.md)
   records the reviewed compatibility plan and bounded source controls;
   native/runtime adoption remains open.

@@ -1,89 +1,98 @@
 """HTTP client surface for exact housekeeping recovery."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any, cast
+
 
 class CleanupRecoveryClientMixin:
+    _http: Any
+    _unwrap: Callable[[Any], Any]
+    _control_headers: Callable[[], dict[str, str]]
+
     def record_spawn_conclusion(
         self, key: str, *, conclusion_state: str, conclusion_detail: str,
         detail: str | None = None, claim_token: str | None = None,
         claimant_machine: str | None = None,
-    ) -> dict:
-        return self._unwrap(self._http.post(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion",
             json={"conclusion_state": conclusion_state, "conclusion_detail": conclusion_detail,
                   "detail": detail, "claim_token": claim_token,
                   **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
-        ))
+        )))
 
-    def claim_spawn_conclusion_retry(self, key: str, *, claimant_machine: str | None = None) -> dict:
-        return self._unwrap(self._http.post(
+    def claim_spawn_conclusion_retry(self, key: str, *, claimant_machine: str | None = None) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/claim",
             **({"json": {"claimant_machine": claimant_machine}} if claimant_machine is not None else {}),
-        ))
+        )))
 
     def rearm_claim_held_conclusion(
         self, key: str, *, expected_detail: str, claimant_machine: str | None = None,
-    ) -> dict:
-        return self._unwrap(self._http.post(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/rearm-claim-held",
             json={"expected_detail": expected_detail,
                   **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
-        ))
+        )))
 
     def validate_spawn_conclusion_claim(
         self, key: str, claim_token: str, *, claimant_machine: str | None = None,
-    ) -> dict:
-        return self._unwrap(self._http.post(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/validate",
             json={"claim_token": claim_token,
                   **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
-        ))
+        )))
 
     def recover_held_cleanup(
         self, key: str, *, expected_generation: int, current_host: str,
         apply: bool = False, expected_preview: str | None = None,
         reason: str | None = None, request_id: str | None = None,
-    ) -> dict:
-        return self._unwrap(self._http.post(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/recover",
             headers=self._control_headers(),
             json={"expected_generation": expected_generation, "current_host": current_host,
                   "apply": apply, "expected_preview": expected_preview,
                   "reason": reason, "request_id": request_id},
-        ))
+        )))
 
-    def cleanup_recovery_history(self, key: str) -> list[dict]:
-        return self._unwrap(self._http.get(
+    def cleanup_recovery_history(self, key: str) -> list[dict[str, Any]]:
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get(
             f"/spawn-reservations/{key}/conclusion/recoveries",
             headers=self._control_headers(),
-        ))
+        )))
 
 
 class HostBoundConclusionClient:
     """Carry the supervisor's resolved identity, never guess an execution host."""
 
-    def __init__(self, client, machine):
+    def __init__(self, client: Any, machine: str | None) -> None:
         self._client = client
         self._machine = machine
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
 
-    def _bound_arguments(self, kwargs):
+    def _bound_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         claimant = kwargs.get("claimant_machine")
         if claimant is not None and claimant != self._machine:
             raise ValueError("claimant machine cannot override the bound supervisor identity")
         return {**kwargs, "claimant_machine": self._machine}
 
-    def claim_spawn_conclusion_retry(self, key, **kwargs):
-        return self._client.claim_spawn_conclusion_retry(key, **self._bound_arguments(kwargs))
+    def claim_spawn_conclusion_retry(self, key: str, **kwargs: Any) -> dict[str, Any]:
+        return cast(dict[str, Any], self._client.claim_spawn_conclusion_retry(key, **self._bound_arguments(kwargs)))
 
-    def validate_spawn_conclusion_claim(self, key, token, **kwargs):
-        return self._client.validate_spawn_conclusion_claim(
+    def validate_spawn_conclusion_claim(self, key: str, token: str, **kwargs: Any) -> dict[str, Any]:
+        return cast(dict[str, Any], self._client.validate_spawn_conclusion_claim(
             key, token, **self._bound_arguments(kwargs),
-        )
+        ))
 
-    def record_spawn_conclusion(self, key, **kwargs):
-        return self._client.record_spawn_conclusion(key, **self._bound_arguments(kwargs))
+    def record_spawn_conclusion(self, key: str, **kwargs: Any) -> dict[str, Any]:
+        return cast(dict[str, Any], self._client.record_spawn_conclusion(key, **self._bound_arguments(kwargs)))
 
-    def rearm_claim_held_conclusion(self, key, **kwargs):
-        return self._client.rearm_claim_held_conclusion(key, **self._bound_arguments(kwargs))
+    def rearm_claim_held_conclusion(self, key: str, **kwargs: Any) -> dict[str, Any]:
+        return cast(dict[str, Any], self._client.rearm_claim_held_conclusion(key, **self._bound_arguments(kwargs)))
