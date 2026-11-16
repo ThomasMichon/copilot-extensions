@@ -352,6 +352,11 @@ their whole #12834/#12763 requests, and retains #4183's already canonical
 duplex, input and progress acceptance. The complete 2026-11-16 11:01:22 UTC
 census is 845 whole open, 116 above fixed 729; these keepers add no closure
 credit or transfer of custody.
+Its subsequent partial-delivery reconciliation verifies #12853's publication
+and #12840's bounded Vault milestone without closing #8729 or its existing
+owner's reservation. #12852 retains its distinct native-path constructor
+request. The complete 2026-11-16 11:36:45 UTC census is 849 whole open,
+120 above fixed 729; no additional closure credit is claimed.
 
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
