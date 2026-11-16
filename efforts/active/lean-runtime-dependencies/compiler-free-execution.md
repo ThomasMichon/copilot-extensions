@@ -58,7 +58,12 @@ not replaced or declared complete by this amendment.
    callers that currently run before their plugin runtime. Reuse the
    [existing Python prerequisite](#python-prerequisite-boundary), rather than
    preserve a Python-free helper implementation. The acquisition front door
-   itself must run before Python exists. Preserve authenticated pipe
+   itself must run before Python exists: on Windows, the native PowerShell
+   seed establishes uv through its prerequisite owner and stages the real
+   per-app setup entry. It does not load a Python-backed custody/installer SDK
+   or require an application daemon to obtain that SDK's execution base.
+   The seed is not another implementation of the shared helper protocols.
+   Preserve authenticated pipe
    endpoints, process handles, strict atomic Job containment, headlessness,
    operation-lock compatibility, filesystem/reparse/ACL checks and uncertain
    launch outcomes. Use the setup-selected uv-managed interpreter; do not retain
@@ -93,6 +98,16 @@ have static setup declarations too; they cannot require Python to discover or
 acquire Python. Reuse this one acquisition owner, not a downloader in every
 helper. Standalone setup works without an Agent Machines service or an already
 installed Manager/application runtime.
+
+The [finite installation-controller boundary](../../../visions/installer/README.md#finite-installation-controller)
+keeps that prepared execution base separate from Manager's presentation and
+application services. Installation management is directly invocable and finite,
+including Manager's own install/update; it cannot require Manager or another
+installation daemon to be running. Reuse existing installer-engine and
+execution-owner code before proposing a separately packaged helper. Such a
+helper remains optional and daemon-independent, not another installer stack.
+Native foreground work retains its own lifetime/failure/cleanup obligations;
+later Python helper and application-service protocols remain with their owners.
 
 Every application launcher uses `uv` from PATH and lets it handle interpreter
 selection for the declared project. Scripts do not assume installed Python
