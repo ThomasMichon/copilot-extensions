@@ -556,10 +556,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         await self._stop_relays(session_id)
         reverse_forwards = list(endpoint.get("reverse_forwards") or [])
         def relay_host_port() -> int:
-            port = get_live_relay_port()
-            if port is None:
-                raise RuntimeError("Credential relay has no live host port")
-            return port
+            return get_live_relay_port() or 0
 
         relays = relay_forwards_from_endpoint(
             endpoint,

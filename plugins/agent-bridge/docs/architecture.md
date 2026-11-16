@@ -762,7 +762,9 @@ not the transport Bridge uses internally or a replacement for durable TCP ACKs.
   SSH endpoints do not store credentials. Remote retirement uses the existing
   account-aware CodeSpace transport instead of dialing the saved ProxyCommand
   under ambient authentication. An unverified account or unconfirmed process
-  exit retains the session reservation and conversation for recovery.
+  exit retains the session reservation and conversation for recovery. Legacy
+  descriptors without a CodeSpace identity retain their captured SSH path;
+  malformed explicit identities cannot fall back to it.
 - **Background reconnect is bounded.** Heartbeat-driven reconnect retries back
   off exponentially up to five minutes. An idle, unwatched session that keeps
   failing background recovery is parked dormant instead of hammering an

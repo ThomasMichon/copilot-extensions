@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -115,7 +116,8 @@ async def test_verified_fallback_account_reaches_ssh_config_and_proxy(
     ]
 
     assert await transport.is_running() is True
-    config = source.get_ssh_config()
+    ssh_config: Callable[[], SSHConfig] = transport.ssh_config
+    config = ssh_config()
 
     assert run_gh.call_args.args[0] == ["gh", "codespace", "ssh", "--config", "-c", NAME]
     assert run_gh.call_args.kwargs["env"]["GH_TOKEN"] == "owner-token"
