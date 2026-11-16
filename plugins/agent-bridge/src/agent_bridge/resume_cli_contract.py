@@ -51,6 +51,9 @@ def cli_contracts() -> dict[str, Any]:
         "schema": "agent-bridge.cli-contracts",
         "version": 1,
         "contracts": {
+            "agent-bridge.send": {
+                "version": 1, "capabilities": ["native-send-settlement"],
+            },
             "agent-bridge.create": {
                 "version": 1,
                 "capabilities": ["keyed-worktree-writer", "keyed-dispatch-origin"],

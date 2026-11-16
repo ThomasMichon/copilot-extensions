@@ -201,19 +201,31 @@ native qualification and activation need their existing separate admission.
 - [x] Prove the smallest admitted standalone artifact flow for ACP and mux,
   then Bridge pickup, with suite services absent from the target. Reuse
   existing owned fixtures; preserve separate admission for native effects.
-- [ ] Correlate that flow with the actual Worktrees/Bridge caller paths and
+- [x] Correlate that flow with the actual Worktrees/Bridge caller paths and
   coordinate any launch-caller changes with their existing owner, rather
   than duplicate the mux-launch implementation.
-- [ ] Publish the first complete functional outcome through normal gates and
+- [x] Publish the first complete functional outcome through normal gates and
   update this root acceptance record, retaining all remaining obligations.
 
 The bounded native checkpoint combines copied-Core ACP with the actual
 Bridge Python client (#12714) and the built-Core headed coordinator with
-Bridge's canonical retained-session client. Both run the target artifact
+Bridge's canonical retained-session client (#12720). Both run the target artifact
 under physical Python with site packages disabled and retain exact native
-conversation/input identity. Headed source publication is still pending.
+conversation/input identity. Both source checkpoints cleared review and CI.
 This closes only the smallest artifact/consumer flow above, not each named
 caller, all modes, installed adoption, lifetime or readiness stability.
+
+The [caller correlation](implementation.md#selected-caller-correlation) links
+those artifact flows to the existing creation/execution seams. Sixty-four
+focused source and real-process controls cover the named caller handoff,
+literal arguments, receipts, support/relocation and no replay after selected
+failure. This is not native completion of the broader caller/mode matrix.
+
+The hosted Windows Manager no-mux and mux decision packets pass at the same
+merged source after the independently published application-archive prerequisite
+fix in #12687. Their exact source, runs and timings are recorded in the journal.
+This qualifies those fresh Manager decisions, not local shared-machine execution,
+every reuse/window mode, caller-Job loss or installed adoption.
 
 The source-complete actor-free recovery-intent adapter supports original-owner
 persistence but does not prove this outcome. Its bounded source acceptance is
