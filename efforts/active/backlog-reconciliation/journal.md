@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Runtime source completion and finite authoring-contract intake](journal/2026/11.16-runtime-source-and-authoring-contract.md)
+
 - [2026-11-16 - Changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
 
 - [2026-11-16 - Complete WSL provisioning receiving](journal/2026/11.16-wsl-provisioning-receiving.md)
