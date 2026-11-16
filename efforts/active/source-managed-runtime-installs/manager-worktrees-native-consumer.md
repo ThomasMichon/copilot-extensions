@@ -282,6 +282,13 @@ bare-hostname and partial-record controls pass with the full 412-test
 packet/client/lifetime selection. Native execution and controller publication
 remain pending; this correction earns no consumer acceptance.
 
+The follow-up review identified sensitive dictionary keys. Recursive structured
+redaction now covers keys as well as values. Colliding redacted keys omit the
+entire affected file and fail qualification rather than overwrite evidence.
+Both JSON and JSONL key/collision controls pass within the full 418-test
+packet/client/lifetime selection, with whole-file strict Linux/Windows typing
+and touched-file lint green. Native execution remains held.
+
 ### 2026-11-15 - Physical application environment prerequisite
 
 The fixture's `_python()` helper hardcoded a legacy direct-slot interpreter,

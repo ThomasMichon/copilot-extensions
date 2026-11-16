@@ -245,7 +245,13 @@ def sanitize_native_files(output: Path) -> bool:
         if isinstance(value, list):
             return [redact_value(item) for item in value]
         if isinstance(value, dict):
-            return {key: redact_value(item) for key, item in value.items()}
+            redacted: dict[str, Any] = {}
+            for key, item in value.items():
+                redacted_key = redact_feed(key)
+                if redacted_key in redacted:
+                    raise ValueError("redacted evidence keys collide")
+                redacted[redacted_key] = redact_value(item)
+            return redacted
         return value
 
     omitted = False
@@ -267,7 +273,7 @@ def sanitize_native_files(output: Path) -> bool:
                     text = json.dumps(redact_value(json.loads(text)), ensure_ascii=True) + "\n"
                 else:
                     text = redact_feed(text)
-            except json.JSONDecodeError:
+            except ValueError:
                 path.unlink()
                 omitted = True
                 continue

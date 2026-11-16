@@ -175,6 +175,41 @@ def test_sanitization_preserves_nested_command_json_and_omits_malformed_files(
     assert worker.sanitize_native_files(tmp_path) is False
 
 
+@pytest.mark.parametrize("suffix", ("json", "jsonl"))
+def test_sanitization_redacts_nested_dictionary_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str,
+) -> None:
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://packages.example.invalid/simple")
+    record = {"nested": [{"https://repository.example.invalid/runtime": {
+        "packages.example.invalid diagnostic": "retained",
+    }}]}
+    path = tmp_path / ("keys." + suffix)
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    assert worker.sanitize_native_files(tmp_path) is False
+    raw = path.read_text("utf-8")
+    assert json.loads(raw) == {"nested": [{"[redacted-url]": {
+        "[configured-feed] diagnostic": "retained",
+    }}]}
+    assert "example.invalid" not in raw
+
+
+@pytest.mark.parametrize("suffix", ("json", "jsonl"))
+@pytest.mark.parametrize("existing_key", ("[redacted-url]", "https://other.example.invalid"))
+def test_sanitization_omits_files_with_colliding_redacted_keys(
+    tmp_path: Path, suffix: str, existing_key: str,
+) -> None:
+    path = tmp_path / ("collision." + suffix)
+    record = {"nested": [{"https://repository.example.invalid": "first", existing_key: "second"}]}
+    text = json.dumps(record) + "\n"
+    if suffix == "jsonl":
+        text = '{"preceding": "retained only if the whole file is safe"}\n' + text
+    path.write_text(text, encoding="utf-8")
+
+    assert worker.sanitize_native_files(tmp_path) is True
+    assert not path.exists()
+
+
 def test_source_worker_does_not_acquire_unrelated_native_binaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
