@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 import pytest
 
@@ -84,7 +85,9 @@ def test_source_identity_preserves_package_and_full_source_identity(payload: Pat
 
 
 @pytest.mark.parametrize("supplied", ["same", "other", "package-only", "empty"])
-def test_cli_honors_call_scoped_transaction_pin(payload, monkeypatch, capsys, supplied):
+def test_cli_honors_call_scoped_transaction_pin(
+    payload: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], supplied: str,
+) -> None:
     source = identity.read_source_identity(payload, VERSION)
     expected = json.dumps(identity.manifest_fields(source), sort_keys=True)
     values = {"same": expected, "other": expected.replace(COMMIT, "d" * 40),
@@ -127,7 +130,7 @@ def test_manager_source_identity_uses_its_standalone_project(
         identity.read_source_identity(payload, VERSION, plugin=expected)
 
 
-def test_independent_project_source_needs_no_plugin_manifest(tmp_path):
+def test_independent_project_source_needs_no_plugin_manifest(tmp_path: Path) -> None:
     payload = tmp_path / "application"
     payload.mkdir()
     project = payload / "pyproject.toml"
@@ -149,7 +152,9 @@ def test_independent_project_source_needs_no_plugin_manifest(tmp_path):
 @pytest.mark.parametrize("manifest", [
     '{"name":"other-service","version":"1.0.0"}', '{"name":',
 ])
-def test_independent_project_does_not_hide_an_invalid_plugin_manifest(tmp_path, manifest):
+def test_independent_project_does_not_hide_an_invalid_plugin_manifest(
+    tmp_path: Path, manifest: str,
+) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname="example-service"\nversion="1.0.0"\n',
     )
@@ -170,7 +175,9 @@ def test_source_identity_accepts_original_and_normalized_dev_versions(version: s
 @pytest.mark.parametrize("commit_size", [40, 64])
 @pytest.mark.parametrize("repair", [False, True])
 @pytest.mark.parametrize("profile", [False, True])
-def test_source_and_repair_slots_preserve_the_declared_package_version(version, commit_size, repair, profile):
+def test_source_and_repair_slots_preserve_the_declared_package_version(
+    version: str, commit_size: int, repair: bool, profile: bool,
+) -> None:
     qualified = identity.runtime_version(version, "a" * commit_size, ASSEMBLY)
     if profile:
         qualified += ".profile." + "c" * 16
@@ -180,7 +187,7 @@ def test_source_and_repair_slots_preserve_the_declared_package_version(version, 
 
 
 @pytest.mark.parametrize("repair", [False, True])
-def test_native_profile_slots_preserve_the_declared_package_version(repair):
+def test_native_profile_slots_preserve_the_declared_package_version(repair: bool) -> None:
     version = VERSION + ".profile." + "c" * 16
     if repair:
         version += ".repair." + "b" * 32
@@ -229,7 +236,7 @@ def test_cell_provenance_is_separate_from_assembled_source_bytes(payload: Path) 
         identity.read_source_identity(payload, VERSION)
 
 
-def _source_slots(root: Path, *, source=True):
+def _source_slots(root: Path, *, source: bool = True) -> tuple[Any, str, str]:
     runtime = identity._runtime()
     first = identity.runtime_version(VERSION, "f" * 40, "a" * 64)
     second = identity.runtime_version(VERSION + "+base", "a" * 40, "b" * 64)
@@ -249,7 +256,7 @@ def _source_slots(root: Path, *, source=True):
 @pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
 @pytest.mark.parametrize("source", [False, True])
 def test_source_recovery_uses_explicit_identity_never_hash_order(
-    tmp_path: Path, selector: str | None, capsys, source,
+    tmp_path: Path, selector: str | None, capsys: pytest.CaptureFixture[str], source: bool,
 ) -> None:
     runtime, first, _ = _source_slots(tmp_path, source=source)
     if selector:
@@ -276,7 +283,9 @@ def test_undecodable_selector_retains_qualified_recovery(tmp_path: Path, broken:
 
 
 @pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
-def test_unreadable_completion_preserves_read_only_recovery(tmp_path, monkeypatch, selector):
+def test_unreadable_completion_preserves_read_only_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str,
+) -> None:
     runtime, first, second = _source_slots(tmp_path)
     (tmp_path / selector).write_text(first, encoding="utf-8")
     if selector == "current-version":
@@ -285,7 +294,7 @@ def test_unreadable_completion_preserves_read_only_recovery(tmp_path, monkeypatc
     original = construction.read_completion
     unavailable = runtime.marker_path(tmp_path, first)
 
-    def read(path, **kwargs):
+    def read(path: Path, **kwargs: Any) -> Any:
         if path == unavailable:
             raise PermissionError("fixture completion is unreadable")
         return original(path, **kwargs)
@@ -300,13 +309,15 @@ def test_unreadable_completion_preserves_read_only_recovery(tmp_path, monkeypatc
         assert selected is None
 
 
-def test_unreadable_current_slot_preserves_healthy_last_known_good(tmp_path, monkeypatch):
+def test_unreadable_current_slot_preserves_healthy_last_known_good(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime, first, second = _source_slots(tmp_path)
     (tmp_path / "current-version").write_text(first, encoding="utf-8")
     (tmp_path / "last-known-good").write_text(second, encoding="utf-8")
     original = Path.exists
 
-    def exists(path):
+    def exists(path: Path) -> bool:
         if path == runtime.version_dir(tmp_path, first):
             raise PermissionError("fixture current slot is unreadable")
         return original(path)
@@ -316,13 +327,15 @@ def test_unreadable_current_slot_preserves_healthy_last_known_good(tmp_path, mon
     assert selected is not None and selected.parent.parent.name == second
 
 
-def test_unreadable_versions_root_is_unavailable_to_read_only_resolution(tmp_path, monkeypatch):
+def test_unreadable_versions_root_is_unavailable_to_read_only_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = identity._runtime()
     versions = tmp_path / "versions"
     versions.mkdir()
     original = os.scandir
 
-    def entries(path):
+    def entries(path: Any) -> Any:
         if isinstance(path, (str, os.PathLike)) and (
             runtime._leases._native_path(path) == runtime._leases._native_path(versions)
         ):
@@ -341,7 +354,7 @@ def test_unreadable_versions_root_is_unavailable_to_read_only_resolution(tmp_pat
 @pytest.mark.parametrize("trace_mode", ["normal", "read-only", "ready"])
 @pytest.mark.parametrize("source", [False, True], ids=["profile", "source"])
 def test_native_source_recovery_matches_explicit_python_selection(
-    tmp_path: Path, host: str, selector: str | None, owner: str, trace_mode: str, source,
+    tmp_path: Path, host: str, selector: str | None, owner: str, trace_mode: str, source: bool,
 ) -> None:
     executable = _bash() if host == "bash" else (
         shutil.which(host) if host != "powershell" or os.name == "nt" else None
@@ -373,7 +386,7 @@ def test_native_source_recovery_matches_explicit_python_selection(
     timeout = 30 if os.name == "nt" and host == "bash" else 15
     result = subprocess.run(
         argv, capture_output=True, text=True, timeout=timeout,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     if selector:
@@ -467,7 +480,7 @@ def test_bash_source_initializer_uses_the_production_function(payload: Path, tmp
     ])
     result = subprocess.run(
         [bash, "-c", command], capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     expected = identity.runtime_version(VERSION, COMMIT, identity.assembly_hash(payload))
@@ -501,7 +514,7 @@ def test_powershell_source_initializer_uses_the_production_function(
         [executable, "-NoProfile", "-File", str(fixture), sys.executable,
          str(payload), str(tmp_path / "runtime"), str(LIBRARY)],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
@@ -537,7 +550,7 @@ def test_powershell_source_refusal_keeps_helper_diagnostic(
         [executable, "-NoProfile", "-File", str(fixture), sys.executable,
          str(payload), str(LIBRARY)],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "exit 1" in result.stdout
@@ -572,7 +585,7 @@ def test_bash_manifest_keeps_package_version_and_binds_source_generation(
     ])
     result = subprocess.run(
         [bash, "-c", command], capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     data = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
@@ -618,7 +631,7 @@ def test_powershell_manifest_keeps_package_version_and_binds_source_generation(
         [executable, "-NoProfile", "-File", str(fixture), sys.executable,
          str(payload), str(root), str(LIBRARY)],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     data = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
@@ -653,7 +666,7 @@ def test_clean_room_source_scenario_applies_the_supplied_uv_index(tmp_path: Path
     }
     result = subprocess.run(
         [bash, _posix(scenario)], env=environment, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [index, index, index]
