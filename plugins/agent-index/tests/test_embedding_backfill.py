@@ -1,5 +1,6 @@
 """Native finite-budget backfill, explicit repair and retained owner guards."""
 
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -49,7 +50,7 @@ def context(tmp_path, monkeypatch):
     def run(**kwargs):
         return backfill_embedding_slice(
             result.spec, result.connector, config=config, store=store, paths=result.paths,
-            clients={"a": client}, row_budget=kwargs.pop("row_budget", 2),
+            clients=kwargs.pop("clients", {"a": client}), row_budget=kwargs.pop("row_budget", 2),
             after_store=kwargs.pop("after_store", result.after),
             before_embed=kwargs.pop("before_embed", lambda: ready.append(True)), **kwargs,
         )
@@ -91,6 +92,58 @@ def test_finite_restart_resume_completion_and_no_canonical_or_checkpoint_writes(
     replay = context.run(restart=True)
     assert replay.offset == 2 and replay.vector_rows_upserted == 0
     assert len(context.client.calls) == before_calls
+
+
+def test_model_readiness_selects_only_missing_pairs_and_skips_covered_replay(
+    context: SimpleNamespace,
+) -> None:
+    assert context.run(row_budget=10).complete
+    old_calls = len(context.client.calls)
+    state_bytes = context.config.state_file.read_bytes()
+    snapshot = context.store.content_store.capture_snapshot()
+    context.config.model_profiles["b"] = profile("b")
+    with context.store._source_domain.write(context.store.content_store.db):
+        context.store.register_model(context.config.model_profiles["b"])._get_or_create_table()
+    added = Client()
+    clients = {"a": context.client, "b": added}
+    callbacks: list[str] = []
+    options = {
+        "clients": clients,
+        "before_embed": lambda: callbacks.append("generic"),
+        "before_model_embed": callbacks.append,
+    }
+
+    first = context.run(restart=True, **options)
+    assert first.offset == first.vector_rows_upserted == 2
+    assert callbacks == ["generic", "b"]
+    assert len(context.client.calls) == old_calls
+    assert len(added.calls) == 1 and len(added.calls[0]) == 2
+
+    replay = context.run(restart=True, **options)
+    assert replay.offset == 2 and replay.vector_rows_upserted == 0
+    assert callbacks == ["generic", "b"]
+    assert len(context.client.calls) == old_calls and len(added.calls) == 1
+    assert context.config.state_file.read_bytes() == state_bytes
+    assert context.store.content_store.capture_snapshot() == snapshot
+
+
+def test_model_readiness_failure_does_not_acknowledge_offset(context: SimpleNamespace) -> None:
+    state_bytes = context.config.state_file.read_bytes()
+    error = RuntimeError("model not ready")
+    models: list[str] = []
+
+    def refuse(model: str) -> None:
+        models.append(model)
+        raise error
+
+    with pytest.raises(RuntimeError) as raised:
+        context.run(before_model_embed=refuse)
+    assert raised.value is error
+    assert models == ["a"] and context.client.calls == []
+    progress = saved(context)
+    assert progress["complete"] == 0
+    assert json.loads(progress["payload"])["offset"] == 0
+    assert context.config.state_file.read_bytes() == state_bytes
 
 
 def test_canonical_change_keeps_indexing_active_and_requires_explicit_restart(context) -> None:

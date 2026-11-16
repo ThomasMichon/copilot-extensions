@@ -193,13 +193,16 @@ def backfill_embedding_slice(
     spec: SourceSpec, connector: SourceConnector, *, config: IndexConfig,
     store: MultiModelStore, paths: PathIndex, clients: dict[str, EngineClient],
     row_budget: int, after_store: Callable[[VectorTable, int], None],
-    before_embed: Callable[[], None] | None = None, restart: bool = False,
+    before_embed: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None, restart: bool = False,
 ) -> BackfillProgress:
     """Process one bounded global offset range, selecting only the accepted family.
 
     Ordinary indexing remains active. Restart resets only derived backfill
     intent, never canonical data, acquisition identity or source checkpoints.
     The preparation callback owns its explicit physical-vector-tail budget.
+    Readiness callbacks run only for missing pairs; the model callback receives
+    the selected model ID and leaves engine lifecycle ownership with the caller.
     """
     if type(row_budget) is not int or row_budget < 1 or type(restart) is not bool:
         raise ValueError("Backfill requires a positive integer row budget and explicit restart mode")
@@ -287,7 +290,7 @@ def backfill_embedding_slice(
             written = embed_and_store_pairs(
                 chunks, store, clients, config.model_profiles, stream_batch_size=row_budget,
                 coverage=coverage, bounded=True,
-                before_embed=prepare, after_store=after_store,
+                before_embed=prepare, before_model_embed=before_model_embed, after_store=after_store,
             )
             for name, profile in config.model_profiles.items():
                 selected = routed_model_chunks(chunks, name, config.model_profiles)
