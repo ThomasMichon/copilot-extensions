@@ -220,3 +220,37 @@ def test_bootstrap_request_decisions_are_qualified(tmp_path: Path, selection: st
             assert declaration.read_bytes() == b"cpython@3.11.11\n"
         else:
             assert not declaration.exists()
+
+
+@pytest.mark.parametrize(("field", "enabled"), [
+    pytest.param("catalogGate", False, id="gate-legacy"),
+    pytest.param("catalogGate", True, id="gate-selected"),
+    pytest.param("payloadDispatcher", False, id="dispatcher-legacy"),
+    pytest.param("payloadDispatcher", True, id="dispatcher-selected"),
+])
+def test_bootstrap_output_does_not_claim_declared_input_ownership(
+    tmp_path: Path, field: str, enabled: bool,
+) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    relative = "scripts/bootstrap-python-version.txt"
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data[field] = {"posix": relative, "windows": relative} if field == "payloadDispatcher" else relative
+        if enabled:
+            data["bootstrapPython"] = "3.11.11"
+        manifest.write_text(json.dumps(data))
+        (manifest.parent / relative).write_text("# declared input\n")
+        (manifest.parent / "pyproject.toml").write_text(
+            '[project]\nname="sample"\nversion="1"\nrequires-python=">=3.11"\n',
+        )
+    before = {path.relative_to(candidate): path.read_bytes()
+              for path in candidate.rglob("*") if path.is_file()}
+    log = owner.materialize(candidate, canonical_root=source)
+    if enabled:
+        assert len(log) == 1 and "conflicts with a declared input" in log[0]
+        assert before == {path.relative_to(candidate): path.read_bytes()
+                          for path in candidate.rglob("*") if path.is_file()}
+    else:
+        assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+    assert (plugin / relative).read_text() == "# declared input\n"

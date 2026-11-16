@@ -120,3 +120,55 @@ def test_planning_and_refusal_do_not_write_bytecode(
             assert copied.source_check(manifest, canonical_root=generator.REPO) == []
         assert sys.dont_write_bytecode is False
     assert not list(tooling.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("field", ["catalogGate", "payloadDispatcher"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_declared_inputs_are_preserved_or_refused_before_writes(
+    tmp_path: Path, field: str, enabled: bool,
+) -> None:
+    manifest = _declare(tmp_path, "3.11.11")
+    destination = manifest.parent / "scripts/bootstrap-python-version.txt"
+    destination.write_text("# existing declared input\n")
+    data = json.loads(manifest.read_text())
+    if not enabled:
+        del data["bootstrapPython"]
+    relative = "scripts/bootstrap-python-version.txt"
+    data[field] = {"posix": relative, "windows": relative} if field == "payloadDispatcher" else relative
+    manifest.write_text(json.dumps(data))
+    before = {p.relative_to(manifest.parent): p.read_bytes()
+              for p in manifest.parent.rglob("*") if p.is_file()}
+    if enabled:
+        with pytest.raises(ValueError, match="conflicts with a declared input"):
+            generator.process_manifest(manifest, check=False)
+        assert before == {p.relative_to(manifest.parent): p.read_bytes()
+                          for p in manifest.parent.rglob("*") if p.is_file()}
+    else:
+        assert generator.process_manifest(manifest, check=False) == []
+    assert destination.read_text() == "# existing declared input\n"
+
+
+def test_declared_input_alias_is_not_misidentified_as_a_withdrawn_scalar(tmp_path: Path) -> None:
+    manifest = _declare(tmp_path, "3.11.11")
+    source = manifest.parent / "scripts/input-gate.txt"
+    source.write_text("# existing aliased input\n")
+    destination = source.with_name("bootstrap-python-version.txt")
+    destination.hardlink_to(source)
+    data = json.loads(manifest.read_text())
+    del data["bootstrapPython"]
+    data["catalogGate"] = "scripts/input-gate.txt"
+    manifest.write_text(json.dumps(data))
+    assert generator.process_manifest(manifest, check=False) == []
+    assert source.read_text() == destination.read_text() == "# existing aliased input\n"
+
+
+def test_legacy_output_directory_is_not_misidentified_as_a_withdrawn_scalar(tmp_path: Path) -> None:
+    manifest = _declare(tmp_path, "3.11.11")
+    destination = manifest.parent / "scripts/bootstrap-python-version.txt"
+    destination.mkdir()
+    data = json.loads(manifest.read_text())
+    del data["bootstrapPython"]
+    data["outputDir"] = "scripts/bootstrap-python-version.txt"
+    manifest.write_text(json.dumps(data))
+    assert generator.process_manifest(manifest, check=False) == []
+    assert (destination / "agent-example.ps1").is_file()

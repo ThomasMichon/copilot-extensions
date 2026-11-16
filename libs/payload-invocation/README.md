@@ -62,6 +62,9 @@ emits no scalar and leaves command/catalog bytes unchanged. The packaged
 generator and toolkit carry the new helper independently of scalar opt-in.
 After withdrawing opt-in, remove its old scalar explicitly: direct generation,
 checks and candidate materialization reject that obsolete output before writes.
+An existing catalog gate or dispatcher input retains ownership without opt-in;
+opting in with that conflicting destination is rejected before writes.
+An existing directory is not mistaken for an obsolete scalar file.
 Both producer helper loads and bootstrap validation suppress bytecode writes
 and restore the caller's prior setting on success or refusal.
 

@@ -9,8 +9,23 @@ from typing import Any
 
 def expected_files(manifest: Path, data: dict[str, Any]) -> dict[Path, str]:
     destination = manifest.parent / "scripts/bootstrap-python-version.txt"
+    regular = destination.is_file()
+    occupied = regular or destination.is_symlink()
+    if occupied:
+        declared_inputs = [data.get("catalogGate")]
+        dispatchers = data.get("payloadDispatcher")
+        if isinstance(dispatchers, dict):
+            declared_inputs.extend(dispatchers.values())
+        for value in declared_inputs:
+            if not isinstance(value, str) or not value:
+                continue
+            source = manifest.parent / value
+            if source == destination or (regular and source.is_file() and source.samefile(destination)):
+                if "bootstrapPython" in data:
+                    raise ValueError(f"{manifest}: bootstrapPython output conflicts with a declared input")
+                return {}
     if "bootstrapPython" not in data:
-        if destination.exists() or destination.is_symlink():
+        if occupied:
             raise ValueError(f"{manifest}: obsolete bootstrap Python request; remove {destination.name}")
         return {}
     version = data["bootstrapPython"]
