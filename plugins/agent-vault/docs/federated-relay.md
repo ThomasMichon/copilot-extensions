@@ -112,5 +112,11 @@ discovery or credential acquisition. States distinguish disabled, waiting for
 the current Vault generation, waiting for conduit, connecting, attached,
 reconnect exhausted and stopped. Provider/consumer readiness is not inferred.
 Lost accepted requests retain the channel's unknown-outcome behavior; reconnect
-does not resend them. Durable attended-auth transactions and multi-source
-cache-first selection remain distinct plan gates, not automatic login popups.
+does not resend them. The optional
+[Gateway normal-fetch SDK owner](../../../fleet-manager/docs/gateway-account-source.md#explicit-normal-fetch-selection)
+can select current Controller sources using ordinary provider retrieval, which
+may refresh normally. This handler also advertises its distinct normal-fetch
+contract; the current `gh-auth` getter reports credential expiry as unknown,
+not as the source lease. Cache-only provider qualification, durable attended-auth
+transactions, installed Gateway composition and actual pod renewal remain
+distinct plan gates, not automatic login popups.
