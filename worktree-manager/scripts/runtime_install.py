@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -15,19 +17,23 @@ import tempfile
 import uuid
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import TextIO
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, cast
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 
-import installer_engine as engine  # noqa: E402
+import installer_engine  # noqa: E402
 from installer_engine_process import _settle  # noqa: E402
+from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs  # noqa: E402
 import versioned_runtime as runtime  # noqa: E402
 import versioned_runtime_source as runtime_source  # noqa: E402
 from runtime_install_environment import (  # noqa: E402
     BOOTSTRAP_PYTHON as BOOTSTRAP_PYTHON,
+    bootstrap_hold_path,
     bootstrap_python_environment as _bootstrap_python_environment,
     installation_child_options as _installation_child_options,
+    windows_console_stream as _windows_console_stream,
 )
 from runtime_install_selection import (  # noqa: E402
     _source_profile_reuse,
@@ -35,33 +41,40 @@ from runtime_install_selection import (  # noqa: E402
     prepared_manager_inputs as prepared_manager_inputs,
     selection_workspace as _selection_workspace,
     selector_text as _selector_text,
-    source_digest as _source_digest,
+    source_digest,
     selected_version as _selected_version,
     source_install_selection as source_install_selection,
 )
+engine = installer_engine
+_source_digest = source_digest
+_bootstrap_hold_path = bootstrap_hold_path
+if TYPE_CHECKING:
+    from runtime_install_environment import ApplicationOptions, StageOptions
+    from update_driver.participant import BorrowedCustody
+    from worktree_manager.self_install import SelfInstallResult
 
 
 @contextmanager
 def candidate(
-    payload: Path, root: Path, *, assemble, uv: Path | None = None,
+    payload: Path, root: Path, *, assemble: Callable[..., object], uv: Path | None = None,
     python: Path | None = None,
-    wheel_inputs: engine.WheelInstallInputs | engine.WheelReuseInputs | None = None,
-    native_wheel_inputs: engine.WheelInstallInputs | None = None,
-    local_packages: tuple[str, ...] | None = None, validate_candidate=None,
+    wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
+    native_wheel_inputs: WheelInstallInputs | None = None,
+    local_packages: tuple[str, ...] | None = None, validate_candidate: Callable[[Path], None] | None = None,
     application: Path | None = None,
-):
+) -> Iterator[engine.ReadyCandidate]:
     """Retain a healthy target; never publish selectors during construction."""
     if os.name == "nt":
-        uv = Path(engine._select_uv_executable(str(Path.cwd() / uv) if uv is not None else "uv"))
+        uv = Path(getattr(engine, "_select_uv_executable")(str(Path.cwd() / uv) if uv is not None else "uv"))
     else:
         uv = uv or Path(shutil.which("uv") or "")
     if not uv.is_file():
         raise RuntimeError("uv is required for Manager runtime construction")
     root.mkdir(parents=True, exist_ok=True)
-    inputs = Path(engine._native_retained_path(root / ".installer-inputs"))
+    inputs = Path(getattr(engine, "_native_retained_path")(root / ".installer-inputs"))
     inputs.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="manager-payload-", dir=inputs) as temporary:
-        import tomllib
+        tomllib = importlib.import_module("tomllib")
 
         project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8")).get("project", {})
         if not isinstance(project, dict):
@@ -93,7 +106,7 @@ def candidate(
         if wheel_inputs is not None:
             if identity is None and native_wheel_inputs is None:
                 raise ValueError("Manager source wheels require an attributed source identity")
-            if not isinstance(wheel_inputs, (engine.WheelInstallInputs, engine.WheelReuseInputs)):
+            if not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs)):
                 raise ValueError("Manager source wheels require inspected retained inputs")
             wheel_inputs.verify()
         elif local_packages is not None:
@@ -108,15 +121,15 @@ def candidate(
         generation = identity.runtime_version if identity is not None else version
         if wheel_inputs is not None:
             generation += ".profile." + wheel_inputs.receipt()["lock_id"][7:23]
-        reuse_only = isinstance(wheel_inputs, engine.WheelReuseInputs)
-        if reuse_only:
+        reuse_only = isinstance(wheel_inputs, WheelReuseInputs)
+        if isinstance(wheel_inputs, WheelReuseInputs):
             if re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", wheel_inputs.generation) is None:
                 raise ValueError("Manager reuse evidence differs from its source/profile generation")
             generation = wheel_inputs.generation
         requested_generation = generation
         if generation == "dev":
             raise RuntimeError("Manager mutable dev installation requires an explicit owning lifecycle")
-        arguments = dict(
+        arguments: dict[str, Any] = dict(
             plugin=prepared, uv=uv, base_python=python or base_python(),
             health_module="worktree_manager.runtime_candidate",
             health_callable="verify_runtime_candidate",
@@ -144,7 +157,7 @@ def candidate(
                 current == generation or current.startswith(generation + "+repair.")
                 or current.startswith(generation + ".repair.")
             )
-            if family and runtime.is_complete(root, current):
+            if family and current is not None and runtime.is_complete(root, current):
                 generation = current
             else:
                 separator = "." if "+" in generation else "+"
@@ -165,7 +178,7 @@ def candidate(
             yield ready
 
 
-def stage_application(root: Path, slot: Path, version: str, unchanged):
+def stage_application(root: Path, slot: Path, version: str, unchanged: Callable[[], None]) -> SelfInstallResult:
     """Prove readiness while the caller retains qualified application inputs."""
     from worktree_manager.runtime_stage import probe
     from worktree_manager.self_install import SelfInstallResult
@@ -178,7 +191,8 @@ def stage_application(root: Path, slot: Path, version: str, unchanged):
 
 
 def verify_stage_readiness(
-    root: Path, ready: engine.ReadyCandidate, *, wheel_inputs=None, timeout: float = 60,
+    root: Path, ready: engine.ReadyCandidate, *,
+    wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None, timeout: float = 60,
 ) -> None:
     """Probe the installed app under the candidate's existing retained custody."""
     root = root.resolve()
@@ -211,8 +225,8 @@ def verify_stage_readiness(
         raise RuntimeError("Manager staging candidate returned no exact readiness result")
 
 
-def activate(root: Path, version: str, *, expected: str | None, after_publish=None,
-             before_publish=None, forward_only=None) -> None:
+def activate(root: Path, version: str, *, expected: str | None, after_publish: Callable[[], None] | None = None,
+             before_publish: Callable[[], None] | None = None, forward_only: Callable[[], bool] | None = None) -> None:
     """Publish under custody; acknowledged incoming startup is forward-only."""
     runtime._validate_dev_previous_version(version)
     root = root.resolve()
@@ -261,11 +275,11 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                                      before.digest if before else ""])
                 context = workspace / "context.json"
                 publication.create_context(context, root, bindings)
-                receipts = []
+                receipts: list[Path] = []
                 digest = hashlib.sha256((version + "\n").encode()).hexdigest()
                 declared = [[str(path), digest] for path in targets]
 
-                def recover():
+                def recover() -> None:
                     output = workspace / f"recovery.{len(receipts)}.jsonl"
                     try:
                         if not receipts:
@@ -313,13 +327,13 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
 class ActivationStarted(BaseException):
     """V2 acknowledged startup; finish publication before propagating the error."""
 
-    def __init__(self, interruption: BaseException, outcome: dict) -> None:
+    def __init__(self, interruption: BaseException, outcome: dict[str, Any]) -> None:
         self.interruption, self.outcome = interruption, outcome
 
 
 def _activate_after_bootstrap_update(
     root: Path, slot: Path, *, start_if_missing: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     from worktree_manager.bootstrap_activation import started_outcome
 
     python = runtime.slot_python(root, slot.name)
@@ -336,7 +350,7 @@ def _activate_after_bootstrap_update(
         command, executable=command[0], stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8",
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         **_installation_child_options(),
     )
     interrupted = None
@@ -368,20 +382,6 @@ def _activate_after_bootstrap_update(
     raise RuntimeError(f"Constructed Manager did not acknowledge V2 startup ({process.returncode})")
 
 
-def _windows_console_stream(stream: TextIO | None) -> bool:
-    if stream is None:
-        return False
-    import ctypes
-    from ctypes import wintypes
-    import msvcrt
-
-    mode = wintypes.DWORD()
-    probe = ctypes.WinDLL("kernel32", use_last_error=True).GetConsoleMode
-    probe.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    probe.restype = wintypes.BOOL
-    return bool(probe(msvcrt.get_osfhandle(stream.fileno()), ctypes.byref(mode)))
-
-
 def _dispatch_manager(
     command: list[str], *, handoff: dict[str, str] | None = None, wait_for_exit: bool = False,
     cwd: str | None = None, fallback_cwd: str | None = None,
@@ -390,9 +390,9 @@ def _dispatch_manager(
         console = os.name == "nt" and any(
             _windows_console_stream(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)
         )
-        options = dict(
+        options: dict[str, Any] = dict(
             stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
-            **({"creationflags": 0 if console else subprocess.CREATE_NO_WINDOW}
+            **({"creationflags": 0 if console else getattr(subprocess, "CREATE_NO_WINDOW")}
                if os.name == "nt" else {}),
             **({"env": {**os.environ, **handoff}} if handoff else {}),
             **({"cwd": cwd} if cwd is not None else {}),
@@ -412,7 +412,7 @@ def _dispatch_manager(
     raise AssertionError("Manager bootstrap exec returned")
 
 
-def _execution_driver(payload: Path):
+def _execution_driver(payload: Path) -> ModuleType:
     # Source controls need application locals as well as the required execution libraries.
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
     roots = engine._package_roots(payload)
@@ -429,7 +429,7 @@ def _execution_driver(payload: Path):
 
 
 @contextmanager
-def _installation_custody():
+def _installation_custody() -> Iterator[BorrowedCustody | None]:
     from update_driver import core, borrowed_custody, participant, participant_environment
     from update_driver.participant import ENVIRONMENT_KEY
 
@@ -465,7 +465,7 @@ def adopt_broker(root: Path, slot: Path) -> None:
         ]
         process = subprocess.Popen(
             command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
+            text=True, encoding="utf-8", creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
             env={**os.environ, **participant_environment()},
         )
         try:
@@ -483,7 +483,7 @@ def adopt_broker(root: Path, slot: Path) -> None:
         custody.assert_owned()
 
 
-def _validate_update_request(args) -> None:
+def _validate_update_request(args: argparse.Namespace) -> None:
     expected = getattr(args, "admitted_source", None)
     if expected is not None:
         from worktree_manager.update_driver_cli import _source_key, _update_context_directory
@@ -493,12 +493,7 @@ def _validate_update_request(args) -> None:
         _update_context_directory(os.environ)
 
 
-def _bootstrap_hold_path() -> str:
-    override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
-    return os.path.abspath(os.path.expanduser(override)) if override else ""
-
-
-def _automatic_bootstrap_refusal(args) -> str | None:
+def _automatic_bootstrap_refusal(args: argparse.Namespace) -> str | None:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if command[:1] != ["update"]:
         return None
@@ -513,7 +508,7 @@ def _automatic_bootstrap_refusal(args) -> str | None:
         context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
         killswitch_path=_bootstrap_hold_path(),
     )
-    reader = getattr(driver, "automatic_update_refusal", None)
+    reader: Callable[[Any], str | None] | None = getattr(driver, "automatic_update_refusal", None)
     if callable(reader):
         return reader(request)
     from worktree_manager.manager_config import ManagerConfigError, load_config
@@ -529,11 +524,11 @@ def _automatic_bootstrap_refusal(args) -> str | None:
     )
 
 
-def _automatic_bootstrap_inhibited(args) -> bool:
+def _automatic_bootstrap_inhibited(args: argparse.Namespace) -> bool:
     return _automatic_bootstrap_refusal(args) is not None
 
 
-def _foreground_install(args, driver) -> Path | int:
+def _foreground_install(args: argparse.Namespace, driver: ModuleType) -> Path | int:
     """Explicit bootstrap owns the existing finite driver, not a spawn fallback."""
     from worktree_manager.update_driver_cli import _CONTEXT_KEYS, parse_options, request_context
 
@@ -592,7 +587,7 @@ def _foreground_install(args, driver) -> Path | int:
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Manager bootstrap did not complete: {result.state}")
     if result.exit_code:
-        return result.exit_code
+        return cast(int, result.exit_code)
     with result.log_path.open("rb") as log:
         offset = max(0, result.log_path.stat().st_size - 65538)
         log.seek(offset)
@@ -623,13 +618,13 @@ def _foreground_install(args, driver) -> Path | int:
     return slot
 
 
-def _uninstall(args) -> int:
+def _uninstall(args: argparse.Namespace) -> int:
     from runtime_uninstall import submit_uninstall
 
     return submit_uninstall(args, _execution_driver, _installation_custody, _source_digest)
 
 
-def _install(args) -> Path | int:
+def _install(args: argparse.Namespace) -> Path | int:
     if getattr(args, "wheel_profile", None) is not None:
         from install_source import wheel_inputs, wheel_selection
 
@@ -647,7 +642,9 @@ def _install(args) -> Path | int:
 
 
 def _install_payload(
-    args, *, wheel_inputs=None, native_wheel_inputs=None, local_packages=None, application=None,
+    args: argparse.Namespace, *, wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
+    native_wheel_inputs: WheelInstallInputs | None = None,
+    local_packages: tuple[str, ...] | None = None, application: Path | None = None,
 ) -> Path | int:
     _validate_update_request(args)
     reconcile = not args.skip_instance_reconcile
@@ -658,7 +655,7 @@ def _install_payload(
     if args.source_digest is not None and _source_digest(args.payload) != args.source_digest:
         raise RuntimeError("Manager installation source changed after driver admission")
 
-    def before_publish():
+    def before_publish() -> None:
         if args.source_digest is not None and _source_digest(args.payload) != args.source_digest:
             raise RuntimeError("Manager installation source changed during construction")
         if args.repair_update:
@@ -667,7 +664,7 @@ def _install_payload(
 
     with ExitStack() as source_custody:
         install_payload = args.payload
-        options = {
+        options: dict[str, Any] = {
             "wheel_inputs": wheel_inputs, "local_packages": local_packages,
             "application": application, "native_wheel_inputs": native_wheel_inputs,
         }
@@ -691,8 +688,9 @@ def _install_payload(
 
 
 def _install_selected_payload(
-    args, install_payload: Path, *, before_publish, reconcile: bool,
-    wheel_inputs, local_packages, application, native_wheel_inputs,
+    args: argparse.Namespace, install_payload: Path, *, before_publish: Callable[[], None], reconcile: bool,
+    wheel_inputs: WheelInstallInputs | WheelReuseInputs | None, local_packages: tuple[str, ...] | None,
+    application: Path | None, native_wheel_inputs: WheelInstallInputs | None,
 ) -> Path | int:
     # Application execution stays under the constructed interpreter and retention bootstrap.
     from worktree_manager.self_install import self_install
@@ -701,9 +699,9 @@ def _install_selected_payload(
         evidence = json.loads(args.recover_adopted.read_text(encoding="utf-8"))
         if evidence.get("root") != str(args.root.resolve()):
             raise RuntimeError("Recovery adoption names another Manager root")
-        from worktree_manager.self_install import _copy_payload
+        from worktree_manager.self_install_payload import _copy_payload
 
-        candidate_options = {"application": application} if application is not None else {}
+        candidate_options: ApplicationOptions = {"application": application} if application is not None else {}
         with candidate(args.payload, args.root, assemble=_copy_payload, **candidate_options) as ready:
             slot = ready.slot
             python = runtime.slot_python(args.root, slot.name)
@@ -721,7 +719,7 @@ def _install_selected_payload(
                 activation, stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8",
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
                 **_installation_child_options(),
             )
             try:
@@ -738,7 +736,7 @@ def _install_selected_payload(
             if process.returncode:
                 return process.returncode
     else:
-        source_options = (
+        source_options: dict[str, Any] = (
             {"_wheel_inputs": wheel_inputs, "_local_packages": local_packages}
             if wheel_inputs is not None else {}
         )
@@ -750,6 +748,7 @@ def _install_selected_payload(
                 _base_python=args.wheel_python, _uv=args.wheel_uv,
             )
         staged = getattr(args, "stage_only", False)
+        stage_options: StageOptions = {"stage_only": True} if staged else {}
         result = self_install(
             install_payload, root=args.root, dry_run=False,
             _before_publish=before_publish,
@@ -757,7 +756,7 @@ def _install_selected_payload(
             _transactional_activation=not staged,
             _reconcile_instances=reconcile,
             **source_options,
-            **({"stage_only": True} if staged else {}),
+            **stage_options,
         )
         if result.action == "error" or (staged and result.action != "staged"):
             print(
@@ -765,11 +764,11 @@ def _install_selected_payload(
                 file=sys.stderr,
             )
             return 1
-        slot = Path(result.slot)
+        slot = Path(cast(str, result.slot))
     return slot
 
 
-def _finish(args, slot: Path | int, command: list[str]) -> int:
+def _finish(args: argparse.Namespace, slot: Path | int, command: list[str]) -> int:
     if isinstance(slot, int):
         return slot
     if args.install_only or getattr(args, "stage_only", False):
@@ -797,7 +796,7 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
 
     handoff = handoff_environment(command)
     owned_without_handoff = not handoff and bool(participant_environment())
-    selected = {
+    selected: dict[str, Any] = {
         "cwd": request_source_anchor(), "fallback_cwd": str(args.root.resolve()),
     } if args.update_participant else {}
     with runtime.retention_lease(args.root, slot.name):

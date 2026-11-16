@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from typing import Any, Callable
 import venv
 
 import pytest
@@ -30,7 +31,8 @@ def test_foreground_install_selects_its_python_for_the_real_queued_participant(
     host = shutil.which("pwsh") or shutil.which("powershell")
     if host is None:
         pytest.skip("PowerShell is unavailable")
-    adapter = self_install._runtime_installer()
+    installer_factory: Callable[[], Any] = self_install._runtime_installer
+    adapter = installer_factory()
     monkeypatch.setattr(sys, "path", list(sys.path))
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -104,7 +106,8 @@ def test_installation_python_scope_restores_the_hint_after_failure(
     else:
         monkeypatch.setenv(KEY, previous)
     with pytest.raises(RuntimeError, match="controlled callback failure"):
-        with self_install._runtime_installer()._bootstrap_python_environment():
+        installer_factory: Callable[[], Any] = self_install._runtime_installer
+        with installer_factory()._bootstrap_python_environment():
             assert os.environ[KEY] == getattr(sys, "_base_executable", sys.executable)
             raise RuntimeError("controlled callback failure")
     assert os.environ.get(KEY) == previous
