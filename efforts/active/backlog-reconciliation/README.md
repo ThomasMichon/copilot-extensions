@@ -3427,6 +3427,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   Its receiving review, actual merge/current readback and separate source
   disposition remain distinct from all unchecked technical work, paused
   adopters and interpreter/resource custody.
+  Reviewed #12909 subsequently delivered that complete hygiene receiving;
+  verified #2729 tracking retirement is `NOT_PLANNED`, not implementation.
+  The same journal retains #2830's complete incident, watchdog and independent
+  exit/extension/advisory lanes OPEN. The complete 21:53:08 UTC census is
+  857 whole open, 128 above fixed 729, with no new inflow or unrelated credit.
   The [auth, typing and cache-admission intake](journal/2026/11.14-auth-typing-and-cache-intake.md)
   directly preserves #12466/#9177/#12600 in their existing canonical domains,
   with nine unchecked Plan/local/actual-global technical rows. Original
