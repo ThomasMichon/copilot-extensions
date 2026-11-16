@@ -374,6 +374,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [complete first-adoption receiving record](journal/2026/11.16-first-adoption-receiving-and-inflow.md)
+records #12904's actual reviewed merge, ENTIRE current Manager ROOT and
+complete Phase 5/source readback, and the separate #356 `NOT_PLANNED`
+tracking retirement. All FA356 technical rows, incumbent check states,
+bounded #8545 transfer and other owners remain. The complete 21:28:09 UTC
+census is 858 whole open, 129 above fixed 729: #356's campaign departure
+and independently owned #12896 departure are partly offset by eligible
+#12905 inflow. #12900 and #12905 retain distinct current claims and whole
+unfinished contracts; no implementation, rollout or parent completion follows.
+
 The [finite status/catalog/roster receiving proposal](status-catalog-roster-receiving.md)
 preserves #918's ten complete requirement families directly in existing
 OPEN #3761, with paired Validation and independent Coordination obligations.
