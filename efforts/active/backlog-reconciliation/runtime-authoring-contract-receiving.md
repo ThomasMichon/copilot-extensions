@@ -10,6 +10,26 @@ existing #1096 and the
 The latter remains **Blocked and parked**. This is additive planning, not
 capability execution, a new implementation assignment or a completion claim.
 
+## Actual receiving and tracking disposition
+
+#12887 merged as `15da010ab44e434138b66dea5d011521af66908f` after exact-head
+approval and successful checks. The complete direct #1096 body addition was
+published and fully read back with its entire incumbent content preserved.
+The relevant reviewed ROOT Plan/global Validation/Coordination/Journal and
+intake route were verified separately.
+
+The subsequent independent judgment retired #1176 `NOT_PLANNED` at
+2026-11-16 19:53:03 UTC, with
+[the complete public explanation](https://github.com/ThomasMichon/copilot-extensions/issues/1176#issuecomment-6927413373).
+All twelve technical rows remain unchecked. Source and receiver assignments
+remain unchanged; #1096 is OPEN and the effort remains Blocked/parked.
+This is complete planned receiving, not technical fulfillment or custody release.
+
+The two newly observed source timeline events were the coordinator's own
+same-repository #12887 and #1096 cross-references, not authored-source changes.
+The initial equality stop was diagnosed before disposition; no changed
+original or discussion was ignored or overwritten.
+
 The original author reports that the authoring pattern, architecture,
 installation/self-provisioning contracts and glossary invariants landed.
 #1183 and subsequent structural guards are credited for that definition and

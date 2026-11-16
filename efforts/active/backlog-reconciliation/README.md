@@ -381,10 +381,18 @@ release, installed or new native claims. Its
 [complete finite #1176 receiving contract](runtime-authoring-contract-receiving.md)
 adds planned Phase 2/8 and global Validation acceptance under parked #1096,
 preserving all eight original families, literal alternatives and custody.
-Reviewed merge, direct issue delivery/full readback and separate source
-judgment remain ahead; #1176 is not declared complete.
+#12887 subsequently merged; direct issue delivery/full readback and the
+separate #1176 `NOT_PLANNED` tracking retirement are now verified, without
+technical completion, assignment change or resumption of the parked effort.
 Two inflow arrivals offset the two verified completions: the complete
 2026-11-16 19:39:02 UTC census remains 859 whole open, 130 above fixed 729.
+The later complete 19:54:09 UTC census records the #1176 baseline departure:
+858 whole open, 129 above fixed 729, with no additional inflow or departures.
+The [ordinary ZDD result contract](ordinary-zdd-result-receiving.md) next
+proposes complete direct planned #870 acceptance in existing #4477. Its
+ordinary port-AND-spawn result, predecessor, canonical/all-copy and release
+scope remains distinct from the keeper's new retirement/relay claim; no
+source disposition or operational authority follows from that proposal.
 
 The [changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
 verify #12831's actual merge while retaining #9532's explicit original-history,
