@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import stat
 from pathlib import Path
 from typing import Any
@@ -781,7 +782,9 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
         protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    generated: dict[Path, str | bytes] = {}
+    generated: dict[Path, str | bytes] = runpy.run_path(
+        str(Path(__file__).with_name("bootstrap_python.py"))
+    )["expected_files"](manifest, data)
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:

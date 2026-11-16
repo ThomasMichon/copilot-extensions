@@ -51,7 +51,30 @@ may select `direct`; the payload shim then invokes that same installer with
 `provision` and never consults a shared snapshot pointer.
 
 Manifest version 1 keeps the legacy runtime-root contract.
-Manifest version 2 renames that field to `legacyRuntimeRoot` and may set
+Both manifest versions may opt into `"bootstrapPython": "3.11.11"` to declare
+an exact stable CPython bootstrap version. Generation checks it against the
+addressed project's nonempty `project.requires-python` in `pyproject.toml` and
+emits `scripts/bootstrap-python-version.txt`: one ASCII `cpython@<version>`
+request followed by a newline. This static input needs no Python or TOML parser
+to read from shell ingress. Missing or malformed project metadata and
+incompatible selections refuse generation before output writes. Absent opt-in
+emits no scalar and leaves command/catalog bytes unchanged. The packaged
+generator and toolkit carry the new helper independently of scalar opt-in.
+
+This is declaration delivery, not launcher adoption or acquisition authority.
+No production manifest currently opts in. A setup owner must qualify the
+shell-native PATH-UV provider before using the declaration; ordinary launch
+remains acquisition-free. Older generators ignore this optional field and do
+not emit the scalar. A future consumer must report a missing declaration as
+unsupported or unprepared setup, never use ambient Python as a fallback.
+Provider delivery precedes any caller migration. It is not the application's `.python-version`,
+completed-generation selector, wheel ABI target or lock. Those remain owned by
+the application-project and runtime-selection producers. The generator's
+opt-in validation uses the existing tooling's Packaging dependency and
+`tomllib` (the established `tomli` backport on Python 3.10); neither is required
+to read the emitted scalar.
+
+Manifest version 2 renames `runtimeRoot` to `legacyRuntimeRoot` and may set
 `installationContext: "required"`. Required-context adoption is accepted only
 for runtime-bearing core `agent-*` identities defined by this suite; an
 independent marketplace may carry the same identity, but an unrelated or

@@ -201,6 +201,7 @@
     {
       "name": "lib-payload-invocation",
       "include": [
+        "libs/payload-invocation/bootstrap_python.py",
         "libs/payload-invocation/command_binding.py",
         "libs/payload-invocation/command_lifecycle.py",
         "libs/payload-invocation/generate.py",

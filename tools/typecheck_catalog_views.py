@@ -18,6 +18,7 @@ PRODUCER = PREFIX + "generate.py"
 TEMPLATE = PREFIX + "templates/catalog-python.tmpl"
 DECLARATION = PREFIX + "python-catalog-inputs.json"
 MEMBERS = tuple(PREFIX + name for name in (
+    "bootstrap_python.py",
     "command_binding.py", "command_lifecycle.py", "generate.py", "runtime_admission.py",
 ))
 TOKENS = (
