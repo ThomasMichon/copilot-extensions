@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+import subprocess
+from typing import Any, Protocol, TypeGuard, cast
 
 from .ordinary_agent_facts import AgentIdentity, identity
 from .queue_records import TaskError
@@ -13,7 +15,13 @@ from .queue_task_relationships import valid_record_writer
 REQUIREMENT = "worktree_writer_requirement"
 
 
-def _writer_identity(value: object) -> bool:
+class ObservationRunner(Protocol):
+    def __call__(
+        self, arguments: list[str], *, read_only: bool,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+def _writer_identity(value: object) -> TypeGuard[dict[str, Any]]:
     return (
         isinstance(value, dict)
         and set(value) == {"installation_root", "runtime_generation"}
@@ -23,7 +31,7 @@ def _writer_identity(value: object) -> bool:
     )
 
 
-def writer_requirement(value: object) -> dict:
+def writer_requirement(value: object) -> dict[str, Any]:
     if not (
         isinstance(value, dict) and set(value) == {"version", "identity", "creation_nonce"}
         and type(value["version"]) is int and value["version"] == 1
@@ -34,7 +42,7 @@ def writer_requirement(value: object) -> dict:
     return copy.deepcopy(value)
 
 
-def retain_requirement(previous: dict | None, incoming: dict) -> None:
+def retain_requirement(previous: dict[str, Any] | None, incoming: dict[str, Any]) -> None:
     """Storage cannot remove, change or retrofit an original writer requirement."""
     if REQUIREMENT in incoming:
         writer_requirement(incoming[REQUIREMENT])
@@ -45,10 +53,12 @@ def retain_requirement(previous: dict | None, incoming: dict) -> None:
         raise TaskError("ordinary Bridge original writer requirement cannot change")
 
 
-def allocation_requirement(row: dict, project: str, value: dict | None) -> str | None:
+def allocation_requirement(
+    row: dict[str, Any], project: str | None, value: dict[str, Any] | None,
+) -> str | None:
     retained = row[REQUIREMENT]
     if value is None:
-        return retained
+        return cast("str | None", retained)
     requirement = OrdinaryWriterAdmission(value, {**row, "allocation_project": project}).requirement
     if row["driver"] != "ordinary-bridge" or not row["creation_key"]:
         raise TaskError("ordinary Bridge writer requirement lacks its original creation key")
@@ -62,8 +72,8 @@ def allocation_requirement(row: dict, project: str, value: dict | None) -> str |
 
 
 def prepared_requirement(
-    row: dict, *, worktree: str, project: str | None, path: str | None,
-    creation_nonce: str | None, value: dict | None,
+    row: dict[str, Any], *, worktree: str, project: str | None, path: str | None,
+    creation_nonce: str | None, value: dict[str, Any] | None,
 ) -> str | None:
     """Retain the expectation with preparation, before its first relationship."""
     retained = row[REQUIREMENT]
@@ -84,7 +94,7 @@ def prepared_requirement(
 class OrdinaryWriterAdmission:
     """Expected writer and original workspace, not a closed-cohort ready permit."""
 
-    def __init__(self, value: dict, reservation: dict) -> None:
+    def __init__(self, value: dict[str, Any], reservation: dict[str, Any]) -> None:
         self.requirement = writer_requirement(value)
         self.workspace = {
             "worktree_id": reservation.get("worktree"),
@@ -98,7 +108,7 @@ class OrdinaryWriterAdmission:
             raise TaskError("ordinary Bridge writer requires its original prepared workspace")
 
     @staticmethod
-    def _read(run, arguments: list[str]) -> dict:
+    def _read(run: ObservationRunner, arguments: list[str]) -> dict[str, Any]:
         result = run(["--json", *arguments], read_only=True)
         try:
             value = json.loads(result.stdout)
@@ -109,7 +119,7 @@ class OrdinaryWriterAdmission:
         return value
 
     @classmethod
-    def _health(cls, run) -> dict:
+    def _health(cls, run: ObservationRunner) -> dict[str, Any]:
         health = cls._read(run, ["status"])
         capabilities = health.get("capabilities")
         slot = health.get("slot")
@@ -131,7 +141,7 @@ class OrdinaryWriterAdmission:
             raise TaskError("actual ordinary Bridge writer support is unconfirmed")
         return health
 
-    def check_record(self, record: dict) -> None:
+    def check_record(self, record: dict[str, Any]) -> None:
         if not isinstance(record, dict) or any(
             record.get(key) != value for key, value in {
                 "id": self.workspace["worktree_id"], "repo": self.workspace["project"],
@@ -142,7 +152,7 @@ class OrdinaryWriterAdmission:
             raise TaskError("ordinary Bridge writer workspace incarnation changed")
 
     @classmethod
-    def _create_health(cls, run) -> dict:
+    def _create_health(cls, run: ObservationRunner) -> dict[str, Any]:
         support = cls._read(run, ["version", "--contracts-json"])
         contracts = support.get("contracts")
         required = {
@@ -166,25 +176,27 @@ class OrdinaryWriterAdmission:
         return cls._health(run)
 
     @classmethod
-    def selected_writer(cls, run) -> dict:
+    def selected_writer(cls, run: ObservationRunner) -> dict[str, Any]:
         """Observe an expectation before preparation, not a closed-cohort permit."""
         selected = cls._create_health(run).get("worktree_record_writer")
         if not _writer_identity(selected):
             raise TaskError("ordinary Bridge selected writer identity is unconfirmed")
         return copy.deepcopy(selected)
 
-    def admit_create(self, run, *, retained: bool = False) -> None:
+    def admit_create(self, run: ObservationRunner, *, retained: bool = False) -> None:
         """A future journal cannot admit the earlier first relationship."""
         health = self._create_health(run)
         if not retained and health.get("worktree_record_writer") != self.requirement["identity"]:
             raise TaskError("ordinary Bridge selected writer differs from the admitted writer")
 
-    def inspect_session(self, run, info: dict) -> dict:
+    def inspect_session(self, run: ObservationRunner, info: dict[str, Any]) -> dict[str, Any]:
         """Requalify only the exact session's retained journal, never a new selection."""
         actual = identity(info)
         return self._inspect_identity(run, actual)
 
-    def inspect_workspace(self, run, *, native_session_id: str) -> dict:
+    def inspect_workspace(
+        self, run: ObservationRunner, *, native_session_id: str,
+    ) -> dict[str, Any]:
         """Discover an existing handle, then qualify its exact original native journal."""
         if not isinstance(native_session_id, str) or not native_session_id.strip():
             raise TaskError("existing Bridge writer requires its exact native session")
@@ -207,12 +219,24 @@ class OrdinaryWriterAdmission:
             response["project"], response["target_dir"],
         ))
 
-    def _inspect_identity(self, run, actual: AgentIdentity) -> dict:
+    def _inspect_identity(self, run: ObservationRunner, actual: AgentIdentity) -> dict[str, Any]:
         health = self._health(run)
         response = self._read(run, ["status", actual.bridge, "--full", "--worktree-writer"])
         observed = response.get("worktree_writer_observation")
         instance = observed.get("bridge_instance") if isinstance(observed, dict) else None
         retained = writer_requirement(observed.get("worktree_writer") if isinstance(observed, dict) else None)
+        executing = observed.get("executing_writer_identity") if isinstance(observed, dict) else None
+        compatible = (
+            retained == self.requirement
+            if isinstance(observed, dict) and "executing_writer_identity" not in observed
+            else (
+                _writer_identity(executing)
+                and retained["creation_nonce"] == self.requirement["creation_nonce"]
+                and retained["identity"]["installation_root"]
+                == self.requirement["identity"]["installation_root"]
+                == executing["installation_root"]
+            )
+        )
         if not (
             isinstance(observed, dict)
             and observed.get("schema") == "copilot-extensions.creation-worktree-writer"
@@ -224,7 +248,7 @@ class OrdinaryWriterAdmission:
             and observed.get("project") == response.get("project") == actual.project
             and observed.get("worktree_path") == response.get("target_dir") == actual.path
             and all(observed.get(key) == value for key, value in self.workspace.items())
-            and retained == self.requirement
+            and compatible
             and observed.get("writer_scope") == "executing-process"
             and valid_record_writer(observed.get("writer_contract"))
             and type(observed.get("retained_session_writes")) is int

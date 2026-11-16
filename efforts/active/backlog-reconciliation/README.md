@@ -380,10 +380,17 @@ OPEN #3761, with paired Validation and independent Coordination obligations.
 It prospectively reconciles only #918's reference-only tracking condition
 after review and actual complete receiving; all 38 incumbent unchecked
 states, other source tokens, actual claims and the conditional ROOT gate
-remain. No receiving receipt, issue retirement or technical completion is
-claimed yet. The [dated record](journal/2026/11.16-status-catalog-roster-receiving.md)
-also journals #12895's actual merge and the complete 20:49:49 UTC census:
-859 whole open, 130 above fixed 729, with no new closure credit.
+remain. #12902 subsequently merged; actual complete #3761 receiving/full
+current readback and separate #918 `NOT_PLANNED` retirement are verified,
+without technical completion or custody transfer. The
+[dated record](journal/2026/11.16-status-catalog-roster-receiving.md)
+also journals #12895's actual merge and the complete 21:09:13 UTC census:
+859 whole open, 130 above fixed 729. Eligible #12900 inflow offsets #918's
+baseline administrative departure; it does not erase the preserved work.
+The [next complete first-adoption proposal](../worktree-manager-control-plane/phase-5-configuration-workbench.md#complete-finite-first-repository-adoption-from-356)
+retains all #356 alternatives and the actual bounded #8545 seam transfer,
+with ROOT/global/Coordination/Journal review and full current readback before
+any separate source judgment.
 
 The [accepted ZDD tracking and current-contract unit](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
 records #12888's actual reviewed merge, complete direct #4477 receiving and

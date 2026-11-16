@@ -205,3 +205,22 @@ altering its incumbent prefix, and fully read back both current discussions.
 Only then judge redundant #918 tracking separately. Actual receiving and source
 judgment are pending; no product tests, native execution, install, owner contact,
 credential or resource operation is authorized by this proposal.
+
+## Actual receiving follow-through - 2026-11-16
+
+#12902 merged at 21:03:47 UTC as
+`4297245fde20051fbf69a4f5017b9e0a93567393`. The complete additive contract
+was then published in actual OPEN #3761 at 21:06:20 UTC. Its full 362-line
+body, all 30 discussions, the complete #918 original and all 21 source
+discussions were read back with fresh complete authored-history and
+collaborator qualification. The entire incumbent prefix, all 38 unchecked
+states and all 26 new planned rows were retained. No separate ROOT receipt
+or technical completion was inferred.
+
+The separate whole-scope judgment retired #918 as `NOT_PLANNED` at
+21:08:01 UTC, with public explanation
+[6929380943](https://github.com/ThomasMichon/copilot-extensions/issues/918#issuecomment-6929380943).
+#3761 remains OPEN, with all independent owners, actual implementation
+claims, other source tokens and the conditional ROOT gate preserved. The
+earlier pending language above describes the review-first sequence, not
+the subsequent observed provider state.

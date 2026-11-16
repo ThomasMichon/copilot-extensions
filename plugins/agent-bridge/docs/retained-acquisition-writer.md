@@ -22,7 +22,7 @@ Version 3 requires the existing exact `project` and `worktree_path`, plus
 |---|---|
 | `version` | Requirement version 1 |
 | `identity.installation_root` | Expected selected Worktrees installation |
-| `identity.runtime_generation` | Expected immutable-slot 32-hex build identity |
+| `identity.runtime_generation` | Expected birth writer's 32-hex build identity, retained afterward as provenance |
 | `creation_nonce` | Original workspace incarnation, checked against exact owner reads |
 
 This object rejects unknown fields. It accepts no caller command, interpreter,
@@ -32,19 +32,33 @@ effects; ordinary unpinned CLI acquisition remains supported.
 
 ## Selection and recovery
 
-The provider resolves its own existing pinned Worktrees selection and runs
+The provider resolves its own existing Worktrees selection and runs
 `resource-relationship capabilities` through that exact command. The response
-must identify the expected executing serializer and its retained-relationship
+must identify a compatible executing serializer and its retained-relationship
 and creation-nonce preservation contract, plus `retained_session_writes: 1`.
-Selected-root metadata alone does not qualify it.
+Selected-root metadata alone does not qualify it. The version-1 adapter requires
+`copilot-extensions.worktree-record-writer` version 1, retained relationships
+version 1 and creation-nonce version 1, together with executing-process identity
+and expected-identity enforcement. A newer runtime generation in the original
+installation can satisfy that contract; another installation cannot.
+An initial request without a retained binding still requires its observed birth
+identity before committing the new journal. Compatible adoption applies only
+after a qualified original binding exists; it cannot invent the guarantees of
+an unqualified earlier writer.
 
 The original request and provider-selected command commit together in the
 existing delivery-keyed acquisition journal before launch. The command remains
 part of that journal's existing effect history through launch and delivery.
-A new frontend or concurrent retry recovers it without selecting a replacement.
-Later same-task acquisition retains the same requirement and command; an
+A new frontend or concurrent retry preserves those original facts, but selects
+and qualifies the installation's current compatible executor. The historical
+command is validated as journal data, never executed as a recovery fallback.
+Later same-task acquisition retains the same original requirement; an
 unqualified historical acquisition cannot be retrofitted. Missing or conflicting
 recovery facts refuse with the existing custody intact.
+Nested continuation keeps the outer operation's qualified executor even when
+it reads an earlier delivery's request. Each delivery retains the inherited
+birth command, not the newer executor, so a later delivery does not silently
+rewrite provenance or strand a prior reader after rollback.
 
 Acquisition reads, delegated registration and binding use the retained owner.
 Controller qualification uses that same command for a fixed cached inventory
@@ -54,7 +68,8 @@ or conflicting evidence still refuses. This observation does not release or
 broaden the retained target scope: registration, binding, succession and other
 target operations remain confined to the original workspace.
 The native target stores only a pointer to the original acquisition journal.
-Later native resume and handoff recover and requalify that same command, check
+Later native resume and handoff recover the original contract, qualify a current
+compatible executor, check
 the original workspace, and use it for registration, succession and lineage
 reads. Required lineage errors are not silently treated as legacy best-effort
 success. Unpinned operations keep their existing fail-open behavior.
@@ -66,7 +81,8 @@ those continuations retain their existing lifecycle owner. An explicit writer
 pointer still requires its original journal, and a matching attempt with
 missing or malformed effects refuses rather than becoming an unpinned call.
 
-Registration, binding and succession carry the original requirement through
+Registration, binding and succession carry the original workspace incarnation
+and this invocation's qualified executing identity through
 Worktrees' [qualified executing-session option](../../agent-worktrees/docs/resource-relationship.md#qualified-executing-session-writes).
 Those commands invoke their existing registered handlers in the qualified CLI,
 not a resident selected only by ordinary verb versions. The actual handler
@@ -97,19 +113,35 @@ so a normal send cannot bypass guarded registration recovery. Startup leaves
 that dormant session stopped; successful guarded registration re-enables its
 ordinary background recovery.
 
-The merged pinned launcher owns retention, current installation governance and
-pre-import checks of the original completion/build identity. Selector movement
-does not replace this writer. Removed or recreated slots refuse; this feature
-does not veto an authorized installer replacement or preserve a second registry.
+## Build-bound record adapter
 
-Bridge-owned pinned wrappers use the serving Bridge interpreter and launcher,
-not the retired Bridge slot recorded alongside the writer. Both legacy and
-same-cell wrappers retain the original Worktrees interpreter, installation
-context and completion/build identity at execution. The original journal is
-not rewritten. Direct owner prefixes remain unchanged; foreign Bridge roots
-and incomplete wrappers refuse rather than selecting another writer or PATH.
-This transport compatibility does not add capabilities to the retained
-Worktrees build, authorize a native resume or settle an unknown send.
+The strict version-1 requirement and saved command remain immutable provenance
+for supported acquisition and keyed-creation records. They no longer require
+the original executable to remain available. The adapter uses the existing
+installed-owner resolver, never the saved interpreter or ambient `PATH`, and
+negotiates the declared version-1 semantics above before effects. The selected
+command and executing identity are operation-scoped; delegated session writes
+still check that actual identity and the locked original workspace incarnation.
+An unsupported contract, foreign installation or changed incarnation refuses;
+build inequality alone does not.
+
+No persisted adoption rewrites request digests, creation facts, handoff history
+or original operations. This keeps concurrent retries and prior Bridge readers
+on the same original journal. A prior Bridge implementation can still interpret
+the unchanged record under its own stricter execution rules; an unavailable old
+slot refuses rather than substituting a new conversation or resending a prompt.
+This operation-level limitation is not an installer replacement veto. A writer
+rollback must still advertise the required semantics before new code uses it.
+
+Read-only acquisition and keyed-creation writer observations keep the original
+`worktree_writer` and separately report `executing_writer_identity`. Observing
+either identity neither adopts native execution nor settles an unknown send.
+Dispatch's ordinary admission validates birth provenance and the qualified
+executing identity separately. Both must belong to the expected installation
+and preserve the original incarnation, with the same executing-process and
+versioned preservation guarantees. An older observation without the additive
+executing identity retains its original exact-identity requirement; missing
+new evidence cannot imply compatible adoption.
 
 ## Ordinary keyed creation
 
@@ -136,9 +168,9 @@ metadata does not establish support, including after a CLI rollback.
 
 This route does **not** create an acquisition attempt. Its original
 `workspace_embodiments` row atomically retains the creation facts, workspace
-incarnation, requirement and provider-selected pinned writer before native
-launch. Required replay requalifies that command and exact workspace without
-reselecting. A different key cannot capture the same retained workspace;
+incarnation, requirement and provider-selected writer provenance before native
+launch. Required replay uses the same contract adapter and exact workspace.
+A different key cannot capture the same retained workspace;
 changed inputs, dropped requirements and retrofitting an unpinned row refuse.
 Schema 41 prepares the nullable columns and immutable original-row/native
 fences through the ordinary writable migration. Passive and existing-only
@@ -248,20 +280,20 @@ once per query, rather than rescanned for every retained session.
 `retained_workspace_creation_writer_inspection: 1` adds the optional
 `BridgeClient.get_session(exact_id, worktree_writer=True)` form on the existing
 `GET /api/v1/sessions/{exact_id}?worktree_writer=true`. The negotiated query
-requalifies the original serializer and workspace, bracketed by unchanged
+qualifies a compatible current serializer and the original workspace, bracketed by unchanged
 journal, target, native identity and active Bridge readiness/instance checks.
 It returns `worktree_writer_observation` schema
 `copilot-extensions.creation-worktree-writer`, version 1, with the creation key
-digest, exact session/native/workspace, original requirement, serializer
+digest, exact session/native/workspace, original requirement, executing identity, serializer
 contract and Bridge instance. It exposes no command or environment. An
 unqualified exact owner returns 409; an older reader ignoring the query is
 unconfirmed, not successful evidence. Ordinary session reads remain unchanged.
 
 A retained terminal creation journal remains inspectable for its exact managed
 native session and still-existing workspace. Inspection does not reopen the
-journal, resume a session or select a replacement writer. Changed identities,
+journal or resume a session. Changed native/workspace/installation identities,
 journal movement, finalizing/terminal workspaces and unavailable original
-writers retain their refusals; terminal history alone cannot prove liveness.
+contracts retain their refusals; terminal history alone cannot prove liveness.
 
 The existing full-session CLI exposes the same optional observation through
 `status <exact-session-id> --full --worktree-writer`. Its
@@ -285,17 +317,17 @@ negotiates that capability on each transport attempt. Without the option,
 inspection retains its previous response and performs no writer probes.
 
 The required form reopens only that delivery's original journal binding.
-It never selects a replacement command, retrofits a legacy acquisition,
-acquires a native, delivers a prompt or repairs a record. It requalifies the
-retained executing serializer and reads the original workspace through that
-same command. Changed project, path or creation nonce refuses. The journal
+It selects a compatible current executor without retrofitting an unqualified
+legacy acquisition, acquiring a native, delivering a prompt or repairing a
+record. It qualifies that serializer and reads the original workspace through
+the same invocation selection. Changed project, path or creation nonce refuses. The journal
 and active Bridge instance must still match after those reads; unknown,
 passive, draining or unready owners do not yield successful evidence.
 
 The additive `worktree_writer_observation` contains schema
 `copilot-extensions.acquisition-worktree-writer`, version 1, the original
 delivery/reservation/task/workspace fields, the retained `worktree_writer`
-requirement, live serializer contract and active Bridge instance
+requirement, separate executing identity, live serializer contract and active Bridge instance
 (installation root, PID and routing generation). It exposes no command or
 environment. Missing acquisitions retain their 404; an unqualified writer
 inspection returns 409. This is a fresh read-only observation, not a durable
@@ -314,7 +346,9 @@ recovery, concurrent replay and an HTTP round trip. A finite source-process
 control executes the actual Worktrees parser/serializer for registration and
 succession while retaining an existing protected claim and nonce, with a
 reachable ordinary-verb-compatible but unqualified resident. Unpinned control
-writes reach that resident; required writes never do. Changed identity, nonce,
-project and path refuse at all three receiving commands. Its declared
+writes reach that resident; required writes never do. Compatible newer
+generations can serialize continuation without changing birth provenance;
+foreign installations, changed nonces, projects and paths still refuse.
+Its declared
 build identity and native ACP transport are controlled fixtures; it is not
 installed-runtime, native Copilot or closed-cohort acceptance.
