@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit control-authorized original native-wake settlement with capability negotiation and unchanged passive reconciliation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

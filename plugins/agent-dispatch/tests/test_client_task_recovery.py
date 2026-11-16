@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
 
-from agent_dispatch.client import DispatchClient, DispatchError, DispatchUpgradeRequired
-from agent_dispatch.client_task_recovery import RECOVERY_OPERATIONS, WAKE_OUTBOXES
+from agent_dispatch.client import DispatchClient
+from agent_dispatch.client_errors import DispatchError, DispatchUpgradeRequired
+from agent_dispatch.client_task_recovery import (
+    RECOVERY_OPERATIONS,
+    WAKE_OUTBOXES,
+    RecoveryOperation,
+    WakeOutbox,
+)
 
 HEALTH = {
     "task_recovery": {
@@ -16,13 +23,13 @@ HEALTH = {
         "operations": [*RECOVERY_OPERATIONS, "reconcile_wake"],
     }
 }
-FIELDS = {
+FIELDS: dict[str, Any] = {
     "expected_revision": "revision-a",
     "request_id": "request-a",
     "actor": "test-operator",
     "reason": "synthetic recovery",
 }
-WAKE_FIELDS = {
+WAKE_FIELDS: dict[str, Any] = {
     "outbox": "wake_outbox",
     "wake_id": "wake-a",
     "expected_revision": "revision-a",
@@ -31,7 +38,7 @@ WAKE_FIELDS = {
 }
 
 
-def _call(client: DispatchClient, method: str) -> dict:
+def _call(client: DispatchClient, method: str) -> dict[str, Any]:
     if method == "task_diagnostics":
         return client.task_diagnostics("task-a")
     if method == "recover_task":
@@ -69,7 +76,7 @@ def test_diagnostics_preserves_redacted_snapshot_and_ordinary_auth() -> None:
 
 
 @pytest.mark.parametrize("operation", RECOVERY_OPERATIONS)
-def test_recovery_exact_route_body_and_control_auth(operation: str) -> None:
+def test_recovery_exact_route_body_and_control_auth(operation: RecoveryOperation) -> None:
     requests = []
     result = {
         "operation": operation,
@@ -97,7 +104,7 @@ def test_recovery_exact_route_body_and_control_auth(operation: str) -> None:
 
 
 @pytest.mark.parametrize("outbox", WAKE_OUTBOXES)
-def test_reconcile_sends_only_original_wake_selector(outbox: str) -> None:
+def test_reconcile_sends_only_original_wake_selector(outbox: WakeOutbox) -> None:
     requests = []
     receipt = {"outcome": "sent", "receipt": {"send_id": "send-a", "sequence": 7}}
 
@@ -300,12 +307,13 @@ def test_invalid_operations_and_caller_outcomes_are_not_accepted() -> None:
         "https://dispatch.invalid", transport=httpx.MockTransport(unexpected)
     ) as client:
         with pytest.raises(ValueError, match="operation"):
-            client.recover_task("task-a", operation="force_clear", **FIELDS)
+            client.recover_task("task-a", **{**FIELDS, "operation": "force_clear"})
         with pytest.raises(ValueError, match="outbox"):
             client.reconcile_wake("task-a", **{**WAKE_FIELDS, "outbox": "other"})
         for field in ("outcome", "send_token", "request_id"):
+            invalid_field: dict[str, Any] = {field: "caller-label"}
             with pytest.raises(TypeError):
-                client.reconcile_wake("task-a", **WAKE_FIELDS, **{field: "caller-label"})
+                client.reconcile_wake("task-a", **WAKE_FIELDS, **invalid_field)
 
 
 def test_legacy_reset_and_target_detach_do_not_require_new_health() -> None:
@@ -330,3 +338,34 @@ def test_legacy_reset_and_target_detach_do_not_require_new_health() -> None:
         "expected_generation": None,
         "expected_owner_session_id": None,
     }
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_explicit_settlement_requires_distinct_running_operation(supported: bool) -> None:
+    requests = []
+    health: dict[str, Any] = {"task_recovery": {
+        "protocol": "task_recovery/v1",
+        "operations": ["reconcile_wake", *(["settle_wake"] if supported else [])],
+    }}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200, json=health if request.method == "GET" else {"outcome": "not_sent"},
+        )
+
+    with DispatchClient(
+        "https://dispatch.invalid", control_token="control-fixture",
+        transport=httpx.MockTransport(handle),
+    ) as client:
+        if supported:
+            assert client.reconcile_wake(
+                "task-a", **WAKE_FIELDS, settle_native_send=True,
+            ) == {"outcome": "not_sent"}
+        else:
+            with pytest.raises(DispatchUpgradeRequired, match="settle_wake"):
+                client.reconcile_wake("task-a", **WAKE_FIELDS, settle_native_send=True)
+    if supported:
+        assert json.loads(requests[-1].content) == {**WAKE_FIELDS, "settle_native_send": True}
+        assert requests[-1].headers["authorization"].endswith("control-fixture")
+    assert [r.method for r in requests] == (["GET", "POST"] if supported else ["GET"])
