@@ -251,6 +251,10 @@ repository creation, or private-environment capture was part of that proposal.
 - Reviewed canonical amendment and complete actual #5799 receiving readback
   precede any separate source tracking retirement; the technical wording
   correction and its validation remain unchecked.
+- The canonical amendment merged in #12815. Complete actual #5799 receiving
+  readback preceded the separate #4215 `NOT_PLANNED` tracking retirement.
+  This case's six direct rows and three canonical items remain unchecked;
+  no product prose or runtime behavior was changed and no custody released.
 
 ### 2026-11-06 - Independent runtime-advice wording planning intake
 
