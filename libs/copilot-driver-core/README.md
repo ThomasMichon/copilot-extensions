@@ -208,8 +208,26 @@ client count and pane observations when present. Confirmed present/absent
 exits zero; unknown/unsupported exits 3. Duplicate/unknown properties and
 unknown options are refused. Older independently installed providers without
 the declaration stay unsupported; callers must not downgrade to passive
-PSMux CLI reads. Foreground attach/create and explicit provider writes still
-launch PSMux and retain its startup-cleanup risk.
+PSMux CLI reads. Foreground attach/create and other explicit provider writes
+still launch PSMux and retain its startup-cleanup risk.
+
+### Finite PSMux presentation
+
+`agent_remote_driver.mux_status.apply_psmux_status` publishes only the harness
+status fields and their status-bar formats through the native authenticated
+loopback endpoint. Manager uses this Core-owned operation instead of starting
+the cleanup-bearing PSMux CLI. TMux retains its existing writer.
+
+The caller supplies the current native session incarnation. The operation
+rechecks that identity and unchanged port/key hints before each option write,
+reads each value back, and checks the target again before reporting success.
+All requests share a bounded deadline. Unsupported options, control characters,
+oversized values, changed targets, failed authentication and incomplete readback
+return false, including after partial publication. No process, pane, input,
+session, provider registration or new background updater is created. This
+in-process seam ships with Manager's declared Core dependency; it adds no
+independently deployed CLI or service contract and does not change observation
+or launch authority.
 
 The explicit headed coordinator now runs in the original caller-owned pane.
 It stages the launch-bound SDK extension, retains the native child handle and

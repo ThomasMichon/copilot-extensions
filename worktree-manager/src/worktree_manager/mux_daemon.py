@@ -16,9 +16,10 @@ import os
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
@@ -41,6 +42,16 @@ from .runtime_identity import route_version, running_generation
 from .restart_observer import RestartObserver
 from .restart_notification_runtime import RestartNotificationRuntime
 from .mux_handler_lifetime import ActiveHandlerTracker as _ActiveHandlerTracker, MuxHandlerLifetime
+
+if TYPE_CHECKING:
+    _DaemonFunction = TypeVar("_DaemonFunction", bound=Callable[..., Any])
+
+    class _DaemonEntrypoint(Protocol):
+        def __call__(
+            self, *args: Any, **kwargs: Any,
+        ) -> Callable[[_DaemonFunction], _DaemonFunction]: ...
+
+    daemon_entrypoint = cast(_DaemonEntrypoint, daemon_entrypoint)
 
 __all__ = [
     "get_mapping",
@@ -93,7 +104,7 @@ def lock_path(root: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def write_lock_data(path: Path, extra: dict) -> bool:
+def write_lock_data(path: Path, extra: dict[str, Any]) -> bool:
     """Atomically write the lock file's JSON payload. Best-effort; never
     raises. Mirrors ``agent_worktrees.locks.write_lock``'s own atomic-replace
     shape (temp file in the same directory, then ``os.replace``)."""
@@ -121,7 +132,7 @@ def write_lock_data(path: Path, extra: dict) -> bool:
         return False
 
 
-def read_lock_data(path: Path) -> dict | None:
+def read_lock_data(path: Path) -> dict[str, Any] | None:
     """Parse the lock file's JSON payload, or ``None`` when absent/torn."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -146,7 +157,7 @@ _scrub_session_credentials = mux_daemon_process.scrub_session_credentials
 _spawn_detached = mux_daemon_process.spawn_detached
 
 
-def _daemon_is_live(data: dict | None) -> bool:
+def _daemon_is_live(data: dict[str, Any] | None) -> bool:
     return mux_daemon_process.daemon_is_live(
         data, endpoint_from_rendezvous=endpoint_from_rendezvous
     )
@@ -155,17 +166,17 @@ def _daemon_is_live(data: dict | None) -> bool:
 _mapping_to_observation = mux_daemon_live._mapping_to_observation
 
 
-def _monitor_unavailable() -> dict:
+def _monitor_unavailable() -> dict[str, Any]:
     return {"applied": False, "reason": "monitor-unavailable"}
 
 
 def publish_live_observation(
-    entry: dict,
+    entry: dict[str, Any],
     *,
     ensure_monitor: bool = True,
     request_deadline_s: float = mux_daemon_live.LIVE_REQUEST_DEADLINE_S,
     boot_wait_s: float = mux_daemon_live.LIVE_BOOT_WAIT_S,
-) -> dict:
+) -> dict[str, Any]:
     lock = _status_monitor_lock_path()
     if lock is None:
         return _monitor_unavailable()
@@ -179,7 +190,9 @@ def publish_live_observation(
     )
 
 
-def register_managed_mapping(payload: dict, root: Path | None = None) -> dict:
+def register_managed_mapping(
+    payload: dict[str, Any], root: Path | None = None,
+) -> dict[str, Any]:
     ensure_daemon_running(root)
     result = register_next_mapping(payload, root=root)
     project = payload.get("project")
@@ -199,7 +212,7 @@ def remove_managed_mapping(
     mux_session: str | None = None,
     session_incarnation: str | None = None,
     root: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     result = remove_mapping(
         project,
         worktree_id,
@@ -225,7 +238,7 @@ def _republish_live_mappings(
     )
 
 
-def rendezvous_fields(server: CoalescingServer) -> dict:
+def rendezvous_fields(server: CoalescingServer) -> dict[str, Any]:
     """Rendezvous fields namespaced so a lock file that ever gains other
     Manager-owned daemon endpoints has room to add them without collision."""
     rv = server.rendezvous()
@@ -237,7 +250,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
     }
 
 
-def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
+def endpoint_from_rendezvous(data: dict[str, Any] | None) -> tuple[str, int, str] | None:
     """Parse this daemon's rendezvous fields out of an already-read lock
     dict. Returns ``None`` for anything malformed or absent -- the caller's
     own correct fallback path, never an exception. Rejects a port outside
@@ -268,34 +281,11 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def apply_status_options(entry: dict, values: dict) -> bool:
-    """Apply a rendered status payload's ``values`` to ``entry``'s mux
-    session via ``set-option``, mirroring
-    ``agent_worktrees.status_monitor_runtime._monitor_mux_set``'s own
-    subprocess shape exactly (bounded timeout, best-effort). Applies every
-    key regardless of an earlier failure (a caller cares about the overall
-    outcome, but a single option write failing should not skip the rest);
-    returns ``True`` only if every write succeeded."""
-    mux_bin = entry["mux_bin"]
-    if not mux_discovery.passive_cli_supported(mux_bin):
-        return False
-    session = entry["mux_session"]
-    values = mux_discovery.initial_status_values(entry, values)
-    all_ok = True
-    for option, value in values.items():
-        try:
-            result = run_mux_child(
-                [mux_bin, "set-option", "-t", session, str(option), str(value)],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                **no_window_kwargs(),
-            )
-            if result.returncode != 0:
-                all_ok = False
-        except Exception:
-            all_ok = False
-    return all_ok
+def apply_status_options(entry: dict[str, Any], values: dict[str, str]) -> bool:
+    """Publish through the transport owner while retaining the child seam."""
+    from .mux_status_publication import apply_status_options as apply
+
+    return apply(entry, values, run=run_mux_child)
 
 
 def _mux_session_alive(mux_bin: str, session: str) -> bool | None:
@@ -310,7 +300,7 @@ def _mux_session_alive(mux_bin: str, session: str) -> bool | None:
     )
 
 
-def status_push_key(payload: dict) -> str:
+def status_push_key(payload: dict[str, Any]) -> str:
     """Derive the ``CoalescingServer`` coalescing key a ``mux-status-v1``
     caller must use, from the payload itself -- mirroring
     ``agent_worktrees.mux_link._push_key``'s own rationale exactly.
@@ -370,7 +360,7 @@ def build_compute(
     registry: MuxMappingRegistry,
     handler_tracker: "_ActiveHandlerTracker | None" = None,
     runtime: "MuxDaemonRuntime | None" = None,
-) -> Callable[[str, dict], dict]:
+) -> Callable[[str, dict[str, Any]], dict[str, Any]]:
     """Wrap the registry lookup + apply into a ``CoalescingServer``-shaped
     ``compute(kind, payload)`` callback, rejecting any request whose
     ``kind`` is not :data:`KIND`.
@@ -411,7 +401,9 @@ def build_compute(
                 worktree_locks[key] = lock
             return lock
 
-    _control_dispatch: dict[str, Callable] = {
+    _control_dispatch: dict[
+        str, Callable[[MuxDaemonRuntime, dict[str, Any]], dict[str, Any]],
+    ] = {
         mux_daemon_cutover.health_kind(): lambda rt, _p: rt.health(exclude_current_request=True),
         mux_daemon_cutover.drain_kind(): lambda rt, p: rt.drain(p),
         mux_daemon_cutover.undrain_kind(): lambda rt, _p: rt.undrain(),
@@ -419,7 +411,7 @@ def build_compute(
         mux_daemon_cutover.adopt_kind(): lambda rt, _p: rt.promote(),
     }
 
-    def _compute(kind: str, payload: dict) -> dict:
+    def _compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         control_fn = _control_dispatch.get(kind)
         if control_fn is not None:
             if runtime is None:
@@ -540,7 +532,7 @@ def build_compute(
 
 
 def start_server(
-    compute: Callable[[str, dict], dict],
+    compute: Callable[[str, dict[str, Any]], dict[str, Any]],
     *,
     port: int = 0,
     token: str | None = None,
@@ -645,7 +637,7 @@ class MuxDaemonRuntime:
         except ValueError:
             return None
 
-    def lock_extra(self) -> dict:
+    def lock_extra(self) -> dict[str, Any]:
         if self.server is None:
             return {}
         return rendezvous_fields(self.server)
@@ -654,7 +646,7 @@ class MuxDaemonRuntime:
         return self.admissions_open and not self.draining
 
     @contextmanager
-    def loop_mutation(self):
+    def loop_mutation(self) -> Iterator[None]:
         self._loop_mutation_active = True
         try:
             yield
@@ -693,7 +685,7 @@ class MuxDaemonRuntime:
         with self._control_requests_lock:
             self._control_requests_in_flight -= 1
 
-    def health(self, *, exclude_current_request: bool = False) -> dict:
+    def health(self, *, exclude_current_request: bool = False) -> dict[str, Any]:
         """Report this daemon's own idle/load state for ``daemons status``.
 
         Over the real wire, every cutover-control request (this probe
@@ -724,14 +716,14 @@ class MuxDaemonRuntime:
             "restart_recovery": self.restart_notifications.status,
         }
 
-    def promote(self) -> dict:
+    def promote(self) -> dict[str, Any]:
         if self.passive:
             return {"adopted": False, "reason": "resident-lease-pending"}
         self.admissions_open = True
         self.picker_sessions.resume()
         return {"adopted": True}
 
-    def drain(self, payload: dict) -> dict:
+    def drain(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.begin_drain()
         timeout = float(payload.get("timeout", 0.0) or 0.0)
         poll = max(0.01, float(payload.get("poll", 0.05) or 0.05))
@@ -750,7 +742,7 @@ class MuxDaemonRuntime:
             "busy_sessions": [] if drained else ["busy"],
         }
 
-    def undrain(self) -> dict:
+    def undrain(self) -> dict[str, Any]:
         self.draining = False
         self.republish_enabled = True
         self.admissions_open = True
@@ -760,7 +752,7 @@ class MuxDaemonRuntime:
         self.picker_sessions.resume()
         return {"draining": False}
 
-    def request_shutdown(self) -> dict:
+    def request_shutdown(self) -> dict[str, Any]:
         self.shutdown_requested = True
         return {"shutdown": True}
 
