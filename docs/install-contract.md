@@ -3548,8 +3548,13 @@ flags any `install.ps1` that launches the `…\Scripts\<name>.exe` trampoline.
 
 ## Binstub format (Windows)
 
-The SAC rule above fixes *what the binstub launches* (`python.exe -m <pkg>`).
-This rule fixes *what the binstub is*. Each Windows entry point in
+The direct `python.exe -m <pkg>` example and launch rule in this section describe
+**legacy adoption**, like the SAC implementation above. New/migrated app
+launchers use [PATH `uv`](#project-owned-managed-python) with the selected
+project's declared environment, not an assumed interpreter location. Preserve
+the argument-forwarding, exit-code and SAC constraints when making that change.
+
+The existing format fixes *what the binstub is*. Each Windows entry point in
 `~/.local/bin` is deployed as **two files**:
 
 - **`<name>.ps1` — the primary.** PowerShell's command resolution ranks an
@@ -3595,7 +3600,8 @@ if not, uninstall the shadowing package from the offending Python.
 ### Rules
 
 1. Deploy **both** `<name>.ps1` and `<name>.cmd`; the `.ps1` body uses `@args`,
-   the `.cmd` body uses `%*`. Both launch `python.exe -m <pkg>` (SAC rule).
+   the `.cmd` body uses `%*`. Current legacy bodies launch `python.exe -m <pkg>`;
+   migrated bodies delegate through PATH `uv` under the managed-Python contract.
 2. Write the `.ps1` **after** (or alongside) the `.cmd` in the same dir so it is
    the preferred resolution; never deploy a `.cmd` without its `.ps1` sibling.
 3. `uninstall` removes **both** files; `status` reports the `.ps1` as primary
