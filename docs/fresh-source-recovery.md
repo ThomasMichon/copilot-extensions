@@ -44,6 +44,15 @@ native apply path. Preview obtains read-only footprint inventory
 through the fresh native owner when its ordinary tool dependencies are available;
 otherwise it reports inspection as unavailable, never as healthy or repaired.
 
+The bootstrap binds the toolkit's canonical `libs/agent-procutil` before loading
+application dependency closures. Published Main materializes vendored copies
+inside applications; those copies do not replace the repository process owner
+used by source preparation. The same selection runs in the fresh isolated
+execution child, without relying on a warmed parent module cache or `PYTHONPATH`.
+An already-loaded different utility copy is refused rather than reloaded.
+Application build inputs, utility-origin checks and native participant custody
+remain unchanged.
+
 ## Native composition
 
 The fresh toolkit composes the existing immutable acquisition, local source
