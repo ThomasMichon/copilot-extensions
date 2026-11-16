@@ -17,6 +17,7 @@ import pytest
 
 import bridge_http47_evidence as evidence
 import capture_bridge_http47 as capture
+from capture_bridge_host_inspection import INPUT as H1_INSPECTION_INPUT
 
 ROOT = Path(__file__).resolve().parents[3]
 SEED_STATES = pytest.mark.parametrize(
@@ -126,6 +127,7 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     paths = evidence.proof_paths(ROOT, registry) | {
         evidence.REGISTRY,
         evidence.CONTRACT + "registry.schema.json",
+        H1_INSPECTION_INPUT,
     }
     paths.update(f["path"] for c in registry["contracts"] for f in c["fixtures"])
     paths.update(

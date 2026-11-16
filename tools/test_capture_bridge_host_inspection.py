@@ -32,6 +32,27 @@ def test_h1_capture_does_not_hide_dispatch_side_effects(monkeypatch):
         asyncio.run(capture.observe(_vector()))
 
 
+def test_h1_capture_refuses_attempted_child_input(monkeypatch):
+    from agent_remote_driver.session_host.host import SessionHost
+
+    original = SessionHost._handle_front
+
+    async def altered(host, reader, writer):
+        await original(host, reader, writer)
+        host._child.stdin.write(b"unexpected input")
+
+    monkeypatch.setattr(SessionHost, "_handle_front", altered)
+    with pytest.raises(AssertionError, match="child/process effect"):
+        asyncio.run(capture.observe(_vector()))
+
+
+@pytest.mark.parametrize("fixtures", [None, [{}], [{"path": []}]])
+def test_h1_optional_validator_defers_malformed_shape_to_registry_owner(tmp_path, fixtures):
+    errors = []
+    capture.validate_packets(tmp_path, {"fixtures": fixtures}, errors)
+    assert errors == []
+
+
 def test_h1_capture_does_not_relabel_changed_historical_frames(monkeypatch):
     from agent_remote_driver.session_host import protocol
 
@@ -53,7 +74,7 @@ def test_h1_capture_requires_matching_independent_request():
     assert observed != vector["expected"]
 
 
-@pytest.mark.parametrize("fault", ["none", "incomplete", "observation", "binding", "source"])
+@pytest.mark.parametrize("fault", ["none", "incomplete", "observation", "binding", "source", "input"])
 def test_packet_validation_keeps_source_bound_observations(tmp_path, monkeypatch, fault):
     vector = _vector()
     target = tmp_path / capture.INPUT
@@ -62,6 +83,9 @@ def test_packet_validation_keeps_source_bound_observations(tmp_path, monkeypatch
     proof = dict.fromkeys((
         *capture.SOURCES, capture.INPUT, capture.SCRIPT, capture.CURRENT + "messages.json",
     ), "a" * 64)
+    proof[capture.INPUT] = capture.git.sha256_bytes(target.read_bytes())
+    if fault == "input":
+        target.write_text(json.dumps({**vector, "uncaptured": True}), encoding="utf-8")
     fixtures = []
     for source in capture.SOURCES:
         relative = capture.CURRENT + "inspection-" + Path(source).stem + "-v1.json"

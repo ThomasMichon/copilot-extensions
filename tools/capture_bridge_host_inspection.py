@@ -66,7 +66,13 @@ async def observe(vector: dict) -> dict:
     from agent_remote_driver.session_host.client import SessionHostClient
     from agent_remote_driver.session_host.host import SessionHost
 
-    child = SimpleNamespace(pid=4242, returncode=None, stdin=None, stdout=None)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspection attempted a child/process effect")
+
+    child = SimpleNamespace(
+        pid=4242, returncode=None, stdout=None,
+        stdin=SimpleNamespace(write=forbidden, drain=forbidden),
+    )
     host = SessionHost(child, nonce=vector["credential"])
     host._front = object()
     host._attachment_epoch = 7
@@ -82,9 +88,6 @@ async def observe(vector: dict) -> dict:
     )
     requests = []
     responses = []
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("inspection attempted a child/process effect")
 
     async def exchange(reader, writer) -> None:
         await host._handle_front(reader, writer)
@@ -189,13 +192,20 @@ def source_bytes(commit: str, path: str) -> bytes:
 def validate_packets(root: Path, contract: dict, errors: list[str]) -> None:
     """Keep the new source packets joined to their independent observations."""
     paths = {CURRENT + "inspection-" + Path(source).stem + "-v1.json": source for source in SOURCES}
-    registered = {row["path"] for row in contract["fixtures"]}
+    fixtures = contract.get("fixtures")
+    if not isinstance(fixtures, list):
+        return
+    registered = {
+        row["path"] for row in fixtures
+        if isinstance(row, dict) and isinstance(row.get("path"), str)
+    }
     if not paths.keys() & registered:
         return
     try:
         if not paths.keys() <= registered:
             raise ValueError("incomplete H1 inspection source portfolio")
-        expected = json.loads(safe(root, INPUT).read_bytes())["expected"]
+        input_bytes = safe(root, INPUT).read_bytes()
+        expected = json.loads(input_bytes)["expected"]
         common = None
         for path in sorted(paths):
             packet = json.loads(safe(root, path).read_bytes())
@@ -205,6 +215,7 @@ def validate_packets(root: Path, contract: dict, errors: list[str]) -> None:
                 set(packet) != {"captured_from", "scope", "inputs", "observed"}
                 or packet["scope"] != SCOPE or packet["observed"] != expected
                 or not {*SOURCES, INPUT, SCRIPT, CURRENT + "messages.json"} <= inputs.keys()
+                or inputs[INPUT] != git.sha256_bytes(input_bytes)
                 or captured["source_path"] != paths[path]
                 or inputs[captured["source_path"]] != captured["source_sha256"]
             ):
