@@ -22,7 +22,7 @@ from tempfile import TemporaryDirectory
 
 from agent_procutil import no_window_kwargs
 
-from .catalog import Prereq, load_catalog
+from .catalog import Catalog, Prereq, load_catalog
 
 
 def current_os() -> str:
@@ -94,7 +94,7 @@ def _python_candidates(first: str | None) -> Iterator[str]:
     if first:
         yield first
     for exe in _EXE_ALIASES["python3"]:
-        suffixes = ("",)
+        suffixes: tuple[str, ...] = ("",)
         if os.name == "nt":
             # Python 3.11 does not apply PATHEXT to directory-qualified commands.
             extensions = tuple(
@@ -117,7 +117,7 @@ def _probe_version(exe: str) -> str | None:
     with context as profile:
         environment = None
         prefix = []
-        flags = ("--version", "-V", "version")
+        flags: tuple[str, ...] = ("--version", "-V", "version")
         if profile is not None:
             # Even --version initializes PowerShell's user configuration directory.
             environment = {
@@ -190,7 +190,7 @@ def bootstrap_python() -> str:
     return getattr(sys, "_base_executable", None) or sys.executable
 
 
-def detect_baseline(catalog=None) -> list[PrereqStatus]:
+def detect_baseline(catalog: Catalog | None = None) -> list[PrereqStatus]:
     """Qualify this controller's Python and the platform's other prerequisites."""
     cat = catalog or load_catalog()
     os_ = current_os()

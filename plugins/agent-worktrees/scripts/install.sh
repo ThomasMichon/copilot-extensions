@@ -1306,7 +1306,16 @@ _bootstrap_python() {
         esac
         echo "$__resolved"
         return 0
-    done < <(_bootstrap_python_candidates)
+    done < <(
+        if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
+            case "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" in
+                /*) printf '%s\n' "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" ;;
+                *) printf '%s\n' "ERROR: Bootstrap Python must be an absolute executable." >&2; return 1 ;;
+            esac
+        else
+            type -ap python3 python
+        fi
+    )
     return 1
 }
 

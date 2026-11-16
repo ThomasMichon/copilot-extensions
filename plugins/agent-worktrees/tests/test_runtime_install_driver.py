@@ -81,7 +81,6 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
         owner=tmp_path / "source-owner", force=True,
     )
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
-    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", sys.executable)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     queued = []
     driver = SimpleNamespace(
@@ -96,7 +95,6 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     assert spec.source == "a" * 64
     assert spec.argv == tuple(adapter._native_arguments(args))
     assert dict(spec.context)["COPILOT_EXTENSIONS_CONTEXT"] == str(tmp_path / "context.json")
-    assert dict(spec.context)["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] == sys.executable
     assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in dict(spec.context)
     assert adapter.NATIVE_ENV in runner.context_keys
     assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" in runner.context_keys

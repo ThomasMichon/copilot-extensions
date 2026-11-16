@@ -9,16 +9,19 @@ a bootstrap.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import worktree_manager.core_install as ci
+from worktree_manager.catalog import find_repo_root
 
 
 @pytest.fixture(autouse=True)
-def _isolate_checkout_ancestors(tmp_path, monkeypatch):
+def _isolate_checkout_ancestors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Runner-owned storage may live inside the real checkout. Hide only its
     # ancestor markers; synthetic checkouts and the real discovery walk remain.
     markers = {
@@ -29,7 +32,7 @@ def _isolate_checkout_ancestors(tmp_path, monkeypatch):
     monkeypatch.setattr(
         Path, "is_file", lambda path: False if path in markers else is_file(path),
     )
-    assert ci.find_repo_root(tmp_path) is None
+    assert find_repo_root(tmp_path) is None
 
 
 def _make_checkout(root: Path) -> Path:
@@ -43,13 +46,13 @@ def _make_checkout(root: Path) -> Path:
     return root
 
 
-def test_is_checkout(tmp_path):
+def test_is_checkout(tmp_path: Path) -> None:
     assert not ci._is_checkout(tmp_path)
     _make_checkout(tmp_path)
     assert ci._is_checkout(tmp_path)
 
 
-def test_resolve_from_cwd(tmp_path, monkeypatch):
+def test_resolve_from_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     co = _make_checkout(tmp_path / "co")
     sub = co / "a" / "b"
     sub.mkdir(parents=True)
@@ -59,7 +62,7 @@ def test_resolve_from_cwd(tmp_path, monkeypatch):
     assert ci.resolve_checkout() == co
 
 
-def test_resolve_from_staging_when_cwd_has_none(tmp_path, monkeypatch):
+def test_resolve_from_staging_when_cwd_has_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # cwd is NOT inside a checkout…
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -71,7 +74,7 @@ def test_resolve_from_staging_when_cwd_has_none(tmp_path, monkeypatch):
     assert ci.resolve_checkout() == wmroot / "staging"
 
 
-def test_resolve_none_when_neither(tmp_path, monkeypatch):
+def test_resolve_none_when_neither(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     monkeypatch.chdir(outside)
@@ -79,7 +82,7 @@ def test_resolve_none_when_neither(tmp_path, monkeypatch):
     assert ci.resolve_checkout() is None
 
 
-def test_install_command_uses_resolved_checkout(tmp_path, monkeypatch):
+def test_install_command_uses_resolved_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     monkeypatch.chdir(outside)
@@ -93,13 +96,13 @@ def test_install_command_uses_resolved_checkout(tmp_path, monkeypatch):
         wmroot / "staging" / "plugins" / "agent-worktrees" / "scripts" / name
     )
     if os.name == "nt":
-        assert cmd[-2:] == ["-BootstrapPython", sys._base_executable]
+        assert cmd[-2:] == ["-BootstrapPython", getattr(sys, "_base_executable", sys.executable)]
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_core_install_preserves_prepared_interpreter_and_child_exit(
-    tmp_path, monkeypatch, exit_code,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,
+) -> None:
     import subprocess
     from types import SimpleNamespace
 
@@ -109,21 +112,21 @@ def test_core_install_preserves_prepared_interpreter_and_child_exit(
     environment = dict(os.environ)
     calls = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         calls.append((command, options))
         return subprocess.CompletedProcess(command, exit_code)
 
-    monkeypatch.setattr(ci.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     result = ci.install_core(repo_root=source, dry_run=False)
     assert result.ran and result.returncode == exit_code
     command, options = calls[0]
     assert command == result.planned_command
     assert options["env"] == {
-        **environment, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": sys._base_executable,
+        **environment, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": getattr(sys, "_base_executable", sys.executable),
     }
     if os.name == "nt":
-        assert command[-2:] == ["-BootstrapPython", sys._base_executable]
-        assert options["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert command[-2:] == ["-BootstrapPython", getattr(sys, "_base_executable", sys.executable)]
+        assert options["creationflags"] & getattr(subprocess, "CREATE_NO_WINDOW")
     assert dict(os.environ) == environment
 
 
@@ -132,8 +135,8 @@ def test_core_install_preserves_prepared_interpreter_and_child_exit(
 @pytest.mark.effect("process")
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_native_core_handoff_uses_prepared_python_with_empty_path(
-    tmp_path, monkeypatch, exit_code,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,
+) -> None:
     import json
     import shlex
     import shutil
@@ -171,6 +174,7 @@ def test_native_core_handoff_uses_prepared_python_with_empty_path(
         )
     monkeypatch.setattr(ci, "install_script", lambda root: script)
     command = ci.install_command()
+    assert command is not None
     command[0] = shell
     monkeypatch.setattr(ci, "install_command", lambda root: command)
     monkeypatch.setattr(ci, "core_status", lambda home: SimpleNamespace(installed=False))
@@ -179,17 +183,17 @@ def test_native_core_handoff_uses_prepared_python_with_empty_path(
     completed = []
     run = subprocess.run
 
-    def observe(command, **options):
+    def observe(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         assert options["env"]["PATH"] == ""
         result = run(command, capture_output=True, text=True, timeout=15, **options)
         completed.append(result)
         return result
 
-    monkeypatch.setattr(ci.subprocess, "run", observe)
+    monkeypatch.setattr(subprocess, "run", observe)
     result = ci.install_core(dry_run=False)
     assert result.ran and result.returncode == exit_code, (
         result.reason, [(item.stdout, item.stderr) for item in completed],
     )
     assert json.loads(receipt.read_text(encoding="utf-8")) == {
-        "python": sys._base_executable, "prepared": sys._base_executable,
+        "python": getattr(sys, "_base_executable", sys.executable), "prepared": getattr(sys, "_base_executable", sys.executable),
     }

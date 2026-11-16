@@ -3975,7 +3975,7 @@ Manager's in-process `setup`/`register` CLI also qualifies its own prepared base
 interpreter against the Python 3.11 helper floor rather than scanning PATH for
 another Python. Its core install child receives that executable through
 Windows `-BootstrapPython` and the finite bootstrap environment. The POSIX
-Worktrees receiver preserves the explicit environment input through Driver
+Worktrees receiver consumes the explicit environment input at initial
 admission and subsequent bootstrap-helper selection; an invalid, unsupported or
 excluded selection never falls back to a current runtime or PATH interpreter.
 Legacy POSIX callers without an explicit input retain their existing discovery.
