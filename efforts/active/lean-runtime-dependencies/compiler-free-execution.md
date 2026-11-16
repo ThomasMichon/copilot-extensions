@@ -44,8 +44,9 @@ not replaced or declared complete by this amendment.
    bounded source slices through their existing owners before implementation.
 2. Extend the existing shared Python lifecycle implementation and reuse its
    record protocol, locks, process-birth checks and Linux pidfd acquisition.
-   Thin shell entrypoints invoke setup-provided Python through normal PATH
-   resolution and invoke that shared implementation. Preserve same-process
+   Thin shell entrypoints use PATH `uv` to invoke the declared managed-Python
+   project and that shared implementation without ambient Python lookup or
+   assumed interpreter locations. Preserve same-process
    admission where required; do not add a central supervisor service or another
    inventory.
 3. Replace Linux C supervision/reconciliation with standard-library Python and
@@ -56,10 +57,16 @@ not replaced or declared complete by this amendment.
 4. Qualify the interpreter/bootstrap boundary before migrating Windows
    callers that currently run before their plugin runtime. Reuse the
    [existing Python prerequisite](#python-prerequisite-boundary), rather than
-   preserve a Python-free helper implementation. Preserve authenticated pipe
+   preserve a Python-free helper implementation. The acquisition front door
+   itself must run before Python exists: on Windows, the native PowerShell
+   seed establishes uv through its prerequisite owner and stages the real
+   per-app setup entry. It does not load a Python-backed custody/installer SDK
+   or require an application daemon to obtain that SDK's execution base.
+   The seed is not another implementation of the shared helper protocols.
+   Preserve authenticated pipe
    endpoints, process handles, strict atomic Job containment, headlessness,
    operation-lock compatibility, filesystem/reparse/ACL checks and uncertain
-   launch outcomes. Trust the setup-provided PATH interpreter; do not retain
+   launch outcomes. Use the setup-selected uv-managed interpreter; do not retain
    signature, registry or physical-path interpreter admission as a replacement
    for compilation.
    An unresolved bootstrap design blocks that slice before mutation.
@@ -74,27 +81,44 @@ not replaced or declared complete by this amendment.
 
 ## Python prerequisite boundary
 
-The operator clarified that Python is a prerequisite of the whole harness,
-installed through Agent Machines. The earlier choice of official Python
-acquisition belongs to that existing provisioning owner; it is not approval
-for an additional embedded distribution, helper-owned download or competing
-installer.
+The [installer vision's uv-managed Python
+contract](../../../visions/installer/README.md#uv-managed-python) governs this
+prerequisite. The [current operator request and setup sequence](../source-managed-runtime-installs/managed-python.md)
+extend it to every app launcher and supersede the earlier machine-wide/PATH
+prerequisite. Each project declares the
+Python version it needs; its existing installation owner uses `uv` to acquire
+or reuse managed Python and construct the addressed environment. System/user
+PATH Python need not exist or be compatible. Projects with different version
+requirements coexist without a global Python change.
 
-The operator's 2026-10-27 clarification supersedes interpreter attestation:
-normal PATH Python is trusted for composability. Upfront harness setup, through
-the existing Agent Machines provisioning owner, supplies the supported Python.
-Standalone setup retains its own declared prerequisite without requiring that
-sibling service.
+The shell-native explicit setup front door establishes `uv` and the declared
+managed bootstrap interpreter before Python-dependent safety helpers,
+installation-context evaluation or application construction. Bootstrap helpers
+have static setup declarations too; they cannot require Python to discover or
+acquire Python. Reuse this one acquisition owner, not a downloader in every
+helper. Standalone setup works without an Agent Machines service or an already
+installed Manager/application runtime.
 
-The Windows migration orders this prerequisite before the shared safety
-helpers. A cold plugin runtime is not a Python-free machine. Thin shells use
-the ordinary platform Python command from PATH; they do not inspect signatures,
-rediscover PEP 514 registrations, require a particular publisher or physical
-namespace, pin interpreter files, or reject an otherwise usable interpreter
-because it is in a venv, worktree or temporary directory. Setup owns keeping
-accidental disposable interpreters off durable PATH, not a runtime blacklist.
-Source-only distributions carry the complete helper source through the existing
-packaging owner, without a new physical-source admission ceremony.
+The [finite installation-controller boundary](../../../visions/installer/README.md#finite-installation-controller)
+keeps that prepared execution base separate from Manager's presentation and
+application services. Installation management is directly invocable and finite,
+including Manager's own install/update; it cannot require Manager or another
+installation daemon to be running. Reuse existing installer-engine and
+execution-owner code before proposing a separately packaged helper. Such a
+helper remains optional and daemon-independent, not another installer stack.
+Native foreground work retains its own lifetime/failure/cleanup obligations;
+later Python helper and application-service protocols remain with their owners.
+
+Every application launcher uses `uv` from PATH and lets it handle interpreter
+selection for the declared project. Scripts do not assume installed Python
+locations, including `uv` storage. The earlier rejection of interpreter
+attestation still applies. Thin shells reach the setup-selected environment
+through `uv`; they do not inspect signatures, rediscover
+PEP 514 registrations, require a special physical namespace, pin interpreter
+files or blacklist venv/worktree/temporary paths. Selecting the declared managed
+interpreter is environment selection, not another admission service.
+Source-only distributions retain their complete helper source through the
+existing packaging owner.
 
 Existing process, lease, update-driver and installation-context owners still
 own their protocols and native OS bindings through ctypes. Trusting Python
@@ -102,29 +126,31 @@ does not relax process identity, atomic Job containment, authenticated pipes,
 operation-lock compatibility or exact cleanup custody. Artifact/source receipts
 for managed application runtimes remain distinct from interpreter attestation.
 
-The prerequisite itself remains owned by machine provisioning. Missing or
-unsupported Python must report the prerequisite and use its existing consented
-provisioning path, not silently download another interpreter or compile an
-interop helper. Status, discovery and optional read-only selection never
-install Python. Standalone plugin use retains its declared Python prerequisite
-and independent installation; this is not a new requirement to run an Agent
-Machines service for every helper.
+Explicit installation owns permitted acquisition and actionable offline,
+unavailable-version, platform and OS-policy errors. Status, discovery and
+ordinary launch only resolve an already-prepared managed environment; they
+never acquire Python, silently use ambient Python or compile an interop helper.
+The [managed-Python contract](../../../docs/install-contract.md#project-owned-managed-python)
+owns declaration/construction details and retained-environment safety.
 
 Before removing a Windows compiled implementation:
 
-- [ ] Replace compiled interpreter admission with ordinary PATH invocation.
+- [ ] Replace remaining compiled interpreter admission with invocation of the
+  setup-selected, project-declared `uv`-managed interpreter.
   Remove signature/publisher, registry-only, PE/path-attestation and physical
   namespace launch gates without adding venv/worktree/temporary-path filters.
 - [ ] Apply the same setup-owned prerequisite boundary to shared installer
   Python rediscovery and signature-driven base selection. Preserve copied-venv
   construction and module invocation where needed, without reimplementing
   Windows code-integrity policy or changing package/feed integrity checks.
-- [ ] Exercise the setup-provided supported Python, legitimate PATH composition,
-  missing command, incompatible version and startup failure. Keep command
-  exposure tidy through existing setup, not per-helper attestation.
-- [ ] Prove the actual first-entry order: machine-owned Python provisioning,
-  PATH-selected standard-library helper, then runtime construction or application
-  work. No unqualified Python process establishes its own trust.
+- [ ] Exercise setup with no Python, old/incompatible Python and differing
+  project versions on one host, an active venv, absent launcher and fresh
+  terminal. Qualify offline managed reuse, missing-version and startup failure
+  without ambient fallback or per-helper attestation.
+- [ ] Prove the actual first-entry order: shell-native `uv` setup, declared
+  managed bootstrap interpreter, standard-library helper, then each project's
+  runtime construction. No Python-dependent probe precedes acquisition.
+  Prove existing supported environments and rollback survive preparation.
 - [ ] Preserve byte-range/operation-lock compatibility, authenticated pipe
   peers, strict atomic child Job assignment, headlessness and uncertain cleanup
   outcomes through the existing Python owners.
@@ -154,7 +180,7 @@ post-start assignment substitutes for that separate safety contract.
 - [ ] Production remains non-expiring. Protected/live/foreign/changed state and
   inconclusive inspection remain explicit holds; cleanup remains limited to
   declared disposable artifacts.
-- [ ] Windows proves machine-owned Python prerequisite ordering and genuine
+- [ ] Windows proves project-owned managed-Python prerequisite ordering and genuine
   cold plugin-runtime bootstrap, native-handle identity,
   authenticated pipes, operation-lock compatibility, filesystem custody,
   strict Job containment and zero unintended windows/focus changes, without

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from fastapi import APIRouter, Request
 from ssh_manager import get_default_manager
@@ -40,12 +41,13 @@ from ..mux_questions import CAPABILITY as MUX_QUESTION_ANSWERS_CAPABILITY
 from ..status_schema import CAPABILITY as HOST_STATUS_CAPABILITY
 from ..dispatch_origin import CAPABILITY as DISPATCH_ORIGIN_CAPABILITY
 from ..dispatch_cli_origin import CAPABILITY as DISPATCH_CLI_ORIGIN_CAPABILITY
+from ..native_send_settlement import CAPABILITY as NATIVE_SEND_SETTLEMENT_CAPABILITY
 
 router = APIRouter()
 
 
 @router.get("/health")
-async def health(request: Request) -> dict:
+async def health(request: Request) -> dict[str, Any]:
     mgr = getattr(request.app.state, "session_manager", None)
     draining = bool(getattr(mgr, "is_draining", False)) if mgr else False
     # protocol_version / min_protocol_version advertise the HTTP wire-contract
@@ -69,6 +71,7 @@ async def health(request: Request) -> dict:
         "capabilities": {
             HOSTING_CAPABILITY: HOSTING_CAPABILITY_VERSION,
             NATIVE_SEND_RECEIPT_CAPABILITY: NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+            NATIVE_SEND_SETTLEMENT_CAPABILITY: 1,
             NATIVE_SEND_NO_RESUME_CAPABILITY: NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
             LIVE_KEYED_RECEIPT_CAPABILITY: 1,
             LIVE_EXACT_NOTIFY_CAPABILITY: 1,

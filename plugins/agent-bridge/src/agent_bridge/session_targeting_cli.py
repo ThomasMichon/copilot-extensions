@@ -10,7 +10,8 @@ import socket
 import subprocess as subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Any, cast
 
 from . import workspace_creation_cli
 from .cli_mode_provider import _cmd_create_cli, _portable_provider_run as _portable_provider_run
@@ -26,7 +27,7 @@ _COMPANION_SEED_HEADS_UP = (
 )
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -60,7 +61,7 @@ def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
         # "-" as the message is never what the caller meant.
         return _read_prompt_from_file("-")
     if positional is not None:
-        return positional
+        return cast(str, positional)
     if required:
         print(
             "[FAIL] No prompt given. Provide it as the positional argument or "
@@ -91,6 +92,10 @@ def _send(args: argparse.Namespace) -> None:
     from .startup_observation import configure_client, validate_options
 
     validate_options(args)
+    if getattr(args, "settle_native_send", False):
+        from .native_send_settlement_cli import send as settle_native_send
+        settle_native_send(args)
+        return
     core = _core()
     if getattr(args, "wait_delivery", False):
         from .live_message_models import validate_live_reply_timeout
@@ -126,12 +131,12 @@ def _send(args: argparse.Namespace) -> None:
         send(args)
         return
     if getattr(args, "native_invocation_file", None) is not None:
-        from .native_keyed_client import send, validate_options
+        from .native_keyed_client import send as send_keyed_native, validate_options
         from .hosting_admission_cli import configure_client as configure_hosting
         validate_options(args)
         client = core._get_client(ensure=False) if getattr(args, "receipt_only", False) else core._get_client()
         configure_hosting(client, args)
-        send(args, client)
+        send_keyed_native(args, client)
         return
     if getattr(args, "receipt_only", False):
         from .native_send_receipt import send as observe_receipt
@@ -175,6 +180,7 @@ def _send(args: argparse.Namespace) -> None:
         _hold_protocol_floor(client, min_protocol)
     target = args.target
     prompt = _resolve_prompt(args, required=True)
+    assert prompt is not None
     if getattr(args, "plugin_context_stdin", False):
         from .plugin_readiness import PluginReadinessRequest
         from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
@@ -292,7 +298,7 @@ def _live_reply_to(args: argparse.Namespace) -> str | None:
 def _live_sender_label(args: argparse.Namespace) -> str:
     explicit = getattr(args, "sender", None)
     if explicit:
-        return explicit
+        return cast(str, explicit)
     # Reuse the SAME worktree-handle resolution as _live_reply_to(), not
     # _get_caller_id() (which returns the raw `agent-worktrees get
     # worktree-dir` path). A mismatch here is exactly the bug this guards
@@ -329,8 +335,8 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
     return getattr(args, "delivery", None) or "steer"
 
 
-def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
-                             *, remote_address=None) -> None:
+def _deliver_to_live_session(client: Any, args: argparse.Namespace, session_id: str, prompt: str,
+                             *, remote_address: Any = None) -> None:
     from .live_message_cli import deliver_to_live_session
 
     return deliver_to_live_session(
@@ -338,7 +344,7 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     )
 
 
-def _handed_off_unnamed(client, session_id: str) -> bool:
+def _handed_off_unnamed(client: Any, session_id: str) -> bool:
     """Whether a successful submit to an older daemon (one that doesn't name the
     session that took the prompt) was taken by a successor: the target then
     already reads stopped. A current daemon always names it, so it's not asked."""
@@ -354,13 +360,13 @@ def _handed_off_unnamed(client, session_id: str) -> bool:
 
 
 def _submit_and_stream(
-    client,
+    client: Any,
     args: argparse.Namespace,
     session_id: str,
     prompt: str,
     *,
     caller_id: str | None,
-    submitted_result: dict | None = None,
+    submitted_result: dict[str, Any] | None = None,
 ) -> None:
     core = _core()
     from .send_outcome import emit, prompt_outcome
@@ -374,14 +380,15 @@ def _submit_and_stream(
             result = submitted_result
         elif expected_native is not None:
             from .native_bound_prompt import submit_native_bound_prompt
+            native_options: dict[str, Any] = {}
+            if getattr(args, "idempotency_key", None) is not None:
+                native_options["idempotency_key"] = args.idempotency_key
+            if getattr(args, "no_resume", False):
+                native_options["no_resume"] = True
             result = submit_native_bound_prompt(
                 client, session_id, prompt, caller_id=caller_id,
                 expected_native_session_id=expected_native,
-                **(
-                    {"idempotency_key": args.idempotency_key}
-                    if getattr(args, "idempotency_key", None) is not None else {}
-                ),
-                **({"no_resume": True} if getattr(args, "no_resume", False) else {}),
+                **native_options,
             )
         else:
             result = client.submit_prompt(
@@ -467,7 +474,9 @@ class _AgentSessionConflict(Exception):
         super().__init__(f"Agent '{agent_name}' already has an active session {existing_session_id}")
 
 
-def _busy_session_message(client, session_id: str, agent_name: str, caller_id: str | None) -> str:
+def _busy_session_message(
+    client: Any, session_id: str, agent_name: str, caller_id: str | None,
+) -> str:
     st: dict[str, Any] = {}
     try:
         st = client.get_session_status(session_id, caller_id=caller_id)
@@ -502,7 +511,8 @@ def _busy_session_message(client, session_id: str, agent_name: str, caller_id: s
 
 
 def _resolve_known_session(
-    client, session_id: str, session: dict, *, force: bool, caller_id: str | None = None,
+    client: Any, session_id: str, session: dict[str, Any], *,
+    force: bool, caller_id: str | None = None,
 ) -> str:
     """Given an already-fetched session record, apply the shared idle/stopped/
     busy dispatch and return the session id to operate on (which the caller
@@ -545,14 +555,14 @@ def _resolve_known_session(
         client.end_session(session_id)
     except Exception:
         pass
-    return core._start_agent_session(
+    return cast(str, core._start_agent_session(
         client, agent, force=False, sender_preference=sender_preference,
         caller_id=caller_context.caller_id, caller_context=caller_context,
-    )
+    ))
 
 
 def _resolve_target(
-    client,
+    client: Any,
     target: str,
     *,
     force_new: bool = False,
@@ -623,7 +633,7 @@ def _resolve_target(
         )
         sys.exit(1)
     if len(matches) == 1:
-        return core._start_agent_session(
+        return cast(str, core._start_agent_session(
             client,
             matches[0],
             force_new=force_new,
@@ -636,10 +646,10 @@ def _resolve_target(
             worktree_id=worktree_id,
             agent_inventory=agents,
             caller_id=caller_id,
-        )
+        ))
 
     try:
-        return core._start_agent_session(
+        return cast(str, core._start_agent_session(
             client,
             target,
             force_new=force_new,
@@ -652,7 +662,7 @@ def _resolve_target(
             worktree_id=worktree_id,
             agent_inventory=agents,
             caller_id=caller_id,
-        )
+        ))
     except BridgeClientError as exc:
         if exc.status != 404:
             print(f"[FAIL] {exc.detail}", file=sys.stderr)
@@ -662,7 +672,7 @@ def _resolve_target(
     sys.exit(core._SEND_UNAVAILABLE_EXIT)
 
 
-def _match_agents(target: str, agents: list[dict]) -> list[str]:
+def _match_agents(target: str, agents: list[dict[str, Any]]) -> list[str]:
     matches: list[str] = []
     bare = ":" not in target
     target_key = target.casefold()
@@ -830,7 +840,7 @@ def _write_session_id_file(path_value: str, session_id: str) -> None:
             pass
 
 
-def _mark_resume_if_behind(client, session_id: str, *, caller_id: str | None) -> bool:
+def _mark_resume_if_behind(client: Any, session_id: str, *, caller_id: str | None) -> bool:
     try:
         info = client.get_cursor_info(session_id, caller_id=caller_id)
     except Exception:
@@ -860,7 +870,7 @@ def _mark_resume_if_behind(client, session_id: str, *, caller_id: str | None) ->
     return True
 
 
-def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None:
+def register_session_targeting_commands(sub: argparse._SubParsersAction[Any]) -> None:
     core = _core()
     send_p = sub.add_parser("send", help="Send a prompt to an agent or session (reuses/resumes this caller's existing session)")
     from .hosting_admission_cli import add_argument as add_hosting_argument

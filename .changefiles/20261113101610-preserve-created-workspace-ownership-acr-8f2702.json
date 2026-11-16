@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve keyed workspace ownership and recover retired conversations",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

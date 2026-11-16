@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from collections.abc import Callable
 from importlib.metadata import distribution
+from os import PathLike
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from ._installation_context_base import path_is_within
+else:
+    from ._installation_context import path_is_within
 
 
 def _completed_progress(phase: str) -> Callable[[], None]:
@@ -28,12 +37,12 @@ def _completed_progress(phase: str) -> Callable[[], None]:
     return completed
 
 
-def prepare_runtime_candidate(data: dict) -> None:
+def prepare_runtime_candidate(data: dict[str, Any]) -> None:
     import worktree_manager
 
     environment = Path(sys.prefix).resolve()
     slot = environment.parent if environment.name == ".venv" else environment
-    if not Path(worktree_manager.__file__).resolve().is_relative_to(slot):
+    if not path_is_within(Path(worktree_manager.__file__), slot):
         raise RuntimeError("Manager preparation must run from the installed candidate")
     from .self_install_payload import _copy_payload
 
@@ -49,10 +58,10 @@ def prepare_runtime_candidate(data: dict) -> None:
     from .self_install import _expected_binstub_contents, _expected_control_plane_provider_manifest
     from .self_install import _runtime_installer
 
-    _runtime_installer()
-    from runtime_uninstall import seal_inventory
+    cast(Callable[[], ModuleType], _runtime_installer)()
+    uninstall = importlib.import_module("runtime_uninstall")
 
-    seal_inventory(
+    uninstall.seal_inventory(
         slot, frontdoors=_expected_binstub_contents(
             application_slot=slot if (slot / "application.json").is_file() else None,
         ),
@@ -68,10 +77,10 @@ def verify_runtime_candidate() -> None:
 
     environment = Path(sys.prefix).resolve()
     slot = environment.parent if environment.name == ".venv" else environment
-    if not Path(worktree_manager.__file__).resolve().is_relative_to(slot):
+    if not path_is_within(Path(worktree_manager.__file__), slot):
         raise RuntimeError("Manager import is outside its constructed runtime")
     installed = distribution("copilot-extensions-worktree-manager")
-    if not Path(installed.locate_file("")).resolve().is_relative_to(slot):
+    if not path_is_within(Path(cast("str | PathLike[str]", installed.locate_file(""))), slot):
         raise RuntimeError("Manager distribution is outside its constructed runtime")
     from .self_install import payload_version
 
@@ -82,11 +91,12 @@ def verify_runtime_candidate() -> None:
     if not (slot / "application.json").is_file() and (
         slot / "payload" / "runtime-source.json"
     ).exists():
-        import tomllib
+        tomllib = importlib.import_module("tomllib")
         from .self_install import _runtime_installer
 
         project = tomllib.loads((slot / "payload" / "pyproject.toml").read_text(encoding="utf-8"))
-        _runtime_installer().runtime_source.read_source_identity(
+        installer = cast(Callable[[], ModuleType], _runtime_installer)()
+        installer.runtime_source.read_source_identity(
             slot / "payload", project["project"]["version"], plugin="worktree-manager",
         )
     origin = json.loads(installed.read_text("direct_url.json") or "{}")

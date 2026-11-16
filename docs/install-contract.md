@@ -12,6 +12,15 @@ it needs. This document is the reference, and
 explicitly while developing; publication validation belongs in CI, not a
 git `pre-push` hook).
 
+For Python acquisition and application-launcher dispatch, the
+[project-owned managed-Python contract](#project-owned-managed-python) is the
+normative target. Later descriptions of PATH/launcher Python discovery,
+signed-system-base selection, direct-interpreter application launch or
+ordinary first-use runtime provisioning record legacy adoption, not exceptions
+for new/migrated launchers. Their independent
+generation selection, isolated argv, OS-policy and process/removal-custody
+requirements remain binding.
+
 ## Authoritative replacement and completion
 
 The canonical intent is
@@ -186,6 +195,11 @@ Bootstrap readiness recognizes the completed profile generation rather than
 mistaking it for package-version drift. Package comparisons strip the generated
 profile suffix; recovery still requires an exact current/last-known-good
 selection instead of choosing a dependency profile by hash order.
+
+Native wheel construction may supply an optional ordinary Python health-callable
+name alongside its health module. The canonical candidate engine invokes it
+before completion, including reuse health; omission preserves module-only health.
+The adapter passes a name, not executable Python or an expression.
 
 Unchanged startup reads the existing selector, bounded constructor receipt,
 deployment manifest, completion marker and interpreter presence. The package
@@ -2176,10 +2190,15 @@ construction, interruption and prior-runtime preservation contracts.
    one uniform method for every binstub, hook, service unit, and agent
    (`versioned_runtime.resolve_python` for Python callers,
    `libs/versioned-runtime/resolve-runtime.sh`/`.ps1` for shell):
-   - **Linux/WSL:** `exec` the marker-resolved slot interpreter
+   These direct-interpreter adapters describe **legacy adoption**, not the
+   [managed-Python launcher target](#project-owned-managed-python). Migration
+   preserves this same generation selection while every app launcher delegates
+   interpreter selection to PATH `uv`; new launchers must not copy a Python
+   location from these historical examples.
+   - **Legacy Linux/WSL:** `exec` the marker-resolved slot interpreter
      `…/versions/<v>/bin/python -m <pkg>` — a shebang interpreter, no Smart App
      Control concern.
-   - **Windows:** launch `…\versions\<v>\Scripts\python.exe -m <pkg>` (resolved via
+   - **Legacy Windows:** launch `…\versions\<v>\Scripts\python.exe -m <pkg>` (resolved via
      the `current-version` marker — there is no `.venv` junction), **never** the
      generated `…\Scripts\<name>.exe` console-script trampoline. That trampoline
      is an unsigned, zero-reputation PE that Smart App Control blocks
@@ -2249,8 +2268,14 @@ construction, interruption and prior-runtime preservation contracts.
      (e.g. don't `if (Register-Task) { Start }` — a locked-down box that can't
      create the task would then never start the daemon). Registration and
      start are independent; start is always user-mode.
-10. **Fast install + deferred self-provision — the entrypoint declares `stamp`
-    and `provision` (dotfiles#1393).** The base install a `sessionStart` hook /
+10. **Legacy fast install + deferred self-provision — the entrypoint declares `stamp`
+    and `provision` (dotfiles#1393).** This rule records current legacy
+    self-provisioning behavior and its existing guard, not the
+    [explicit-setup target](#project-owned-managed-python). Migration keeps
+    ordinary first use acquisition-free and reports missing setup rather than
+    building a runtime; the description below does not authorize a new
+    hook/launch provisioning path or claim current implementations changed.
+    The legacy base install a `sessionStart` hook /
     `copilot plugin update` triggers must be **fast** and must never hold the
     singleton marketplace payload open long enough to wedge a concurrent update:
     - **`stamp`** — snapshot the payload SOURCE into the versioned slot area
@@ -3257,11 +3282,24 @@ Proven inactive, unloaded legacy registrations may be removed without issuing
 service stop/disable against an unverified loaded registration. Effective
 command values are passed through stdin and are not printed in diagnostics.
 
-CodeSpaces, SSH and Pull Requests removal select only an already available
+**Managed-Python removal target:** uninstall and dry-run work without PATH or
+Windows-launcher Python. Their launchers resolve PATH `uv` and use an
+already-prepared managed environment under the
+[project-owned contract](#project-owned-managed-python), with downloads,
+dependency resolution and repair disabled. Before removal, retain the existing
+proof that uv and the selected interpreter's executable, prefix, base prefix
+and base interpreter are outside every removable root. No guessed Python
+location, target-owned environment or creation of another interpreter is a
+fallback. Missing eligible tooling gives an actionable explicit result, not a
+partial removal. The [setup plan](../efforts/active/source-managed-runtime-installs/managed-python.md#validation-and-completion)
+keeps actual no-Python-PATH uninstall/dry-run and retained-root qualification open.
+
+**Current legacy removal adoption:** CodeSpaces, SSH and Pull Requests select only an already available
 interpreter whose executable, prefix, base prefix and base interpreter remain
 outside the removable root. Admission-only and dry-run paths use that same
 non-provisioning selector; absence refuses without invoking `uv` or downloading
-Python. Construction's bootstrap resolver retains its separate behavior.
+Python. This existing PATH/launcher-only selector is not an exception to the
+managed-Python removal target. Construction's bootstrap resolver retains its separate behavior.
 Other finite native adapters use the same executable/prefix/base closure
 checks and enumerate all available PATH candidates. An activated removable
 venv, broken first executable or physical alias cannot hide a later eligible
@@ -3479,15 +3517,23 @@ Both fail with `CodeIntegrity` event **3077** ("did not meet the Enterprise
 signing level requirements"). Because these plugins ship publicly on GitHub, the
 fix must **not** require downloaders to disable SAC.
 
-### Rules (Windows `install.ps1` / `init.ps1`)
+### Legacy adoption (Windows `install.ps1` / `init.ps1`)
 
 The signature-driven Python discovery below describes the current legacy
 implementation. The [setup-owned Python prerequisite](../visions/plugin-services/README.md#setup-owned-python-prerequisite)
 and [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
-replace that discovery with trusted PATH Python supplied by upfront setup.
-Windows code-integrity enforcement, copied-venv construction and avoiding
-console-script trampolines remain separate from per-helper signature checks.
-The source migration is not complete merely because that intent is recorded.
+now require project-declared, `uv`-managed Python and PATH-`uv` app launchers,
+not trusted PATH Python or signed-system-Python discovery. The numbered
+construction/launch steps below preserve legacy implementation evidence only;
+they are not an exception allowing new launchers to assume Python locations.
+Windows code-integrity enforcement and avoiding console-script trampolines
+remain independent requirements. Before migrating SAC-enforcing hosts, the
+[setup plan](../efforts/active/source-managed-runtime-installs/managed-python.md#validation-and-completion)
+requires successful managed-Python cold setup and launch with policy enforcing,
+or explicit resolution of the supported-distribution/platform constraint.
+A refusal-only test is not Windows success; neither policy disablement nor
+ambient/signed-system fallback satisfies the target. The source migration is
+not complete merely because that intent is recorded.
 
 1. **Build the venv from a PSF-signed base Python via `--copies`.** Resolve a
    signed interpreter (`py -3.x` whose `Get-AuthenticodeSignature` reports
@@ -3535,8 +3581,13 @@ flags any `install.ps1` that launches the `…\Scripts\<name>.exe` trampoline.
 
 ## Binstub format (Windows)
 
-The SAC rule above fixes *what the binstub launches* (`python.exe -m <pkg>`).
-This rule fixes *what the binstub is*. Each Windows entry point in
+The direct `python.exe -m <pkg>` example and launch rule in this section describe
+**legacy adoption**, like the SAC implementation above. New/migrated app
+launchers use [PATH `uv`](#project-owned-managed-python) with the selected
+project's declared environment, not an assumed interpreter location. Preserve
+the argument-forwarding, exit-code and SAC constraints when making that change.
+
+The existing format fixes *what the binstub is*. Each Windows entry point in
 `~/.local/bin` is deployed as **two files**:
 
 - **`<name>.ps1` — the primary.** PowerShell's command resolution ranks an
@@ -3582,7 +3633,8 @@ if not, uninstall the shadowing package from the offending Python.
 ### Rules
 
 1. Deploy **both** `<name>.ps1` and `<name>.cmd`; the `.ps1` body uses `@args`,
-   the `.cmd` body uses `%*`. Both launch `python.exe -m <pkg>` (SAC rule).
+   the `.cmd` body uses `%*`. Current legacy bodies launch `python.exe -m <pkg>`;
+   migrated bodies delegate through PATH `uv` under the managed-Python contract.
 2. Write the `.ps1` **after** (or alongside) the `.cmd` in the same dir so it is
    the preferred resolution; never deploy a `.cmd` without its `.ps1` sibling.
 3. `uninstall` removes **both** files; `status` reports the `.ps1` as primary
@@ -3814,27 +3866,151 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
-### PATH Python evaluator bootstrap
+### Project-owned managed Python
+
+**Required target; not a claim that existing launchers have migrated.** The
+[installer vision](../visions/installer/README.md#uv-managed-python) and
+[binding invariant](patterns/README.md#design-invariants-binding-contracts)
+replace the ambient-Python prerequisite with per-project `uv` management.
+The [implementation and qualification plan](../efforts/active/source-managed-runtime-installs/managed-python.md)
+retains the existing setup, engine, bootstrap and application owners.
+
+The [finite-controller target](../visions/installer/README.md#finite-installation-controller)
+separates three stages. The native shell seed establishes tooling and stages
+sources; the prepared managed interpreter runs finite installation management;
+installed applications then use their own runtime/service owners. On Windows,
+PowerShell reaches the existing package-manager uv prerequisite owner, performs
+core Git checkout/copies and invokes the real per-app setup entrypoints.
+Do not require a Python-backed SDK to acquire that first Python, or require
+an installed/running Manager/application daemon to run the controller.
+The normal Manager entry establishes Manager first and then composes the
+selected repository's declared apps/plugins. Independent per-app setup remains
+available. A separately packaged helper is optional and reuses the same engine,
+not another installation algorithm or mandatory service.
+
+This staging preserves native foreground-command ownership, failure,
+cancellation/deadline and cleanup obligations. The seed is not a substitute
+implementation of later Python/helper pipe, process/Job or installation
+protocols; after the execution base exists, their existing owners retain them.
+Source/feed/seasoning, repository hosting policy-before-acquisition and OS
+execution policy remain in force. Application service activation is a separate
+accepted handoff, not an installation-controller startup prerequisite.
+This is the required layering, not a qualification of current cold-entry paths.
+
+- An installable Python project declares compatibility in `pyproject.toml`
+  (`requires-python`). Its release/setup inputs select a compatible version;
+  locks and native wheel targets must agree with the selected interpreter.
+  A shared library uses its consuming project's environment, not another
+  independently installed interpreter.
+- Explicit setup first resolves `uv` from PATH, establishing it through the
+  existing prerequisite owner when absent, without executing Python.
+  It asks `uv` for managed Python
+  matching the addressed project's requirement, reusing an existing compatible
+  managed installation or acquiring one through the supported setup path.
+  A bare `uv venv`/`uv run` default that can choose system Python is insufficient:
+  managed-only selection and the project requirement must be explicit.
+  The prerequisite owner must make `uv` available in fresh terminal, hook and
+  service/task PATH environments after setup exits; a temporary PATH change
+  around a privately vendored executable is not durable command exposure.
+- Bootstrap standard-library helpers have declared setup inputs too. Establish
+  that managed foundation before the first Python-dependent evaluator,
+  installation-context, process or dependency helper. Neither an installed
+  application nor the Manager is a prerequisite for obtaining it.
+- Retain the selected interpreter/version in construction inputs and normal
+  runtime records; create the package's isolated environment and use the
+  existing uniform runtime resolver to choose the completed application
+  generation afterward. Every app launcher invokes PATH `uv` with that
+  generation's declared project/environment inputs and delegates interpreter
+  selection to it. Never assume a Python installation path, reverse-engineer
+  `uv`'s storage layout or select Python from PATH, a launcher registry or a
+  sibling runtime. A discovered path recorded as evidence is not a hardcoded
+  deployment location. Different projects can use different versions;
+  compatible managed base installations may be shared without sharing mutable
+  package environments.
+- Read-only status/discovery and ordinary launch use already-prepared
+  environments only. Missing environments produce an actionable setup result,
+  not a download, implicit repair or fallback to ambient Python. Explicit
+  installation owns permitted acquisition, offline reuse and clear network,
+  unavailable-version, unsupported-platform or OS-policy failure outcomes.
+- Preserve existing artifact/dependency admission, seasoning and OS execution
+  policy. Managed Python is not permission to disable code integrity, compile
+  native helpers or add per-launch interpreter-attestation gates. Ordinary
+  updates must not remove a managed base interpreter still used by a retained
+  environment or live process.
+  SAC-enforcing Windows migration requires a successful supported managed
+  interpreter path under that policy, not only an actionable refusal.
+
+<a id="path-python-evaluator-bootstrap"></a>
+
+### Explicit Python handoff and compatibility evaluator bootstrap
+
+The ordinary Manager bootstrap carries its uv-managed Python selection into
+finite installer children as `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`. This is an
+absolute executable path, not a version request, acquisition permission or
+persistent installation selector. PowerShell restores its caller's previous
+value on success or failure; POSIX exports it only within the bootstrap process
+tree. Queued installations clear stale inherited hints through the existing
+runner's context-key handling. Each finite Manager request scope then uses the
+explicitly launched application's base interpreter, not the draining worker's
+hint, and restores the previous environment afterward. The strict legacy
+request-context record is unchanged, so older prepared Manager sources still
+accept it. Self-install uses the same finite interpreter scope.
+The standalone Windows install-only participant also establishes its own finite
+base-interpreter scope. Its queue and the bootstrap-update queue clear the
+worker's hint without requiring newer private APIs from a prepared Manager.
+These helpers are stdlib-only. Using the base interpreter keeps an inherited
+helper hint independent of a retired Manager package environment; managed-base
+retention remains with the toolchain owner.
+Manager cold/passive resident launches remove the finite hint through their
+existing environment scrubber instead of retaining the updater's selection.
+The installation-context caller-owned adapter, PowerShell daemon-instance
+transport and the evaluator selector below consume it without rediscovering
+PATH Python. The process transport applies the hint only at its existing lazy
+helper startup: a live helper retains its original interpreter and custody,
+and a conflicting nonempty hint refuses before another request without
+breaking that owner.
+The installation-context and evaluator adapters' optional `-Python`
+argument overrides the inherited value. Invalid paths and interpreter execution
+failures are terminal, not permission to fall back. The original process,
+private-pipe, Job/group, startup/deadline and cleanup protocols are unchanged.
+
+This closes the setup-process handoff portion of
+[uv-managed Python](../visions/installer/README.md#uv-managed-python), not the
+whole migration. It neither publishes a global Python preference nor changes
+installed application interpreters. Independently installed, fresh-terminal
+and legacy callers without a supplied selection retain the compatibility path
+below until their installation owners carry the same explicit selection.
+
+### Legacy PATH evaluator adoption
+
+The no-selection fallback below is remaining migration work, not the managed
+target above. Its PATH requirement must not be copied into new setup plans as
+an architectural prerequisite. Historical source and native validation credit
+remain valid only for the behavior they actually exercised.
 
 `bootstrap-python.ps1` is a standalone, read-only selector for the existing
-`python` application on PATH that evaluates the owning payload's stdlib SDK.
+explicit interpreter or compatibility `python` application on PATH that
+evaluates the owning payload's stdlib SDK.
 `sync-installer-engine.py` delivers byte-identical copies only to the declared
 Containers and Codespaces adopters. Loading the file or delivering a copy does
 not opt a caller into another evaluator or change its installer selection.
 
-`Resolve-EvaluatorBootstrapPython` uses ordinary application-only `Get-Command`
+Without an explicit selection, `Resolve-EvaluatorBootstrapPython` uses ordinary application-only `Get-Command`
 lookup, preserving PATH order without executing candidates, compiling native
 code, consulting the registry, verifying signatures or pinning interpreter files.
 Aliases and functions do not override the application. The compatibility
 `-ExcludedRoots` parameter is accepted but does not filter interpreters.
-The [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
-assigns supported Python provisioning and durable PATH hygiene to upfront harness
-setup; standalone use retains an explicit Python 3.10+ prerequisite. Temporary
-and worktree interpreters should not be placed on durable PATH by setup, not
-rejected by a per-launch interpreter allowlist.
+The earlier compiler-free amendment assigned supported Python provisioning and
+durable PATH hygiene to upfront setup; this implementation still has that
+Python prerequisite. The
+[current amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+instead requires setup-owned, project-declared managed Python. It preserves the
+removal of per-launch interpreter attestation; it does not qualify this existing
+PATH selector as migrated.
 
 The result retains `Status`, `Reason`, `Python` and `Guard` for caller
-compatibility. `selected` / `path-python` returns the resolved application path
+compatibility. `selected` / `explicit-python` returns the supplied absolute path, while
+`selected` / `path-python` returns the resolved compatibility application path
 and a null guard; `unavailable` / `python-not-on-path` has neither. Only command
 absence becomes `unavailable`; unexpected discovery errors propagate.
 There is no interpreter acquisition, state write, persistent admission cache
@@ -5754,13 +5930,15 @@ effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
 ### Python-owned construction foundation
 
-For the earlier, Python-free Windows admission boundary, the canonical
+For the earlier pre-runtime Windows admission boundary, the canonical
 `agent-procutil` package also carries native daemon/owned-child helpers, and
 `single-instance-lease` carries the native counterpart of `OperationLock`.
 They reuse WMI outside-Job admission and the exact existing kernel lock
 protocol; owned writers enter their strict Job atomically at creation.
 Their API and qualification boundary are in the
-[procutil bootstrap reference](../libs/agent-procutil/README.md#python-free-windows-bootstrap-admission).
+[procutil bootstrap reference](../libs/agent-procutil/README.md#windows-bootstrap-and-shell-admission).
+Those helpers still require setup-provided Python; they do not supply the
+Python-free first-toolchain stage required by the managed-Python target.
 They do not themselves construct a driver foundation or migrate any first-use
 publisher. Bootstrap source admission, durable interruption fencing and
 immutable publication remain consumer obligations.

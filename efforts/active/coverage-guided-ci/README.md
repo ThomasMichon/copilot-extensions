@@ -50,6 +50,11 @@ replace that plugin's collect-only tier with genuine diff-scoped selection.
   [reviewed wave plan](windows-pr-waves.md) merged in #7338; its
   [pinned residual census](windows-residual-ledger.md) precedes the first
   implementation batch. Existing sibling owners retain their scopes.
+- **Finite #5340 intake:** The Primary maintainer retains the selector,
+  baseline and diagnostic follow-up. #5340 remains OPEN; directly receiving
+  planned clauses does not establish technical completion or retire another
+  tracker. The retired required-CI shadow consumer is not restored by this
+  standalone-selector clarification, and no strict-selection mode is enabled.
 
 ## Context
 
@@ -402,6 +407,19 @@ their historical context rather than authorizing retired jobs.
       later phase adds non-runtime (static-analysis) dependency edges.
 - [ ] Measure and record real wall-clock PR-CI impact for `agent-worktrees`
       changes (before/after).
+- [ ] **CG5340-P1:** Bound the whole owning selector invocation, or an
+      equivalent outer completion contract, rather than only individual Git
+      calls. Expose timeout, error and unknown outcomes distinctly; missing or
+      unqualified baseline evidence must not appear as successful complete
+      selection. Preserve the separation between informational selection
+      diagnostics and successful native tests/required aggregate results.
+      Keep this residual applicable to supported standalone consumers without
+      restoring the retired required-CI shadow step or enabling strict selection.
+- [ ] **CG5340-P2:** Reconcile the historical base/baseline-resolution concern
+      through a bounded investigation OR an explicit limitation. Credit the
+      reported per-call repair separately; existing nearest-ancestor work or a
+      later bounded informational timeout does not establish that historical
+      resolution, whole-invocation bound or remaining diagnostic acceptance.
 
 ### Phase 3.5 — Full-matrix local validation (de-risking prep for Phase 4 slice 2)
 Before Phase 4's eventual `--collect-only` -> real-execution cutover, every
@@ -771,12 +789,28 @@ regardless of this effort's local fixes.
 - [ ] No phase regresses `test-portfolio`'s own host-safety or budget
       guarantees — the selector is an additional CLI mode, not a rewrite of
       how any existing test tier runs.
+- [ ] **CG5340-V1:** Exercise the complete invocation's bound and distinct
+      timeout/error/unknown diagnostics, including missing baseline evidence
+      that cannot be reported as clean selection. Record the bounded historical
+      resolution finding OR its explicit limitation. Keep reported call-bound
+      repair, the retired informational CI consumer, supported standalone
+      behavior, native/required aggregate success and this residual distinct;
+      no strict-selection or restored required-CI shadow acceptance is implied.
 
 ## Proposal
 
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-11-15 - Finite selector-bound and diagnostic acceptance proposed
+
+Added two unchecked #5340 Plan clauses and one matching Validation clause.
+The whole-invocation bound and historical resolution finding OR explicit
+limitation remain separate from reported per-call repair and the retired CI
+consumer. #5340 stays OPEN under its original tracking condition. Existing
+owners, checked/unchecked rows and test-portfolio boundaries remain; no selector,
+CI, baseline, source investigation or test was executed by this intake.
 
 ### 2026-11-03 - Complete the bounded auditability selection amendment
 

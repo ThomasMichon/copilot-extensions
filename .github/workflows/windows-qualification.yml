@@ -54,7 +54,7 @@ jobs:
   windows:
     needs: admit
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: ${{ needs.admit.outputs.packet == 'manager-worktrees-source' && 60 || 40 }}
     permissions:
       contents: read
     defaults:
@@ -119,19 +119,19 @@ jobs:
       - name: Execute typed selection through canonical bounded owners
         if: ${{ success() || (failure() && needs.admit.outputs.native == 'true' && steps.native.outcome == 'failure') }}
         env:
-          UV_DEFAULT_INDEX: ${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || needs.admit.outputs.packet == 'native-worktrees-copilot' || needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || needs.admit.outputs.packet == 'native-worktrees-manager-mux') && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
+          UV_DEFAULT_INDEX: ${{ (needs.admit.outputs.packet == 'manager-worktrees-source' || needs.admit.outputs.packet == 'native-worktrees-embody' || needs.admit.outputs.packet == 'native-worktrees-copilot' || needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || needs.admit.outputs.packet == 'native-worktrees-manager-mux') && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
           WINDOWS_QUALIFICATION_NATIVE_PREPARATION: ${{ steps.native.outcome }}
         run: >-
           python control/tools/windows_qualification_worker.py execute
           --candidate candidate --output evidence
       - name: Sanitize native evidence independently after worker interruption
         id: sanitize
-        if: always() && needs.admit.outputs.native == 'true'
+        if: always() && (needs.admit.outputs.native == 'true' || needs.admit.outputs.packet == 'manager-worktrees-source')
         env:
-          UV_DEFAULT_INDEX: ${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || needs.admit.outputs.packet == 'native-worktrees-copilot' || needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || needs.admit.outputs.packet == 'native-worktrees-manager-mux') && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
+          UV_DEFAULT_INDEX: ${{ (needs.admit.outputs.packet == 'manager-worktrees-source' || needs.admit.outputs.packet == 'native-worktrees-embody' || needs.admit.outputs.packet == 'native-worktrees-copilot' || needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || needs.admit.outputs.packet == 'native-worktrees-manager-mux') && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
         run: python control/tools/windows_qualification_worker.py sanitize --output evidence
       - name: Retain request-bound evidence even after failure
-        if: ${{ always() && (needs.admit.outputs.native != 'true' || steps.sanitize.outcome == 'success') }}
+        if: ${{ always() && ((needs.admit.outputs.native != 'true' && needs.admit.outputs.packet != 'manager-worktrees-source') || steps.sanitize.outcome == 'success') }}
         uses: actions/upload-artifact@v4
         with:
           name: winqual-${{ inputs.request_id }}-${{ github.run_attempt }}

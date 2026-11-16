@@ -32,7 +32,7 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_reset_legacy_runtime_lock)
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -82,7 +82,7 @@ def _grace_seconds(value: str) -> float:
     return seconds
 
 
-def _cmd_stop_phased(client, args: argparse.Namespace) -> None:
+def _cmd_stop_phased(client: Any, args: argparse.Namespace) -> None:
     """``stop --grace``/``--json``: the cooperative, phased stop (session_stop)."""
     from .session_stop import STOP_BUSY_EXIT, STOP_UNCONFIRMED_EXIT, STOP_UNSUPPORTED_EXIT, run_stop
 
@@ -250,7 +250,7 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
 
 
 def _agent_bridge_owner_root() -> Path:
-    return _core().install_dir()
+    return Path(_core().install_dir())
 
 
 def _agent_bridge_installation_context() -> str:
@@ -267,10 +267,11 @@ def _agent_bridge_installation_context() -> str:
 
 def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[str] | None:
     from .acquisition_worktree_writer import current
+    from .retained_writer_transport import execution_prefix
 
     writer = current()
     if writer is not None:
-        return list(writer.prefix)
+        return execution_prefix(writer.prefix)
     selection = _agent_worktrees_selection(allow_path_fallback=allow_path_fallback)
     return selection[0] if selection else None
 
@@ -620,8 +621,9 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     log.info("Starting ACP agent mode (agent=%s)", agent_name)
 
     async def _run() -> None:
-        from acp import run_agent
+        from importlib import import_module
 
+        run_agent = import_module("acp").run_agent
         try:
             await run_agent(bridge_agent)
         finally:
@@ -630,7 +632,7 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     asyncio.run(_run())
 
 
-def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None:
+def register_session_lifecycle_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     stop_p = sub.add_parser("stop", help="Stop a session (with --grace, ask the agent to wind down first)")
     stop_p.add_argument("session_id", help="Session ID")
     stop_p.add_argument("--force", action="store_true", help="Tear down even with active background sub-agent tasks (kills them), skipping any --grace notice. Prefer waiting for them to finish.")

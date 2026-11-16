@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Complete status, catalog and roster receiving proposal](journal/2026/11.16-status-catalog-roster-receiving.md)
+
+- [2026-11-16 - Accepted ZDD tracking and current unfinished contracts](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
+
+- [2026-11-16 - Runtime source completion and finite authoring-contract intake](journal/2026/11.16-runtime-source-and-authoring-contract.md)
+
+- [2026-11-16 - Changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
+
+- [2026-11-16 - Complete WSL provisioning receiving](journal/2026/11.16-wsl-provisioning-receiving.md)
+
+- [2026-11-16 - Cold bootstrap source completion and retained keepers](journal/2026/11.16-cold-bootstrap-source-completion.md)
+
 - [2026-11-15 - Title-bound ready frontier](journal/2026/11.15-title-bound-ready-frontier.md)
 
 - [2026-11-14 - Accepted receivers and the next owner frontier](journal/2026/11.14-accepted-receivers-and-owner-frontier.md)

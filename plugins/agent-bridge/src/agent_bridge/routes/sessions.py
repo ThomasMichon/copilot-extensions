@@ -7,7 +7,8 @@ import contextlib
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -28,8 +29,6 @@ from ..models import (
     ResyncSessionResponse,
     SessionInfo,
     SessionListResponse,
-    SessionStatus,
-    StartSessionRequest,
     StartSessionResponse,
 )
 from ..result_snapshot import (
@@ -37,8 +36,6 @@ from ..result_snapshot import (
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
-    ResultHistoryChangedError,
-    ResultTokenError,
     build_owned_result_snapshot,
     expand_owned_result_ref,
 )
@@ -48,6 +45,9 @@ from ..session_manager import (
     SessionBusyError,
     SessionConflictError,
 )
+from ..result_tokens import ResultHistoryChangedError, ResultTokenError
+from ..session_status import SessionStatus
+from ..session_start_models import StartSessionRequest
 from ..transport import SpawnTarget
 from ..remote_acp_config import is_remote_address
 from ..session_start_selection import find_reusable_caller_session as _find_reusable_session
@@ -187,7 +187,7 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
     )
 
 
-def _tool_progress_sse(active: dict, now: float) -> str:
+def _tool_progress_sse(active: dict[str, Any], now: float) -> str:
     """Frame an in-flight tool call as a cursor-neutral SSE *comment*.
 
     ``active`` is :meth:`EventLog.active_tool_call`'s return value. The
@@ -222,16 +222,16 @@ def _control_sse(code: str, message: str, **details: Any) -> str:
 
 
 async def _sse_event_stream(  # noqa: ANN001
-    session,
-    start,
+    session: Any,
+    start: int,
     *,
-    server,
-    is_disconnected,
-    mgr=None,
+    server: Any,
+    is_disconnected: Callable[[], Awaitable[bool]] | None,
+    mgr: Any = None,
     signal_gaps: bool = False,
     expected_continuity_id: str | None = None,
     heartbeat_interval: float = 30.0,
-):
+) -> AsyncIterator[str]:
     """The SSE event generator for ``GET /{id}/events`` (extracted for testing).
 
     Streams durable events past ``start``; on each quiet ``wait_for_events``
@@ -382,7 +382,7 @@ async def _sse_event_stream(  # noqa: ANN001
             mgr.remove_subscriber(session.session_id)
 
 
-def _session_info(s, manager=None) -> SessionInfo:  # noqa: ANN001
+def _session_info(s: Session, manager: SessionManager | None = None) -> SessionInfo:
     """Convert an internal Session to the public SessionInfo model."""
     from datetime import datetime, timezone
     from ..remote_relationships import inspection
@@ -396,7 +396,7 @@ def _session_info(s, manager=None) -> SessionInfo:  # noqa: ANN001
         acp_session_id=s.acp_session_id,
         durable_session_id=s.acp_session_id or s.session_id,
         target_dir=s.target.cwd,
-        target_type=s.target.type,
+        target_type=cast(Literal["local", "ssh", "command", "remote-acp"], s.target.type),
         target_host=s.target.host,
         project=getattr(s.target, "project", None),
         worktree_id=s.target.worktree_id,
@@ -435,7 +435,9 @@ def _session_info(s, manager=None) -> SessionInfo:  # noqa: ANN001
 
 # Session states considered "alive"/reusable for caller affinity. Terminal
 # states are excluded -- reusing one would hand back a no-process session.
-def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
+def _enforce_worktree_head_guard(
+    worktree_id: str, mgr: SessionManager | None = None,
+) -> None:
     """Refuse a create into a worktree with an active head or pending handoff.
 
     Derives the head from agent-worktrees. When occupied, raises
@@ -526,14 +528,14 @@ def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
 
 
 @router.post("/workspace-creations", response_model=StartSessionResponse)
-async def create_workspace(req: StartSessionRequest, request: Request):
+async def create_workspace(req: StartSessionRequest, request: Request) -> StartSessionResponse:
     if req.creation_key is None:
         raise HTTPException(status_code=422, detail="workspace-creations requires creation_key")
     return await start_session(req, request)
 
 
 @router.post("", response_model=StartSessionResponse, status_code=201)
-async def start_session(req: StartSessionRequest, request: Request):
+async def start_session(req: StartSessionRequest, request: Request) -> StartSessionResponse:
     mgr: SessionManager = request.app.state.session_manager
     try:
         with mgr.start_admission():
@@ -542,7 +544,7 @@ async def start_session(req: StartSessionRequest, request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-async def _start_session_admitted(req: StartSessionRequest, request: Request):
+async def _start_session_admitted(req: StartSessionRequest, request: Request) -> StartSessionResponse:
     mgr: SessionManager = request.app.state.session_manager
     resolver = getattr(request.app.state, "resolver", None)
     agent_name = req.agent
@@ -733,7 +735,7 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
 
 
 @router.get("", response_model=SessionListResponse)
-async def list_sessions(request: Request, status: str | None = None):
+async def list_sessions(request: Request, status: str | None = None) -> SessionListResponse:
     mgr: SessionManager = request.app.state.session_manager
     status = status or None
     primary_sessions = mgr.list_sessions()
@@ -768,7 +770,7 @@ async def list_sessions(request: Request, status: str | None = None):
 
 
 @router.get("/{session_id}", response_model=SessionInfo)
-async def get_session(session_id: str, request: Request, worktree_writer: bool = False):
+async def get_session(session_id: str, request: Request, worktree_writer: bool = False) -> Any:
     from ..creation_writer_inspection import session_info
 
     return await session_info(session_id, request, _session_info, worktree_writer=worktree_writer)
@@ -815,7 +817,7 @@ async def get_session_transcript(session_id: str, request: Request) -> dict[str,
 
 
 @router.get("/{session_id}/usage")
-async def get_session_usage(session_id: str, request: Request):
+async def get_session_usage(session_id: str, request: Request) -> Any:
     """Return the full context window usage snapshot for a session."""
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
@@ -843,7 +845,7 @@ async def get_session_usage(session_id: str, request: Request):
 @router.get("/{session_id}/status")
 async def get_session_status(
     session_id: str, request: Request, caller_id: str | None = None
-):
+) -> Any:
     """Compact, single-screen status for a dispatch.
 
     Returns session state, turn count, delivery-cursor position vs head,
@@ -860,6 +862,9 @@ async def get_session_status(
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
+    from ..session_inspection import inspect_session
+
+    inspection = await inspect_session(session)
     status, at_rest, _liveness = session.public_state()
     active = session.event_log.active_tool_call() if session.event_log else None
     if active and active.get("started_at") is not None:
@@ -887,6 +892,10 @@ async def get_session_status(
             session.client.pending_ask_user() if session.client else []
         ),
         "progress": dict(session.progress),
+        "inspection": inspection,
+        "liveness": inspection["liveness"],
+        "last_output_at": inspection["last_output_at"],
+        "last_heartbeat_at": inspection["last_heartbeat_at"],
         "updated_at": datetime.fromtimestamp(session.updated_at, tz=timezone.utc).isoformat(),
     }
 
@@ -903,7 +912,7 @@ def get_result_snapshot(
     max_text_chars: int = Query(
         default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
     ),
-):
+) -> DelegatedResultSnapshot:
     """Return a bounded, cursor-neutral result snapshot for an owned session."""
     mgr: SessionManager = request.app.state.session_manager
     session = _resolve_result_session(mgr, session_ref)
@@ -935,7 +944,7 @@ def get_result_detail(
     session_ref: str,
     request: Request,
     ref: str = Query(max_length=2048),
-):
+) -> Any:
     """Resolve an opaque result detail reference without moving a cursor."""
     mgr: SessionManager = request.app.state.session_manager
     session = _resolve_result_session(mgr, session_ref)
@@ -975,7 +984,7 @@ async def wait_for_attention(
     reason: list[AttentionReason] = Query(min_length=1),
     position: str | None = Query(default=None, max_length=2048),
     timeout_seconds: float = Query(default=30.0, ge=0.0, le=30.0),
-):
+) -> AttentionWaitResponse:
     """Wait for the earliest selected durable attention boundary."""
     mgr: SessionManager = request.app.state.session_manager
     try:
@@ -1035,7 +1044,7 @@ async def wait_for_attention(
 
 
 @router.post("/{session_id}/resync", response_model=ResyncSessionResponse)
-async def resync_session(session_id: str, request: Request):
+async def resync_session(session_id: str, request: Request) -> ResyncSessionResponse:
     """Rebuild a session's event log from the agent's authoritative replay.
 
     Heals logs truncated by a mid-session disconnect. Reattaches the ACP
@@ -1084,7 +1093,7 @@ async def get_events(
     transient: bool = False,
     before: int | None = Query(default=None, ge=1),
     limit: int = Query(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
-):
+) -> Any:
     """SSE event stream with durable event IDs.
 
     Resume semantics:
@@ -1115,6 +1124,7 @@ async def get_events(
     cursor_state = None
     current_continuity_id = None
     if controlled:
+        assert controlled_caller_id is not None
         if transient and (after is None or continuity_id is None):
             raise HTTPException(
                 status_code=422,
@@ -1161,6 +1171,7 @@ async def get_events(
     else:
         start = after
     if controlled:
+        assert cursor_state is not None
         durable_cursor = int(cursor_state["last_acked_id"])
         transient_resume = (
             transient
@@ -1219,7 +1230,7 @@ async def get_events(
 @router.get("/{session_id}/events/range")
 async def get_events_range(
     session_id: str, request: Request, start: int = 0, end: int | None = None
-):
+) -> Any:
     """Random-access historical read of events by id range (inclusive).
 
     Returns events with ``start <= id <= end``. Does NOT touch any
@@ -1238,7 +1249,9 @@ async def get_events_range(
 
 
 @router.get("/{session_id}/cursor", response_model=CursorInfo)
-async def get_cursor(session_id: str, request: Request, caller_id: str | None = None):
+async def get_cursor(
+    session_id: str, request: Request, caller_id: str | None = None,
+) -> CursorInfo:
     """Return a caller's current delivery-cursor position for a session."""
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
@@ -1261,7 +1274,7 @@ async def get_cursor(session_id: str, request: Request, caller_id: str | None = 
 @router.post("/{session_id}/cursor", response_model=CursorInfo)
 async def ack_cursor(
     session_id: str, req: CursorAckRequest, request: Request
-):
+) -> CursorInfo:
     """Acknowledge delivery up to ``last_id`` for a caller (monotonic).
 
     The stored cursor never regresses, so duplicate/out-of-order acks are
@@ -1330,7 +1343,7 @@ async def ack_cursor(
 @router.post("/{session_id}/stop", status_code=204)
 async def stop_session(
     session_id: str, request: Request, force: bool = False, reap_host: bool = False
-):
+) -> None:
     """Stop a session, preserving state for resume.
 
     ``reap_host=true`` additionally FREES the Session-Host child immediately
@@ -1358,7 +1371,7 @@ async def interrupt_relays_for_parity(
     session_id: str,
     request: Request,
     timeout: float = 90.0,
-):
+) -> Any:
     """Interrupt one harness-owned relay and wait for its supervisor to heal."""
     mgr: SessionManager = request.app.state.session_manager
     try:
@@ -1381,7 +1394,7 @@ async def recreate_container_for_parity(
     session_id: str,
     request: Request,
     timeout: float = 600.0,
-):
+) -> Any:
     """Recreate one harness-owned container and return its replacement."""
     mgr: SessionManager = request.app.state.session_manager
     try:
@@ -1400,7 +1413,7 @@ async def recreate_container_for_parity(
 
 
 @router.post("/{session_id}/interrupt", response_model=SessionInfo)
-async def interrupt_turn(session_id: str, request: Request):
+async def interrupt_turn(session_id: str, request: Request) -> SessionInfo:
     """Interrupt the in-flight turn, leaving the session alive and idle.
 
     Cancels the *current turn* (ACP session/cancel) and returns the agent to
@@ -1421,7 +1434,7 @@ async def handoff_session(
     request: Request,
     reason: str | None = None,
     seed: bool = True,
-):
+) -> SessionInfo:
     """Hand a hosted session off to a fresh successor in the SAME worktree.
 
     The bridge-native analogue of an interactive context handoff: the
@@ -1455,7 +1468,7 @@ async def end_session(
     request: Request,
     force: bool = False,
     if_idle: bool = False,
-):
+) -> None:
     mgr: SessionManager = request.app.state.session_manager
     try:
         if if_idle:

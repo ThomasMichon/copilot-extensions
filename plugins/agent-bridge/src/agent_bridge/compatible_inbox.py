@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .inbox_custody import InboxConsumer, handoff_stage, observed_time, original_handoff
 from .runtime_custody import RuntimeCustodyError, encode
 
+if TYPE_CHECKING:
+    from .db import Database
+
 BINDING = "compatible-inbox-v1"
 
 
-def require_live(conn, session_id: str, now: float) -> None:
+def require_live(
+    conn: sqlite3.Connection, session_id: str, now: float, *, native_only: bool = False,
+) -> None:
     row = conn.execute(
-        "SELECT status,updated_at FROM live_sessions WHERE session_id=?", (session_id,),
+        "SELECT status,updated_at,venue FROM live_sessions WHERE session_id=?", (session_id,),
     ).fetchone()
     if (
         row is None or row["status"] != "live"
@@ -24,25 +31,30 @@ def require_live(conn, session_id: str, now: float) -> None:
         ).fetchone() is not None
     ):
         raise RuntimeCustodyError("Inbox target is not registered live; explicitly resume it first")
+    if native_only and row["venue"] is not None:
+        raise RuntimeCustodyError("Automatic SDK compatibility requires a registered native target")
 
 
-def negotiate(db, consumer: InboxConsumer, *, now: float) -> str | None:
+def negotiate(
+    db: Database, consumer: InboxConsumer, *, now: float, native_only: bool = False,
+) -> str | None:
     observed_time(now)
     with db._runtime_transaction(write=False) as conn:
-        require_live(conn, consumer.session_id, now)
+        require_live(conn, consumer.session_id, now, native_only=native_only)
         row = conn.execute(
             "SELECT incarnation FROM bridge_inbox_consumers WHERE session_id=? AND current=1",
             (consumer.session_id,),
         ).fetchone()
-        return row["incarnation"] if row is not None else None
+        return cast(str, row["incarnation"]) if row is not None else None
 
 
 def enroll(
-    db, consumer: InboxConsumer, *, expected_incarnation: str | None, now: float,
+    db: Database, consumer: InboxConsumer, *, expected_incarnation: str | None, now: float,
+    native_only: bool = False,
 ) -> None:
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
-        require_live(conn, consumer.session_id, now)
+        require_live(conn, consumer.session_id, now, native_only=native_only)
         if conn.execute(
             "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
             "AND kind != 'control:plugin-readiness' AND delivered_at IS NULL LIMIT 1",
@@ -79,7 +91,7 @@ def enroll(
         )
 
 
-def require_current(conn, consumer: InboxConsumer) -> None:
+def require_current(conn: sqlite3.Connection, consumer: InboxConsumer) -> None:
     row = conn.execute(
         "SELECT 1 FROM bridge_inbox_consumers "
         "WHERE session_id=? AND incarnation=? AND installation=? AND current=1",
@@ -89,7 +101,7 @@ def require_current(conn, consumer: InboxConsumer) -> None:
         raise RuntimeCustodyError("Inbox receiver is not currently enrolled")
 
 
-def retain_message(conn, message_id: int) -> None:
+def retain_message(conn: sqlite3.Connection, message_id: int) -> None:
     row = conn.execute("SELECT * FROM live_messages WHERE id=?", (message_id,)).fetchone()
     if row is None or row["handoff_json"] is not None:
         return
@@ -109,7 +121,7 @@ def retain_message(conn, message_id: int) -> None:
         )
 
 
-def require_supported(conn, row, now: float) -> None:
+def require_supported(conn: sqlite3.Connection, row: sqlite3.Row, now: float) -> None:
     if row["delivery"] not in ("steer", "queue") or row["kind"].casefold().startswith("control:"):
         raise RuntimeCustodyError("Retained inbox control or interrupt delivery remains unsupported")
     if row["kind"].casefold().startswith("startup:"):
@@ -125,10 +137,13 @@ def require_supported(conn, row, now: float) -> None:
             raise RuntimeCustodyError("Original startup readiness or input is unsupported")
 
 
-def poll(db, consumer: InboxConsumer, *, now: float, limit: int | None) -> list[dict]:
+def poll(
+    db: Database, consumer: InboxConsumer, *, now: float, limit: int | None,
+    native_only: bool = False,
+) -> list[dict[str, Any]]:
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
-        require_live(conn, consumer.session_id, now)
+        require_live(conn, consumer.session_id, now, native_only=native_only)
         require_current(conn, consumer)
         rows = conn.execute(
             "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
@@ -151,10 +166,13 @@ def poll(db, consumer: InboxConsumer, *, now: float, limit: int | None) -> list[
         return result
 
 
-def begin(db, consumer: InboxConsumer, message_id: int, handoff_id: str, *, now: float) -> bool:
+def begin(
+    db: Database, consumer: InboxConsumer, message_id: int, handoff_id: str, *, now: float,
+    native_only: bool = False,
+) -> bool:
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
-        require_live(conn, consumer.session_id, now)
+        require_live(conn, consumer.session_id, now, native_only=native_only)
         row = db._original_handoff(
             conn, message_id, consumer, handoff_id, compatible_consumer=True,
         )

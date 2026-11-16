@@ -3,28 +3,66 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 import json
+import os
+import ssl
 import time
 from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
 import pytest
+from aiohttp import ClientResponse
 
-from fleet_manager.gateway_account_source import LEASE_CONTRACT
-from gateway_service_transport_fixtures import eventually, running
+from fleet_manager.gateway_account_source import (
+    LEASE_CONTRACT, AccountSource, AccountSourceGrant, AccountSourceHandler,
+)
+from fleet_manager.gateway_controller_services import ControllerService
+from fleet_manager.gateway_local_handler import LocalHandlerBinding
+from fleet_manager.gateway_manifest import ServiceSlot
+from fleet_manager.gateway_service_handler import ServiceRequest, ServiceResponse
+from fleet_manager.gateway_vault_available import NORMAL_FETCH_CONTRACT
+from fleet_manager.gateway_vault_fetch import AccountFetchGrant, AccountSourcePin, GatewayAccountFetch
+from gateway_service_transport_fixtures import eventually as _eventually, running as _running
 from test_gateway_account_source import CAPABILITY, FIELDS, PIN, handler
-from test_gateway_service_handler import connect_handler
+from test_gateway_service_handler import connect_handler as _connect_handler
+from test_gateway_controller_services import connect, gateway_owner
+
+if TYPE_CHECKING:
+    from credential_relay.sources.gh_auth import GhAuthSource
+
+NORMAL_SERVICE = "vault-normal-fetch-v1"
+
+# These shared transport helpers expose dynamically configured test rigs.
+eventually: Callable[[Callable[[], bool]], Awaitable[None]] = _eventually
+running: Callable[[Path], AbstractAsyncContextManager[Any]] = _running
+connect_handler: Callable[
+    [Any, Callable[[ServiceRequest], Awaitable[ServiceResponse]]], Awaitable[Any],
+] = _connect_handler
+
+
+def fetch_owner(slot: ServiceSlot, *, budget: float = 30) -> GatewayAccountFetch:
+    return GatewayAccountFetch(
+        slot=slot, service=NORMAL_SERVICE, budget=budget, installation="gateway-installation", grants=(
+        AccountFetchGrant(
+            "caller-a", "binding-a", "account-a", "worker-a", "github.com",
+            (AccountSourcePin("service-a", "repo-a", "source-installation"),
+             AccountSourcePin("service-b", "repo-a", "second-installation")),
+        ),
+    ))
 
 
 @asynccontextmanager
-async def source_running(root, profile):
+async def source_running(root: Path, profile: str) -> AsyncIterator[Any]:
     if profile == "jwt-pop-v1":
         async with running(root) as rig:
             yield rig
         return
     from test_gateway_enrolled_identity import EnrolledRig, RS256Harness
 
-    rig = EnrolledRig(root, RS256Harness)
+    enrolled_rig: Any = EnrolledRig
+    rig = enrolled_rig(root, RS256Harness)
     try:
         await rig.start(identity_provider=rig.h.provider)
         yield rig
@@ -32,16 +70,20 @@ async def source_running(root, profile):
         await rig.close()
 
 
-def custodian(tmp_path, monkeypatch):
+def custodian(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AccountSource, list[tuple[str | None, str, dict[str, str]]], Path, dict[str, Any]]:
     monkeypatch.syspath_prepend(str(
         Path(__file__).resolve().parents[2] / "libs" / "credential-relay" / "src",
     ))
     from credential_relay.account_relay import AccountRelay
     from credential_relay.sources.gh_auth import GhAuthSource
 
-    calls = []
+    calls: list[tuple[str | None, str, dict[str, str]]] = []
 
-    async def resolve(self, action, fields, *, timeout):
+    async def resolve(
+        self: GhAuthSource, action: str, fields: dict[str, str], *, timeout: float,
+    ) -> str:
         calls.append((self._account, action, fields))
         return (
             "protocol=https\nhost=github.com\nusername=account-a\n"
@@ -51,7 +93,7 @@ def custodian(tmp_path, monkeypatch):
     monkeypatch.setattr(GhAuthSource, "resolve", resolve)
     capability = tmp_path / "capability"
     capability.write_text(CAPABILITY, encoding="ascii")
-    document = {
+    document: dict[str, Any] = {
         "schema": "credential-relay.account-policy", "version": 1,
         "providers": {"local": {"kind": "gh-auth", "account": "account-a", "host": "github.com"}},
         "grants": [{
@@ -66,10 +108,12 @@ def custodian(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-rs256-pop-v1"])
 def test_real_source_request_renewal_denial_loss_and_reconnect(
-        tmp_path, monkeypatch, caplog, profile):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture, profile: str,
+) -> None:
     source, calls, policy, document = custodian(tmp_path, monkeypatch)
 
-    async def scenario():
+    async def scenario() -> None:
         async with source_running(tmp_path, profile) as rig:
             await connect_handler(rig, handler(source).handle)
             async with await rig.request("/api/health", headers=PIN) as response:
@@ -80,13 +124,14 @@ def test_real_source_request_renewal_denial_loss_and_reconnect(
                 }
             value = {**FIELDS, "capability": CAPABILITY, "lease_contract": LEASE_CONTRACT}
 
-            async def acquire(expected=200, **changes):
+            async def acquire(expected: int = 200, **changes: Any) -> dict[str, Any]:
                 async with await rig.request(
                     "/api/source-credentials", "POST", json={**value, **changes}, headers=PIN,
                 ) as response:
                     assert response.status == expected
                     assert response.headers["Cache-Control"] == "no-store"
-                    return await response.json()
+                    result: dict[str, Any] = await response.json()
+                    return result
 
             first = await acquire()
             second = await acquire()
@@ -122,15 +167,19 @@ def test_real_source_request_renewal_denial_loss_and_reconnect(
 
 
 @pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-rs256-pop-v1"])
-def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_path, profile):
+def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(
+    tmp_path: Path, profile: str,
+) -> None:
     from test_gateway_account_source import Source
 
-    async def scenario():
+    async def scenario() -> None:
         async with source_running(tmp_path, profile) as rig:
             source = Source()
             entered, cancelled = asyncio.Event(), asyncio.Event()
 
-            async def resolve(fields, capability, *, source_lease):
+            async def resolve(
+                fields: dict[str, str], capability: str, *, source_lease: bool,
+            ) -> None:
                 source.calls.append((fields, capability, source_lease))
                 entered.set()
                 try:
@@ -138,9 +187,9 @@ def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_p
                 finally:
                     cancelled.set()
 
-            source.resolve = resolve
+            setattr(source, "resolve", resolve)
             await connect_handler(rig, handler(source).handle)
-            pending = asyncio.create_task(rig.request(
+            pending: asyncio.Task[ClientResponse] = asyncio.create_task(rig.request(
                 "/api/source-credentials", "POST", json={**FIELDS, "capability": CAPABILITY},
                 headers=PIN,
             ))
@@ -168,10 +217,12 @@ def test_source_request_lost_after_dispatch_is_not_replayed_to_replacement(tmp_p
 
 
 @pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-rs256-pop-v1"])
-def test_installation_replacement_between_health_and_post_never_acquires(tmp_path, profile):
+def test_installation_replacement_between_health_and_post_never_acquires(
+    tmp_path: Path, profile: str,
+) -> None:
     from test_gateway_account_source import Source
 
-    async def scenario():
+    async def scenario() -> None:
         async with source_running(tmp_path, profile) as rig:
             first, replacement = Source(), Source()
             await connect_handler(rig, handler(first).handle)
@@ -193,5 +244,384 @@ def test_installation_replacement_between_health_and_post_never_acquires(tmp_pat
             ) as response:
                 assert response.status == 200
             assert len(replacement.calls) == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("leased", [False, True])
+def test_gateway_normal_fetch_uses_current_channels_custodian_and_success_affinity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    leased: bool,
+) -> None:
+    from test_gateway_account_source import Source
+
+    service = NORMAL_SERVICE
+    actual, calls, policy, document = custodian(tmp_path, monkeypatch)
+    first = Source()
+    first.result = None
+    owner: GatewayAccountFetch | None = None
+    order: list[str] = []
+    received: list[ServiceRequest] = []
+
+    def binding_factory(slot: ServiceSlot) -> LocalHandlerBinding:
+        nonlocal owner
+        owner = fetch_owner(slot)
+        return owner.binding()
+
+    def remote(
+        source: AccountSource, slot: str, installation: str,
+    ) -> Callable[[ServiceRequest], Awaitable[ServiceResponse]]:
+        selected = AccountSourceHandler(
+            source, fleet="fleet-a", gateway="gateway-a", slot=slot,
+            installation=installation, grants=(AccountSourceGrant("caller-a", **FIELDS),))
+
+        async def handle(request: ServiceRequest) -> ServiceResponse:
+            order.append(slot)
+            received.append(request)
+            return await selected.handle(request)
+
+        return handle
+
+    async def scenario() -> None:
+        async with gateway_owner(
+            tmp_path, lambda request: None, binding_factory=binding_factory,
+        ) as rig:
+            try:
+                one = await connect(rig, offers=(ControllerService(service, "/api"),),
+                                    handle=remote(first, "service-a", "source-installation"))
+                two = await connect(rig, 1, offers=(ControllerService(service, "/assets"),),
+                                    handle=remote(actual, "service-b", "second-installation"))
+                value = {
+                    "fetch_contract": NORMAL_FETCH_CONTRACT, "binding": "binding-a",
+                    "sources": {"service-a": CAPABILITY, "service-b": CAPABILITY},
+                    **({"lease_contract": LEASE_CONTRACT, "installationId": "gateway-installation"}
+                       if leased else {}),
+                }
+
+                async def fetch(status: int = 200, **changes: Any) -> dict[str, Any]:
+                    async with await rig.request(
+                        "/vault/token-fetch", "POST", json={**value, **changes},
+                    ) as response:
+                        assert response.status == status
+                        assert response.headers["Cache-Control"] == "no-store"
+                        result: dict[str, Any] = await response.json()
+                        return result
+
+                result = await fetch()
+                assert result["token"] == "synthetic-source-token-1"
+                assert result["state"] == "fetched" and result["acquisition"] == "normal-fetch"
+                assert result["token_expires_at"] is None
+                assert ("lease_contract" in result) == leased
+                if leased:
+                    assert result["lease_contract"] == LEASE_CONTRACT
+                    assert 0 < result["lease_remaining_seconds"] <= 60
+                assert order == ["service-a", "service-b"]
+                order.clear()
+                await fetch()
+                assert order[0] == "service-b"
+                assert len(calls) == 2
+                assert all(request.context.principal == "caller-a" for request in received)
+                assert all(request.origin is not None and request.origin.slot == "vault"
+                           for request in received)
+                assert all(request.origin is not None
+                           and request.origin.target_uri == rig.origin + "/vault/token-fetch"
+                           for request in received)
+                assert all(not ({"authorization", "dpop"} & dict(request.headers).keys())
+                           for request in received)
+                await fetch(403, binding="foreign")
+                await fetch(403, sources={"foreign": CAPABILITY})
+                assert len(calls) == 2
+                document["grants"] = []
+                policy.write_text(json.dumps(document), encoding="utf-8")
+                result = await fetch(503)
+                assert result["state"] == "unavailable" and "token" not in result
+                assert len(calls) == 2
+                await one.advertise(())
+                await two.advertise(())
+                assert (await fetch(503))["state"] == "no-source"
+                assert rig.state.pending == 0
+                assert rig.backends[0].requests == rig.backends[1].requests == []
+            finally:
+                if owner is not None:
+                    owner.stop()
+                    assert await owner.drain(timeout=3)
+                    assert owner.pending_count == 0
+
+    asyncio.run(scenario())
+    assert CAPABILITY not in caplog.text and "synthetic-source-token-" not in caplog.text
+
+
+@pytest.mark.parametrize("stop", ["replacement", "withdrawal", "timeout", "caller"])
+@pytest.mark.parametrize("leased", [False, True])
+def test_gateway_normal_fetch_unknown_work_is_not_replayed_to_a_new_source(
+    tmp_path: Path, stop: str, leased: bool,
+) -> None:
+    from test_gateway_account_source import Source
+
+    owner: GatewayAccountFetch | None = None
+
+    def binding_factory(slot: ServiceSlot) -> LocalHandlerBinding:
+        nonlocal owner
+        owner = fetch_owner(slot, budget=0.1 if stop == "timeout" else 3)
+        return owner.binding()
+
+    async def scenario() -> None:
+        async with gateway_owner(
+            tmp_path, lambda request: None, binding_factory=binding_factory,
+        ) as rig:
+            entered, cancelled = asyncio.Event(), asyncio.Event()
+            source, replacement = Source(), Source()
+
+            async def resolve(
+                fields: dict[str, str], capability: str, *, source_lease: bool,
+            ) -> None:
+                source.calls.append((fields, capability, source_lease))
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+            setattr(source, "resolve", resolve)
+            offered = (ControllerService(NORMAL_SERVICE, "/api"),)
+            connector = await connect(rig, offers=offered, handle=handler(source).handle)
+            pending: asyncio.Task[ClientResponse] = asyncio.create_task(rig.request(
+                "/vault/token-fetch", "POST", json={
+                "fetch_contract": NORMAL_FETCH_CONTRACT, "binding": "binding-a",
+                "sources": {"service-a": CAPABILITY},
+                **({"lease_contract": LEASE_CONTRACT, "installationId": "gateway-installation"}
+                   if leased else {}),
+            }))
+            try:
+                await asyncio.wait_for(entered.wait(), 3)
+                if stop == "replacement":
+                    await connect(rig, offers=offered, handle=handler(replacement).handle)
+                elif stop == "withdrawal":
+                    await connector.advertise(())
+                elif stop == "caller":
+                    rig.h.document["callers"] = []
+                    await rig.update()
+                async with await pending as response:
+                    assert response.status != 200
+                    assert b"synthetic-token" not in await response.read()
+                await asyncio.wait_for(cancelled.wait(), 3)
+                assert source.calls == [(FIELDS, CAPABILITY, leased)]
+                assert not replacement.calls
+                assert owner is not None
+                assert await owner.drain(timeout=3)
+                assert owner.pending_count == rig.state.pending == 0
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+                assert owner is not None
+                owner.stop()
+                assert await owner.drain(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("change", ["legacy", "installationId", "account", "token_expires_at"])
+def test_gateway_normal_fetch_refuses_old_or_misbound_reply_without_fallback(
+    tmp_path: Path, change: str,
+) -> None:
+    owner: GatewayAccountFetch | None = None
+
+    def binding_factory(slot: ServiceSlot) -> LocalHandlerBinding:
+        nonlocal owner
+        owner = fetch_owner(slot)
+        return owner.binding()
+
+    async def scenario() -> None:
+        received: list[ServiceRequest] = []
+
+        async def remote(request: ServiceRequest) -> ServiceResponse:
+            received.append(request)
+            if change == "legacy":
+                return ServiceResponse(404)
+            value = {
+                **FIELDS, "installationId": "source-installation",
+                "fetch_contract": NORMAL_FETCH_CONTRACT, "acquisition": "normal-fetch",
+                "token": "synthetic-token", "token_expires_at": None,
+                change: 123 if change == "token_expires_at" else "foreign",
+            }
+            return ServiceResponse(200, body=json.dumps(value).encode())
+
+        async with gateway_owner(
+            tmp_path, lambda request: None, binding_factory=binding_factory,
+        ) as rig:
+            try:
+                await connect(rig, offers=(ControllerService(NORMAL_SERVICE, "/api"),), handle=remote)
+                async with await rig.request("/vault/token-fetch", "POST", json={
+                    "fetch_contract": NORMAL_FETCH_CONTRACT, "binding": "binding-a",
+                    "sources": {"service-a": CAPABILITY},
+                }) as response:
+                    assert response.status == 503
+                    assert b"synthetic-token" not in await response.read()
+                assert [request.target for request in received] == ["/token-fetch"]
+                assert owner is not None
+                assert owner.pending_count == rig.state.pending == 0
+            finally:
+                assert owner is not None
+                owner.stop()
+                assert await owner.drain(timeout=3)
+
+    asyncio.run(scenario())
+
+
+def test_gateway_lease_client_renews_from_real_custodian_and_preserves_native_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, calls, policy, document = custodian(tmp_path, monkeypatch)
+    monkeypatch.syspath_prepend(str(
+        Path(__file__).resolve().parents[2] / "plugins" / "agent-bridge" / "src",
+    ))
+    from agent_bridge.copilot_file_auth import CopilotAccountFile
+    from agent_bridge.source_lease_http import GatewaySourceLeaseClient, SourceLeaseError
+    from credential_relay.http_auth import HttpAuthContext
+
+    owner: GatewayAccountFetch | None = None
+
+    def binding_factory(slot: ServiceSlot) -> LocalHandlerBinding:
+        nonlocal owner
+        owner = fetch_owner(slot)
+        return owner.binding()
+
+    async def scenario() -> None:
+        async with gateway_owner(
+            tmp_path, lambda request: None, binding_factory=binding_factory,
+        ) as rig:
+            class Auth:
+                def __init__(self, path: str, method: str) -> None:
+                    self.path, self.method = path, method
+
+                async def headers(self, context: HttpAuthContext) -> dict[str, str]:
+                    headers: dict[str, str] = await rig.auth(self.path, self.method)
+                    return headers
+
+                async def invalidate(self, context: HttpAuthContext) -> None:
+                    raise AssertionError("Unexpected authentication retry")
+
+            try:
+                await connect(rig, offers=(ControllerService(NORMAL_SERVICE, "/api"),),
+                              handle=handler(source).handle)
+                capability = tmp_path / "consumer-capability"
+                capability.write_text(CAPABILITY, encoding="ascii")
+                context = HttpAuthContext(rig.origin, "caller-a", "fixture-generation")
+                selected = GatewaySourceLeaseClient(
+                    rig.origin + "/vault/token-fetch",
+                    auth=Auth("/vault/token-fetch", "POST"), context=context,
+                    discovery_endpoint=rig.origin + "/vault/health",
+                    discovery_auth=Auth("/vault/health", "GET"), discovery_context=context,
+                    installation_id="gateway-installation", binding="binding-a",
+                    account="account-a", host="github.com",
+                    capability_files={"service-a": capability},
+                    tls_context=ssl.create_default_context(cafile=str(rig.ca)),
+                )
+                first = await selected.acquire()
+                assert first.token == "synthetic-source-token-1"
+                assert first.token_expires_at is None
+                assert 0 < first.remaining_seconds() <= 60
+                native = None
+                config = tmp_path / "native" / "config.json"
+                original: dict[str, Any] = {"theme": "dark", "authTokens": {
+                    "https://github.com:account-a": {"token": "prior-synthetic"},
+                    "https://github.com:other": {"token": "other-synthetic"},
+                }}
+                if os.name == "posix":
+                    config.parent.mkdir(mode=0o700)
+                    config.write_text(json.dumps(original), encoding="utf-8")
+                    config.chmod(0o600)
+                    native = CopilotAccountFile(config, account="account-a")
+                    second = await native.renew(selected)
+                    saved = json.loads(config.read_text(encoding="utf-8"))
+                    assert saved["authTokens"]["https://github.com:account-a"]["token"] == second.token
+                    assert saved["authTokens"]["https://github.com:other"] == original[
+                        "authTokens"]["https://github.com:other"]
+                    assert saved["theme"] == "dark"
+                else:
+                    second = await selected.acquire()
+                assert second.token == "synthetic-source-token-2"
+                assert second.lease_id != first.lease_id
+                document["grants"] = []
+                policy.write_text(json.dumps(document), encoding="utf-8")
+                with pytest.raises(SourceLeaseError):
+                    await selected.acquire()
+                assert len(calls) == 2
+                if native is not None:
+                    native.withdraw()
+                    assert "token" not in json.loads(config.read_text(encoding="utf-8"))[
+                        "authTokens"]["https://github.com:account-a"]
+                assert rig.state.pending == 0
+            finally:
+                assert owner is not None
+                owner.stop()
+                assert await owner.drain(timeout=3)
+                assert owner.pending_count == 0
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("changes", [
+    {"lease_contract": "unsupported"}, {"lease_id": "invalid"},
+    {"lease_remaining_seconds": True}, {"lease_remaining_seconds": 0},
+    {"lease_expires_at": 1}, {"installationId": "foreign"}, {"legacy": True},
+])
+def test_gateway_never_turns_missing_or_invalid_custodian_lease_into_authorization(
+    tmp_path: Path, changes: dict[str, Any],
+) -> None:
+    owner: GatewayAccountFetch | None = None
+
+    def binding_factory(slot: ServiceSlot) -> LocalHandlerBinding:
+        nonlocal owner
+        owner = fetch_owner(slot)
+        return owner.binding()
+
+    async def scenario() -> None:
+        received: list[ServiceRequest] = []
+
+        async def remote(request: ServiceRequest) -> ServiceResponse:
+            received.append(request)
+            now = time.time()
+            value = {
+                **FIELDS, "installationId": "source-installation",
+                "fetch_contract": NORMAL_FETCH_CONTRACT, "acquisition": "normal-fetch",
+                "token": "synthetic-token", "token_expires_at": None,
+                "lease_contract": LEASE_CONTRACT, "lease_id": "a" * 32,
+                "lease_issued_at": now - 1, "lease_expires_at": now + 59,
+                "lease_remaining_seconds": 55, **changes,
+            }
+            if "legacy" in changes:
+                value = {name: item for name, item in value.items()
+                         if not name.startswith("lease_") and name != "legacy"}
+            return ServiceResponse(200, body=json.dumps(value).encode())
+
+        async with gateway_owner(
+            tmp_path, lambda request: None, binding_factory=binding_factory,
+        ) as rig:
+            try:
+                await connect(rig, offers=(ControllerService(NORMAL_SERVICE, "/api"),), handle=remote)
+                base = {
+                    "fetch_contract": NORMAL_FETCH_CONTRACT, "lease_contract": LEASE_CONTRACT,
+                    "binding": "binding-a", "sources": {"service-a": CAPABILITY},
+                }
+                for pin, status in (({}, 400), ({"installationId": "foreign"}, 409)):
+                    async with await rig.request(
+                        "/vault/token-fetch", "POST", json={**base, **pin},
+                    ) as response:
+                        assert response.status == status
+                assert not received
+                async with await rig.request("/vault/token-fetch", "POST", json={
+                    **base, "installationId": "gateway-installation",
+                }) as response:
+                    assert response.status == 503
+                    assert b"synthetic-token" not in await response.read()
+                assert len(received) == 1
+                assert json.loads(received[0].body)["lease_contract"] == LEASE_CONTRACT
+                assert [item.target for item in received] == ["/token-fetch"]
+            finally:
+                assert owner is not None
+                owner.stop()
+                assert await owner.drain(timeout=3)
+                assert owner.pending_count == 0
 
     asyncio.run(scenario())

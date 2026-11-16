@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-15
+- **Last revised:** 2026-11-16
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -82,6 +82,11 @@ and fix how it is wired.
   familiar single-command `curl … | bash` / `iex …` shape) that fetches and runs
   the installer directly, independent of any plugin or prior harness tooling. It
   is the front door the inert-plugin failure mode requires.
+- **Native seed and finite installation controller** — the operating system's
+  shell establishes the minimal tooling and stages the real setup entrypoints.
+  A finite program/library then coordinates installation; its execution does
+  not live in or require a Manager/application daemon. Manager presents and
+  composes that controller without becoming its prerequisite.
 - **Prerequisite layer** — the step that ensures the machine's foundational
   tools and the prerequisites of the user's selected session hosts exist,
   installing what is missing and **pausing for a restart when it changes the
@@ -273,6 +278,32 @@ selection follows live upstream Main; explicit locally promoted installation
 snapshots and admitted source checkouts/commits remain supported. Last-known-good
 Main ancestors retain their own release identity.
 
+### finite-installation-controller
+
+Bootstrap has a minimal native seed followed by a finite installation
+controller. On Windows, PowerShell uses the supported package-manager owners
+to establish or update uv, performs core Git acquisition and file staging,
+and invokes the real per-application setup entrypoints. Other platforms use
+their native shell equivalents. The seed can obtain the declared managed
+Python before loading Python-backed installer, context or process helpers;
+those helpers cannot be prerequisites for acquiring their own interpreter.
+
+The controller is a directly invocable program/library, not an always-running
+daemon. It can install, update and repair Manager while Manager and its daemon
+are absent or unavailable. Durable requests, single-writer coordination and
+explicit background work do not make a resident installation service mandatory.
+Its finite execution and any accepted application-service handoff have the
+separate lifetimes defined by the installation owner.
+
+The standard Manager journey establishes Manager as the first selected
+application, then uses setup helpers to resolve the selected repository's
+expected applications and plugins through their existing owners. Independent
+component setup remains available without Manager. A separately packaged
+finite install helper is an implementation option when independent delivery
+requires it, not another installer algorithm or a second mandatory product.
+Reuse the canonical installation machinery rather than creating a parallel
+stack. Installed applications may still run their own declared services.
+
 ### staged-repository-onboarding
 
 The public foundation is available before authentication for a selected private
@@ -342,6 +373,41 @@ administration merely because it selected a harness.
 ### prerequisite-provisioning
 Detects and installs the foundational prerequisites, and **prompts to restart**
 when a change requires it before continuing.
+
+### uv-managed-python
+
+Each Python project installation declares the Python version it needs, and the
+suite uses uv to manage those versions. Different project requirements coexist
+without changing unrelated environments. Explicit installation
+prepares the declared interpreter independently of the machine's default
+`python`, active virtual environment, Python launcher registrations or PATH
+ordering. A supported system Python installation and a machine-wide PATH repair
+are not prerequisites for preparing the suite's Python.
+
+The installation owner carries that selection into bootstrap helpers and
+application environments before Python-dependent installation work. All app
+launchers, including service and ordinary-command launchers, use `uv` from PATH
+and delegate interpreter selection to it for the declared project environment.
+Scripts never assume where Python is installed, including where uv stores it.
+Wrapping an old bound executable is not a migration: uv must receive the
+selected project/environment, not an instruction to run that old interpreter.
+Fresh terminals, repair and update use the same declared selection rather than
+rediscovering ambient Python. The standalone installation path owns the same
+preparation without requiring Manager, a sibling service or a plugin session.
+
+Interpreter acquisition belongs to explicit, authorized installation or repair,
+not status, discovery or ordinary command launch. Already prepared toolchains
+remain usable offline; missing inputs and acquisition or execution failures
+produce actionable outcomes without silently selecting an incompatible system
+interpreter. Upgrading the managed toolchain preserves supported installed
+environments and rollback until their installation owners replace them.
+
+uv manages interpreter selection and acquisition, not process custody or trust
+policy. Existing caller lifetimes, authenticated pipes, native containment,
+deadlines and exact cleanup remain intact, including while preparing a toolchain.
+Source and package integrity and operating-system execution policy still apply;
+an OS refusal is not permission to disable policy, elevate or substitute an
+unqualified interpreter.
 
 ### core-install-via-real-flow
 Establishes Manager through the real upstream installation owner, then derives
@@ -1034,6 +1100,10 @@ ownership and unsettled effects.
 
 ## Non-Goals / Boundaries
 
+- **Installation management is not a daemon dependency.** Neither the native
+  seed nor the finite controller requires an already-running Manager,
+  application or installation daemon to establish or repair the installation.
+  A graphical control surface does not become the exclusive execution owner.
 - **It is not a plugin, and must not be delivered through the plugin pipe.** It
   must not depend on a plugin being installed or a session being active to run.
   (Stated as a negative deliberately: this app must never be folded back into the

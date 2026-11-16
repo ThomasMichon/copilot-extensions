@@ -1,0 +1,276 @@
+"""Shell-native managed selection, independently of ambient Python discovery."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+from typing import Any
+
+import pytest
+
+import installer_engine_ref as ier
+import materialize_installer_engine as materializer
+
+ROOT = Path(__file__).resolve().parents[1]
+PROVIDER = ROOT / "libs/installer-engine/bootstrap-uv.ps1"
+
+
+@pytest.fixture(params=("pwsh", "powershell"))
+def host(request: pytest.FixtureRequest) -> str:
+    executable = shutil.which(str(request.param))
+    if not executable:
+        pytest.skip(f"{request.param} is unavailable")
+    return executable
+
+
+def _run(
+    host: str, tmp_path: Path, responses: list[dict[str, Any]], *,
+    request: bytes = b"cpython@3.11.11\n", operation: str = "Inspect",
+    uv: bool = True,
+) -> dict[str, Any]:
+    request_file = tmp_path / "bootstrap-python-version.txt"
+    request_file.write_bytes(request)
+    uv_file = tmp_path / "uv application"
+    uv_file.touch()
+    python = tmp_path / "managed python"
+    python.touch()
+    for response in responses:
+        if response.get("Stdout") == "PYTHON":
+            response["Stdout"] = str(python) + "\n"
+    script = tmp_path / "provider-test.ps1"
+    script.write_text(
+        r"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+. $env:PROVIDER
+$responses = ConvertFrom-Json $env:RESPONSES
+$script:calls = [Collections.Generic.List[object]]::new()
+function Get-Command {
+    param($Name, $CommandType, $ErrorAction)
+    if ($Name -cne 'uv' -or $CommandType -cne 'Application') {
+        throw 'Ambient Python, aliases and functions must not be discovered.'
+    }
+    if ($env:HAS_UV -eq '1') { [pscustomobject]@{Source = $env:FIXTURE_UV} }
+}
+$invoke = {
+    param($FilePath, $ArgList)
+    if ($FilePath -cne $env:FIXTURE_UV) { throw 'Wrong uv application.' }
+    $script:calls.Add(@($ArgList))
+    $response = $responses[$script:calls.Count - 1]
+    if ($response.PSObject.Properties['Throw']) { throw $response.Throw }
+    return $response
+}
+try {
+    $selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE `
+        -InvokeCaptured $invoke -Operation $env:OPERATION
+    @{Selected = $selected; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
+} catch {
+    @{Error = $_.Exception.Message; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
+}
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+        env={
+            **os.environ, "PROVIDER": str(PROVIDER), "REQUEST_FILE": str(request_file),
+            "FIXTURE_UV": str(uv_file), "HAS_UV": "1" if uv else "0",
+            "RESPONSES": json.dumps(responses), "OPERATION": operation,
+        },
+        **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr
+    value: dict[str, Any] = json.loads(result.stdout)
+    return value
+
+
+def _result(stdout: str = "", *, code: int = 0, stderr: str = "") -> dict[str, Any]:
+    return {"ExitCode": code, "Stdout": stdout, "Stderr": stderr}
+
+
+FIND = [
+    "python", "find", "--no-project", "--system", "--managed-python",
+    "--no-python-downloads", "cpython@3.11.11",
+]
+
+
+@pytest.mark.parametrize("operation,line_ending", [
+    ("Inspect", b"\n"), ("Inspect", b"\r\n"), ("Prepare", b"\n"), ("prepare", b"\r\n"),
+])
+def test_managed_selection_preserves_exact_request_and_operation(
+    host: str, tmp_path: Path, operation: str, line_ending: bytes,
+) -> None:
+    prepare = operation.lower() == "prepare"
+    responses = [_result("uv 0.8.0\n")]
+    if prepare:
+        responses.append(_result(stderr="installation progress is not a Python path\n"))
+    responses.append(_result("PYTHON", stderr="diagnostic is not a Python path\n"))
+    result = _run(
+        host, tmp_path, responses,
+        operation=operation, request=b"cpython@3.11.11" + line_ending,
+    )
+    assert result["Selected"] == {
+        "Status": "selected", "Reason": "uv-managed-python",
+        "Uv": str(tmp_path / "uv application"), "Python": str(tmp_path / "managed python"),
+        "Requirement": "cpython@3.11.11",
+    }
+    assert result["Calls"] == [
+        ["--version"],
+        *([["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]] if prepare else []),
+        FIND,
+    ]
+
+
+@pytest.mark.parametrize("exit_code", [1, 2])
+def test_unprepared_lookup_never_acquires(host: str, tmp_path: Path, exit_code: int) -> None:
+    result = _run(host, tmp_path, [
+        _result("uv 0.9.4 (release)\n"),
+        _result(code=exit_code, stderr="error: No interpreter found for CPython 3.11.11 in managed installations\n"),
+    ])
+    assert result["Selected"]["Reason"] == "managed-python-not-prepared"
+    assert result["Selected"]["Python"] is None
+    assert result["Calls"] == [["--version"], FIND]
+
+
+def test_missing_uv_does_not_discover_python(host: str, tmp_path: Path) -> None:
+    result = _run(host, tmp_path, [], uv=False)
+    assert result["Selected"]["Reason"] == "uv-not-on-path"
+    assert result["Calls"] == []
+
+
+@pytest.mark.parametrize("declaration", [
+    b"cpython@3.11\n", b"3.11.11\n", b"cpython@03.11.11\n",
+    b"cpython@3.11.11\nextra", b"cpython@3.11.11", b"cpython@3.11.11\r\r\n", b"x" * 65,
+])
+def test_invalid_declaration_refuses_before_uv(
+    host: str, tmp_path: Path, declaration: bytes,
+) -> None:
+    result = _run(host, tmp_path, [], request=declaration)
+    assert "Bootstrap Python request" in result["Error"]
+    assert result["Calls"] == []
+
+
+@pytest.mark.parametrize("response", [
+    _result("uv 0.7.99\n"), _result("uv 0.8.0rc1\n"), _result("other 0.9.0\n"),
+    _result(code=1, stderr="version failure"), {"ExitCode": None, "Stdout": "", "Stderr": ""},
+    {"Throw": "caller deadline/cleanup failure"},
+])
+def test_unqualified_uv_or_unconfirmed_custody_stops(
+    host: str, tmp_path: Path, response: dict[str, Any],
+) -> None:
+    result = _run(host, tmp_path, [response], operation="Prepare")
+    assert "Error" in result
+    assert result["Calls"] == [["--version"]]
+
+
+@pytest.mark.parametrize("stage", ["version", "install", "find"])
+def test_policy_refusal_does_not_retry_or_fall_back(
+    host: str, tmp_path: Path, stage: str,
+) -> None:
+    steps = ["version", "install", "find"]
+    responses = [_result("uv 0.8.1\n"), _result(), _result("PYTHON")]
+    responses[steps.index(stage)] = _result(code=1, stderr="Access denied (os error 448)")
+    result = _run(host, tmp_path, responses, operation="Prepare")
+    assert "operating-system policy" in result["Error"]
+    assert len(result["Calls"]) == steps.index(stage) + 1
+
+
+@pytest.mark.parametrize("response", [
+    _result("relative-python\n"), _result("one\nsecond\n"),
+    _result(code=1, stderr="permission denied"),
+    _result(code=2, stderr="invalid configuration"),
+])
+def test_failed_or_malformed_lookup_is_not_a_missing_interpreter(
+    host: str, tmp_path: Path, response: dict[str, Any],
+) -> None:
+    result = _run(host, tmp_path, [_result("uv 0.8.1\n"), response])
+    assert "Error" in result
+    assert result["Calls"] == [["--version"], FIND]
+
+
+def test_real_uv_lookup_uses_production_capture_without_path_python(
+    host: str, tmp_path: Path,
+) -> None:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("This read-only native witness requires existing uv; it never installs it.")
+    request_file = tmp_path / "bootstrap-python-version.txt"
+    request_file.write_bytes(b"cpython@3.11.11\r\n")
+    script = tmp_path / "native-lookup.ps1"
+    script.write_text(
+        r"""
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+. $env:CAPTURE_HELPER
+. $env:PROVIDER
+$env:PATH = $env:UV_ONLY_PATH
+$env:UV_PYTHON = $null
+$script:calls = [Collections.Generic.List[object]]::new()
+$invoke = {
+    param($FilePath, $ArgList)
+    $script:calls.Add(@($ArgList))
+    $errors = ''
+    $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -ErrorOutput ([ref]$errors)
+    [pscustomobject]@{ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $errors}
+}
+$selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE -InvokeCaptured $invoke
+@{Selected = $selected; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
+""",
+        encoding="utf-8-sig",
+    )
+    uv_only = tmp_path / "uv-only"
+    uv_only.mkdir()
+    # Copy the already available standalone uv, never Python or another host tool.
+    shutil.copy2(uv, uv_only / Path(uv).name)
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+        env={
+            **os.environ,
+            "CAPTURE_HELPER": str(ROOT / "libs/versioned-runtime/versioned_runtime_native.ps1"),
+            "PROVIDER": str(PROVIDER), "REQUEST_FILE": str(request_file),
+            "UV_ONLY_PATH": str(uv_only), "UV_PYTHON_INSTALL_DIR": str(tmp_path / "empty-python"),
+            "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_PYTHON_DOWNLOADS": "never",
+        },
+        **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr
+    value = json.loads(result.stdout)
+    assert value["Selected"]["Reason"] == "managed-python-not-prepared"
+    assert value["Calls"] == [["--version"], FIND]
+    assert not (tmp_path / "empty-python").exists()
+
+
+def test_provider_is_materialized_only_to_declared_native_consumer(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    scripts = candidate / "plugins/agent-worktrees/scripts"
+    scripts.mkdir(parents=True)
+    source_scripts = ROOT / "plugins/agent-worktrees/scripts"
+    for name in ier.native_files(ROOT / "plugins/agent-worktrees", ROOT):
+        source = source_scripts / name
+        if source.is_file():
+            shutil.copyfile(source, scripts / name)
+    before = PROVIDER.read_bytes()
+    log = materializer.materialize_derived_files(
+        candidate, canonical_root=ROOT,
+        copied_consumer=(ROOT / "plugins/agent-worktrees", candidate / "plugins/agent-worktrees"),
+        file_names=frozenset({"bootstrap-uv.ps1"}),
+    )
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    assert (scripts / "bootstrap-uv.ps1").read_bytes() == before
+    assert PROVIDER.read_bytes() == before
+    assert not (candidate / "plugins/agent-codespaces/scripts/bootstrap-uv.ps1").exists()
+    (scripts / "bootstrap-uv.ps1").write_text("foreign candidate\n")
+    refused = materializer.materialize_derived_files(
+        candidate, canonical_root=ROOT,
+        copied_consumer=(ROOT / "plugins/agent-worktrees", candidate / "plugins/agent-worktrees"),
+        file_names=frozenset({"bootstrap-uv.ps1"}),
+    )
+    assert refused and all(line.startswith("SKIP") for line in refused), refused
+    assert (scripts / "bootstrap-uv.ps1").read_text() == "foreign candidate\n"

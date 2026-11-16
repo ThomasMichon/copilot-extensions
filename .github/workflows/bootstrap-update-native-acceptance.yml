@@ -12,12 +12,17 @@ on:
     paths:
       - .github/workflows/bootstrap-update-native-acceptance.yml
       - libs/installer-engine/installer_engine.py
+      - libs/installer-engine/bootstrap-python.ps1
+      - libs/installation-context/shell-caller-owned.ps1
+      - libs/installation-context/tests/test_powershell_bootstrap.py
+      - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - worktree-manager/bootstrap.ps1
       - worktree-manager/bootstrap.sh
       - worktree-manager/scripts/bootstrap_inputs.py
       - worktree-manager/scripts/bootstrap_update.py
       - worktree-manager/scripts/runtime_install.py
       - worktree-manager/src/worktree_manager/update_driver_cli.py
+      - worktree-manager/src/worktree_manager/mux_daemon_process.py
       - worktree-manager/src/worktree_manager/runtime_application_inputs.py
       - worktree-manager/src/worktree_manager/update_bootstrap.py
       - worktree-manager/src/worktree_manager/runtime_source_repair.py
@@ -28,6 +33,9 @@ on:
       - worktree-manager/tests/test_install_source.py
       - worktree-manager/tests/test_bootstrap_inputs.py
       - worktree-manager/tests/test_bootstrap_update.py
+      - worktree-manager/tests/test_bootstrap_ps1.py
+      - worktree-manager/tests/test_bootstrap_sh.py
+      - worktree-manager/tests/test_update_python_context.py
       - worktree-manager/tests/test_application_input_provider.py
       - worktree-manager/tests/test_update_bootstrap.py
       - worktree-manager/tests/test_recovery_source.py
@@ -62,6 +70,8 @@ jobs:
         run: >-
           python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['QUALIFICATION_SHA']; print('source='+actual)"
       - name: Qualify whole-operation joins, waiter loss and prepared-source compatibility
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=10"
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/native/test_bootstrap_update_native.py
@@ -73,7 +83,17 @@ jobs:
           --test-file tests/test_update_bootstrap.py
           --test-file tests/test_recovery_source.py
           --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
+          --test-file tests/test_bootstrap_ps1.py
+          --test-file tests/test_bootstrap_sh.py
+          --test-file tests/test_update_python_context.py
           -k "not full_declared_repository_inputs_reach_immutable_retention and
+          (not test_bootstrap_ps1.py or managed_python or
+          python_lookup_rejects_empty_success or bootstrap_retains_physical_uv or
+          bootstrap_prepares_compatible_uv or hands_selected_python or
+          reuses_supported_uv_later_on_path or uv_discovery_preserves_explicit_os_policy_refusal or
+          refuses_unknown_uv_handoff) and
+          (not test_bootstrap_sh.py or bootstrap_uses_managed_python or
+          reuses_supported_uv_later_on_path) and
           (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
           (not test_install_source or standalone_prepared_updates) and
           (not test_bootstrap_inputs or first_touch_retention or unresolved_source_selection or
@@ -82,13 +102,36 @@ jobs:
           (not test_update_bootstrap.py or prepared_repair_uses_declared_installer_entry) and
           (not test_recovery_source.py or unattributable_engine_uses_native_fresh_installation) and
           (not test_bootstrap_update.py or observer_modes_share)"
-
   bootstrap-update-windows:
     name: Whole bootstrap update (Windows)
     runs-on: windows-latest
     timeout-minutes: 5
     env: *bootstrap-update-env
     steps: *bootstrap-update-steps
+
+  bootstrap-python-linux:
+    name: Prepared Python handoff (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: &bootstrap-python-steps
+      - *bootstrap-update-checkout
+      - *bootstrap-update-python
+      - *bootstrap-update-uv
+      - *bootstrap-update-source
+      - name: Qualify prepared Python handoff through the native SDK
+        run: >-
+          python tools/run-plugin-tests.py installation-context --test-file tests/test_powershell_bootstrap.py -k "uses_prepared_python or positional_arguments" --allow-explicit-tiers
+      - name: Qualify prepared Python evaluator selection
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_bootstrap_python.py -k prepared_python --allow-explicit-tiers
+
+  bootstrap-python-windows:
+    name: Prepared Python handoff (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: *bootstrap-python-steps
 
   bootstrap-retention-linux:
     name: Declared source retention (Linux)

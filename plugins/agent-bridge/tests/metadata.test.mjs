@@ -53,12 +53,12 @@ test("receiving metadata refuses another plugin root rather than querying guest 
 function makeFakeBinDir() {
   const dir = mkdtempSync(join(tmpdir(), "agent-bridge-metadata-test-"));
   const isWin = process.platform === "win32";
-  const write = (name, sleepMs, output) => {
+  const write = (name, output) => {
     const scriptName = isWin ? `${name}.cmd` : name;
     const scriptPath = join(dir, scriptName);
     const body = isWin
-      ? `@echo off\r\npowershell -NoProfile -Command "Start-Sleep -Milliseconds ${sleepMs}" >nul\r\necho ${output}\r\n`
-      : `#!/bin/sh\nsleep ${sleepMs / 1000}\necho "${output}"\n`;
+      ? `@echo off\r\necho ${output}\r\n`
+      : `#!/bin/sh\necho "${output}"\n`;
     writeFileSync(scriptPath, body);
     if (!isWin) chmodSync(scriptPath, 0o755);
   };
@@ -72,7 +72,7 @@ test("runCliAsync resolves null (not a throw) when the binary does not exist", a
 
 test("runCliAsync resolves trimmed stdout on success", async () => {
   const { dir, write } = makeFakeBinDir();
-  write("probe", 0, "hello-world");
+  write("probe", "hello-world");
   const bin = process.platform === "win32" ? join(dir, "probe.cmd") : join(dir, "probe");
   const result = await runCliAsync(bin, [], dir);
   assert.equal(result, "hello-world");
@@ -134,8 +134,8 @@ poll();
 // `agent-worktrees get session-scope-id` itself).
 test("resolveMetadataAsync passes an anchor session-scope-id through verbatim", async (t) => {
   const { dir, write } = makeFakeBinDir();
-  write("git", 0, "main");
-  write("agent-worktrees", 0, "anchor-example-web");
+  write("git", "main");
+  write("agent-worktrees", "anchor-example-web");
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
@@ -151,8 +151,8 @@ test("resolveMetadataAsync passes an anchor session-scope-id through verbatim", 
 // venue-qualified identity via AGENT_BRIDGE_SCOPE_ID; it must win.
 test("resolveMetadataAsync prefers an explicit AGENT_BRIDGE_SCOPE_ID", async (t) => {
   const { dir, write } = makeFakeBinDir();
-  write("git", 0, "main");
-  write("agent-worktrees", 0, "anchor-example-web");
+  write("git", "main");
+  write("agent-worktrees", "anchor-example-web");
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
@@ -169,8 +169,8 @@ test("resolveMetadataAsync prefers an explicit AGENT_BRIDGE_SCOPE_ID", async (t)
 // an unrelated one that later reuses its pid, so it must never change.
 test("resolveMetadataAsync reports a fixed process start time", async (t) => {
   const { dir, write } = makeFakeBinDir();
-  write("git", 0, "main");
-  write("agent-worktrees", 0, "anchor-example-web");
+  write("git", "main");
+  write("agent-worktrees", "anchor-example-web");
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
@@ -186,11 +186,11 @@ test("resolveMetadataAsync reports a fixed process start time", async (t) => {
 });
 
 // Sanity check that the fake-binary harness itself is exercising a real
-// subprocess (not silently no-op-ing), so the timing assertion above is
+// subprocess (not silently no-op-ing), so the overlap assertion above is
 // actually meaningful.
-test("fake bin harness sanity: the stub script really does sleep", () => {
+test("fake bin harness sanity: the stub script returns its output", () => {
   const { dir, write } = makeFakeBinDir();
-  write("probe", 0, "ok");
+  write("probe", "ok");
   const bin = process.platform === "win32" ? join(dir, "probe.cmd") : join(dir, "probe");
   const out = execFileSync(bin, [], { cwd: dir, encoding: "utf-8", shell: process.platform === "win32" }).trim();
   assert.equal(out, "ok");
@@ -198,7 +198,7 @@ test("fake bin harness sanity: the stub script really does sleep", () => {
 
 test("resolveMetadataAsync does not invent a logical machine from a physical hostname", async (t) => {
   const { dir, write } = makeFakeBinDir();
-  write("git", 0, "main");
+  write("git", "main");
   const isWin = process.platform === "win32";
   const failing = join(dir, isWin ? "agent-worktrees.cmd" : "agent-worktrees");
   writeFileSync(failing, isWin ? "@echo off\r\nexit /b 1\r\n" : "#!/bin/sh\nexit 1\n");

@@ -38,6 +38,7 @@ delegated-agent facade.
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
 | Retry an exact native follow-up | Standard `send` with `--expected-native-session-id` and `--idempotency-key` | `POST .../turns/native-bound/send`, protocol 51 | Original native turn receipt; a stopped context is strictly resumed without recreation |
 | Observe an exact native follow-up without sending | Standard native `send` with `--receipt-only` | `POST .../turns/native-bound/send/receipt`, HTTP 51 plus `native_send_receipt: 1` | Historical admission only; missing evidence stays unproven, even for a stopped or busy session |
+| Settle an original keyed native send | Standard native `send` with `--settle-native-send` | `POST .../turns/native-bound/send/settle`, HTTP 51 plus `native_send_settlement: 1` | Original acceptance, or owner-proved and persistently fenced non-admission; never sends or resumes |
 | Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the hosted result as `delivered`, `queued`, or a `refused_*` with a distinct exit code. Represented sends use receipt stages `admitted`, `sdk_accepted`, or `consumed`, or `duplicate`; `steered`, `interrupted`, and `accepted` are legacy-daemon outcomes, not current receipt evidence. |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
@@ -78,6 +79,10 @@ gate before selecting the legacy hosted surface; a cached positive still enters
 the fresh resolver guard, so downgrade refusal does not become an ACP fallback.
 A synthetic admission receipt whose evidence is no longer current does not advertise a
 message-specific receipt read; the CLI instead offers session-state inspection.
+
+Explicit [native-send settlement](native-send-settlement.md) uses the original
+journal and a persistent original-key exclusion through a negotiated front door.
+Receipt-only observation still cannot turn missing evidence into non-admission.
 
 Represented-message consumption removes the input from delivery polling even
 when its separate SDK acknowledgement is lost; it never fabricates that

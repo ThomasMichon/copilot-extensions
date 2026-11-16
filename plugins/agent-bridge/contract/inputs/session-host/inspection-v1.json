@@ -1,0 +1,38 @@
+{
+  "schema": "h1-read-only-inspection-v1",
+  "credential": "synthetic-inspection",
+  "nonce": "00000000000000000000000000000000",
+  "pipeline_base64": "AAAAFVdtdXN0LW5vdC1yZWFjaC1jaGlsZAAAAAlLAAAAAAAAAAEAAAACUwEAAAABVA==",
+  "expected": {
+    "request_base64": "AAAAiT97ImNvbnRyYWN0IjoiY29waWxvdC1kcml2ZXIuaG9zdC1pbnNwZWN0aW9uIiwidmVyc2lvbiI6MSwibm9uY2UiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsImNyZWRlbnRpYWwiOiJzeW50aGV0aWMtaW5zcGVjdGlvbiJ9",
+    "reply": {
+      "contract": "copilot-driver.host-inspection",
+      "version": 1,
+      "nonce": "00000000000000000000000000000000",
+      "host_pid": "<positive-host-pid>",
+      "host_generation": "<32-hex-host-generation>",
+      "child_pid": 4242,
+      "child_alive": true,
+      "turn_in_flight": true,
+      "max_seq": 1,
+      "frontend_ack": 0,
+      "last_child_frame_age_s": null,
+      "buffer_depth": 1
+    },
+    "state": "responsive",
+    "refused": {
+      "state": "unsupported",
+      "reason": "no-inspection-response"
+    },
+    "private": {
+      "state": "unsupported",
+      "reason": "provider-has-no-read-only-inspection"
+    },
+    "custody_unchanged": true,
+    "early_caps": ["?", "!"],
+    "historical_messages": [
+      "attach", "ack", "write", "terminate", "status", "detach", "hello",
+      "frame", "liveness", "unknown", "attach_private"
+    ]
+  }
+}

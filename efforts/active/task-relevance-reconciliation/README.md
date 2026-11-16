@@ -7,6 +7,15 @@ visions:
 
 ## Goal
 
+**Retained-writer compatibility amendment:**
+
+> "exact-build" pins should only be used for kicking a contract-compatible *daemon*. If for some reason we need to pin a contract to a specific build, then that data either needs to be ephemeral, or we always need a "contract adapter" for support for newer versions to claim it. We should avoid exact-build pins whenever possible.
+
+Apply this to the [retained-writer compatibility repair](retained-writer-compatibility.md):
+preserve original ownership and history while admitting a compatible newer
+executor through a versioned contract and an adapter for existing build-bound
+records. The implementation sequence below is a proposal, not rollout authority.
+
 Reconcile source-backed tasks that are no longer relevant. Retire a
 never-claimed, resource-free task atomically; otherwise request closeout from
 its existing agent through durable steering and wake delivery. Allow both
@@ -119,6 +128,15 @@ merged plan does not establish running adoption.
       The [before-start body correction](journal/2026/11.14-before-start-owner.md)
       targets a proved, fully prepared original pool body without manufacturing
       affirmative start; incomplete startup and legacy uncaptured owners remain open.
+      The [original native-wake settlement plan](native-wake-settlement.md)
+      separates passive receipt observation from owner-proved, durably fenced
+      non-admission; #12789 accepted the plan, while implementation
+      qualification remains open.
+- [ ] Review and implement the
+      [retained-writer compatibility repair](retained-writer-compatibility.md)
+      before qualifying newer-code original-conversation continuation.
+      Keep birth provenance separate from the executing serializer; adapt
+      existing build-bound records without replaying unknown operations.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -221,6 +239,13 @@ merged plan does not establish running adoption.
 
 ## Validation Plan
 
+- [ ] Qualify the retained-writer contract adapter through actual Bridge-to-
+      Worktrees serialization: compatible newer execution of original records,
+      preserved identity/history, unsupported-contract refusal, concurrent
+      adoption and supported rollback. The
+      [bounded controls](retained-writer-compatibility.md#validation-plan)
+      remain implementation obligations, not claimed passes.
+
 - [x] Source closure before claim abandons without launching an agent.
       Isolated receipt-caller/current-HTTP controls exercise explicit source
       closure with empty open-only production, not installed-runtime activation.
@@ -281,6 +306,9 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Retained-writer contract adaptation](journal/2026/11.16-retained-writer-contract.md)
+  records the reviewed compatibility plan and bounded source controls;
+  native/runtime adoption remains open.
 - [Managed command-emitter grant carrier](journal/2026/11.14-managed-command-emitter.md)
   - credential-free discovery and existing managed-create integration; running adoption remains open.
 - [Original body closeout before affirmative start](journal/2026/11.14-before-start-owner.md)

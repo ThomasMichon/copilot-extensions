@@ -687,7 +687,7 @@ def make_headless_spawn(
     ``agent-dispatch`` commands (``""`` for local discovery, ``" --shared"`` for
     the shared moniker); never a raw ``--url`` (the caller rejects that).
     """
-    from . import bridge, embody, ordinary_bridge
+    from . import bridge, embody, ordinary_bridge, session_acquisition
 
     def spawn(task: dict) -> tuple[bool, dict]:
         client = task.get("_spawn_client")
@@ -696,14 +696,46 @@ def make_headless_spawn(
         from .ordinary_invocation import startup_seed
         try:
             seed = startup_seed(task, client, route=route, all_repos=all_repos)
-            handle = ordinary_bridge.start(
-                task, client=task.get("_spawn_client"),
-                agent=agent,
-                charter=charter,
-                prompt=seed,
-                project=task.get("spawn_allocation_project") or embody.project_for_task(task),
-                no_pair=no_pair,
-            )
+            reservation = client.get_reservation(task["spawn_reservation_key"])
+            if (
+                reservation.get("conversation_retired") is True
+                and reservation.get("worktree")
+            ):
+                acquired = session_acquisition.spawn_snapshot(
+                    task,
+                    reservation,
+                    reservation["worktree"],
+                    {
+                        "path": reservation.get("worktree_path"),
+                        "project": reservation.get("allocation_project"),
+                    },
+                    reservation.get("worktree_ownership"),
+                    True,
+                )
+                result = session_acquisition.acquire(
+                    acquired,
+                    mode="acp",
+                    agent=agent,
+                    prompt=seed,
+                    charter=charter,
+                    project=reservation.get("allocation_project"),
+                    driver="agent-dispatch",
+                )
+                if result.returncode:
+                    return False, {
+                        "error": (result.stderr or "").strip()[:200] or "nonzero exit",
+                        "preserve_workspace": True,
+                    }
+                handle = session_acquisition.handle(result)
+            else:
+                handle = ordinary_bridge.start(
+                    task, client=client,
+                    agent=agent,
+                    charter=charter,
+                    prompt=seed,
+                    project=task.get("spawn_allocation_project") or embody.project_for_task(task),
+                    no_pair=no_pair,
+                )
         except ordinary_bridge.CreatedAgentUnrecorded as exc:
             return False, {"error": str(exc), "retained": True}
         except bridge.BridgeCarriedSessionBusy as exc:

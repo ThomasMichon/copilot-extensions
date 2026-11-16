@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-15
+- **Last revised:** 2026-11-16
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -273,23 +273,35 @@ silently fall back to compiling native dependencies.
 
 ### setup-owned-python-prerequisite
 
-Python is a normal, composable prerequisite supplied by upfront harness or
-standalone setup and selected through the platform's ordinary PATH command.
-Helper launchers trust that selection rather than rediscovering, signing,
-attesting or physically pinning the interpreter on each invocation. Python
-provenance and signature checks, registry-only selection and special physical
-launch namespaces are not prerequisites for running the suite's helpers.
+Each independently installable Python project declares the Python version it
+needs. Its installation owner uses `uv` to acquire and manage a compatible
+interpreter and construct its environment. A host needs no preinstalled Python,
+particular system or user PATH ordering, global Python upgrade or manual
+interpreter choice. Different projects can require different Python versions
+on the same machine without changing one another's environments.
 
-Setup owns a supported Python and tidy command exposure. The suite does not
-accidentally publish interpreters from disposable worktrees or temporary
-environments onto durable PATH. This is provisioning and environment hygiene,
-not a per-launch blacklist or another interpreter-admission service. Missing
-or incompatible Python produces a clear prerequisite failure and uses the
-existing explicit setup owner, never an implicit helper-owned download.
+Every application launcher uses `uv` from PATH and delegates interpreter
+installation/selection to it. Suite scripts do not assume where Python is
+installed, including where `uv` stores it, or use bare PATH Python.
 
-Trusting the interpreter does not waive process-birth identity, containment,
-lease ownership, authenticated endpoints, operation locks or safe cleanup.
-Those protect the work the helper performs, not the provenance of Python.
+The [installer's uv-managed Python contract](../installer/README.md#uv-managed-python)
+owns the same setup and launcher boundary for standalone and integrated use.
+
+The same boundary covers bootstrap and standard-library helpers that run before
+an application environment exists. Explicit setup establishes their declared
+managed interpreter before Python-dependent installation work, without needing
+Python to obtain Python or requiring another plugin's service. Installed
+commands reach their selected project environment through `uv`; they do not
+rediscover ambient Python or select another application generation.
+Status and ordinary launch do not acquire an interpreter or repair setup.
+
+Setup owns acquisition and useful missing/offline/unsupported-platform
+diagnostics, not a new interpreter-attestation service. Existing OS execution
+policy and dependency/source admission remain in force. Per-launch signature,
+registry, physical-path attestation or disposable-location blacklists are not
+substitutes for the declared managed environment. This does not waive
+process-birth identity, containment, lease ownership, authenticated endpoints,
+operation locks or safe cleanup.
 
 ### attributed-daemon-instances
 
@@ -608,6 +620,14 @@ callers — and an older endpoint tolerates a newer caller's additive requests �
 rather than demanding a matched peer. Convergence (reconcile, drain-and-cutover)
 merely *reduces* skew when convenient; it is never a **precondition for
 correctness**. The suite is correct **while** skewed.
+
+Durable conversations and ownership records likewise outlive the executable
+that created them. Compatible newer code can adopt their versioned contracts
+without requiring that original build indefinitely or rewriting their history.
+Exact-build pins serve invocation-time startup of a contract-compatible daemon,
+not durable compatibility. Any necessary build-specific contract data is
+ephemeral or has an adapter for newer code; neither choice loses unresolved
+effects or weakens resource ownership.
 
 ### uniform-deploy-contract
 Independently installed services share one deploy/update/version footprint (the

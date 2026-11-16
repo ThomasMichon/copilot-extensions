@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -21,14 +21,16 @@ FIELDS = {
     "actor": "test-operator",
     "reason": "synthetic recovery",
 }
+Tool = Callable[..., dict[str, Any]]
+Bindings = tuple[dict[str, Tool], list[tuple[Any, ...]], list[dict[str, Any]], object]
 
 
 class Registry:
     def __init__(self) -> None:
-        self.functions: dict[str, Callable[..., dict]] = {}
+        self.functions: dict[str, Tool] = {}
 
-    def tool(self, *, name: str) -> Callable:
-        def register(function: Callable[..., dict]) -> Callable[..., dict]:
+    def tool(self, *, name: str) -> Callable[[Tool], Tool]:
+        def register(function: Tool) -> Tool:
             self.functions[name] = function
             return function
 
@@ -36,7 +38,9 @@ class Registry:
 
 
 def test_actual_http_mcp_registration_matches_stdio_names_and_fields() -> None:
-    server = build_coordinator_mcp(SimpleNamespace(), EventBus(), control_token="control-fixture")
+    server = build_coordinator_mcp(
+        cast(Any, SimpleNamespace()), EventBus(), control_token="control-fixture",
+    )
     registered = asyncio.run(server.list_tools())
     schemas = {tool.name: tool.input_schema for tool in registered}
     assert {
@@ -61,12 +65,12 @@ def test_actual_http_mcp_registration_matches_stdio_names_and_fields() -> None:
 
 
 @pytest.fixture
-def bindings() -> tuple[dict[str, Callable], list, list, object]:
-    calls: list = []
-    events: list = []
+def bindings() -> Bindings:
+    calls: list[tuple[Any, ...]] = []
+    events: list[dict[str, Any]] = []
     context = object()
 
-    def diagnostics(task_id: str) -> dict:
+    def diagnostics(task_id: str) -> dict[str, Any]:
         calls.append(("diagnostics", task_id))
         return {
             "contract": "task_recovery/v1",
@@ -74,7 +78,7 @@ def bindings() -> tuple[dict[str, Callable], list, list, object]:
             "revision": "revision-a",
         }
 
-    def recover(task_id: str, **fields: Any) -> dict:
+    def recover(task_id: str, **fields: Any) -> dict[str, Any]:
         calls.append(("recover", task_id, fields))
         return {
             "operation": fields["operation"],
@@ -83,11 +87,11 @@ def bindings() -> tuple[dict[str, Callable], list, list, object]:
             "task": {"status": "proposed"},
         }
 
-    def legacy_reset(task_id: str, **fields: Any) -> dict:
+    def legacy_reset(task_id: str, **fields: Any) -> dict[str, Any]:
         calls.append(("legacy_reset", task_id, fields))
         return {"status": "proposed"}
 
-    def control_error(ctx: object) -> dict | None:
+    def control_error(ctx: object) -> dict[str, object] | None:
         if ctx is context:
             return None
         return {"reason": "invalid_control_authority"}
@@ -95,22 +99,23 @@ def bindings() -> tuple[dict[str, Callable], list, list, object]:
     registry = Registry()
     register_task_recovery_tools(
         registry,
-        SimpleNamespace(task_diagnostics=diagnostics, recover_task=recover),
-        SimpleNamespace(publish=events.append),
+        cast(Any, SimpleNamespace(task_diagnostics=diagnostics, recover_task=recover)),
+        cast(Any, SimpleNamespace(publish=events.append)),
         control_error=control_error,
         legacy_reset=legacy_reset,
     )
     return registry.functions, calls, events, context
 
 
-def test_http_recovery_requires_control_before_calling_owner(bindings: tuple) -> None:
+def test_http_recovery_requires_control_before_calling_owner(bindings: Bindings) -> None:
     tools, calls, events, _ = bindings
     result = tools["dispatch_detach_agent"](object(), "task-a", **FIELDS)
     assert result["error"]["code"] == "task_recovery_forbidden"
-    assert calls == events == []
+    assert calls == []
+    assert events == []
 
 
-def test_http_diagnostics_and_agent_detach_use_owning_methods(bindings: tuple) -> None:
+def test_http_diagnostics_and_agent_detach_use_owning_methods(bindings: Bindings) -> None:
     tools, calls, events, context = bindings
     result = tools["dispatch_task_diagnostics"]("task-a")
     assert result["revision"] == "revision-a"
@@ -123,7 +128,7 @@ def test_http_diagnostics_and_agent_detach_use_owning_methods(bindings: tuple) -
     assert events[0]["type"] == "task.recovered"
 
 
-def test_http_reset_keeps_default_and_strict_paths_distinct(bindings: tuple) -> None:
+def test_http_reset_keeps_default_and_strict_paths_distinct(bindings: Bindings) -> None:
     tools, calls, _, context = bindings
     tools["dispatch_reset"](object(), "task-a")
     assert calls == [("legacy_reset", "task-a", {"reason": None, "expected_status": None})]
@@ -141,7 +146,7 @@ def test_http_reset_keeps_default_and_strict_paths_distinct(bindings: tuple) -> 
 
 
 def test_http_reconciliation_reuses_wake_owner_without_caller_outcomes(
-    bindings: tuple,
+    bindings: Bindings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_dispatch import task_wake_recovery
@@ -150,7 +155,7 @@ def test_http_reconciliation_reuses_wake_owner_without_caller_outcomes(
     result = {"outcome": "sent", "replayed": False, "receipt": {"send_id": "send-a"}}
     observed = []
 
-    def observe(queue: object, task_id: str, **fields: Any) -> dict:
+    def observe(queue: object, task_id: str, **fields: Any) -> dict[str, Any]:
         observed.append((task_id, fields))
         return result
 
@@ -165,7 +170,7 @@ def test_http_reconciliation_reuses_wake_owner_without_caller_outcomes(
     assert tools["dispatch_reconcile_wake"](object(), "task-a", **fields)["error"]
     assert observed == []
     assert tools["dispatch_reconcile_wake"](context, "task-a", **fields) is result
-    assert observed == [("task-a", fields)]
+    assert observed == [("task-a", {**fields, "settle_native_send": False})]
     assert calls == []
     assert events == [{"type": "task.wake_reconciled", **result}]
     for name in ("outcome", "send_token"):

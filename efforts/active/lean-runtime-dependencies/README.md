@@ -19,7 +19,12 @@ capabilities or independently installable services, as the unchanged Guiding
 Intent below requires. The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
 also governs shared process helpers: foreground update work is cancellable;
 accepted service startup has independent, qualified lifetime. Preserve the
-compiler-free and setup-owned Python requirements.
+compiler-free requirements and use uv as the suite's Python manager, independent
+of ambient Python PATH order. The [Python strategy amendment](#2026-11-16---uv-managed-python)
+records the operator's wording and the remaining migration controls. The
+[current prerequisite amendment](compiler-free-execution.md#python-prerequisite-boundary)
+adds project declarations and PATH-`uv` dispatch for every app launcher,
+without assumed Python locations or a change to existing owners.
 
 ## Guiding Intent
 
@@ -145,6 +150,36 @@ Process identity, containment, leases, authenticated endpoints and safe cleanup
 remain separate requirements. The [amendment](compiler-free-execution.md#python-prerequisite-boundary)
 owns the revised implementation and validation boundary.
 
+### 2026-11-16 - uv-managed Python
+
+Operator verbatim:
+
+> Yes. I think this is the correct strategy here. Let `uv` be our python manager, so whatever is on PATH doesn't impact us, ideally.
+
+> Yes, we need to make this architecture change and possible a vision update. Since `uv` can manage python versions this simplifies things compared to what we had been trying to do.
+
+The [installer vision](../../../visions/installer/README.md#uv-managed-python)
+and [prerequisite amendment](compiler-free-execution.md#python-prerequisite-boundary)
+replace the earlier first-PATH-Python selection and system-Python provisioning
+choice. The earlier removal of interpreter attestation and all process-safety
+requirements remain. Explicit setup prepares the declared uv-managed Python;
+helpers and managed application environments consume explicit interpreters.
+Read-only status and ordinary launch do not acquire a toolchain. This records
+source architecture, not implemented migration or installed rollout.
+
+### 2026-11-16 - All-launcher refinement
+
+The [current request, verbatim](../source-managed-runtime-installs/managed-python.md#current-direction-and-scope)
+requires each project install to declare its Python version and let `uv` manage
+it without dependence on system/user PATH. Every app launcher uses PATH `uv`,
+not an assumed installed Python location. This supersedes the earlier
+machine-wide/PATH selection requirement, not the decision against interpreter
+attestation or the compiler-free and process-safety guarantees. The existing
+installation owner establishes managed Python before shared helpers execute.
+Historical requests and #9262's delivered PATH-selector credit remain above
+and below; they do not qualify the new boundary. #12775 is the bounded
+architecture/plan revision, not an implementation or rollout assignment.
+
 ## Plan
 
 - [ ] Carry the updater/service lifetime distinction through the existing
@@ -225,6 +260,21 @@ owns the revised implementation and validation boundary.
   signature, PE and physical-path interpreter attestation (#9262). This closes
   selector and consumer compatibility, not the remaining compiled SDK,
   installer or daemon entrypoints.
+- [ ] Migrate setup-owned Python preparation and pre-runtime helper selection
+  to the [uv-managed contract](compiler-free-execution.md#python-prerequisite-boundary).
+  Preserve explicit application-environment interpreters, standalone setup,
+  offline prepared use, read-only non-acquisition and caller custody. Qualify
+  incompatible first PATH Python, fresh-terminal, failure and rollback cases
+  before claiming installed adoption.
+  Ordinary Manager bootstrap source is delivered in #12783; the finite
+  shared-helper/child interpreter handoff is delivered in #12798, merged as
+  `eb9e34ffa6eec0cf19a9bbbe879d62e5826dee71` after current-head approval,
+  required CI and native Linux/Windows acceptance. Qualified UV discovery and
+  its real Dev-preparation/queued-constructor handoff are delivered in #12833
+  after exact-head approval, required CI and all six active native jobs passed.
+  Standalone preparation,
+  all-application launcher migration, actual fresh-terminal and installed
+  acceptance remain open.
 - [x] Replace the compiled installation-context PowerShell SDK with its shared
   standard-library Python owner and preserve original-shell lifetime, strict
   action/policy behavior and source-only distribution. The complete bounded
@@ -239,10 +289,11 @@ owns the revised implementation and validation boundary.
 - [ ] Replace remaining executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
-  setup-owned Python prerequisite before these helpers, invoke normal PATH
-  Python without interpreter attestation, and remove the superseded signature,
-  registry and physical-path gates rather than introduce another acquisition
-  or admission path.
+  project-declared `uv`-managed Python foundation before these helpers,
+  independent of system/user PATH. Use the existing installation owner and
+  [shared managed-Python sequence](../source-managed-runtime-installs/managed-python.md),
+  without interpreter attestation, another downloader or helper-owned setup.
+  Remove superseded signature, registry and physical-path gates.
 - [x] Land the compiler-free finite owned-process helper, retained lazy
   accounting, complete construction-resource closure and original client
   startup deadline through #9687. This is source closure only; current native
@@ -315,6 +366,10 @@ open.
 - [ ] The compiler-free amendment's complete source, packaging, bootstrap,
   kernel-identity, Windows Job/headlessness and minimal-machine checks pass;
   unsupported lanes remain explicit blockers, not assumed parity.
+- [ ] The [managed-Python boundary](compiler-free-execution.md#python-prerequisite-boundary)
+  passes no-Python/old-Python PATH, differing project versions, offline reuse,
+  acquisition-free ordinary launch and real shell-to-helper cold-start
+  qualification through the existing installation/native owners.
 
 ## Proposal
 
@@ -405,6 +460,8 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+- [2026-11-16 - uv-managed Python intent and adoption](journal/2026/11.16%20uv-managed%20Python.md)
 
 - [2026-11-01 - merged finite source and non-UI safety preparation](journal/2026/11.01%20non-ui-process-safety.md)
 

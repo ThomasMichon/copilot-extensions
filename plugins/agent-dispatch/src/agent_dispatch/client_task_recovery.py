@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import httpx
 
@@ -54,6 +55,12 @@ def strict_reset_request(
 class TaskRecoveryClientMixin:
     """Recovery methods composed with DispatchClient's transport and authority."""
 
+    if TYPE_CHECKING:
+        _http: httpx.Client
+        _unwrap: Callable[[httpx.Response], Any]
+        _control_headers: Callable[[], dict[str, str]]
+        health: Callable[[], dict[str, Any]]
+
     def _require_task_recovery(self, operation: str | None = None) -> None:
         # Probe each call: an earlier advertisement cannot authorize a rolled-back
         # or replaced running provider.
@@ -83,10 +90,10 @@ class TaskRecoveryClientMixin:
                 f"running coordinator lacks {TASK_RECOVERY_PROTOCOL} operation {operation}"
             )
 
-    def task_diagnostics(self, task_id: str) -> dict:
+    def task_diagnostics(self, task_id: str) -> dict[str, Any]:
         """Read a bounded redacted snapshot and its opaque recovery revision."""
         self._require_task_recovery()
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/diagnostics"))
+        return cast(dict[str, Any], self._unwrap(self._http.get(f"/tasks/{task_id}/diagnostics")))
 
     def recover_task(
         self,
@@ -97,7 +104,7 @@ class TaskRecoveryClientMixin:
         request_id: str,
         actor: str,
         reason: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Apply one explicit, revision-fenced and idempotent recovery action."""
         if operation not in RECOVERY_OPERATIONS:
             raise ValueError(f"unsupported task recovery operation: {operation!r}")
@@ -109,12 +116,12 @@ class TaskRecoveryClientMixin:
         }
         validate_recovery_fields(**body)
         self._require_task_recovery(operation)
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/recovery/{operation}",
                 json=body,
                 headers=self._control_headers(),
-            )
+            ))
         )
 
     def reconcile_wake(
@@ -126,11 +133,14 @@ class TaskRecoveryClientMixin:
         expected_revision: str,
         actor: str,
         reason: str,
-    ) -> dict:
-        """Ask the owner to observe original send custody, never send a prompt."""
+        settle_native_send: bool = False,
+    ) -> dict[str, Any]:
+        """Observe custody, or explicitly select owner settlement without replay."""
+        if type(settle_native_send) is not bool:
+            raise ValueError("native settlement selection must be boolean")
         if outbox not in WAKE_OUTBOXES:
             raise ValueError(f"unsupported wake outbox: {outbox!r}")
-        body = {
+        body: dict[str, str | bool] = {
             "outbox": outbox,
             "wake_id": wake_id,
             "expected_revision": expected_revision,
@@ -138,11 +148,13 @@ class TaskRecoveryClientMixin:
             "reason": reason,
         }
         validate_recovery_fields(**body)
-        self._require_task_recovery("reconcile_wake")
-        return self._unwrap(
+        if settle_native_send:
+            body["settle_native_send"] = True
+        self._require_task_recovery("settle_wake" if settle_native_send else "reconcile_wake")
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/wakes/reconcile",
                 json=body,
                 headers=self._control_headers(),
-            )
+            ))
         )

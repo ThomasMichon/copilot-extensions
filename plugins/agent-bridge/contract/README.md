@@ -35,6 +35,20 @@ the independent HTTP-52 vector and genuine current execution evidence refresh;
 historical generations remain unchanged. These controls do not establish native
 Copilot or installed adoption.
 
+Twelve additional source controls cover the original selector-omitting ordinary
+SDK wire form against a genuinely unconfigured provider. They retain original
+one-shot handoffs and late receipts across process loss, while configured,
+failed or subsequently added governance and older portable consumers keep
+their original admission boundaries. The governance helper is an affected
+semantic owner for this expansion. HTTP generation, capability floors,
+independent input vector and historical evidence remain unchanged.
+The HTTP-52 collector re-exports the unchanged current portfolio and adds only
+these controls; the older collector and test bodies are not copied or rewritten.
+Ten further controls require the stored native registration inside every
+automatic receiving transaction, including venue changes before enrollment,
+poll and final admission, while preserving explicit native selection. A missing
+request-side portable observation cannot reclassify a registered remote venue.
+
 Declaration preparation can refresh a retired path's `current_path` fingerprint
 only through its already registered, affected semantic owner. The retired alias
 stays non-semantic; dirty backing bytes and missing/non-semantic owners refuse.
@@ -261,6 +275,13 @@ acquisition-runtime custody. Host and native process I/O remain controlled
 fixtures, not installed-runtime or native Copilot evidence. Historical
 generations and their captures remain unchanged.
 
+Three read-only inspection controls extend the current source-bound portfolio,
+which contains 629 cases at this checkpoint.
+They join both CLI aliases and the authenticated route to a copied Core Host,
+preserve cursors and child input, refuse unsupported older daemons without a
+retry, and distinguish bounded semantic observations from Host responsiveness.
+These remain fixture observations, not installed or native qualification.
+
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
 and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared
@@ -431,6 +452,30 @@ When a wire contract does change:
    python tools/check-agent-bridge-contracts.py
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
+
+## Additive H1 read-only inspection evidence
+
+H1 inspection adds first-message-only PING/PONG without changing envelope
+generation 1. Its source-bound capture executes the real codec, Host handler
+and client against in-memory streams and a synthetic child/controller.
+Independent expectations cover authentication refusal, private-provider
+refusal, pipelined control isolation, controller/lifetime preservation,
+pre-body size rejection and replay of the retained historical message vectors.
+Only Host PID, Host generation and nonnegative RTT are normalized.
+This is not a listener, installed-runtime or native Copilot qualification.
+
+Commit and publish the source, capture owner and independent input, then run:
+
+```text
+python tools/capture_bridge_host_inspection.py --source-commit <published-source-commit> --write
+python tools/capture_bridge_host_inspection.py --source-commit <published-source-commit>
+```
+
+The four new inspection packets bind the canonical protocol, Host, inspection
+and client owners. The old message, wrapper and prior-runtime fixtures and
+their provenance remain unchanged. After this H1 capture, prepare HTTP-52
+declarations, publish that checkpoint and run its existing write/no-write
+capture sequence. Preparation alone is not execution evidence.
 
 ## HTTP-51 standard native-send evidence
 

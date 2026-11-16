@@ -506,9 +506,16 @@ whole-desktop SDK self-profile, literal cases and verifier remain separate.
 compiled `native_daemon.ps1` launcher below remains a separate migration
 boundary. `native_owned.ps1` delegates finite process execution to the same
 original-shell-owned Python transport.
-Python is an existing harness prerequisite owned by machine provisioning;
+Setup may supply its existing absolute
+`COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON` handoff when the helper starts. The
+adapter uses only that executable, with terminal validation/startup failures
+and no PATH fallback. The selected interpreter and original helper remain
+bound for that helper's lifetime; a different nonempty hint refuses before
+sending another request and does not replace or break live custody.
+Acquisition stays with setup, not this transport.
+Without that handoff, Python remains a legacy harness prerequisite:
 a cold plugin runtime does not authorize another Python download or a
-helper-owned interpreter installation. The PowerShell adapter checks PATH's
+helper-owned interpreter installation. The compatibility adapter checks PATH's
 `python` applications headlessly and selects the first compatible Python 3.10+.
 An unsupported earlier interpreter or WindowsApps alias does not hide a later
 compatible interpreter. A confirmed version refusal exits before receiving any
@@ -1758,8 +1765,11 @@ child still runs). In that degraded case ordinary cleanup still applies, but a
 hard-killed owner can orphan the child. Do not use it for children meant to
 outlive their launcher (detached daemons, keepers).
 
-The synchronous helper also supports `require_job=True` to refuse Windows
-execution before resume if ownership cannot be armed, and
+Both async and synchronous helpers support `require_job=True` to refuse Windows
+execution before resume if ownership cannot be armed. The async helper kills
+and awaits the still-suspended child before reporting failure, including when
+its caller is cancelled during cleanup.
+The synchronous helper additionally supports
 `allow_breakaway=False` to omit the Job's explicit-breakaway permission.
 Bounded captured commands use both options. Defaults retain deliberate
 service-child breakaway for existing callers; strict mode prevents descendants

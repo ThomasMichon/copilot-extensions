@@ -301,6 +301,33 @@ Each capture retains its own existing aggregate clock, including managed test
 environment preparation; the workflow timeout does not enlarge it.
 Returned files are data: the client never applies the generated outputs.
 
+`submit --packet manager-worktrees-source --source <candidate-commit>
+--main-commit <released-main-commit> --dev-commit <merged-dev-commit>` selects
+the candidate's existing `run-manager-suite-acceptance.py --mode source` owner.
+All three inputs are full immutable commits; the runtime inputs must be
+distinct and reachable from the repository's published Main/Dev histories.
+Only this named packet accepts those extra source inputs. It constructs and
+updates only Manager, Worktrees and their actual declared closure in the
+fixture's private disposable home, not an operator installation.
+
+This packet uses the protected controller's existing URL-only governed feed
+and independent post-interruption sanitizer. Generic selections and candidate
+workflows do not receive that feed. The source fixture forwards only its
+validated default-index URL across fake HOME and UV scrubbing; it does not
+copy host configuration, credentials or supplemental indexes. It does not
+download Copilot/PSMux or launch New/Resume or survival actors.
+
+The original 1800/900/300/90-second prepare/exercise/assertion/settlement limits,
+3320-second observer bound and 60-minute suite job allocation remain; other
+protected packets retain their existing allocations. The protected adapter's
+3500-second outer wait includes the runner's preparation, stages and cleanup
+inside that job. Actual case, stage, source and settled-observer evidence must
+all pass. Only named bounded diagnostics and JUnit are exported, after URL and
+feed-hostname redaction including JSONL command logs. A missing, skipped,
+failed, interrupted or unsettled consumer never qualifies. Controller support
+must be reviewed and promoted before submission; source support or passing
+unit controls alone is not native qualification or rollout authority.
+
 `submit --packet desktop-capability` selects only
 `tools/test_windows_qualification_desktop_native.py::test_hosted_desktop_capability`.
 This independently scored, optional venue prerequisite composes the existing
@@ -1994,8 +2021,11 @@ execution and the required unit-only CI packet.
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
 and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
-Hosted acceptance runs complementary behavioral and full-retention selections
-in separate jobs on each platform; no case is removed from acceptance. The
+Hosted acceptance runs complementary behavioral, full-retention and prepared
+Python handoff selections in separate jobs on each platform; no case is removed
+from acceptance. The SDK and evaluator handoff packets share their own job,
+not the behavioral packet's remaining cold-preparation budget. All jobs use the
+same exact-source checkout and tool setup. The
 behavioral jobs also run `tests/test_update_python_path.py` with fake registry
 state to check waited completion, excluded observer modes and publication failures.
 They select the source-anchor-loss dispatch controls and standalone prepared-source
@@ -2007,7 +2037,10 @@ retained controller. The permissions control reads actual POSIX modes under
 umask `022` or protected Windows DACL flags. Old UUID-named snapshots are not
 deleted or migrated, and storage is not claimed bounded across distinct inputs.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
-is unchanged. Local workers may use smaller serial selections when the complete
+is unchanged. Behavioral jobs emit verbose per-test progress and the ten slowest
+completed cases to distinguish preparation or case delays from outer cancellation;
+those diagnostics do not turn an interrupted packet into passing acceptance.
+Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
 Manual dispatch with `qualify_promotion_copies=true` additionally runs an
 opt-in Linux job against the exact selected source revision. It composes the
@@ -4306,6 +4339,24 @@ also tests bounded Windows transient-lock retries without retrying permanent
 errors or extending the original deadline.
 Expired source-lock consumption retains an active typed subprocess timeout
 and its diagnostics; successful consumption still checks the outer deadline.
+
+## Optional shell-native UV bootstrap provider
+
+`python -m pytest -q tools/test_uv_bootstrap_provider.py` exercises the separately
+delivered Worktrees provider in Windows PowerShell and PowerShell Core when
+available. Captured-boundary cases cover exact helper declarations, managed-only
+UV arguments, explicit preparation versus read-only lookup, missing prerequisites,
+confirmed exit/stream results and OS-policy refusal without fallback. The real
+materializer covers candidate delivery and refusal of a foreign replacement.
+
+The native lookup witness copies an already installed UV executable into an
+otherwise empty PATH and uses production `Invoke-Hidden` with private empty
+managed-Python/cache roots and downloads disabled. It proves an acquisition-free
+missing-toolchain result without PATH Python. It does not acquire an interpreter,
+qualify a fresh installation, prove managed-Python execution under Smart App
+Control, or migrate an installer/launcher. Missing UV/PowerShell is an explicit
+skip, not a pass. These subprocess packets remain on-demand, outside required
+unit-only PR testing.
 
 ## Optional stock Windows bootstrap building blocks
 
@@ -12210,6 +12261,16 @@ Manager's existing `tests/test_manager_engine_adapter.py` packet checks that
 source-qualified preparation copies the original pinned payload, not the
 dependency resolver's rewritten build manifests. Fresh runtime acceptance
 continues to verify the installed payload's original source identity.
+
+`worktree-manager/tests/test_runtime_candidate_identity.py` checks equivalent
+Windows native/ordinary path spellings in both candidate layouts, while retaining
+outside-package, outside-distribution and editable-install refusal.
+The guards reuse the existing installation-context containment owner.
+The explicit `tests/native/test_runtime_candidate_identity_native.py` selection
+replays the existing SDK metadata-health callback through a real interpreter and
+packaged Manager. It borrows test dependencies and does not fabricate frozen
+origin or completion evidence: full fresh construction, closed-wheel inputs,
+terminal exercise and installed rollout remain separate qualification.
 
 The existing `installation-context-full.yml` `vault-activation` portfolio runs
 the focused Vault launcher and cold configuration-capture regressions on both

@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import sys
-import tomllib
+from typing import Any
 
 import installer_engine as engine
 import versioned_runtime_source as runtime_source
 
+tomllib = importlib.import_module("tomllib")
+
 
 @contextmanager
-def manager_payload(payload: Path, root: Path):
+def manager_payload(
+    payload: Path, root: Path, *, uv: Path | None = None,
+) -> Iterator[tuple[Path, dict[str, Any]]]:
     from worktree_manager.self_install import manager_ref, manager_repo, payload_version
 
     root = root.resolve()
@@ -22,8 +27,9 @@ def manager_payload(payload: Path, root: Path):
         return
     receipt = payload / runtime_source.SOURCE_FILE
     if receipt.exists() or receipt.is_symlink():
-        if runtime_source.read_source_identity(
-            payload, payload_version(payload), plugin="worktree-manager",
+        version = payload_version(payload)
+        if version is None or runtime_source.read_source_identity(
+            payload, version, plugin="worktree-manager",
         ) is None:
             raise ValueError("Manager prepared source receipt disappeared before validation")
         raise ValueError("Manager Dev bootstrap requires complete --install-source inputs for attributed source")
@@ -49,5 +55,8 @@ def manager_payload(payload: Path, root: Path):
     from worktree_manager.runtime_source_self_update import prepared
     from worktree_manager.source_config import absolute_local_source
 
-    with prepared(absolute_local_source(manager_repo(root)), root) as (selected, options):
+    uv_options: dict[str, Any] = {"uv": uv} if uv is not None else {}
+    with prepared(
+        absolute_local_source(manager_repo(root)), root, **uv_options,
+    ) as (selected, options):
         yield selected, {name.removeprefix("_"): value for name, value in options.items()}

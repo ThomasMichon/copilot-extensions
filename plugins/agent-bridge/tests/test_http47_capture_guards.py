@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable, Iterator
 import hashlib
 import json
 import os
@@ -12,11 +13,17 @@ import shutil
 import stat
 import subprocess
 import sys
+from types import TracebackType
+from typing import Any, cast
 
 import pytest
+from agent_procutil import no_window_flags
 
+import agent_bridge_contract_git as git_evidence
+import agent_bridge_contract_registry as registry_codec
 import bridge_http47_evidence as evidence
 import capture_bridge_http47 as capture
+from capture_bridge_host_inspection import INPUT as H1_INSPECTION_INPUT
 
 ROOT = Path(__file__).resolve().parents[3]
 SEED_STATES = pytest.mark.parametrize(
@@ -24,13 +31,13 @@ SEED_STATES = pytest.mark.parametrize(
 )
 
 
-def test_http47_capture_source_lookup_scans_the_proof_only_at_admission():
+def test_http47_capture_source_lookup_scans_the_proof_only_at_admission() -> None:
     from bridge_http47_runtime import _source_locator
 
-    class Proof(dict):
+    class Proof(dict[str, Any]):
         scans = 0
 
-        def __iter__(self):
+        def __iter__(self) -> Iterator[str]:
             self.scans += 1
             return super().__iter__()
 
@@ -50,7 +57,7 @@ def test_http47_capture_source_lookup_scans_the_proof_only_at_admission():
     assert proof.scans == 1
 
 
-def test_http47_interpreter_log_retains_distinct_admissions_after_pid_reuse(tmp_path):
+def test_http47_interpreter_log_retains_distinct_admissions_after_pid_reuse(tmp_path: Path) -> None:
     from bridge_http47_runtime import _interpreter_log
 
     prior = tmp_path / f"{os.getpid()}.jsonl"
@@ -63,7 +70,10 @@ def test_http47_interpreter_log_retains_distinct_admissions_after_pid_reuse(tmp_
 
 def remove_fixture(root: Path) -> None:
     """Release only this completed composed Git fixture, including readonly objects."""
-    def readonly(function, path, error):
+    def readonly(
+        function: Callable[..., Any], path: str,
+        error: tuple[type[BaseException], BaseException, TracebackType | None],
+    ) -> None:
         target = Path(path)
         info = target.lstat()
         if (
@@ -79,13 +89,13 @@ def remove_fixture(root: Path) -> None:
     shutil.rmtree(root, onerror=readonly)
 
 
-def read_registry(root: Path) -> dict:
-    return evidence.registry_codec.load(root).materialized
+def read_registry(root: Path) -> dict[str, Any]:
+    return cast(dict[str, Any], registry_codec.load(root).materialized)
 
 
-def write_registry(root: Path, registry: dict) -> None:
-    snapshot = evidence.registry_codec.load(root)
-    for relative, data in evidence.registry_codec.plan(root, snapshot, registry).items():
+def write_registry(root: Path, registry: dict[str, Any]) -> None:
+    snapshot = registry_codec.load(root)
+    for relative, data in registry_codec.plan(root, snapshot, registry).items():
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -95,7 +105,7 @@ def fixture_git(root: Path, *args: str) -> str:
     return evidence.git(root, *args).decode("utf-8").strip()
 
 
-def copy_fixture_source(destination: Path, path: str, registry: dict) -> None:
+def copy_fixture_source(destination: Path, path: str, registry: dict[str, Any]) -> None:
     source = ROOT / path
     if not source.exists():
         sources = {
@@ -106,12 +116,12 @@ def copy_fixture_source(destination: Path, path: str, registry: dict) -> None:
         canonical = sources[row["current_path"]]
         assert "current_path" not in canonical and row["sha256"] == canonical["sha256"]
         source = ROOT / canonical["path"]
-        assert evidence.git_evidence.sha256_bytes(source.read_bytes()) == row["sha256"]
+        assert git_evidence.sha256_bytes(source.read_bytes()) == row["sha256"]
     shutil.copyfile(source, destination)
 
 
 def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
-    registry = evidence.registry_codec.load(ROOT).index
+    registry = registry_codec.load(ROOT).index
     compact = evidence.encode(registry, indent=None)
     assert json.loads(compact) == registry
     assert len(compact) <= 1024 * 1024
@@ -121,11 +131,12 @@ def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
 @pytest.fixture(scope="module")
 def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     seed = tmp_path_factory.mktemp("http47-registered-seed")
-    metadata = evidence.registry_codec.load(ROOT)
+    metadata = registry_codec.load(ROOT)
     registry = metadata.materialized
     paths = evidence.proof_paths(ROOT, registry) | {
         evidence.REGISTRY,
         evidence.CONTRACT + "registry.schema.json",
+        H1_INSPECTION_INPUT,
     }
     paths.update(f["path"] for c in registry["contracts"] for f in c["fixtures"])
     paths.update(
@@ -194,7 +205,7 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return seed
 
 
-def test_http47_shared_capture_seed_has_owned_committed_inputs(source_seed):
+def test_http47_shared_capture_seed_has_owned_committed_inputs(source_seed: Path) -> None:
     registry = read_registry(source_seed)
     http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
     assert http["declared_range"]["current"] == 47
@@ -272,9 +283,9 @@ def test_http47_generated_registry_is_lossless_and_bounded(
     )
     data = outputs[evidence.REGISTRY]
     assert len(data) <= 1024 * 1024
-    generated = evidence.registry_codec.load(
+    generated = registry_codec.load(
         root, read=lambda path: outputs[path] if path in outputs
-        else evidence.registry_codec.read_file(root, path),
+        else registry_codec.read_file(root, path),
     ).materialized
     for before, after in zip(original["contracts"], generated["contracts"], strict=True):
         assert after["provenance"][:len(before["provenance"])] == before["provenance"]
@@ -316,7 +327,7 @@ def test_http47_capture_semantic_upgrade_requires_registered_same_source(
 
 
 def checker_environment() -> dict[str, str]:
-    environment = evidence.git_evidence.clean_git_environment()
+    environment = git_evidence.clean_git_environment()
     # Static checker controls do not contribute native-operation observations.
     # Keep their subprocesses outside any enclosing portfolio capture context.
     environment.pop(capture.REQUEST_ENV, None)
@@ -333,14 +344,17 @@ def public_hashes(root: Path) -> dict[str, str]:
     }
 
 
-def stub_transport(monkeypatch, callback=None):
-    calls = []
+def stub_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    callback: Callable[[Path, dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
+) -> list[tuple[Path, dict[str, Any]]]:
+    calls: list[tuple[Path, dict[str, Any]]] = []
 
-    def runner(root, proof, expected):
+    def runner(root: Path, proof: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
         calls.append((root, proof))
         if callback is not None:
             return callback(root, proof, expected)
-        return copy.deepcopy(expected["expected"])
+        return cast(dict[str, Any], copy.deepcopy(expected["expected"]))
 
     # Only the external runner transport is stubbed in guard/persistence tests.
     # Real ASGI/native observations have their own contained probe test.
@@ -349,7 +363,9 @@ def stub_transport(monkeypatch, callback=None):
 
 
 @SEED_STATES
-def test_http47_capture_reproducible_real_commit_preserves_history(repository, monkeypatch):
+def test_http47_capture_reproducible_real_commit_preserves_history(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, commit = repository
     initial_commit = commit
     before = public_hashes(root)
@@ -368,7 +384,7 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
     assert times_before == {path: (root / path).stat().st_mtime_ns for path in outputs}
     assert len(calls) == 2
     for path in outputs:
-        if path == evidence.REGISTRY or path.startswith(evidence.registry_codec.PROVENANCE):
+        if path == evidence.REGISTRY or path.startswith(registry_codec.PROVENANCE):
             continue
         packet = json.loads(outputs[path])
         proof = packet["captured_from"]
@@ -396,7 +412,7 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
         text=True,
         timeout=90,
         env=checker_environment(),
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=no_window_flags(),
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
 
@@ -409,7 +425,9 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
         "tools/capture_bridge_http47.py",
     ],
 )
-def test_http47_capture_dirty_source_and_input_refuse_before_probes(repository, monkeypatch, path):
+def test_http47_capture_dirty_source_and_input_refuse_before_probes(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, path: str,
+) -> None:
     root, commit = repository
     node = root / path
     node.write_bytes(node.read_bytes() + b"\n")
@@ -423,7 +441,9 @@ def test_http47_capture_dirty_source_and_input_refuse_before_probes(repository, 
 @pytest.mark.parametrize(
     "constant", ["HTTP_PROTOCOL_VERSION", "NEGOTIATED_DRAIN_PROTOCOL_VERSION"]
 )
-def test_http47_capture_wrong_generation_genuine_commit_refuses(repository, monkeypatch, constant):
+def test_http47_capture_wrong_generation_genuine_commit_refuses(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, constant: str,
+) -> None:
     root, _commit = repository
     protocol = root / evidence.PREFIX / "protocol.py"
     protocol.write_text(protocol.read_text().replace(constant + " = 47", constant + " = 45"))
@@ -448,16 +468,18 @@ def test_http47_capture_wrong_generation_genuine_commit_refuses(repository, monk
 
 @pytest.mark.parametrize("mutation", ["source", "input", "report", "boolean-type", "history"])
 @SEED_STATES
-def test_http47_capture_post_probe_substitution_cannot_write(repository, monkeypatch, mutation):
+def test_http47_capture_post_probe_substitution_cannot_write(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     root, commit = repository
     before = public_hashes(root)
     outputs_before = output_bytes(root)
     owned = set(outputs_before)
-    history_path = None
+    history_path: str | None = None
 
-    def altered(root, _proof, expected):
+    def altered(root: Path, _proof: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
         nonlocal history_path
-        observed = copy.deepcopy(expected["expected"])
+        observed: dict[str, Any] = copy.deepcopy(expected["expected"])
         if mutation in {"source", "input"}:
             path = root / (
                 evidence.PREFIX + "client.py" if mutation == "source" else evidence.INPUT
@@ -489,7 +511,9 @@ def test_http47_capture_post_probe_substitution_cannot_write(repository, monkeyp
 
 @pytest.mark.parametrize("target", [evidence.PRIMARY, evidence.REGISTRY])
 @SEED_STATES
-def test_http47_capture_hardlink_output_refuses_before_write(repository, monkeypatch, target):
+def test_http47_capture_hardlink_output_refuses_before_write(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
     root, commit = repository
     paths = evidence.output_paths(read_registry(root))
     node = root / target
@@ -513,8 +537,8 @@ def test_http47_capture_hardlink_output_refuses_before_write(repository, monkeyp
 )
 @SEED_STATES
 def test_http47_capture_symlink_output_refuses_without_external_write(
-    repository, monkeypatch, tmp_path
-):
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root, commit = repository
     outside = tmp_path / "outside.json"
     outside.write_bytes(b"untouched")
@@ -531,7 +555,9 @@ def test_http47_capture_symlink_output_refuses_without_external_write(
 
 @pytest.mark.parametrize("kind", ["unowned", "registry-boolean", "foreign-owner"])
 @SEED_STATES
-def test_http47_capture_unowned_or_dirty_output_is_not_overwritten(repository, monkeypatch, kind):
+def test_http47_capture_unowned_or_dirty_output_is_not_overwritten(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     root, commit = repository
     if kind == "unowned":
         (root / evidence.PRIMARY).write_text('{"unowned":true}')
@@ -573,8 +599,8 @@ def test_http47_capture_unowned_or_dirty_output_is_not_overwritten(repository, m
 
 @SEED_STATES
 def test_http47_capture_no_write_drift_never_materializes_or_rewrites_outputs(
-    repository, monkeypatch
-):
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, commit = repository
     before = public_hashes(root)
     outputs_before = output_bytes(root)
@@ -587,14 +613,14 @@ def test_http47_capture_no_write_drift_never_materializes_or_rewrites_outputs(
 @pytest.mark.parametrize("owner", ["other-contract", "deferred", "http-historical"])
 @SEED_STATES
 def test_http47_capture_immutable_reference_collision_precedes_probes(
-    repository, monkeypatch, owner, source_seed
-):
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, owner: str, source_seed: Path,
+) -> None:
     root, _commit = repository
     primary = root / evidence.PRIMARY
     if not primary.exists():
         shutil.copyfile(source_seed / evidence.PRIMARY, primary)
     registry = read_registry(root)
-    sha = evidence.git_evidence.sha256_bytes(primary.read_bytes())
+    sha = git_evidence.sha256_bytes(primary.read_bytes())
     error = "collision.*immutable reference"
     if owner == "deferred":
         reference = next(
@@ -631,8 +657,8 @@ def test_http47_capture_immutable_reference_collision_precedes_probes(
 
 @SEED_STATES
 def test_http47_capture_unplanned_prior_generation_packet_remains_immutable(
-    repository, monkeypatch
-):
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, commit = repository
     path = evidence.CURRENT + "startup-observation-generation-46.json"
     registry = read_registry(root)
@@ -653,7 +679,9 @@ def test_http47_capture_unplanned_prior_generation_packet_remains_immutable(
 
 
 @SEED_STATES
-def test_http47_capture_history_accepts_only_the_committed_closed_plan(repository):
+def test_http47_capture_history_accepts_only_the_committed_closed_plan(
+    repository: tuple[Path, str],
+) -> None:
     root, commit = repository
     original = evidence.baseline(root, commit)
     proof = evidence.source_snapshot(root, commit, original)
@@ -671,13 +699,13 @@ def test_http47_capture_history_accepts_only_the_committed_closed_plan(repositor
 @pytest.mark.parametrize("mutation", ["dirty-packet", "exact-planned-packet", "exact-planned-registry"])
 @SEED_STATES
 def test_http47_capture_owned_output_probe_mutation_is_never_accepted(
-    repository, monkeypatch, mutation
-):
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     root, commit = repository
     before = output_bytes(root)
     expected_after = dict(before)
 
-    def mutate(root: Path, proof: dict, expected: dict) -> dict:
+    def mutate(root: Path, proof: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
         original = evidence.baseline(root, commit)
         observed = json.loads(capture.canonical(expected["expected"]))
         planned = evidence.build_outputs(root, commit, original, proof, observed)
@@ -689,7 +717,7 @@ def test_http47_capture_owned_output_probe_mutation_is_never_accepted(
             data = evidence.encode(packet)
         (root / path).write_bytes(data)
         expected_after[path] = data
-        return copy.deepcopy(expected["expected"])
+        return cast(dict[str, Any], copy.deepcopy(expected["expected"]))
 
     calls = stub_transport(monkeypatch, mutate)
     with pytest.raises(ValueError, match="dirty capture output|evidence changed during capture"):
@@ -698,7 +726,9 @@ def test_http47_capture_owned_output_probe_mutation_is_never_accepted(
 
 
 @pytest.mark.parametrize("status", ["skipped", "failure", "missing", "duplicate"])
-def test_http47_capture_requires_complete_unskipped_probe_portfolio(tmp_path, status):
+def test_http47_capture_requires_complete_unskipped_probe_portfolio(
+    tmp_path: Path, status: str,
+) -> None:
     from xml.etree.ElementTree import Element, SubElement, ElementTree
 
     suite = Element("testsuite")
@@ -719,18 +749,18 @@ def test_http47_capture_requires_complete_unskipped_probe_portfolio(tmp_path, st
 
 @pytest.mark.parametrize("fault", ["none", "input", "missing-report", "skipped"])
 def test_http47_capture_contained_dispatch_binds_input_report_and_portfolio(
-    repository,
-    monkeypatch,
-    fault,
-):
+    repository: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+) -> None:
     from agent_procutil import owned_process
     from xml.etree.ElementTree import Element, SubElement, ElementTree
 
     root, _commit = repository
     expected = capture.expected_input(root)
-    calls = []
+    calls: list[list[str]] = []
 
-    def contained(argv, **limits):
+    def contained(argv: list[str], **limits: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         assert argv[:3] == [
             sys.executable,
@@ -788,7 +818,9 @@ def test_http47_capture_contained_dispatch_binds_input_report_and_portfolio(
 
 
 @pytest.mark.parametrize("fault", ["none", "digest", "output", "input"])
-def test_http47_capture_probe_request_binding_refuses_substitution(repository, monkeypatch, fault):
+def test_http47_capture_probe_request_binding_refuses_substitution(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     import test_http47_capture_probes as probes
 
     root, commit = repository
@@ -824,16 +856,16 @@ def test_http47_capture_probe_request_binding_refuses_substitution(repository, m
 
 
 def test_http47_capture_loaded_production_bytes_are_not_an_import_label(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import test_http47_capture_probes as probes
     from agent_bridge import protocol
 
     # Check the currently imported cohort, not the deliberately composed
     # HTTP-47 publication fixture's different protocol implementation.
-    registry = evidence.registry_codec.load(ROOT).materialized
+    registry = registry_codec.load(ROOT).materialized
     proof = {
-        path: {"sha256": evidence.git_evidence.sha256_bytes((ROOT / path).read_bytes())}
+        path: {"sha256": git_evidence.sha256_bytes((ROOT / path).read_bytes())}
         for path in evidence.proof_paths(ROOT, registry)
     }
     probes.loaded_source_proof(proof)
@@ -846,8 +878,8 @@ def test_http47_capture_loaded_production_bytes_are_not_an_import_label(
 
 @pytest.mark.parametrize("fault", ["missing-termination", "wrong-blob", "wrong-sha", "missing-manifest"])
 def test_http47_capture_canonical_closure_rejects_self_consistent_tamper(
-    repository, monkeypatch, fault
-):
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     root, commit = repository
     stub_transport(monkeypatch)
     outputs = capture.capture(root, commit, write=True)
@@ -882,12 +914,12 @@ def test_http47_capture_canonical_closure_rejects_self_consistent_tamper(
             value["shared_operation_evidence"]["sha256"] = primary["sha256"]
             path.write_bytes(evidence.encode(value))
             fixture["sha256"] = evidence.digest(path.read_bytes())
-    (root / evidence.REGISTRY).write_bytes(evidence.registry_codec.encode(registry))
+    (root / evidence.REGISTRY).write_bytes(registry_codec.encode(registry))
     checked = subprocess.run(
         [sys.executable, str(root / "tools/check-agent-bridge-contracts.py")],
         capture_output=True, text=True, timeout=90,
         env=checker_environment(),
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=no_window_flags(),
     )
     assert checked.returncode != 0
     assert "HTTP-47 execution closure" in checked.stdout + checked.stderr
@@ -895,8 +927,8 @@ def test_http47_capture_canonical_closure_rejects_self_consistent_tamper(
 
 @pytest.mark.parametrize("fault", ["none", "host-only-module", "host-entry", "worker-entry"])
 def test_http47_capture_real_subprocess_source_and_entrypoint_binding(
-    tmp_path, fault
-):
+    tmp_path: Path, fault: str,
+) -> None:
     from bridge_http47_runtime import sha
 
     root = tmp_path / "runtime"
@@ -948,7 +980,7 @@ def test_http47_capture_real_subprocess_source_and_entrypoint_binding(
     })
     checked = subprocess.run(
         argv, capture_output=True, text=True, timeout=30, env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=no_window_flags(),
     )
     if fault == "none":
         assert checked.returncode == 0, checked.stdout + checked.stderr
@@ -966,7 +998,9 @@ def test_http47_capture_real_subprocess_source_and_entrypoint_binding(
 
 
 @pytest.mark.parametrize("fault", ["none", "pid-reuse", "missing-child", "duplicate-launch", "refusal"])
-def test_http47_capture_every_launch_requires_its_own_entrypoint_receipt(tmp_path, fault):
+def test_http47_capture_every_launch_requires_its_own_entrypoint_receipt(
+    tmp_path: Path, fault: str,
+) -> None:
     from bridge_http47_runtime import verify_interpreters
 
     directory = tmp_path / "interpreters"
@@ -979,7 +1013,7 @@ def test_http47_capture_every_launch_requires_its_own_entrypoint_receipt(tmp_pat
     if fault == "duplicate-launch":
         observer.append({"kind": "launch", "role": "host"})
     (directory / "10.jsonl").write_text("".join(json.dumps(e) + "\n" for e in observer))
-    proof = {}
+    proof: dict[str, dict[str, Any]] = {}
     for pid, role in enumerate(("worker", "host", "peer"), start=11):
         pid = 11 if fault == "pid-reuse" else pid
         if fault == "missing-child" and role == "host":

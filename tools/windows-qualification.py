@@ -13,16 +13,20 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from single_instance_lease import OperationLock
 
 from windows_qualification_contract import (
-    DESKTOP_FILES, DESKTOP_PACKET, NATIVE_PACKETS, PACKETS, SUPPORT_PATH,
+    DESKTOP_FILES, DESKTOP_PACKET, NATIVE_PACKETS, PACKETS, SOURCE_FILES, SOURCE_PACKET, SUPPORT_PATH,
     TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
-    canonical, request, selection, sha, validate_result,
+    QualificationTransport, canonical, request, selection, sha, validate_result,
 )
 from windows_qualification_transport import Transport, command, rejected_attempt
 
 
-def request_lock(directory: Path):
+def request_lock(directory: Path) -> OperationLock:
     """Serialize one request's local state, never the shared transport ref."""
     source = str(Path(__file__).resolve().parents[1] / "libs/single-instance-lease/src")
     if source not in sys.path:
@@ -34,14 +38,14 @@ def request_lock(directory: Path):
 class Client:
     """Repository-scoped GitHub calls and durable, non-replayed remote effects."""
 
-    def __init__(self, root: Path, worktrees: Path, repository: str):
+    def __init__(self, root: Path, worktrees: Path, repository: str) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise ValueError("invalid owner/repository")
         self.root, self.repository = root, repository
         self.argv = [str(worktrees)]
         if os.name == "nt" and worktrees.suffix == ".ps1":
             self.argv = ["pwsh", "-NoProfile", "-File", str(worktrees)]
-        self.transport = Transport(root, "https://github.com/" + repository + ".git")
+        self.transport = cast(QualificationTransport, Transport(root, "https://github.com/" + repository + ".git"))
         origin = self.transport.git("config", "--get", "remote.origin.url").stdout.strip()
         if origin.endswith(".git"):
             origin = origin[:-4]
@@ -51,24 +55,24 @@ class Client:
         git_path = self.transport.git("rev-parse", "--git-path", "windows-qualification").stdout.strip()
         self.state_root = (root / git_path).resolve()
 
-    def gh(self, *args):
+    def gh(self, *args: str) -> str:
         result = command([
             *self.argv, "repos", "gh", self.repository, "--", *args,
         ], cwd=self.root)
         if "could not mint" in result.stderr.lower() or "ambient" in result.stderr.lower():
             raise RuntimeError("repository identity injection failed")
-        return result.stdout
+        return cast(str, result.stdout)
 
-    def api(self, endpoint: str, *args):
-        return json.loads(self.gh("api", endpoint, *args))
+    def api(self, endpoint: str, *args: str) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.gh("api", endpoint, *args)))
 
-    def save(self, directory: Path, state: dict) -> None:
+    def save(self, directory: Path, state: dict[str, Any]) -> None:
         """Replace only this client's own request state atomically."""
         temporary = directory / "state.json.new"
         temporary.write_text(canonical(state) + "\n", encoding="utf-8")
         temporary.replace(directory / "state.json")
 
-    def preflight(self, selected: dict) -> dict:
+    def preflight(self, selected: dict[str, Any]) -> dict[str, Any]:
         """Check actual protected-provider support before any remote mutation."""
         repo = self.api("repos/" + self.repository)
         login = self.api("user")["login"]
@@ -111,7 +115,7 @@ class Client:
             raise ValueError("protected qualification workflow is unavailable")
         return {"branch": branch, "control_sha": control, "owner": login}
 
-    def submit(self, selected: dict, source: str) -> dict:
+    def submit(self, selected: dict[str, Any], source: str) -> dict[str, Any]:
         """Create one public request; an unknown dispatch is never sent twice."""
         selection(selected)
         from plugin_test_selection import resolve_plugin_root
@@ -127,6 +131,8 @@ class Client:
             native = NATIVE_PACKETS.get(selected["name"])
             if selected["name"] == DESKTOP_PACKET:
                 files = list(DESKTOP_FILES)
+            elif selected["name"] == SOURCE_PACKET:
+                files = list(SOURCE_FILES)
             elif native and native[0] == "agent-worktrees":
                 files = [
                     "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
@@ -159,7 +165,7 @@ class Client:
         })
         directory = self.state_root / value["request_id"]
         directory.mkdir(parents=True, exist_ok=False)
-        state = {
+        state: dict[str, Any] = {
             "repository": self.repository, "request": value, "provider": provider,
             "phase": "prepared", "created_at": time.time(),
         }
@@ -169,7 +175,7 @@ class Client:
             self.stage(directory, state)
             return self.dispatch(directory, state)
 
-    def stage(self, directory: Path, state: dict) -> None:
+    def stage(self, directory: Path, state: dict[str, Any]) -> None:
         """Publish only a source whose transport attempt has not yet started."""
         value = state["request"]
         candidate = value["source_sha"]
@@ -185,13 +191,13 @@ class Client:
             self.append_transport(directory, state)
 
     def append_transport(
-        self, directory: Path, state: dict, *, required_history: str | None = None,
+        self, directory: Path, state: dict[str, Any], *, required_history: str | None = None,
     ) -> None:
         """Retain superseded attempt evidence before starting another envelope."""
         value = state["request"]
         required_history = required_history or state.get("transport_history_anchor")
 
-        def persist(delta):
+        def persist(delta: dict[str, Any]) -> None:
             replacing = delta.get("phase") in {"transport-attempt", "transport-confirmed"}
             if replacing and state.get("envelope_sha") and (
                 delta["phase"] == "transport-attempt"
@@ -218,7 +224,7 @@ class Client:
             ) from None
         self.save(directory, state)
 
-    def dispatch(self, directory: Path, state: dict) -> dict:
+    def dispatch(self, directory: Path, state: dict[str, Any]) -> dict[str, Any]:
         """Perform the one dispatch attempt, durably excluding automatic replay."""
         value, provider = state["request"], state["provider"]
         if state["phase"] not in {"prepared", "transport-confirmed"}:
@@ -243,7 +249,7 @@ class Client:
         self.save(directory, state)
         return state
 
-    def resume(self, identifier: str) -> dict:
+    def resume(self, identifier: str) -> dict[str, Any]:
         """Reconcile original transport identities; never resend an unknown dispatch."""
         directory, state = self.load(identifier)
         if state["phase"].startswith("dispatch") or state["phase"] in {"accepted", "running", "completed"}:
@@ -255,7 +261,7 @@ class Client:
         if state.get("envelope_sha"):
             history = state.get("transport_history_anchor") or state.get("previous_tip")
 
-            def remember(delta):
+            def remember(delta: dict[str, Any]) -> None:
                 state.update(delta)
                 self.save(directory, state)
 
@@ -294,7 +300,7 @@ class Client:
             self.stage(directory, state)
         return self.dispatch(directory, state)
 
-    def load(self, identifier: str) -> tuple[Path, dict]:
+    def load(self, identifier: str) -> tuple[Path, dict[str, Any]]:
         from windows_qualification_contract import REQUEST_ID
         if not REQUEST_ID.fullmatch(identifier):
             raise ValueError("invalid request ID")
@@ -305,12 +311,12 @@ class Client:
             raise ValueError("request belongs to another repository")
         return directory, state
 
-    def lock(self, identifier: str):
+    def lock(self, identifier: str) -> OperationLock:
         """Acquire only this request's operation custody; busy is not replay."""
         directory, _ = self.load(identifier)
         return request_lock(directory)
 
-    def status(self, identifier: str) -> dict:
+    def status(self, identifier: str) -> dict[str, Any]:
         """Resolve the same request, including a dispatch whose response was lost."""
         directory, state = self.load(identifier)
         matches = []
@@ -343,7 +349,7 @@ class Client:
             self.save(directory, state)
         return state
 
-    def result(self, identifier: str) -> dict:
+    def result(self, identifier: str) -> dict[str, Any]:
         """Download only the bound run artifact; do not execute or apply its files."""
         state = self.status(identifier)
         run = state.get("run")
@@ -381,10 +387,10 @@ class Client:
             raise ValueError("unsuccessful workflow cannot qualify")
         state["artifact"] = {"id": matches[0]["id"], "directory": output.name}
         self.save(directory, state)
-        return value
+        return cast(dict[str, Any], value)
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Parse local commands; no remote request contains executable arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -397,6 +403,8 @@ def main(argv=None) -> int:
     target.add_argument("--plugin")
     target.add_argument("--tools", action="store_true")
     target.add_argument("--packet", choices=PACKETS)
+    submit.add_argument("--main-commit")
+    submit.add_argument("--dev-commit")
     submit.add_argument("--test-file", action="append", default=[])
     submit.add_argument("-k", default="")
     submit.add_argument("--full-suite", action="store_true")
@@ -413,7 +421,9 @@ def main(argv=None) -> int:
             if args.packet:
                 if args.test_file or args.k or args.full_suite or args.allow_explicit_tiers:
                     raise ValueError("named packets retain their canonical selectors and bounds")
-                selected = {"kind": "packet", "name": args.packet}
+                selected: dict[str, Any] = {"kind": "packet", "name": args.packet}
+                if args.packet == SOURCE_PACKET:
+                    selected.update(main_sha=args.main_commit, dev_sha=args.dev_commit)
             else:
                 selected = {
                     "kind": "plugin" if args.plugin else "tools",
@@ -422,6 +432,10 @@ def main(argv=None) -> int:
                 }
                 if args.plugin:
                     selected["plugin"] = args.plugin
+            if args.packet != SOURCE_PACKET and (
+                args.main_commit is not None or args.dev_commit is not None
+            ):
+                raise ValueError("source commit inputs require the named source packet")
             value = client.submit(selected, args.source)
         elif args.action == "result":
             with client.lock(args.request_id):

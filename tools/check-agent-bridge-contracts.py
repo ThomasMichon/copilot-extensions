@@ -753,6 +753,10 @@ def _validate_contract(
                 loaded[fixture["path"]] = (fixture["sha256"], data)
         validate_http_families(REPO, contract, loaded, errors, current)
 
+    if contract["id"] == "agent-bridge.session-host-wire":
+        from capture_bridge_host_inspection import validate_packets
+        validate_packets(REPO, contract, errors)
+
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:
         errors.append(

@@ -254,6 +254,32 @@ _Pending review._
 
 ## Journal
 
+### 2026-11-15 - Per-clause tracking reconciliation
+
+The existing P4744-1..7 and V4744-1..7 retain the complete original and refined
+contract. The following crosswalk reconciles the dated 2026-11-12 delivery
+record with the work still tracked here; it does not rerun or newly qualify
+source, tests, a migration or a live queue.
+
+| Clause | Retained credit | Unresolved acceptance and direct tracking |
+|---|---|---|
+| P/V4744-1 | The earlier record credits the ABANDONED retarget and a cap regression using a supported `max_attempts=3` override. | The production default remains five. Original simulated exhaustion, unaffected ordinary states and the separate queued spawn diagnostic/rearm remain under P/V4744-1 and global Validation. |
+| P/V4744-2 | The earlier record credits cleared owner/session and recorded `completed_at`; P4744-2 retains the reported field/fence/audit delivery. | Exact terminal ownership/lease/fence/audit and consistent returned-count naming remain tracked by P/V4744-2; historical read compatibility does not authorize producing new DEAD_LETTER states. |
+| P/V4744-3 | The earlier record credits ordinary terminal-settlement admission and removal of the bespoke paths. | The separate ordinary SPAWNED AND COLD witnesses, without calling either removed sweep, remain unbound here and directly tracked by P/V4744-3 and global Validation. |
+| P/V4744-4 | The earlier record credits the named three-column migration and its automatic queue-schema call. | Fixture conversion, no-op rerun and restored-backup/manual-repair acceptance remain unbound here and tracked by P/V4744-4 and global Validation; no migration is run by this reconciliation. |
+| P/V4744-5 | Read compatibility, the retirement/backup-repair note and migration crosslink retain their recorded credit. | The recorded State-model wording about clearing completion metadata still needs reconciliation with recorded `completed_at` semantics. P/V4744-5 retain both documentation surfaces and the original keep-OR-delete compatibility choice without requiring removal of working compatibility. |
+| P/V4744-6 | The historical CI run and successful agent-dispatch test step retain the dated credit recorded below. | That step is not independently bound here to every original suite selector or case. Original full-suite and individual exhaustion, settlement, migration, backup and unaffected-state witnesses remain under P/V4744-6 and global Validation; test-source qualification gaps are not claims of absent tests. |
+| P/V4744-7 | This crosswalk records credited and explicitly tracked results in the same canonical Plan/Validation/Journal. | Draft, every incumbent checkbox, the original Request, historical Journal and existing Dispatch custodians remain unchanged. Actual acceptance and evidence resolution remain with those owners; this entry is not effort Done. |
+
+This supports a separate **redundant-tracking** judgment for #4744 after normal
+review and current receiving readback, not a `COMPLETED` technical judgment.
+Retiring the issue's duplicate tracking would leave the full actionable
+contract, all unchecked product acceptance and existing source/resource duties
+in this Draft effort. It would not release a claim, appoint an implementer,
+prove a test or require an invented generic acknowledgment or native-host gate.
+The source disposition remains a separate provider action; none is claimed by
+this journal entry.
+
 ### 2026-11-12 - Existing retirement source and CI evidence reconciled
 
 #4844 actually merged as `87cd6d2694e4edef50603e3dc8493c0abd0420bf`.

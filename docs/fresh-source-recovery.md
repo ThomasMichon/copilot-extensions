@@ -44,6 +44,34 @@ native apply path. Preview obtains read-only footprint inventory
 through the fresh native owner when its ordinary tool dependencies are available;
 otherwise it reports inspection as unavailable, never as healthy or repaired.
 
+The bootstrap binds the toolkit's canonical `libs/agent-procutil` before loading
+application dependency closures. Published Main materializes vendored copies
+inside applications; those copies do not replace the repository process owner
+used by source preparation. The same selection runs in the fresh isolated
+execution child, without relying on a warmed parent module cache or `PYTHONPATH`.
+An already-loaded different utility copy is refused rather than reloaded.
+Application build inputs, utility-origin checks and native participant custody
+remain unchanged.
+
+For apply, the toolkit first prepares the ordinary external dependencies declared
+by its Manager, Worktrees and local-library source closure into the request's
+private `tool-dependencies` directory. This uses the existing UV dependency owner
+and seasoning policy, before native installation admission. A dependency-only
+input preserves Manager's approved bundled artifact mapping without installing
+the first-party source projects. Host UV discovery excludes the toolkit and
+current directory, not ordinary tool directories beneath the caller's home.
+The isolated child uses that directory after its source and standard-library
+paths; it does not
+rely on a warmed parent, execute site startup hooks or install into an existing
+runtime. These are the fresh controller's tools, not a change to the selected
+application's dependency profile. Preview does not publish application runtimes
+or activate services and may report footprint observation unavailable.
+
+An exception escaping native execution custody still leaves cleanup unconfirmed.
+The parent retains a matching child outcome as diagnostic evidence alongside the
+native interrupted state and null native exit; it does not convert that receipt
+into cleanup, completion or replay authority.
+
 ## Native composition
 
 The fresh toolkit composes the existing immutable acquisition, local source

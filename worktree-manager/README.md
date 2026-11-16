@@ -825,8 +825,35 @@ before writing an expandable user PATH, rather than publishing a different
 directory after Windows variable expansion; literal registry strings retain
 their original type.
 
-The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
-selects Python 3.11 or newer without running project resolution, then the engine
+The Manager is a standalone canonical Python-installer-engine adopter. Ordinary
+bootstrap selects uv-managed Python 3.11 without running project resolution.
+The lookup excludes active virtual environments and system Python and disables
+automatic downloads; when preparation is needed, the explicit bootstrap uses
+`uv python install --no-bin --no-registry 3.11`, then repeats the same lookup.
+It does not publish Python command aliases or register Python with the Windows
+launcher. These controls are supported by uv 0.8.0 and newer.
+Bootstrap checks external uv commands in PATH order and retains the first
+supported executable; an older, malformed or failing earlier copy does not
+hide a supported later copy. Windows selection excludes PowerShell-only
+scripts: the same tool must also execute from the Python constructor.
+On Windows, an explicit OS-policy refusal
+(`WinError 448` / `os error 448`) remains fatal rather than selecting another
+copy. Only when no supported candidate is found does bootstrap use its existing
+user-local prerequisite installation path, then repeat qualification.
+The same qualified UV path reaches runtime construction through the explicit
+`--bootstrap-uv` installation input, including queued installation and update
+participants. It is not a worker-environment hint or a second PATH lookup.
+Manager Dev source preparation carries it into the canonical application
+preparer before construction too; it does not reselect an ambient UV.
+The selected source's `scripts/runtime_install.py` declares this receiver
+contract with the exact line `# copilot-extensions:bootstrap-uv=1`. Bootstrap
+reads that declaration before sending the new argument; a missing or unknown
+generation refuses installation with an instruction to select a newer source.
+It never probes an effectful legacy invocation or retries installation with
+weaker tool selection. Older callers retain the existing default discovery
+behavior on the new provider. Repair-recovery does not take this installation
+input, and independent native-wheel inputs keep their own UV selection.
+The selected explicit interpreter is passed into construction, where the engine
 retains the source/dependency/configuration inputs and constructs a non-editable
 runtime. Governed `uv pip install` selects runtime dependencies for this platform,
 not development groups or unrelated platforms, while retaining the configured
@@ -836,6 +863,8 @@ before its first Python lookup and retains that physical path for acquisition
 and the subsequent lookup. It does not launch a WinGet executable link or
 reselect UV if PATH changes during bootstrap; missing or unsupported targets
 fail before runtime construction without changing Windows mitigation policy.
+POSIX bootstrap retains an absolute uv path before changing directories, including
+when the original PATH entry is relative.
 Git staging checkout also enables long-path handling only for that invocation,
 without changing user or repository Git configuration. Before constructing the
 runtime, bootstrap verifies the tracked checkout is complete and unchanged;
@@ -2220,12 +2249,15 @@ iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/
 curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.sh | bash
 ```
 
-Windows retains UV's successful Python selection. If that lookup instead fails
-with RedirectionGuard error 448, bootstrap resolves existing `python3`/`python`
-application paths to physical executables and verifies a base interpreter at
-Python 3.11 or newer. Store aliases, virtual environments and invalid probe
-responses are not accepted. With no qualified candidate, the original UV
-acquisition path still applies; mitigation and dependency policy are unchanged.
+Ordinary Windows and POSIX bootstrap use uv-managed Python 3.11, independently
+of an older first PATH Python or active virtual environment. Prepared toolchains
+are reused without acquisition. Windows RedirectionGuard error 448 remains an
+explicit OS-policy refusal rather than falling back to an ambient interpreter
+or attempting another download. The separately requested Windows system-Python
+mode and recovery-only interface retain their documented legacy behavior.
+Installed helper migration and removal of the legacy manual-update user-PATH
+publication above remain separate work under the
+[uv-managed Python plan](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary).
 
 The bootstrap fetches this `worktree-manager/` payload and **version-installs** it
 under the same convention as the harness's other installers — an immutable

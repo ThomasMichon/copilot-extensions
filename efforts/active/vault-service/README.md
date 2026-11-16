@@ -295,7 +295,8 @@ from retaining it._
   into the existing proposal's validation without using real credentials,
   changing a live service or bypassing architecture/owner admission.
 
-All runtime acceptance below is **pending**, not evidence of an implementation.
+Full parent runtime acceptance below is **pending**; the separately admitted
+relay source slice and its isolated qualification are recorded in the journal.
 The [validation matrix](validation.md) is the detailed, agent-recommended plan.
 
 - [ ] V1: typed bindings, complete credential lifecycle and protected delivery/use.
@@ -360,6 +361,130 @@ implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
 
+### 2026-11-16 - Closed-wheel dependency-profile source qualification
+
+The native closed-wheel receiver now joins admitted Vault extras to the explicit
+or recorded desired dependency profile. Unselected optional inputs fail before
+publication; selection is rechecked and persisted under the existing transaction
+lock. Completed-generation readiness additionally joins the frozen extras to
+that desired profile without adding a payload-tree scan.
+
+The generic native adapter forwards an optional ordinary health-callable name
+to the existing candidate engine. Vault uses its existing selected dependency
+health checks before completion; base callers retain module-only health. This
+does not construct a relay, read credentials or activate a service. Whole-file
+strict checking also required annotations in the touched retained-construction
+and source-target helpers; no checker suppression or admission level changed.
+
+Fresh Windows closed-wheel relay and combined SSH/relay construction passed,
+including explicit selection, unselected refusal, preserved update desire,
+actual installed dependency imports and readiness. Both profiles' provision
+and update paths passed with no ambient Python commands: construction and its
+preflight use the supplied wheel interpreter. The new condition first
+reproduced a real preflight failure before its correction. A separately built
+wheel with a missing required Gateway module failed before completion/publication.
+The final relay positive/negative packet passed two cases in 261.72 seconds
+(294.48 including preparation); the separate combined case passed in 171.57
+seconds (178.95 including preparation). These are not one aggregate run, and
+neither item nor group deadlines were increased. The generic callback
+refusal and affected receiver controls passed 21 cases, and profile/snapshot
+regressions passed 47 with two platform skips after the preflight correction.
+Before that correction, sync/native recipe controls passed 140 with one skip,
+and strict checking passed 23 physical files across the 18 selected projects
+and configured Linux/Windows targets.
+
+This is source qualification, not accepted publication or installed adoption.
+Required CI and review remain pending. R2-R4, independent deployment lifetime,
+real provider/file renewal and complete consuming journeys remain open. No
+live profile, installation, credential acquisition or rollout occurred.
+
+### 2026-11-16 - Native optional-profile source accepted
+
+PR #12840 merged to `dev` at `2026-11-16T09:50:16Z` as
+`29a22b5620765248ac413bbf19a401cb17128a46`, from exact head
+`41fd117825a9114648d90317fc9a9369ded5e077`. Copilot review `5917937017`
+approved that head without active issues; required CI `43842338316` passed.
+The managed merge used the authorized additional code-owner exception, not
+a CI or findings exception. The umbrella and parent remain open.
+
+The existing installer now selects explicit relay and combined SSH/relay
+dependency profiles, retaining desired state and immutable slots. Standalone
+Fleet Manager remains a first-party application artifact. Dependency health
+does not select policy, read keys, acquire credentials or start serving work.
+Qualification also corrected native Windows health-import asset lookup and
+bounded completion-driven source progress without increasing deadlines.
+
+The source packet passed 71 tests with two POSIX-only skips on Windows.
+Separate native selections qualified installed synthetic TLS consumers,
+base/SSH preservation, failed candidates and retained-source reuse. Source
+identity/progress passed 180 tests; eight native progress/quiet-window
+controls and the separate long-path integrity check passed. The closed-wheel
+suite passed 63 tests with one skip. Strict analysis covered 25 changed
+Python files across Linux/Windows targets. CI's full dependency-age audit
+passed all 616 declarations; exact unit source bindings and standalone
+release intent were corrected before the green run, without changing unit
+nodes, coverage, effect restrictions or budgets.
+
+This accepts part of R4's source construction only. Native closed-wheel
+non-base association, native consumer selection, installed service/adopter
+lifetime, actual renewal, R2/R3 and the full parent stay open. No installed
+runtime, credentials, enrollment, tunnel or shared service changed.
+
+### 2026-11-16 - Source-lease consumer join accepted
+
+PR #12818 merged to `dev` at `2026-11-16T06:47:50Z` as
+`d123d0b93d1b4d3cd3886343bb2692174a0692eb`, from exact head
+`02533b1e636ffcf5b19a4de43ced7d62cabd5707`. Copilot review `5915977280`
+approved without active issues; original and metadata-triggered required CI
+passed. The managed merge used the authorized additional code-owner
+exception, not a findings or CI exception. The umbrella remains open.
+
+The explicit normal-fetch profile now carries custodian-issued source
+authorization through Gateway selection into Bridge's finite acquire port
+and existing native account-file adapter. Serving-peer negotiation precedes
+consumer capability reads. Gateway and custodian installation pins remain
+independent; unknown token expiry is not a lease or native execution authority.
+Old callers retain their meanings and unknown POSTs have no replay/downgrade.
+
+The exact published head passed 183 Fleet and 46 Bridge regressions, with
+20 POSIX-only skips on Windows. The actual HTTP/TLS/PoP/channel/custodian path
+uses synthetic credentials; this run does not claim POSIX file effects or
+native CLI reload. All nine changed Python files passed strict Linux/Windows
+analysis. Lint, install/docs, dependency-age and required CI gates passed.
+
+Only this R2 consumer source contract is accepted. Native optional-profile
+construction/distribution, installed adoption, actual provider renewal,
+deliberate interaction, proper cache/provider evolution and remaining R2-R4
+and parent acceptance stay open. No live credentials, login, enrollment,
+tunnel, installed runtime or shared service changed.
+
+### 2026-11-16 - Initial normal-retrieval source accepted
+
+PR #12807 merged to `dev` at `2026-11-16T05:43:43Z` as
+`2759dce666e29bd4dd1b6ca6827ac1755c795827`, from exact head
+`7a4c969440f4bd7959ebb600a40ea97f768773e8`. Copilot review
+`5915476463` approved that head without active issues; required CI and
+its metadata-triggered rerun passed. The managed merge used the authorized
+exception to the additional code-owner vote, not a CI or findings exception.
+
+The opt-in SDK Gateway owner now composes current authorized Controller offers,
+the shared bounded selector and the existing account custodian. Normal provider
+retrieval and refresh are explicit, with unknown credential expiry kept separate
+from source leases. The strict available-only profile and legacy lease exchange
+retain their meanings. The existing vision and proposal now explicitly cover
+the independent cache, local/central broker role and standard provider drivers.
+
+The exact published source passed 168 focused real TLS/channel/custodian and
+Gateway regressions. All seven changed Python files passed whole-file strict
+analysis for Linux and Windows with the Python 3.10 target retained; source,
+install, documentation and required CI gates passed. Credentials were synthetic.
+
+This is the initial R2 source flow, not full R2-R4 or parent acceptance. Continue
+the actual consumer/source-lease composition, qualified cache/provider contract,
+deliberate interaction and native optional-profile construction/adoption.
+Durable transactions and every remaining Plan/Validation item stay open.
+No live credential, installed runtime, enrollment or shared service changed.
+
 ### 2026-11-15 - Local transaction and admitted relay scopes distinguished
 
 The effort is Active for the separately admitted federated-relay slice.
@@ -375,6 +500,32 @@ detailed-matrix cases for the inherited #3980/#3981/#5918/#5940/#5959 union.
 Existing headless OR acceptance, V1-V10, qualification levels, owners and
 P0/D1-D6 gates remain unchanged. Documentary review is not implementation,
 credential/native interaction, source retirement or resource transfer.
+
+### 2026-11-15 - First running federated source flow
+
+Implemented the optional channel in the existing Vault service lifetime,
+using the existing account custodian and exact channel-derived caller grants.
+The connector consumes an expiring local conduit observation while retaining
+the canonical Gateway TLS/Host/proof identity. Native configuration and cheap
+status are separate from portable vault settings and credential acquisition.
+
+The isolated source flow exercised actual Vault generation startup, real TLS
+Gateway admission, Controller-service advertisement, authorized synthetic
+credential delivery, denied recipient/capability, conduit withdrawal,
+replacement and shutdown. The composed Gateway packet passed 130 tests,
+including caller/source contracts and revocation. A revoked offer now reports
+the stable unavailable result even before its old channel finishes closing.
+
+The contained Windows generation/request-settlement packet passed 119 tests
+with one platform skip and settled cleanup. The source work also corrected
+fixture client-lifetime and delayed receipt-cleanup problems without weakening
+production process-identity custody. These contained results do not qualify an
+installed optional profile or service survival after production caller-Job loss.
+
+The normal native `base`/`ssh` profiles do not yet select the optional relay
+dependency closure. R2-R4, attended durable transactions, independent installed
+distribution, real provider adoption and complete parent acceptance remain open.
+No live credential, enrollment, installation, tunnel or shared service changed.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Journal -->
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit immutable federated-relay and combined SSH profiles with first-party SDK artifact composition and dependency-only readiness.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

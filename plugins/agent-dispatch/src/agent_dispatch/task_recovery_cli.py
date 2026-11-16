@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import sys
 from types import ModuleType
+from typing import cast
 
 from .client_task_recovery import WAKE_OUTBOXES, strict_reset_request, validate_recovery_fields
 from .loop_commands import _resolve_cli_module
 
 
 def _core() -> ModuleType:
-    return _resolve_cli_module()
+    return cast(ModuleType, _resolve_cli_module())
 
 
 def _recovery_flags(parser: argparse.ArgumentParser, *, request_id: bool = True) -> None:
@@ -28,7 +29,9 @@ def _recovery_flags(parser: argparse.ArgumentParser, *, request_id: bool = True)
     parser.add_argument("--reason", required=True, help="nonblank recovery reason")
 
 
-def register_task_recovery_commands(sub: argparse._SubParsersAction) -> None:
+def register_task_recovery_commands(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
     parser = sub.add_parser(
         "task-diagnostics",
         allow_abbrev=False,
@@ -54,6 +57,10 @@ def register_task_recovery_commands(sub: argparse._SubParsersAction) -> None:
     parser.add_argument("task_id")
     parser.add_argument("--outbox", choices=WAKE_OUTBOXES, required=True)
     parser.add_argument("--wake-id", required=True)
+    parser.add_argument(
+        "--settle-native-send", action="store_true",
+        help="explicitly settle the original Bridge key; may fence non-admission, never replay",
+    )
     _recovery_flags(parser, request_id=False)
     parser.set_defaults(func=_core()._cmd_reconcile_wake)
 
@@ -70,7 +77,7 @@ def _validated_fields(args: argparse.Namespace, *names: str) -> dict[str, str] |
 def _cmd_task_diagnostics(args: argparse.Namespace) -> int:
     with _core()._client(args, ensure=False, read_only=True) as client:
         result = client.task_diagnostics(args.task_id)
-    return _core()._emit(result)
+    return cast(int, _core()._emit(result))
 
 
 def _cmd_detach_agent(args: argparse.Namespace) -> int:
@@ -79,7 +86,7 @@ def _cmd_detach_agent(args: argparse.Namespace) -> int:
         return 2
     with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
         result = client.recover_task(args.task_id, operation="detach_agent", **fields)
-    return _core()._emit(result)
+    return cast(int, _core()._emit(result))
 
 
 def _cmd_reset(args: argparse.Namespace) -> int:
@@ -102,17 +109,18 @@ def _cmd_reset(args: argparse.Namespace) -> int:
                 reason=args.reason,
                 expected_status=args.expected_status,
             )
-        return _core()._emit(result)
+        return cast(int, _core()._emit(result))
     operation, fields = request
     with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
         result = client.recover_task(args.task_id, operation=operation, **fields)
-    return _core()._emit(result)
+    return cast(int, _core()._emit(result))
 
 
 def _cmd_reconcile_wake(args: argparse.Namespace) -> int:
     fields = _validated_fields(args, "outbox", "wake_id", "expected_revision", "actor", "reason")
     if fields is None:
         return 2
+    options = {"settle_native_send": True} if args.settle_native_send else {}
     with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
-        result = client.reconcile_wake(args.task_id, **fields)
-    return _core()._emit(result)
+        result = client.reconcile_wake(args.task_id, **fields, **options)
+    return cast(int, _core()._emit(result))
