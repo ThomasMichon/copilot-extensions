@@ -54,6 +54,7 @@ def cmd_batch_get(args):
         try:
             result = read_credential(SimpleNamespace(
                 entry=entry, field=field, refresh=args.refresh, prompt=False, strict_cache=True,
+                require_running=getattr(args, "require_running", False),
             ))
         except (CacheProtectionError, KekError, ValueError):
             results.append({
@@ -100,9 +101,13 @@ def add_commands(sub, get_handler):
                    help="Use the persistent cache only when it is at most this many seconds old")
     p.add_argument("--cache-only", action="store_true", dest="cache_only",
                    help="Read from the persistent cache only; never contact the service")
+    p.add_argument("--require-running", action="store_true",
+                   help="Use cached values or an already-running service; never activate it")
     p.set_defaults(func=get_handler)
 
     p = sub.add_parser("batch-get", help="Read ordered entry/field requests from JSON stdin")
     p.add_argument("--refresh", action="store_true",
                    help="Bypass the persistent cache and reconcile live values")
+    p.add_argument("--require-running", action="store_true",
+                   help="Use cached values or an already-running service; never activate it")
     p.set_defaults(func=cmd_batch_get)

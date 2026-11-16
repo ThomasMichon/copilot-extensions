@@ -54,6 +54,7 @@ def read_credential(args) -> CredentialRead:
     pinned = config.PINNED_CONTEXT_ENV in os.environ
     legacy_entry = legacy_cache_entry(entry, cache_entry)
     strict_cache = getattr(args, "strict_cache", False)
+    require_running = getattr(args, "require_running", False)
     readonly_cache = pinned or strict_cache or cache_only
     cache_decryption_failed = False
     cache_warning = None
@@ -95,16 +96,29 @@ def read_credential(args) -> CredentialRead:
         return CredentialRead(1, error=error, source="cache")
 
     try:
-        ready = cli.ensure_service()
+        if require_running:
+            running = cli.send_command(
+                {"action": "ping"}, timeout=5.0, strict_endpoint=True,
+            )
+            ready = (
+                isinstance(running, dict) and running.get("ok") is True
+                and running.get("accepting_work", True) is True
+            )
+        else:
+            ready = cli.ensure_service()
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
-        if not strict_cache:
+        if not (strict_cache or require_running):
             raise
         return CredentialRead(
             1, error="service_unavailable; vault service could not be reached",
             warning=cache_warning,
         )
     if not ready:
-        return CredentialRead(1, error="could not start vault service", warning=cache_warning)
+        error = (
+            "service_unavailable; selected vault service must already be running"
+            if require_running else "could not start vault service"
+        )
+        return CredentialRead(1, error=error, warning=cache_warning)
 
     request = {
         "action": "get",
@@ -123,15 +137,18 @@ def read_credential(args) -> CredentialRead:
     reconciliation_failed = False
     with read_lock:
         try:
-            resp = cli.send_command(request, timeout=None)
+            resp = cli.send_command(
+                request, timeout=None,
+                **({"strict_endpoint": True} if require_running else {}),
+            )
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
-            if not strict_cache:
+            if not (strict_cache or require_running):
                 raise
             return CredentialRead(
                 1, error="service_read_failed; vault service request did not complete",
                 warning=cache_warning,
             )
-        if strict_cache and resp is not None and (
+        if (strict_cache or require_running) and resp is not None and (
             not isinstance(resp, dict)
             or type(resp.get("ok")) is not bool
             or (resp["ok"] and not isinstance(resp.get("value"), str))

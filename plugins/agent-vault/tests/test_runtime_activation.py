@@ -156,6 +156,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
     assert json.loads(metadata.stdout)["capabilities"] == [
         "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
         "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
+        "credential-read-require-running-v1",
     ]
     assert not (runtime / "run").exists()
 
@@ -363,6 +364,7 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
         assert json.loads(result.stdout)["capabilities"] == [
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1",
+            "preserved-cache-recovery-v1", "credential-read-require-running-v1",
         ]
     if not prepared and dispatcher_aware and operation == "contract":
         assert json.loads(result.stdout)["runtime_prepared"] is False
@@ -912,7 +914,8 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
             " selected = config.resolve_context(strict=True)\n"
             " print(json.dumps({'enabled':configuration.runtime_enabled(), 'group':selected.group}))\n"
             "service._run_resident = probe\n"
-            "sys.argv = ['agent_vault.service', *captured['argv'][6:]]\n"
+            "service_args = captured['argv'][captured['argv'].index('--foreground'):]\n"
+            "sys.argv = ['agent_vault.service', *service_args]\n"
             "service.main()\n"
         )
     for enabled in (True, False, None, "invalid"):
