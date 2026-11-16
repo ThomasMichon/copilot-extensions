@@ -1,14 +1,22 @@
-# First-use CodeSpace doctor: proposed receiving contract
+# First-use CodeSpace doctor: accepted planned contract
 
 Back to [Backlog Reconciliation](README.md).
 
 ## Intent and exact scope
 
-This agent-recommended proposal would retain #9281's complete first-use
-`agent-codespaces doctor <name> --fix` contract directly in the existing
-#954 venue-parity canonical. Both issues remain OPEN. The issue-only study
-establishes a feasible receiving route, not accepted issue content, a
-technical fix, implementation ownership or permission to provision a venue.
+This agent-recommended tracking intake directly retains #9281's complete
+first-use `agent-codespaces doctor <name> --fix` contract in the existing
+#954 venue-parity canonical. The proposal merged in #12810; the direct
+issue addition was published and its entire actual body read back.
+Both issues remain OPEN, and all seven new acceptance rows are unchecked.
+This is not a technical fix, implementation assignment or venue-operation grant.
+
+The separate disposition keeps #9281 OPEN under the standing distinction
+between fulfilling another contributor's request and dismissing it as a
+duplicate. Complete planned receiving does not establish fulfillment or
+waive that boundary. The original request remains unedited and received an
+[acknowledgment](https://github.com/ThomasMichon/copilot-extensions/issues/9281#issuecomment-6908587849),
+not a closure.
 
 The reported starting state is an existing Ubuntu 24.04 CodeSpace with
 Copilot CLI, node, python3 and uv, but no tmux, no `copilot-extensions`
@@ -61,11 +69,12 @@ denial, P3 reservations, and the separate #2042, #2094, #1082, #2476 and
 #5926 scopes. The independent #4227 affected-scope condition is not resolved
 or expanded by adding this first-use CodeSpace case.
 
-## Proposed direct issue intake
+## Direct accepted issue intake
 
-Publish this addition only after required plan review and current
-qualification. Preserve the receiver's entire incumbent body, discussions
-and check states. All new technical rows remain unchecked.
+This addition was published after required plan review and current
+qualification. The receiver's entire incumbent body, eighteen discussions
+and twenty-three existing check states were preserved. All seven new rows
+remain unchecked.
 
 ### Plan FD9281
 
@@ -143,8 +152,17 @@ execution, runtime update or cleanup is authorized by this tracking plan.
 
 ## Publication boundary
 
-This proposal and its [dated journal](journal/2026/11.15-venue-doctor-first-use-receiving.md)
-require normal review before issue mutation. A merged proposal alone is not
-accepted receiving content. Actual delivery, complete readback and any
-separate source retirement must be recorded afterward; the parent campaign
-and its fixed whole-queue completion gates remain open.
+The [dated journal](journal/2026/11.15-venue-doctor-first-use-receiving.md)
+records reviewed intent, actual issue delivery, complete readback and the
+separate keep-open judgment. The receiver's incumbent remains an exact
+prefix, the source original is retained verbatim, and post-intake metadata
+shows one new receiver edit by the publisher with no changed discussion,
+assignment or ownership.
+
+The source is another contributor's unfulfilled request. Author eligibility
+for research does not waive the standing no-duplicate-dismissal boundary;
+no `NOT_PLANNED` closure was attempted or credited. A future `COMPLETED`
+judgment needs actual whole fulfillment and delivering evidence, not this
+accepted plan. No implementation, native execution, venue operation or
+resource release occurred. The parent campaign and its fixed whole-queue
+completion gates remain open.
