@@ -130,7 +130,8 @@ The existing signed-in provider retains refresh and physical-custody policy.
 `AccountSourceHandler` advertises this contract as `normal_fetch_contract`
 through `/health`. `POST /token-fetch` requires the exact source fields and
 capability above plus `fetch_contract` and `installationId`, with no lease
-fields. The selected installation pin is mandatory in the body, allowing
+fields by default. An explicit matching `lease_contract` additionally requests
+the existing custodian-issued source lease. The selected installation pin is mandatory in the body, allowing
 Gateway forwarding to preserve the original filtered headers. A supplied
 installation header must still match; a contradictory pin never gets replaced.
 The handler checks contract, installation and caller/source grants before
@@ -198,3 +199,53 @@ owner. Real TLS/channel tests cover this composition, affinity, source-policy
 withdrawal, unknown expiry, lost/replaced sources, deadline/caller denial and
 old/misbound replies. Installed profiles, live signed-in credentials, pod
 renewal and attended-auth transactions remain separately qualified.
+
+## Normal retrieval with source authorization
+
+The optional `normal_source_lease_contract` health declaration is exactly
+`{fetch_contract: "fleet-manager.vault-normal-fetch/v1",
+lease_contract: "credential-relay.account-source-lease/v1"}`. This is separate
+from ordinary retrieval and available-only support. A source receiver accepts
+the matching `lease_contract` on its normal-fetch request and asks its existing
+custodian for `source_lease=True`. The custodian must already authorize that
+lease in current policy; the adapter cannot invent one from token expiry or a
+Gateway timeout. The source response retains all normal-fetch fields and adds
+the existing five lease fields.
+
+For the Gateway-facing consumer, construct `GatewayAccountFetch` with an
+explicit `installation` identity. Its local `/health` publishes that identity
+and the new contract without acquiring credentials. After verifying both,
+the consumer adds `lease_contract` and `installationId` to its existing
+`/token-fetch` body. The latter pins the **Gateway owner**, while each
+`AccountSourcePin.installation` still pins a separate custodian. These pins
+are not interchangeable. The Gateway body pin is enforced before source
+dispatch; it does not depend on expanding the channel's filtered headers.
+Missing or foreign pins/contracts refuse without acquisition.
+
+The selected source's lease ID, issuance and expiry survive forwarding. Every
+hop conservatively consumes wall/monotonic elapsed time, rejects expired
+authorization and permanently expires a retained observation on clock
+regression. Selection and final response formation also check lease usability.
+The Gateway never mints a replacement lease. The consumer response contains
+the Gateway `installationId`, normal-fetch binding/account/host and actual
+token expiry (still `null` for the current getter), plus the source lease.
+Neither unknown token expiry nor a source lease conveys native execution
+authority.
+
+Bridge's opt-in `GatewaySourceLeaseClient` implements this consumer contract
+and the existing `CopilotAccountFile.renew` port; see
+[source-account renewal](../../plugins/agent-bridge/docs/source-account-file-auth.md#gateway-selected-acquisition).
+It supplies separately selected consumer-owned capability files per Controller,
+never a Gateway credential or a client-side Controller retry chain. A new
+consumer refuses an old/rolled-back Gateway before reading those files; a
+new Gateway refuses an unsupported source result without token-only fallback
+or replay. Old normal-fetch and fixed-source lease requests retain their
+previous semantics. No old form is retired. Deploy capable source receivers
+and the explicitly selected Gateway owner before enabling this consumer.
+
+The contained cross-package test drives the actual Bridge HTTP client through
+verified TLS, PoP admission, local Gateway selection, the Controller channel and
+the real account custodian with a synthetic provider. It covers lease renewal,
+policy withdrawal and separately gated POSIX native-file renewal/withdrawal.
+This is source-contract evidence, not installed adoption, a signed-in account,
+a running CLI reload or native execution enforcement.

@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from .gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
-from .gateway_vault_available import NORMAL_FETCH_CONTRACT
+from .gateway_vault_available import NORMAL_FETCH_CONTRACT, NORMAL_LEASE_SUPPORT
 from .planning import PlanError, decode as _decode
 
 LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
@@ -112,6 +112,7 @@ class AccountSourceHandler:
                 "installationId": self._installation,
                 "source_credentials_contract": {"lease_contract": LEASE_CONTRACT, "exchange": "http/v1"},
                 "normal_fetch_contract": NORMAL_FETCH_CONTRACT,
+                "normal_source_lease_contract": NORMAL_LEASE_SUPPORT,
             })
         normal = request.target == "/token-fetch"
         if request.method != "POST" or request.target not in ("/source-credentials", "/token-fetch"):
@@ -124,7 +125,8 @@ class AccountSourceHandler:
                 raise ValueError
             value = decode(request.body)
             keys = _FIELDS | {"capability"}
-            shapes = ((keys | {"fetch_contract", "installationId"},) if normal else
+            normal_keys = keys | {"fetch_contract", "installationId"}
+            shapes = ((normal_keys, normal_keys | {"lease_contract"}) if normal else
                       (keys, keys | {"lease_contract"}))
             if (not isinstance(value, dict) or frozenset(value) not in shapes
                     or not all(_text(value[name]) for name in keys)

@@ -124,6 +124,7 @@ merged in #12793. Its selected
 private-container controls exercise the persistent turn-write boundary with
 independent processes; they do not establish native-runtime or installed
 qualification and do not close this slice's aggregate acceptance.
-The next provider-first slice exposes the explicit negotiated Bridge
-CLI/HTTP operation and preserves passive receipt semantics; automatic Dispatch
-consumption and actual original-flow settlement remain unwired and unqualified.
+The negotiated Bridge CLI/HTTP front door merged in #12802, preserving passive
+receipt semantics. The next slice adds explicitly selected Dispatch consumption
+through its existing control-authorized reconciliation owner; it does not
+enable automatic settlement or qualify an actual original-flow outcome.
