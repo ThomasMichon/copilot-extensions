@@ -119,9 +119,10 @@ merged plan does not establish running adoption.
       The [before-start body correction](journal/2026/11.14-before-start-owner.md)
       targets a proved, fully prepared original pool body without manufacturing
       affirmative start; incomplete startup and legacy uncaptured owners remain open.
-      The proposed [original native-wake settlement](native-wake-settlement.md)
+      The [original native-wake settlement plan](native-wake-settlement.md)
       separates passive receipt observation from owner-proved, durably fenced
-      non-admission; review and implementation qualification remain open.
+      non-admission; #12789 accepted the plan, while implementation
+      qualification remains open.
 
 ### Phase 3 - Source and periodic evaluation integration
 
