@@ -343,11 +343,13 @@ the non-public approval conversation.
 ## Plan
 
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
-proposes direct pre-clone noninteractive authentication, multiple-account
-routing and actual owning-plugin installer discovery in the existing onboarding
-effort. Ordinary standalone provisioning and all implementation owners remain
-independent. Review, merged receiving, readback and separate source judgment
-remain outstanding; #4201 is still OPEN and no reduction credit is claimed.
+verifies #12842's reviewed delivery of direct pre-clone noninteractive
+authentication, multiple-account routing and actual owning-plugin installer
+discovery in the existing onboarding effort. Complete receiving readback and
+the separate source judgment support #4201's `NOT_PLANNED` tracking retirement;
+all seven technical rows, standalone provisioning and existing owners remain.
+One new arrival, claimed cold-recovery follow-up #12841, offsets that departure:
+the complete 09:57:33 UTC census remains 841 whole open, 112 above fixed 729.
 
 The [cold-bootstrap source and keeper unit](journal/2026/11.16-cold-bootstrap-source-completion.md)
 verifies #12824's complete narrow source/regression fulfillment in merged
