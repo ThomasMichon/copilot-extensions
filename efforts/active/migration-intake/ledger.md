@@ -303,3 +303,22 @@ supports this finite runtime contract; #4197's distinct documentation intake
 neither receives it nor prohibits separately admitting it. All new technical
 acceptance remains unchecked. Planned receiving does not require the features
 or a native activation to have happened first, and does not establish either.
+
+## Finite runtime-agent authoring-contract intake (2026-11-16 UTC)
+
+This route becomes effective through normal reviewed delivery of the
+accompanying complete domain Plan/global Validation/Coordination amendment.
+Ledger publication alone is not domain acceptance. Prior entries remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete runtime-agent authoring shape and enforcement: required/optional surfaces, reference and before-release command OR CI, attributable invocation, installed-payload capability agreement, installation ownership, idempotent optional-safe lifecycle and platform fixtures | Public #1176, complete original and three discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [marketplace-scoped-installations](../marketplace-scoped-installations/README.md), finite FC1176-P1-P8/V1-V4 through existing Phase 2/8 | Retain #1176 pending reviewed merge, complete direct OPEN #1096 receiving delivery/readback and separate source judgment; no new issue, executor or custody transfer |
+
+This is the existing runtime/invocation/lifecycle owner, not a second
+implementation program. Delivered authoring definition/structural checks keep
+their credit. General runtime-agent authoring does not widen suite-private cell
+eligibility, require default hosts to activate cells or complete every unrelated
+#1096 item first. The domain remains Blocked/parked; Phase 8 blocking enforcement,
+all incumbent acceptance, actual assignments, native/diagnostic/release and
+source/resource custody remain. Planned intake is neither technical completion
+nor permission to resume capability execution.

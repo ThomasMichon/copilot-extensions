@@ -374,6 +374,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [runtime source and authoring-contract unit](journal/2026/11.16-runtime-source-and-authoring-contract.md)
+records #12763/#12834's independently verified whole source requests and
+acknowledged `COMPLETED` dispositions through merged #12767/#12835, with no
+release, installed or new native claims. Its
+[complete finite #1176 receiving contract](runtime-authoring-contract-receiving.md)
+adds planned Phase 2/8 and global Validation acceptance under parked #1096,
+preserving all eight original families, literal alternatives and custody.
+Reviewed merge, direct issue delivery/full readback and separate source
+judgment remain ahead; #1176 is not declared complete.
+Two inflow arrivals offset the two verified completions: the complete
+2026-11-16 19:39:02 UTC census remains 859 whole open, 130 above fixed 729.
+
 The [changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
 verify #12831's actual merge while retaining #9532's explicit original-history,
 adoption, rollback and lifetime gates. #4303's whole generic branch-resume
