@@ -25,6 +25,11 @@ the passive. Postcommit retirement is irreversible.
 With ``self_retirement``, publication commits before ``activate_successor``
 can admit work. Serving readiness completes installation independently of
 predecessor retirement; an explicit bounded fallback may then clean up old owners.
+
+Exact-predecessor fencing retains writer-owned recovery by default. A caller
+that never drains the predecessor may explicitly disable writer reconciliation;
+its breadcrumb records that no drain was requested, so ordinary recovery does
+not change the predecessor's admission gate.
 """
 
 from __future__ import annotations
@@ -121,6 +126,7 @@ class CutoverOrchestrator:
         refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
         routing_lock_timeout: float | None = None,
         preserve_raw_active: bool = False,
+        writer_reconciliation: bool | None = None,
     ) -> None:
         if preserve_raw_active and refuse_old is None:
             raise ValueError("raw active preservation requires a publication refusal guard")
@@ -132,6 +138,10 @@ class CutoverOrchestrator:
             raise ValueError("self-retirement requires successor activation without predecessor drain")
         if activate_successor is not None and not self_retirement:
             raise ValueError("successor activation requires self-retirement")
+        if writer_reconciliation is not None and type(writer_reconciliation) is not bool:
+            raise ValueError("writer reconciliation must be a boolean")
+        if writer_reconciliation is False and (drain_before_publish or drain_predecessor):
+            raise ValueError("writer reconciliation opt-out requires a no-drain cutover")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -148,6 +158,10 @@ class CutoverOrchestrator:
         self.routing = routing_mod
         self.drain_before_publish = drain_before_publish
         self.expected_old = expected_old
+        self.writer_reconciliation = (
+            drain_before_publish or expected_old is not None
+            if writer_reconciliation is None else writer_reconciliation
+        )
         self.preserve_raw_active = preserve_raw_active
         self.on_published = on_published
         self.self_retirement = self_retirement
@@ -223,7 +237,7 @@ class CutoverOrchestrator:
 
         return _await_exit(self, handle, timeout=timeout, poll=poll)
 
-    def _raw_active(self) -> dict | None:
+    def _raw_active(self) -> dict[str, Any] | None:
         """The routing table's own ``active`` row -- never healed to ``previous``."""
         return raw_active(self)
 
@@ -373,12 +387,14 @@ class CutoverOrchestrator:
         result = CutoverResult(ok=False, conditional=conditional is not None)
         publication_witness = None
         new_process_start_time = None
-        def write_breadcrumb(**kwargs: Any) -> dict:
+        def write_breadcrumb(**kwargs: Any) -> dict[str, Any]:
             if conditional:
                 kwargs["state"] = "conditional-" + kwargs["state"]
             kwargs["publication_witness"] = publication_witness
             kwargs["new_process_start_time"] = new_process_start_time
-            kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
+            kwargs["requires_writer_reconciliation"] = self.writer_reconciliation
+            if not self.drain_predecessor and not self.writer_reconciliation:
+                kwargs["predecessor_drain_requested"] = False
             if self.self_retirement:
                 kwargs["self_retirement"] = True
             try:
@@ -782,13 +798,17 @@ class CutoverOrchestrator:
                     from .cutover_drain import shutdown_predecessor
 
                     shutdown_predecessor(self, old, old_client, result)
+                    if self.retire_failed_predecessor is not None and not health_check(
+                        self._client_host(), new_port,
+                    ):
+                        raise CutoverError("incoming daemon lost readiness during predecessor cleanup")
                 result.steps.append("old daemon shutdown requested" if result.predecessor_cleanup is None
                                     else "old daemon best-effort retirement attempted")
                 if conditional:
                     conditional.confirm_retired()
                     result.retirement_confirmed = True
                     result.steps.append("old daemon exit confirmed")
-                detail = {"new_port": new_port}
+                detail: dict[str, Any] = {"new_port": new_port}
                 if result.predecessor_cleanup is not None:
                     detail.update(old_endpoint=old_dict, predecessor_cleanup=result.predecessor_cleanup)
                 self._emit(
@@ -836,7 +856,8 @@ class CutoverOrchestrator:
             if isinstance(exc, routing_persistence.PublicationCommitUncertain):
                 if self.self_retirement and not result.committed:
                     try:
-                        active = Endpoint.from_dict(self._raw_active())
+                        raw = self._raw_active()
+                        active = Endpoint.from_dict(raw) if raw is not None else None
                         result.committed = active is not None and (
                             active.bind, active.port, active.pid, active.version, active.process_start_time,
                         ) == (self.bind, new_port, new_pid, self.version, new_process_start_time) and (
@@ -972,7 +993,7 @@ class CutoverOrchestrator:
     def _adopt_relay(
         self, new_port: int, result: CutoverResult,
         *, make_client: Callable[[str], _Client] | None = None,
-        adopt_relay: Callable[[], dict] | None = None,
+        adopt_relay: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         """Best-effort: bind the credential relay on the new daemon (non-fatal)."""
         from .cutover_drain import adopt_relay as apply

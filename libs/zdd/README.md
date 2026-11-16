@@ -149,6 +149,21 @@ attempt. An adopter that cannot negotiate predecessor recovery may set
 then left undrained until successor serving readiness permits native cleanup.
 Skipping drain without that bounded retirement owner is refused.
 
+Exact `expected_old` fencing retains writer-owned recovery by default. A pure
+no-drain adopter may explicitly set `writer_reconciliation=False`; this is
+refused if predecessor drain or pre-publication drain is enabled. Its breadcrumb
+records `predecessor_drain_requested: false`, so ordinary recovery preserves the
+original witness without reopening a predecessor admission gate it never closed.
+Existing stateful, conditional and resident recovery defaults are unchanged.
+An adopter selecting its predecessor outside `run()` can hold `CutoverLock`
+through stale-route reconciliation, selection and `run(held_lock=...)`, which
+borrows that exact authority instead of reacquiring it.
+
+Bounded retirement adapters must revalidate successor health after any native
+exit wait and before an irreversible signal. Synchronous cutover also checks
+incoming health after its retirement callback; actual incoming readiness loss
+is a failed committed result, not a non-fatal predecessor-cleanup outcome.
+
 Publications for a live PID also record its `process_start_time`, establishing
 the process identity when the route is written rather than sampling a potentially
 reused PID during later adoption. The three publication APIs accept an optional

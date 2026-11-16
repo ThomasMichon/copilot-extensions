@@ -1,5 +1,7 @@
 """Process admission and settled database shutdown for the Bridge ASGI host."""
 
+from __future__ import annotations
+
 import asyncio
 from contextlib import asynccontextmanager
 import contextvars
@@ -8,12 +10,12 @@ import logging
 import sys
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar
-
-from fastapi import FastAPI
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
 
 from agent_procutil.daemon_instances import admit_daemon_instance
-from .db import Database
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+    from .db import Database
 
 log = logging.getLogger(__name__)
 _P = ParamSpec("_P")

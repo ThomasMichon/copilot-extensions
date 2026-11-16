@@ -182,7 +182,8 @@ def _cmd_deploy(
     serving: ServingRuntime | None = None,
 ) -> None:
     from zdd import breadcrumb, routing
-    from zdd.cutover import CutoverOrchestrator
+    from zdd.cutover import CutoverOrchestrator, CutoverResult
+    from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
     from . import __version__
     from .client import BridgeClient
@@ -386,12 +387,8 @@ def _cmd_deploy(
         prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
     successor_published = False
-    ordinary_predecessor = None
-    ordinary_successor = None
-    if serving is None:
-        table = routing.read_table(config_dir(), strict=True) or {}
-        raw = table.get("active")
-        ordinary_predecessor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+    ordinary_predecessor: routing.Endpoint | None = None
+    ordinary_successor: routing.Endpoint | None = None
 
     def refuse_ordinary(active: dict[str, Any] | None) -> str | None:
         if active_route_is_forward(active):
@@ -449,29 +446,58 @@ def _cmd_deploy(
         candidate.mark_published(endpoint)
         successor_published = True
 
-    orch = CutoverOrchestrator(
-        config_dir(),
-        bind=cfg.bind,
-        version=__version__,
-        spawn_passive=spawn_passive,
-        health_check=health_check,
-        make_client=make_client,
-        pick_free_port=pick_free_port,
-        refuse_old=(
-            refuse_serving if serving is not None else
-            refuse_ordinary
-        ),
-        expected_old=predecessor if serving is not None else ordinary_predecessor,
-        on_published=(
-            record_successor_publication if serving is not None else
-            record_ordinary_publication if ordinary_predecessor is not None else None
-        ),
-        retire_failed_predecessor=retire_ordinary if ordinary_predecessor is not None else None,
-        drain_predecessor=ordinary_predecessor is None,
-    )
+    def run_cutover(held_lock: CutoverLock | None = None) -> CutoverResult:
+        nonlocal ordinary_predecessor
+        if serving is None:
+            healing = routing.reap_stale_active(config_dir(), service="agent-bridge")
+            if str(healing.get("reason", "")).startswith("error:"):
+                return CutoverResult(ok=False, error=f"routing reconciliation failed: {healing['reason']}")
+            table = routing.read_table(config_dir(), strict=True) or {}
+            routing._validate_endpoint_rows(table)
+            raw = table.get("active")
+            ordinary_predecessor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        orch = CutoverOrchestrator(
+            config_dir(),
+            bind=cfg.bind,
+            version=__version__,
+            spawn_passive=spawn_passive,
+            health_check=health_check,
+            make_client=make_client,
+            pick_free_port=pick_free_port,
+            refuse_old=refuse_serving if serving is not None else refuse_ordinary,
+            expected_old=predecessor if serving is not None else ordinary_predecessor,
+            on_published=(
+                record_successor_publication if serving is not None else
+                record_ordinary_publication if ordinary_predecessor is not None else None
+            ),
+            retire_failed_predecessor=retire_ordinary if ordinary_predecessor is not None else None,
+            drain_predecessor=ordinary_predecessor is None,
+            writer_reconciliation=False if ordinary_predecessor is not None else None,
+        )
+        if held_lock is not None:
+            return orch.run(
+                health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
+                force=args.force, held_lock=held_lock,
+            )
+        return orch.run(
+            health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force,
+        )
+
     res = None
     try:
-        res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
+        if serving is None:
+            lock = CutoverLock(config_dir())
+            try:
+                lock.acquire(timeout=args.health_timeout + args.drain_timeout + 60.0)
+            except CutoverLockedError as exc:
+                res = CutoverResult(ok=False, error=str(exc))
+            else:
+                try:
+                    res = run_cutover(lock)
+                finally:
+                    lock.release()
+        else:
+            res = run_cutover()
     finally:
         if candidate is not None:
             candidate.close(completed=res is not None and res.ok)
@@ -547,7 +573,8 @@ def _cmd_deploy(
             try:
                 active_url = f"http://{routing.format_authority(host, active.port)}"
                 reattach = make_client(active_url)._request(
-                    "POST", "/api/v1/session-hosts/reattach"
+                    "POST", "/api/v1/session-hosts/reattach",
+                    request_timeout=5.0, allow_retry=False,
                 ) or {}
                 res.steps.append(
                     f"post-cutover reattach: {reattach.get('reattached', 0)} session(s)"

@@ -56,7 +56,7 @@ import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeGuard
 
 from zdd import routing, routing_persistence
 from zdd.routing import format_authority
@@ -81,7 +81,7 @@ def breadcrumb_path(config_dir: str | os.PathLike[str]) -> Path:
     return Path(config_dir) / _BREADCRUMB_FILENAME
 
 
-def _atomic_write(path: Path, data: dict) -> None:
+def _atomic_write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     routing_persistence.write(path, data)
 
@@ -90,7 +90,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
+def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict[str, Any] | None:
     """Read and parse the cutover breadcrumb, or ``None`` if absent/unreadable."""
     path = breadcrumb_path(config_dir)
     try:
@@ -105,8 +105,13 @@ def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) -> str | None:
+def recovery_refusal(config_dir: str | os.PathLike[str], record: dict[str, Any] | None) -> str | None:
     """Shared refusal for existing custody that legacy paths cannot interpret."""
+    if record is not None and (
+        "predecessor_drain_requested" in record
+        and type(record["predecessor_drain_requested"]) is not bool
+    ):
+        return "predecessor drain marker is invalid; recovery refused"
     if record is not None and (
         record.get("self_retirement") is True
         and record.get("state") in _NON_TERMINAL | {"committed"}
@@ -154,7 +159,7 @@ def _owner_start_time(
     return token if valid_start_time(token) else None
 
 
-def owner_exited(record: dict | None) -> bool | None:
+def owner_exited(record: dict[str, Any] | None) -> bool | None:
     """True for proven exit, False for a live birth match, otherwise None.
 
     A missing legacy birth permits only positive native PID-absence evidence.
@@ -186,7 +191,7 @@ def write_breadcrumb(
     config_dir: str | os.PathLike[str],
     *,
     state: str,
-    old: dict | None = None,
+    old: dict[str, Any] | None = None,
     new_port: int | None = None,
     new_pid: int | None = None,
     pid: int | None = None,
@@ -195,10 +200,11 @@ def write_breadcrumb(
     publication_witness: str | None = None,
     new_process_start_time: str | None = None,
     requires_writer_reconciliation: bool = False,
+    predecessor_drain_requested: bool | None = None,
     self_retirement: bool = False,
     _routing_locked: bool = False,
     _routing_deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Durably replace the cutover breadcrumb. Returns the confirmed record.
 
     Persistence errors propagate; an unconfirmed replacement retains the
@@ -227,6 +233,8 @@ def write_breadcrumb(
     it borrows that authority without reacquiring the non-reentrant file lock.
     ``_routing_deadline`` preserves a caller's tighter acquisition budget.
     """
+    if predecessor_drain_requested is not None and type(predecessor_drain_requested) is not bool:
+        raise ValueError("predecessor drain marker must be a boolean")
     with (
         nullcontext() if _routing_locked else
         routing.routing_lock(
@@ -265,6 +273,8 @@ def write_breadcrumb(
                 record["new_process_start_time"] = previous["new_process_start_time"]
         if requires_writer_reconciliation:
             record["requires_writer_reconciliation"] = True
+        if predecessor_drain_requested is not None:
+            record["predecessor_drain_requested"] = predecessor_drain_requested
         if self_retirement:
             record["self_retirement"] = True
         _atomic_write(breadcrumb_path(config_dir), record)
@@ -283,19 +293,19 @@ def clear_breadcrumb(config_dir: str | os.PathLike[str]) -> bool:
         return False
 
 
-def is_stale(record: dict | None) -> bool:
+def is_stale(record: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
     """True when ``record`` marks an aborted (non-terminal) cutover."""
     if not record:
         return False
     return str(record.get("state")) in _NON_TERMINAL
 
 
-def requires_conditional_recovery(record: dict | None) -> bool:
+def requires_conditional_recovery(record: dict[str, Any] | None) -> bool:
     """Conditional attempts cannot be resolved by legacy undrain/reap."""
     return bool(record and str(record.get("state", "")).startswith("conditional-"))
 
 
-def refusal_reason(outcome: dict) -> str:
+def refusal_reason(outcome: dict[str, Any]) -> str:
     """Report malformed refusal evidence explicitly rather than crashing a CLI."""
     reason = outcome.get("reason")
     if isinstance(reason, str) and reason.strip():
@@ -305,7 +315,7 @@ def refusal_reason(outcome: dict) -> str:
     return message
 
 
-def requires_owner_reconciliation(record: dict | None) -> bool:
+def requires_owner_reconciliation(record: dict[str, Any] | None) -> bool:
     """Stateful retirement remains unresolved even after the commit point."""
     return bool(
         record
@@ -319,7 +329,7 @@ def recover_stale_cutover(
     make_client: Callable[[str], Any],
     *,
     health_check: Callable[[str, int], bool] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Recover only while holding native transition authority, without waiting."""
     from .cutover_lock import CutoverLock, CutoverLockedError
 
@@ -343,7 +353,7 @@ def _recover_stale_cutover_locked(
     make_client: Callable[[str], Any],
     *,
     health_check: Callable[[str, int], bool] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Undrain a survivor stranded by an aborted cutover (#1756).
 
     Reads the breadcrumb; if it marks an aborted cutover (non-terminal state)
@@ -379,17 +389,18 @@ def _recover_stale_cutover_locked(
         return {"recovered": False, "reason": "no stale cutover breadcrumb"}
 
     old = record.get("old") if isinstance(record.get("old"), dict) else None
-    if not old:
+    if not old or record.get("predecessor_drain_requested") is False:
         # Nothing to undrain (drain gate was never opened before the abort).
         write_breadcrumb(
             config_dir, state="rolled_back",
             pid=record.get("pid"),
-            old=None, new_port=record.get("new_port"),
+            old=old, new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
             publication_witness=record.get("publication_witness"),
             new_process_start_time=record.get("new_process_start_time"),
             error=record.get("error") or "aborted before drain",
             started_at=record.get("started_at"),
+            predecessor_drain_requested=record.get("predecessor_drain_requested"),
         )
         return {
             "recovered": False,
@@ -464,7 +475,7 @@ def _recover_stale_cutover_locked(
 DEFAULT_ABANDONED_PASSIVE_GRACE_S = 600.0
 
 
-def _record_age_seconds(record: dict, *, now: datetime | None = None) -> float | None:
+def _record_age_seconds(record: dict[str, Any], *, now: datetime | None = None) -> float | None:
     """Seconds since ``record["updated_at"]``, or ``None`` if unparseable.
 
     Conservative on the ambiguous axis: an unparseable/missing timestamp
@@ -491,9 +502,9 @@ def reap_abandoned_passive(
     terminate: Callable[[int], bool],
     active_pid: int | None = None,
     grace_seconds: float = DEFAULT_ABANDONED_PASSIVE_GRACE_S,
-    record: dict | None = None,
+    record: dict[str, Any] | None = None,
     now: datetime | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Reap only under native transition authority with a fresh breadcrumb."""
     import time
 
@@ -561,9 +572,9 @@ def _reap_abandoned_passive_locked(
     terminate: Callable[[int], bool],
     active_pid: int | None = None,
     grace_seconds: float = DEFAULT_ABANDONED_PASSIVE_GRACE_S,
-    record: dict | None = None,
+    record: dict[str, Any] | None = None,
     now: datetime | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Terminate a passive daemon spawned by an abandoned cutover (the downstream tracker).
 
     ``spawn_passive`` stands the new daemon up *before* the breadcrumb can

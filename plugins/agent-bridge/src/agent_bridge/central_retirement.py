@@ -45,13 +45,7 @@ def retire_predecessor(
         ):
             raise RuntimeError("central predecessor identity is unavailable")
 
-    try:
-        verify_route(require_previous=False)
-        if not previous.pid or not previous.process_start_time:
-            raise RuntimeError("central predecessor has no native identity")
-        if process_exit.observe_original_exit(previous.pid, previous.process_start_time):
-            return {"exit_confirmed": True, "forced": False}
-        verify_previous()
+    def verify_successor_health() -> None:
         body = make_client(successor).health()
         slot = body.get("slot")
         if (
@@ -61,6 +55,15 @@ def retire_predecessor(
             or slot.get("role") != "active" or slot.get("active") != successor.to_dict()
         ):
             raise RuntimeError("central successor is not ready")
+
+    try:
+        verify_route(require_previous=False)
+        if not previous.pid or not previous.process_start_time:
+            raise RuntimeError("central predecessor has no native identity")
+        if process_exit.observe_original_exit(previous.pid, previous.process_start_time):
+            return {"exit_confirmed": True, "forced": False}
+        verify_previous()
+        verify_successor_health()
         birth = _daemon_instance_identity.birth_identity(previous.pid)
         with process_retirement.PinnedProcess(previous.pid, birth) as pinned:
             verify_previous()
@@ -76,6 +79,7 @@ def retire_predecessor(
             with routing.routing_lock(root, deadline=time.monotonic() + 2.0):
                 verify_route()
                 verify_previous()
+                verify_successor_health()
                 pinned.terminate(timeout=5.0)
             return {"exit_confirmed": True, "forced": True}
     except Exception as exc:

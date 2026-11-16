@@ -879,6 +879,11 @@ of returning 503 forever.
 the installer invokes during `update`/activation when a live daemon exists. It
 runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
 
+Ordinary deployment first takes native cutover authority, reconciles a dead
+active row to its live serving fallback, and only then captures the exact
+predecessor. That authority is borrowed by the orchestrator through publication
+and retirement; a dead advertised endpoint cannot hide the actual serving peer.
+
 1. pick a free port and spawn the new daemon `--passive` (no self-route, no
    relay);
 2. wait until it is healthy;
@@ -888,6 +893,9 @@ runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
    self-retirement for five seconds, then terminate only the
    identity-pinned predecessor if it is still the exact demoted central owner.
    The route lease serializes the final check and force signal with publication.
+   Successor health is checked again after the wait, under that lease before
+   the signal. Incoming readiness loss remains a failure rather than a successful
+   cleanup result.
    No Session Host, session child, transport descendant or process group is
    targeted. The separate required-graceful path's `POST /api/v1/shutdown` releases this generation's
    session-host claims and `clear_if_owner`s only its own route entry -- see
@@ -895,7 +903,9 @@ runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
    below);
 6. best-effort: adopt the credential relay (ephemeral) on the new daemon, and
    retry the session-host claim scan (`POST /api/v1/session-hosts/reattach`)
-   now that the old generation is confirmed gone.
+   now that the old generation is confirmed gone. The optional scan request has
+   a five-second client timeout and no automatic retry; an unknown later server
+   completion does not block or replay the central cutover.
 
 No unfenced HTTP shutdown is sent to the predecessor: such a request could stop
 a reselected active daemon or complete after its client times out. The only
@@ -906,6 +916,11 @@ reap. Missing native identity, changed routing or unsupported native pinning
 leaves cleanup unconfirmed rather than falling back to numeric-PID signaling.
 Explicit required-graceful/serving reconciliation and conditional repair keep
 their existing graceful-only contracts; they do not opt into this fallback.
+Ordinary no-drain deployment explicitly disables writer-owned reconciliation
+without weakening exact-predecessor fencing. Its recovery witness records that
+no predecessor drain was requested, so an interrupted deploy can use normal
+`--recover`/retry without an unavailable writer-recovery handler or an unfenced
+undrain request. Stateful and conditional recovery defaults remain unchanged.
 
 The selected installed-generation startup uses the same exact-central fallback
 after a one-second self-retirement observation instead of waiting indefinitely.
