@@ -342,6 +342,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
+verify #12831's actual merge while retaining #9532's explicit original-history,
+adoption, rollback and lifetime gates. #4303's whole generic branch-resume
+contract exceeds Venue parity; #5799 already owns its unfinished materials
+families. Stopped or unqualified comparisons support no disposition.
+
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
 authentication, multiple-account routing and actual owning-plugin installer
