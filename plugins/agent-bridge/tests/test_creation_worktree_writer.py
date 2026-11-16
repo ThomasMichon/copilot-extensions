@@ -74,6 +74,7 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
     ))
     monkeypatch.setattr(session_lifecycle_cli, "_agent_worktrees_pinned_selection", selected)
     original = workspace_creation.worktree_command
+    executing_identity = requirement.identity.model_dump()
 
     async def command(args, project, *, owner_prefix=None):
         if args[0] == "resource-relationship":
@@ -82,7 +83,7 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
                 "schema": "copilot-extensions.resource-relationship", "version": 1,
                 "expected_creation_nonce": True, "expected_writer_identity": True,
                 "writer_scope": "executing-process", "retained_session_writes": 1,
-                "writer_identity": requirement.identity.model_dump(),
+                "writer_identity": dict(executing_identity),
                 "writer_contract": {
                     "schema": "copilot-extensions.worktree-record-writer",
                     "version": 1, "retained_relationships": 1, "creation_nonce": 1,
@@ -121,7 +122,22 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
     rig.target = replace(rig.target, worktree_id=rig.row["id"])
     return SimpleNamespace(
         rig=rig, requirement=requirement, selected=selected, command=command, starts=starts,
+        executing_identity=executing_identity,
     )
+
+
+@pytest.mark.asyncio
+async def test_new_creation_requires_its_observed_birth_writer_before_legacy_adoption(writer_creation):
+    fixture = writer_creation
+    fixture.executing_identity["runtime_generation"] = "b" * 32
+    with pytest.raises(AcquisitionRefused, match="serializer"):
+        await workspace_creation.start(
+            fixture.rig.manager, fixture.rig.target, key="original-key",
+            worktree_writer=fixture.requirement,
+        )
+    assert not fixture.rig.manager.list_sessions()
+    assert not fixture.rig.db.execute_read("SELECT * FROM workspace_embodiments")
+    assert not fixture.starts
 
 
 @pytest.mark.asyncio
@@ -132,10 +148,10 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
         rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
     )
     saved = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    fixture.executing_identity["runtime_generation"] = "b" * 32
     assert first.target.venue[creation.JOURNAL_KEY] == saved["key_digest"]
     assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
     assert not any(args[0] == "create" for args, _project in rig.calls)
-    fixture.selected.side_effect = AssertionError("must not select another writer")
     replay, replay_receipt = await workspace_creation.start(
         rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
     )
@@ -147,7 +163,8 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
         worktree_writer=fixture.requirement,
     )
     assert resumed is first and resumed.acp_session_id == receipt["native_session_id"]
-    assert fixture.selected.call_count == 1
+    assert fixture.requirement.identity.runtime_generation == "a" * 32
+    assert fixture.selected.call_count > 1
     assert writers.current() is None
     assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == saved
 
@@ -197,6 +214,15 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
 
     fixture, rig = writer_creation, writer_creation.rig
     session, request, _command = await recovery_fixture(fixture, monkeypatch)
+    fixture.executing_identity["runtime_generation"] = "b" * 32
+
+    async def preflight_pins_executor(args, project, **kwargs):
+        result = await _command(args, project, **kwargs)
+        if args[0] == "embody":
+            fixture.selected.side_effect = AssertionError("recovery must retain its qualified invocation")
+        return result
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", preflight_pins_executor)
     pending = rig.db.enqueue_prompt(session.session_id, "Original queued work", now=100)
     drain = AsyncMock()
     monkeypatch.setattr(rig.manager, "_drain_pending_prompts", drain)
@@ -208,6 +234,7 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
         assert target.native_resume_id == session.acp_session_id == kwargs["load_session_id"]
         assert guard["head"] == {"session_id": request.native_session_id, "revision": 1}
         assert guard["writer"]["creation_nonce"] == fixture.requirement.creation_nonce
+        assert guard["writer"]["identity"] == fixture.executing_identity
         assert guard["operation_id"] == request.operation_id
         admitted.append(guard)
         return await connect(target, **kwargs)
@@ -228,7 +255,7 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
         rig.manager, session.session_id, request, fixture.requirement, lambda: True,
     ))[1] == result
     assert len(admitted) == 1
-    assert fixture.selected.call_count == 1
+    assert fixture.selected.call_count > 1
     assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
 
 
@@ -555,7 +582,7 @@ async def test_required_creation_resume_refuses_changed_custody_before_effect(
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_writer_rehydrates_same_native_without_reselection(writer_creation):
+async def test_keyed_creation_writer_rehydrates_same_native_with_current_serializer(writer_creation):
     from agent_bridge.session_manager import SessionManager
 
     fixture = writer_creation
@@ -564,7 +591,6 @@ async def test_keyed_creation_writer_rehydrates_same_native_without_reselection(
         rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
     )
     saved = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
-    fixture.selected.side_effect = AssertionError("a new frontend cannot select another writer")
     recovered = SessionManager(rig.db)
     restored, replay = await workspace_creation.start(
         recovered, rig.target, key="original-key", worktree_writer=fixture.requirement,
@@ -574,7 +600,7 @@ async def test_keyed_creation_writer_rehydrates_same_native_without_reselection(
     assert restored.status == SessionStatus.IDLE
     assert restored.target.venue[creation.JOURNAL_KEY] == saved["key_digest"]
     assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == saved
-    assert fixture.selected.call_count == 1
+    assert fixture.selected.call_count > 1
 
 
 @pytest.mark.asyncio
@@ -618,7 +644,6 @@ async def test_keyed_creation_writer_reconciles_lost_completion_without_new_nati
         )
     original = rig.manager.list_sessions()[0]
     monkeypatch.setattr(workspace_creation, "_update", update)
-    fixture.selected.side_effect = AssertionError("no replacement selection")
     replay, _receipt = await workspace_creation.start(
         rig.manager, rig.target, key="original-key", prompt="Original turn",
         worktree_writer=fixture.requirement,
@@ -637,7 +662,6 @@ async def test_keyed_creation_writer_refuses_changed_custody_before_effects(writ
     first, _receipt = await workspace_creation.start(
         rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
     )
-    fixture.selected.side_effect = AssertionError("no replacement selection")
     await rig.manager.stop_session(first.session_id, force=True)
     before = rig.client.new_session.await_count
     if changed == "dropped":
@@ -921,7 +945,6 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
             worktree_writer=fixture.requirement.model_dump(),
         )
         original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
-        fixture.selected.side_effect = AssertionError("inspection must not select a writer")
         requirement = fixture.requirement.model_dump()
         assert http.post(
             f"/api/v1/sessions/{result['session_id']}/stop", params={"force": "true"},
@@ -978,7 +1001,6 @@ async def test_terminal_creation_writer_remains_inspectable_without_reopening(wr
     monkeypatch.setattr(inspection, "_instance", lambda: {
         "installation_root": "/bridge", "pid": 42, "generation": 1,
     })
-    fixture.selected.side_effect = AssertionError("terminal inspection cannot select another writer")
     observed = await inspection.inspect_writer(rig.manager, session, lambda: True)
     assert observed["native_session_id"] == session.acp_session_id
     assert observed["worktree_writer"] == fixture.requirement.model_dump()
@@ -1017,7 +1039,6 @@ async def test_creation_writer_inspection_refuses_changed_owner_without_effects(
         return result
 
     monkeypatch.setattr(acquisition_authority, "worktree_command", changing_owner)
-    fixture.selected.side_effect = AssertionError("inspection must not select a writer")
     with pytest.raises(AcquisitionRefused):
         await inspection.inspect_writer(rig.manager, session, lambda: ready[0])
     assert len(fixture.starts) == 1
@@ -1086,7 +1107,6 @@ async def test_keyed_creation_handoff_retains_original_successor_and_seed(
     handoff = json.loads(original["creation_handoffs_json"])[predecessor.session_id]
     assert handoff["successor_id"] != predecessor.session_id
     assert handoff["seed_prompt"] == "Original continuation"
-    fixture.selected.side_effect = AssertionError("must retain the original command")
     if failed == "seed":
         with pytest.raises(AcquisitionRefused, match="seed"):
             await rig.manager.handoff_session(
@@ -1125,7 +1145,6 @@ async def test_keyed_creation_registration_failure_retains_native_and_dormancy(w
     assert not session.background_recovery_enabled and session.client is None
     assert session.status == SessionStatus.STOPPED
     assert not rig.head["id"]
-    fixture.selected.side_effect = AssertionError("registration retry must retain the original writer")
     with pytest.raises(AcquisitionRefused, match="registration pending"):
         await workspace_creation.start(
             rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
@@ -1261,7 +1280,6 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         assert capability < next(
             i for i, args in enumerate(calls) if verb in args and "--retained-record-writer" in args
         )
-    selected.side_effect = AssertionError("continuation must retain its original writer")
     session.status = SessionStatus.IDLE
     rig.client.acp_session_id = "native-successor"
 
@@ -1277,11 +1295,40 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     assert linked["creation_nonce"] == before["creation_nonce"]
     assert [item for item in linked["resources"] if item["ref"] == protected["ref"]] == before["resources"]
     assert (state / "resident-calls").read_text().splitlines() == resident_calls
-    identity_file.write_text(json.dumps({**identity, "runtime_generation": "b" * 32}), encoding="utf-8")
-    with pytest.raises(AcquisitionRefused, match="serializer"):
+    saved = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    current_identity = {**identity, "runtime_generation": "b" * 32}
+    identity_file.write_text(json.dumps(current_identity), encoding="utf-8")
+    current_prefix = (prefix[0], "-B", *prefix[1:])
+    selected.return_value = (current_prefix, Path(identity["installation_root"]), Path(sys.executable))
+    async def current_command(args, project, *, owner_prefix=None):
+        assert owner_prefix == current_prefix if owner_prefix is not None else writers.current().prefix == current_prefix
+        return await receiving_command(args, project, owner_prefix=owner_prefix)
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", current_command)
+    monkeypatch.setattr(workspace_creation, "worktree_command", current_command)
+    rig.client.acp_session_id = "native-compatible-successor"
+    compatible = await rig.manager.handoff_session(
+        successor.session_id, reason="compatible writer", seed=False, seed_text="Continue",
+    )
+    adopted = snapshot()
+    assert adopted["head"] == compatible.acp_session_id
+    assert adopted["creation_nonce"] == linked["creation_nonce"]
+    assert all(item in adopted["resources"] for item in linked["resources"])
+    now = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    assert now["creation_writer_json"] == saved["creation_writer_json"]
+    assert now["facts_digest"] == saved["facts_digest"]
+    calls = [json.loads(line) for line in (state / "calls").read_text().splitlines()]
+    delegated = [
+        json.loads(args[args.index("--retained-record-writer") + 1])
+        for args in calls if "--retained-record-writer" in args
+    ]
+    assert delegated[-1]["identity"] == current_identity
+    assert json.loads(now["creation_writer_json"])["worktree_writer"]["identity"] == identity
+    selected.return_value = (current_prefix, state / "foreign-owner", Path(sys.executable))
+    with pytest.raises(AcquisitionRefused, match="installation changed"):
         await rig.manager.handoff_session(
-            successor.session_id, reason="changed writer", seed=False, seed_text="Continue",
+            compatible.session_id, reason="changed writer", seed=False, seed_text="Continue",
         )
-    assert snapshot() == linked
-    assert selected.call_count == 1
+    assert snapshot() == adopted
+    assert selected.call_count > 1
     assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")

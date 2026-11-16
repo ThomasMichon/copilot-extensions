@@ -80,7 +80,9 @@ def rig(tmp_db, tmp_path, monkeypatch):
     from agent_bridge import session_lifecycle_cli
     monkeypatch.setattr(
         session_lifecycle_cli, "_agent_worktrees_pinned_selection",
-        Mock(side_effect=AssertionError("inspection must not select a replacement")),
+        Mock(return_value=(
+            ("original-owner", "original-build"), tmp_path / "owner", tmp_path / "python",
+        )),
     )
     return SimpleNamespace(
         runtime=runtime, request=request, db=tmp_db, manager=manager, state=state,
@@ -99,7 +101,7 @@ def snapshot(db):
 
 
 @pytest.mark.asyncio
-async def test_live_observation_recovers_original_writer_without_writes_or_reselection(rig, monkeypatch):
+async def test_live_observation_recovers_original_writer_without_writes(rig, monkeypatch):
     before = snapshot(rig.db)
     monkeypatch.setattr(rig.db, "execute_write", Mock(side_effect=AssertionError("inspection wrote")))
     legacy = await rig.runtime.inspect_pending(rig.request.delivery_id)
@@ -135,7 +137,7 @@ async def test_changed_original_workspace_never_yields_writer_evidence(rig, chan
 async def test_old_unknown_or_changed_executing_serializer_refuses_before_record(rig, monkeypatch, changed):
     before = snapshot(rig.db)
     if changed == "identity":
-        rig.support["writer_identity"]["runtime_generation"] = "b" * 32
+        rig.support["writer_identity"]["installation_root"] = "/foreign-owner"
     elif changed == "contract":
         rig.support.pop("writer_contract")
     elif changed == "scope":

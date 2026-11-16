@@ -8,7 +8,7 @@ from typing import Any
 
 from .acquisition_contract import AcquisitionRefused, AcquisitionRequest
 from .acquisition_journal import _digest
-from .acquisition_worktree_writer import JOURNAL_KEY, RetainedWriter, _prefix, _qualify
+from .acquisition_worktree_writer import JOURNAL_KEY, RetainedWriter, _prefix, select_writer
 from .config import config_dir
 from .self_retire import slot_descriptor
 
@@ -37,7 +37,7 @@ def _instance() -> dict:
 
 
 async def inspect_writer(db: Any, delivery_id: str, original: dict) -> dict:
-    """Requalify only the retained command; never select a replacement."""
+    """Observe a compatible executor without changing the original journal."""
     from .acquisition_authority import read_worktree_record, worktree_command
 
     before = _instance()
@@ -60,10 +60,10 @@ async def inspect_writer(db: Any, delivery_id: str, original: dict) -> dict:
             "worktree_writer_unconfirmed", "original acquisition writer binding is unconfirmed",
         )
     try:
-        support = await _qualify(RetainedWriter(request, prefix))
+        writer, support = await select_writer(RetainedWriter(request, prefix))
         record = await read_worktree_record(
             request.worktree_id, request.project,
-            command=partial(worktree_command, owner_prefix=prefix),
+            command=partial(worktree_command, owner_prefix=writer.prefix),
         )
     except OSError as exc:
         raise AcquisitionRefused(
@@ -97,6 +97,7 @@ async def inspect_writer(db: Any, delivery_id: str, original: dict) -> dict:
             )
         },
         "worktree_writer": request.worktree_writer.model_dump(),
+        "executing_writer_identity": support["writer_identity"],
         "writer_scope": support["writer_scope"],
         "writer_contract": support["writer_contract"],
         "retained_session_writes": support["retained_session_writes"],

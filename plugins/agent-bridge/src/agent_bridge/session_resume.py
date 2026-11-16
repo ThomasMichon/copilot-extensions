@@ -367,7 +367,7 @@ class _SessionResumeMixin:
                     raise ValueError("Retained recovery lost its original Worktrees writer")
                 resume_target = replace(resume_target, env={
                     **resume_target.env,
-                    ENVIRONMENT_KEY: recovery_operation.environment(writer.request.worktree_writer),
+                    ENVIRONMENT_KEY: recovery_operation.environment(writer.execution_requirement),
                 })
 
             session.status = SessionStatus.STARTING

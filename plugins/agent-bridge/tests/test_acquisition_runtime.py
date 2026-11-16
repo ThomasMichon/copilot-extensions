@@ -213,7 +213,7 @@ def writer_rig(rig, tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_retained_writer_recovery_uses_original_journal_without_reselection(writer_rig, monkeypatch):
+async def test_retained_writer_recovery_uses_original_journal_with_current_executor(writer_rig, monkeypatch):
     from agent_bridge import acquisition_worktree_writer as writer
 
     rig, request = writer_rig.rig, writer_rig.request
@@ -226,7 +226,6 @@ async def test_retained_writer_recovery_uses_original_journal_without_reselectio
     assert data["_request"]["worktree_writer"] == request.worktree_writer.model_dump()
     session = rig.manager.list_sessions()[0]
     assert session.target.venue[writer.DELIVERY_KEY] == request.delivery_id
-    writer_rig.selected.side_effect = AssertionError("must recover original build, not select a replacement")
     # A new frontend object uses the same keyed database and native holder.
     recovered = AcquisitionRuntime(rig.manager, rig.resolver, rig.db)
     results = await asyncio.gather(recovered.acquire(request), recovered.acquire(request))
@@ -235,7 +234,7 @@ async def test_retained_writer_recovery_uses_original_journal_without_reselectio
     assert len(rig.manager.list_sessions()) == 1
     assert rig.manager._run_prompt.call_count == 1
     assert writer.current() is None
-    assert writer_rig.selected.call_count == 1
+    assert writer_rig.selected.call_count > 1
     for changed in (
         {"version": 2, "worktree_writer": None},
         {"worktree_writer": request.worktree_writer.model_copy(update={"creation_nonce": "other"})},
@@ -279,7 +278,7 @@ async def test_required_writer_survives_stopped_resume_and_later_acquisition(
     }))
     assert later.session_id == first.session_id and later.native_session_id == first.native_session_id
     assert len(rig.manager.list_sessions()) == 1
-    assert writer_rig.selected.call_count == 1
+    assert writer_rig.selected.call_count > 1
 
 
 @pytest.mark.asyncio
@@ -458,7 +457,6 @@ async def test_required_handoff_retries_registration_on_original_native(
     monkeypatch.setattr(rig.manager, "_try_reattach_live_host", AsyncMock(
         side_effect=reattach_host if recovery != "load" else None, return_value=False,
     ))
-    writer_rig.selected.side_effect = AssertionError("original writer cannot be reselected")
     new_count = rig.client.new_session.await_count
     # A failed registration retry still cannot link or replace the successor.
     if recovery == "load":
@@ -588,7 +586,6 @@ async def test_required_handoff_retry_reuses_original_successor_after_lineage_fa
     successor_id = rig.db.get_session(predecessor.session_id)["successor_id"]
     assert successor_id
     assert not seed.await_count
-    writer_rig.selected.side_effect = AssertionError("original writer cannot be recaptured")
     successor = await rig.manager.handoff_session(
         predecessor.session_id, reason="fixture", seed_text="Original continuation",
     )
@@ -668,7 +665,9 @@ async def test_required_handoff_retains_unknown_effect_without_replacement(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad", ["identity", "preservation", "old", "unavailable", "nonce", "resident-only"])
+@pytest.mark.parametrize("bad", [
+    "identity", "birth-generation", "preservation", "old", "unavailable", "nonce", "resident-only",
+])
 async def test_required_writer_refuses_before_native_effects(writer_rig, monkeypatch, bad):
     rig, request = writer_rig.rig, writer_rig.request
 
@@ -678,6 +677,8 @@ async def test_required_writer_refuses_before_native_effects(writer_rig, monkeyp
         value = await writer_rig.command(args, project, **kwargs)
         if args[0] == "resource-relationship":
             if bad == "identity":
+                value["writer_identity"]["installation_root"] = "/foreign-owner"
+            elif bad == "birth-generation":
                 value["writer_identity"]["runtime_generation"] = "b" * 32
             elif bad == "preservation":
                 value["writer_contract"]["retained_relationships"] = 0
@@ -897,7 +898,6 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         if "register-session" in args and "--retained-record-writer" in args
     )
     assert capability < registration
-    selected.side_effect = AssertionError("continuation must recover the original command")
     session = rig.manager.get_session(result.session_id)
     session.status = SessionStatus.IDLE
     rig.client.acp_session_id = "native-successor"
@@ -928,14 +928,18 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     assert [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")] == journal_before
     assert (state / "resident-calls").read_text().splitlines() == resident_calls
     identity_file.write_text(json.dumps({**identity, "runtime_generation": "b" * 32}), encoding="utf-8")
-    with pytest.raises(AcquisitionRefused, match="serializer"):
-        await rig.runtime.inspect_pending(request.delivery_id, worktree_writer=True)
-    with pytest.raises(AcquisitionRefused, match="serializer"):
+    observed = await rig.runtime.inspect_pending(request.delivery_id, worktree_writer=True)
+    evidence = observed["worktree_writer_observation"]
+    assert evidence["executing_writer_identity"]["runtime_generation"] == "b" * 32
+    assert evidence["worktree_writer"]["identity"] == identity
+    assert [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")] == journal_before
+    selected.return_value = (tuple(prefix), state / "foreign-owner", Path(sys.executable))
+    with pytest.raises(AcquisitionRefused, match="installation changed"):
         await rig.manager.handoff_session(
             successor.session_id, reason="changed writer", seed=False, seed_text="Continue",
         )
     assert snapshot() == linked
-    assert selected.call_count == 1
+    assert selected.call_count > 1
     assert writer.current() is None
 
 @pytest.mark.asyncio

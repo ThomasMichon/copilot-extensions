@@ -10,7 +10,7 @@ from typing import Any
 from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from .acquisition_writer_inspection import _instance
 from .creation_worktree_writer import JOURNAL_KEY, _binding, _read, _refuse
-from .acquisition_worktree_writer import _qualify
+from .acquisition_worktree_writer import select_writer
 
 CAPABILITY = "retained_workspace_creation_writer_inspection"
 SCHEMA = "copilot-extensions.creation-worktree-writer"
@@ -51,7 +51,7 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
     if not expected_native or expected_native != native:
         raise _refuse("exact native identity is not retained by its keyed creation")
     try:
-        support = await _qualify(writer)
+        writer, support = await select_writer(writer)
         record = await read_worktree_record(
             scope.worktree_id, scope.project, command=partial(worktree_command, owner_prefix=writer.prefix),
         )
@@ -71,6 +71,7 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
         "key_digest": digest, "session_id": session.session_id, "native_session_id": native,
         "project": scope.project, "worktree_id": scope.worktree_id, "worktree_path": scope.worktree_path,
         "worktree_writer": scope.worktree_writer.model_dump(),
+        "executing_writer_identity": support["writer_identity"],
         "writer_scope": support["writer_scope"], "writer_contract": support["writer_contract"],
         "retained_session_writes": support["retained_session_writes"],
         "retained_native_resume": support.get("retained_native_resume"),

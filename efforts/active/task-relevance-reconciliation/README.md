@@ -306,6 +306,9 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Retained-writer contract adaptation](journal/2026/11.16-retained-writer-contract.md)
+  records the reviewed compatibility plan and bounded source controls;
+  native/runtime adoption remains open.
 - [Managed command-emitter grant carrier](journal/2026/11.14-managed-command-emitter.md)
   - credential-free discovery and existing managed-create integration; running adoption remains open.
 - [Original body closeout before affirmative start](journal/2026/11.14-before-start-owner.md)

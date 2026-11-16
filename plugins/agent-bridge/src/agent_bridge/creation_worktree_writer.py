@@ -90,10 +90,18 @@ async def _verify(scope: CreationWriterScope, saved: dict) -> None:
 
 
 @contextlib.asynccontextmanager
-async def retained(db: Any, row: dict) -> AsyncIterator[CreationWriterScope]:
-    """Requalify the original command, never the currently selected writer."""
+async def retained(
+    db: Any, row: dict, *, executing_writer: writers.RetainedWriter | None = None,
+) -> AsyncIterator[CreationWriterScope]:
+    """Adapt the original contract to a compatible current executing writer."""
     scope, writer = _binding(row)
-    await writers._qualify(writer)
+    if executing_writer is not None:
+        if executing_writer.request != scope or executing_writer.execution_identity is None:
+            raise _refuse("retained execution lost its original writer contract")
+        writer = executing_writer
+        await writers._qualify(writer)
+    else:
+        writer, _support = await writers.select_writer(writer)
     token = writers._current.set(writer)
     try:
         await _verify(scope, json.loads(row["worktree_json"]))
@@ -135,22 +143,13 @@ def creation_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
                     (target.worktree_id, target.project),
                 ):
                     raise _refuse("workspace writer belongs to its original creation key")
-                from .session_lifecycle_cli import _agent_worktrees_pinned_selection
-                from ._peer_launch import ContextRefused
                 from .workspace_creation import _workspace
 
-                try:
-                    prefix, root, _python = _agent_worktrees_pinned_selection()
-                except ContextRefused as exc:
-                    raise _refuse(str(exc)) from exc
-                if str(root) != requirement.identity.installation_root:
-                    raise _refuse("selected Worktrees installation changed")
                 # The exact record supplies the path; no caller command or new allocation is accepted.
                 probe = CreationWriterScope(
                     digest, target.project, target.worktree_id, target.cwd, requirement,
                 )
-                writer = writers.RetainedWriter(probe, tuple(prefix))
-                await writers._qualify(writer)
+                writer, _support = await writers.select_writer(writers.RetainedWriter(probe, ()))
                 token = writers._current.set(writer)
                 try:
                     saved, _head = await _workspace(target.project, target.worktree_id)
@@ -188,9 +187,9 @@ def creation_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
 def require_journal(row: dict) -> None:
     if row["creation_writer_json"] is None:
         return
-    scope, writer = _binding(row)
+    scope, _writer = _binding(row)
     actual = writers.current()
-    if actual != writer or not isinstance(actual.request, CreationWriterScope):
+    if actual is None or actual.request != scope or not isinstance(actual.request, CreationWriterScope):
         raise _refuse("keyed creation lost its original writer owner")
     if scope.key_digest != row["key_digest"]:
         raise _refuse("keyed creation writer changed journal")

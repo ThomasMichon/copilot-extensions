@@ -249,7 +249,7 @@ async def resume(
     requirement: WorktreeWriterRequirement | None, ready,
 ) -> tuple[Any, dict]:
     from .acquisition_authority import worktree_command
-    from .acquisition_worktree_writer import _qualify
+    from .acquisition_worktree_writer import select_writer
     from .creation_writer_inspection import inspect_writer
     from .acquisition_launch_owner import require_unassociated_session
     from .cold_outages import latest, recovery_admission
@@ -289,7 +289,7 @@ async def resume(
             inventory = manager._host_index.locked_inventory() if manager._host_index is not None else None
             if inventory is None or not inventory.storage_complete:
                 raise _refuse("Recovery cannot replace unknown or retained Host custody")
-            support = await _qualify(writer)
+            writer, support = await select_writer(writer)
             if type(support.get("retained_native_resume")) is not int or support["retained_native_resume"] != 1:
                 raise _refuse("Original Worktrees owner lacks retained native resume fencing")
             command = partial(worktree_command, owner_prefix=writer.prefix)
@@ -337,7 +337,7 @@ async def resume(
         token = _current.set(owner)
         try:
             with recovery_admission(manager, session_id, automatic=True):
-                async with retained(manager.db, row):
+                async with retained(manager.db, row, executing_writer=writer):
                     resumed = await manager.resume_session(
                         session_id, drain=False, allow_recreate=False, owner_native_resume=True,
                         recovery_operation=owner, worktree_writer=requirement,
