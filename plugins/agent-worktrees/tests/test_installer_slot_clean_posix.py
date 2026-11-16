@@ -316,6 +316,61 @@ _bootstrap_python exclude-runtime-root
     assert not unexpected.exists()
 
 
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("selection", ["runtime-root", "trampoline", "symlink"])
+def test_prepared_bootstrap_excludes_resolved_interpreter(
+    tmp_path: Path, selection: str,
+) -> None:
+    import shlex
+
+    from agent_procutil import no_window_kwargs
+
+    real = Path(sys.executable)
+    selected = real
+    if selection == "trampoline":
+        selected = tmp_path / "outside-runtime"
+        selected.write_text(
+            "#!/bin/sh\nexec " + shlex.quote(_bash_path(real)) + ' "$@"\n',
+            encoding="utf-8",
+        )
+        selected.chmod(0o700)
+    elif selection == "symlink":
+        selected = tmp_path / real.name
+        try:
+            selected.symlink_to(real)
+        except OSError as error:
+            pytest.skip(f"executable symlink is unavailable: {error}")
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    script = tmp_path / "resolved-python.sh"
+    script.write_text(
+        f"""
+set -uo pipefail
+LINK_DIR={shlex.quote(_bash_path(tmp_path / "absent"))}
+VENV_DIR="$LINK_DIR"
+INSTALL_DIR={shlex.quote(_bash_path(real.parent))}
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON={shlex.quote(_bash_path(selected))}
+{_function_body(text, "_bootstrap_python")}
+}}
+control="$(_bootstrap_python)" || exit 77
+[[ -n "$control" ]] || exit 78
+if _bootstrap_python exclude-runtime-root; then exit 90; fi
+printf '%s\\n' refused
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [cast(str, _BASH), str(script)], capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
+    )
+    if selection == "symlink" and result.returncode == 77:
+        pytest.skip("this host cannot execute the real interpreter through an executable symlink")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "refused"
+
+
 def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot() -> None:
     """`deploy_venv` must capture `_versioned_slot_clean`'s result, retry
     briefly on failure, and refuse to call `uv venv` at all when the slot is

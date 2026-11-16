@@ -1294,10 +1294,25 @@ _bootstrap_python() {
             # (one level under the directory venv_real points at), not AT
             # venv_real itself -- compare with a prefix match, not equality.
             __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
-            [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
+            [[ -n "$__resolved_bin_real" &&
+               ( "$__resolved_bin_real" == "$venv_real" || "$__resolved_bin_real" == "$venv_real"/* ) ]] && continue
         fi
+        local __probe_root="$venv_real" __probe_candidate="$__resolved"
+        case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                [[ -z "$__probe_root" ]] || __probe_root="$(cygpath -m "$__probe_root")" || continue
+                __probe_candidate="$(cygpath -m "$__probe_candidate")" || continue ;;
+        esac
         __resolved="$("$__resolved" -I -B -X utf8 -c \
-            'import sys; assert sys.version_info >= (3, 11); print(sys.executable)' 2>/dev/null)" \
+            'import sys
+from pathlib import Path
+assert sys.version_info >= (3, 11)
+if sys.argv[1]:
+    boundary = Path(sys.argv[1]).resolve()
+    for value in (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+                  getattr(sys, "_base_executable", sys.executable)):
+        assert not Path(value).resolve().is_relative_to(boundary)
+print(sys.executable)' "$__probe_root" "$__probe_candidate" 2>/dev/null)" \
             || continue
         case "${OSTYPE:-}" in
             msys*|cygwin*)

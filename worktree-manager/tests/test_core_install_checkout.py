@@ -121,6 +121,8 @@ def test_core_install_preserves_prepared_interpreter_and_child_exit(
     assert result.ran and result.returncode == exit_code
     command, options = calls[0]
     assert command == result.planned_command
+    assert options["stdout"] is sys.stdout
+    assert options["stderr"] is sys.stderr
     assert options["env"] == {
         **environment, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": getattr(sys, "_base_executable", sys.executable),
     }
@@ -135,12 +137,12 @@ def test_core_install_preserves_prepared_interpreter_and_child_exit(
 @pytest.mark.effect("process")
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_native_core_handoff_uses_prepared_python_with_empty_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    exit_code: int,
 ) -> None:
     import json
     import shlex
     import shutil
-    import subprocess
     from types import SimpleNamespace
 
     shell = shutil.which("pwsh" if os.name == "nt" else "bash")
@@ -150,6 +152,7 @@ def test_native_core_handoff_uses_prepared_python_with_empty_path(
     program = (
         "import json,os,pathlib,shutil,sys;"
         "assert not any(shutil.which(name) for name in ('python', 'python3', 'py'));"
+        "print('finite-core-stdout');print('finite-core-stderr',file=sys.stderr);"
         "pathlib.Path(sys.argv[1]).write_text(json.dumps({"
         "'python':sys.executable,"
         "'prepared':os.environ['COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON']}));"
@@ -180,20 +183,13 @@ def test_native_core_handoff_uses_prepared_python_with_empty_path(
     monkeypatch.setattr(ci, "core_status", lambda home: SimpleNamespace(installed=False))
     monkeypatch.setenv("PATH", "")
     monkeypatch.setenv("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", "stale-inherited-selection")
-    completed = []
-    run = subprocess.run
-
-    def observe(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
-        assert options["env"]["PATH"] == ""
-        result = run(command, capture_output=True, text=True, timeout=15, **options)
-        completed.append(result)
-        return result
-
-    monkeypatch.setattr(subprocess, "run", observe)
     result = ci.install_core(dry_run=False)
+    output = capfd.readouterr()
     assert result.ran and result.returncode == exit_code, (
-        result.reason, [(item.stdout, item.stderr) for item in completed],
+        result.reason, output,
     )
+    assert output.out.strip() == "finite-core-stdout"
+    assert output.err.strip() == "finite-core-stderr"
     assert json.loads(receipt.read_text(encoding="utf-8")) == {
         "python": getattr(sys, "_base_executable", sys.executable), "prepared": getattr(sys, "_base_executable", sys.executable),
     }

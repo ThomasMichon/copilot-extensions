@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -172,6 +173,7 @@ def install_core(
     try:
         r = subprocess.run(
             cmd,
+            stdout=sys.stdout, stderr=sys.stderr,
             env={**os.environ, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": bootstrap_python()},
             **no_window_kwargs(),
         )  # noqa: S603 (installer-owned, no shell)
