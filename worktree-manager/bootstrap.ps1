@@ -226,7 +226,7 @@ function Add-BootstrapPythonPath([string]$Path, [string]$Directory) {
 
 function Find-BootstrapPython([string]$Uv) {
     $ErrorActionPreference = 'Continue'
-    $lookup = @(& $Uv python find --no-project '>=3.11' 2>&1)
+    $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
     $lookupExit = $LASTEXITCODE
     if ($lookupExit -eq 0) {
         $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
@@ -236,14 +236,16 @@ function Find-BootstrapPython([string]$Uv) {
         throw 'Manager Python lookup returned an invalid executable.'
     }
     if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
-        $physical = Find-PhysicalBootstrapPython
-        if ($physical) { return $physical }
+        throw ('Manager managed Python lookup is blocked by operating-system policy: ' + ($lookup -join "`n"))
     }
-    & $Uv python install 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+    & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
     if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-    $python = @(& $Uv python find --no-project '>=3.11' 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
-        throw 'Manager needs Python 3.11 or newer.'
+    $python = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
+    }
+    if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
+        throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
     }
     return [string]$python[0]
 }

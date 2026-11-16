@@ -104,6 +104,36 @@ def test_bootstrap_invalid_repair_is_an_explicit_failed_diagnostic(tmp_path):
     ), result.stderr
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(tmp_path, missing):
+    repo = _source_repo(tmp_path)
+    root = tmp_path / "manager-root"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        f'[source]\nrepo = "{repo.as_posix()}"\nref = "main"\n', encoding="utf-8",
+    )
+    tools = tmp_path / "tools"
+    _fake_tools(tools, uv_exit=0, python_exit=0)
+    trace = tmp_path / "uv-trace.txt"
+    result = subprocess.run(
+        [BASH, str(BOOTSTRAP), "--version"],
+        env={
+            **os.environ, "WORKTREE_MANAGER_ROOT": str(root),
+            "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+            "VIRTUAL_ENV": str(tmp_path / "active-venv"),
+            "UV_PYTHON": str(tmp_path / "ambient-python"),
+            "BOOTSTRAP_UV_TRACE": str(trace),
+            "BOOTSTRAP_UV_MISSING": "1" if missing else "0",
+        },
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    lookup = "python find --no-project --system --managed-python --no-python-downloads 3.11"
+    expected = [lookup, "python install --no-bin --no-registry 3.11", lookup] if missing else [lookup]
+    assert trace.read_text(encoding="utf-8").splitlines() == expected
+    assert result.stdout == ""
+
+
 def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_path):
     root = tmp_path / "manager-root"
     result = subprocess.run(

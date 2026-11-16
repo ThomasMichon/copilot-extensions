@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -224,8 +225,7 @@ def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
     if os.name == "nt":
         python = bin_dir / "fake-python.cmd"
         python.write_text(f"@echo off\r\nexit /b {python_exit}\r\n", "utf-8")
-        # A .ps1 stub: cmd.exe would treat the real ``'>=3.11'`` argument as a
-        # redirection, and PowerShell resolves .ps1 before PATHEXT executables.
+        # PowerShell resolves .ps1 before PATHEXT executables.
         (bin_dir / "uv.ps1").write_text(
             "if ($env:BOOTSTRAP_UV_TRACE) {\n"
             "  Add-Content -LiteralPath $env:BOOTSTRAP_UV_TRACE "
@@ -243,7 +243,17 @@ def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
         python.write_text(f"#!/bin/sh\nexit {python_exit}\n", "utf-8")
         python.chmod(0o755)
         uv = bin_dir / "uv"
-        uv.write_text(f"#!/bin/sh\necho {python}\nexit {uv_exit}\n", "utf-8")
+        uv.write_text(
+            "#!/bin/sh\n"
+            'if [ -n "${BOOTSTRAP_UV_TRACE:-}" ]; then\n'
+            '  printf "%s\\n" "$*" >> "$BOOTSTRAP_UV_TRACE"\n'
+            '  if [ "${BOOTSTRAP_UV_MISSING:-0}" = 1 ] && '
+            '[ "$(wc -l < "$BOOTSTRAP_UV_TRACE")" -eq 1 ]; then exit 2; fi\n'
+            "fi\n"
+            f'if [ "$2" = install ]; then exit {uv_exit}; fi\n'
+            f"printf '%s\\n' {shlex.quote(str(python))}\nexit {uv_exit}\n",
+            "utf-8",
+        )
         uv.chmod(0o755)
 
 
@@ -423,9 +433,9 @@ def test_bootstrap_retains_physical_uv_across_find_install_and_path_change(tmp_p
     calls = (tmp_path / "uv-trace.txt").read_text(encoding="utf-8-sig").splitlines()
     expected = str(tmp_path / "fake-bin" / "uv.ps1")
     assert calls == [
-        expected + "|python find --no-project >=3.11",
-        expected + "|python install 3.11",
-        expected + "|python find --no-project >=3.11",
+        expected + "|python find --no-project --system --managed-python --no-python-downloads 3.11",
+        expected + "|python install --no-bin --no-registry 3.11",
+        expected + "|python find --no-project --system --managed-python --no-python-downloads 3.11",
     ]
     assert result.stdout == ""
 
@@ -450,10 +460,40 @@ def _quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+def test_managed_python_selection_excludes_ambient_python_and_active_venv(tmp_path, host_name):
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    uv = tmp_path / "uv.ps1"
+    selected = tmp_path / "managed-python" / "python.exe"
+    uv.write_text(
+        "$expected = 'python find --no-project --system --managed-python --no-python-downloads 3.11'\n"
+        "if (($args -join ' ') -cne $expected) { throw 'Unqualified interpreter request' }\n"
+        f"Write-Output {_quote(selected)}\nexit 0\n",
+        encoding="utf-8",
+    )
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "function Get-Command { throw 'Ambient Python discovery was attempted' }\n"
+        f"$env:VIRTUAL_ENV = {_quote(tmp_path / 'active-venv')}\n"
+        f"$env:UV_PYTHON = {_quote(tmp_path / 'ambient-python' / 'python.exe')}\n"
+        f"$env:PATH = {_quote(tmp_path / 'older-python')}\n"
+        f"Find-BootstrapPython {_quote(uv)}\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == str(selected)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Python alias fallback")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("lookup_error", [448, 2])
-def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
+def test_failed_managed_python_lookup_preserves_os_refusal_without_ambient_fallback(
     tmp_path, host_name, lookup_error,
 ):
     host = shutil.which(host_name)
@@ -473,7 +513,7 @@ def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
     script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
     script += (
         "function Get-Command { param($Name, $CommandType, [switch]$All, $ErrorAction)\n"
-        f"  [pscustomobject]@{{ Source = {_quote(sys._base_executable)} }}\n"
+        "  throw 'Ambient Python discovery was attempted'\n"
         "}\n"
         f"$selected = Find-BootstrapPython {_quote(uv)}\n"
         "Write-Output $selected\n"
@@ -484,14 +524,14 @@ def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     calls = trace.read_text(encoding="utf-8-sig").splitlines()
+    assert result.returncode != 0
+    lookup = "python find --no-project --system --managed-python --no-python-downloads 3.11"
     if lookup_error == 448:
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert Path(result.stdout.strip()).samefile(sys._base_executable)
-        assert calls == ["python find --no-project >=3.11"]
+        assert "blocked by operating-system policy" in result.stdout + result.stderr
+        assert calls == [lookup]
     else:
-        assert result.returncode != 0
         assert "Python acquisition failed" in result.stdout + result.stderr
-        assert calls == ["python find --no-project >=3.11", "python install 3.11"]
+        assert calls == [lookup, "python install --no-bin --no-registry 3.11"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter protocol")
@@ -542,8 +582,27 @@ def test_python_lookup_rejects_empty_success(tmp_path, after_install):
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode != 0
-    expected = "Python 3.11 or newer" if after_install else "invalid executable"
+    expected = "uv-managed Python 3.11" if after_install else "invalid executable"
     assert expected in result.stdout + result.stderr
+    assert not result.stdout.strip()
+
+
+def test_managed_python_lookup_preserves_post_install_failure(tmp_path):
+    uv = tmp_path / "uv.ps1"
+    uv.write_text(
+        "if ($args[1] -eq 'install') { exit 0 }\n"
+        "Write-Error 'Managed interpreter query denied' -ErrorAction Continue\n"
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command",
+         _python_resolvers() + f"\nFind-BootstrapPython {_quote(uv)}\n"],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode != 0
+    assert "Managed interpreter query denied" in result.stderr
     assert not result.stdout.strip()
 
 
@@ -562,7 +621,7 @@ def test_unprivileged_link_creator_restores_thread_identity_after_failure(tmp_pa
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
-def test_guarded_python_lookup_reuses_real_physical_python_twice(tmp_path, host_name):
+def test_guarded_legacy_system_python_lookup_reuses_real_physical_python_twice(tmp_path, host_name):
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -570,13 +629,6 @@ def test_guarded_python_lookup_reuses_real_physical_python_twice(tmp_path, host_
     linked = tmp_path / "python-link"
     _create_untrusted_junction(physical.parent, linked)
     logical = linked / physical.name
-    uv = tmp_path / "uv.ps1"
-    uv.write_text(
-        "if ($args[1] -ne 'find') { throw 'Python acquisition was attempted' }\n"
-        "Write-Error 'interpreter query failed (os error 448)' -ErrorAction Continue\n"
-        "exit 2\n",
-        encoding="utf-8",
-    )
     script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
     script += r"""
 Add-Type -TypeDefinition @'
@@ -608,7 +660,7 @@ if (-not [BootstrapPythonGuard]::SetProcessMitigationPolicy(
         "  $blocked = $false\n"
         "  try { & $logical --version 2>$null | Out-Null } catch { $blocked = $true }\n"
         "  if (-not $blocked) { throw 'Logical interpreter was not guarded' }\n"
-        f"  $selected = Find-BootstrapPython {_quote(uv)}\n"
+        "  $selected = Find-PhysicalBootstrapPython\n"
         "  if ($selected -ine $expected) { throw 'Wrong physical interpreter selected' }\n"
         "}\n"
         "$after = [uint32]0\n"
