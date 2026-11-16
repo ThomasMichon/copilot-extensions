@@ -10,11 +10,13 @@ installed a stale staged payload).
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 from contextlib import contextmanager
 import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -23,10 +25,10 @@ from pathlib import Path
 import pytest
 
 BOOTSTRAP = Path(__file__).resolve().parents[1] / "bootstrap.ps1"
-PWSH = shutil.which("pwsh")
+PWSH = shutil.which("pwsh") or ""
 
 pytestmark = pytest.mark.skipif(
-    PWSH is None or shutil.which("git") is None,
+    not PWSH or shutil.which("git") is None,
     reason="pwsh and git are required to exercise bootstrap.ps1",
 )
 
@@ -41,17 +43,17 @@ _LONG_SOURCE_PATH = Path("source-fixtures") / ("nested-" * 15) / ("file-" * 20 +
 
 
 @contextmanager
-def _unprivileged_link_creator(directory: Path):
+def _unprivileged_link_creator(directory: Path) -> Iterator[None]:
     """RedirectionGuard permits links created by an administrator."""
     import ctypes
     from ctypes import wintypes
 
-    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    shell = getattr(ctypes, "WinDLL")("shell32", use_last_error=True)
     if not shell.IsUserAnAdmin():
         yield
         return
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    security = getattr(ctypes, "WinDLL")("advapi32", use_last_error=True)
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     kernel.GetCurrentThread.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
@@ -112,17 +114,17 @@ def _unprivileged_link_creator(directory: Path):
     try:
         if security.OpenThreadToken(kernel.GetCurrentThread(), 8, True, ctypes.byref(thread_token)):
             raise RuntimeError("Link fixture must begin without an impersonated thread token")
-        if ctypes.get_last_error() != 1008:  # ERROR_NO_TOKEN
-            raise ctypes.WinError(ctypes.get_last_error())
+        if getattr(ctypes, "get_last_error")() != 1008:  # ERROR_NO_TOKEN
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         if not security.OpenProcessToken(kernel.GetCurrentProcess(), 10, ctypes.byref(process_token)):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         size = wintypes.DWORD()
         security.GetTokenInformation(process_token, 1, None, 0, ctypes.byref(size))
         user = ctypes.create_string_buffer(size.value)
         if not security.GetTokenInformation(
             process_token, 1, user, len(user), ctypes.byref(size),
         ):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         user_sid = SidAndAttributes.from_buffer(user).Sid
         # Preserve pytest's ACL and admit only this same user to the owned fixture.
         error = security.GetNamedSecurityInfoW(
@@ -130,24 +132,24 @@ def _unprivileged_link_creator(directory: Path):
             ctypes.byref(descriptor),
         )
         if error:
-            raise ctypes.WinError(error)
+            raise getattr(ctypes, "WinError")(error)
         access = ExplicitAccess(0x1F01FF, 1, 3, Trustee(None, 0, 0, 1, user_sid))
         error = security.SetEntriesInAclW(1, ctypes.byref(access), original_acl, ctypes.byref(fixture_acl))
         if error:
-            raise ctypes.WinError(error)
+            raise getattr(ctypes, "WinError")(error)
         error = security.SetNamedSecurityInfoW(str(directory), 1, 4, None, None, fixture_acl, None)
         if error:
-            raise ctypes.WinError(error)
+            raise getattr(ctypes, "WinError")(error)
         if not security.ConvertStringSidToSidW("S-1-5-32-544", ctypes.byref(administrators)):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         disabled = SidAndAttributes(administrators, 0)
         if not security.CreateRestrictedToken(
             process_token, 1, 1, ctypes.byref(disabled), 0, None, 0, None,
             ctypes.byref(restricted_token),
         ):  # DISABLE_MAX_PRIVILEGE and deny-only Administrators membership.
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         if not security.ImpersonateLoggedOnUser(restricted_token):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         impersonating = True
         if shell.IsUserAnAdmin():
             raise RuntimeError("Link creator still has administrator membership")
@@ -155,7 +157,7 @@ def _unprivileged_link_creator(directory: Path):
     finally:
         try:
             if impersonating and not security.RevertToSelf():
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         finally:
             for token in (thread_token, restricted_token, process_token):
                 if token:
@@ -170,7 +172,7 @@ def _create_untrusted_junction(target: Path, link: Path) -> None:
     from ctypes import wintypes
     import struct
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -190,14 +192,14 @@ def _create_untrusted_junction(target: Path, link: Path) -> None:
         link.mkdir()
         handle = kernel.CreateFileW(str(link), 0x40000000, 7, None, 3, 0x02200000, None)
         if handle == wintypes.HANDLE(-1).value:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         try:
             returned = wintypes.DWORD()
             if not kernel.DeviceIoControl(
                 handle, 0x900A4, ctypes.create_string_buffer(packet), len(packet),
                 None, 0, ctypes.byref(returned), None,
             ):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         finally:
             kernel.CloseHandle(handle)
 
@@ -218,15 +220,17 @@ def _source_repo(root: Path, *, long_path: bool = False) -> Path:
     return repo
 
 
-def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
+def _fake_tools(
+    bin_dir: Path, uv_exit: int, python_exit: int, *, uv_version: str = "0.13.7",
+) -> None:
     """A fake ``uv`` whose ``python find`` names a fake interpreter."""
     bin_dir.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         python = bin_dir / "fake-python.cmd"
         python.write_text(f"@echo off\r\nexit /b {python_exit}\r\n", "utf-8")
-        # A .ps1 stub: cmd.exe would treat the real ``'>=3.11'`` argument as a
-        # redirection, and PowerShell resolves .ps1 before PATHEXT executables.
+        # PowerShell resolves .ps1 before PATHEXT executables.
         (bin_dir / "uv.ps1").write_text(
+            f"if ($args[0] -eq '--version') {{ Write-Output 'uv {uv_version}'; exit 0 }}\n"
             "if ($env:BOOTSTRAP_UV_TRACE) {\n"
             "  Add-Content -LiteralPath $env:BOOTSTRAP_UV_TRACE "
             "-Value ($PSCommandPath + '|' + ($args -join ' '))\n"
@@ -243,7 +247,18 @@ def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
         python.write_text(f"#!/bin/sh\nexit {python_exit}\n", "utf-8")
         python.chmod(0o755)
         uv = bin_dir / "uv"
-        uv.write_text(f"#!/bin/sh\necho {python}\nexit {uv_exit}\n", "utf-8")
+        uv.write_text(
+            "#!/bin/sh\n"
+            f'if [ "$1" = --version ]; then printf "%s\\n" "uv {uv_version}"; exit 0; fi\n'
+            'if [ -n "${BOOTSTRAP_UV_TRACE:-}" ]; then\n'
+            '  printf "%s\\n" "$*" >> "$BOOTSTRAP_UV_TRACE"\n'
+            '  if [ "${BOOTSTRAP_UV_MISSING:-0}" = 1 ] && '
+            '[ "$(wc -l < "$BOOTSTRAP_UV_TRACE")" -eq 1 ]; then exit 2; fi\n'
+            "fi\n"
+            f'if [ "$2" = install ]; then exit {uv_exit}; fi\n'
+            f"printf '%s\\n' {shlex.quote(str(python))}\nexit {uv_exit}\n",
+            "utf-8",
+        )
         uv.chmod(0o755)
 
 
@@ -270,6 +285,7 @@ def _run(
     *, host: str | None = None, encoded: bool = False, linked_uv: bool = False,
     long_path: bool = False, incomplete_checkout: bool = False,
     longpaths_disabled: bool = False, retained_sparse: bool = False,
+    uv_version: str = "0.13.7",
 ) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path, long_path=long_path)
     root = tmp_path / "manager-root"
@@ -280,7 +296,7 @@ def _run(
         f'[source]\nrepo = "{repo.as_posix()}"\nref = "{ref}"\n', "utf-8"
     )
     fake_bin = tmp_path / "fake-bin"
-    _fake_tools(fake_bin, uv_exit, python_exit)
+    _fake_tools(fake_bin, uv_exit, python_exit, uv_version=uv_version)
     if incomplete_checkout:
         real_git = shutil.which("git")
         assert real_git is not None
@@ -301,12 +317,21 @@ def _run(
             [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J",
              str(selected_bin), str(fake_bin)],
             capture_output=True, check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     env = dict(os.environ)
     env["WORKTREE_MANAGER_ROOT"] = str(root)
     env["USERPROFILE"] = str(tmp_path / "profile")
     env["PATH"] = str(selected_bin) + os.pathsep + env.get("PATH", "")
+    installer_mock = ""
+    if uv_version == "0.7.0":
+        _fake_tools(Path(env["USERPROFILE"]) / ".local" / "bin", uv_exit, python_exit)
+        installer_mock = (
+            "function Invoke-RestMethod { param([string]$Uri)\n"
+            "if ($Uri -cne 'https://astral.sh/uv/install.ps1') { throw 'Unexpected download' }\n"
+            f"[IO.File]::WriteAllText({_quote(tmp_path / 'uv-prepared')}, 'prepared')\n"
+            "'$null = 0'\n}\n"
+        )
     if long_path:
         config = tmp_path / "global.gitconfig"
         config.write_text(
@@ -324,9 +349,9 @@ def _run(
         env["BOOTSTRAP_UV_TRACE"] = str(tmp_path / "uv-trace.txt")
         env["BOOTSTRAP_UV_POISON"] = str(poison)
     command = [host or PWSH, "-NoProfile", "-NonInteractive"]
-    if encoded:
+    if encoded or installer_mock:
         script = str(BOOTSTRAP).replace("'", "''")
-        text = (
+        text = installer_mock + (
             "[Threading.Thread]::CurrentThread.CurrentCulture = "
             "[Globalization.CultureInfo]::GetCultureInfo('de-DE'); "
             f"& '{script}' --version; exit $LASTEXITCODE"
@@ -337,28 +362,28 @@ def _run(
     return subprocess.run(
         command,
         capture_output=True, text=True, env=env, timeout=120, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
-def test_failed_uv_fails_the_bootstrap(tmp_path):
+def test_failed_uv_fails_the_bootstrap(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=3)
     assert result.returncode != 0
     assert "Python acquisition failed" in result.stdout + result.stderr
 
 
-def test_failed_runtime_command_fails_the_bootstrap(tmp_path):
+def test_failed_runtime_command_fails_the_bootstrap(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=0, python_exit=4)
     assert result.returncode == 4
     assert "failed (4)" in result.stdout + result.stderr
 
 
-def test_successful_uv_succeeds(tmp_path):
+def test_successful_uv_succeeds(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=0)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_fresh_bootstrap_restores_engine_sdk_from_retained_sparse_staging(tmp_path):
+def test_fresh_bootstrap_restores_engine_sdk_from_retained_sparse_staging(tmp_path: Path) -> None:
     from worktree_manager.core_install import install_script
 
     result = _run(tmp_path, uv_exit=0, retained_sparse=True)
@@ -372,7 +397,9 @@ def test_fresh_bootstrap_restores_engine_sdk_from_retained_sparse_staging(tmp_pa
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Git long-path checkout")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
-def test_bootstrap_checks_out_long_source_paths_without_global_git_changes(tmp_path, host_name):
+def test_bootstrap_checks_out_long_source_paths_without_global_git_changes(
+    tmp_path: Path, host_name: str,
+) -> None:
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -390,7 +417,7 @@ def test_bootstrap_checks_out_long_source_paths_without_global_git_changes(tmp_p
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Git long-path configuration")
-def test_bootstrap_preserves_global_disable_without_accepting_partial_source(tmp_path):
+def test_bootstrap_preserves_global_disable_without_accepting_partial_source(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=0, long_path=True, longpaths_disabled=True)
     assert (tmp_path / "global.gitconfig").read_text(encoding="utf-8") == (
         "[core]\nlongpaths = false\n"
@@ -405,7 +432,7 @@ def test_bootstrap_preserves_global_disable_without_accepting_partial_source(tmp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Git script adapter")
-def test_bootstrap_refuses_incomplete_source_even_after_zero_exit_checkout(tmp_path):
+def test_bootstrap_refuses_incomplete_source_even_after_zero_exit_checkout(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=0, incomplete_checkout=True)
     assert result.returncode != 0
     assert "source checkout is incomplete or changed" in result.stdout + result.stderr
@@ -414,7 +441,9 @@ def test_bootstrap_refuses_incomplete_source_even_after_zero_exit_checkout(tmp_p
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows junction contract")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
-def test_bootstrap_retains_physical_uv_across_find_install_and_path_change(tmp_path, host_name):
+def test_bootstrap_retains_physical_uv_across_find_install_and_path_change(
+    tmp_path: Path, host_name: str,
+) -> None:
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -423,18 +452,27 @@ def test_bootstrap_retains_physical_uv_across_find_install_and_path_change(tmp_p
     calls = (tmp_path / "uv-trace.txt").read_text(encoding="utf-8-sig").splitlines()
     expected = str(tmp_path / "fake-bin" / "uv.ps1")
     assert calls == [
-        expected + "|python find --no-project >=3.11",
-        expected + "|python install 3.11",
-        expected + "|python find --no-project >=3.11",
+        expected + "|python find --no-project --system --managed-python --no-python-downloads 3.11",
+        expected + "|python install --no-bin --no-registry 3.11",
+        expected + "|python find --no-project --system --managed-python --no-python-downloads 3.11",
     ]
     assert result.stdout == ""
+
+
+def test_bootstrap_prepares_compatible_uv_before_managed_python(tmp_path: Path) -> None:
+    result = _run(tmp_path, uv_exit=0, uv_version="0.7.0")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "uv-prepared").read_text(encoding="utf-8") == "prepared"
+    assert "uv 0.8.0+ required" in result.stderr
 
 
 def _resolver() -> str:
     source = BOOTSTRAP.read_text(encoding="utf-8")
     match = re.search(r"^function Resolve-BootstrapExecutable.*?^}", source, re.M | re.S)
     assert match is not None
-    return match[0]
+    version = re.search(r"^function Test-BootstrapUvVersion\b.*?^}", source, re.M | re.S)
+    assert version is not None
+    return match[0] + "\n" + version[0]
 
 def _python_resolvers() -> str:
     source = BOOTSTRAP.read_text(encoding="utf-8")
@@ -450,12 +488,44 @@ def _quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+def test_managed_python_selection_excludes_ambient_python_and_active_venv(
+    tmp_path: Path, host_name: str,
+) -> None:
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    uv = tmp_path / "uv.ps1"
+    selected = tmp_path / "managed-python" / "python.exe"
+    uv.write_text(
+        "$expected = 'python find --no-project --system --managed-python --no-python-downloads 3.11'\n"
+        "if (($args -join ' ') -cne $expected) { throw 'Unqualified interpreter request' }\n"
+        f"Write-Output {_quote(selected)}\nexit 0\n",
+        encoding="utf-8",
+    )
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "function Get-Command { throw 'Ambient Python discovery was attempted' }\n"
+        f"$env:VIRTUAL_ENV = {_quote(tmp_path / 'active-venv')}\n"
+        f"$env:UV_PYTHON = {_quote(tmp_path / 'ambient-python' / 'python.exe')}\n"
+        f"$env:PATH = {_quote(tmp_path / 'older-python')}\n"
+        f"Find-BootstrapPython {_quote(uv)}\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == str(selected)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Python alias fallback")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("lookup_error", [448, 2])
-def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
-    tmp_path, host_name, lookup_error,
-):
+def test_failed_managed_python_lookup_preserves_os_refusal_without_ambient_fallback(
+    tmp_path: Path, host_name: str, lookup_error: int,
+) -> None:
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -473,7 +543,7 @@ def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
     script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
     script += (
         "function Get-Command { param($Name, $CommandType, [switch]$All, $ErrorAction)\n"
-        f"  [pscustomobject]@{{ Source = {_quote(sys._base_executable)} }}\n"
+        "  throw 'Ambient Python discovery was attempted'\n"
         "}\n"
         f"$selected = Find-BootstrapPython {_quote(uv)}\n"
         "Write-Output $selected\n"
@@ -481,17 +551,17 @@ def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     calls = trace.read_text(encoding="utf-8-sig").splitlines()
+    assert result.returncode != 0
+    lookup = "python find --no-project --system --managed-python --no-python-downloads 3.11"
     if lookup_error == 448:
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert Path(result.stdout.strip()).samefile(sys._base_executable)
-        assert calls == ["python find --no-project >=3.11"]
+        assert "blocked by operating-system policy" in result.stdout + result.stderr
+        assert calls == [lookup]
     else:
-        assert result.returncode != 0
         assert "Python acquisition failed" in result.stdout + result.stderr
-        assert calls == ["python find --no-project >=3.11", "python install 3.11"]
+        assert calls == [lookup, "python install --no-bin --no-registry 3.11"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter protocol")
@@ -503,9 +573,11 @@ def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
     {"version": [3, 14], "base": True, "executable": "relative-python.exe"},
     'not-json',
 ])
-def test_physical_python_fallback_rejects_venv_old_version_and_bad_protocol(tmp_path, report):
+def test_physical_python_fallback_rejects_venv_old_version_and_bad_protocol(
+    tmp_path: Path, report: dict[str, object] | str,
+) -> None:
     if isinstance(report, dict):
-        report = json.dumps({"executable": sys._base_executable, **report})
+        report = json.dumps({"executable": getattr(sys, "_base_executable", sys.executable), **report})
     fake = tmp_path / "python.ps1"
     fake.write_text(f"Write-Output {_quote(report)}\nexit 0\n", encoding="utf-8")
     script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
@@ -518,13 +590,13 @@ def test_physical_python_fallback_rejects_venv_old_version_and_bad_protocol(tmp_
     result = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("after_install", [False, True])
-def test_python_lookup_rejects_empty_success(tmp_path, after_install):
+def test_python_lookup_rejects_empty_success(tmp_path: Path, after_install: bool) -> None:
     uv = tmp_path / "uv.ps1"
     trace = tmp_path / "calls.txt"
     uv.write_text(
@@ -539,19 +611,81 @@ def test_python_lookup_rejects_empty_success(tmp_path, after_install):
     result = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode != 0
-    expected = "Python 3.11 or newer" if after_install else "invalid executable"
+    expected = "uv-managed Python 3.11" if after_install else "invalid executable"
     assert expected in result.stdout + result.stderr
     assert not result.stdout.strip()
 
 
+def test_managed_python_lookup_preserves_post_install_failure(tmp_path: Path) -> None:
+    uv = tmp_path / "uv.ps1"
+    uv.write_text(
+        "if ($args[1] -eq 'install') { exit 0 }\n"
+        "Write-Error 'Managed interpreter query denied' -ErrorAction Continue\n"
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command",
+         _python_resolvers() + f"\nFind-BootstrapPython {_quote(uv)}\n"],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode != 0
+    assert "Managed interpreter query denied" in result.stderr
+    assert not result.stdout.strip()
+
+
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("operation", ["version", "post-install"])
+def test_managed_python_native_diagnostics_are_not_result_records(
+    tmp_path: Path, host_name: str, operation: str,
+) -> None:
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    selected = str(Path(sys.executable))
+    marker = tmp_path / "lookup"
+    program = tmp_path / "uv.py"
+    program.write_text(
+        "import pathlib,sys\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('uv 0.13.7')\n"
+        "elif sys.argv[2] == 'install':\n"
+        "    sys.exit(0)\n"
+        f"elif not pathlib.Path({str(marker)!r}).exists():\n"
+        f"    pathlib.Path({str(marker)!r}).touch(); sys.exit(2)\n"
+        f"else: print({selected!r})\n"
+        "sys.stderr.write('uv debug diagnostic\\n')\n",
+        encoding="utf-8",
+    )
+    uv = tmp_path / ("uv.cmd" if os.name == "nt" else "uv")
+    uv.write_text(
+        f'@"{sys.executable}" -I -S -B "{program}" %*\n'
+        if os.name == "nt" else
+        f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -S -B {shlex.quote(str(program))} \"$@\"\n",
+        encoding="utf-8",
+    )
+    if os.name != "nt":
+        uv.chmod(0o755)
+    action = "Test-BootstrapUvVersion" if operation == "version" else "Find-BootstrapPython"
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command",
+         _python_resolvers() + f"\n{action} {_quote(uv)}\n"],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == ("True" if operation == "version" else selected)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
-def test_unprivileged_link_creator_restores_thread_identity_after_failure(tmp_path):
+def test_unprivileged_link_creator_restores_thread_identity_after_failure(tmp_path: Path) -> None:
     import ctypes
 
-    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    shell = getattr(ctypes, "WinDLL")("shell32", use_last_error=True)
     original = bool(shell.IsUserAnAdmin())
     with pytest.raises(RuntimeError, match="fixture failure"):
         with _unprivileged_link_creator(tmp_path):
@@ -562,21 +696,16 @@ def test_unprivileged_link_creator_restores_thread_identity_after_failure(tmp_pa
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
-def test_guarded_python_lookup_reuses_real_physical_python_twice(tmp_path, host_name):
+def test_guarded_legacy_system_python_lookup_reuses_real_physical_python_twice(
+    tmp_path: Path, host_name: str,
+) -> None:
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
-    physical = Path(sys._base_executable).resolve(strict=True)
+    physical = Path(getattr(sys, "_base_executable", sys.executable)).resolve(strict=True)
     linked = tmp_path / "python-link"
     _create_untrusted_junction(physical.parent, linked)
     logical = linked / physical.name
-    uv = tmp_path / "uv.ps1"
-    uv.write_text(
-        "if ($args[1] -ne 'find') { throw 'Python acquisition was attempted' }\n"
-        "Write-Error 'interpreter query failed (os error 448)' -ErrorAction Continue\n"
-        "exit 2\n",
-        encoding="utf-8",
-    )
     script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
     script += r"""
 Add-Type -TypeDefinition @'
@@ -608,7 +737,7 @@ if (-not [BootstrapPythonGuard]::SetProcessMitigationPolicy(
         "  $blocked = $false\n"
         "  try { & $logical --version 2>$null | Out-Null } catch { $blocked = $true }\n"
         "  if (-not $blocked) { throw 'Logical interpreter was not guarded' }\n"
-        f"  $selected = Find-BootstrapPython {_quote(uv)}\n"
+        "  $selected = Find-PhysicalBootstrapPython\n"
         "  if ($selected -ine $expected) { throw 'Wrong physical interpreter selected' }\n"
         "}\n"
         "$after = [uint32]0\n"
@@ -620,7 +749,7 @@ if (-not [BootstrapPythonGuard]::SetProcessMitigationPolicy(
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "physical-python-ready"
@@ -629,7 +758,9 @@ if (-not [BootstrapPythonGuard]::SetProcessMitigationPolicy(
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard contract")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("link_kind", ["junction", "file"])
-def test_physical_uv_runs_twice_while_logical_uv_is_guarded(tmp_path, host_name, link_kind):
+def test_physical_uv_runs_twice_while_logical_uv_is_guarded(
+    tmp_path: Path, host_name: str, link_kind: str,
+) -> None:
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -637,6 +768,7 @@ def test_physical_uv_runs_twice_while_logical_uv_is_guarded(tmp_path, host_name,
     assert uv is not None, "contained runner must provide UV"
     configuration = BOOTSTRAP.parents[1] / "libs" / "installer-engine" / "installer_dependency_config.py"
     spec = importlib.util.spec_from_file_location("bootstrap_uv_configuration", configuration)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     selected = module.physical_executable(uv)
@@ -654,7 +786,7 @@ def test_physical_uv_runs_twice_while_logical_uv_is_guarded(tmp_path, host_name,
             with _unprivileged_link_creator(logical):
                 os.symlink(physical, logical / physical.name)
         except OSError as error:
-            if error.winerror == 1314:
+            if getattr(error, "winerror", None) == 1314:
                 pytest.skip("file symlink creation requires Windows developer mode or privilege")
             raise
     script = (
@@ -706,14 +838,14 @@ if (-not [BootstrapGuard]::GetProcessMitigationPolicy(
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == ""
 
 
 @pytest.mark.parametrize("kind", ["missing", "directory", "cycle", "unsupported"])
-def test_bootstrap_executable_refuses_invalid_targets(tmp_path, kind):
+def test_bootstrap_executable_refuses_invalid_targets(tmp_path: Path, kind: str) -> None:
     target = tmp_path / "tool"
     if kind == "directory":
         target.mkdir()
@@ -735,7 +867,7 @@ function Get-Item {{
     result = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode != 0
     assert result.stdout == ""
@@ -748,7 +880,7 @@ function Get-Item {{
     assert expected[kind] in result.stderr
 
 
-def test_failed_git_fetch_fails_the_bootstrap(tmp_path):
+def test_failed_git_fetch_fails_the_bootstrap(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=0, ref="no-such-branch")
     assert result.returncode != 0
     assert "git fetch of" in result.stdout + result.stderr
@@ -757,8 +889,8 @@ def test_failed_git_fetch_fails_the_bootstrap(tmp_path):
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("encoded", [False, True])
 def test_bootstrap_progress_is_once_on_stderr_without_information_records(
-    tmp_path, host_name, encoded,
-):
+    tmp_path: Path, host_name: str, encoded: bool,
+) -> None:
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -779,5 +911,9 @@ def test_bootstrap_progress_is_once_on_stderr_without_information_records(
             r"\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] update/bootstrap "
             r"(?:running|warning) .+ \[elapsed \d+\.\d+s\]", line,
         ), line
-    elapsed = [float(re.search(r"\[elapsed (\d+\.\d+)s\]$", line)[1]) for line in progress]
+    elapsed = []
+    for line in progress:
+        match = re.search(r"\[elapsed (\d+\.\d+)s\]$", line)
+        assert match is not None
+        elapsed.append(float(match[1]))
     assert elapsed == sorted(elapsed)

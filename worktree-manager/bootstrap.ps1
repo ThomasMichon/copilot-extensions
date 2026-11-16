@@ -224,9 +224,21 @@ function Add-BootstrapPythonPath([string]$Path, [string]$Directory) {
     return (@($Directory) + $remaining) -join ';'
 }
 
+function Test-BootstrapUvVersion([string]$Uv) {
+    $ErrorActionPreference = 'Continue'
+    $output = @(& $Uv --version 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw ('uv version qualification failed: ' + ($output -join "`n"))
+    }
+    $output = @($output | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+    $match = [regex]::Match(($output -join "`n"), '\Auv[ \t]+([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t(+]|$)')
+    if (-not $match.Success) { throw 'uv returned an invalid version report.' }
+    return [version]$match.Groups[1].Value -ge [version]'0.8.0'
+}
+
 function Find-BootstrapPython([string]$Uv) {
     $ErrorActionPreference = 'Continue'
-    $lookup = @(& $Uv python find --no-project '>=3.11' 2>&1)
+    $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
     $lookupExit = $LASTEXITCODE
     if ($lookupExit -eq 0) {
         $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
@@ -236,14 +248,17 @@ function Find-BootstrapPython([string]$Uv) {
         throw 'Manager Python lookup returned an invalid executable.'
     }
     if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
-        $physical = Find-PhysicalBootstrapPython
-        if ($physical) { return $physical }
+        throw ('Manager managed Python lookup is blocked by operating-system policy: ' + ($lookup -join "`n"))
     }
-    & $Uv python install 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+    & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
     if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-    $python = @(& $Uv python find --no-project '>=3.11' 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
-        throw 'Manager needs Python 3.11 or newer.'
+    $python = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
+    }
+    $python = @($python | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+    if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
+        throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
     }
     return [string]$python[0]
 }
@@ -450,13 +465,18 @@ $SystemPython = if ($SystemPythonRequested) { Find-SystemBootstrapPython } else 
 
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-BootstrapProgress 'uv not found - installing (user-local, no admin)...'
+$uvPrepared = $false
+$uvCandidateCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+$uvCandidate = if ($uvCandidateCommand) { Resolve-BootstrapExecutable $uvCandidateCommand.Source } else { $null }
+if (-not $uvCandidate -or -not (Test-BootstrapUvVersion $uvCandidate)) {
+    Write-BootstrapProgress 'uv 0.8.0+ required - preparing it (user-local, no admin)...'
     try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression }
     catch { throw "uv install failed: $_" }
+    $uvPrepared = $true
     # uv installs into ~\.local\bin; amend THIS session's PATH so we can continue
     # without a restart (the installer persists PATH for future shells).
-    if (Test-Path (Join-Path $LocalBin 'uv.exe')) { $env:PATH = "$LocalBin;$env:PATH" }
+    $env:PATH = $LocalBin + [IO.Path]::PathSeparator + $env:PATH
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         Write-BootstrapProgress 'uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap.' warning
         exit 1
@@ -464,7 +484,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 $UvCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction Stop |
     Select-Object -First 1
-$Uv = Resolve-BootstrapExecutable $UvCommand.Source
+$Uv = if ($uvCandidate -and -not $uvPrepared) { $uvCandidate }
+    else { Resolve-BootstrapExecutable $UvCommand.Source }
+if ($uvPrepared -and -not (Test-BootstrapUvVersion $Uv)) {
+    throw 'uv 0.8.0 or newer is required after prerequisite preparation.'
+}
 
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 if (-not $HaveGit -and -not $InstallSource) {
