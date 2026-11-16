@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import os
 import subprocess
 import sys
+from typing import Any, TypedDict
 
 from . import config
 from .cache_dpapi import CacheDecryptionUnavailable
@@ -26,13 +27,18 @@ class CredentialRead:
     warning: str | None = None
 
 
+class _CacheOptions(TypedDict, total=False):
+    strict: bool
+    legacy_entry: str | None
+
+
 def legacy_cache_entry(entry: str, normalized: str) -> str | None:
     if config.PINNED_CONTEXT_ENV in os.environ or normalized != config.normalize_entry(entry, ""):
         return None
     return entry
 
 
-def read_credential(args) -> CredentialRead:
+def read_credential(args: Any) -> CredentialRead:
     from . import cli
     from .cache import get_cache
 
@@ -135,6 +141,9 @@ def read_credential(args) -> CredentialRead:
     )
     succeeded = False
     reconciliation_failed = False
+    cache_options: _CacheOptions = (
+        {"strict": True, "legacy_entry": legacy_entry} if strict_cache else {}
+    )
     with read_lock:
         try:
             resp = cli.send_command(
@@ -172,15 +181,13 @@ def read_credential(args) -> CredentialRead:
                         field,
                         value,
                         int(generation) if generation is not None else None,
-                        **({"strict": True, "legacy_entry": legacy_entry}
-                           if strict_cache else {}),
+                        **cache_options,
                     )
                 else:
                     cached_ok = cache.put(
                         cache_entry, field, value,
                         *(() if generation is None else (int(generation),)),
-                        **({"strict": True, "legacy_entry": legacy_entry}
-                           if strict_cache else {}),
+                        **cache_options,
                     )
                     reconciliation_failed = strict_cache and not cached_ok
     if reconciliation_failed or (succeeded and authoritative and cache_decryption_failed):
@@ -198,7 +205,7 @@ def read_credential(args) -> CredentialRead:
     return CredentialRead(1, error=error, warning=cache_warning)
 
 
-def cmd_get(args):
+def cmd_get(args: Any) -> int:
     result = read_credential(args)
     if result.warning:
         print(f"Warning: {result.warning}", file=sys.stderr)

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from agent_vault import cache, cli, config
+from agent_vault import cache, cli, config, extensions, rendezvous
 
 
 @pytest.fixture
@@ -27,9 +29,12 @@ def _read(
     monkeypatch: pytest.MonkeyPatch, command: str, *options: str,
 ) -> int:
     if command == "get":
-        return cli.main(["get", "service", *options])
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"service"}]'))
-    return cli.main(["batch-get", *options])
+        result = cli.main(["get", "service", *options])
+    else:
+        monkeypatch.setattr(sys, "stdin", io.StringIO('[{"entry":"service"}]'))
+        result = cli.main(["batch-get", *options])
+    assert isinstance(result, int)
+    return result
 
 
 @pytest.mark.parametrize("command", ["get", "batch-get"])
@@ -40,7 +45,7 @@ def test_unavailable_or_draining_service_never_activates(
 ) -> None:
     calls = []
 
-    def send(request: dict, **options: object) -> object:
+    def send(request: dict[str, Any], **options: object) -> object:
         calls.append(request)
         assert request == {"action": "ping"}
         assert options == {"timeout": 5.0, "strict_endpoint": True}
@@ -59,11 +64,11 @@ def test_unavailable_or_draining_service_never_activates(
 @pytest.mark.parametrize("response", [{"ok": True, "value": "synthetic-value"}, None])
 def test_selected_service_read_or_loss_never_falls_back_to_activation(
     isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str], command: str, response: dict | None,
+    capsys: pytest.CaptureFixture[str], command: str, response: dict[str, Any] | None,
 ) -> None:
     actions = []
 
-    def send(request: dict, **options: object) -> dict | None:
+    def send(request: dict[str, Any], **options: object) -> dict[str, Any] | None:
         actions.append(request["action"])
         assert options["strict_endpoint"] is True
         if request["action"] == "ping":
@@ -101,7 +106,7 @@ def test_cached_read_needs_neither_running_service_nor_activation(
 def test_prompt_is_explicit_and_does_not_authorize_service_activation(
     isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def send(request: dict, **options: object) -> dict:
+    def send(request: dict[str, Any], **options: object) -> dict[str, Any]:
         assert options["strict_endpoint"] is True
         if request["action"] == "ping":
             return {"ok": True}
@@ -117,9 +122,13 @@ def test_legacy_read_keeps_existing_activation_and_transport_defaults(
     isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, command: str,
 ) -> None:
     calls = []
-    monkeypatch.setattr(cli, "ensure_service", lambda: calls.append("ensure") or True)
+    def ensure() -> bool:
+        calls.append("ensure")
+        return True
 
-    def send(request: dict, **options: object) -> dict:
+    monkeypatch.setattr(cli, "ensure_service", ensure)
+
+    def send(request: dict[str, Any], **options: object) -> dict[str, Any]:
         calls.append(request["action"])
         assert options == {"timeout": None}
         return {"ok": True, "value": "synthetic-value"}
@@ -127,3 +136,68 @@ def test_legacy_read_keeps_existing_activation_and_transport_defaults(
     monkeypatch.setattr(cli, "send_command", send)
     assert _read(monkeypatch, command) == 0
     assert calls == ["ensure", "get"]
+
+
+@pytest.mark.parametrize("response", [None, {"ok": True, "value": "selected-value"}])
+def test_real_transport_keeps_strict_tcp_selection_off_legacy_socket(
+    isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    response: dict[str, Any] | None,
+) -> None:
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "tcp:127.0.0.1:12345")
+    monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(
+        kpdb=None, group="Example", vault_name=None, port=10170,
+        sources={"port": "default"},
+    ))
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    monkeypatch.setattr(
+        cli, "_send_socket", lambda *_a, **_kw: pytest.fail("selected TCP dial used legacy socket"),
+    )
+    calls = []
+
+    def tcp(
+        request: dict[str, Any], host: str, port: int, timeout: float | None,
+    ) -> dict[str, Any] | None:
+        calls.append((request["action"], host, port))
+        return response
+
+    monkeypatch.setattr(cli, "_send_tcp", tcp)
+    actual = cli.send_command({"action": "get"}, strict_endpoint=True)
+    assert actual == (
+        {**response, "_transport": "discovered-tcp"} if response is not None else None
+    )
+    assert calls == [("get", "127.0.0.1", 12345)]
+
+
+@pytest.mark.parametrize("with_extension", [False, True])
+def test_unsupported_native_selection_refuses_but_keeps_configured_extension_priority(
+    isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    with_extension: bool,
+) -> None:
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(
+        kpdb=None, group="Example", vault_name=None, port=10170,
+        sources={"port": "default"},
+    ))
+    endpoint = rendezvous.Endpoint.parse(r"pipe:\\.\pipe\synthetic-selected-vault")
+    monkeypatch.setattr(cli, "_discover_endpoint", lambda *_a, **_kw: endpoint)
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    if with_extension:
+        registry.register_transport(
+            lambda *_args: {"ok": True, "value": "extension-value"}, before_builtin=True,
+        )
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    for name in ("_send_socket", "_send_tcp"):
+        monkeypatch.setattr(
+            cli, name, lambda *_a, **_kw: pytest.fail("unsupported selection dialed another daemon"),
+        )
+    actual = cli.send_command({"action": "get"}, strict_endpoint=True)
+    if with_extension:
+        assert actual is not None and actual["value"] == "extension-value"
+    else:
+        assert actual is None

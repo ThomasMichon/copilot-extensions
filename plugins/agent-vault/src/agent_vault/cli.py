@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 
@@ -16,7 +17,7 @@ from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest as _read_cache_manifest
 from .cache_recovery import status_command as cmd_cache_status
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
-from .credential_reads import cmd_get, legacy_cache_entry
+from .credential_reads import cmd_get as cmd_get, legacy_cache_entry
 from .prompt import prompt_password as gui_prompt_password
 from .winpipe import pipe_send
 
@@ -58,9 +59,11 @@ PROVIDER_UNLOCK_TIMEOUT = 10.0
 
 
 def _send_socket(
-    request: dict, timeout: float | None = 5.0, path: str = SOCKET_PATH
-) -> dict | None:
+    request: dict[str, Any], timeout: float | None = 5.0, path: str = SOCKET_PATH
+) -> dict[str, Any] | None:
     """Try sending a command via Unix socket (``path`` defaults to ``SOCKET_PATH``)."""
+    if sys.platform == "win32":
+        return None
     import socket as _sock
 
     connect_timeout = 5.0
@@ -77,12 +80,13 @@ def _send_socket(
                 break
             buf += chunk
         s.close()
-        return json.loads(buf.decode().strip())
+        response = json.loads(buf.decode().strip())
+        return response if isinstance(response, dict) else None
     except Exception:
         return None
 
 
-def _send_tcp(request: dict, host: str, port: int, timeout: float | None) -> dict | None:
+def _send_tcp(request: dict[str, Any], host: str, port: int, timeout: float | None) -> dict[str, Any] | None:
     """Try sending a command via TCP to a specific host:port."""
     import socket
 
@@ -100,7 +104,8 @@ def _send_tcp(request: dict, host: str, port: int, timeout: float | None) -> dic
                 break
             buf += chunk
         s.close()
-        return json.loads(buf.decode().strip())
+        response = json.loads(buf.decode().strip())
+        return response if isinstance(response, dict) else None
     except Exception:
         return None
 
@@ -177,6 +182,7 @@ def _discover_endpoint(
     if override == "" and config.PINNED_CONTEXT_ENV in os.environ:
         override = None
     expected_installation = config.installation_id()
+    endpoint: rendezvous.Endpoint | None
     if strict:
         if override is not None:
             endpoint = rendezvous.Endpoint.parse(override, source="env")
@@ -219,16 +225,16 @@ def _discover_endpoint(
 
 
 def send_command(
-    request: dict,
+    request: dict[str, Any],
     timeout: float | None = 5.0,
     *,
     strict_endpoint: bool = False,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
     context = config.resolve_context()
     request = dict(request)
 
-    def _tag(result: dict | None, transport: str) -> dict | None:
+    def _tag(result: dict[str, Any] | None, transport: str) -> dict[str, Any] | None:
         if result is not None:
             result["_transport"] = transport
         return result
@@ -298,6 +304,11 @@ def send_command(
     if result is not None:
         return result
 
+    if strict_endpoint and discovered is not None and discovered.transport not in (
+        "tcp", "pipe" if IS_WINDOWS else "unix",
+    ):
+        return None
+
     # Strict selection never falls back to another daemon after a failed dial.
     if discovered_pipe is not None and IS_WINDOWS:
         result = pipe_send(discovered_pipe, request, timeout)
@@ -311,7 +322,11 @@ def send_command(
         if result is not None or strict_endpoint:
             return _tag(result, "discovered-unix")
 
-    if discovered_unix is None and not IS_WINDOWS and context.sources.get("port") == "default":
+    if (
+        discovered_unix is None and not IS_WINDOWS
+        and context.sources.get("port") == "default"
+        and not (strict_endpoint and discovered is not None)
+    ):
         result = _send_socket(request, timeout)
         if result is not None:
             return _tag(result, "unix-socket")
@@ -353,7 +368,7 @@ def _start_service_systemd() -> bool:
         return False
 
 
-def _ready_for_work(response: dict | None) -> bool:
+def _ready_for_work(response: dict[str, Any] | None) -> bool:
     return bool(
         response and response.get("ok") and response.get("accepting_work", True) is True
     )
@@ -441,7 +456,7 @@ def prompt_password() -> str | None:
 
 def _read_password_from_tty(prompt: str) -> str | None:
     """Read a password from the controlling terminal with echo disabled."""
-    if os.name == "nt":
+    if sys.platform == "win32" or os.name == "nt":
         import getpass
 
         try:
@@ -484,7 +499,7 @@ def _has_controlling_tty() -> bool:
     operator, so a headless/agent caller fails fast instead of printing a
     "no terminal" error.
     """
-    if os.name == "nt":
+    if sys.platform == "win32" or os.name == "nt":
         return sys.stdin.isatty()
     try:
         fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
@@ -648,7 +663,7 @@ Write-Output $box1.Text
             capture_output=True, text=True, timeout=120,
             **no_window_kwargs(),
         )
-        pw = r.stdout.strip().replace("\r", "")
+        pw: str = r.stdout.strip().replace("\r", "")
         if pw == "CANCELLED" or not pw:
             return None
         if pw == "MISMATCH":
@@ -677,7 +692,7 @@ Write-Output $box1.Text
 # ---------------------------------------------------------------------------
 
 
-def cmd_has(args):
+def cmd_has(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -695,7 +710,7 @@ def cmd_has(args):
     return 1
 
 
-def cmd_search(args):
+def cmd_search(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -727,7 +742,7 @@ _TRANSPORT_LABELS = {
 }
 
 
-def cmd_ping(args):
+def cmd_ping(args: Any) -> int:
     from .service_status import format_service_status
 
     resp = send_command({"action": "ping"})
@@ -742,7 +757,7 @@ def cmd_ping(args):
     return 1
 
 
-def cmd_installer_readiness(args):
+def cmd_installer_readiness(args: Any) -> int:
     """Report config and service readiness without starting or unlocking."""
     from .installer_readiness import emit, evaluate
     from .configuration import runtime_enabled
@@ -765,11 +780,12 @@ def cmd_installer_readiness(args):
     return emit(evaluate(context, service))
 
 
-def cmd_start(args):
+def cmd_start(args: Any) -> int:
     if not _runtime_active():
         return 2
     resp = send_command({"action": "ping"})
     if _ready_for_work(resp):
+        assert resp is not None
         status = _vault_status_label(resp["cli"])
         print(f"Already running - PID {resp['pid']}, status={status}")
         return 0
@@ -777,6 +793,7 @@ def cmd_start(args):
     if ensure_service():
         resp = send_command({"action": "ping"})
         if _ready_for_work(resp):
+            assert resp is not None
             status = _vault_status_label(resp["cli"])
             print(f"Vault service started - PID {resp['pid']}, status={status}")
             return 0
@@ -784,13 +801,13 @@ def cmd_start(args):
     return 1
 
 
-def cmd_source_start(args):
+def cmd_source_start(args: Any) -> int:
     from .source_start import command
 
     return command(args)
 
 
-def cmd_stop(args):
+def cmd_stop(args: Any) -> int:
     resp = send_command({"action": "stop"})
     if resp and resp.get("ok"):
         print("Vault service stopped")
@@ -799,7 +816,7 @@ def cmd_stop(args):
     return 1
 
 
-def cmd_lock(args):
+def cmd_lock(args: Any) -> int:
     resp = send_command({"action": "lock"})
     if resp and resp.get("ok"):
         if resp.get("was_unlocked"):
@@ -811,7 +828,7 @@ def cmd_lock(args):
     return 1
 
 
-def _current_vault_unlocked(resp: dict, context: ResolvedVault | None = None) -> bool:
+def _current_vault_unlocked(resp: dict[str, Any] | None, context: ResolvedVault | None = None) -> bool:
     """Return whether the service has the current vault unlocked."""
     if not resp or not resp.get("ok"):
         return False
@@ -821,7 +838,7 @@ def _current_vault_unlocked(resp: dict, context: ResolvedVault | None = None) ->
     return resp.get("cli") == "unlocked"
 
 
-def cmd_unlock(args):
+def cmd_unlock(args: Any) -> int:
     if getattr(args, "terminal", False) or os.environ.get("VAULT_UNLOCK_TERMINAL"):
         if _terminal_unlock_local():
             print("Vault unlocked (local service, via terminal)")
@@ -857,7 +874,7 @@ def _ensure_unlocked_service() -> bool:
     return False
 
 
-def cmd_add(args):
+def cmd_add(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -889,7 +906,7 @@ def cmd_add(args):
     return 1
 
 
-def cmd_set_password(args):
+def cmd_set_password(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1024,7 +1041,7 @@ def cmd_set_password(args):
         return 1
 
 
-def cmd_set_username(args):
+def cmd_set_username(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1041,7 +1058,7 @@ def cmd_set_username(args):
     return 1
 
 
-def cmd_list(args):
+def cmd_list(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1061,7 +1078,7 @@ def cmd_list(args):
     return 1
 
 
-def cmd_show(args):
+def cmd_show(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1078,7 +1095,7 @@ def cmd_show(args):
     return 1
 
 
-def cmd_remove(args):
+def cmd_remove(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1094,7 +1111,7 @@ def cmd_remove(args):
     return 1
 
 
-def cmd_move(args):
+def cmd_move(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1110,7 +1127,7 @@ def cmd_move(args):
     return 1
 
 
-def cmd_git_credential(args):
+def cmd_git_credential(args: Any) -> int:
     """git credential helper: delegate an allowlisted host's credential to GCM.
 
     Reads the git-credential protocol (key=value lines, blank-line terminated)
@@ -1155,7 +1172,7 @@ def cmd_git_credential(args):
     return 0
 
 
-def cmd_import_key(args):
+def cmd_import_key(args: Any) -> int:
     import base64
 
     key_file = Path(args.key_file)
@@ -1191,7 +1208,7 @@ def cmd_import_key(args):
     return 1
 
 
-def cmd_export_key(args):
+def cmd_export_key(args: Any) -> int:
     import base64
 
     dest_dir = Path(args.dest_dir)
@@ -1226,7 +1243,7 @@ def cmd_export_key(args):
     return 0
 
 
-def _read_seal_input(args) -> bytes | None:
+def _read_seal_input(args: Any) -> bytes | None:
     """Read the plaintext/ciphertext payload from --in FILE or stdin."""
     src = getattr(args, "in_path", None)
     try:
@@ -1238,7 +1255,7 @@ def _read_seal_input(args) -> bytes | None:
         return None
 
 
-def cmd_seal(args):
+def cmd_seal(args: Any) -> int:
     import base64
 
     if not ensure_service():
@@ -1262,7 +1279,7 @@ def cmd_seal(args):
     return 1
 
 
-def cmd_unseal(args):
+def cmd_unseal(args: Any) -> int:
     import base64
     import binascii
 
@@ -1294,7 +1311,7 @@ def cmd_unseal(args):
     return 1
 
 
-def cmd_kek_list(args):
+def cmd_kek_list(args: Any) -> int:
     if not ensure_service():
         print("Error: service unreachable", file=sys.stderr)
         return 1
@@ -1312,7 +1329,7 @@ def cmd_kek_list(args):
     return 0
 
 
-def cmd_cache_populate(args):
+def cmd_cache_populate(args: Any) -> int:
     """Pre-warm the vault cache for a set of entries.
 
     Entries come from (deduped, in order): explicit ``--entry`` values, a
@@ -1374,7 +1391,7 @@ def cmd_cache_populate(args):
     failures: list[str] = []
     for entry, field in pairs:
         action = "has" if args.verify else "get"
-        request = {"action": action, "entry": entry, "field": field}
+        request: dict[str, Any] = {"action": action, "entry": entry, "field": field}
         if not args.verify:
             request["refresh"] = True
         if args.prompt and not args.verify:
@@ -1394,6 +1411,7 @@ def cmd_cache_populate(args):
                 present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
                 if (
                     present
+                    and resp is not None
                     and not args.verify
                     and cache.enabled
                     and resp.get("value") is not None
@@ -1435,7 +1453,7 @@ def cmd_cache_populate(args):
     return 1 if fail > 0 else 0
 
 
-def cmd_cache_clear(args):
+def cmd_cache_clear(args: Any) -> int:
     """Wipe the persistent on-disk credential cache."""
     from .cache import get_cache
 
@@ -1447,7 +1465,7 @@ def cmd_cache_clear(args):
     return 1
 
 
-def cmd_cache_verify(args):
+def cmd_cache_verify(args: Any) -> int:
     """Check the persistent cache holds a set of entries without unlocking.
 
     Entries come from ``--entry`` / ``--manifest`` / cache-source extensions,
@@ -1511,7 +1529,7 @@ def cmd_cache_verify(args):
     return 2 if missing else 0
 
 
-def cmd_which(args):
+def cmd_which(args: Any) -> int:
     context = config.resolve_context()
     payload = {
         "vault_name": context.vault_name,
@@ -1531,7 +1549,7 @@ def cmd_which(args):
     return 0
 
 
-def cmd_vault_list(args):
+def cmd_vault_list(args: Any) -> int:
     data = config.load_global_config()
     vaults = config.list_vaults()
     active = config.resolve_context().vault_name
@@ -1559,7 +1577,7 @@ def cmd_vault_list(args):
     return 0
 
 
-def cmd_vault_add(args):
+def cmd_vault_add(args: Any) -> int:
     # A relative database path names the caller's directory, but the global
     # settings resolve relative paths against their own directory: anchor it.
     kpdb = args.kpdb
@@ -1570,7 +1588,7 @@ def cmd_vault_add(args):
     return 0
 
 
-def cmd_vault_set_default(args):
+def cmd_vault_set_default(args: Any) -> int:
     try:
         config.set_default_vault(args.name)
     except KeyError as exc:
@@ -1580,7 +1598,7 @@ def cmd_vault_set_default(args):
     return 0
 
 
-def cmd_vault_remove(args):
+def cmd_vault_remove(args: Any) -> int:
     try:
         config.remove_vault(args.name)
     except KeyError as exc:
@@ -1590,12 +1608,12 @@ def cmd_vault_remove(args):
     return 0
 
 
-def main(argv: list[str] | None = None):
+def main(argv: list[str] | None = None) -> int | None:
     from .invocation import invoke_cli
     return invoke_cli(_main, sys.argv[1:] if argv is None else argv)
 
 
-def _main(argv: list[str] | None = None):
+def _main(argv: list[str] | None = None) -> int | None:
     import argparse
 
     class _LazyVersionAction(argparse.Action):
@@ -1605,14 +1623,14 @@ def _main(argv: list[str] | None = None):
         front, forcing the ``importlib.metadata`` lookup on every invocation
         regardless of subcommand)."""
 
-        def __init__(self, option_strings, dest=argparse.SUPPRESS,
-                     default=argparse.SUPPRESS, help=None):
+        def __init__(self, option_strings: list[str], dest: str=argparse.SUPPRESS,
+                     default: Any=argparse.SUPPRESS, help: str | None=None) -> None:
             super().__init__(
                 option_strings=option_strings, dest=dest, default=default,
                 nargs=0, help=help,
             )
 
-        def __call__(self, parser, namespace, values, option_string=None):
+        def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values: Any, option_string: str | None=None) -> None:
             import sys as _sys
 
             from . import __version__
@@ -1863,7 +1881,7 @@ def _main(argv: list[str] | None = None):
     from configuration_context import RepositoryContextRequired
 
     try:
-        return args.func(args)
+        return cast("int | None", args.func(args))
     except RepositoryContextRequired:
         print(
             "Error: Agent Vault repository context is missing. Run from an adopted "
