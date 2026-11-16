@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from . import acquisition_worktree_writer as writers
@@ -47,14 +47,14 @@ def require_form(target: Any, *, key: str, provider_instance: bool) -> None:
         )
 
 
-def _read(db: Any, digest: str) -> dict | None:
+def _read(db: Any, digest: object) -> dict[str, Any] | None:
     if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         return None
     rows = db.execute_read("SELECT * FROM workspace_embodiments WHERE key_digest=?", (digest,))
     return dict(rows[0]) if rows else None
 
 
-def _binding(row: dict) -> tuple[CreationWriterScope, writers.RetainedWriter]:
+def _binding(row: dict[str, Any]) -> tuple[CreationWriterScope, writers.RetainedWriter]:
     try:
         data = json.loads(row["creation_writer_json"])
         if set(data) != {"version", "facts", "worktree_writer", "binding"} or (
@@ -83,17 +83,25 @@ def _binding(row: dict) -> tuple[CreationWriterScope, writers.RetainedWriter]:
     return scope, writer
 
 
-async def _verify(scope: CreationWriterScope, saved: dict) -> None:
+async def _verify(scope: CreationWriterScope, saved: dict[str, Any]) -> None:
     from .workspace_creation import _workspace
 
     await _workspace(scope.project, scope.worktree_id, expected=saved)
 
 
 @contextlib.asynccontextmanager
-async def retained(db: Any, row: dict) -> AsyncIterator[CreationWriterScope]:
-    """Requalify the original command, never the currently selected writer."""
+async def retained(
+    db: Any, row: dict[str, Any], *, executing_writer: writers.RetainedWriter | None = None,
+) -> AsyncIterator[CreationWriterScope]:
+    """Adapt the original contract to a compatible current executing writer."""
     scope, writer = _binding(row)
-    await writers._qualify(writer)
+    if executing_writer is not None:
+        if executing_writer.request != scope or executing_writer.execution_identity is None:
+            raise _refuse("retained execution lost its original writer contract")
+        writer = executing_writer
+        await writers._qualify(writer)
+    else:
+        writer, _support = await writers.select_writer(writer)
     token = writers._current.set(writer)
     try:
         await _verify(scope, json.loads(row["worktree_json"]))
@@ -107,7 +115,7 @@ def creation_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
     async def run(
         manager: Any, target: Any, *, key: str, prompt: str | None = None,
         provider_instance: bool = False,
-        worktree_writer: WorktreeWriterRequirement | dict | None = None, **options: Any,
+        worktree_writer: WorktreeWriterRequirement | dict[str, Any] | None = None, **options: Any,
     ) -> Any:
         from .acquisition_executor import executor
         from .workspace_creation import creation_facts
@@ -135,22 +143,13 @@ def creation_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
                     (target.worktree_id, target.project),
                 ):
                     raise _refuse("workspace writer belongs to its original creation key")
-                from .session_lifecycle_cli import _agent_worktrees_pinned_selection
-                from ._peer_launch import ContextRefused
                 from .workspace_creation import _workspace
 
-                try:
-                    prefix, root, _python = _agent_worktrees_pinned_selection()
-                except ContextRefused as exc:
-                    raise _refuse(str(exc)) from exc
-                if str(root) != requirement.identity.installation_root:
-                    raise _refuse("selected Worktrees installation changed")
                 # The exact record supplies the path; no caller command or new allocation is accepted.
                 probe = CreationWriterScope(
                     digest, target.project, target.worktree_id, target.cwd, requirement,
                 )
-                writer = writers.RetainedWriter(probe, tuple(prefix))
-                await writers._qualify(writer)
+                writer, _support = await writers.select_writer(writers.RetainedWriter(probe, ()))
                 token = writers._current.set(writer)
                 try:
                     saved, _head = await _workspace(target.project, target.worktree_id)
@@ -171,6 +170,8 @@ def creation_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
                          str(uuid.uuid4())[:12], json.dumps(saved), document),
                     )
                 original = _read(manager.db, digest)
+            if original is None:
+                raise _refuse("original keyed creation journal is unavailable")
             scope, _writer = _binding(original)
             if (
                 scope.worktree_writer != requirement
@@ -185,12 +186,12 @@ def creation_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
     return run
 
 
-def require_journal(row: dict) -> None:
+def require_journal(row: dict[str, Any]) -> None:
     if row["creation_writer_json"] is None:
         return
-    scope, writer = _binding(row)
+    scope, _writer = _binding(row)
     actual = writers.current()
-    if actual != writer or not isinstance(actual.request, CreationWriterScope):
+    if actual is None or actual.request != scope or not isinstance(actual.request, CreationWriterScope):
         raise _refuse("keyed creation lost its original writer owner")
     if scope.key_digest != row["key_digest"]:
         raise _refuse("keyed creation writer changed journal")
@@ -288,9 +289,9 @@ async def continue_session(
 
 
 def handoff_state(
-    db: Any, scope: CreationWriterScope, predecessor: str, *, create: dict | None = None,
+    db: Any, scope: CreationWriterScope, predecessor: str, *, create: dict[str, Any] | None = None,
     stage: str | None = None, native_session_id: str | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     with db._runtime_transaction(write=create is not None or stage is not None, full_sync=True) as conn:
         row = conn.execute(
             "SELECT * FROM workspace_embodiments WHERE key_digest=?", (scope.key_digest,),
@@ -317,4 +318,4 @@ def handoff_state(
                 "UPDATE workspace_embodiments SET creation_handoffs_json=? WHERE key_digest=?",
                 (json.dumps(handoffs, sort_keys=True), scope.key_digest),
             )
-        return result
+        return cast("dict[str, Any] | None", result)

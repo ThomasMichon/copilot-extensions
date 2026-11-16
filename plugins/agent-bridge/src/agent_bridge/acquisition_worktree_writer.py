@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 import json
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from .acquisition_contract import AcquisitionRefused, AcquisitionRequest
+from .acquisition_contract import (
+    AcquisitionRefused, AcquisitionRequest, InstalledWorktreeWriter, WorktreeWriterRequirement,
+)
 from .acquisition_journal import _digest
 
 if TYPE_CHECKING:
@@ -25,9 +28,20 @@ JOURNAL_KEY = "_worktree_writer"
 class RetainedWriter:
     request: AcquisitionRequest | CreationWriterScope
     prefix: tuple[str, ...]
+    execution_identity: InstalledWorktreeWriter | None = None
+    journal_prefix: tuple[str, ...] | None = None
 
-    def document(self) -> dict:
-        return {"version": 1, "prefix": list(self.prefix)}
+    @property
+    def execution_requirement(self) -> WorktreeWriterRequirement:
+        """Bind this invocation's checks without changing historical provenance."""
+        requirement = self.request.worktree_writer
+        assert requirement is not None
+        return requirement.model_copy(update={
+            "identity": self.execution_identity or requirement.identity,
+        })
+
+    def document(self) -> dict[str, Any]:
+        return {"version": 1, "prefix": list(self.journal_prefix or self.prefix)}
 
 
 _current: ContextVar[RetainedWriter | None] = ContextVar("acquisition_worktree_writer", default=None)
@@ -38,7 +52,7 @@ def current() -> RetainedWriter | None:
     return _current.get()
 
 
-def retained_document(request: AcquisitionRequest) -> dict | None:
+def retained_document(request: AcquisitionRequest) -> dict[str, Any] | None:
     writer = current()
     if request.worktree_writer is None:
         return None
@@ -47,7 +61,7 @@ def retained_document(request: AcquisitionRequest) -> dict | None:
     return writer.document()
 
 
-def _retained(db: Any, request: AcquisitionRequest) -> dict | None:
+def _retained(db: Any, request: AcquisitionRequest) -> dict[str, Any] | None:
     rows = db.execute_read(
         "SELECT a.request_digest,e.data_json FROM acquisition_attempts a "
         "LEFT JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
@@ -87,7 +101,7 @@ def _retained(db: Any, request: AcquisitionRequest) -> dict | None:
     binding = data.get(JOURNAL_KEY)
     if request.worktree_writer is not None and binding is None:
         raise AcquisitionRefused("worktree_writer_unconfirmed", "original writer binding is missing")
-    return binding
+    return cast("dict[str, Any] | None", binding)
 
 
 def _prefix(binding: object) -> tuple[str, ...]:
@@ -101,11 +115,10 @@ def _prefix(binding: object) -> tuple[str, ...]:
     return tuple(binding["prefix"])
 
 
-async def _qualify(writer: RetainedWriter) -> dict:
+async def _qualify(writer: RetainedWriter, *, compatible: bool = False) -> dict[str, Any]:
     from .acquisition_authority import worktree_command
 
-    expected = writer.request.worktree_writer
-    assert expected is not None
+    expected = writer.execution_requirement
     support = await worktree_command(
         ["resource-relationship", "capabilities", "--json"], writer.request.project,
         owner_prefix=writer.prefix,
@@ -119,7 +132,10 @@ async def _qualify(writer: RetainedWriter) -> dict:
         and support.get("writer_scope") == "executing-process"
         and type(support.get("retained_session_writes")) is int
         and support["retained_session_writes"] == 1
-        and support.get("writer_identity") == expected.identity.model_dump()
+        and (
+            support.get("writer_identity") == expected.identity.model_dump()
+            or compatible and _compatible_identity(support.get("writer_identity"), expected.identity)
+        )
         and isinstance(contract, dict)
         and contract.get("schema") == "copilot-extensions.worktree-record-writer"
         and all(
@@ -134,8 +150,58 @@ async def _qualify(writer: RetainedWriter) -> dict:
     return support
 
 
+def _compatible_identity(value: object, original: InstalledWorktreeWriter) -> bool:
+    try:
+        identity = InstalledWorktreeWriter.model_validate(value)
+    except ValueError:
+        return False
+    return identity.installation_root == original.installation_root
+
+
+async def select_writer(
+    original: RetainedWriter,
+) -> tuple[RetainedWriter, dict[str, Any]]:
+    """Adapt the v1 retained contract without executing its historical prefix."""
+    from ._peer_launch import ContextRefused
+    from .session_lifecycle_cli import _agent_worktrees_pinned_selection
+
+    requirement = original.request.worktree_writer
+    assert requirement is not None
+    active = current()
+    if active is not None and (
+        active.request == original.request
+        or isinstance(active.request, AcquisitionRequest)
+        and isinstance(original.request, AcquisitionRequest)
+        and all(
+            getattr(active.request, field) == getattr(original.request, field)
+            for field in (
+                "worktree_writer", "task_id", "target", "mode", "project",
+                "worktree_id", "worktree_path",
+            )
+        )
+    ):
+        selected = RetainedWriter(
+            original.request, active.prefix, active.execution_identity,
+            original.prefix or active.journal_prefix,
+        )
+        return selected, await _qualify(selected)
+    try:
+        prefix, root, _python = _agent_worktrees_pinned_selection()
+    except ContextRefused as exc:
+        raise AcquisitionRefused("worktree_writer_unavailable", str(exc)) from exc
+    if str(root) != requirement.identity.installation_root:
+        raise AcquisitionRefused("worktree_writer_incompatible", "selected Worktrees installation changed")
+    candidate = RetainedWriter(original.request, tuple(prefix))
+    support = await _qualify(candidate, compatible=bool(original.prefix))
+    return RetainedWriter(
+        candidate.request, candidate.prefix,
+        InstalledWorktreeWriter.model_validate(support["writer_identity"]),
+        original.prefix or None,
+    ), support
+
+
 @contextlib.asynccontextmanager
-async def acquisition_writer(db: Any, request: AcquisitionRequest):
+async def acquisition_writer(db: Any, request: AcquisitionRequest) -> AsyncIterator[None]:
     """Recover the same binding, or select once before the journal's atomic claim."""
     binding = _retained(db, request)
     if request.worktree_writer is None:
@@ -146,20 +212,9 @@ async def acquisition_writer(db: Any, request: AcquisitionRequest):
             "worktree_writer_mode_unsupported", "retained writer acquisition currently supports ACP only",
             effect="not_started",
         )
-    if binding is None:
-        from ._peer_launch import ContextRefused
-        from .session_lifecycle_cli import _agent_worktrees_pinned_selection
-
-        try:
-            prefix, root, _python = _agent_worktrees_pinned_selection()
-        except ContextRefused as exc:
-            raise AcquisitionRefused("worktree_writer_unavailable", str(exc)) from exc
-        if str(root) != request.worktree_writer.identity.installation_root:
-            raise AcquisitionRefused("worktree_writer_incompatible", "selected Worktrees installation changed")
-    else:
-        prefix = _prefix(binding)
-    writer = RetainedWriter(request, tuple(prefix))
-    await _qualify(writer)
+    writer, _support = await select_writer(RetainedWriter(
+        request, _prefix(binding) if binding is not None else (),
+    ))
     token = _current.set(writer)
     try:
         yield
@@ -224,16 +279,16 @@ def session_write_args(args: list[str]) -> list[str]:
         return args
     request = writer.request
     scope = {
-        **request.worktree_writer.model_dump(), "worktree_id": request.worktree_id,
+        **writer.execution_requirement.model_dump(), "worktree_id": request.worktree_id,
         "project": request.project, "worktree_path": request.worktree_path,
     }
     return [*args, "--retained-record-writer", json.dumps(scope, sort_keys=True)]
 
 
 def handoff_state(
-    db: Any, predecessor: str, *, create: dict | None = None, stage: str | None = None,
+    db: Any, predecessor: str, *, create: dict[str, Any] | None = None, stage: str | None = None,
     native_session_id: str | None = None,
-):
+) -> Any:
     """Retain continuation effects in the original acquisition journal."""
     writer = current()
     if writer is None:
@@ -276,10 +331,10 @@ def handoff_state(
         return retained
 
 
-def session_writer(method):
+def session_writer(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     """Retain the same journal owner through later native resume and lineage."""
     @wraps(method)
-    async def run(manager, session_id, *args, **kwargs):
+    async def run(manager: Any, session_id: str, *args: Any, **kwargs: Any) -> Any:
         requirement = kwargs.pop("worktree_writer", None)
         if requirement is not None:
             from .acquisition_contract import WorktreeWriterRequirement
@@ -347,7 +402,7 @@ def session_writer(method):
 
 async def registration_pending(manager: Any, session: Any) -> None:
     """Keep an unregistered native dormant without abandoning its host."""
-    from .models import SessionStatus
+    from .session_status import SessionStatus
 
     manager._set_background_recovery_enabled(session, False)
     try:
@@ -364,7 +419,7 @@ async def registration_pending(manager: Any, session: Any) -> None:
 
 
 @contextlib.contextmanager
-def lineage_errors():
+def lineage_errors() -> Iterator[None]:
     """Keep legacy best-effort lineage, but never hide a required writer failure."""
     try:
         yield
