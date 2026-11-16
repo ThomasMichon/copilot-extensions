@@ -2105,8 +2105,7 @@ def remote_reap_stop(tmp_db, tmp_path, monkeypatch):
     )
     manager._host_index.register(HostRecord(
         session_id=session.session_id, port=5000, host_pid=300, child_pid=123,
-        boundary="codespace",
-        endpoint={"kind": "codespace", "codespace": "example-codespace"},
+        boundary="codespace", endpoint={"kind": "codespace"},
     ))
     monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: tmp_path / "locks")
     manager._acquire_codespace_lock(session.session_id, "example-codespace")
@@ -2148,14 +2147,14 @@ async def test_remote_reap_stop_waits_for_confirmation_and_releases_only_connect
         reap_calls += 1
         entered.set()
         await finish.wait()
-        return SimpleNamespace(exit_code=0, stdout="__REAPED__", stderr="")
+        return SimpleNamespace(exit_code=0, stdout="__REAPED__")
 
     monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: SimpleNamespace(
         ensure_connected=AsyncMock(), disconnect=AsyncMock(), exec_command=confirm,
     ))
     monkeypatch.setattr(
-        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport._read_state",
-        lambda self: "Available",
+        "agent_bridge.session_host.endpoints.ssh_config_from_endpoint",
+        lambda endpoint: SimpleNamespace(host_alias="synthetic"),
     )
     operation = asyncio.create_task(manager.stop_session(session.session_id, reap_host=True))
     try:

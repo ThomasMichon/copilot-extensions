@@ -7,21 +7,27 @@ import contextlib
 import os
 import time
 from dataclasses import is_dataclass
-from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from .acp_diagnostics import capture_acp_parse_errors, describe_truncated_child
 from .connect import ConnectError, ConnectStage
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 from .session_host_launch_custody import _SessionHostLaunchCustodyMixin
 
 if TYPE_CHECKING:
+    from agent_remote_driver.session_preferences import client_preferences
     from .acp_client import AcpClient
+    from .db import Database
     from .local_launch_owner import LocalLaunchOwner
     from .local_launch_preparation import PreparedLocalLaunch
+    from .models import PhasedTimeouts
     from .retained_session_recovery import RetainedRecovery
+    from .session_manager import SessionManager
+else:
+    from .session_preferences import client_preferences
 from .transport import SpawnTarget
-from .session_preferences import client_preferences
 from .startup_progress import step
 
 
@@ -33,6 +39,24 @@ def _core() -> Any:
 
 class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
     """Session Host connection, relay, and reap helpers."""
+
+    if TYPE_CHECKING:
+        _db: Database
+        _sessions: dict[str, Session]
+        _timeouts: PhasedTimeouts
+        _host_index: Any
+        _forwards: dict[str, Any]
+        _relays: dict[str, list[Any]]
+        _remote_reap_tasks: set[asyncio.Task[bool]]
+        _disconnected_reattach_failures: dict[str, int]
+        _session_host_unexpected_reap_seconds: float
+        _session_host_active_reap_seconds: float
+        get_session: Callable[[str], Session | None]
+        _release_container_lock: Callable[[str], None]
+        _release_codespace_lock: Callable[[str], None]
+        _set_container_launch_pending: Callable[[str, bool], None]
+        _route_acp_event: Callable[[Session, str, dict[str, Any]], None]
+        submit_prompt: Callable[[str, str], Awaitable[Any]]
 
     async def _connect_via_session_host(
         self,
@@ -65,7 +89,10 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
         from .session_host.acp_adapter import open_acp_streams
-        from .session_host.client import SessionHostClient
+        if TYPE_CHECKING:
+            from agent_remote_driver.session_host.client import SessionHostClient
+        else:
+            from .session_host.client import SessionHostClient
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
         from .hosting_policy import require_path_hosting, require_target_hosting
@@ -81,7 +108,12 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         if acquisition_launch is not None:
             if type(spawner) is not LocalSpawner or remote_child_argv is not None:
                 raise ValueError("Original acquisition requires the actual local Host spawner")
-            acquisition_launch.bind(self, self.get_session(session_id), target)
+            session = self.get_session(session_id)
+            if session is None:
+                raise ValueError("Original acquisition requires its registered session")
+            acquisition_launch.bind(
+                cast("SessionManager", self), session, target,
+            )
         if recovery_operation is not None:
             if (
                 type(spawner) is not LocalSpawner or remote_child_argv is not None
@@ -99,6 +131,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
             boundary=getattr(spawner, "boundary", "unknown"),
         )
 
+        env: dict[str, str] | None
         if remote_child_argv is not None:
             # Remote boundary (CodeSpace/mesh): the child runs on the FAR side,
             # so there is no local worktree to resolve -- the Spawner is handed
@@ -142,7 +175,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         prepare_child = getattr(spawner, "prepare_child", None)
         if prepare_child is not None:
 
-            async def prepare_bound_child(argv):
+            async def prepare_bound_child(argv: list[str]) -> list[str]:
                 prepared = await step("plugin-sync", prepare_child(argv))
                 bound = bind_launch_purpose(
                     prepared, preference_options["preference_source"], preserving=preserving,
@@ -150,11 +183,11 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 verify_selected_instance(bound, expected_instance)
                 return bound
 
-            spawner.prepare_child = prepare_bound_child
+            setattr(spawner, "prepare_child", prepare_bound_child)
         from . import cold_outages
 
         if cold_outages.latest(self._db, session_id) is not None:
-            cold_outages.revalidate_launch(self, session_id)
+            cold_outages.revalidate_launch(cast("SessionManager", self), session_id)
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
             # command the agent runs (e.g. an in-session `test-chamber services
@@ -176,10 +209,14 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 await require_target_hosting(target)
             if recovery_operation is not None:
                 recovery_operation.require_current()
+            spawn_options: dict[str, Any] = {}
+            if acquisition_launch is not None:
+                spawn_options["acquisition_launch"] = acquisition_launch
+            if recovery_operation is not None:
+                spawn_options["recovery_operation"] = recovery_operation
             spawned = await step("session-host-start", spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
-                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
-                **({"recovery_operation": recovery_operation} if recovery_operation is not None else {}),
+                **spawn_options,
             ))
             timing.add("host_spawn", time.monotonic() - step_started)
             # Retain a remote-boundary forward so reattach can refresh it and
@@ -481,7 +518,9 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
             )
             raise
 
-    async def _ensure_relays_from_endpoint(self, session_id: str, endpoint: dict) -> None:
+    async def _ensure_relays_from_endpoint(
+        self, session_id: str, endpoint: dict[str, Any],
+    ) -> None:
         """Start endpoint-declared relay supervisors if this daemon owns none.
 
         The relay is independent of frontend reattach. When a live daemon already
@@ -500,7 +539,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
     async def _replace_relays_from_endpoint(
         self,
         session_id: str,
-        endpoint: dict,
+        endpoint: dict[str, Any],
         *,
         require_ready: bool = False,
     ) -> None:
@@ -516,9 +555,15 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
 
         await self._stop_relays(session_id)
         reverse_forwards = list(endpoint.get("reverse_forwards") or [])
+        def relay_host_port() -> int:
+            port = get_live_relay_port()
+            if port is None:
+                raise RuntimeError("Credential relay has no live host port")
+            return port
+
         relays = relay_forwards_from_endpoint(
             endpoint,
-            host_port_resolver=get_live_relay_port,
+            host_port_resolver=relay_host_port,
             serving_probe_for_port=endpoint_serving_probe_factory(
                 endpoint, timeout=self._timeouts.session_host_ready,
             ),
@@ -534,7 +579,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
             fail_open=False,
             timeout=self._timeouts.session_host_ready,
         )
-        started = []
+        started: list[Any] = []
         for relay, relay_port in zip(relays, relay_ports, strict=True):
             try:
                 await relay.start()
@@ -633,11 +678,16 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         (startup path); the in-session driver leaves it for a later retry.
         """
         from .session_host.acp_adapter import open_acp_streams
-        from .session_host.client import SessionHostClient
+        if TYPE_CHECKING:
+            from agent_remote_driver.session_host.client import SessionHostClient
+        else:
+            from .session_host.client import SessionHostClient
         from .session_host.endpoints import CredentialRelayReadinessError
         from .acquisition_launch_owner import require_unassociated_session
 
-        require_unassociated_session(self, session, operation="Host reattachment")
+        require_unassociated_session(
+            cast("SessionManager", self), session, operation="Host reattachment",
+        )
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             self._route_acp_event(session, event_type, data)
@@ -796,7 +846,10 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         job also takes the child). Used for both the explicit-terminate reap
         (#1786) and the version-mux stranded/forced reap.
         """
-        from .session_host.osutil import kill_pid, reap_zombie
+        if TYPE_CHECKING:
+            from agent_remote_driver.session_host.osutil import kill_pid, reap_zombie
+        else:
+            from .session_host.osutil import kill_pid, reap_zombie
 
         log.info(
             "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
@@ -891,19 +944,19 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         self._remote_reap_tasks.add(task)
         task.add_done_callback(self._remote_reap_tasks.discard)
 
-    async def _remote_reap(self, rec: Any, endpoint: dict) -> bool:
-        from ssh_manager import ConnectionManager
+    async def _remote_reap(self, rec: Any, endpoint: dict[str, Any]) -> bool:
+        from ssh_manager import ConnectionManager, SSHConfig
 
         from .session_host.endpoints import ssh_config_from_endpoint
 
         class _StaticSource:
-            def __init__(self, cfg):
+            def __init__(self, cfg: SSHConfig) -> None:
                 self._cfg = cfg
 
-            def get_ssh_config(self):
+            def get_ssh_config(self) -> SSHConfig:
                 return self._cfg
 
-            def refresh(self):
+            def refresh(self) -> SSHConfig:
                 return self._cfg
 
         host = None
@@ -933,7 +986,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 f"if alive {pid} || alive {child_pid}; then exit 42; fi; "
                 "printf __REAPED__"
             )
-            if endpoint.get("kind") == "codespace":
+            if endpoint.get("kind") == "codespace" and "codespace" in endpoint:
                 from .session_host.codespace_transport import CodeSpaceTransport
 
                 host = endpoint.get("codespace")
@@ -946,6 +999,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 )
                 rc, stdout, _stderr = await transport.run(command, timeout=20.0)
             else:
+                # Legacy descriptors contain only the captured SSH configuration.
                 cfg = ssh_config_from_endpoint(endpoint)
                 host = cfg.host_alias
                 await mgr.ensure_connected(host, _StaticSource(cfg), [])
