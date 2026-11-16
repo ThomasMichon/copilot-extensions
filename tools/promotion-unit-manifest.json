@@ -5032,8 +5032,9 @@
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract[False]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract[True]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[absent]",
-        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[compatible]",
-        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[incompatible]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[matching]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[different]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[malformed]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[withdrawn]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_loader_closure_is_statically_admitted[bootstrap-provider]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_output_does_not_claim_declared_input_ownership[gate-legacy]",
@@ -6085,7 +6086,7 @@
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "4259ae57b2d47fb35b26140c65e9410864c89959935c01cfd5ff2018c2bb073d",
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "bbf926dde19cab70e9995eb0befbb6ee630179a7deeb9db59e7a7f4b574995c1",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
         "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
@@ -6140,6 +6141,6 @@
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "680a3389cd1226effb5e29658ba61671db64d72a3cda41145e0769fa34c14eaa",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268",
-        "libs/payload-invocation/bootstrap_python.py": "c6b5698acb62505622f06014c5f705b8478613a3b83c8fe6bfb0ec629ad7e951"
+        "libs/payload-invocation/bootstrap_python.py": "92b949933b98e1419caf01e459ab61752c937aa81dcc3ac8878f62d45633d0f0"
     }
 }

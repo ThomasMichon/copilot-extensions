@@ -190,16 +190,16 @@ def test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer(
             }
 
 
-@pytest.mark.parametrize("selection", ["absent", "compatible", "incompatible", "withdrawn"])
+@pytest.mark.parametrize("selection", ["absent", "matching", "different", "malformed", "withdrawn"])
 def test_bootstrap_request_decisions_are_qualified(tmp_path: Path, selection: str) -> None:
     source, candidate, plugin = _candidate(tmp_path)
     for root in (source, candidate):
         manifest = root / "plugins/sample/payload-invocation.json"
         data = json.loads(manifest.read_text())
-        if selection in {"compatible", "incompatible"}:
-            data["bootstrapPython"] = "3.11.11"
+        if selection in {"matching", "different", "malformed"}:
+            data["bootstrapPython"] = "3.11" if selection == "malformed" else "3.11.11"
         manifest.write_text(json.dumps(data))
-        requirement = ">=3.12" if selection == "incompatible" else ">=3.11"
+        requirement = ">=3.12" if selection == "different" else ">=3.11"
         (manifest.parent / "pyproject.toml").write_text(
             '[project]\nname="sample"\nversion="1"\nrequires-python=' + json.dumps(requirement),
         )
@@ -209,14 +209,14 @@ def test_bootstrap_request_decisions_are_qualified(tmp_path: Path, selection: st
     before = {path.relative_to(candidate): path.read_bytes()
               for path in candidate.rglob("*") if path.is_file()}
     log = owner.materialize(candidate, canonical_root=source)
-    if selection in {"incompatible", "withdrawn"}:
-        reason = "does not satisfy" if selection == "incompatible" else "obsolete bootstrap Python request"
+    if selection in {"malformed", "withdrawn"}:
+        reason = "exact stable CPython" if selection == "malformed" else "obsolete bootstrap Python request"
         assert len(log) == 1 and log[0].startswith("SKIP") and reason in log[0]
         assert before == {path.relative_to(candidate): path.read_bytes()
                           for path in candidate.rglob("*") if path.is_file()}
     else:
         assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
-        if selection == "compatible":
+        if selection in {"matching", "different"}:
             assert declaration.read_bytes() == b"cpython@3.11.11\n"
         else:
             assert not declaration.exists()

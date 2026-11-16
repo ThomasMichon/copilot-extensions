@@ -1,4 +1,4 @@
-"""Static managed-Python inputs are validated before publication, not at launch."""
+"""Static helper declarations do not select application interpreters."""
 from __future__ import annotations
 
 import importlib.util
@@ -74,23 +74,24 @@ def test_invalid_bootstrap_requests_refuse_before_writes(tmp_path: Path, version
 
 
 @pytest.mark.parametrize("requirement", ["", "not-a-specifier", ">=3.12", ">=3.11,!=3.11.11"])
-def test_incompatible_project_refuses_before_writes(tmp_path: Path, requirement: str) -> None:
+def test_helper_declaration_does_not_interpret_application_constraints(tmp_path: Path, requirement: str) -> None:
     manifest = _declare(tmp_path, "3.11.11", requirement)
-    with pytest.raises(ValueError, match="invalid bootstrap Python project"):
-        generator.process_manifest(manifest, check=False)
+    outputs = generator.expected_files(manifest)
+    assert outputs[manifest.parent / "scripts/bootstrap-python-version.txt"] == "cpython@3.11.11\n"
     assert not (manifest.parent / "bin").exists()
 
 
 @pytest.mark.parametrize("metadata", [None, "[project]\nname='example'\n", "[project\n", "project='invalid'\n"])
-def test_missing_or_malformed_project_refuses(tmp_path: Path, metadata: str | None) -> None:
+def test_helper_declaration_precedes_application_metadata(tmp_path: Path, metadata: str | None) -> None:
     manifest = _declare(tmp_path, "3.11.11")
     project = manifest.parent / "pyproject.toml"
     if metadata is None:
         project.unlink()
     else:
         project.write_text(metadata, encoding="utf-8")
-    with pytest.raises(ValueError, match="bootstrapPython|invalid bootstrap Python project"):
-        generator.expected_files(manifest)
+    outputs = generator.expected_files(manifest)
+    assert outputs[manifest.parent / "scripts/bootstrap-python-version.txt"] == "cpython@3.11.11\n"
+    assert not (manifest.parent / "bin").exists()
 
 
 @pytest.mark.parametrize("operation", ["planning", "checking", "refusal"])
@@ -107,12 +108,12 @@ def test_planning_and_refusal_do_not_write_bytecode(
     with monkeypatch.context() as setup:
         setup.setattr(sys, "dont_write_bytecode", True)
         spec.loader.exec_module(copied)
-    manifest = _declare(tmp_path, "3.11.11", ">=3.12" if operation == "refusal" else ">=3.11")
+    manifest = _declare(tmp_path, "3.11" if operation == "refusal" else "3.11.11")
     with monkeypatch.context() as enabled:
         enabled.setattr(sys, "dont_write_bytecode", False)
         enabled.setattr(sys, "pycache_prefix", None)
         if operation == "refusal":
-            with pytest.raises(ValueError, match="does not satisfy"):
+            with pytest.raises(ValueError, match="exact stable CPython"):
                 copied.source_check(manifest, canonical_root=generator.REPO)
         elif operation == "checking":
             assert copied.process_manifest(manifest, check=True, canonical_root=generator.REPO)
