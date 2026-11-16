@@ -69,6 +69,16 @@ def reconcile_wake(
             raise TaskError("transport settlement conflicts with the retained original outcome")
         replayed = current["execution_send_state"] == outcome
         ts = queue._now(None)
+        if outcome == "not_sent":
+            # Terminal at publication, before either outbox's lease recovery can reclaim it.
+            conn.execute(
+                f"UPDATE {outbox} SET status='failed' WHERE id=?", (wake_id,),  # noqa: S608
+            )
+            if outbox == "wake_outbox":
+                conn.execute(
+                    "UPDATE tasks SET wake_status='failed' WHERE id=? AND wake_operation_id=?",
+                    (task_id, wake_id),
+                )
         if (
             outcome == "sent" and outbox == "wake_outbox"
             and current.get("pool_recovery_revision") is not None

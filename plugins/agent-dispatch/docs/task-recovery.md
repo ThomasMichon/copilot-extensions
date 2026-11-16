@@ -156,7 +156,10 @@ its non-retrying POST. Receipt-only observation is never upgraded implicitly.
 
 A matching accepted result settles `sent`. A matching `not_admitted` result,
 including the provider's durable fence and original-request digest, settles
-`not_sent` on the original wake row. The digest covers the version-1 Bridge
+`not_sent` and terminal `failed` delivery status on the original wake row,
+before either outbox's lease recovery or drainer can reclaim it. The owner's
+task wake-status mirror is updated, without changing the task lifecycle.
+The digest covers the version-1 Bridge
 request document: session ID and the original invocation key, native ID,
 prompt, `agent-dispatch:<wake-id>` caller and `no_resume: false`.
 The queue rechecks its opaque revision after the provider operation. A changed
@@ -168,7 +171,10 @@ No automatic retry, ordinary send or other-target fallback occurs.
 Settlement preserves attempts, generations, delivery tokens, deadlines,
 workspace and native bindings. Its negative detail is not the retryable
 busy/not-attempted receipt, so it cannot authorize another delivery of the
-fenced key. An already committed matching outcome can be observed again;
+fenced key. A pre-existing `not_sent` row is eligible only when it already
+retains matching qualified fenced-settlement evidence; a retryable refusal
+is rejected before contacting Bridge, even if a settlement reply could be lost.
+An already committed matching outcome can be observed again;
 contradictory terminal outcomes refuse. Any independent later lifecycle action
 retains its own policy and authority gates. This source capability neither
 qualifies legacy admission history nor performs runtime adoption.

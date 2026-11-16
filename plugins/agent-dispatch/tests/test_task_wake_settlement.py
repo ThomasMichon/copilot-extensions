@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from agent_dispatch.bridge_command_delivery import NativePromptNotSent
 from agent_dispatch.bridge_native_settlement import (
     native_prompt_settlement,
     original_request_digest,
@@ -75,6 +76,10 @@ def test_settlement_preserves_episode_without_replay(retained: Any, accepted: bo
     for field in ("execution_send_state", "execution_send_detail"):
         after.pop(field)
         original_wake.pop(field)
+    if not accepted:
+        original_wake["status"] = "failed"
+        if wake_table(wake) == "wake_outbox":
+            original_task["wake_status"] = "failed"
     assert after == original_wake
     assert asdict(queue.get(task_id)) == original_task
     assert asdict(queue.latest_reservation(task_id)) == original_reservation
@@ -88,6 +93,49 @@ def test_settlement_preserves_episode_without_replay(retained: Any, accepted: bo
             f"SELECT * FROM {wake_table(wake)} WHERE id=?", (wake.id,),  # noqa: S608
         ).fetchone()
         assert not _known_native_retry(row, wake, queue.get(task_id))
+
+
+def test_fenced_negative_stays_terminal_after_lease_expiry(retained: Any) -> None:
+        queue, task_id, wake = retained
+        settle(queue, task_id, wake, lambda *args, **kwargs: negative(wake))
+        after_settlement = asdict(current(queue, task_id, wake))
+        future = wake.delivery_expires_at + 1
+        assert queue.recover_inflight_wakes(now=future) == 0
+        assert queue.recover_inflight_run_waiter_wakes(now=future) == 0
+        assert queue.claim_due_wake(now=future) is None
+        assert queue.claim_due_run_waiter_wake(now=future) is None
+        finish = (
+            queue.finish_wake if wake_table(wake) == "wake_outbox"
+            else queue.finish_run_waiter_wake
+        )
+        with pytest.raises(TaskError, match="not held by this delivery"):
+            finish(wake.id, wake.delivery_token, delivered=False, now=future)
+        assert asdict(current(queue, task_id, wake)) == after_settlement
+        assert settle(queue, task_id, wake, lambda *args, **kwargs: negative(wake))["replayed"]
+
+
+@pytest.mark.parametrize("reply_lost", [False, True])
+def test_retryable_not_sent_refuses_before_any_provider_fence(
+        retained: Any, reply_lost: bool,
+) -> None:
+        queue, task_id, wake = retained
+        detail = json.dumps(NativePromptNotSent(BRIDGE, NATIVE, wake.id).receipt)
+        with queue._connect() as conn:
+            conn.execute(
+                f"UPDATE {wake_table(wake)} SET execution_send_state='not_sent',"  # noqa: S608
+                " execution_send_detail=? WHERE id=?",
+                (detail, wake.id),
+            )
+        before = asdict(current(queue, task_id, wake))
+
+        def provider(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            if reply_lost:
+                raise TaskError("synthetic acknowledgement lost after fence")
+            pytest.fail("retryable refusal must not reach provider settlement")
+
+        with pytest.raises(TaskError, match="lacks retained fenced-settlement"):
+            settle(queue, task_id, wake, provider)
+        assert asdict(current(queue, task_id, wake)) == before
 
 
 @pytest.mark.parametrize("change", [

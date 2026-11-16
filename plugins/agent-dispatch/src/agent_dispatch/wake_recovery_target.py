@@ -57,6 +57,17 @@ def retained_wake(
     )
     if row["execution_send_state"] not in states:
         raise TaskError("wake does not retain a reconcilable send outcome")
+    if row["execution_send_state"] == "not_sent":
+        try:
+            detail = json.loads(row["execution_send_detail"])
+        except (TypeError, ValueError) as exc:
+            raise TaskError("not-sent wake lacks retained fenced-settlement evidence") from exc
+        if not isinstance(detail, dict) or (
+            detail.get("source") != "bridge_native_settlement/v1"
+            or not isinstance(detail.get("receipt"), dict)
+            or detail["receipt"].get("admission") != "not_admitted"
+        ):
+            raise TaskError("not-sent wake lacks retained fenced-settlement evidence")
     return row
 
 
@@ -104,4 +115,16 @@ def reconciliation_plan(
         raise TaskError(
             "reconciliation requires one supported original ordinary native Bridge target"
         )
-    return wake, targets.pop()
+    target = targets.pop()
+    if wake["execution_send_state"] == "not_sent":
+        from .bridge_command_delivery import steering_prompt
+        from .bridge_native_settlement import valid_settlement
+        detail = json.loads(wake["execution_send_detail"])
+        prompt = steering_prompt(captured["task"]["id"], wake["message"])
+        if not valid_settlement(
+            detail["receipt"], target[0], target[1], prompt, idempotency_key=wake_id,
+        ):
+            raise TaskError(
+                "not-sent wake retained settlement conflicts with its original request"
+            )
+    return wake, target
