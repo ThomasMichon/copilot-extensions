@@ -12262,6 +12262,16 @@ source-qualified preparation copies the original pinned payload, not the
 dependency resolver's rewritten build manifests. Fresh runtime acceptance
 continues to verify the installed payload's original source identity.
 
+`worktree-manager/tests/test_runtime_candidate_identity.py` checks equivalent
+Windows native/ordinary path spellings in both candidate layouts, while retaining
+outside-package, outside-distribution and editable-install refusal.
+The guards reuse the existing installation-context containment owner.
+The explicit `tests/native/test_runtime_candidate_identity_native.py` selection
+replays the existing SDK metadata-health callback through a real interpreter and
+packaged Manager. It borrows test dependencies and does not fabricate frozen
+origin or completion evidence: full fresh construction, closed-wheel inputs,
+terminal exercise and installed rollout remain separate qualification.
+
 The existing `installation-context-full.yml` `vault-activation` portfolio runs
 the focused Vault launcher and cold configuration-capture regressions on both
 Linux and Windows, retaining source-pinned JUnit artifacts. The stock runner
