@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 import venv
 
 import pytest
@@ -18,6 +19,95 @@ from worktree_manager import update_driver_cli as manager
 
 
 KEY = "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows bootstrap installation participant")
+def test_foreground_install_selects_its_python_for_the_real_queued_participant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import self_install
+
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    adapter = self_install._runtime_installer()
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    root = tmp_path / "manager"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    adapter.runtime.mark_complete(root, slot.name, payload_hash="b" * 64)
+    queue = tmp_path / "queue"
+    report = tmp_path / "participant.json"
+    sdk = Path(__file__).resolve().parents[2] / "libs" / "installation-context" / "installation-context.ps1"
+    (scripts / "runtime_install.py").write_text(f"""
+import json,os,subprocess,sys
+from pathlib import Path
+sys.path[:0]={sys.path!r}
+from agent_procutil import no_window_kwargs
+from update_driver import core
+from worktree_manager import self_install
+adapter=self_install._runtime_installer()
+core.default_root=lambda:Path({str(queue)!r})
+adapter._execution_driver=lambda payload:core
+report={{"before":os.environ.get({KEY!r})}}
+def install(args):
+    report["during"]=os.environ.get({KEY!r})
+    result=subprocess.run([
+        {host!r},"-NoProfile","-NonInteractive","-File",{str(sdk)!r},
+        "source-id","-SourceJson",'{{"source":"opaque","id":"install"}}',
+        "-CopilotHome",{str(tmp_path / "copilot")!r},
+        "-DurableHome",{str(tmp_path / "durable")!r},
+    ],capture_output=True,text=True,timeout=15,**no_window_kwargs())
+    report.update(code=result.returncode,stdout=result.stdout,stderr=result.stderr)
+    if result.returncode:
+        raise RuntimeError(result.stdout+result.stderr)
+    return Path({str(slot)!r})
+adapter._install=install
+try:
+    code=adapter.main(sys.argv[1:])
+finally:
+    report["after"]=os.environ.get({KEY!r})
+    Path({str(report)!r}).write_text(json.dumps(report),encoding="utf-8")
+raise SystemExit(code)
+""", encoding="utf-8")
+    monkeypatch.setattr(update_driver.core, "default_root", lambda: queue)
+    monkeypatch.setattr(adapter, "SCRIPTS", scripts)
+    monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv(KEY, "different-worker-selection")
+    args = SimpleNamespace(
+        payload=root, root=root, command=[], repair_update=False, recover_adopted=None,
+        skip_instance_reconcile=False,
+    )
+    assert adapter._foreground_install(args, update_driver.core) == slot
+    result = json.loads(report.read_text(encoding="utf-8"))
+    assert result["before"] is None and result["after"] is None
+    assert result["during"] == getattr(sys, "_base_executable", sys.executable)
+    assert result["code"] == 0 and result["stderr"] == "", result
+    assert json.loads(result["stdout"])["canonical"] == "opaque:install"
+    assert os.environ[KEY] == "different-worker-selection"
+    requests = update_driver.status(root=queue)
+    assert isinstance(requests, tuple) and len(requests) == 1
+    assert KEY not in dict(requests[0].spec.context)
+
+
+@pytest.mark.parametrize("previous", [None, "different-worker-selection"])
+def test_installation_python_scope_restores_the_hint_after_failure(
+    monkeypatch: pytest.MonkeyPatch, previous: str | None,
+) -> None:
+    from worktree_manager import self_install
+
+    if previous is None:
+        monkeypatch.delenv(KEY, raising=False)
+    else:
+        monkeypatch.setenv(KEY, previous)
+    with pytest.raises(RuntimeError, match="controlled callback failure"):
+        with self_install._runtime_installer()._bootstrap_python_environment():
+            assert os.environ[KEY] == getattr(sys, "_base_executable", sys.executable)
+            raise RuntimeError("controlled callback failure")
+    assert os.environ.get(KEY) == previous
 
 
 @pytest.mark.parametrize("prepared", [False, True])

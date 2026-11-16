@@ -24,6 +24,11 @@ import installer_engine as engine  # noqa: E402
 from installer_engine_process import _settle  # noqa: E402
 import versioned_runtime as runtime  # noqa: E402
 import versioned_runtime_source as runtime_source  # noqa: E402
+from runtime_install_environment import (  # noqa: E402
+    BOOTSTRAP_PYTHON as BOOTSTRAP_PYTHON,
+    bootstrap_python_environment as _bootstrap_python_environment,
+    installation_child_options as _installation_child_options,
+)
 from runtime_install_selection import (  # noqa: E402
     _source_profile_reuse,
     base_python as base_python,
@@ -407,12 +412,6 @@ def _dispatch_manager(
     raise AssertionError("Manager bootstrap exec returned")
 
 
-def _installation_child_options() -> dict[str, object]:
-    from update_driver import participant_environment
-
-    return {"env": {**os.environ, **participant_environment()}}
-
-
 def _execution_driver(payload: Path):
     # Source controls need application locals as well as the required execution libraries.
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
@@ -585,7 +584,7 @@ def _foreground_install(args, driver) -> Path | int:
             killswitch_path=_bootstrap_hold_path(),
         ),
         runner=driver.TrustedRunner(
-            tuple(arguments), caller, context_keys=_CONTEXT_KEYS,
+            tuple(arguments), caller, context_keys=(*_CONTEXT_KEYS, BOOTSTRAP_PYTHON),
         ),
     )
     driver.drain()
@@ -962,7 +961,7 @@ def main(argv: list[str] | None = None) -> int:
         print(refusal, file=sys.stderr)
         return 3
     if os.name == "nt" or command[:1] == ["update"]:
-        with _installation_custody() as custody:
+        with _installation_custody() as custody, _bootstrap_python_environment():
             if custody is None:
                 if args.install_only or args.update_participant:
                     raise RuntimeError("Manager installation participant requires live driver custody")

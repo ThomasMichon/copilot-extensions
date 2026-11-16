@@ -13,7 +13,7 @@ from agent_procutil import direct_python, spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 from work_coalescing_singleton import client as wcs_client
 
-from .mux_mapping_registry import _try_lock_file_once, _unlock_file
+from .mux_file_lock import _try_lock_file_once, _unlock_file
 from .self_install import default_root
 
 python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])

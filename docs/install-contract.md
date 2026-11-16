@@ -3926,6 +3926,9 @@ explicitly launched application's base interpreter, not the draining worker's
 hint, and restores the previous environment afterward. The strict legacy
 request-context record is unchanged, so older prepared Manager sources still
 accept it. Self-install uses the same finite interpreter scope.
+The standalone Windows install-only participant also establishes its own finite
+base-interpreter scope. Its queue and the bootstrap-update queue clear the
+worker's hint without requiring newer private APIs from a prepared Manager.
 These helpers are stdlib-only. Using the base interpreter keeps an inherited
 helper hint independent of a retired Manager package environment; managed-base
 retention remains with the toolchain owner.
