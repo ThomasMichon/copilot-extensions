@@ -267,7 +267,7 @@ PARAMETER_COUNTS.update({
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
-    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 16,
+    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 17,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
