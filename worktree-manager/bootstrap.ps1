@@ -236,6 +236,18 @@ function Test-BootstrapUvVersion([string]$Uv) {
     return [version]$match.Groups[1].Value -ge [version]'0.8.0'
 }
 
+function Find-BootstrapUv {
+    foreach ($command in @(Get-Command uv -CommandType Application,ExternalScript -All -ErrorAction SilentlyContinue)) {
+        try {
+            $candidate = Resolve-BootstrapExecutable $command.Source
+            if (Test-BootstrapUvVersion $candidate) { return $candidate }
+        } catch {
+            if ($_ -match '(?i)(?:os error|WinError)\s+448\b') { throw }
+        }
+    }
+    return $null
+}
+
 function Find-BootstrapPython([string]$Uv) {
     $ErrorActionPreference = 'Continue'
     $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
@@ -465,29 +477,16 @@ $SystemPython = if ($SystemPythonRequested) { Find-SystemBootstrapPython } else 
 
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
-$uvPrepared = $false
-$uvCandidateCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-$uvCandidate = if ($uvCandidateCommand) { Resolve-BootstrapExecutable $uvCandidateCommand.Source } else { $null }
-if (-not $uvCandidate -or -not (Test-BootstrapUvVersion $uvCandidate)) {
+$Uv = Find-BootstrapUv
+if (-not $Uv) {
     Write-BootstrapProgress 'uv 0.8.0+ required - preparing it (user-local, no admin)...'
     try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression }
     catch { throw "uv install failed: $_" }
-    $uvPrepared = $true
     # uv installs into ~\.local\bin; amend THIS session's PATH so we can continue
     # without a restart (the installer persists PATH for future shells).
     $env:PATH = $LocalBin + [IO.Path]::PathSeparator + $env:PATH
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        Write-BootstrapProgress 'uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap.' warning
-        exit 1
-    }
-}
-$UvCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction Stop |
-    Select-Object -First 1
-$Uv = if ($uvCandidate -and -not $uvPrepared) { $uvCandidate }
-    else { Resolve-BootstrapExecutable $UvCommand.Source }
-if ($uvPrepared -and -not (Test-BootstrapUvVersion $Uv)) {
-    throw 'uv 0.8.0 or newer is required after prerequisite preparation.'
+    $Uv = Find-BootstrapUv
+    if (-not $Uv) { throw 'uv 0.8.0 or newer is required after prerequisite preparation.' }
 }
 
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)

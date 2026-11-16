@@ -832,8 +832,12 @@ automatic downloads; when preparation is needed, the explicit bootstrap uses
 `uv python install --no-bin --no-registry 3.11`, then repeats the same lookup.
 It does not publish Python command aliases or register Python with the Windows
 launcher. These controls are supported by uv 0.8.0 and newer.
-Bootstrap qualifies the selected uv version first and uses its existing
-user-local prerequisite installation path for an absent or older uv.
+Bootstrap checks external uv commands in PATH order and retains the first
+supported executable; an older, malformed or failing earlier copy does not
+hide a supported later copy. On Windows, an explicit OS-policy refusal
+(`WinError 448` / `os error 448`) remains fatal rather than selecting another
+copy. Only when no supported candidate is found does bootstrap use its existing
+user-local prerequisite installation path, then repeat qualification.
 The selected explicit interpreter is passed into construction, where the engine
 retains the source/dependency/configuration inputs and constructs a non-editable
 runtime. Governed `uv pip install` selects runtime dependencies for this platform,
