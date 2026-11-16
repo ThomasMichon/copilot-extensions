@@ -404,7 +404,8 @@
         "plugins/agent-bridge"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-service-index-requirements.txt"
     },
     {
       "name": "agent-codespaces",

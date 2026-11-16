@@ -17,6 +17,11 @@ Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
 
+Bridge remains pending as a project. Its whole-file changed-code checks reuse
+the existing hash-locked service-index checker environment, which includes
+Pydantic's typed models. This supplies validation dependencies without claiming
+that the complete Bridge source or test tree is strict.
+
 Materialized library copies under the strict services' `libs/` directories are
 inventoried separately as pending consumers. They do not inherit service
 admission merely because promotion places them below that service's path.

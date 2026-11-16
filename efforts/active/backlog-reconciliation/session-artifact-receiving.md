@@ -1,28 +1,30 @@
-# Session-artifact persistence: proposed direct receiving contract
+# Session-artifact persistence: accepted direct receiving contract
 
 Back to [Backlog Reconciliation](README.md).
 
 ## Intent and exact tracking boundary
 
-This is an agent-recommended, research-only proposal to retain #2165 as a
+This agent-recommended, research-only intake retains #2165 as a
 sixth, independently testable track in the existing #10968 artifact-lifecycle
 tracker. It does not claim that cleanup, sync exclusion, portable guidance or
 the other five tracks implement a persistence boundary.
 
 The shared tracking concern is where suite-created artifacts may enter,
-remain in and leave persistent state. The proposed addition extends #10968's
-currently stated temporary/regenerable-state boundary to the specific
+remain in and leave persistent state. The received addition extends #10968's
+temporary/regenerable-state boundary to the specific
 session-artifact write policy below. It does not make arbitrary durable data
 disposable or turn the security/data-handling requirement into disk cleanup.
 The existing A-E plans, validations, source-delivery credit and independent
 owners remain unchanged. The source #2165 is currently unassigned; this
-proposal appoints no implementer and does not add work to another
+intake appoints no implementer and does not add work to another
 participant's accepted implementation slice.
 
-No receiver mutation or source retirement follows from this file alone.
-Required review, the complete direct issue intake, current qualification and
-live readback must precede the separate retirement judgment. If the extended
-contract is not accepted, #2165 stays open as its own canonical request.
+The contract was reviewed and merged in #12791. The complete direct issue
+intake, current qualification and live readback preceded the separate #2165
+`NOT_PLANNED` tracking retirement. Its original and discussions remain intact;
+#10968 stays OPEN with every F/FV technical row unchecked. The
+[dated journal](journal/2026/11.15-session-artifact-receiving.md) records the
+actual receiving, disposition and complete census, not technical completion.
 
 ## Evidence and distinctions
 
@@ -53,12 +55,12 @@ obligations is settled by this intake.
 The other recently compared originals remain separate: #1886's uninstall
 plan/apply and shared-reference protection, #2709's CodeSpace lifecycle
 contract, and #2861's authored same-destination ownership protection are not
-received by this proposal. A shared artifact-related word does not make
+received by this intake. A shared artifact-related word does not make
 their complete outcomes duplicates.
 
-## Proposed direct issue intake
+## Direct issue intake
 
-The following finite addition is intended for #10968 after review. It is
+The following finite addition is accepted in #10968's actual issue body. It is
 additive to its complete incumbent body and discussions, not a replacement.
 
 ### Track F - structural session-artifact persistence boundary (#2165)
@@ -149,14 +151,15 @@ participants, delivery records and remaining acceptance stay intact.
 
 ## Publication and completion
 
-The publication owner must preserve the whole current receiving body, qualify
-changed inputs, append the reviewed direct track without altering incumbent
-content, and verify the actual accepted issue text. Only then may the complete
-#2165 source receive an independently reasoned `NOT_PLANNED` tracking
-retirement. Its original and discussions remain available, with a neutral
-explanation that the stronger write-time/data-handling work remains planned.
+The publication owner preserved the whole current receiving body, qualified
+changed inputs, appended the reviewed direct track without altering incumbent
+content, and verified the actual accepted issue text before the separate
+#2165 `NOT_PLANNED` tracking judgment. Its original and discussions remain
+available with a neutral explanation that the stronger write-time/data-handling
+work remains planned.
 
 The current campaign's fixed whole-queue target, all parent Plan/Validation
 items and every existing source/resource hold remain independent. This
-proposal provides no closure credit, implementation proof, real-data
-remediation, installed adoption or custody release.
+intake produced one verified administrative tracking retirement. It provides
+no implementation proof, real-data remediation, installed adoption or custody
+release.

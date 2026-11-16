@@ -3634,12 +3634,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
-  The agent-recommended [session-artifact receiving proposal](session-artifact-receiving.md)
-  directly maps #2165's structural write-time block OR flag and source/replica
-  data-handling acceptance to a proposed sixth, independent #10968 track.
-  It preserves the incumbent five tracks and their owners. Review and actual
-  accepted receiving content precede any separate tracking retirement; no
-  cleanup, implementation or source/custody release is inferred.
+  The agent-recommended [accepted session-artifact contract](session-artifact-receiving.md)
+  directly retains #2165's structural write-time block OR flag and source/replica
+  data-handling acceptance in a sixth, independent #10968 track after #12791.
+  The [actual receiving and separate retirement](journal/2026/11.15-session-artifact-receiving.md)
+  preserve all incumbent tracks and owners, record #2165 `NOT_PLANNED`,
+  and reconcile 838 whole open, 109 above fixed 729. Every new technical row
+  remains unchecked; no cleanup, implementation or source/custody release follows.
   The [current receiving-contract unit](consolidation-current-unit.md)
   now has independently admitted current contracts for six conditional
   families/nineteen own identities and authored direct receiving amendments.
