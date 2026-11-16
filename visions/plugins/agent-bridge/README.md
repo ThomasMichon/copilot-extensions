@@ -223,6 +223,21 @@ negotiation; the bridge records the outcome internally rather than adding a
 second handshake or generic capability bit. Implementation package versions
 remain useful evidence, but never stand in for negotiated semantics.
 
+Retained messages have a minimal stable outer contract for original identity,
+sender correlation, target resource and receiver incarnation, independent of
+versioned message-type payloads. An authenticated current receiver can reject
+unknown types, unsupported versions or required semantics without executing
+their payload. Rejection clears deliverable pending work with an auditable,
+sender-visible not-delivered code and reason; it is not delivery or consumption.
+Supported legacy types migrate before retirement, preserving original identity,
+order and effect history. Already-started effects retain their honest uncertain
+outcomes and never acquire replay authority through migration or rejection.
+Backlog compatibility never blocks valid receiver registration or enrollment.
+The current native receiver remains the sole delivery path to its uniquely
+identified worktree; compatibility does not weaken transport authorization,
+resource binding or incarnation fences. Every message-type retirement supplies
+a migration or explicit pre-effect rejection strategy.
+
 ### AHP host face
 
 The bridge exposes bridge-owned agent, session, chat, and event state to clients
