@@ -106,10 +106,17 @@ Bridge owns the native admission and strict context-preserving resume; callers
 do not supply startup invocation JSON. See the [native follow-up contract](../../../docs/delegation-contract.md#exact-native-follow-ups-through-ordinary-send)
 for support discovery, retry receipts and the current busy/queue limits.
 
+An authorized original-key adjustment uses explicit `--settle-native-send`,
+not ordinary sending or passive receipt observation. See
+[native-send settlement](../../../docs/native-send-settlement.md) for running
+support discovery, exact request retention and unknown-outcome recovery.
+
 **Typed outcomes.** `<agent-bridge catalog argv[0]> --json send ...` prints exactly one JSON
 document on stdout for every classified outcome (progress text goes to
 stderr), always with an `outcome`.
-Accepted (exit 0): `delivered` (an ACP prompt started a turn),
+Explicit settlement resolves with `accepted` or `not_admitted`; neither means
+that a new prompt was sent.
+Ordinary delivery (exit 0): `delivered` (an ACP prompt started a turn),
 `queued` (a hosted `--queue` prompt behind a busy turn),
 `admitted`, `sdk_accepted`, `consumed` (live inbox receipt evidence), and `duplicate` (an identical
 `--idempotency-key` retry; `message_id` is the original's, nothing new

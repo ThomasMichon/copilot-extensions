@@ -1,6 +1,29 @@
 """Extend the unchanged current portfolio with original SDK wire controls."""
 
 from test_http51_capture_probes import *  # noqa: F403 - Preserve the existing source-bound portfolio.
+from test_native_send_settlement_frontend import (
+    keyed as keyed,
+    test_real_cli_settles_original_through_advertised_provider_without_sending
+    as test_real_cli_settles_original_through_advertised_provider_without_sending,
+    test_executing_cli_declares_settlement_without_contacting_a_daemon
+    as test_executing_cli_declares_settlement_without_contacting_a_daemon,
+    test_ordinary_sender_preserves_proved_settled_key_refusal
+    as test_ordinary_sender_preserves_proved_settled_key_refusal,
+    test_explicit_reobservation_recovers_lost_settlement_without_another_turn
+    as test_explicit_reobservation_recovers_lost_settlement_without_another_turn,
+    test_mixed_settlement_modes_refuse_before_input_or_client
+    as test_mixed_settlement_modes_refuse_before_input_or_client,
+    test_unsupported_running_provider_refuses_before_mutation
+    as test_unsupported_running_provider_refuses_before_mutation,
+    test_unavailable_existing_client_refuses_without_ensure_or_settlement
+    as test_unavailable_existing_client_refuses_without_ensure_or_settlement,
+    test_post_commit_unknown_response_never_retries_or_replays_prompt
+    as test_post_commit_unknown_response_never_retries_or_replays_prompt,
+    test_drain_winning_the_turn_lock_refuses_settlement
+    as test_drain_winning_the_turn_lock_refuses_settlement,
+    test_missing_authentication_cannot_reach_settlement_owner
+    as test_missing_authentication_cannot_reach_settlement_owner,
+)
 from test_unconfigured_sdk_receiving import (
     test_original_sdk_wire_works_with_genuinely_unconfigured_governance
     as test_original_sdk_wire_works_with_genuinely_unconfigured_governance,

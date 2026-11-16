@@ -19,6 +19,9 @@ from .client import BridgeClientError
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--settle-native-send", action="store_true",
+                        help="Settle the original keyed native send; return acceptance or fence "
+                             "proved non-admission, without sending or resuming")
     parser.add_argument("--no-resume", action="store_true",
                         help="Keyed ordinary native send only: refuse a stopped native under its turn lock")
     parser.add_argument("--live-exact-notify", action="store_true",
@@ -44,6 +47,7 @@ def validate_options(args: argparse.Namespace) -> None:
         or any(getattr(args, field, False) for field in (
             "force", "plugin_context_stdin", "steer", "interrupt", "queue",
             "notify", "status_check", "wait_reply", "full_history", "new", "no_resume",
+            "settle_native_send",
         ))
         or getattr(args, "kind", None) not in (None, "prompt")
         or getattr(args, "delivery", None) not in (None, "steer")

@@ -125,6 +125,30 @@ The remaining duplicate-implementation boundary must be evaluated against the
 actual selected runtimes and supported rollback window, not removed merely to
 close a checklist item.
 
+### Selected caller correlation
+
+| Caller boundary | Selected Core path | Caller-owned state retained |
+|-----------------|--------------------|-----------------------------|
+| Worktrees `launch_seed_exec._launch_headed` and `normalized_backend.launch` | `agent_remote_driver.headed.caller.execute` builds/runs the retained Core artifact | Workspace/policy, original admission, seed and process/exit receipts; recordless setup does not fabricate a worktree record |
+| Manager relocated `launch-session` and mux creation | Execution follows the resolved Worktrees handoff; finite mux creation selects the executing `agent_remote_driver.mux_creation` contract and returned interpreter/entrypoint | UI/window choice, resolved worktree/attempt and original handoffs; unknown/lost selected creation does not enter legacy retry |
+| Bridge `SessionHostConnectionMixin`, `LocalSpawner` and launcher adapter | `agent_remote_driver.session_host.launcher.launch_session_host` owns execution; ACP uses the same Core client/stream protocol | Original acquisition/recovery, selected policy, durable Host index and frontend-only detach |
+| Bridge portable Spawner | Current Core bundle export, physical `-I -S` receiving preflight and the same broker endpoint | Venue transport, credential relay, forwarding and selected remote authority; unsupported Core refuses before provision/launch |
+
+Focused Worktrees controls exercise the actual Python caller's Core handoff
+and native receipt callbacks, including preserved/unseeded and recordless
+forms. Bridge local controls launch the real Core with a synthetic child;
+the portable control relocates the current artifact, removes construction
+and forbids selecting the legacy export before executing its support probe.
+Manager PowerShell/Bash controls execute copied consumer functions against
+finite synthetic providers, preserving literal inputs and unknown outcomes
+without legacy replay.
+
+These source/real-process controls correlate the native artifact/Bridge
+checkpoints in #12714 and #12720 with the existing callers. They do not
+qualify every native caller mode, caller-Job loss, installed replacement,
+remote deployment or readiness stability. Supported older-runtime adapters
+and the existing launch owners remain unchanged.
+
 ## Lifetime and activity evidence
 
 Interactive execution stays alive until Copilot is closed by the user or an

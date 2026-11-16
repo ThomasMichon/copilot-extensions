@@ -11,8 +11,11 @@ from .native_send_admission import NativeSendPrompt
 if TYPE_CHECKING:
     from .db import Database
 
+CAPABILITY = "native_send_settlement"
 
-def _digest(session_id: str, request: NativeSendPrompt) -> str:
+
+def request_digest(session_id: str, request: NativeSendPrompt) -> str:
+    """Bind the settlement result to the original native-send request."""
     document = json.dumps(
         {"session_id": session_id, "request": request.model_dump(mode="json")},
         sort_keys=True, allow_nan=False, separators=(",", ":"),
@@ -34,7 +37,7 @@ def settle_record(db: Database, session_id: str, request: NativeSendPrompt) -> d
     from .native_keyed_admission import stored_receipt
     from .native_send_history import require_original_history
 
-    digest = _digest(session_id, request)
+    digest = request_digest(session_id, request)
     receipt = {
         "version": 1, "session_id": session_id,
         "native_session_id": request.expected_native_session_id,
@@ -83,4 +86,7 @@ async def settle(manager: Any, session_id: str, request: NativeSendPrompt) -> di
         raise KeyError("native_session_unavailable")
     async with session._turn_start_lock:
         validate_holder(manager, session_id, session, request)
+        if manager.is_draining:
+            from .session_manager import DaemonDrainingError
+            raise DaemonDrainingError("native-send-settlement")
         return settle_record(manager.db, session_id, request)
