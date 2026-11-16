@@ -19,11 +19,13 @@
 
 ## Goal
 
-Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
+**Kind:** completion.
+
+**Root goal:** Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
 
 > All Python code in copilot-extensions passing string type-checking, with strict type-checkng enforced first for all new code, and then all existing code.
 
-Acceptance evidence must prove both stages, not merely a completed activity:
+**Acceptance:** Evidence must prove both stages, not merely a completed activity:
 
 - Required source CI rejects new first-party Python that lacks strict coverage,
   including additions inside pending owners, with real negative controls and
@@ -52,6 +54,20 @@ The repository-wide strict-new-code gate remains required. The sweep and
 low-risk annotation waves proceed without waiting for that separate gate;
 diagnostic passes do not constitute persistent admission or waive any
 project's existing acceptance criteria.
+
+**Now:** Strict diagnostic and annotation waves. A first declared-target sweep
+is cataloged, with incomplete analyses, environment setup failures and absent
+scopes kept visibly blocked rather than counted clean. Prepare bounded,
+low-risk typing cohorts, resweep affected inputs and finish the
+nearest-complete projects through their existing acceptance and publication
+gates. Temporary opt-in diagnostics do not change persistent admission.
+
+**Return:** After a prerequisite, publication or guidance refresh, return to
+this campaign's next unmet Plan or Validation Plan criterion. Reuse preserved
+exact-input evidence, recheck current ownership and holds, and rerun only
+changed or unresolved checks before selecting the next bounded typing cohort.
+Keep the complete root goal and finalization criterion above; no slice,
+transfer or refresh completes the parent or renews a spent qualification clock.
 
 ## Guiding Intent
 
