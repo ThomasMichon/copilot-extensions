@@ -32,6 +32,12 @@ selection with failure-aware parsing. Invalid selected sources report unknown
 state; machine routes retain their resolved peer identity.
 Confirmed disabled managed drop-ins do not participate in preference inheritance
 or block editing; invalid or indeterminate contributions still require repair.
+Production plugin-route discovery retains the activation owner's authority.
+Indeterminate activation or unavailable discovery reports a sanitized
+`plugin-contributions-unavailable` finding and unknown routes, not confirmed
+absence. Readable independent preferences do not hide that finding. The explicit
+`AGENT_WORKTREES_INSTALLED_PLUGINS_DIR` filesystem override remains a diagnostic
+scan rather than requiring production activation.
 Route/pair editing and plugin enablement remain unsupported: use their owning
 capabilities, not a generic source-file editor.
 

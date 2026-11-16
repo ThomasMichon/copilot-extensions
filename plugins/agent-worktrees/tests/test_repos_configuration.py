@@ -14,6 +14,7 @@ import threading
 import time
 
 from agent_procutil import no_window_kwargs
+from agent_procutil.owned_process import run_caller_owned
 import pytest
 import yaml
 
@@ -155,9 +156,9 @@ def native(tmp_path, monkeypatch):
 
 
 def cli(*args):
-    return subprocess.run(
+    return run_caller_owned(
         [sys.executable, "-m", "agent_worktrees", "repos", "configuration", *args],
-        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+        timeout=15, max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
     )
 
 
@@ -1401,6 +1402,173 @@ def test_malformed_projects_registry_is_sanitized_native_inspection(native):
     assert tree(native) == before
 
 
+@pytest.fixture
+def repository_activation(native, monkeypatch):
+    from agent_worktrees import installer, related
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: native))
+    for key in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(native))
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    root = native / "repository"
+    for arguments in (
+        ["init", "--quiet"],
+        ["remote", "add", "origin", "https://github.com/example/sample.git"],
+    ):
+        child = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert child.returncode == 0, child.stderr
+    installer.projects_yaml_path().write_text(
+        yaml.safe_dump({"projects": {"sample": {"config_dir": str(native / ".sample")}}}),
+        encoding="utf-8",
+    )
+    settings = root / ".github" / "copilot" / "settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}", encoding="utf-8")
+    related.resolve_active_plugins(home=native)
+    return settings
+
+
+def activation_inputs(root):
+    sources = tree(root)
+    # Activation may refresh its derived Git-identity memo, never configuration.
+    sources.pop(str(Path(".agent-worktrees") / "cache" / "project-identities.json"), None)
+    sources.pop(str(Path(".agent-worktrees") / "cache"), None)
+    return sources
+
+
+@pytest.mark.parametrize("readable_preference", [False, True])
+def test_repository_activation_failure_is_unknown_without_managed_pointers(
+    native, repository_activation, readable_preference,
+):
+    from agent_worktrees.repos_configuration_catalog import inspect_project
+
+    if not readable_preference:
+        cfg.global_config_path().write_text("{}\n", encoding="utf-8")
+    repository_activation.write_text('{"private": "' + SECRET + '",', encoding="utf-8")
+    assert not list(native.rglob("config.d"))
+    before = activation_inputs(native)
+    cfg.set_active_project("previous")
+    inspection = inspect_project("sample", "")
+    assert cfg.active_project() == "previous"
+    assert inspection.findings == [{
+        "code": "plugin-contributions-unavailable", "severity": "error",
+        "message": "Plugin contribution discovery is indeterminate; inspect plugin activation sources.",
+    }]
+    result = request("catalog")
+    assert result.returncode == 0, result.stderr
+    row = next(row for row in json.loads(result.stdout)["entries"] if row["id"] == "sample")
+    assert row["configuration"]["route"]["status"] == "unknown"
+    assert row["participation"] == "unknown"
+    assert row["configuration"]["participation"] == "unknown"
+    assert row["configuration"]["findings"] == inspection.findings
+    if readable_preference:
+        assert row["effective"] == "inherited" and row["editable"] == "true"
+    assert SECRET not in result.stdout + result.stderr + repr(inspection)
+    assert activation_inputs(native) == before
+
+
+@pytest.mark.parametrize("enabled", [None, False, True])
+def test_repository_activation_known_empty_and_active_remain_distinct(
+    native, repository_activation, enabled,
+):
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    root = native / "repository"
+    market = root / ".ai"
+    plugin = market / "sample-routes"
+    (plugin / ".agent-worktrees").mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name": "sample-routes"}', encoding="utf-8")
+    (plugin / ".agent-worktrees" / "related.yaml").write_text(
+        "related:\n  contributed: {locus: {preferred: local}}\n"
+        "  base-wins: {locus: {preferred: codespace}}\n", encoding="utf-8",
+    )
+    (market / ".claude-plugin").mkdir()
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+        "name": "fixture",
+        "plugins": [{"name": "sample-routes", "source": "./sample-routes"}],
+    }), encoding="utf-8")
+    if enabled is not None:
+        repository_activation.write_text(json.dumps({
+            "extraKnownMarketplaces": {
+                "fixture": {"source": {"source": "directory", "path": "./.ai"}},
+            },
+            "enabledPlugins": {"sample-routes@fixture": enabled},
+        }), encoding="utf-8")
+    policy = root / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    (policy / "related.yaml").write_text(
+        "related:\n  base-wins: {locus: {preferred: local}}\n", encoding="utf-8",
+    )
+    before = activation_inputs(native)
+    rows = {row["id"]: row for row in catalog("sample")["entries"]}
+    assert not rows["sample"]["configuration"]["findings"]
+    assert rows["sample"]["participation"] == "not-declared"
+    assert ("contributed" in rows) is (enabled is True)
+    if enabled:
+        assert rows["contributed"]["configuration"]["route"]["source"] == "plugin"
+    assert rows["base-wins"]["configuration"]["route"]["preferred"] == "local"
+    assert activation_inputs(native) == before
+
+
+def test_repository_activation_resolution_failure_is_sanitized_once(
+    native, repository_activation, monkeypatch,
+):
+    from agent_worktrees import related
+    from agent_worktrees.repos_configuration_catalog import inspect_project
+
+    calls = []
+
+    def unavailable(**kwargs):
+        calls.append(kwargs)
+        raise OSError(SECRET)
+
+    monkeypatch.setattr(related, "resolve_active_plugins", unavailable)
+    before = activation_inputs(native)
+    cfg.set_active_project("previous")
+    inspection = inspect_project("sample", "")
+    assert cfg.active_project() == "previous"
+    assert len(calls) == 1
+    assert inspection.findings[0]["code"] == "plugin-contributions-unavailable"
+    assert SECRET not in repr(inspection)
+    assert activation_inputs(native) == before
+
+
+def test_repository_activation_filesystem_override_keeps_diagnostic_discovery(
+    native, repository_activation, monkeypatch,
+):
+    from agent_worktrees import related
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    repository_activation.write_text("{broken", encoding="utf-8")
+    plugins = native / "diagnostic-plugins"
+    for relative, manifest in (
+        ("flat", "plugin.json"),
+        ("market/nested", ".claude-plugin/plugin.json"),
+        ("market/not-a-plugin", None),
+    ):
+        plugin = plugins / relative
+        fragment = plugin / ".agent-worktrees" / "related.yaml"
+        fragment.parent.mkdir(parents=True)
+        fragment.write_text(f"related:\n  {plugin.name}:\n", encoding="utf-8")
+        if manifest:
+            path = plugin / manifest
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"name": plugin.name}), encoding="utf-8")
+    expected = [str(plugins / "flat"), str(plugins / "market" / "nested")]
+    assert related.installed_plugin_related_anchors(root=plugins) == expected
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(plugins))
+    before = activation_inputs(native)
+    rows = {row["id"]: row for row in catalog("sample")["entries"]}
+    assert {"flat", "nested"} <= rows.keys()
+    assert "not-a-plugin" not in rows
+    assert not rows["sample"]["configuration"]["findings"]
+    assert rows["flat"]["configuration"]["route"]["status"] == "present"
+    assert activation_inputs(native) == before
+
+
 @pytest.mark.parametrize("command", ["catalog", "knowledge-preview"])
 def test_missing_default_repository_is_sanitized_and_read_only(native, command):
     from agent_worktrees import installer
@@ -1745,14 +1913,16 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
     (machine / "config.yaml").write_text("knowledge_repo: knowledge\n", encoding="utf-8")
     paths = {name: native / f"{name}-worktree" for name in ("sample", "knowledge")}
     records = {}
+    reporter = cfg.detect_machine()
     for name, role, sibling in (("sample", "harness", "knowledge"), ("knowledge", "knowledge", "sample")):
         paths[name].mkdir()
         record = tracking.WorktreeRecord(
             worktree_id=f"wt-{name}", branch=f"worktree/wt-{name}", worktree_path=str(paths[name]),
-            repo=name, machine="fixture", platform=repos._current_platform(),
+            repo=name, machine=reporter, platform=repos._current_platform(),
             started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
             resume_count=0, title=None, status="active", completed_at=None, sessions=[],
-            pair_id="fixture-pair", pair_role=role, pair_ref=f"fixture/{sibling}/wt-{sibling}",
+            pair_id="fixture-pair", pair_role=role,
+            pair_ref=tracking.format_claim_ref(reporter, sibling, f"wt-{sibling}"),
             pair_kind="worktree",
         )
         path = cfg.project_dir(name) / "worktrees" / f"wt-{name}.yaml"
