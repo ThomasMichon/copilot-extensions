@@ -14,6 +14,7 @@ import re
 import struct
 import sys
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import patch
 
 import agent_bridge_contract_git as git
@@ -60,20 +61,20 @@ class Wire:
         return "127.0.0.1", 1
 
 
-async def observe(vector: dict) -> dict:
+async def observe(vector: dict[str, Any]) -> dict[str, Any]:
     """Execute real codecs and dispatch with all effectful boundaries refused."""
-    from agent_remote_driver.session_host import inspection, protocol
+    from agent_remote_driver.session_host import protocol
     from agent_remote_driver.session_host.client import SessionHostClient
     from agent_remote_driver.session_host.host import SessionHost
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("inspection attempted a child/process effect")
 
     child = SimpleNamespace(
         pid=4242, returncode=None, stdout=None,
         stdin=SimpleNamespace(write=forbidden, drain=forbidden),
     )
-    host = SessionHost(child, nonce=vector["credential"])
+    host: Any = SessionHost(child, nonce=vector["credential"])
     host._front = object()
     host._attachment_epoch = 7
     host._frames = {1: b"retained"}
@@ -86,10 +87,10 @@ async def observe(vector: dict) -> dict:
         host._last_reapable, host._graceful_detach, host._reap_timer,
         host._active_reap_timer, host._turn_in_flight, child.returncode,
     )
-    requests = []
-    responses = []
+    requests: list[bytes] = []
+    responses: list[bytes] = []
 
-    async def exchange(reader, writer) -> None:
+    async def exchange(reader: asyncio.StreamReader, writer: Wire) -> None:
         await host._handle_front(reader, writer)
         responses.append(bytes(writer.data))
 
@@ -104,12 +105,12 @@ async def observe(vector: dict) -> dict:
             response_reader.feed_data(bytes(reply.data))
             response_reader.feed_eof()
 
-    async def connect(*args, **kwargs):
+    async def connect(*args: Any, **kwargs: Any) -> tuple[asyncio.StreamReader, Wire]:
         if args != ("127.0.0.1", 1) or kwargs != {"limit": 4101}:
             raise AssertionError("inspection changed its bounded connection contract")
         return response_reader, RequestWire()
 
-    client = SessionHostClient(asyncio.StreamReader(), Wire())
+    client = SessionHostClient(asyncio.StreamReader(), cast(asyncio.StreamWriter, Wire()))
     private = await client.inspect()
     client._inspection_credential = vector["credential"]
     client._inspection_child_pid = child.pid
@@ -117,7 +118,8 @@ async def observe(vector: dict) -> dict:
     with (
         patch("agent_remote_driver.session_host.host._tree_kill", forbidden),
         patch.object(asyncio, "open_connection", side_effect=connect),
-        patch.object(inspection.secrets, "token_hex", return_value=vector["nonce"]),
+        patch("agent_remote_driver.session_host.inspection.secrets.token_hex",
+              return_value=vector["nonce"]),
     ):
         result = await client.inspect()
         response_reader = asyncio.StreamReader()
@@ -168,7 +170,7 @@ async def observe(vector: dict) -> dict:
             or decoded[1] != base64.b64decode(message["payload_base64"])
         ):
             raise ValueError(f"historical H1 decoding changed: {name}")
-        if decoded[0] is not None and protocol.encode(*decoded) != wire:
+        if decoded[0] is not None and protocol.encode(decoded[0], decoded[1]) != wire:
             raise ValueError(f"historical H1 encoding changed: {name}")
         replayed.append(name)
     return {
@@ -189,7 +191,7 @@ def source_bytes(commit: str, path: str) -> bytes:
     return data
 
 
-def validate_packets(root: Path, contract: dict, errors: list[str]) -> None:
+def validate_packets(root: Path, contract: dict[str, Any], errors: list[str]) -> None:
     """Keep the new source packets joined to their independent observations."""
     paths = {CURRENT + "inspection-" + Path(source).stem + "-v1.json": source for source in SOURCES}
     fixtures = contract.get("fixtures")
@@ -247,16 +249,18 @@ def capture(commit: str, *, write: bool = False) -> dict[str, bytes]:
     sys.path[:0] = [str(path) for path in sorted((ROOT / "libs").glob("*/src"))]
     for name, path in zip(("protocol", "host", "inspection", "client"), SOURCES, strict=True):
         module = importlib.import_module("agent_remote_driver.session_host." + name)
-        if Path(module.__file__).resolve() != safe(ROOT, path).resolve():
+        origin = module.__file__
+        if origin is None or Path(origin).resolve() != safe(ROOT, path).resolve():
             raise ValueError(f"capture imported foreign source: {name}")
     paths = {INPUT, SCRIPT, CURRENT + "messages.json", "plugins/agent-bridge/plugin.json"}
-    paths.update(
-        Path(module.__file__).resolve().relative_to(ROOT).as_posix()
-        for module in list(sys.modules.values())
-        if getattr(module, "__file__", None)
-        and Path(module.__file__).resolve().is_relative_to(ROOT)
-        and Path(module.__file__).suffix == ".py"
-    )
+    for loaded in list(sys.modules.values()):
+        origin = getattr(loaded, "__file__", None)
+        if (
+            isinstance(origin, str) and origin
+            and Path(origin).resolve().is_relative_to(ROOT)
+            and Path(origin).suffix == ".py"
+        ):
+            paths.add(Path(origin).resolve().relative_to(ROOT).as_posix())
     before = {path: git.sha256_bytes(source_bytes(commit, path)) for path in sorted(paths)}
     vector = json.loads(source_bytes(commit, INPUT))
     if vector.get("schema") != "h1-read-only-inspection-v1":
@@ -298,7 +302,7 @@ def capture(commit: str, *, write: bool = False) -> dict[str, bytes]:
         if provenance not in owner["provenance"]:
             owner["provenance"].append(provenance)
     outputs.update(codec.plan(ROOT, snapshot, updated))
-    history = {
+    history: dict[str, str | None] = {
         **{path: codec.digest(safe(ROOT, path).read_bytes()) for path in before},
         **{path: codec.digest(data) for path, data in snapshot.inputs.items()},
     }

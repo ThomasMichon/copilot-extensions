@@ -405,7 +405,8 @@
       ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-service-index-requirements.txt"
+      "requirements": "tools/typecheck-service-index-requirements.txt",
+      "import_roots": ["tools"]
     },
     {
       "name": "agent-codespaces",
