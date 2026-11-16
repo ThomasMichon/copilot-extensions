@@ -60,6 +60,8 @@ to read from shell ingress. Missing or malformed project metadata and
 incompatible selections refuse generation before output writes. Absent opt-in
 emits no scalar and leaves command/catalog bytes unchanged. The packaged
 generator and toolkit carry the new helper independently of scalar opt-in.
+After withdrawing opt-in, remove its old scalar explicitly: direct generation,
+checks and candidate materialization reject that obsolete output before writes.
 
 This is declaration delivery, not launcher adoption or acquisition authority.
 No production manifest currently opts in. A setup owner must qualify the

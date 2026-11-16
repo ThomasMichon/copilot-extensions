@@ -32,3 +32,13 @@ def test_bootstrap_declaration_materializes_without_changing_canonical_source(
     assert log and not any(line.startswith("SKIP") for line in log), log
     assert declaration.read_bytes() == b"cpython@3.11.11\n"
     assert before == {p.relative_to(canonical): p.read_bytes() for p in canonical.rglob("*") if p.is_file()}
+
+
+def test_withdrawn_bootstrap_request_refuses_candidate_before_writes(tmp_path: Path) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    declaration = candidate / "plugins/agent-worktrees/scripts/bootstrap-python-version.txt"
+    declaration.write_text("cpython@3.11.11\n")
+    before = {p.relative_to(candidate): p.read_bytes() for p in candidate.rglob("*") if p.is_file()}
+    log = invocation.materialize(candidate, canonical_root=canonical)
+    assert len(log) == 1 and "SKIP" in log[0] and "obsolete bootstrap Python request" in log[0]
+    assert before == {p.relative_to(candidate): p.read_bytes() for p in candidate.rglob("*") if p.is_file()}

@@ -5030,7 +5030,11 @@
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_qualification_and_post_callback_evidence_have_separate_bounds[qualification]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_qualification_and_post_callback_evidence_have_separate_bounds[changed]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract[False]",
-        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract[True]"
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract[True]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[absent]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[compatible]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[incompatible]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_request_decisions_are_qualified[withdrawn]"
     ],
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
@@ -5347,7 +5351,8 @@
         "tools/typecheck_bootstrap_views.py",
         "tools/typecheck_new_code.py",
         "libs/installer-engine/runtime_application_install.py",
-        "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py"
+        "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py",
+        "libs/payload-invocation/bootstrap_python.py"
     ],
     "sources": {
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
@@ -5995,7 +6000,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "fa59ad840f2a9c4a5c2a77c0a9d4fd22f9124e352ec310042b07d0d7d2873271",
-        "libs/payload-invocation/python-catalog-inputs.json": "a9f68e1e86216eb99b23b1c3e4b53dd44687ed2f0d75d67208611fe14615a877",
+        "libs/payload-invocation/python-catalog-inputs.json": "b70da998e9cbbe77e49ad4ce0e2a442b377e1fe1a2057f89856cef5f8faf832e",
         "tools/promotion_unit_tests/test_typecheck_catalog.py": "d5f76b668a5e5b6d0bd57125dc09b51bb9395bf4f799d3fe94e926e301373bb1",
         "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
         "libs/payload-invocation/templates/dispatcher-posix.tmpl": "c8cbc41689aa28cb98dced319f91cb451dd444ab5c3523407657db5459eb5f08",
@@ -6010,7 +6015,7 @@
         "libs/payload-invocation/command_binding.py": "783c14e3da2c21ab10e7e61ece68d6920ec5b273d04030d099c4b0c96b285864",
         "tools/typecheck_catalog_views.py": "4f6e562a8ab461c0de002710475782047e4eb62d9de8efceebc8240fa9fd2ee7",
         "libs/payload-invocation/templates/catalog-python.tmpl": "c752063e0fa7c4ae6e344843055991498773870d78823e14a5d4f89edeaf93b6",
-        "libs/payload-invocation/generate.py": "f60766fd777e252d35df1012009ea0127815feb4e46293e74ee4b0d4a868bd41",
+        "libs/payload-invocation/generate.py": "dcdcd15ad816ff13acd28b682c7b62c885f8c91d1a522f17c08bc480bda78d57",
         "tools/promotion_unit_tests/test_live_question_answers.py": "51b9c884787883d6fec7ce81db0075d0d13f54b32df71d3bff6c92227a9134bf",
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "d7c57186148fc9538f6f18eaf87ba1abab42e60ba31f6b4e7d3d163e0d7a19b2",
@@ -6075,7 +6080,7 @@
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "c52235529845529d3e3ed61c3b7b804dd4db022359771762161f4d5e07e08b3a",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
         "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
@@ -6130,6 +6135,6 @@
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "680a3389cd1226effb5e29658ba61671db64d72a3cda41145e0769fa34c14eaa",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268",
-        "libs/payload-invocation/bootstrap_python.py": "c58d1c13ad845384eb4f5dfec3de126dab83168fab1e37f2f745fbdcf381236b"
+        "libs/payload-invocation/bootstrap_python.py": "9fcb4ffb7d1aa48bbbf96c974c524f75f93345cb329f5e5be4abcae45370b944"
     }
 }

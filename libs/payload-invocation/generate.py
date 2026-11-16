@@ -5,18 +5,17 @@ import ast
 import sys
 import argparse
 import hashlib
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 import re
-import runpy
 import stat
 from pathlib import Path
 from typing import Any
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SCHEMA = "copilot-extensions.payload-invocation"
-LEGACY_VERSION = 1
-VERSION = 2
+LEGACY_VERSION, VERSION = 1, 2
 _PLUGIN = re.compile(r"^[a-z][a-z0-9-]*$")
 _COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
 _MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
@@ -782,9 +781,11 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
         protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    generated: dict[Path, str | bytes] = runpy.run_path(
-        str(Path(__file__).with_name("bootstrap_python.py"))
-    )["expected_files"](manifest, data)
+    bootstrap_spec = spec_from_file_location("_bootstrap_python", Path(__file__).with_name("bootstrap_python.py"))
+    assert bootstrap_spec and bootstrap_spec.loader
+    bootstrap_module = module_from_spec(bootstrap_spec)
+    bootstrap_spec.loader.exec_module(bootstrap_module)
+    generated: dict[Path, str | bytes] = bootstrap_module.expected_files(manifest, data)
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:

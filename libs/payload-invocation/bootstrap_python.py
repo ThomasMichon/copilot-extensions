@@ -8,7 +8,10 @@ from typing import Any
 
 
 def expected_files(manifest: Path, data: dict[str, Any]) -> dict[Path, str]:
+    destination = manifest.parent / "scripts/bootstrap-python-version.txt"
     if "bootstrapPython" not in data:
+        if destination.exists() or destination.is_symlink():
+            raise ValueError(f"{manifest}: obsolete bootstrap Python request; remove {destination.name}")
         return {}
     version = data["bootstrapPython"]
     if (
@@ -35,4 +38,4 @@ def expected_files(manifest: Path, data: dict[str, Any]) -> dict[Path, str]:
             raise ValueError(f"bootstrapPython {version} does not satisfy requires-python {requirement}")
     except (OSError, UnicodeError, ValueError) as exc:
         raise ValueError(f"{manifest}: invalid bootstrap Python project: {exc}") from exc
-    return {manifest.parent / "scripts/bootstrap-python-version.txt": f"cpython@{version}\n"}
+    return {destination: f"cpython@{version}\n"}

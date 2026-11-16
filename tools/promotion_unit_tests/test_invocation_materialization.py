@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 from pathlib import Path
 import shutil
+from typing import Any
 
 import pytest
 
@@ -68,7 +70,7 @@ def test_pinned_invocation_owner_refuses_corrupted_actual_write(
     target = plugin / "bin/sample.ps1"
     original = Path.write_text
 
-    def corrupt(path: Path, text: str, *args, **kwargs):
+    def corrupt(path: Path, text: str, *args: Any, **kwargs: Any) -> int:
         if path == target:
             text += "\n# corrupt actual candidate output\n"
         return original(path, text, *args, **kwargs)
@@ -81,13 +83,13 @@ def test_pinned_invocation_owner_refuses_corrupted_actual_write(
 
 
 @pytest.mark.parametrize("blocked", ["output-directory", "parent-file"])
-def test_source_phase_refuses_unmaterializable_output_types(tmp_path, blocked):
+def test_source_phase_refuses_unmaterializable_output_types(tmp_path: Path, blocked: str) -> None:
     source, _candidate_root, _plugin = _candidate(tmp_path)
-    spec = owner.importlib.util.spec_from_file_location(
+    spec = importlib.util.spec_from_file_location(
         "_unit_invocation_source_check", ROOT / "libs/payload-invocation/generate.py",
     )
     assert spec and spec.loader
-    generator = owner.importlib.util.module_from_spec(spec)
+    generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
     manifest = source / "plugins/sample/payload-invocation.json"
     output = manifest.parent / "bin/sample.ps1"
@@ -101,16 +103,18 @@ def test_source_phase_refuses_unmaterializable_output_types(tmp_path, blocked):
 
 @pytest.mark.parametrize(("relative", "expected"), [
     ("tools/materialize_payload_invocation.py", {"libs/payload-invocation/generate.py"}),
-    ("libs/payload-invocation/generate.py", {"libs/payload-invocation/runtime_admission.py"}),
+    ("libs/payload-invocation/generate.py", {
+        "libs/payload-invocation/bootstrap_python.py", "libs/payload-invocation/runtime_admission.py",
+    }),
 ], ids=["candidate-producer", "canonical-packager"])
-def test_pinned_invocation_loader_closure_is_statically_admitted(relative, expected):
+def test_pinned_invocation_loader_closure_is_statically_admitted(relative: str, expected: set[str]) -> None:
     from release_helper_loaders import dynamic_loads
 
     assert dynamic_loads(ast.parse((ROOT / relative).read_bytes()), relative) == expected
 
 
 @pytest.mark.parametrize("phase", ["source", "candidate"])
-def test_planned_output_ancestor_conflicts_refuse_before_writes(tmp_path, phase):
+def test_planned_output_ancestor_conflicts_refuse_before_writes(tmp_path: Path, phase: str) -> None:
     source, candidate, plugin = _candidate(tmp_path)
     for root in (source, candidate):
         manifest = root / "plugins/sample/payload-invocation.json"
@@ -120,11 +124,11 @@ def test_planned_output_ancestor_conflicts_refuse_before_writes(tmp_path, phase)
     before = {path.relative_to(tmp_path): path.read_bytes()
               for path in tmp_path.rglob("*") if path.is_file()}
     if phase == "source":
-        spec = owner.importlib.util.spec_from_file_location(
+        spec = importlib.util.spec_from_file_location(
             "_unit_invocation_conflict_check", ROOT / "libs/payload-invocation/generate.py",
         )
         assert spec and spec.loader
-        generator = owner.importlib.util.module_from_spec(spec)
+        generator = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(generator)
         with pytest.raises(ValueError, match="generated output path conflict"):
             generator.source_check(source / "plugins/sample/payload-invocation.json", canonical_root=source)
@@ -138,7 +142,7 @@ def test_planned_output_ancestor_conflicts_refuse_before_writes(tmp_path, phase)
 
 
 @pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
-def test_source_preparation_materializes_declared_invocation_outputs(tmp_path, stale):
+def test_source_preparation_materializes_declared_invocation_outputs(tmp_path: Path, stale: bool) -> None:
     source, _candidate_root, _plugin = _candidate(tmp_path, stale=stale)
     (source / "plugins/sample/pyproject.toml").write_text(
         '[project]\nname = "sample"\nversion = "1.0"\n', encoding="utf-8",
@@ -157,7 +161,9 @@ def test_source_preparation_materializes_declared_invocation_outputs(tmp_path, s
 
 
 @pytest.mark.parametrize("initial", ["absent", "stale", "foreign-manifest"])
-def test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer(tmp_path, initial):
+def test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer(
+    tmp_path: Path, initial: str,
+) -> None:
     source, _candidate_root, _plugin = _candidate(tmp_path, stale=initial == "stale")
     consumer = source / "plugins/sample"
     destination = tmp_path / "individual/sample"
@@ -183,3 +189,35 @@ def test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer(
                 path.relative_to("source"): content for path, content in before.items()
                 if path.parts[0] == "source"
             }
+
+
+@pytest.mark.parametrize("selection", ["absent", "compatible", "incompatible", "withdrawn"])
+def test_bootstrap_request_decisions_are_qualified(tmp_path: Path, selection: str) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        if selection in {"compatible", "incompatible"}:
+            data["bootstrapPython"] = "3.11.11"
+        manifest.write_text(json.dumps(data))
+        requirement = ">=3.12" if selection == "incompatible" else ">=3.11"
+        (manifest.parent / "pyproject.toml").write_text(
+            '[project]\nname="sample"\nversion="1"\nrequires-python=' + json.dumps(requirement),
+        )
+    declaration = plugin / "scripts/bootstrap-python-version.txt"
+    if selection == "withdrawn":
+        declaration.write_text("cpython@3.11.11\n")
+    before = {path.relative_to(candidate): path.read_bytes()
+              for path in candidate.rglob("*") if path.is_file()}
+    log = owner.materialize(candidate, canonical_root=source)
+    if selection in {"incompatible", "withdrawn"}:
+        reason = "does not satisfy" if selection == "incompatible" else "obsolete bootstrap Python request"
+        assert len(log) == 1 and log[0].startswith("SKIP") and reason in log[0]
+        assert before == {path.relative_to(candidate): path.read_bytes()
+                          for path in candidate.rglob("*") if path.is_file()}
+    else:
+        assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+        if selection == "compatible":
+            assert declaration.read_bytes() == b"cpython@3.11.11\n"
+        else:
+            assert not declaration.exists()

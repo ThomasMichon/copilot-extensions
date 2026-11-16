@@ -47,6 +47,19 @@ def test_static_bootstrap_declaration_does_not_change_launchers(tmp_path: Path) 
     assert generator.expected_files(manifest) == outputs
 
 
+@pytest.mark.parametrize("check", [False, True])
+def test_withdrawn_request_is_rejected_by_generation_and_check(tmp_path: Path, check: bool) -> None:
+    manifest = _declare(tmp_path, "3.11.11")
+    assert generator.process_manifest(manifest, check=False) == []
+    data = json.loads(manifest.read_text())
+    del data["bootstrapPython"]
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="obsolete bootstrap Python request"):
+        generator.process_manifest(manifest, check=check)
+    (manifest.parent / "scripts/bootstrap-python-version.txt").unlink()
+    assert generator.process_manifest(manifest, check=check) == []
+
+
 @pytest.mark.parametrize("version", [
     None, True, "3.11", "pypy@3.11.11", "3.13.1t", "3.11.11\n", "../python", "--system",
 ])
