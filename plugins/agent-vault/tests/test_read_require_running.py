@@ -204,7 +204,9 @@ def test_unsupported_native_selection_refuses_but_keeps_configured_extension_pri
         assert actual is None
 
 
-@pytest.mark.parametrize("case", ["unreachable", "local-foreign", "windows-foreign"])
+@pytest.mark.parametrize("case", [
+    "unreachable", "local-foreign", "windows-foreign", "unreachable-preferred",
+])
 def test_present_unusable_advertisement_never_becomes_legacy_discovery(
     isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path, case: str,
@@ -225,15 +227,23 @@ def test_present_unusable_advertisement_never_becomes_legacy_discovery(
     rendezvous.write_endpoint(
         windows if case == "windows-foreign" else local,
         "tcp", "127.0.0.1:12345",
-        installation_id="expected/agent-vault" if case == "unreachable" else "other/agent-vault",
+        installation_id="expected/agent-vault" if case.startswith("unreachable") else "other/agent-vault",
     )
     monkeypatch.setattr(rendezvous, "connect_probe", lambda _endpoint: False)
     registry = extensions.ExtensionRegistry()
     registry._loaded = True
+    if case == "unreachable-preferred":
+        registry.register_transport(
+            lambda *_args: {"ok": True, "value": "preferred-value"}, before_builtin=True,
+        )
     monkeypatch.setattr(extensions, "_REGISTRY", registry)
     for name in ("_send_socket", "_send_tcp"):
         monkeypatch.setattr(
             cli, name, lambda *_a, **_kw: pytest.fail("unusable advertisement used another daemon"),
         )
-    with pytest.raises(rendezvous.EndpointUnavailable, match="Selected vault endpoint"):
-        cli.send_command({"action": "get"}, strict_endpoint=True)
+    if case == "unreachable-preferred":
+        actual = cli.send_command({"action": "get"}, strict_endpoint=True)
+        assert actual is not None and actual["value"] == "preferred-value"
+    else:
+        with pytest.raises(rendezvous.EndpointUnavailable, match="Selected vault endpoint"):
+            cli.send_command({"action": "get"}, strict_endpoint=True)

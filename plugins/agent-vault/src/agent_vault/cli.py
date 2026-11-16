@@ -261,7 +261,13 @@ def send_command(
     # socket/port when nothing is advertised. A discovered TCP port also feeds
     # the extension transports (e.g. the WSL->Windows interop relay), so a
     # dynamic/discovered port is honored end to end.
-    discovered = _discover_endpoint(context, strict=strict_endpoint)
+    discovery_error: rendezvous.EndpointUnavailable | None = None
+    try:
+        discovered = _discover_endpoint(context, strict=strict_endpoint)
+    except rendezvous.EndpointUnavailable as error:
+        if not strict_endpoint:
+            raise
+        discovered, discovery_error = None, error
     discovered_unix: str | None = None
     discovered_pipe: str | None = None
     if discovered is not None:
@@ -315,6 +321,9 @@ def send_command(
     result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
     if result is not None:
         return result
+
+    if discovery_error is not None:
+        raise discovery_error
 
     if strict_endpoint and discovered is not None and discovered.transport not in (
         "tcp", "pipe" if IS_WINDOWS else "unix",
