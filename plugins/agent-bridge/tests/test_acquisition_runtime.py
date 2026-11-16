@@ -310,8 +310,9 @@ async def test_later_stopped_delivery_keeps_qualified_executor_and_birth_prefix(
     result = await rig.runtime.acquire(later)
     assert result.session_id == first.session_id
     assert result.native_session_id == first.native_session_id
-    _, _, data = rig.runtime.store.recovery(later)
-    assert data is not None
+    data = json.loads(rig.db.execute_read(
+        "SELECT data_json FROM acquisition_effects WHERE delivery_id=?", (later.delivery_id,),
+    )[0]["data_json"])
     assert data[writer.JOURNAL_KEY]["prefix"] == list(original_prefix)
     assert data["_request"]["worktree_writer"] == request.worktree_writer.model_dump()
     assert rig.manager.get_session(first.session_id).target.venue[writer.DELIVERY_KEY] == request.delivery_id
@@ -319,6 +320,7 @@ async def test_later_stopped_delivery_keeps_qualified_executor_and_birth_prefix(
         selected is not None and selected.request == request and selected.prefix == current_selection[0]
         for _, _, selected in writer_rig.calls
     )
+    await rig.manager.stop_session(first.session_id, force=True)
     # A prior reader can still qualify the unchanged birth binding after rollback.
     writer_rig.selected.side_effect = None
     writer_rig.selected.return_value = (original_prefix, *current_selection[1:])

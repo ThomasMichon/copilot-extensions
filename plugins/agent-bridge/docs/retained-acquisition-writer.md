@@ -55,6 +55,10 @@ command is validated as journal data, never executed as a recovery fallback.
 Later same-task acquisition retains the same original requirement; an
 unqualified historical acquisition cannot be retrofitted. Missing or conflicting
 recovery facts refuse with the existing custody intact.
+Nested continuation keeps the outer operation's qualified executor even when
+it reads an earlier delivery's request. Each delivery retains the inherited
+birth command, not the newer executor, so a later delivery does not silently
+rewrite provenance or strand a prior reader after rollback.
 
 Acquisition reads, delegated registration and binding use the retained owner.
 Controller qualification uses that same command for a fixed cached inventory
@@ -132,6 +136,12 @@ rollback must still advertise the required semantics before new code uses it.
 Read-only acquisition and keyed-creation writer observations keep the original
 `worktree_writer` and separately report `executing_writer_identity`. Observing
 either identity neither adopts native execution nor settles an unknown send.
+Dispatch's ordinary admission validates birth provenance and the qualified
+executing identity separately. Both must belong to the expected installation
+and preserve the original incarnation, with the same executing-process and
+versioned preservation guarantees. An older observation without the additive
+executing identity retains its original exact-identity requirement; missing
+new evidence cannot imply compatible adoption.
 
 ## Ordinary keyed creation
 
