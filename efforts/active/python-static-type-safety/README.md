@@ -617,6 +617,8 @@ composition prerequisites, and review/validation rules.
 
 ## Journal
 
+- [2026-11-16 - Chat preparation merged and native qualification](journal/2026/11.16%20Chat%20preparation%20and%20qualification.md)
+
 ### 2026-11-15 - Strict sweep direction and execution transfer
 
 - Captured the operator's complete temporary-opt-in, failure-catalog,
