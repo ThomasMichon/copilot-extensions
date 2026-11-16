@@ -1,0 +1,9 @@
+{
+  "comment": "Scope Windows Dispatch stop to its installation and native process identity.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

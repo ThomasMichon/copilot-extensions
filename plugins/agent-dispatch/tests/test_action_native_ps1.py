@@ -9,15 +9,285 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+import venv
 
+import agent_procutil
 import pytest
+
+from agent_dispatch import procutil
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 INSTALLER = SCRIPTS / "install.ps1"
 GATE = SCRIPTS / "runtime-gate.ps1"
 BOOTSTRAP = SCRIPTS / "bootstrap-check.ps1"
 PWSH = shutil.which("pwsh")
-HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process scope and command-line parsing")
+@pytest.mark.parametrize(
+    "scenario",
+    ["inventory", "foreign-endpoint", "retirement-refused", "late-endpoint", "endpoint-query-failed"],
+)
+def test_stop_scope_preserves_foreign_processes_and_uncertain_endpoint(
+    tmp_path: Path, scenario: str,
+) -> None:
+    root = tmp_path / "owned"
+    (root / "run").mkdir(parents=True)
+    endpoint = root / "run" / "endpoint.json"
+    if scenario != "inventory":
+        endpoint_pid = (
+            12 if scenario == "foreign-endpoint" else
+            99 if scenario in ("late-endpoint", "endpoint-query-failed") else 11
+        )
+        endpoint.write_text(
+            json.dumps({"pid": endpoint_pid}),
+            encoding="utf-8",
+        )
+    own_python = str(root / "versions" / "one" / "Scripts" / "python.exe")
+    foreign_python = str(tmp_path / "other" / "Scripts" / "python.exe")
+    marker = ["-X", "agent_dispatch_install_dir=" + str(root)]
+    rows = []
+    for pid, executable, arguments in (
+        (11, own_python, ["-m", "agent_dispatch", "serve"]),
+        (12, foreign_python, ["-m", "agent_dispatch", "serve"]),
+        (13, str(root) + "-other\\python.exe", ["-m", "agent_dispatch", "serve"]),
+        (14, own_python, ["-m", "agent_dispatch", "supervise"]),
+        (15, own_python, ["-m", "agent_dispatch", "serve"]),
+        (16, own_python, ["-c", 'print("agent_dispatch serve")']),
+        (17, foreign_python, [*marker, "-m", "agent_dispatch", "serve"]),
+    ):
+        rows.append({
+            "ProcessId": pid, "ExecutablePath": executable,
+            "CommandLine": subprocess.list2cmdline([executable, *arguments]),
+            "CreationDate": "2026-01-01T00:00:00Z",
+        })
+    inventory = tmp_path / "processes.json"
+    inventory.write_text(json.dumps(rows), encoding="utf-8")
+    body = (
+        f". {quote(SCRIPTS / 'supervisor-lifecycle.ps1')}\n"
+        + function(INSTALLER, "Stop-DispatchProcess") + "\n"
+        + f"$InstallDir = {quote(root)}\n"
+        + f"$script:rows = @(Get-Content -LiteralPath {quote(inventory)} -Raw | ConvertFrom-Json)\n"
+        + f"$scenario = {quote(scenario)}\n"
+    )
+    body += r"""
+$env:OS = 'Windows_NT'
+$script:effects = @()
+function Get-CimInstance {
+    param($ClassName, $Filter, $ErrorAction)
+    if ($Filter -match '^ProcessId=(\d+)$') {
+        if ($scenario -eq 'endpoint-query-failed') { throw 'endpoint process query denied' }
+        if ($scenario -eq 'late-endpoint' -and [int]$Matches[1] -eq 99) {
+            return [pscustomobject]@{ProcessId=99}
+        }
+        return @($script:rows | Where-Object ProcessId -eq ([int]$Matches[1]))
+    }
+    return $script:rows
+}
+function Invoke-CimMethod {
+    param($InputObject, $MethodName, $ErrorAction)
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($InputObject.ProcessId -eq 15) { $sid = 'S-1-0-0' }
+    return [pscustomobject]@{ReturnValue=0;Sid=$sid}
+}
+function Stop-Process {
+    param($Id, [switch]$Force, $ErrorAction)
+    $script:effects += [int]$Id
+}
+function Stop-SupervisorSnapshotProcess {
+    param($Snapshot)
+    if ($scenario -eq 'retirement-refused') { return $false }
+    $script:effects += [int]$Snapshot.ProcessId
+    return $true
+}
+$caught = $false
+try { $count = Stop-DispatchProcess -Subcommand serve }
+catch { $caught = $true }
+if ($scenario -eq 'inventory') {
+    if ($caught -or $count -ne 2 -or (($script:effects | Sort-Object) -join ',') -cne '11,17') {
+        throw "Stop crossed installation, role or user scope: $script:effects"
+    }
+} else {
+    if (-not $caught -or $script:effects.Count) {
+        throw "Uncertain endpoint/retirement performed effects: $script:effects"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'run\endpoint.json'))) {
+        throw 'Unconfirmed retirement cleared the endpoint'
+    }
+}
+"""
+    result = run_ps(tmp_path, body, policy_required=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows scoped process retirement")
+def test_stop_scope_native_handle_retires_only_the_owned_finite_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "agent_dispatch"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import os,time\nfrom pathlib import Path\n"
+        "Path(os.environ['DISPATCH_STOP_READY']).touch()\ntime.sleep(45)\n",
+        encoding="utf-8",
+    )
+    roots = [tmp_path / "owned", tmp_path / "foreign"]
+    children: list[subprocess.Popen[bytes]] = []
+    commands: list[list[str]] = []
+
+    def capture(argv: list[str], **_options: object) -> None:
+        commands.append(list(argv))
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", capture)
+    try:
+        for index, root in enumerate(roots):
+            root.mkdir()
+            ready = tmp_path / f"ready-{index}"
+            env = dict(os.environ, PYTHONPATH=str(tmp_path), DISPATCH_STOP_READY=str(ready))
+            monkeypatch.setattr(procutil, "runtime_root", lambda: root)
+            procutil.spawn_dispatch_daemon(
+                [getattr(sys, "_base_executable", sys.executable),
+                 "-m", "agent_dispatch", "serve"],
+                log_name="finite-test.log",
+            )
+            child = subprocess.Popen(
+                commands[-1],
+                cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=HEADLESS,
+            )
+            children.append(child)
+            deadline = time.monotonic() + 10
+            while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert ready.exists() and child.poll() is None
+        body = (
+            f". {quote(SCRIPTS / 'supervisor-lifecycle.ps1')}\n"
+            + function(INSTALLER, "Stop-DispatchProcess") + "\n"
+            + f"$InstallDir = {quote(roots[0])}\n"
+            + f"$script:children = @({children[0].pid},{children[1].pid})\n"
+            + r"""
+$env:OS = 'Windows_NT'
+function Get-CimInstance {
+    param($ClassName, $ErrorAction)
+    foreach ($number in $script:children) {
+        CimCmdlets\Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$number" -ErrorAction Stop
+    }
+}
+function Write-Warn { param($Message) throw $Message }
+if ((Stop-DispatchProcess -Subcommand serve) -ne 1) { throw 'Owned child was not retired' }
+"""
+        )
+        result = run_ps(tmp_path, body, policy_required=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert children[0].wait(timeout=5) != 0
+        assert children[1].poll() is None
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            if child.stderr is not None:
+                child.stderr.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows coordinator launcher")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("tee_failure", [False, True])
+def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_identity(
+    tmp_path: Path, tee_failure: bool, host: str,
+) -> None:
+    if PWSH is None:
+        pytest.skip("pwsh is required")
+    shell = shutil.which(host)
+    assert shell, f"required Windows shell unavailable: {host}"
+    root = tmp_path / "owned"
+    slot = root / "versions" / "fixture"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    site = slot / "Lib" / "site-packages"
+    (site / "fixture-sdk.pth").write_text(
+        str(Path(agent_procutil.__file__).resolve().parent.parent) + "\n", encoding="utf-8",
+    )
+    package = site / "agent_dispatch"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "installation_policy.py").write_text(
+        "def windows_policy(*args, **kwargs):\n return {'start_coordinator': True}\n",
+        encoding="utf-8",
+    )
+    (package / "__main__.py").write_text(
+        "import json,os,sys,time\nfrom pathlib import Path\n"
+        "with Path(os.environ['DISPATCH_NATIVE_READY']).open('a') as ready:\n"
+        " ready.write(json.dumps({'pid':os.getpid(),'prefix':sys.prefix,\n"
+        "  'root':sys._xoptions.get('agent_dispatch_install_dir')})+'\\n')\n"
+        "print('native-fixture-started',flush=True)\ntime.sleep(8)\n",
+        encoding="utf-8",
+    )
+    ready = root / "native-ready.jsonl"
+    wrapper = tmp_path / "native-entry.ps1"
+    intercept = r"""
+function Out-File {
+    param([Parameter(ValueFromPipeline)]$InputObject, $FilePath, [switch]$Append, $Encoding)
+    process {
+        if ($InputObject -eq 'native-fixture-started') { throw 'fixture tee failure' }
+        Microsoft.PowerShell.Utility\Out-File -InputObject $InputObject `
+            -FilePath $FilePath -Append:$Append -Encoding $Encoding
+    }
+}
+""" if tee_failure else ""
+    launcher = SCRIPTS.parent / "src" / "agent_dispatch" / "service_launchers" / "coordinator.ps1"
+    wrapper.write_text(
+        intercept + f"& {quote(launcher)} -InstallDir {quote(root)} "
+        f"-RuntimePython {quote(slot / 'Scripts' / 'python.exe')} -RuntimeSlot {quote(slot)}\n",
+        encoding="utf-8",
+    )
+    parent = subprocess.Popen(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(wrapper)],
+        env=dict(os.environ, DISPATCH_NATIVE_READY=str(ready)),
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, creationflags=HEADLESS,
+    )
+    try:
+        records: list[dict[str, object]] = []
+        needed = 2 if tee_failure else 1
+        deadline = time.monotonic() + 15
+        while parent.poll() is None and time.monotonic() < deadline:
+            if ready.exists():
+                records = [json.loads(line) for line in ready.read_text(encoding="utf-8").splitlines()]
+            if len(records) >= needed:
+                break
+            time.sleep(0.02)
+        if len(records) < needed and parent.poll() is not None:
+            output, error = parent.communicate()
+            pytest.fail(output + error)
+        assert len(records) >= needed, "native launcher did not reach the selected finite branch"
+        numbers = ",".join(str(record["pid"]) for record in records)
+        body = (
+            f". {quote(SCRIPTS / 'supervisor-lifecycle.ps1')}\n"
+            + function(INSTALLER, "Stop-DispatchProcess") + "\n"
+            + f"$InstallDir = {quote(root)}\n"
+            + f"$script:fixturePids = @({numbers})\n"
+            + r"""
+$env:OS = 'Windows_NT'
+$script:rows = @(foreach ($number in $script:fixturePids) {
+    CimCmdlets\Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$number" -ErrorAction Stop
+})
+function Get-CimInstance { param($ClassName, $ErrorAction) return $script:rows }
+function Write-Warn { param($Message) throw $Message }
+if (-not $script:rows.Count -or
+    (Stop-DispatchProcess -Subcommand serve) -ne $script:rows.Count) {
+    throw 'Native launcher child did not satisfy scoped retirement'
+}
+"""
+        )
+        result = run_ps(tmp_path, body, policy_required=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(record["root"] == str(root) for record in records)
+        assert all(Path(str(record["prefix"])).resolve() == slot.resolve() for record in records)
+    finally:
+        parent.communicate(timeout=12)
 
 
 def function(path: Path, name: str) -> str:
@@ -322,7 +592,7 @@ throw 'linked policy path was admitted'
 
 @pytest.mark.parametrize("unreadable", ["policy", "ancestor"])
 def test_permission_denial_is_not_policy_absence(tmp_path: Path, unreadable: str) -> None:
-    if os.name == "nt" or os.geteuid() == 0:
+    if os.name == "nt" or getattr(os, "geteuid", lambda: 0)() == 0:
         pytest.skip("contained POSIX access-denial fixture requires an unprivileged user")
     root = tmp_path / "runtime"
     root.mkdir()
@@ -777,7 +1047,9 @@ def test_namespaced_admission_does_not_consult_an_unselected_legacy_root(tmp_pat
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def global_gate_fixture(tmp_path: Path, *, warm: bool = False):
+def global_gate_fixture(
+    tmp_path: Path, *, warm: bool = False,
+) -> tuple[dict[str, str], Path, Path, Path, Path]:
     if PWSH is None:
         pytest.skip("actual PowerShell is required")
     from . import source_publication_fixture as fixture
@@ -822,7 +1094,9 @@ def global_gate_fixture(tmp_path: Path, *, warm: bool = False):
     return env, root, bin_dir / "runtime-gate.ps1", shared, installer_called
 
 
-def run_global_gate(tmp_path: Path, entry: Path, env: dict[str, str], prefix: str = ""):
+def run_global_gate(
+    tmp_path: Path, entry: Path, env: dict[str, str], prefix: str = "",
+) -> subprocess.CompletedProcess[str]:
     if PWSH is None:
         pytest.skip("actual PowerShell is required")
     harness = tmp_path / "global-entry.ps1"
@@ -857,6 +1131,7 @@ def test_payload_telemetry_refuses_missing_runtime_without_provision(
     tmp_path: Path, arguments: list[str],
 ) -> None:
     env, root, global_entry, shared, installer = global_gate_fixture(tmp_path)
+    assert PWSH is not None
     shared.write_text('{"active":false}', encoding="utf-8")
     env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
     payload = Path(env["AGENT_DISPATCH_PAYLOAD_ROOT"])
@@ -934,6 +1209,7 @@ def test_full_global_late_refusal_settles_only_its_owned_provision_status(
     tmp_path: Path, unwritable_status: bool,
 ) -> None:
     env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+    assert PWSH is not None
     shared.write_text('{"active":false}', encoding="utf-8")
     env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
     status = root / ".provision-status"

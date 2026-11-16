@@ -28,7 +28,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 # Re-exported so existing callers keep using ``from .procutil import
 # no_window_kwargs`` while the implementation is single-sourced in the shared
@@ -46,6 +46,24 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, _run_owned
 
 from .install_paths import install_dir
+
+if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
+
+class _ProcessTreeOptions(TypedDict, total=False):
+    creationflags: int
+    start_new_session: bool
+
+
+class _DispatchDaemonOptions(TypedDict):
+    instance: DaemonInstanceSpec
+    cwd: Path
+    log_path: Path
+    env: dict[str, str] | None
+    console_children: bool
+    display: str
+
 
 __all__ = [
     "agent_bridge_launch_prefix",
@@ -524,12 +542,12 @@ def run_background_capture(
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 
-def ssh_subprocess_kwargs() -> dict[str, object]:
+def ssh_subprocess_kwargs() -> _ProcessTreeOptions:
     """Contain SSH and ProxyCommand descendants in a windowless process tree."""
     return _process_tree_kwargs()
 
 
-def _process_tree_kwargs() -> dict[str, object]:
+def _process_tree_kwargs() -> _ProcessTreeOptions:
     """``Popen`` kwargs that make the whole descendant tree killable as one unit.
 
     Windows: ``CREATE_NO_WINDOW`` (no process-group semantics needed --
@@ -542,7 +560,7 @@ def _process_tree_kwargs() -> dict[str, object]:
     return {"start_new_session": True}
 
 
-def _signal_ssh_process(proc: subprocess.Popen[object], method: str) -> None:
+def _signal_ssh_process(proc: subprocess.Popen[Any], method: str) -> None:
     try:
         getattr(proc, method)()
     except OSError:
@@ -553,6 +571,8 @@ def _posix_process_group_alive(pgid: int) -> bool:
     """Best-effort POSIX check for whether any process still belongs to
     process-group ``pgid`` -- signal ``0`` only probes existence/permission,
     it never actually signals anything."""
+    if sys.platform == "win32":
+        raise NotImplementedError("POSIX process groups are unavailable on Windows")
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
@@ -563,7 +583,7 @@ def _posix_process_group_alive(pgid: int) -> bool:
 
 
 def terminate_process_tree(
-    proc: subprocess.Popen[object],
+    proc: subprocess.Popen[Any],
     *,
     grace: float = 5.0,
     expected_start_token: str | None = None,
@@ -713,7 +733,7 @@ def terminate_process_tree(
 
 
 def terminate_ssh_process_tree(
-    proc: subprocess.Popen[object],
+    proc: subprocess.Popen[Any],
     *,
     grace: float = 5.0,
 ) -> None:
@@ -762,7 +782,7 @@ def run_ssh_command(
         terminate_ssh_process_tree(proc)
         raise subprocess.TimeoutExpired(
             args,
-            timeout,
+            exc.timeout,
             output=exc.output,
             stderr=exc.stderr,
         ) from exc
@@ -787,7 +807,7 @@ def spawn_dispatch_daemon(
     console_children: bool = True,
     cwd: Path | None = None,
     finite_worker: bool = False,
-) -> subprocess.Popen:
+) -> subprocess.Popen[Any] | WindowsDaemonProcess:
     """Launch a resident or explicitly finite process with the same survival policy.
 
     Runs from the runtime root (or ``cwd``), breaks away from a kill-on-close
@@ -802,12 +822,15 @@ def spawn_dispatch_daemon(
 
     root = Path(os.path.abspath(runtime_root()))
     root.mkdir(parents=True, exist_ok=True)
+    command = list(argv)
+    if os.name == "nt" and command and Path(command[0]).name.lower() in ("python.exe", "pythonw.exe"):
+        command[1:1] = ["-X", "agent_dispatch_install_dir=" + str(root)]
     words: list[str] = []
     for arg in argv[3:5]:
         if str(arg).startswith("-"):
             break
         words.append(str(arg))
-    options = {
+    options: _DispatchDaemonOptions = {
         "instance": DaemonInstanceSpec(
             "agent-dispatch", root, Path(__file__).resolve(),
             lifecycle="finite-worker" if finite_worker else "resident",
@@ -819,8 +842,8 @@ def spawn_dispatch_daemon(
         "display": " ".join(["agent_dispatch", *words]),
     }
     if finite_worker:
-        return spawn_finite_worker(argv, **options)
-    return spawn_daemon(argv, **options)
+        return cast("subprocess.Popen[Any] | WindowsDaemonProcess", spawn_finite_worker(command, **options))
+    return spawn_daemon(command, **options)
 
 
 def relocate_off_payload() -> None:
