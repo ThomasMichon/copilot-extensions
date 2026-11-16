@@ -42,6 +42,37 @@ source slice does not complete M1 or this effort. The reviewed source stages
 1–4 have landed; the combined Plan and Validation items below remain open
 because they also require the separate live qualification.
 
+### Delegation driver's completion charter
+
+- **Kind:** completion; a finite implementation and qualification assignment,
+  not an indefinitely running review service.
+- **Root goal (agent-stated, public-safe):** Deliver the durable, independently
+  operable PR service in Guiding Intent, with reliable selected-provider
+  observation and owned subscriptions. Its ADO consumer prerequisite includes
+  reliable MCP initialization and diff/source acquisition, demonstrated by
+  real posted reviews from the separately authorized review owner. The M1
+  milestone above remains the current integration exit, not a replacement for
+  the broader goal or inherited outcomes.
+- **Original direction:** The accepted filter model is recorded in
+  [driver-aware filters](filter-subscriptions.md). The implementation go-ahead
+  was, verbatim, "Great, that sounds good. Build it" (2026-11-12).
+- **Acceptance:** Resolve the existing Plan and Validation Plan, including
+  source review/CI, final-source lifecycle and clean teardown, M1 release and
+  installed/running qualification, and separately authorized real-consumer
+  evidence. Source publication, cache reads and a passing child PR alone do
+  not meet these criteria.
+- **Finalization criterion:** The canonical effort is explicitly Done, every
+  Plan/Validation item is resolved or transferred to a named tracked objective,
+  owned PRs are terminal, and resource obligations have been settled or
+  accepted by their rightful owners through the normal guarded flow.
+- **Now:** Finish the owned filtered-population source and qualification
+  gates. The Windows registry snapshot correction is a bounded lifecycle
+  prerequisite, not a new root objective.
+- **Return:** After that slice, resume the remaining M1 integration,
+  installed/running and consumer-owned acceptance under this same effort.
+  Existing MCP follow-through, domain custody, operational holds and separate
+  spending, deployment, credential and retained-resource authority remain.
+
 ## Guiding Intent
 
 Resume the deferred PR-watch delegation work without trading away wake
