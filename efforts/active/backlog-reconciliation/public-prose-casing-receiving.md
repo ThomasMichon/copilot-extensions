@@ -41,8 +41,15 @@ unlocked and unassigned, with two equal complete twelve-member collaborator
 rosters and unchanged issue, comment, history and source metadata.
 The source and receiver authors are the current publisher. No identified
 or genuinely uncertain held-source derivative was encountered in these
-admitted units. No linked PR, product documentation file, code, test or
-ROOT effort was inspected to claim current implementation or completion.
+admitted units. No linked PR, product documentation file, code or test was
+inspected to claim current implementation or completion.
+
+The material campaign's canonical effort was separately read in full after
+complete primary-history qualification with equal complete rosters.
+Its actual Plan and global Validation Plan receive this case through the
+same reviewed amendment, so future material participants cannot miss work
+retained only in an issue or another campaign's journal. This is planning
+evidence, not proof of a product wording correction.
 
 Keep the independent material campaign OPEN/Active. Its completed primary
 documentation participant remains released; the execution lead and future
@@ -88,11 +95,14 @@ unchecked; they describe future technical work and its receiving boundary.
   Add no native, installed-runtime, fleet-rollout or whole-materials
   completion gate to this narrow documentation task.
 - [ ] **PC4215-V3:** Before any separate administrative source retirement,
-  qualify both issues and read back this complete direct Plan, Validation
-  and Coordination in the OPEN receiver, preserving its entire incumbent,
-  discussions and check states. Retain the source original verbatim. Any
-  eligible retirement is `NOT_PLANNED` tracking consolidation, not delivery
-  of the casing patch, campaign completion or source/resource release.
+  qualify both issues and verify the reviewed casing scope and exclusions
+  in the material campaign's canonical
+  [Plan and Validation Plan](../adopter-material-refresh/README.md).
+  Read back this complete direct Plan, Validation and Coordination in the
+  OPEN receiver, preserving its entire incumbent, discussions and check
+  states. Retain the source original verbatim. Any eligible retirement is
+  `NOT_PLANNED` tracking consolidation, not delivery of the casing patch,
+  campaign completion or source/resource release.
 
 ### Coordination PC4215
 
@@ -103,9 +113,9 @@ any claim, hold, deadline, approval limit or resource duty.
 
 The admitted pair contains no #4215-specific token-OPEN, same-claim release
 or receiver-consent requirement. That scoped observation clears no contrary
-actual owner restriction elsewhere. Complete direct acceptance and readback
-must precede a separate source-specific judgment; a merged proposal or a
-generic parent link is insufficient.
+actual owner restriction elsewhere. Reviewed canonical material-effort
+amendment and complete direct issue acceptance/readback must precede a separate
+source-specific judgment; a merged proposal or generic parent link is insufficient.
 
 The eventual finite prose correction need not wait for every other material
 family or preview. Conversely, it cannot complete those independently owned
