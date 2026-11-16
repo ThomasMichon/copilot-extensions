@@ -154,7 +154,7 @@ async def retire_previous_daemon(
             from .app_lifecycle import settled_thread_call
             from zdd import routing
 
-            while not getattr(app.state, "shutting_down", False):
+            if not getattr(app.state, "shutting_down", False):
                 table = await asyncio.to_thread(routing.read_table, config_dir())
                 raw = table.get("active") if isinstance(table, dict) else None
                 active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
@@ -171,6 +171,26 @@ async def retire_previous_daemon(
                         predecessor_exited=True,
                     )
                     return
+                from .central_retirement import retire_predecessor
+                from .client import BridgeClient
+
+                if make_client is None:
+                    make_client = lambda endpoint: BridgeClient(
+                        endpoint.base_url, app.state.auth_token,
+                        timeout=2, connect_grace=0,
+                    )
+                cleanup = await settled_thread_call(
+                    retire_predecessor, config_dir(), previous, successor,
+                    make_client=make_client,
+                )
+                app.state.predecessor_cleanup = cleanup
+                if cleanup.get("exit_confirmed") is True:
+                    await recover_owned_cold(
+                        app, successor, initial_recovery_task=initial_recovery_task,
+                        predecessor_exited=True,
+                    )
+                else:
+                    log.warning("Central predecessor retirement remains unconfirmed: %s", cleanup)
             return
         if reference is not None and reference.wait(0):
             await recover_owned_cold(

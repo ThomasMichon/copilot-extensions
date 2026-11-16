@@ -883,15 +883,32 @@ runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
    relay);
 2. wait until it is healthy;
 3. **flip the routing table** -> new `active`, old demoted to `previous`;
-4. **drain** the old daemon (busy-oracle wait, optional `--force`);
-5. **-- commit point --** shut the old daemon down (`POST /api/v1/shutdown`:
-   releases every session-host claim this generation holds, then a clean
-   exit; it `clear_if_owner`s only its own route entry -- see
+4. verify the incoming daemon again, independently of predecessor drain;
+5. **-- commit point --** attempt bounded central-only retirement: request
+   shutdown once, wait five seconds for native exit, then terminate only the
+   identity-pinned predecessor if it is still the exact demoted central owner.
+   The route lease serializes the final check and force signal with publication.
+   No Session Host, session child, transport descendant or process group is
+   targeted. Clean `POST /api/v1/shutdown` releases this generation's
+   session-host claims and `clear_if_owner`s only its own route entry -- see
    [Session-host generation handoff](#4-session-host-generation-handoff-claimreleaserecover)
    below);
 6. best-effort: adopt the credential relay (ephemeral) on the new daemon, and
    retry the session-host claim scan (`POST /api/v1/session-hosts/reattach`)
    now that the old generation is confirmed gone.
+
+Unconfirmed predecessor cleanup is reported separately from successful incoming
+readiness; it does not restore the incumbent or trigger a legacy process-tree
+reap. Missing native identity, changed routing or unsupported native pinning
+leaves cleanup unconfirmed rather than falling back to numeric-PID signaling.
+Explicit required-graceful/serving reconciliation and conditional repair keep
+their existing graceful-only contracts; they do not opt into this fallback.
+
+The selected installed-generation startup uses the same exact-central fallback
+after a one-second self-retirement observation instead of waiting indefinitely.
+Once exit is confirmed, it adopts the singleton credential relay before its
+best-effort Session Host reattach scan, so a slow remote Host does not defer the
+relay bind. Neither path restarts or reloads the surviving sessions.
 
 Any failure **before** the commit point rolls back: re-publish the old endpoint
 as active, undrain the old daemon, and terminate the freshly spawned passive. If

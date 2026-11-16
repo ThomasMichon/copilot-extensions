@@ -418,7 +418,7 @@ async def test_source_adopts_tcp_relay_only_after_fresh_start_or_predecessor_exi
     finally:
         exited.set()
         await asyncio.wait_for(task, 5)
-    assert calls == (["retire", "reattach", "relay"] if predecessor else ["relay"])
+    assert calls == (["retire", "relay", "reattach"] if predecessor else ["relay"])
 
 
 @pytest.mark.asyncio

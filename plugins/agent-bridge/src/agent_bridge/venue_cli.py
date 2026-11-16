@@ -384,6 +384,34 @@ def _cmd_deploy(
         prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
     successor_published = False
+    ordinary_predecessor = None
+    ordinary_successor = None
+    if serving is None:
+        table = routing.read_table(config_dir(), strict=True) or {}
+        raw = table.get("active")
+        ordinary_predecessor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+
+    def refuse_ordinary(active: dict | None) -> str | None:
+        if active_route_is_forward(active):
+            return forwarded_skip
+        expected = ordinary_predecessor.to_dict() if ordinary_predecessor is not None else None
+        return "central predecessor route changed before publication" if active != expected else None
+
+    def record_ordinary_publication(endpoint: routing.Endpoint) -> None:
+        nonlocal ordinary_successor
+        ordinary_successor = endpoint
+
+    def retire_ordinary(endpoint: routing.Endpoint) -> dict:
+        from .central_retirement import retire_predecessor
+
+        if ordinary_successor is None or endpoint != ordinary_predecessor:
+            return {"exit_confirmed": False, "reason": "central publication identity unavailable"}
+        return retire_predecessor(
+            Path(config_dir()), endpoint, ordinary_successor,
+            make_client=lambda owner: BridgeClient(
+                owner.base_url, token, timeout=2, connect_grace=0,
+            ),
+        )
 
     def refuse_serving(active: dict | None) -> str | None:
         if successor_published and isinstance(active, dict) and (
@@ -428,10 +456,15 @@ def _cmd_deploy(
         pick_free_port=pick_free_port,
         refuse_old=(
             refuse_serving if serving is not None else
-            lambda active: forwarded_skip if active_route_is_forward(active) else None
+            refuse_ordinary
         ),
-        expected_old=routing.Endpoint.from_dict(serving.route) if serving is not None else None,
-        on_published=record_successor_publication if serving is not None else None,
+        expected_old=predecessor if serving is not None else ordinary_predecessor,
+        on_published=(
+            record_successor_publication if serving is not None else
+            record_ordinary_publication if ordinary_predecessor is not None else None
+        ),
+        retire_failed_predecessor=retire_ordinary if ordinary_predecessor is not None else None,
+        drain_predecessor=ordinary_predecessor is None,
     )
     res = None
     try:
@@ -477,10 +510,14 @@ def _cmd_deploy(
             if serving is not None:
                 exited, forced = serving.process.wait(0), False
             else:
-                exited, forced = core._ensure_retired_daemon_exited(old.pid)
+                exited = res.retirement_confirmed
+                forced = bool((res.predecessor_cleanup or {}).get("forced"))
             if exited:
-                res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced tree reap)" if forced else ""))
+                res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced central-only)" if forced else ""))
                 old_confirmed_gone = True
+            elif serving is None:
+                res.retirement_pending = True
+                res.steps.append(f"central predecessor cleanup unconfirmed pid={old.pid}; successor remains active")
             else:
                 res.steps.append(f"FAILED: retired daemon pid={old.pid} is still alive")
                 res.ok = False

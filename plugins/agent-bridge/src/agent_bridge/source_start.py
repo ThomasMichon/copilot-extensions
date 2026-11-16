@@ -1,4 +1,4 @@
-"""Start the selected source generation without controlling its predecessor."""
+"""Start the selected generation and independently retire its central predecessor."""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +17,7 @@ log = logging.getLogger("agent-bridge")
 
 
 async def complete_source_start(app, published: asyncio.Event, initial_recovery_task) -> None:
-    """Publish only a ready selected frontend, then observe predecessor self-retirement."""
+    """Publish a ready frontend, then bound central retirement and adopt resources."""
     from . import __version__, lifecycle_hooks
     from .app import _retire_previous_daemon
     from .app_lifecycle import settled_thread_call
@@ -58,16 +58,17 @@ async def complete_source_start(app, published: asyncio.Event, initial_recovery_
             await _retire_previous_daemon(
                 app, previous, current, initial_recovery_task=initial_recovery_task,
             )
-            if app.state.cold_recovery_ready and not app.state.shutting_down:
-                try:
-                    await app.state.session_manager.reattach_session_hosts(recover_cold=False)
-                except Exception:
-                    log.warning("Post-retirement Session Host reattach deferred", exc_info=True)
         if (
             app.state.cold_recovery_ready and not app.state.shutting_down
             and app.state.config.enable_credential_relay
         ):
             await app.state.adopt_relay()
+        if previous is not None:
+            if app.state.cold_recovery_ready and not app.state.shutting_down:
+                try:
+                    await app.state.session_manager.reattach_session_hosts(recover_cold=False)
+                except Exception:
+                    log.warning("Post-retirement Session Host reattach deferred", exc_info=True)
     except asyncio.CancelledError:
         raise
     except ForwardedRouteRefused as exc:
