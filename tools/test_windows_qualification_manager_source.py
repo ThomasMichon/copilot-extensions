@@ -147,6 +147,34 @@ def test_export_rejects_redirected_or_oversized_evidence(tmp_path: Path) -> None
         adapter.export_evidence(tmp_path, tmp_path / "out")
 
 
+def test_sanitization_preserves_nested_command_json_and_omits_malformed_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = "https://packages.example.invalid/simple"
+    monkeypatch.setenv("UV_DEFAULT_INDEX", index)
+    record = {
+        "argv": ["--source-descriptor", json.dumps({
+            "kind": "git", "canonical": "git:https://repository.example.invalid/runtime", "ref": "",
+        })],
+        "stdout": {"index": index, "diagnostic": "packages.example.invalid is unavailable"},
+    }
+    for suffix in ("json", "jsonl"):
+        (tmp_path / ("commands." + suffix)).write_text(json.dumps(record) + "\n", encoding="utf-8")
+    malformed = tmp_path / "partial.jsonl"
+    malformed.write_text(json.dumps(record) + "\n" + '{"partial": "https://packages.example.invalid', encoding="utf-8")
+    assert worker.sanitize_native_files(tmp_path) is True
+    assert not malformed.exists()
+    for suffix in ("json", "jsonl"):
+        raw = (tmp_path / ("commands." + suffix)).read_text("utf-8")
+        actual = json.loads(raw)
+        descriptor = json.loads(actual["argv"][1])
+        assert descriptor["canonical"] == "git:[redacted-url]"
+        assert actual["stdout"]["index"] == "[redacted-url]"
+        assert actual["stdout"]["diagnostic"] == "[configured-feed] is unavailable"
+        assert "https://" not in raw and "example.invalid" not in raw
+    assert worker.sanitize_native_files(tmp_path) is False
+
+
 def test_source_worker_does_not_acquire_unrelated_native_binaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

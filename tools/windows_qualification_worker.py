@@ -239,6 +239,15 @@ def redact_feed(text: str) -> str:
 
 def sanitize_native_files(output: Path) -> bool:
     """Sanitize retained text even when the execution worker was interrupted."""
+    def redact_value(value: Any) -> Any:
+        if isinstance(value, str):
+            return redact_feed(value)
+        if isinstance(value, list):
+            return [redact_value(item) for item in value]
+        if isinstance(value, dict):
+            return {key: redact_value(item) for key, item in value.items()}
+        return value
+
     omitted = False
     for path in output.rglob("*"):
         if path.suffix not in {".xml", ".json", ".jsonl", ".log"}:
@@ -247,7 +256,22 @@ def sanitize_native_files(output: Path) -> bool:
             path.unlink()
             omitted = True
         elif path.is_file():
-            path.write_text(redact_feed(path.read_text("utf-8", errors="replace")), encoding="utf-8")
+            text = path.read_text("utf-8", errors="replace")
+            try:
+                if path.suffix == ".jsonl":
+                    text = "".join(
+                        json.dumps(redact_value(json.loads(line)), ensure_ascii=True) + "\n"
+                        for line in text.splitlines() if line.strip()
+                    )
+                elif path.suffix == ".json":
+                    text = json.dumps(redact_value(json.loads(text)), ensure_ascii=True) + "\n"
+                else:
+                    text = redact_feed(text)
+            except json.JSONDecodeError:
+                path.unlink()
+                omitted = True
+                continue
+            path.write_text(text, encoding="utf-8")
     return omitted
 
 

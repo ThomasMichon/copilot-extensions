@@ -274,6 +274,14 @@ native consumer result. Controller review/publication and the held authentic
 source fixture's hosted acceptance remain pending; no productive rollout or
 parent completion is claimed.
 
+Review identified a raw-text redaction defect for escaped nested descriptors
+in JSONL command records. Structured JSON and JSONL are now parsed, redacted
+recursively and reserialized; malformed files are omitted and qualification
+fails rather than uploading raw or corrupt evidence. The nested-descriptor,
+bare-hostname and partial-record controls pass with the full 412-test
+packet/client/lifetime selection. Native execution and controller publication
+remain pending; this correction earns no consumer acceptance.
+
 ### 2026-11-15 - Physical application environment prerequisite
 
 The fixture's `_python()` helper hardcoded a legacy direct-slot interpreter,
