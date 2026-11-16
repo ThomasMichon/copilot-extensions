@@ -112,6 +112,42 @@ def fingerprint(payload: Path, profile: str) -> str:
     return engine._construction_hash(engine._source_files(engine._package_roots(payload)), extras)
 
 
+def dependency_health(profile: str) -> tuple[str, str | None]:
+    extras = PROFILES[profile]
+    if "federated-relay" in extras:
+        return (
+            "agent_vault.federated_relay",
+            "ssh_dependency_health" if "ssh" in extras else "dependency_health",
+        )
+    if "ssh" in extras:
+        return "agent_vault.ssh_key", "_crypto"
+    return "agent_vault", None
+
+
+def wheel_selection(
+    root: Path, payload: Path, admitted: dict[str, Any], requested: str | None = None,
+) -> dict[str, Any]:
+    from runtime_source_target import check_target
+
+    selected = selection(root, payload, requested)
+    if (
+        selected["source_identity"] is not None or admitted.get("identity") != {}
+        or admitted.get("extras") != list(PROFILES[selected["profile"]])
+        or not isinstance(admitted.get("runtime_version"), str)
+        or not re.fullmatch(
+            re.escape(selected["package_version"]) + r"\.profile\.[0-9a-f]{16}",
+            admitted["runtime_version"],
+        )
+        or not isinstance(admitted.get("payload_hash"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", admitted["payload_hash"])
+    ):
+        raise ValueError("Closed wheels differ from the selected Vault dependency profile")
+    selected["runtime_version"] = admitted["runtime_version"]
+    check_target(root, selected)
+    module, callback = dependency_health(selected["profile"])
+    return {**selected, "health_module": module, "health_callable": callback}
+
+
 def construction_session(root: Path, payload: Path, version: str, expected_hash: str) -> int:
     import installer_engine as engine
     from runtime_source_target import record_profile
@@ -126,12 +162,7 @@ def construction_session(root: Path, payload: Path, version: str, expected_hash:
     if not uv:
         raise ValueError("Vault profile construction requires its native installer's selected uv")
     extras = PROFILES[selected["profile"]]
-    health_module, health_callable = "agent_vault", None
-    if "federated-relay" in extras:
-        health_module = "agent_vault.federated_relay"
-        health_callable = "ssh_dependency_health" if "ssh" in extras else "dependency_health"
-    elif "ssh" in extras:
-        health_module, health_callable = "agent_vault.ssh_key", "_crypto"
+    health_module, health_callable = dependency_health(selected["profile"])
     with engine.numbered_candidate(
         root, version, plugin=payload, uv=Path(uv), base_python=Path(sys.executable),
         health_module=health_module, health_callable=health_callable,
@@ -182,6 +213,10 @@ def main(argv: list[str] | None = None) -> int:
     select = commands.add_parser("select", allow_abbrev=False)
     select.add_argument("--profile", choices=PROFILES)
     select.add_argument("--persist", action="store_true")
+    wheels = commands.add_parser("select-wheels", allow_abbrev=False)
+    wheels.add_argument("--selection", required=True)
+    wheels.add_argument("--profile", choices=PROFILES)
+    wheels.add_argument("--persist", action="store_true")
     commands.add_parser("fingerprint", allow_abbrev=False)
     commands.add_parser("fields", allow_abbrev=False)
     check = commands.add_parser("current", allow_abbrev=False)
@@ -191,6 +226,15 @@ def main(argv: list[str] | None = None) -> int:
     session.add_argument("--payload-hash", required=True)
     args = parser.parse_args(argv)
     payload = SCRIPTS.parent
+    if args.command == "select-wheels":
+        admitted = json.loads(args.selection, object_pairs_hook=_unique_object)
+        if not isinstance(admitted, dict):
+            raise ValueError("Closed-wheel admission must be an object")
+        result = wheel_selection(args.root, payload, admitted, args.profile)
+        if args.persist and (args.profile is not None or os.path.lexists(args.root / PROFILE_FILE)):
+            persist_profile(args.root, result["profile"])
+        print(json.dumps(result, sort_keys=True))
+        return 0
     if args.command == "select":
         from runtime_source_target import check_target
 

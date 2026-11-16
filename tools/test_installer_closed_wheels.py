@@ -581,6 +581,38 @@ def test_native_construction_refuses_a_replacement_profile_after_admission(
     assert not (tmp_path / "runtime").exists()
 
 
+def test_native_health_callable_runs_before_completion(
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import install_source
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION", raising=False)
+    uv = shutil.which("uv")
+    assert uv
+    root = tmp_path / "runtime"
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    helpers = Path(__file__).resolve().parents[1] / "plugins" / "agent-vault" / "scripts"
+    for name in (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py", "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
+    ):
+        shutil.copyfile(helpers / name, scripts / name)
+    with snapshot(tmp_path) as retained:
+        inputs = inspected(retained)
+        selected = install_source.wheel_selection(plugin, "demo-pkg", inputs)
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            install_source._native_candidate_session(
+                plugin, root, inputs, selected, uv=Path(uv), base_python=Path(sys.executable),
+                health_module="demo_pkg", health_callable="required_dependency_health",
+                expected_version=selected["runtime_version"], expected_hash=selected["payload_hash"],
+            )
+        assert "required_dependency_health" in caught.value.stderr
+        assert not engine.runtime.is_complete(root, selected["runtime_version"])
+        assert engine.runtime.current_version(root) is None
+
+
 def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
     tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

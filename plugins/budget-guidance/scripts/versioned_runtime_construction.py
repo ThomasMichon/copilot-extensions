@@ -1,6 +1,8 @@
 """Completion selection, finite attached construction and native shell adapters."""
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -9,11 +11,11 @@ import stat
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
-from typing import Callable, ContextManager
+from types import ModuleType, SimpleNamespace
+from typing import Any, Callable, ContextManager, Iterator
 
 
 def publish_prepared_snapshot(
@@ -50,7 +52,7 @@ def publish_source_snapshot(
             return snapshot
         with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
             candidate = Path(temporary) / "payload"
-            def copy(origin, destination):
+            def copy(origin: str | os.PathLike[str], destination: str | os.PathLike[str]) -> str | os.PathLike[str]:
                 result = shutil.copy2(origin, destination)
                 if on_progress is not None:
                     on_progress()
@@ -58,9 +60,9 @@ def publish_source_snapshot(
 
             shutil.copytree(
                 payload, candidate, symlinks=True,
-                **({"copy_function": copy} if on_progress is not None else {}),
+                copy_function=copy if on_progress is not None else shutil.copy2,
             )
-            def verify_inputs(candidate):
+            def verify_inputs(candidate: Path) -> None:
                 verify(candidate)
                 verify(payload)
 
@@ -75,7 +77,7 @@ def native_path(path: Path) -> Path:
     return Path(value)
 
 
-def read_completion(path: Path, *, object_pairs_hook: Callable) -> object:
+def read_completion(path: Path, *, object_pairs_hook: Callable[[list[tuple[str, Any]]], dict[str, Any]]) -> object:
     """Reject unusable completion evidence without blocking on a pipe or device."""
     path = native_path(path)
     info = path.lstat()
@@ -141,7 +143,7 @@ def resolve_completed_python(
 @dataclass(frozen=True)
 class RuntimeOperations:
     version_dir: Callable[[Path, str], Path]
-    _load_unique_json: Callable[[Path], dict]
+    _load_unique_json: Callable[[Path], dict[str, Any]]
     current_version: Callable[..., str | None]
     is_complete: Callable[..., bool]
     _is_link: Callable[[Path], bool]
@@ -152,7 +154,7 @@ class RuntimeOperations:
     ADMIT_CONSTRUCT: str
     ADMIT_REUSE: str
     is_dev_generation: Callable[[str], bool]
-    _require_dev_owner: Callable[[Path, str | None], dict]
+    _require_dev_owner: Callable[[Path, str | None], dict[str, Any]]
     mark_complete: Callable[..., Path]
     slot: Callable[..., Path]
     discard_failed_candidate: Callable[..., bool]
@@ -173,9 +175,10 @@ class CleanupOperations:
 @contextmanager
 def retention_custody(
     root: Path, version: str, *, payload_hash: str | None, require_installed: bool,
-    timeout: float, poll_interval: float, kernel_lease: Callable, version_dir: Callable,
-    is_link: Callable, check_admission: Callable, admit_reuse: str,
-):
+    timeout: float, poll_interval: float, kernel_lease: Callable[..., ContextManager[int]],
+    version_dir: Callable[[Path, str], Path], is_link: Callable[[Path], bool],
+    check_admission: Callable[..., str], admit_reuse: str,
+) -> Iterator[tuple[Path, int]]:
     with kernel_lease(
         root, version, kind="retention", shared=True,
         timeout=timeout, poll_interval=poll_interval,
@@ -368,7 +371,8 @@ def retain_helpers(slot: Path, *, complete: bool, context_source: Path | None = 
 
 
 def discard_failed_candidate(runtime: CleanupOperations, root: Path, version: str, *,
-                             link_name: str = "current", validate=None) -> bool:
+                             link_name: str = "current",
+                             validate: Callable[[Path], None] | None = None) -> bool:
     """Delete only an unfinished candidate held by this construction owner.
 
     ``validate`` can enforce an installation-cell ownership receipt while all
@@ -398,7 +402,8 @@ def discard_failed_candidate(runtime: CleanupOperations, root: Path, version: st
         return True
 
 
-def remove_owned_candidate(runtime: CleanupOperations, root: Path, version: str, *, remove,
+def remove_owned_candidate(runtime: CleanupOperations, root: Path, version: str, *,
+                           remove: Callable[[Path], None],
                            link_name: str = "current") -> None:
     """Run one installation owner's exact-candidate removal under cleanup custody.
 
@@ -433,15 +438,10 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
     Completion transfers to retention before construction is released. There
     is no background service, PID/timestamp ownership, or directory promotion.
     """
-    from contextlib import ExitStack
-    import hashlib
-
     if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
         raise ValueError("construction requires an attributable SHA-256 payload fingerprint")
     plan = None
     if footprint is not None:
-        import importlib.util
-
         if dev_owner is not None or not plugin:
             raise ValueError("Footprint construction requires an immutable plugin owner")
         source = Path(__file__).with_name("installer_engine_footprint.py")
@@ -463,7 +463,7 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
     if executable.is_relative_to(runtime.version_dir(root, version).resolve()):
         raise RuntimeError("construction supervisor must use a base interpreter outside the candidate")
 
-    def reply(**record):
+    def reply(**record: Any) -> None:
         print(json.dumps(record), flush=True)
 
     cell_arguments = None
@@ -471,9 +471,6 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
     ownership_digest = None
     ownership_file = runtime.version_dir(root, version) / ".runtime-slot-ownership.json"
     if os.path.lexists(ownership_file):
-        import importlib.util
-        from types import SimpleNamespace
-
         record = runtime._load_unique_json(ownership_file)
         context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(root / "install.json")
         source = Path(__file__).resolve().parent / "installation-context" / "installation_context.py"
@@ -516,13 +513,14 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
     elif os.environ.get("COPILOT_EXTENSIONS_CONTEXT") and (root / "install.json").is_file():
         raise RuntimeError("cell construction requires a reserved ownership receipt before writes")
 
-    def discard():
+    def discard() -> bool:
         if cell_module is None:
             return runtime.discard_failed_candidate(root, version, link_name=link_name)
-        return cell_module.discard_failed_runtime_slot(
+        result: bool = cell_module.discard_failed_runtime_slot(
             runtime=cleanup_runtime, expected_ownership_sha256=ownership_digest,
             **cleanup_arguments,
         )
+        return result
 
     with ExitStack() as retained, ExitStack() as building:
         if plan is not None:
@@ -819,7 +817,7 @@ function script:Start-RuntimeConstruction {
           [string]$PayloadHash, [string]$LinkName, [string]$DevOwner = '',
           [string]$Footprint = '', [string]$Plugin = '', [string]$InstallSource = '',
           [string]$Payload = '', [string]$UvCommand = '', [string]$HealthModule = '',
-          [string]$WheelProfile = '', [string]$WheelDirectory = '',
+          [string]$WheelProfile = '', [string]$WheelDirectory = '', [string]$HealthCallable = '',
           [switch]$NestedEnvironment,
           [switch]$Repair)
     if (($InstallSource -and $WheelProfile) -or ([bool]$WheelProfile -ne [bool]$WheelDirectory)) {
@@ -867,9 +865,10 @@ function script:Start-RuntimeConstruction {
         if ($InstallSource) { $argv += @('--install-source', $InstallSource) }
         else { $argv += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory) }
         if ($Repair) { $argv += '--repair' }
+        if ($HealthCallable) { $argv += @('--health-callable', $HealthCallable) }
         if ($NestedEnvironment) { $argv += '--nested-environment' }
     } else {
-        if ($Payload -or $UvCommand -or $HealthModule -or $Repair -or $NestedEnvironment) {
+        if ($Payload -or $UvCommand -or $HealthModule -or $HealthCallable -or $Repair -or $NestedEnvironment) {
             throw 'Source construction arguments require an installation-source snapshot'
         }
         if ($DevOwner) { $argv += @('--dev-owner', $DevOwner) }

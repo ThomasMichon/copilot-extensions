@@ -684,24 +684,28 @@ def stamped_snapshot(tmp_path_factory: pytest.TempPathFactory) -> _SnapshotState
 
 def _no_service_provision_command(
     home: Path, installer: Path, pwsh: str, *, action: str = "provision",
+    wheel_inputs: tuple[Path, Path, Path, Path] | None = None,
 ) -> list[str]:
     runner = home / "tmp" / "provision.ps1"
     runner.write_text(
-        "param($Installer, $InstallRoot, $Action)\n"
+        "param($Installer, $InstallRoot, $Action, $WheelProfile, $WheelDirectory, $WheelPython, $WheelUv)\n"
         "function Get-ScheduledTask {}\n"
         "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Start-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Register-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Set-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Unregister-ScheduledTask { throw 'unexpected service mutation' }\n"
-        "& $Installer $Action -NoService -InstallDir $InstallRoot\n"
+        "$options = @{}\n"
+        "if ($WheelProfile) { $options = @{ WheelProfile=$WheelProfile; WheelDirectory=$WheelDirectory; "
+        "WheelPython=$WheelPython; WheelUv=$WheelUv } }\n"
+        "& $Installer $Action -NoService -InstallDir $InstallRoot @options\n"
         "exit $LASTEXITCODE\n",
         encoding="utf-8",
     )
     return [
         pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
         str(runner), str(installer), str(home / ".agent-vault"), action,
-    ]
+    ] + ([str(value) for value in wheel_inputs] if wheel_inputs else [])
 
 
 @pytest.mark.parametrize("profile", ["base", "ssh"])

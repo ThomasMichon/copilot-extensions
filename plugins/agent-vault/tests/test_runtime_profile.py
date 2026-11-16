@@ -214,6 +214,89 @@ def test_legacy_currentness_preserves_unselected_base(
     assert not (root / profile.PROFILE_FILE).exists()
 
 
+@pytest.mark.parametrize("desired,extras,module,callback", [
+    ("base", [], "agent_vault", None),
+    ("ssh", ["ssh"], "agent_vault.ssh_key", "_crypto"),
+    ("federated-relay", ["federated-relay"], "agent_vault.federated_relay", "dependency_health"),
+    ("ssh-federated-relay", ["federated-relay", "ssh"],
+     "agent_vault.federated_relay", "ssh_dependency_health"),
+])
+def test_closed_wheels_require_exact_explicit_or_recorded_desire(
+    profile: ModuleType, payload: Path, tmp_path: Path, desired: str,
+    extras: list[str], module: str, callback: str | None,
+) -> None:
+    root = tmp_path / "runtime"
+    admitted = {
+        "identity": {}, "runtime_version": "1.2.3.profile." + "a" * 16,
+        "payload_hash": "b" * 64, "extras": extras,
+    }
+    if desired != "base":
+        with pytest.raises(ValueError, match="selected Vault dependency profile"):
+            profile.wheel_selection(root, payload, admitted)
+    selected = profile.wheel_selection(root, payload, admitted, desired)
+    assert selected["runtime_version"] == admitted["runtime_version"]
+    assert (selected["health_module"], selected["health_callable"]) == (module, callback)
+    assert not root.exists(), "selection must not persist desire before the installer lock"
+    profile.persist_profile(root, desired)
+    assert profile.wheel_selection(root, payload, admitted) == selected
+    before = (root / profile.PROFILE_FILE).read_bytes()
+    for wrong in ([], ["unknown"], extras + extras, list(reversed(extras))):
+        if wrong == extras:
+            continue
+        with pytest.raises(ValueError, match="selected Vault dependency profile"):
+            profile.wheel_selection(root, payload, {**admitted, "extras": wrong})
+    assert (root / profile.PROFILE_FILE).read_bytes() == before
+
+
+@pytest.mark.parametrize("change", [
+    {"identity": {"runtime_source": {}}},
+    {"runtime_version": "1.2.4.profile." + "a" * 16},
+    {"runtime_version": "1.2.3+ssh"},
+    {"payload_hash": "not-a-hash"},
+])
+def test_closed_wheel_selection_refuses_unassociated_generations(
+    profile: ModuleType, payload: Path, tmp_path: Path, change: dict[str, Any],
+) -> None:
+    admitted = {
+        "identity": {}, "runtime_version": "1.2.3.profile." + "a" * 16,
+        "payload_hash": "b" * 64, "extras": ["ssh"], **change,
+    }
+    with pytest.raises(ValueError, match="selected Vault dependency profile"):
+        profile.wheel_selection(tmp_path / "runtime", payload, admitted, "ssh")
+    assert not (tmp_path / "runtime").exists()
+
+
+@pytest.mark.parametrize("desired", ["base", "ssh", "federated-relay", "ssh-federated-relay"])
+def test_closed_wheel_readiness_joins_native_evidence_to_desired_extras(
+    profile: ModuleType, payload: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    desired: str,
+) -> None:
+    import install_source
+
+    profile.persist_profile(tmp_path, desired)
+    version = "1.2.3.profile." + "a" * 16
+    slot = tmp_path / "versions" / version
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (tmp_path / "current-version").write_text(version)
+    (tmp_path / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"version": "1.2.3"}, "runtime_profile": desired, "runtime_version": version,
+    }))
+    origins = slot / ".runtime-input-origins.json"
+    origins.write_text(json.dumps({"extras": list(profile.PROFILES[desired])}))
+    monkeypatch.setattr(install_source, "native_current", lambda *_args: True)
+    assert profile.current(tmp_path, "1.2.3", payload)
+    origins.write_text(json.dumps({"extras": ["unselected"]}))
+    assert not profile.current(tmp_path, "1.2.3", payload)
+    origins.write_text(json.dumps({"extras": list(profile.PROFILES[desired])}))
+    monkeypatch.setattr(install_source, "native_current", lambda *_args: False)
+    assert not profile.current(tmp_path, "1.2.3", payload)
+    monkeypatch.setattr(install_source, "native_current", lambda *_args: True)
+    (tmp_path / "current-version").write_text("1.2.3")
+    assert not profile.current(tmp_path, "1.2.3", payload)
+
+
 def test_pinned_legacy_base_currentness_does_not_import_the_native_installer(
     profile: ModuleType, payload: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

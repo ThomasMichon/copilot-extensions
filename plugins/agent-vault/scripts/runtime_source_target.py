@@ -9,6 +9,7 @@ import re
 import stat
 import sys
 from pathlib import Path
+from typing import Any
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -16,7 +17,7 @@ TARGET_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET"
 TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
 
 
-def selected(root: Path, payload: Path, requested: str | None = None) -> dict:
+def selected(root: Path, payload: Path, requested: str | None = None) -> dict[str, Any]:
     import runtime_profile as profile
 
     if requested is None and not os.path.lexists(root / profile.PROFILE_FILE):
@@ -33,7 +34,7 @@ def selected(root: Path, payload: Path, requested: str | None = None) -> dict:
     return profile.selection(root, payload, requested)
 
 
-def document(root: Path, selection: dict) -> dict:
+def document(root: Path, selection: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema": TARGET_SCHEMA, "version": 1, "plugin": "agent-vault",
         "runtime_root": str(root.resolve()), "source": selection["source_identity"],
@@ -43,7 +44,7 @@ def document(root: Path, selection: dict) -> dict:
 
 def current(root: Path, payload: Path, package_version: str) -> bool:
     import versioned_runtime_source as source
-    from runtime_profile import _unique_object
+    from runtime_profile import PROFILES, _unique_object
 
     expected = selected(root, payload)
     pin = os.environ.get(source.SOURCE_PIN_ENV)
@@ -62,16 +63,23 @@ def current(root: Path, payload: Path, package_version: str) -> bool:
     if not isinstance(manifest, dict) or not isinstance(manifest.get("source"), dict):
         raise ValueError("Vault deployment metadata must name its source")
     fields = expected["source_identity"]
-    version = expected["runtime_version"]
+    version: str = expected["runtime_version"]
     if (
-        fields is None and expected["profile"] == "base"
+        fields is None
         and isinstance(manifest.get("runtime_version"), str)
         and re.search(r"\.profile\.[0-9a-f]{16}", manifest["runtime_version"])
     ):
         from install_source import native_current
 
-        if native_current(root, payload, "agent-vault"):
-            version = manifest["runtime_version"]
+        if (
+            marker.read_text(encoding="utf-8").strip() == manifest["runtime_version"]
+            and native_current(root, payload, "agent-vault")
+        ):
+            origins = json.loads((
+                root / "versions" / manifest["runtime_version"] / ".runtime-input-origins.json"
+            ).read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+            if origins.get("extras", []) == list(PROFILES[expected["profile"]]):
+                version = manifest["runtime_version"]
     if (
         manifest["source"].get("version") != package_version
         or manifest.get("runtime_profile", "base") != expected["profile"]
@@ -86,7 +94,7 @@ def current(root: Path, payload: Path, package_version: str) -> bool:
     return python.is_file()
 
 
-def check_target(root: Path, selection: dict) -> None:
+def check_target(root: Path, selection: dict[str, Any]) -> None:
     if TARGET_ENV not in os.environ:
         return
     from runtime_profile import _unique_object
@@ -104,7 +112,7 @@ def check_target(root: Path, selection: dict) -> None:
         raise ValueError("Vault source/profile changed after target planning")
 
 
-def record_profile(slot: Path, selection: dict, payload_hash: str) -> None:
+def record_profile(slot: Path, selection: dict[str, Any], payload_hash: str) -> None:
     import versioned_runtime as runtime
     from runtime_profile import _unique_object
 
@@ -125,7 +133,8 @@ def record_profile(slot: Path, selection: dict, payload_hash: str) -> None:
         info = path.lstat()
         if (
             not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 4096
-            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or getattr(info, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
         ):
             raise ValueError("Vault slot profile evidence must be a bounded ordinary file")
         if json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object) != value:
@@ -137,7 +146,7 @@ def record_profile(slot: Path, selection: dict, payload_hash: str) -> None:
         stream.write(json.dumps(value, sort_keys=True) + "\n")
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--payload", type=Path, default=SCRIPTS.parent)

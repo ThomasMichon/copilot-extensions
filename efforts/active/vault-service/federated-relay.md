@@ -177,8 +177,13 @@ Fleet Manager remains a standalone application artifact selected by the
 canonical `standalone:fleet-manager` association, not a vendored library or a
 Bridge-service installation. Configured-feed native construction and prepared
 application extras remain the existing construction paths. The native
-closed-wheel adapter still refuses non-base dependency profiles; this source
-slice does not claim that remaining profile/source association is implemented.
+closed-wheel adapter associates admitted wheel extras with an explicit or
+persisted desired profile, without enabling a profile from wheel availability
+alone. It rechecks that association under the installer lock and runs the
+selected dependency health before candidate completion or reuse. Readiness
+joins the selected generation, frozen extras and desired profile; it does not
+silently select base when an optional closure is missing. This is source
+construction, not installed service/adopter acceptance.
 
 This closes part of the installer's
 [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
@@ -191,7 +196,9 @@ R4 stays open for installed service/adopter lifetime, deployment qualification
 and the remaining distribution lanes; a contained installed SDK consumer is not
 an installed service rollout.
 
-Qualification for this source increment:
+Closed-wheel qualification and its exact-source limits are recorded in the
+[parent journal](README.md#journal). The preceding native UV/source-profile
+increment was qualified as follows:
 
 - The contained Vault profile/snapshot/relay packet passed 71 tests; two POSIX
   installer cases were skipped on Windows.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
+from email.parser import Parser
 import importlib
 import importlib.metadata
 from contextlib import contextmanager
@@ -18,7 +19,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from typing import Any
+import zipfile
 
 import agent_procutil
 from packaging.requirements import Requirement
@@ -59,7 +62,7 @@ class SourceProfileSequence:
     complete: bool = False
 
 BACKEND = r'''
-import pathlib,re,tomllib,zipfile
+import base64,csv,hashlib,io,pathlib,re,tomllib,zipfile
 
 def get_requires_for_build_wheel(config_settings=None):
     return []
@@ -83,15 +86,23 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     with zipfile.ZipFile(pathlib.Path(wheel_directory)/wheel,"w") as archive:
         for member in (root/"src").rglob("*"):
             if member.is_file():
-                archive.write(member,member.relative_to(root/"src").as_posix())
+                archive.writestr(member.relative_to(root/"src").as_posix(),member.read_bytes())
         archive.writestr(info+"/METADATA",metadata+"\n")
         archive.writestr(info+"/WHEEL","Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
-        archive.writestr(info+"/RECORD","")
         if entries:
             archive.writestr(info+"/entry_points.txt","".join(
                 "["+group+"]\n"+"".join(key+" = "+value+"\n" for key,value in values.items())
                 for group,values in entries.items()
             ))
+        rows=[]
+        for member in archive.namelist():
+            body=archive.read(member)
+            digest=base64.urlsafe_b64encode(hashlib.sha256(body).digest()).rstrip(b"=").decode()
+            rows.append([member,"sha256="+digest,str(len(body))])
+        rows.append([info+"/RECORD","",""])
+        record=io.StringIO(newline="")
+        csv.writer(record,lineterminator="\n").writerows(rows)
+        archive.writestr(info+"/RECORD",record.getvalue())
     return wheel
 '''
 
@@ -220,6 +231,7 @@ def _external_wheel(
 
 def _relay_artifacts(
     tmp_path: Path, payload: Path, pool: Path, uv: str, env: dict[str, str],
+    *, missing_gateway: bool = False,
 ) -> None:
     repository = Path(__file__).resolve().parents[4]
     sys.path.insert(0, str(repository / "tools"))
@@ -232,6 +244,8 @@ def _relay_artifacts(
     shutil.copytree(application, package, ignore=shutil.ignore_patterns(
         ".venv", "__pycache__", "tests", "build", "dist", "*.egg-info",
     ))
+    if missing_gateway:
+        (package / "src" / "fleet_manager" / "gateway_service_connector.py").unlink()
     _backend(package)
     _run([uv, "build", "--offline", "--wheel", "--out-dir", pool, package], env, tmp_path)
     project = toml.loads((package / "pyproject.toml").read_text())["project"]
@@ -255,6 +269,53 @@ def _relay_artifacts(
                 for extra in ("", *requirement.extras)
             )
         )
+
+
+def _closed_wheels(
+    payload: Path, env: dict[str, str], home: Path, desired: str,
+) -> tuple[Path, Path, Path, Path]:
+    from packaging.markers import default_environment
+    source_wheels = importlib.import_module("runtime_source_wheels")
+
+    uv = shutil.which("uv")
+    assert uv
+    pool = payload.parents[1] / "artifacts"
+    for package in [payload, *(payload / "libs").iterdir()]:
+        if (package / "pyproject.toml").is_file():
+            _run([uv, "build", "--offline", "--wheel", "--out-dir", pool, package], env, home)
+    wheels: dict[str, dict[str, Any]] = {}
+    for path in pool.glob("*.whl"):
+        with zipfile.ZipFile(path) as archive:
+            metadata = Parser().parsestr(archive.read(next(
+                name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+            )).decode())
+        name = re.sub(r"[-_.]+", "-", str(metadata["Name"])).lower()
+        wheels[name] = {
+            "name": name, "version": str(metadata["Version"]), "filename": path.name,
+            "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+            "requires_python": metadata.get("Requires-Python", ""),
+            "requires_dist": metadata.get_all("Requires-Dist", []),
+            "provides_extras": metadata.get_all("Provides-Extra", []),
+        }
+    extras = ["federated-relay", "ssh"] if desired == "ssh-federated-relay" else [desired]
+    roots = ["agent-vault[" + ",".join(extras) + "]==" + wheels["agent-vault"]["version"]]
+    environment = default_environment()
+    wanted: dict[str, set[str]] = source_wheels._extras(
+        wheels, roots, environment, time.monotonic() + 30,
+    )
+    document = {
+        "schema": "copilot-extensions.exact-runtime-profile", "version": 1,
+        "release": {"identity": "fixture-release", "sha256": "sha256:" + "2" * 64},
+        "mode": "source", "artifact": None, "component": "agent-vault", "backend": "cpu",
+        "approval_source": "fixture-authority", "acquisition_policy": "fixture-policy",
+        "target": {"device": "cpu", "environment": environment, "tags": ["py3-none-any"]},
+        "roots": roots,
+        "wheels": [{**wheels[name], "selected_extras": sorted(selected)}
+                   for name, selected in sorted(wanted.items())],
+    }
+    profile = pool.parent / "closed-profile.json"
+    profile.write_text(json.dumps(document), encoding="utf-8")
+    return profile, pool, Path(getattr(sys, "_base_executable")), Path(uv)
 
 
 @contextmanager
@@ -314,6 +375,7 @@ def native_inputs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[NativeIn
 
 def native_profile_inputs(
     tmp_path_factory: pytest.TempPathFactory, *, crypto: bool = True, relay: bool = False,
+    missing_gateway: bool = False,
 ) -> Iterator[NativeInputs]:
     tmp_path = tmp_path_factory.mktemp("vp")
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
@@ -333,7 +395,7 @@ def native_profile_inputs(
     if crypto:
         _external_wheel(tmp_path, "pycryptodomex", "Cryptodome", pool, uv, env)
     if relay:
-        _relay_artifacts(tmp_path, payload, pool, uv, env)
+        _relay_artifacts(tmp_path, payload, pool, uv, env, missing_gateway=missing_gateway)
     for package in [payload, *(payload / "libs").iterdir()]:
         if (package / "pyproject.toml").is_file():
             _backend(package)
@@ -473,6 +535,80 @@ def test_native_relay_profile_uses_first_party_artifact_and_real_tls_consumer(
                 await rig.close()
 
         asyncio.run(scenario())
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("desired", ["federated-relay", "ssh-federated-relay"])
+def test_native_closed_profile_preserves_desire_and_checks_installed_dependencies(
+    tmp_path_factory: pytest.TempPathFactory, desired: str,
+) -> None:
+    with contextmanager(native_profile_inputs)(
+        tmp_path_factory, crypto="ssh" in desired, relay=True,
+    ) as (payload, home, env, pwsh):
+        wheels = _closed_wheels(payload, env, home, desired)
+        env["PATH"] = str(home)
+        assert all(shutil.which(name, path=env["PATH"]) is None
+                   for name in ("python", "python3", "py"))
+        installer = payload / "scripts" / "install.ps1"
+        command = _no_service_provision_command(home, installer, pwsh, wheel_inputs=wheels)
+        refused = subprocess.run(
+            command, env=env, cwd=home, capture_output=True, text=True,
+            timeout=30, **agent_procutil.no_window_kwargs(),
+        )
+        assert refused.returncode != 0
+        assert "selected Vault dependency profile" in refused.stdout + refused.stderr
+        root = home / ".agent-vault"
+        assert not (root / "runtime-profile.json").exists()
+        assert not (root / "current-version").exists()
+        env["AGENT_VAULT_INSTALL_PROFILE"] = desired
+        _run(command, env, home)
+        selected = (root / "current-version").read_text().strip()
+        assert ".profile." in selected and not selected.endswith("+" + desired)
+        slot = root / "versions" / selected
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        callback = "ssh_dependency_health" if "ssh" in desired else "dependency_health"
+        _run([python, "-I", "-B", "-c",
+              f"from agent_vault.federated_relay import {callback}; {callback}()"], env, home)
+        env.pop("AGENT_VAULT_INSTALL_PROFILE")
+        _run(_no_service_provision_command(
+            home, installer, pwsh, action="update", wheel_inputs=wheels,
+        ), env, home)
+        assert (root / "current-version").read_text().strip() == selected
+        manifest = json.loads((root / "deploy-manifest.json").read_text())
+        assert manifest["runtime_profile"] == desired
+        assert manifest["runtime_version"] == selected
+        assert json.loads((root / "runtime-profile.json").read_text())["profile"] == desired
+        _run([sys.executable, "-I", "-B", payload / "scripts" / "runtime_profile.py",
+              "--root", root, "current", "--package-version", manifest["source"]["version"]],
+             env, home)
+        assert json.loads((slot / ".runtime-input-origins.json").read_text())["extras"] == (
+            ["federated-relay", "ssh"] if "ssh" in desired else ["federated-relay"]
+        )
+        assert not (root / "config.json").exists()
+
+
+@pytest.mark.timeout(180)
+def test_native_closed_profile_health_failure_never_publishes(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    with contextmanager(native_profile_inputs)(
+        tmp_path_factory, crypto=False, relay=True, missing_gateway=True,
+    ) as (payload, home, env, pwsh):
+        wheels = _closed_wheels(payload, env, home, "federated-relay")
+        env["AGENT_VAULT_INSTALL_PROFILE"] = "federated-relay"
+        result = subprocess.run(
+            _no_service_provision_command(
+                home, payload / "scripts" / "install.ps1", pwsh, wheel_inputs=wheels,
+            ),
+            env=env, cwd=home, capture_output=True, text=True, timeout=120,
+            **agent_procutil.no_window_kwargs(),
+        )
+        assert result.returncode != 0
+        assert "gateway_service_connector" in result.stdout + result.stderr
+        root = home / ".agent-vault"
+        assert not (root / "current-version").exists()
+        assert not (root / "deploy-manifest.json").exists()
+        assert not list((root / "versions").glob("*/.install-complete.json"))
 
 
 @pytest.fixture(scope="class")
