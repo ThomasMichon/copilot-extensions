@@ -1,0 +1,15 @@
+{
+  "schema": "http52-native-send-settlement-cases-v1",
+  "generation": 52,
+  "expected": {
+    "capability": 1,
+    "cli": {
+      "version": 1,
+      "capabilities": [
+        "native-send-settlement"
+      ]
+    },
+    "accepted": "accepted",
+    "unadmitted": "not_admitted"
+  }
+}

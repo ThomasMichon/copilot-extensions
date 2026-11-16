@@ -121,6 +121,7 @@ AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
+    "plugins/agent-bridge/contract/inputs/http52/native-send-settlement.json",
     "plugins/agent-bridge/tests/test_http52_capture_probes.py",
     "plugins/agent-bridge/tests/test_native_send_unavailable.py",
     "plugins/agent-bridge/tests/test_native_send_settlement.py",
