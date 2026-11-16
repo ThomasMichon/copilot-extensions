@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+import time
+import venv
 
 import pytest
 import update_driver
@@ -32,7 +36,7 @@ def test_request_python_uses_the_application_interpreter_and_restores_ambient_hi
     monkeypatch.setenv(KEY, "different-worker-selection")
     with pytest.raises(RuntimeError, match="controlled callback failure"):
         with manager._request_environment(context):
-            assert os.environ[KEY] == sys.executable
+            assert os.environ[KEY] == getattr(sys, "_base_executable", sys.executable)
             raise RuntimeError("controlled callback failure")
     assert os.environ[KEY] == "different-worker-selection"
 
@@ -48,7 +52,8 @@ import json,os,sys
 from pathlib import Path
 sys.path.insert(0,sys.argv[2])
 from worktree_manager.update_driver_cli import _request_environment
-report={{"before":os.environ.get({KEY!r}),"interpreter":sys.executable}}
+report={{"before":os.environ.get({KEY!r}),
+        "interpreter":getattr(sys,"_base_executable",sys.executable)}}
 with _request_environment({{}}):
     report["during"]=os.environ.get({KEY!r})
 report["after"]=os.environ.get({KEY!r})
@@ -81,5 +86,105 @@ Path(sys.argv[1]).write_text(json.dumps(report),encoding="utf-8")
         result = json.loads(report.read_text(encoding="utf-8"))
         assert result["before"] is None and result["after"] is None
         assert result["during"] == result["interpreter"]
-        assert Path(result["during"]).resolve() == Path(selected)
+        assert Path(result["during"]).resolve() == Path(
+            getattr(sys, "_base_executable", sys.executable),
+        ).resolve()
         assert os.environ[KEY] == "different-worker-selection"
+
+
+def test_helper_base_interpreter_survives_application_environment_retirement(
+    tmp_path: Path,
+) -> None:
+    application = tmp_path / "application"
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(application)
+    python = application / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    program = f"""
+import json,os,sys
+sys.path.insert(0,sys.argv[1])
+from worktree_manager.update_driver_cli import _request_environment
+with _request_environment({{}}):
+    print(json.dumps(os.environ[{KEY!r}]))
+"""
+    environment = {**os.environ, "PATH": str(tmp_path)}
+    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
+    selected = subprocess.run(
+        [str(python), "-I", "-S", "-B", "-c", program,
+         str(Path(__file__).resolve().parents[1] / "src")],
+        capture_output=True, text=True, timeout=20, env=environment, **options,
+    )
+    assert selected.returncode == 0, selected.stdout + selected.stderr
+    helper = Path(json.loads(selected.stdout))
+    assert helper.is_absolute() and not helper.is_relative_to(application)
+    shutil.rmtree(application)
+    result = subprocess.run(
+        [str(helper), "-I", "-S", "-B", "-c", "print('independent-helper')"],
+        capture_output=True, text=True, timeout=20, env=environment, **options,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "independent-helper"
+
+
+@pytest.mark.timeout(60)
+def test_successor_resident_drops_updaters_hint_before_the_old_environment_is_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from _manager_process_fixture import synthetic_runtime
+    from worktree_manager import mux_daemon_cutover
+
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    previous = tmp_path / "previous"
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(previous)
+    old_python = previous / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    root = tmp_path / "stable"
+    root.mkdir()
+    sdk = Path(__file__).resolve().parents[2] / "libs" / "installation-context" / "installation-context.ps1"
+    base = Path(getattr(sys, "_base_executable", sys.executable))
+    monkeypatch.setenv("PATH", str(base.parent) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv(KEY, str(old_python))
+    monkeypatch.setenv("RESIDENT_PROBE_HOST", host)
+    monkeypatch.setenv("RESIDENT_PROBE_SDK", str(sdk))
+    slot = synthetic_runtime(root, "successor", program=f"""
+import json,os,subprocess,sys,time
+from pathlib import Path
+from agent_procutil import no_window_kwargs
+root=Path(next(value.split("=",1)[1] for value in sys.argv if value.startswith("--root=")))
+pending=root/"ready.tmp"
+pending.write_text(json.dumps({{"hint":os.environ.get({KEY!r})}}),encoding="utf-8")
+pending.replace(root/"ready.json")
+deadline=time.monotonic()+15
+while not (root/"old-retired").exists():
+    if time.monotonic()>=deadline:
+        raise TimeoutError("old environment retirement was not signalled")
+    time.sleep(0.01)
+result=subprocess.run([
+    os.environ["RESIDENT_PROBE_HOST"],"-NoProfile","-NonInteractive","-File",
+    os.environ["RESIDENT_PROBE_SDK"],"source-id","-SourceJson",
+    '{{"source":"opaque","id":"resident"}}',"-CopilotHome",str(root/"copilot"),
+    "-DurableHome",str(root/"durable"),
+],capture_output=True,text=True,timeout=15,**no_window_kwargs())
+(root/"result.json").write_text(json.dumps({{
+    "code":result.returncode,"stdout":result.stdout,"stderr":result.stderr,
+}}),encoding="utf-8")
+raise SystemExit(result.returncode)
+""")
+    process = mux_daemon_cutover.spawn_passive(slot, root=root, port=54321)
+    try:
+        ready = root / "ready.json"
+        deadline = time.monotonic() + 15
+        while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.is_file(), (root / "mux-daemon-passive.log").read_text(encoding="utf-8")
+        status = json.loads(ready.read_text(encoding="utf-8"))
+        shutil.rmtree(previous)
+        (root / "old-retired").touch()
+        assert process.wait(timeout=20) == 0, (root / "mux-daemon-passive.log").read_text(encoding="utf-8")
+        result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+        assert status["hint"] is None
+        assert result["code"] == 0 and result["stderr"] == "", result
+        assert json.loads(result["stdout"])["canonical"] == "opaque:resident"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)

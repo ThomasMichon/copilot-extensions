@@ -3922,10 +3922,15 @@ persistent installation selector. PowerShell restores its caller's previous
 value on success or failure; POSIX exports it only within the bootstrap process
 tree. Queued installations clear stale inherited hints through the existing
 runner's context-key handling. Each finite Manager request scope then uses the
-explicitly launched application's own interpreter, not the draining worker's
+explicitly launched application's base interpreter, not the draining worker's
 hint, and restores the previous environment afterward. The strict legacy
 request-context record is unchanged, so older prepared Manager sources still
 accept it. Self-install uses the same finite interpreter scope.
+These helpers are stdlib-only. Using the base interpreter keeps an inherited
+helper hint independent of a retired Manager package environment; managed-base
+retention remains with the toolchain owner.
+Manager cold/passive resident launches remove the finite hint through their
+existing environment scrubber instead of retaining the updater's selection.
 The installation-context caller-owned adapter and the evaluator selector
 below consume it without rediscovering PATH Python. Their optional `-Python`
 argument overrides the inherited value. Invalid paths and interpreter execution

@@ -226,7 +226,10 @@ def _request_environment(
             if not root.is_absolute():
                 raise ValueError("Manager root cannot resolve against request cwd")
         values["WORKTREE_MANAGER_ROOT"] = str(root)
-    values[_BOOTSTRAP_PYTHON] = sys.executable
+    base_python = getattr(sys, "_base_executable", None)
+    values[_BOOTSTRAP_PYTHON] = (
+        base_python if isinstance(base_python, str) and base_python else sys.executable
+    )
     keys: tuple[str, ...] = (*_RUNNER_CONTEXT_KEYS, SOURCE_ANCHOR_ENV)
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
@@ -299,7 +302,8 @@ def self_install_request(operation: Callable[[], int]) -> int:
     from .runtime_identity import running_application_slot
 
     try:
-        with _request_environment(request_context()), _runtime_installer()._installation_custody() as custody:
+        installer_factory: Callable[[], Any] = _runtime_installer
+        with _request_environment(request_context()), installer_factory()._installation_custody() as custody:
             if custody is not None:
                 return operation()
             argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])

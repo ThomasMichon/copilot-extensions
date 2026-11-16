@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any, BinaryIO, Callable
 
 import agent_procutil
 from agent_procutil import direct_python, spawn_daemon
@@ -20,6 +21,7 @@ python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *
 _DAEMON_EXCLUDED_ENV_KEYS = {
     "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
     "UPDATE_DRIVER_WITNESS", "AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER",
+    "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON",
 }
 
 
@@ -28,7 +30,10 @@ def selected_root(root: Path | None = None) -> Path:
     return Path(os.path.abspath(root if root is not None else default_root()))
 
 
-def daemon_is_live(data: dict | None, *, endpoint_from_rendezvous) -> bool:
+def daemon_is_live(
+    data: dict[str, Any] | None, *,
+    endpoint_from_rendezvous: Callable[[dict[str, Any] | None], tuple[str, int, str] | None],
+) -> bool:
     """Prove liveness by actually reaching the endpoint, not just trusting
     the lock file's presence."""
     endpoint = endpoint_from_rendezvous(data)
@@ -49,7 +54,7 @@ def spawn_lock_path(root: Path) -> Path:
     return root / "mux-daemon.spawn.lock"
 
 
-def acquire_daemon_lease(root: Path):
+def acquire_daemon_lease(root: Path) -> BinaryIO | None:
     """Attempt the daemon's single-instance lease (non-blocking)."""
     root.mkdir(parents=True, exist_ok=True)
     fh = open(spawn_lock_path(root), "a+b")
@@ -59,7 +64,7 @@ def acquire_daemon_lease(root: Path):
     return None
 
 
-def release_daemon_lease(fh) -> None:
+def release_daemon_lease(fh: BinaryIO) -> None:
     try:
         _unlock_file(fh)
     except OSError:
