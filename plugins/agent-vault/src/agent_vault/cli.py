@@ -153,8 +153,8 @@ def _read_windows_endpoint(
     """Read the Windows-side rendezvous file from WSL; ``None`` if none found.
 
     The recorded ``pid`` is a *Windows* pid, meaningless to a Linux
-    ``pid_alive`` check, so staleness here is left to the actual send (which
-    fails fast and falls through to the legacy dial). The endpoint is re-tagged
+    ``pid_alive`` check, so staleness here is left to the actual send. Only
+    non-strict callers retain legacy-dial fallback. The endpoint is re-tagged
     ``source="windows"`` so the caller keeps the resolved cross-boundary host.
     """
     from dataclasses import replace
