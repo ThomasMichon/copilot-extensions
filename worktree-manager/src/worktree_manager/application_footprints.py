@@ -98,6 +98,7 @@ def plan(
             not isinstance(row, dict) or set(row) != {"name", "version", "dependencies"}
             or not isinstance(row["name"], str) or not _NAME.fullmatch(row["name"])
             or not isinstance(row["version"], str) or not _VERSION.fullmatch(row["version"])
+            or row["version"].endswith(".")
             or not isinstance(row["dependencies"], list) or len(row["dependencies"]) > 64
             or any(not isinstance(name, str) or not _NAME.fullmatch(name)
                    for name in row["dependencies"])
@@ -186,7 +187,7 @@ def _preflight(applications: tuple[Application, ...]) -> tuple[Any, str]:
         raise ValueError("application root-environment declarations conflict")
     for application in applications:
         _verify_copy(application.source, application)
-        _ordinary(application.root)
+        _ordinary(application.slot)
         if os.path.lexists(application.slot):
             _verify_copy(application.slot, application)
     installer_factory: Callable[[], Any] = _runtime_installer
@@ -217,7 +218,7 @@ def install(
     for application in applications:
         remaining()
         _verify_copy(application.source, application)
-        _ordinary(application.root)
+        _ordinary(application.slot)
         application.slot.parent.mkdir(parents=True, exist_ok=True)
         with runtime.construction_lease(application.root, application.version):
             construction.publish_source_snapshot(

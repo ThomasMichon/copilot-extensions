@@ -257,8 +257,9 @@ def test_apply_uses_existing_finite_driver_not_a_worktrees_installer(
     assert not (tmp_path / "installed").exists()
 
 
-def test_rejected_source_does_not_fence_a_corrected_request_on_the_same_queue(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("rejected_input", ["source", "versions", "slot", "trailing-dot"])
+def test_rejected_input_does_not_fence_a_corrected_request_on_the_same_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejected_input: str,
 ) -> None:
     import update_driver
 
@@ -266,8 +267,23 @@ def test_rejected_source_does_not_fence_a_corrected_request_on_the_same_queue(
     log = tmp_path / "setup-events"
     monkeypatch.setenv("FOOTPRINT_TEST_LOG", str(log))
     target = tmp_path / "installed"
-    rejected = source / "apps" / "example" / "src" / "example" / "state" / "linked"
-    rejected.mkdir(parents=True)
+    if rejected_input == "source":
+        rejected = source / "apps" / "example" / "src" / "example" / "state" / "linked"
+        rejected.mkdir(parents=True)
+    elif rejected_input == "versions":
+        rejected = target / "example" / "versions"
+        rejected.mkdir(parents=True)
+    elif rejected_input == "slot":
+        rejected = target / "example" / "versions" / "1.0"
+        shutil.copytree(source / "apps" / "example", rejected)
+    else:
+        rejected = None
+    declarations = [source / "footprint.json", source / "apps" / "example" / "application.json"]
+    originals = [path.read_bytes() for path in declarations]
+    if rejected_input == "trailing-dot":
+        for path in declarations:
+            path.write_bytes(path.read_bytes().replace(b'"1.0"', b'"1.0."'))
+    before = sorted(path.relative_to(target) for path in target.rglob("*")) if target.exists() else None
     original = Path.lstat
     def indirect(path: Path, *args: object, **kwargs: object) -> object:
         info = original(path)
@@ -281,8 +297,12 @@ def test_rejected_source_does_not_fence_a_corrected_request_on_the_same_queue(
     with monkeypatch.context() as rejection:
         rejection.setattr(Path, "lstat", indirect)
         assert footprints.main(arguments) == 1
-    assert not target.exists()
+    after = sorted(path.relative_to(target) for path in target.rglob("*")) if target.exists() else None
+    assert after == before
     assert not (update_driver.default_root() / "queue.sqlite3").exists()
+    assert not log.exists()
+    for path, content in zip(declarations, originals):
+        path.write_bytes(content)
     assert footprints.main(arguments) == 0
     requests = update_driver.status()
     assert isinstance(requests, tuple)
