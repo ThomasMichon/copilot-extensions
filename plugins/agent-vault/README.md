@@ -124,9 +124,12 @@ application-source declaration associates it with `standalone:fleet-manager`.
 Native construction needs those first-party artifacts in its configured feed;
 it does not copy an installed Fleet Manager or install a Bridge service.
 Prepared application production can select `federated-relay` (and optionally
-`ssh`) through its existing `--application-extras` input. The separate native
-closed-wheel adapter currently accepts only the base dependency profile and
-refuses other selections; it never silently drops their extras.
+`ssh`) through its existing `--application-extras` input. The native closed-wheel
+adapter accepts these profiles only when the admitted Vault wheel's selected
+extras exactly match the explicit or recorded desired profile. Wheel contents
+never opt in to an unselected profile or silently drop extras. The installer
+rechecks that association under its transaction lock and runs the same selected
+dependency health check before candidate completion.
 
 The same selection works with `stamp`, `provision` and `update`. Stamping records
 the desired profile without acquiring dependencies. With no active runtime,

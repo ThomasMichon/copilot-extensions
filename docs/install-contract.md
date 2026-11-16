@@ -196,6 +196,11 @@ mistaking it for package-version drift. Package comparisons strip the generated
 profile suffix; recovery still requires an exact current/last-known-good
 selection instead of choosing a dependency profile by hash order.
 
+Native wheel construction may supply an optional ordinary Python health-callable
+name alongside its health module. The canonical candidate engine invokes it
+before completion, including reuse health; omission preserves module-only health.
+The adapter passes a name, not executable Python or an expression.
+
 Unchanged startup reads the existing selector, bounded constructor receipt,
 deployment manifest, completion marker and interpreter presence. The package
 identity, exact profile/closure, selected extras and manifest construction hash

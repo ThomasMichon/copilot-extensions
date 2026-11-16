@@ -361,6 +361,69 @@ implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
 
+### 2026-11-16 - Closed-wheel dependency-profile source qualification
+
+The native closed-wheel receiver now joins admitted Vault extras to the explicit
+or recorded desired dependency profile. Unselected optional inputs fail before
+publication; selection is rechecked and persisted under the existing transaction
+lock. Completed-generation readiness additionally joins the frozen extras to
+that desired profile without adding a payload-tree scan.
+
+The generic native adapter forwards an optional ordinary health-callable name
+to the existing candidate engine. Vault uses its existing selected dependency
+health checks before completion; base callers retain module-only health. This
+does not construct a relay, read credentials or activate a service. Whole-file
+strict checking also required annotations in the touched retained-construction
+and source-target helpers; no checker suppression or admission level changed.
+
+Fresh Windows closed-wheel relay and combined SSH/relay construction passed,
+including explicit selection, unselected refusal, preserved update desire,
+actual installed dependency imports and readiness. A separately built wheel
+with a missing required Gateway module failed before completion/publication.
+The final relay positive/negative packet passed two cases in 203.89 seconds;
+the combined case previously passed in 157.18 seconds. The generic callback
+refusal and affected receiver controls passed 21 cases, and profile/snapshot
+regressions passed 47 with two platform skips. Sync/native recipe controls
+passed 140 with one skip. Strict checking passed 23 physical files across the
+18 selected projects and configured Linux/Windows targets.
+
+This is source qualification, not accepted publication or installed adoption.
+Required CI and review remain pending. R2-R4, independent deployment lifetime,
+real provider/file renewal and complete consuming journeys remain open. No
+live profile, installation, credential acquisition or rollout occurred.
+
+### 2026-11-16 - Native optional-profile source accepted
+
+PR #12840 merged to `dev` at `2026-11-16T09:50:16Z` as
+`29a22b5620765248ac413bbf19a401cb17128a46`, from exact head
+`41fd117825a9114648d90317fc9a9369ded5e077`. Copilot review `5917937017`
+approved that head without active issues; required CI `43842338316` passed.
+The managed merge used the authorized additional code-owner exception, not
+a CI or findings exception. The umbrella and parent remain open.
+
+The existing installer now selects explicit relay and combined SSH/relay
+dependency profiles, retaining desired state and immutable slots. Standalone
+Fleet Manager remains a first-party application artifact. Dependency health
+does not select policy, read keys, acquire credentials or start serving work.
+Qualification also corrected native Windows health-import asset lookup and
+bounded completion-driven source progress without increasing deadlines.
+
+The source packet passed 71 tests with two POSIX-only skips on Windows.
+Separate native selections qualified installed synthetic TLS consumers,
+base/SSH preservation, failed candidates and retained-source reuse. Source
+identity/progress passed 180 tests; eight native progress/quiet-window
+controls and the separate long-path integrity check passed. The closed-wheel
+suite passed 63 tests with one skip. Strict analysis covered 25 changed
+Python files across Linux/Windows targets. CI's full dependency-age audit
+passed all 616 declarations; exact unit source bindings and standalone
+release intent were corrected before the green run, without changing unit
+nodes, coverage, effect restrictions or budgets.
+
+This accepts part of R4's source construction only. Native closed-wheel
+non-base association, native consumer selection, installed service/adopter
+lifetime, actual renewal, R2/R3 and the full parent stay open. No installed
+runtime, credentials, enrollment, tunnel or shared service changed.
+
 ### 2026-11-16 - Source-lease consumer join accepted
 
 PR #12818 merged to `dev` at `2026-11-16T06:47:50Z` as
