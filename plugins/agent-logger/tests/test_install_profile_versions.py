@@ -40,6 +40,18 @@ def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _bash() -> str:
+    if os.name == "nt":
+        git = shutil.which("git")
+        candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        shell = str(candidate) if candidate is not None and candidate.is_file() else None
+    else:
+        shell = shutil.which("bash")
+    if shell is None:
+        pytest.skip("Git Bash or native Bash unavailable")
+    return shell
+
+
 @pytest.mark.parametrize(
     ("action", "current", "desired", "skip_install", "skip_stamp", "failure"),
     [
@@ -135,14 +147,7 @@ try {
 def test_posix_comparison_projects_sdk_profile_identities(
     tmp_path: Path, left: str, right: str, expected: int,
 ) -> None:
-    if os.name == "nt":
-        git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
-        shell = str(candidate) if candidate is not None and candidate.is_file() else None
-    else:
-        shell = shutil.which("bash")
-    if shell is None:
-        pytest.skip("Git Bash or native Bash unavailable")
+    shell = _bash()
     text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     match = re.search(r"(?ms)^        __version_cmp\(\) \{.*?^        \}", text)
     assert match is not None
@@ -158,3 +163,53 @@ def test_posix_comparison_projects_sdk_profile_identities(
     result = _run([shell, str(path)], tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == str(expected)
+
+
+@pytest.mark.parametrize(
+    ("action", "current_profile", "skip_install", "skip_stamp"),
+    [
+        ("update", PROFILE_B, False, False),
+        ("stamp", PROFILE_B, False, False),
+        ("update", PROFILE_A, True, False),
+        ("stamp", PROFILE_A, False, True),
+    ],
+)
+def test_posix_contended_lock_reuses_only_the_exact_identity(
+    tmp_path: Path, action: str, current_profile: str,
+    skip_install: bool, skip_stamp: bool,
+) -> None:
+    current = "1.2.3-dev4" + current_profile
+    desired = "1.2.3-dev4" + PROFILE_A
+    root = tmp_path / "runtime"
+    slot = root / "versions" / current
+    slot.mkdir(parents=True)
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text(current, encoding="utf-8")
+    (root / "stamped-version").write_text(current, encoding="utf-8")
+    (root / "payload-dir").write_text(str(tmp_path / "payload"), encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({"source": {"version": current}}), encoding="utf-8",
+    )
+    text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
+    start = text.index("    # Reject stale payloads after every lock acquisition.")
+    end = text.index("\n# Mirror pip's configured index", start)
+    script = (
+        "set -euo pipefail\n"
+        f"ACTION={shlex.quote(action)}\n"
+        f"INSTALL_DIR={shlex.quote(str(root))}\n"
+        f"SCRIPT_DIR={shlex.quote(str(SCRIPTS))}\n"
+        f"SRC_VERSION={shlex.quote(desired)}\n"
+        "SOURCE_RUNTIME_IDENTITY=''\n"
+        "SKIP_PACKAGE_INSTALL=0\nSKIP_STAMP=0\nVENV=unused\n"
+        "__install_lock_contended=1\n"
+        "_assert_source_runtime() { :; }\n"
+        f"python3() {{ {shlex.quote(sys.executable)} \"$@\"; }}\n"
+        "if true; then\n"
+        + text[start:end]
+        + "\nprintf '%s %s' \"$SKIP_PACKAGE_INSTALL\" \"$SKIP_STAMP\"\n"
+    )
+    path = tmp_path / "contended.sh"
+    path.write_text(script, encoding="utf-8")
+    result = _run([_bash(), str(path)], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == f"{int(skip_install)} {int(skip_stamp)}"

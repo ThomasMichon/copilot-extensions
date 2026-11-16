@@ -793,7 +793,7 @@ print((left > right) - (left < right) if left is not None and right is not None 
         if [[ "$ACTION" =~ ^(install|update|provision)$ && -n "$__desired" ]]; then
             if [[ -n "$__current" && -f "$INSTALL_DIR/versions/$__current/.install-complete.json" ]]; then
                 __active_cmp="$(__version_cmp "$__current" "$__desired")"
-                if [[ "$__active_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__active_cmp" = 0 && "$__deployed" = "$__current" ) ]]; then
+                if [[ "$__active_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__active_cmp" = 0 && "$__current" = "$__desired" && "$__deployed" = "$__current" ) ]]; then
                     SKIP_PACKAGE_INSTALL=1
                     # Action-specific unit work must target the active newer
                     # slot, not the queued payload's stale SRC_VERSION.
@@ -810,13 +810,13 @@ print((left > right) - (left < right) if left is not None and right is not None 
         elif [[ "$ACTION" = stamp && -n "$__desired" ]]; then
             if [[ -n "$__current" && -f "$INSTALL_DIR/versions/$__current/.install-complete.json" ]]; then
                 __current_cmp="$(__version_cmp "$__current" "$__desired")"
-                if [[ "$__current_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__current_cmp" = 0 ) ]]; then
+                if [[ "$__current_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__current_cmp" = 0 && "$__current" = "$__desired" ) ]]; then
                     SKIP_STAMP=1
                 fi
             fi
             if [[ "$SKIP_STAMP" = 0 && -n "$__stamped" && -f "$INSTALL_DIR/payload-dir" ]]; then
                 __stamped_cmp="$(__version_cmp "$__stamped" "$__desired")"
-                if [[ "$__stamped_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__stamped_cmp" = 0 ) ]]; then
+                if [[ "$__stamped_cmp" = 1 || ( "$__install_lock_contended" = 1 && "$__stamped_cmp" = 0 && "$__stamped" = "$__desired" ) ]]; then
                     SKIP_STAMP=1
                 fi
             fi
