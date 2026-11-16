@@ -206,58 +206,57 @@ not replace installed acceptance or authorize deployment.
 
 <!-- backlog-reconciliation:7556:transfer:7179:to:efforts/active/configuration-backstage-and-worker-instances/README.md -->
 
-Copilot-assisted proposal; every row remains planned. The inspected repository
-catalog accepts an empty contribution list when effective plugin activation is
-indeterminate. Generic sanitization cannot repair a helper's successful empty
-return. Resolve this finite caller/helper authority boundary without rewriting
-the workbench, replacing the activation owner or claiming all Configuration is
-empty/broken.
+The finite inspection Plan and local Validation are delivered by #12918.
+Production plugin-contribution authority is retained before accepting routes,
+with a sanitized unknown finding for indeterminate discovery. The separate
+receiving audit and global gate remain open under their existing Coordinator;
+this source result does not complete the workbench or its installed acceptance.
 
 #### Local Plan
 
-- [ ] P7179-1. At the actual repos_configuration_catalog.inspect_project ->
+- [x] P7179-1. At the actual repos_configuration_catalog.inspect_project ->
   related.installed_plugin_related_anchors boundary, establish/reuse the effective
   repository-activation authority BEFORE accepting a production contribution
   list. Treat indeterminate activation or failed authority resolution as an
   explicit sanitized inspection finding, not known absent/not-declared routes.
-- [ ] P7179-2. Preserve the intentional explicit filesystem override: root input
+- [x] P7179-2. Preserve the intentional explicit filesystem override: root input
   and AGENT_WORKTREES_INSTALLED_PLUGINS_DIR retain their supported contained/
   diagnostic scan behavior, including required manifests, flat/nested layouts,
   deduplication and ordering. Do not ignore that override or impose an unrelated
   production activation prerequisite on it.
-- [ ] P7179-3. Preserve valid known-empty versus unknown activation and known-active
+- [x] P7179-3. Preserve valid known-empty versus unknown activation and known-active
   contribution behavior. Unrelated readable preferences, base/knowledge sources
   or other healthy rows must not hide the unknown plugin-contribution finding
   or turn it into a successful empty catalog. Retain source precedence, project
   context restoration and existing read-only/refusal boundaries.
-- [ ] P7179-4. Keep error/finding output bounded, sanitized and meaningful through
+- [x] P7179-4. Keep error/finding output bounded, sanitized and meaningful through
   the actual native repository inspection consumer. An exception handler cannot
   catch a success-shaped empty list; carry the authority outcome at the owning
   seam instead of suppressing another error or adding a competing registry.
 
 #### Local Validation
 
-- [ ] V7179-1. Reproduce the original malformed repository activation settings
+- [x] V7179-1. Reproduce the original malformed repository activation settings
   case through the real inspection/helper boundary with NO managed config.d
   pointers, and assert a sanitized unknown/unavailable finding rather than
   absent/not-declared plugin routes. Do not mock after the list was accepted.
-- [ ] V7179-2. Include unrelated readable preferences in that same no-pointer
+- [x] V7179-2. Include unrelated readable preferences in that same no-pointer
   fixture and prove they cannot mask activation indeterminacy. Retain the
   finding even if other independent sections have useful results.
-- [ ] V7179-3. Cover valid known-empty and known-active activation as distinct
+- [x] V7179-3. Cover valid known-empty and known-active activation as distinct
   controls, preserving intended contributions, source precedence and honest
   absence. Failed authority resolution must remain distinguishable.
-- [ ] V7179-4. Qualify explicit root/environment filesystem overrides through
+- [x] V7179-4. Qualify explicit root/environment filesystem overrides through
   the supported scan/consumer path, preserving valid manifests/layouts and
   existing source/refusal behavior rather than forcing both discovery modes.
-- [ ] V7179-5. Retain project-context restoration and privacy-safe diagnostics;
+- [x] V7179-5. Retain project-context restoration and privacy-safe diagnostics;
   live operator settings/activation are never test fixtures. Use the existing
   bounded source/consumer portfolio and the original appropriate finite tier,
   not a new installed UI, every-host or full-parent native campaign.
 
 #### Continuing local Coordination and receiving gate
 
-- [ ] C7179-1. Preserve all #6379 original/current Configuration/Workers behavior,
+- [x] C7179-1. Preserve all #6379 original/current Configuration/Workers behavior,
   existing source/native/installed/release holds and complete historical Journal.
   This finite repository inspection family can be qualified independently of
   unrelated remaining parent implementation; intake is not parent completion.
@@ -313,6 +312,14 @@ This is a reviewed local configuration redesign, not an expansion into remote
 configuration, arbitrary source editing, or automatic maintenance dispatch.
 
 ## Journal
+
+### 2026-11-16 - Finite repository activation inspection accepted
+
+[Source acceptance](journal/2026/11.16-repository-activation-inspection.md)
+records #12918's actual merge, fail-first controls, native consumer outcomes,
+strict typing and required review/CI. Only P7179/V7179 and preservation C7179-1
+are accepted here. C7179-2, G7179-1, all incumbent participants and the remaining
+installed/release/effort-lifecycle gates retain their existing owners.
 
 ### 2026-10-24 - Conditional repository activation-truth intake (#7179)
 
