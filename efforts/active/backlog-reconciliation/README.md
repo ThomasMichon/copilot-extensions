@@ -3634,12 +3634,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
-  The agent-recommended [public-prose casing proposal](public-prose-casing-receiving.md)
-  would directly retain #4215's complete wording-only scope and token
+  The agent-recommended [accepted public-prose casing contract](public-prose-casing-receiving.md)
+  directly retains #4215's complete wording-only scope and token
   exclusions in existing #5799 acceptance. Its
   [dated journal](journal/2026/11.15-public-prose-casing-receiving.md)
-  preserves all material-campaign owners and independent wording families;
-  both issues remain OPEN pending review, actual receiving and a separate judgment.
+  records #12815, canonical Plan/global Validation delivery, complete actual
+  issue readback and separate #4215 `NOT_PLANNED` tracking retirement.
+  #5799 remains OPEN/Active; all technical rows and independent owners remain.
+  The verified queue is 839 whole open, 110 above fixed 729.
   The agent-recommended [accepted first-use CodeSpace doctor contract](venue-doctor-first-use-receiving.md)
   directly retains #9281's three remediation-OR-command cases and
   failing-command stderr in existing #954 acceptance. Its

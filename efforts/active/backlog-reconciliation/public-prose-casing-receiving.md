@@ -1,14 +1,21 @@
-# Public product-name prose: proposed receiving contract
+# Public product-name prose: accepted planned contract
 
 Back to [Backlog Reconciliation](README.md).
 
 ## Intent and exact scope
 
-This agent-recommended proposal would retain #4215's complete public-prose
+This agent-recommended intake directly retains #4215's complete public-prose
 product-casing request as an independent planned family in the existing
-#5799 adopter-material-refresh canonical. Both issues remain OPEN.
-Neither a correct overview heading nor a planning intake proves the complete
-wording correction has been implemented.
+#5799 adopter-material-refresh canonical and its canonical Plan/global
+Validation. The planning amendment merged in #12815; complete direct issue
+delivery and whole actual readback preceded the separate #4215 `NOT_PLANNED`
+tracking retirement. #5799 remains OPEN/Active and all six direct rows and
+three new canonical checklist items remain unchecked.
+
+Neither a correct overview heading, this planning intake nor the retired
+tracking token proves that the wording correction has been implemented.
+The [dated journal](journal/2026/11.15-public-prose-casing-receiving.md)
+records the actual effects and retained owners.
 
 The source requests canonical product casing in agent-codespaces and related
 public plugin documentation. Its refinements identify descriptive README
@@ -58,11 +65,12 @@ capture/assets, exhaustive owner-reference inventory and legacy setup-skill
 drift retain their independent work. Preserve every #433 and #3941 clause,
 check state, discussion, original alternative and owner.
 
-## Proposed direct issue intake
+## Direct accepted issue intake
 
-Publish only after required plan review and current qualification.
-Preserve the complete incumbent and discussions. All six new rows remain
-unchecked; they describe future technical work and its receiving boundary.
+This addition was published after required plan review, the canonical
+material-effort amendment and fresh qualification. The complete incumbent
+and discussions were preserved. All six new rows remain unchecked; they
+describe future technical work and its receiving boundary.
 
 ### Plan PC4215
 
@@ -137,8 +145,20 @@ runtime rollout is performed or authorized by this tracking intake.
 
 ## Publication boundary
 
-The [dated journal](journal/2026/11.15-public-prose-casing-receiving.md)
-records this proposal and its evidence. Normal review must precede issue
-mutation. Actual receiving, whole readback and any separately justified
-source retirement must be recorded afterward. The parent campaign's
-whole-queue checkpoint and all remaining Plan/Validation gates stay open.
+The publisher verified the reviewed canonical material Plan/global Validation,
+then appended the direct issue contract with the receiver's entire incumbent
+as an exact prefix. All fourteen earlier check states and five discussions
+remain intact, followed by six unchecked rows, Coordination and the source
+title/body verbatim. The canonical link is rendered as its public repository
+URL in the issue; no requirement changes through that link normalization.
+
+Complete actual readback and post-intake qualification preceded a separate
+source-specific judgment. #4215 is closed only as `NOT_PLANNED` redundant
+tracking; its original title/body, labels, assignments and earlier discussion
+remain. The public explanation distinguishes this accepted planned work from
+an implemented correction. No product documentation, runtime state, claim or
+resource custody was changed.
+
+The parent campaign's fixed whole-queue checkpoint and both efforts' remaining
+Plan/Validation gates stay open. The material campaign's primary-documentation
+participant remains released and further execution unassigned.
