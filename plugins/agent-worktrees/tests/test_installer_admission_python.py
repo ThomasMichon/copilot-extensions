@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -16,9 +17,16 @@ HOSTS = [
     if (host := shutil.which(name)) and (os.name == "nt" or not host.lower().endswith(".exe"))
 ]
 pytestmark = pytest.mark.guard
+Admission = tuple[Path, Path, Path, Path, Path]
 
 
-def test_admission_hosts_match_running_platform():
+class AdmissionReceipt(TypedDict):
+    python: str
+    arguments: list[str]
+    no_site: int
+
+
+def test_admission_hosts_match_running_platform() -> None:
     assert os.name == "nt" or all(not host.lower().endswith(".exe") for host in HOSTS)
 
 
@@ -27,7 +35,7 @@ def _quote(value: str | Path) -> str:
 
 
 @pytest.fixture
-def admission(tmp_path: Path):
+def admission(tmp_path: Path) -> Admission:
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)
     home = tmp_path / "empty-home"
@@ -88,10 +96,10 @@ def admission(tmp_path: Path):
 
 
 def _run(
-    admission, host: str, candidates: dict, explicit: Path | None = None,
+    admission: Admission, host: str, candidates: dict[str, list[str]], explicit: Path | None = None,
     *, native_driver: bool = False, participant: bool = False, first_use: bool = False,
     selected_snapshot: Path | str | None = None,
-):
+) -> tuple[subprocess.CompletedProcess[str], AdmissionReceipt | None]:
     root, script, home, receipt, _ = admission
     environment = {
         key: value for key, value in os.environ.items()
@@ -116,10 +124,11 @@ def _run(
         [host, "-NoLogo", "-NoProfile", "-File", str(script),
          *(["-BootstrapPython", str(explicit)] if explicit else [])],
         cwd=root, env=environment, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert not (home / "never-created").exists()
-    return result, json.loads(receipt.read_text()) if receipt.exists() else None
+    recorded: AdmissionReceipt | None = json.loads(receipt.read_text()) if receipt.exists() else None
+    return result, recorded
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
@@ -127,8 +136,8 @@ def _run(
 @pytest.mark.parametrize("contextual", [False, True])
 @pytest.mark.parametrize("participant", [False, True])
 def test_driver_precedes_legacy_or_contextual_publication(
-    admission, host, contextual, participant,
-):
+    admission: Admission, host: str, contextual: bool, participant: bool,
+) -> None:
     _root, script, home, _receipt, _old = admission
     (script.parent / "runtime_install_driver.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
@@ -156,7 +165,9 @@ def test_driver_precedes_legacy_or_contextual_publication(
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("participant", [False, True])
-def test_first_use_uses_nonblocking_driver_only_before_custody(admission, host, participant):
+def test_first_use_uses_nonblocking_driver_only_before_custody(
+    admission: Admission, host: str, participant: bool,
+) -> None:
     _root, script, home, _receipt, _old = admission
     (script.parent / "runtime_install_driver.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
@@ -181,7 +192,9 @@ def test_first_use_uses_nonblocking_driver_only_before_custody(admission, host, 
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("first_use", [False, True])
 @pytest.mark.parametrize("absent", [False, True])
-def test_first_use_forwards_its_selected_snapshot(admission, host, first_use, absent):
+def test_first_use_forwards_its_selected_snapshot(
+    admission: Admission, host: str, first_use: bool, absent: bool,
+) -> None:
     root, script, home, _receipt, _old = admission
     (script.parent / "runtime_install_driver.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
@@ -209,27 +222,29 @@ def test_first_use_forwards_its_selected_snapshot(admission, host, first_use, ab
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_admission_uses_payload_only_no_site_startup(admission, host):
+def test_admission_uses_payload_only_no_site_startup(admission: Admission, host: str) -> None:
     result, receipt = _run(
         admission, host, {}, explicit=Path(sys.executable),
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["no_site"] == 1
     assert "--run-lifecycle" in receipt["arguments"]
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_old_launcher_uses_compatible_path_python(admission, host):
+def test_old_launcher_uses_compatible_path_python(admission: Admission, host: str) -> None:
     result, receipt = _run(
         admission, host, {"py": [str(admission[4])], "python": [sys.executable]},
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == sys.executable
     assert "--run-lifecycle" in receipt["arguments"]
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_no_compatible_python_refuses_before_admission(admission, host):
+def test_no_compatible_python_refuses_before_admission(admission: Admission, host: str) -> None:
     result, receipt = _run(
         admission, host, {"py": [str(admission[4])], "python": [str(admission[4])]},
     )
@@ -239,7 +254,7 @@ def test_no_compatible_python_refuses_before_admission(admission, host):
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_valid_launcher_is_preferred(admission, host):
+def test_valid_launcher_is_preferred(admission: Admission, host: str) -> None:
     launcher = admission[0] / "valid-launcher.ps1"
     launcher.write_text(
         f"& {_quote(sys.executable)} @($args | Where-Object {{ $_ -ne '-3' }})\n"
@@ -248,12 +263,15 @@ def test_valid_launcher_is_preferred(admission, host):
     )
     result, receipt = _run(admission, host, {"py": [str(launcher)]})
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == sys.executable
 
 
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("selector", ["-3.14-64", "-V:PythonCore/3.14"])
-def test_old_default_finds_newer_launcher_only_interpreter(admission, host, selector):
+def test_old_default_finds_newer_launcher_only_interpreter(
+    admission: Admission, host: str, selector: str,
+) -> None:
     launcher = admission[0] / "registered-launcher.ps1"
     stream = "stderr" if selector.startswith("-3") else "stdout"
     inventory = (
@@ -275,19 +293,23 @@ def test_old_default_finds_newer_launcher_only_interpreter(admission, host, sele
     )
     result, receipt = _run(admission, host, {"py": [str(launcher)]})
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == sys.executable
     assert "--run-lifecycle" in receipt["arguments"]
 
 
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("compatible", [False, True])
-def test_explicit_python_is_validated_without_fallback(admission, host, compatible):
+def test_explicit_python_is_validated_without_fallback(
+    admission: Admission, host: str, compatible: bool,
+) -> None:
     result, receipt = _run(
         admission, host, {"python": [sys.executable]},
         Path(sys.executable) if compatible else admission[4],
     )
     if compatible:
         assert result.returncode == 0, result.stdout + result.stderr
+        assert receipt is not None
         assert receipt["python"] == sys.executable
     else:
         assert result.returncode != 0
@@ -296,7 +318,7 @@ def test_explicit_python_is_validated_without_fallback(admission, host, compatib
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_explicit_missing_python_is_not_ignored(admission, host):
+def test_explicit_missing_python_is_not_ignored(admission: Admission, host: str) -> None:
     result, receipt = _run(
         admission, host, {"python": [sys.executable]}, admission[0] / "absent.exe",
     )
@@ -307,7 +329,9 @@ def test_explicit_missing_python_is_not_ignored(admission, host):
 
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("action", ["install", "uninstall"])
-def test_native_mutation_requires_python311_before_driver_admission(admission, host, action):
+def test_native_mutation_requires_python311_before_driver_admission(
+    admission: Admission, host: str, action: str,
+) -> None:
     supported = admission[0] / "python310.ps1"
     supported.write_text(
         admission[4].read_text(encoding="utf-8").replace(
@@ -327,7 +351,9 @@ def test_native_mutation_requires_python311_before_driver_admission(admission, h
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_uninstall_refuses_a_bootstrap_prefix_selected_for_removal(admission, host):
+def test_uninstall_refuses_a_bootstrap_prefix_selected_for_removal(
+    admission: Admission, host: str,
+) -> None:
     script = admission[1]
     source = script.read_text(encoding="utf-8").replace("$Action='update'", "$Action='uninstall'")
     source = source.replace(
@@ -341,7 +367,9 @@ def test_uninstall_refuses_a_bootstrap_prefix_selected_for_removal(admission, ho
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_path_search_skips_alias_and_incompatible_first_match(admission, host):
+def test_path_search_skips_alias_and_incompatible_first_match(
+    admission: Admission, host: str,
+) -> None:
     alias = admission[0] / "WindowsApps" / "python.ps1"
     alias.parent.mkdir()
     alias.write_text("throw 'WindowsApps alias must not run'\n", encoding="utf-8")
@@ -350,12 +378,13 @@ def test_path_search_skips_alias_and_incompatible_first_match(admission, host):
         {"python3": [str(alias), str(admission[4]), sys.executable]},
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == sys.executable
     assert "WindowsApps alias must not run" not in result.stderr
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_exact_admission_floor_preserves_deferred_bootstrap(admission, host):
+def test_exact_admission_floor_preserves_deferred_bootstrap(admission: Admission, host: str) -> None:
     supported = admission[0] / "supported-python.ps1"
     supported.write_text(
         admission[4].read_text(encoding="utf-8").replace(
@@ -370,13 +399,14 @@ def test_exact_admission_floor_preserves_deferred_bootstrap(admission, host):
     )
     result, receipt = _run(admission, host, {}, supported)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == str(supported)
     assert "--deferred-runtime" in receipt["arguments"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
 @pytest.mark.parametrize("host", HOSTS)
-def test_native_stamp_uses_driver_with_the_python310_floor(admission, host):
+def test_native_stamp_uses_driver_with_the_python310_floor(admission: Admission, host: str) -> None:
     root, script, home, _receipt, old = admission
     supported = root / "supported-python.ps1"
     supported.write_text(
@@ -402,7 +432,9 @@ def test_native_stamp_uses_driver_with_the_python310_floor(admission, host):
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_discovered_python_preserves_unicode_path_through_native_output(admission, host):
+def test_discovered_python_preserves_unicode_path_through_native_output(
+    admission: Admission, host: str,
+) -> None:
     supported = admission[0] / "caf\u00e9" / "python.ps1"
     supported.parent.mkdir()
     supported.write_text(
@@ -413,24 +445,31 @@ def test_discovered_python_preserves_unicode_path_through_native_output(admissio
     )
     result, receipt = _run(admission, host, {"python": [str(supported)]})
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == str(supported)
     assert "--run-lifecycle" in receipt["arguments"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Python launcher")
 @pytest.mark.parametrize("host", HOSTS)
-def test_real_python39_launcher_first_touch_uses_compatible_alternative(admission, host):
+def test_real_python39_launcher_first_touch_uses_compatible_alternative(
+    admission: Admission, host: str,
+) -> None:
     supplied = os.environ.get("TEST_PYTHON39")
     launcher = shutil.which("py") if not supplied else None
-    if not supplied and launcher is None:
-        pytest.skip("Python launcher unavailable")
     if supplied:
         assert Path(supplied).is_absolute() and Path(supplied).is_file()
+        interpreter = [supplied]
+    else:
+        if launcher is None:
+            pytest.skip("Python launcher unavailable")
+        interpreter = [launcher, "-3.9"]
     discovery = subprocess.run(
-        [*([supplied] if supplied else [launcher, "-3.9"]),
+        [*interpreter,
          "-I", "-B", "-c",
          "import json,sys; print(json.dumps([sys.executable,list(sys.version_info[:2])]))"],
-        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if discovery.returncode != 0 and not supplied:
         pytest.skip("Existing Python 3.9 interpreter unavailable")
@@ -448,6 +487,7 @@ def test_real_python39_launcher_first_touch_uses_compatible_alternative(admissio
         admission, host, {"py": [str(fixture_launcher)], "python": [sys.executable]},
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt is not None
     assert receipt["python"] == sys.executable
     assert "--run-lifecycle" in receipt["arguments"]
     print(f"Actual Python {version} refused; admission reached Python {sys.version_info[:2]}")
