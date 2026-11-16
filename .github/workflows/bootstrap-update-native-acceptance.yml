@@ -70,6 +70,8 @@ jobs:
         run: >-
           python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['QUALIFICATION_SHA']; print('source='+actual)"
       - name: Qualify whole-operation joins, waiter loss and prepared-source compatibility
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=10"
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/native/test_bootstrap_update_native.py
