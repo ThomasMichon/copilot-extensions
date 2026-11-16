@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,9 @@ import pytest
 from agent_codespaces.relay_launch import (
     AZURE_AUTH_HELPER_COMPAT_DIR,
     FEED_TOKEN_REFRESH_DIR,
+    FEED_TOKEN_REFRESH_INTERVAL_ENV,
+    FEED_TOKEN_REFRESH_TIMEOUT_ENV,
+    FEED_TOKEN_REFRESH_VARS_ENV,
     SCRUB_ENV_VARS,
     build_azure_auth_helper_compat_shim,
     build_feed_token_exports,
@@ -258,6 +262,7 @@ def test_refresh_shim_remints_token_per_invocation(tmp_path: Path) -> None:
     env = {
         "HOME": str(home),
         "PATH": f"{real_bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+        FEED_TOKEN_REFRESH_INTERVAL_ENV: "0",
     }
     out = subprocess.run(
         [str(_posix_bash()), "-c", script], env=env, capture_output=True, text=True,
@@ -295,6 +300,115 @@ def test_refresh_shim_keeps_previous_token_when_mint_fails(tmp_path: Path) -> No
     )
     assert out.stdout.splitlines() == ["token=launch", "rc=127"]
     assert "rushx: command not found" in out.stderr
+
+
+def _helper_and_bin(tmp_path: Path, helper_body: str) -> tuple[Path, Path]:
+    home = tmp_path / "home"
+    helper = home / ".local" / "bin" / "ado-auth-helper"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("#!/usr/bin/env bash\n" + helper_body)
+    helper.chmod(0o755)
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir()
+    return home, real_bin
+
+
+def _tool(path: Path, body: str) -> None:
+    path.write_text("#!/usr/bin/env bash\n" + body)
+    path.chmod(0o755)
+
+
+def _run_bash(script: str, env: dict[str, str], cwd: Path | None = None) -> Any:
+    return subprocess.run(
+        [str(_posix_bash()), "-c", script], env=env, capture_output=True, text=True,
+        check=False, cwd=cwd, timeout=60,
+    )
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_skips_nested_remint_within_interval(tmp_path: Path) -> None:
+    counter = tmp_path / "count"
+    home, real_bin = _helper_and_bin(
+        tmp_path,
+        f'n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 ))\n'
+        f'echo "$n" > "{counter}"\necho "fresh-$n"\n',
+    )
+    _tool(real_bin / "rush", 'echo "rush=$FEED_TOKEN"; npm run x\n')
+    _tool(real_bin / "npm", 'echo "npm=$FEED_TOKEN"\n')
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "rush build"
+    )
+    env = {"HOME": str(home), "PATH": f"{real_bin}:/usr/bin:/bin"}
+    out = _run_bash(script, env)
+    assert out.stdout.splitlines() == ["rush=fresh-1", "npm=fresh-1"]
+    assert counter.read_text().strip() == "1"
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_bounds_a_stalled_mint(tmp_path: Path) -> None:
+    if shutil.which("timeout") is None:
+        pytest.skip("needs coreutils timeout")
+    home, real_bin = _helper_and_bin(tmp_path, "sleep 30\necho late\n")
+    _tool(real_bin / "npm", 'echo "token=$FEED_TOKEN"\n')
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "npm --version"
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": f"{real_bin}:/usr/bin:/bin",
+        FEED_TOKEN_REFRESH_TIMEOUT_ENV: "1",
+    }
+    started = time.monotonic()
+    out = _run_bash(script, env)
+    assert out.stdout.splitlines() == ["token=launch"]
+    assert time.monotonic() - started < 15
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_wraps_only_tools_present_at_launch(tmp_path: Path) -> None:
+    home, real_bin = _helper_and_bin(tmp_path, "echo fresh\n")
+    _tool(real_bin / "rush", "echo rush\n")
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + 'command -v rush; command -v pnpm || echo "pnpm missing"'
+    )
+    env = {"HOME": str(home), "PATH": f"{real_bin}:/usr/bin:/bin"}
+    out = _run_bash(script, env).stdout.splitlines()
+    assert out[0].endswith("/.cache/agent-codespaces/feed-token-path/rush")
+    assert out[1] == "pnpm missing"
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_walks_path_literally(tmp_path: Path) -> None:
+    home, _ = _helper_and_bin(tmp_path, "echo fresh\n")
+    bracket = tmp_path / "tools[1]"
+    sibling = tmp_path / "tools1"
+    cwd_bin = tmp_path / "cwd-bin"
+    for d in (bracket, sibling, cwd_bin):
+        d.mkdir()
+    _tool(bracket / "rush", "echo bracket\n")
+    _tool(sibling / "rush", "echo sibling\n")
+    _tool(cwd_bin / "npm", 'echo "cwd npm=$FEED_TOKEN"\n')
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "rush; npm"
+    )
+    env = {"HOME": str(home), "PATH": f"{bracket}:/usr/bin:/bin:"}
+    out = _run_bash(script, env, cwd=cwd_bin).stdout.splitlines()
+    assert out == ["bracket", "cwd npm=fresh"]
+
+
+def test_refresh_shim_refuses_reserved_feed_var_names() -> None:
+    assert build_feed_token_refresh_shim(["__acs_fte_name"]) == ""
+    assert build_feed_token_refresh_shim([FEED_TOKEN_REFRESH_VARS_ENV]) == ""
+    shim = build_feed_token_refresh_shim(["__acs_fte_token", "FEED_TOKEN"])
+    assert f"export {FEED_TOKEN_REFRESH_VARS_ENV}=FEED_TOKEN; " in shim
 
 
 def test_current_identity_prefers_short_user_alias(monkeypatch: pytest.MonkeyPatch) -> None:

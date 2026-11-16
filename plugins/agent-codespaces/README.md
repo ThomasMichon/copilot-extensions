@@ -482,10 +482,14 @@ relay-minted Azure bearer tokens into named env vars, and
 tokens represent. Ordinary user principals export the short alias (UPN local
 part); other principal types keep the reported identity string. Because a
 reused or resumed session outlives that launch-time bearer, the launch also
-puts a session-scoped wrapper directory first on `PATH` so each `rush`,
-`rushx`, `pnpm`, `npm`, `npx`, `yarn`, `nuget` or `dotnet` invocation re-mints
-the named vars (keeping the previous value if minting fails) before running the
-real tool.
+puts a session-scoped wrapper directory first on `PATH` for whichever of
+`rush`, `rushx`, `pnpm`, `npm`, `npx`, `yarn`, `nuget` and `dotnet` resolve at
+launch (absent tools stay absent). A wrapped invocation re-mints the named vars
+before running the real tool when the last mint in its process tree is older
+than `AGENT_CODESPACES_FEED_TOKEN_REFRESH_INTERVAL` seconds (default 300), so
+nested clients reuse a recent token. Minting is bounded by
+`AGENT_CODESPACES_FEED_TOKEN_REFRESH_TIMEOUT` seconds (default 10); on failure
+or timeout the previous value is kept.
 
 ### Installer reuse
 

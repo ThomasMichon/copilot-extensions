@@ -256,77 +256,125 @@ def build_feed_token_exports(var_names: Any) -> str:
 
 FEED_TOKEN_REFRESH_DIR = "$HOME/.cache/agent-codespaces/feed-token-path"
 FEED_TOKEN_REFRESH_VARS_ENV = "AGENT_CODESPACES_FEED_TOKEN_VARS"
+FEED_TOKEN_REFRESH_MINTED_ENV = "AGENT_CODESPACES_FEED_TOKEN_MINTED_AT"
+FEED_TOKEN_REFRESH_INTERVAL_ENV = "AGENT_CODESPACES_FEED_TOKEN_REFRESH_INTERVAL"
+FEED_TOKEN_REFRESH_TIMEOUT_ENV = "AGENT_CODESPACES_FEED_TOKEN_REFRESH_TIMEOUT"
+FEED_TOKEN_REFRESH_INTERVAL_SECONDS = 300
+FEED_TOKEN_REFRESH_TIMEOUT_SECONDS = 10
 FEED_TOKEN_REFRESH_TOOLS = (
     "rush", "rushx", "pnpm", "npm", "npx", "yarn", "nuget", "dotnet",
 )
+# Wrapper bookkeeping uses these reserved names, so configured feed vars must
+# not reuse them.
+_FEED_TOKEN_RESERVED_PREFIXES = ("__acs_fte_", "AGENT_CODESPACES_FEED_TOKEN_")
 
-# Wrapper installed under FEED_TOKEN_REFRESH_DIR for each feed client. It
-# re-mints the bearer, keeps the previous value when minting fails, and execs
-# the next same-named binary on PATH (skipping its own directory).
-_FEED_TOKEN_REFRESH_SCRIPT = """#!/usr/bin/env bash
-self_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)"
-name="$(basename "$0")"
-if [ -n "${%(vars)s:-}" ]; then
-  token="$("%(helper)s" get-access-token 2>/dev/null || true)"
-  if [ -n "$token" ]; then
-    for var in ${%(vars)s}; do
-      case "$var" in
-        [A-Za-z_]*) export "$var=$token" ;;
-      esac
-    done
+# Wrapper installed under FEED_TOKEN_REFRESH_DIR for each feed client. When
+# the last successful mint in this process tree is older than the refresh
+# interval, it re-mints the bearer under a hard deadline (keeping the previous
+# value on failure), then execs the next same-named binary on PATH, skipping
+# its own directory.
+_FEED_TOKEN_REFRESH_SCRIPT = (
+    """#!/usr/bin/env bash
+__acs_fte_self="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)"
+__acs_fte_name="$(basename "$0")"
+if [ -n "${@VARS@:-}" ]; then
+  __acs_fte_now="$(date +%s 2>/dev/null)"
+  __acs_fte_last="${@MINTED@:-0}"
+  __acs_fte_every="${@INTERVAL@:-@INTERVAL_DEFAULT@}"
+  __acs_fte_wait="${@TIMEOUT@:-@TIMEOUT_DEFAULT@}"
+  case "$__acs_fte_now" in ''|*[!0-9]*) __acs_fte_now=0 ;; esac
+  case "$__acs_fte_last" in ''|*[!0-9]*) __acs_fte_last=0 ;; esac
+  case "$__acs_fte_every" in ''|*[!0-9]*) __acs_fte_every=@INTERVAL_DEFAULT@ ;; esac
+  case "$__acs_fte_wait" in ''|*[!0-9]*) __acs_fte_wait=@TIMEOUT_DEFAULT@ ;; esac
+  if [ "$__acs_fte_now" -eq 0 ] \\
+      || [ $(( __acs_fte_now - __acs_fte_last )) -ge "$__acs_fte_every" ] \\
+      || [ "$__acs_fte_now" -lt "$__acs_fte_last" ]; then
+    if command -v timeout >/dev/null 2>&1; then
+      __acs_fte_token="$(timeout -k 2 "$__acs_fte_wait" "@HELPER@" get-access-token 2>/dev/null || true)"
+    else
+      __acs_fte_token="$("@HELPER@" get-access-token 2>/dev/null || true)"
+    fi
+    if [ -n "$__acs_fte_token" ]; then
+      read -r -a __acs_fte_vars <<< "${@VARS@}"
+      for __acs_fte_var in "${__acs_fte_vars[@]}"; do
+        case "$__acs_fte_var" in
+          ''|[0-9]*|*[!A-Za-z0-9_]*|__acs_fte_*|AGENT_CODESPACES_FEED_TOKEN_*) ;;
+          *) export "$__acs_fte_var=$__acs_fte_token" ;;
+        esac
+      done
+      export @MINTED@="$__acs_fte_now"
+    fi
+    unset __acs_fte_token
   fi
-  unset token
 fi
-real=""
-IFS=:
-for dir in $PATH; do
-  [ -n "$dir" ] || continue
-  resolved="$(cd "$dir" 2>/dev/null && pwd -P)"
-  [ "$resolved" = "$self_dir" ] && continue
-  if [ -x "$dir/$name" ] && [ ! -d "$dir/$name" ]; then
-    real="$dir/$name"
+__acs_fte_real=""
+__acs_fte_rest="$PATH:"
+while [ -n "$__acs_fte_rest" ]; do
+  __acs_fte_dir="${__acs_fte_rest%%:*}"
+  __acs_fte_rest="${__acs_fte_rest#*:}"
+  [ -n "$__acs_fte_dir" ] || __acs_fte_dir=.
+  [ "$(cd "$__acs_fte_dir" 2>/dev/null && pwd -P)" = "$__acs_fte_self" ] && continue
+  if [ -x "$__acs_fte_dir/$__acs_fte_name" ] && [ ! -d "$__acs_fte_dir/$__acs_fte_name" ]; then
+    __acs_fte_real="$__acs_fte_dir/$__acs_fte_name"
     break
   fi
 done
-unset IFS
-if [ -z "$real" ]; then
-  echo "$name: command not found" >&2
+if [ -z "$__acs_fte_real" ]; then
+  echo "$__acs_fte_name: command not found" >&2
   exit 127
 fi
-exec "$real" "$@"
-""" % {"vars": FEED_TOKEN_REFRESH_VARS_ENV, "helper": ADO_AUTH_HELPER}
+exec "$__acs_fte_real" "$@"
+"""
+    .replace("@VARS@", FEED_TOKEN_REFRESH_VARS_ENV)
+    .replace("@MINTED@", FEED_TOKEN_REFRESH_MINTED_ENV)
+    .replace("@INTERVAL@", FEED_TOKEN_REFRESH_INTERVAL_ENV)
+    .replace("@TIMEOUT@", FEED_TOKEN_REFRESH_TIMEOUT_ENV)
+    .replace("@INTERVAL_DEFAULT@", str(FEED_TOKEN_REFRESH_INTERVAL_SECONDS))
+    .replace("@TIMEOUT_DEFAULT@", str(FEED_TOKEN_REFRESH_TIMEOUT_SECONDS))
+    .replace("@HELPER@", ADO_AUTH_HELPER)
+)
 
 
 def build_feed_token_refresh_shim(var_names: Any) -> str:
-    """POSIX snippet that re-mints feed tokens on every feed-client invocation.
+    """POSIX snippet that re-mints feed tokens on feed-client invocations.
 
     :func:`build_feed_token_exports` mints the bearer once, at launch. A
     reused or resumed session outlives that short-lived token, so a later
     ``rush install`` sends an expired bearer and the feed answers 401. This
     prepends a launch-scoped PATH directory with wrappers for the common feed
-    clients; each wrapper mints a fresh bearer through the relay-backed
-    ``ado-auth-helper`` and then execs the real binary. Like the
-    ``azure-auth-helper`` compat shim, PATH is exported only for this launch
-    and never written to a dotfile.
+    clients that resolve at launch; each wrapper mints a fresh bearer through
+    the relay-backed ``ado-auth-helper`` (under a short deadline, at most once
+    per refresh interval in a process tree) and then execs the real binary.
+    Tools absent at launch get no wrapper, so ``command -v`` still reports
+    them missing. Like the ``azure-auth-helper`` compat shim, PATH is exported
+    only for this launch and never written to a dotfile.
     """
-    names = _valid_env_names(var_names)
+    names = [
+        name for name in _valid_env_names(var_names)
+        if not name.startswith(_FEED_TOKEN_RESERVED_PREFIXES)
+    ]
     if not names:
         return ""
     d = FEED_TOKEN_REFRESH_DIR
     script = shlex.quote(_FEED_TOKEN_REFRESH_SCRIPT)
-    out = (
+    tools = " ".join(FEED_TOKEN_REFRESH_TOOLS)
+    return (
         f"export {FEED_TOKEN_REFRESH_VARS_ENV}={shlex.quote(' '.join(names))}; "
         f'mkdir -p "{d}" 2>/dev/null && '
         f'printf %s {script} > "{d}/.feed-token-exec.$$" 2>/dev/null && '
         f'chmod 755 "{d}/.feed-token-exec.$$" 2>/dev/null && '
         f'mv -f "{d}/.feed-token-exec.$$" "{d}/feed-token-exec" 2>/dev/null && '
         "{ "
+        f"for __acs_fte_tool in {tools}; do "
+        f'rm -f "{d}/$__acs_fte_tool"; '
+        'if command -v "$__acs_fte_tool" >/dev/null 2>&1; then '
+        f'ln -sf feed-token-exec "{d}/$__acs_fte_tool"; '
+        "fi; "
+        "done; "
+        "unset __acs_fte_tool; "
+        f'export PATH="{d}:$PATH"; '
+        "} || true; "
     )
-    for tool in FEED_TOKEN_REFRESH_TOOLS:
-        out += f'ln -sf feed-token-exec "{d}/{tool}"; '
-    out += f'export PATH="{d}:$PATH"; '
-    out += "} || true; "
-    return out
 
 
 def build_identity_env_exports(var_names: Any) -> str:
