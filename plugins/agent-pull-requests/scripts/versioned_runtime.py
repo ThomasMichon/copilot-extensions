@@ -68,7 +68,9 @@ import sys
 import threading
 import time
 from pathlib import Path
-from contextlib import contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, suppress
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, cast
 
 
 _runtime_components = globals().get("_retained_runtime_components", {})
@@ -84,7 +86,7 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_reset_runtime_component_lock)
 
 
-def _runtime_component(name: str):
+def _runtime_component(name: str) -> Any:
     with _runtime_components_lock:
         if name not in _runtime_components:
             source = Path(__file__).with_name(name + ".py")
@@ -93,7 +95,14 @@ def _runtime_component(name: str):
                 raise FileNotFoundError(f"Runtime component is unavailable: {name}")
             component = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = component
-            exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
+            read_source = source
+            if os.name == "nt":
+                # The lease module's native-path helper is not loaded yet.
+                value = os.path.abspath(source)
+                if not value.startswith("\\\\?\\"):
+                    value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+                read_source = Path(value)
+            exec(compile(read_source.read_bytes(), str(source), "exec"), component.__dict__)
             _runtime_components[name] = component
         return _runtime_components[name]
 
@@ -114,38 +123,21 @@ _normalize_windows_extended_path = _leases.normalize_windows_extended_path
 CURRENT_LINK = "current"
 VERSIONS_DIR = "versions"
 RUNNING_VERSION_FILE = "running-version.json"
-# The active version is published as a plain-text marker file (no reparse point),
-# replacing the legacy `current`/`venv` directory junction. A marker file is
-# never blocked by RedirectionGuard (WinError 448 "untrusted mount point") the
-# way traversing a junction is, and the runtime is selected by version-pinned
-# binstubs the installer rewrites on cutover -- so no junction is needed at all.
+# A plain-text selector and version-pinned binstubs replace legacy junctions,
+# avoiding RedirectionGuard's WinError 448 without a mutable runtime link.
 CURRENT_VERSION_FILE = "current-version"
-# The last version `activate()` published, stamped atomically alongside the
-# marker. It is the fallback resolution target: if the `current-version` marker
-# is missing or malformed (or unreadable on POSIX), a resolver prefers the
-# last-known-good version -- whose slot, having been the active one, still exists
-# -- over guessing the newest installed slot. See `resolve_python`.
+# Atomic activation fallback: resolve_python prefers this prior selection over
+# guessing when current-version is missing, malformed or unreadable on POSIX.
 LAST_KNOWN_GOOD_FILE = "last-known-good"
 
-# The interpreter sub-paths inside a version slot, POSIX then Windows layout.
-# The single place the "where is the slot's python" answer lives, so every
-# resolver (this module, the shell resolvers, the binstubs) agrees.
+# Canonical slot interpreter paths for all resolvers: POSIX, then Windows.
 SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
 
-# The one well-known, mutable slot name (dotfiles / mutable-dev-slot pattern):
-# unlike every other version, `versions/dev/` is meant to be rebuilt in place
-# (e.g. an editable/`-e` install from a live worktree checkout) rather than
-# treated as an immutable, once-built artifact. It still uses the same
-# completion-marker / activate machinery as any other slot -- an installer
-# marks it complete after a healthy (re)build, same as always -- the only
-# structural differences are: (1) GC never reclaims it while a claim is live
-# (see `gc`'s `read_dev_claim` check), and (2) a claim (below) gates who may
-# rebuild/activate it, so two worktrees can't silently clobber each other's
-# mutable install.
+# The sole mutable slot supports in-place development rebuilds, but retains
+# ordinary completion and activation checks. GC preserves it while claimed;
+# the claim serializes rebuild/activation ownership across worktrees.
 DEV_VERSION = "dev"
-# The dev-slot claim record, a sibling of `current-version`/`last-known-good`.
-# Schema-versioned like the runtime-slot-ownership marker family so a future
-# reader can validate/evolve it without guessing.
+# Schema-versioned dev-slot claim beside the current/last-known-good selectors.
 DEV_CLAIM_FILE = "dev-claim.json"
 DEV_CLAIM_SCHEMA = "copilot-extensions.dev-slot-claim"
 
@@ -166,7 +158,7 @@ def current_link(root: Path, link_name: str = CURRENT_LINK) -> Path:
     return root / link_name
 
 
-def list_versions(root: Path, *, check=None) -> list[str]:
+def list_versions(root: Path, *, check: Callable[[], None] | None = None) -> list[str]:
     """Installed version directory names, sorted (newest-looking last)."""
     vroot = _leases._native_path(versions_root(root))
     if not _leases.checked(check, vroot.is_dir):
@@ -183,10 +175,10 @@ def list_versions(root: Path, *, check=None) -> list[str]:
 
 def package_version(slot_name: str) -> str:
     """Separate generated source/repair identities from the package version."""
-    return _runtime_component("versioned_runtime_source").package_version(slot_name)
+    return cast(str, _runtime_component("versioned_runtime_source").package_version(slot_name))
 
 
-def _version_key(v: str):
+def _version_key(v: str) -> Any:
     """Order package releases and profiles before generated repair identities."""
     return _runtime_component("versioned_runtime_source").version_key(v)
 
@@ -338,14 +330,14 @@ def resolve_python(root: Path) -> Path | None:
     Every tier requires a valid completion marker, so a partially built slot is
     never selected merely because it contains an interpreter-shaped file.
     """
-    return _runtime_component("versioned_runtime_construction").resolve_completed_python(
+    return cast(Path | None, _runtime_component("versioned_runtime_construction").resolve_completed_python(
         root, current_version=lambda path: current_version(path, _tolerate_slot_error=True),
         read_last_known_good=read_last_known_good,
         is_complete=is_complete, slot_python=slot_python, list_versions=list_versions,
         requires_exact_selection=lambda versions: _runtime_component(
             "versioned_runtime_source"
         ).requires_exact_selection(versions),
-    )
+    ))
 
 
 # --------------------------------------------------------------------------
@@ -590,8 +582,10 @@ def _slot(root: Path, version: str, *, clean_incomplete: bool = False,
 # GC
 # --------------------------------------------------------------------------
 
-def _running_pids(root: Path, *, check=None) -> set[int]:
-    return _leases.running_pids(root, filename=RUNNING_VERSION_FILE, alive=_pid_alive, check=check)
+def _running_pids(root: Path, *, check: Callable[[], None] | None = None) -> set[int]:
+    return cast(set[int], _leases.running_pids(
+        root, filename=RUNNING_VERSION_FILE, alive=_pid_alive, check=check,
+    ))
 
 
 def _pid_alive(pid: int) -> bool:
@@ -603,7 +597,7 @@ def _pid_alive(pid: int) -> bool:
 
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
             STILL_ACTIVE = 259
-            k32 = ctypes.windll.kernel32
+            k32 = getattr(ctypes, "windll").kernel32
             h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not h:
                 return False
@@ -642,7 +636,7 @@ def _pid_image_path(pid: int) -> str | None:
             from ctypes import wintypes
 
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            k32 = ctypes.windll.kernel32
+            k32 = getattr(ctypes, "windll").kernel32
             k32.OpenProcess.restype = wintypes.HANDLE
             k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
@@ -668,7 +662,7 @@ def _pid_image_path(pid: int) -> str | None:
         return None
 
 
-def _iter_all_pids(*, check=None) -> list[int]:
+def _iter_all_pids(*, check: Callable[[], None] | None = None) -> list[int]:
     """Best-effort list of live process ids on this machine (``[]`` if we cannot
     enumerate). Windows: psapi ``EnumProcesses``. POSIX: numeric ``/proc`` dirs.
     """
@@ -677,7 +671,7 @@ def _iter_all_pids(*, check=None) -> list[int]:
             import ctypes
             from ctypes import wintypes
 
-            psapi = ctypes.windll.psapi
+            psapi = getattr(ctypes, "windll").psapi
             n = 4096
             while True:
                 if check:
@@ -777,7 +771,9 @@ def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> st
     return next((version for version in versions if os.path.normcase(version) == first), None)
 
 
-def _recorded_live_versions(root: Path, versions: set[str], *, check=None) -> set[str]:
+def _recorded_live_versions(
+    root: Path, versions: set[str], *, check: Callable[[], None] | None = None,
+) -> set[str]:
     """Versions explicitly recorded live in ``running-version.json`` -- the
     symlink-proof signal a daemon writes about itself (``{version, pid}``). The
     recorded PEP 440 string is matched to the actual dir name via
@@ -802,14 +798,14 @@ def _recorded_live_versions(root: Path, versions: set[str], *, check=None) -> se
     return out
 
 
-def _versions_with_live_process(root: Path, *, check=None) -> set[str]:
+def _versions_with_live_process(root: Path, *, check: Callable[[], None] | None = None) -> set[str]:
     """Live slots from recorded ownership, lexical argv[0] and native images."""
-    return _leases.versions_with_live_process(
+    return cast(set[str], _leases.versions_with_live_process(
         root, versions=list_versions, recorded=_recorded_live_versions,
         pids=_iter_all_pids, running=_running_pids,
         probes=(_pid_cmdline_argv0, _pid_image_path), slot_of_path=_slot_of_path,
         versions_abs=os.path.abspath(str(root / VERSIONS_DIR)), check=check,
-    )
+    ))
 
 
 _AV_RETRY_ATTEMPTS = 4
@@ -947,7 +943,7 @@ def _remove_slot(d: Path, *, label: str) -> bool:
     return _rmtree_deferrable(d, label=label)
 
 
-def remove_owned_candidate(root: Path, version: str, *, remove,
+def remove_owned_candidate(root: Path, version: str, *, remove: Callable[[Path], None],
                            link_name: str = CURRENT_LINK) -> None:
     """Run the installation owner's exact deletion under canonical cleanup custody."""
     component, runtime = _candidate_cleanup_operations()
@@ -981,17 +977,20 @@ def gc(root: Path, keep: list[str] | None = None,
     traversing the junction target.
     """
     root = _leases._native_path(root)
-    return _runtime_component("versioned_runtime_cache").gc(
+    return cast(list[str], _runtime_component("versioned_runtime_cache").gc(
         root, candidates=_gc_candidate_versions, cleanup_lease=_cleanup_lease,
         protected=lambda **kwargs: _gc_protected_versions(root, keep, protect_pids, link_name, **kwargs),
         version_dir=version_dir, is_link=_is_link, slot_age_days=_slot_age_days,
         remove_slot=_remove_slot, min_age_days=min_age_days,
         windows_owned_file=_leases.windows_owned_file,
-    )
+    ))
 
 
-def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str, *, check=None) -> set[str]:
-    return _leases.gc_protected_versions(
+def _gc_protected_versions(
+    root: Path, keep: list[str] | None, protect_pids: bool, link_name: str, *,
+    check: Callable[[], None] | None = None,
+) -> set[str]:
+    return cast(set[str], _leases.gc_protected_versions(
         root, keep, protect_pids, link_name,
         selectors=(CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE), current_version=current_version,
         dev_claim=read_dev_claim, dev_version=DEV_VERSION,
@@ -1001,7 +1000,7 @@ def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str,
         ),
         running=(lambda root: _running_pids(root, check=check)) if check else _running_pids,
         versions=list_versions, check=check,
-    )
+    ))
 
 
 # --------------------------------------------------------------------------
@@ -1024,7 +1023,7 @@ def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str,
 class DevClaimConflict(RuntimeError):
     """Raised when a dev-slot claim/release is attempted by a non-owner."""
 
-    def __init__(self, existing: dict):
+    def __init__(self, existing: dict[str, Any]):
         owner = existing.get("owner")
         super().__init__(f"dev slot is already claimed by {owner!r}")
         self.existing = existing
@@ -1039,14 +1038,14 @@ def is_dev_generation(version: str) -> bool:
     return bool(re.fullmatch(r"dev-(?:[0-9a-f]{32}|[0-9a-f]{64})", version))
 
 
-def _require_dev_owner(root: Path, owner: str | None) -> dict:
+def _require_dev_owner(root: Path, owner: str | None) -> dict[str, Any]:
     claim = read_dev_claim(root, strict=True)
     if not owner or claim is None or claim["owner"] != owner:
         raise RuntimeError("development generation requires its current canonical claim owner")
     return claim
 
 
-def _write_dev_claim(root: Path, record: dict) -> None:
+def _write_dev_claim(root: Path, record: dict[str, Any]) -> None:
     path = dev_claim_path(root)
     tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
     try:
@@ -1056,7 +1055,7 @@ def _write_dev_claim(root: Path, record: dict) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _validate_dev_previous_version(previous) -> None:
+def _validate_dev_previous_version(previous: object) -> None:
     if previous is not None and (
         not isinstance(previous, str) or
         not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", previous) or previous.endswith(".")
@@ -1064,7 +1063,7 @@ def _validate_dev_previous_version(previous) -> None:
         raise ValueError("dev rollback version must be a single ordinary slot name or None")
 
 
-def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
+def read_dev_claim(root: Path, *, strict: bool = False) -> dict[str, Any] | None:
     """Return the current dev-slot claim record, or ``None`` if absent/malformed.
 
     Status reads retain their legacy malformed-as-absent behavior. Cleanup and
@@ -1097,7 +1096,7 @@ def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
 
 
 def claim_dev(root: Path, owner: str, *, host: str | None = None,
-             previous_version: str | None = None, force: bool = False) -> dict:
+             previous_version: str | None = None, force: bool = False) -> dict[str, Any]:
     """Publish a dev claim under the same selector guard as cleanup."""
     if not isinstance(owner, str) or not owner.strip():
         raise ValueError("dev claim owner must be a nonempty string")
@@ -1107,7 +1106,7 @@ def claim_dev(root: Path, owner: str, *, host: str | None = None,
 
 
 def _claim_dev(root: Path, owner: str, *, host: str | None = None,
-               previous_version: str | None = None, force: bool = False) -> dict:
+               previous_version: str | None = None, force: bool = False) -> dict[str, Any]:
     """Claim the mutable ``dev`` slot for ``owner``.
 
     Refuses (raises :class:`DevClaimConflict`) if a *different* owner already
@@ -1121,7 +1120,7 @@ def _claim_dev(root: Path, owner: str, *, host: str | None = None,
     if existing is not None and existing.get("owner") != owner and not force:
         raise DevClaimConflict(existing)
     same_owner_reclaim = existing is not None and existing.get("owner") == owner
-    record = {
+    record: dict[str, Any] = {
         "schema": DEV_CLAIM_SCHEMA,
         "version": 1,
         "owner": owner,
@@ -1129,11 +1128,11 @@ def _claim_dev(root: Path, owner: str, *, host: str | None = None,
         "pid": os.getpid(),
         "claimed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "previous_version": (
-            existing.get("previous_version") if same_owner_reclaim
+            existing.get("previous_version") if existing is not None and same_owner_reclaim
             else previous_version
         ),
     }
-    if same_owner_reclaim and existing.get("selected_generation"):
+    if existing is not None and same_owner_reclaim and existing.get("selected_generation"):
         record["selected_generation"] = existing["selected_generation"]
     root.mkdir(parents=True, exist_ok=True)
     _write_dev_claim(root, record)
@@ -1141,7 +1140,7 @@ def _claim_dev(root: Path, owner: str, *, host: str | None = None,
 
 
 def release_dev(root: Path, owner: str, *, force: bool = False,
-                restore: bool = False, link_name: str = CURRENT_LINK) -> dict | None:
+                restore: bool = False, link_name: str = CURRENT_LINK) -> dict[str, Any] | None:
     """Settle a dev claim under the same selector guard as cleanup."""
     from contextlib import ExitStack
 
@@ -1163,7 +1162,7 @@ def release_dev(root: Path, owner: str, *, force: bool = False,
 
 def _release_dev(root: Path, owner: str, *, force: bool = False,
                  restore: bool = False, previous: str | None = None,
-                 link_name: str = CURRENT_LINK) -> dict | None:
+                 link_name: str = CURRENT_LINK) -> dict[str, Any] | None:
     """Release ``owner``'s claim on the ``dev`` slot.
 
     Returns the released claim record (so the caller can read
@@ -1211,8 +1210,8 @@ def marker_path(root: Path, version: str) -> Path:
     return version_dir(root, version) / COMPLETE_MARKER
 
 
-def _unique_object_pairs_hook(pairs):
-    out = {}
+def _unique_object_pairs_hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     for key, value in pairs:
         if key in out:
             raise ValueError(f"duplicate JSON field: {key}")
@@ -1220,14 +1219,14 @@ def _unique_object_pairs_hook(pairs):
     return out
 
 
-def _load_unique_json(path: Path):
+def _load_unique_json(path: Path) -> Any:
     return json.loads(
         path.read_text(encoding="utf-8"),
         object_pairs_hook=_unique_object_pairs_hook,
     )
 
 
-def validate_marker(data, version: str) -> dict | None:
+def validate_marker(data: object, version: str) -> dict[str, Any] | None:
     """Validate the canonical completion-marker schema.
 
     JSON field order is intentionally irrelevant to Python readers. The shell
@@ -1255,7 +1254,7 @@ def validate_marker(data, version: str) -> dict | None:
     return data
 
 
-def read_marker(root: Path, version: str) -> dict | None:
+def read_marker(root: Path, version: str) -> dict[str, Any] | None:
     """Parse completion evidence; absent/malformed is None, storage errors raise."""
     try:
         data = _runtime_component("versioned_runtime_construction").read_completion(
@@ -1307,7 +1306,7 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
     import tempfile
     import time as _t
 
-    payload: dict = {
+    payload: dict[str, Any] = {
         "version": version,
         "completed_at": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
         "pid": pid if pid is not None else os.getpid(),
@@ -1409,7 +1408,7 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 @contextmanager
 def retention_lease(root: Path, version: str, *, payload_hash: str | None = None,
                     timeout: float = 60.0, poll_interval: float = 0.05,
-                    require_installed: bool = True):
+                    require_installed: bool = True) -> Iterator[Path]:
     """Pin an existing candidate or rollback slot until its lifecycle settles.
 
     Shared holders coexist. Cleanup takes the same lease exclusively and
@@ -1429,16 +1428,18 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
 
 def retention_custody(root: Path, version: str, *, payload_hash: str | None = None,
                       timeout: float = 60.0, poll_interval: float = 0.05,
-                      require_installed: bool = True):
+                      require_installed: bool = True) -> AbstractContextManager[tuple[Path, int | None]]:
     """Yield a retained slot and borrowed descriptor under the same lease protocol.
     POSIX guardians may inherit it; callers must never close it themselves.
     """
-    return _runtime_component("versioned_runtime_construction").retention_custody(
+    return cast(AbstractContextManager[tuple[Path, int | None]], _runtime_component(
+        "versioned_runtime_construction",
+    ).retention_custody(
         root, version, payload_hash=payload_hash, require_installed=require_installed,
         timeout=timeout, poll_interval=poll_interval, kernel_lease=_kernel_lease,
         version_dir=version_dir, is_link=_is_link,
         check_admission=check_admission, admit_reuse=ADMIT_REUSE,
-    )
+    ))
 
 
 def retain_runtime_helpers(slot: Path, *, complete: bool, context_source: Path | None = None) -> None:
@@ -1470,17 +1471,17 @@ def construction_session(root: Path, version: str, *, payload_hash: str,
         slot=slot,
         discard_failed_candidate=discard_failed_candidate,
     )
-    return component.construction_session(
+    return cast(int, component.construction_session(
         runtime, root, version, payload_hash=payload_hash, link_name=link_name, dev_owner=dev_owner,
         footprint=footprint, plugin=plugin,
-    )
+    ))
 
 
 def construction_shell_helpers(shell: str) -> str:
-    return _runtime_component("versioned_runtime_construction").construction_shell_helpers(shell)
+    return cast(str, _runtime_component("versioned_runtime_construction").construction_shell_helpers(shell))
 
 
-def _candidate_cleanup_operations():
+def _candidate_cleanup_operations() -> tuple[Any, Any]:
     component = _runtime_component("versioned_runtime_construction")
     return component, component.CleanupOperations(
         version_dir=version_dir, marker_path=marker_path, _is_link=_is_link,
@@ -1491,12 +1492,13 @@ def _candidate_cleanup_operations():
 
 
 def discard_failed_candidate(root: Path, version: str, *,
-                             link_name: str = CURRENT_LINK, validate=None) -> bool:
+                             link_name: str = CURRENT_LINK,
+                             validate: Callable[[Path], None] | None = None) -> bool:
     """Discard an unfinished, construction-owned slot; never completion evidence."""
     component, runtime = _candidate_cleanup_operations()
-    return component.discard_failed_candidate(
+    return cast(bool, component.discard_failed_candidate(
         runtime, root, version, link_name=link_name, validate=validate,
-    )
+    ))
 
 
 #: Admission decision states. A caller branches on these, never guesses from
@@ -1509,12 +1511,16 @@ ADMIT_CONSTRUCT = "construct"
 ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 
 
-def fingerprint_source(paths, *, on_progress=None, file_hashes=None, on_file=None) -> str:
+def fingerprint_source(
+    paths: Iterable[Path], *, on_progress: Callable[[], None] | None = None,
+    file_hashes: dict[Path, str] | None = None,
+    on_file: Callable[[Path, bytes], None] | None = None,
+) -> str:
     """Fingerprint complete source inputs through the shipped stdlib component."""
-    return _runtime_component("versioned_runtime_source").fingerprint_source(
+    return cast(str, _runtime_component("versioned_runtime_source").fingerprint_source(
         paths, _normalize_windows_extended_path=_normalize_windows_extended_path, on_file=on_file,
         on_progress=on_progress, file_hashes=file_hashes, _native_path=_leases._native_path,
-    )
+    ))
 
 
 def check_admission(root: Path, version: str, *, payload_hash: str | None) -> str:
@@ -1642,7 +1648,7 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
                 return ADMIT_HEALTH_REPAIR_REQUIRED
             try:
                 marker_fd = os.open(
-                    COMPLETE_MARKER, os.O_RDONLY | nofollow | os.O_NONBLOCK,
+                    COMPLETE_MARKER, os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK"),
                     dir_fd=vdir_fd,
                 )
             except FileNotFoundError:
@@ -1732,7 +1738,7 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
 # CLI
 # --------------------------------------------------------------------------
 
-def _emit(data, json_mode: bool) -> None:
+def _emit(data: object, json_mode: bool) -> None:
     if json_mode:
         print(json.dumps(data))
     elif isinstance(data, list):
@@ -1933,14 +1939,14 @@ def main(argv: list[str] | None = None) -> int:
                                force=args.force)
             _emit(record if args.json else record, args.json)
         elif args.cmd == "dev-release":
-            record = release_dev(
+            released_record = release_dev(
                 root, args.owner, force=args.force,
                 restore=args.restore, link_name=link_name,
             )
-            _emit(record if args.json else (record or {}), args.json)
+            _emit(released_record if args.json else (released_record or {}), args.json)
         elif args.cmd == "dev-status":
-            record = read_dev_claim(root)
-            _emit(record, args.json)
+            status_record = read_dev_claim(root)
+            _emit(status_record, args.json)
         else:  # pragma: no cover
             p.error(f"unknown command {args.cmd}")
     except DevClaimConflict as exc:
