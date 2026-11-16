@@ -758,6 +758,11 @@ not the transport Bridge uses internally or a replacement for durable TCP ACKs.
   under the other authenticated GitHub accounts. All lookup commands share a
   30-second budget. Unavailable or unverifiable venues remain untouched; a later
   Available result permits recovery. Healthy attached sessions need no check.
+- **Explicit CodeSpace Host retirement resolves its account again.** Persisted
+  SSH endpoints do not store credentials. Remote retirement uses the existing
+  account-aware CodeSpace transport instead of dialing the saved ProxyCommand
+  under ambient authentication. An unverified account or unconfirmed process
+  exit retains the session reservation and conversation for recovery.
 - **Background reconnect is bounded.** Heartbeat-driven reconnect retries back
   off exponentially up to five minutes. An idle, unwatched session that keeps
   failing background recovery is parked dormant instead of hammering an

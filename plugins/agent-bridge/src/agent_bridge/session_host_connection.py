@@ -906,13 +906,11 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
             def refresh(self):
                 return self._cfg
 
-        cfg = ssh_config_from_endpoint(endpoint)
-        host = cfg.host_alias
+        host = None
         mgr = None
         confirmed_dead = False
         try:
             mgr = ConnectionManager()
-            await mgr.ensure_connected(host, _StaticSource(cfg), [])
             # Kill the host's whole PROCESS GROUP, not just the host pid. The
             # host was launched via ``setsid`` (so it leads its own group,
             # pgid == host_pid) and the ``bash -lc`` wrapper + the copilot
@@ -923,8 +921,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
             # flush), then SIGKILL as a backstop.
             pid = int(rec.host_pid)
             child_pid = int(rec.child_pid)
-            result = await mgr.exec_command(
-                host,
+            command = (
                 f"kill -TERM -{pid} 2>/dev/null || kill -TERM {pid} 2>/dev/null; "
                 f"sleep 1; kill -KILL -{pid} 2>/dev/null || kill -KILL {pid} "
                 "2>/dev/null || true; "
@@ -934,17 +931,31 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 f"{pid} || alive {child_pid}; "
                 "} && test $i -lt 20; do sleep 0.1; i=$((i+1)); done; "
                 f"if alive {pid} || alive {child_pid}; then exit 42; fi; "
-                "printf __REAPED__",
-                timeout=20.0,
+                "printf __REAPED__"
             )
-            confirmed_dead = (
-                result.exit_code == 0
-                and "__REAPED__" in (result.stdout or "")
-            )
+            if endpoint.get("kind") == "codespace":
+                from .session_host.codespace_transport import CodeSpaceTransport
+
+                host = endpoint.get("codespace")
+                if not isinstance(host, str) or not host.strip():
+                    raise ValueError("remote reap requires the persisted CodeSpace name")
+                # Durable endpoints intentionally contain no credentials.
+                # Reuse the transport's account resolution before dialing SSH.
+                transport = CodeSpaceTransport(
+                    host, str(endpoint.get("repo") or ""), manager=mgr,
+                )
+                rc, stdout, _stderr = await transport.run(command, timeout=20.0)
+            else:
+                cfg = ssh_config_from_endpoint(endpoint)
+                host = cfg.host_alias
+                await mgr.ensure_connected(host, _StaticSource(cfg), [])
+                result = await mgr.exec_command(host, command, timeout=20.0)
+                rc, stdout = result.exit_code, result.stdout
+            confirmed_dead = rc == 0 and "__REAPED__" in (stdout or "")
             if not confirmed_dead:
                 raise RuntimeError(
                     f"remote reap could not verify process death "
-                    f"(rc={result.exit_code}, output={result.stdout!r})"
+                    f"(rc={rc}, output={stdout!r})"
                 )
             log.info("Remote-reaped Session Host group for session %s (far pid=%s)",
                      rec.session_id, rec.host_pid)
@@ -955,7 +966,7 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
                 rec.session_id, rec.host_pid, exc_info=True,
             )
         finally:
-            if mgr is not None:
+            if mgr is not None and host:
                 with contextlib.suppress(Exception):
                     await mgr.disconnect(host)
             if confirmed_dead:

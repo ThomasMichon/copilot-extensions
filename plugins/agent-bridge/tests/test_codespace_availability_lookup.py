@@ -138,6 +138,80 @@ async def test_first_connection_resolves_account_without_prior_availability_read
     assert len(run_gh.call_args_list) == 4
 
 
+async def test_remote_reap_restores_account_without_persisting_credentials(
+    run_gh, tmp_db, tmp_path, monkeypatch,
+):
+    from agent_bridge.session_host.endpoints import endpoint_from_ssh_config
+    from agent_bridge.session_manager import SessionManager
+    from ssh_manager import SSHConfig
+
+    endpoint = json.loads(json.dumps(endpoint_from_ssh_config(
+        SSHConfig(host_alias=NAME, process_env={"GH_TOKEN": "original-token"}),
+        50000, 50001, kind="codespace", extra={"codespace": NAME},
+    )))
+    assert "original-token" not in json.dumps(endpoint)
+    record = SimpleNamespace(session_id="retained-session", host_pid=300, child_pid=301)
+    bound_configs = []
+
+    async def connect(host, source, _forwards):
+        assert host == NAME
+        source._config_dir = tmp_path
+        bound_configs.append(source.get_ssh_config())
+
+    manager = SimpleNamespace(
+        ensure_connected=AsyncMock(side_effect=connect),
+        exec_command=AsyncMock(return_value=SimpleNamespace(
+            exit_code=0, stdout="__REAPED__", stderr="",
+        )),
+        disconnect=AsyncMock(),
+    )
+    monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+    run_gh.side_effect = [
+        _denied(403),
+        _result(stdout="Logged in to github.com account owning-account\n"),
+        _result(stdout="renewed-owner-token"),
+        _result({"name": NAME, "state": "Available"}),
+        _result(stdout=(
+            f"Host {NAME}\n"
+            "  User codespace\n"
+            f"  ProxyCommand gh codespace ssh --stdio -c {NAME}\n"
+        )),
+    ]
+
+    assert await SessionManager(tmp_db)._remote_reap(record, endpoint)
+
+    assert bound_configs[0].process_env["GH_TOKEN"] == "renewed-owner-token"
+    assert run_gh.call_args.kwargs["env"]["GH_TOKEN"] == "renewed-owner-token"
+    manager.exec_command.assert_awaited_once()
+    command = manager.exec_command.await_args.args[1]
+    assert "kill -TERM -300" in command
+    assert "alive 300 || alive 301" in command
+    manager.disconnect.assert_awaited_once_with(NAME)
+    assert "renewed-owner-token" not in json.dumps(endpoint)
+
+
+async def test_remote_reap_cannot_release_custody_when_account_lookup_fails(
+    run_gh, tmp_db, monkeypatch,
+):
+    from agent_bridge.session_manager import SessionManager
+
+    manager = SimpleNamespace(
+        ensure_connected=AsyncMock(), exec_command=AsyncMock(), disconnect=AsyncMock(),
+    )
+    monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+    run_gh.side_effect = [_denied(403), _result(stdout="no accounts")]
+    owner = SessionManager(tmp_db)
+    release = Mock()
+    monkeypatch.setattr(owner, "_release_unprotected_codespace_lock", release)
+    record = SimpleNamespace(session_id="retained-session", host_pid=300, child_pid=301)
+
+    assert not await owner._remote_reap(record, {"kind": "codespace", "codespace": NAME})
+
+    manager.ensure_connected.assert_not_awaited()
+    manager.exec_command.assert_not_awaited()
+    release.assert_not_called()
+
+
 @pytest.mark.parametrize("accessible", [True, False])
 async def test_explicit_source_account_is_not_replaced_by_ambient_auth(run_gh, accessible):
     source_env = {"GH_TOKEN": "pinned-token"}
