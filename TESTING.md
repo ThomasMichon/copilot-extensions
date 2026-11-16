@@ -2037,7 +2037,10 @@ retained controller. The permissions control reads actual POSIX modes under
 umask `022` or protected Windows DACL flags. Old UUID-named snapshots are not
 deleted or migrated, and storage is not claimed bounded across distinct inputs.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
-is unchanged. Local workers may use smaller serial selections when the complete
+is unchanged. Behavioral jobs emit verbose per-test progress and the ten slowest
+completed cases to distinguish preparation or case delays from outer cancellation;
+those diagnostics do not turn an interrupted packet into passing acceptance.
+Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
 Manual dispatch with `qualify_promotion_copies=true` additionally runs an
 opt-in Linux job against the exact selected source revision. It composes the

@@ -4,6 +4,8 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import sys
 
 import pytest
 
@@ -89,3 +91,32 @@ def test_missing_or_malformed_project_refuses(tmp_path: Path, metadata: str | No
         project.write_text(metadata, encoding="utf-8")
     with pytest.raises(ValueError, match="bootstrapPython|invalid bootstrap Python project"):
         generator.expected_files(manifest)
+
+
+@pytest.mark.parametrize("operation", ["planning", "checking", "refusal"])
+def test_planning_and_refusal_do_not_write_bytecode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    tooling = tmp_path / "tooling/libs/payload-invocation"
+    tooling.mkdir(parents=True)
+    for name in ("generate.py", "runtime_admission.py", "bootstrap_python.py"):
+        shutil.copyfile(Path(__file__).resolve().parents[1] / name, tooling / name)
+    spec = importlib.util.spec_from_file_location("_private_bootstrap_generator", tooling / "generate.py")
+    assert spec and spec.loader
+    copied = importlib.util.module_from_spec(spec)
+    with monkeypatch.context() as setup:
+        setup.setattr(sys, "dont_write_bytecode", True)
+        spec.loader.exec_module(copied)
+    manifest = _declare(tmp_path, "3.11.11", ">=3.12" if operation == "refusal" else ">=3.11")
+    with monkeypatch.context() as enabled:
+        enabled.setattr(sys, "dont_write_bytecode", False)
+        enabled.setattr(sys, "pycache_prefix", None)
+        if operation == "refusal":
+            with pytest.raises(ValueError, match="does not satisfy"):
+                copied.source_check(manifest, canonical_root=generator.REPO)
+        elif operation == "checking":
+            assert copied.process_manifest(manifest, check=True, canonical_root=generator.REPO)
+        else:
+            assert copied.source_check(manifest, canonical_root=generator.REPO) == []
+        assert sys.dont_write_bytecode is False
+    assert not list(tooling.rglob("__pycache__"))
