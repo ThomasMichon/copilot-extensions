@@ -90,6 +90,11 @@ these files only, without admitting their unchanged project or certifying
 unmodeled emitted programs. `--enforced` remains the independent admitted-cohort
 gate; exact-candidate enforcement of the ratchet is not yet activated.
 
+Bridge's pending project reuses the existing hash-locked service-index checker
+profile for FastAPI, Pydantic and HTTPX declarations. This makes its selected
+route and consumer-contract files checkable without admitting the full plugin
+or changing its runtime dependencies.
+
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.
 Environments are private repository test-cache entries keyed by requirements,
