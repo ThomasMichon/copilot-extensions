@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+
+import pytest
+
 from agent_codespaces.relay_launch import (
     AZURE_AUTH_HELPER_COMPAT_DIR,
+    FEED_TOKEN_REFRESH_DIR,
     SCRUB_ENV_VARS,
     build_azure_auth_helper_compat_shim,
     build_feed_token_exports,
+    build_feed_token_refresh_shim,
     build_identity_env_exports,
     build_relay_env,
 )
@@ -194,6 +202,97 @@ def test_build_relay_env_no_relay_omits_feed_token():
         9857, "tok", use_relay=False, feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"]
     )
     assert "EXAMPLE_NPM_AUTH_TOKEN" not in env
+    assert FEED_TOKEN_REFRESH_DIR not in env
+
+
+def test_build_feed_token_refresh_shim_empty_without_feed_vars():
+    assert build_feed_token_refresh_shim(None) == ""
+    assert build_feed_token_refresh_shim(["bad-name"]) == ""
+    env = build_relay_env(9857, "tok123", use_relay=True)
+    assert FEED_TOKEN_REFRESH_DIR not in env
+
+
+def test_build_relay_env_installs_refresh_shim_after_feed_export():
+    env = build_relay_env(
+        9857, "tok123", use_relay=True, feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"]
+    )
+    assert f'export PATH="{FEED_TOKEN_REFRESH_DIR}:$PATH"; ' in env
+    assert env.index("export EXAMPLE_NPM_AUTH_TOKEN=") < env.index(
+        FEED_TOKEN_REFRESH_DIR
+    )
+    assert ".bashrc" not in env and ".profile" not in env
+
+
+def _posix_bash():
+    if os.name == "nt":
+        return None
+    return shutil.which("bash")
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_remints_token_per_invocation(tmp_path):
+    home = tmp_path / "home"
+    helper = home / ".local" / "bin" / "ado-auth-helper"
+    helper.parent.mkdir(parents=True)
+    counter = tmp_path / "count"
+    helper.write_text(
+        "#!/usr/bin/env bash\n"
+        f'n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 ))\n'
+        f'echo "$n" > "{counter}"\n'
+        'echo "fresh-$n"\n'
+    )
+    helper.chmod(0o755)
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir()
+    rush = real_bin / "rush"
+    rush.write_text('#!/usr/bin/env bash\necho "token=$FEED_TOKEN args=$*"\n')
+    rush.chmod(0o755)
+
+    script = (
+        'export FEED_TOKEN="$($HOME/.local/bin/ado-auth-helper get-access-token)"; '
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + 'rush install --purge; rush build; echo "outer=$FEED_TOKEN"'
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": f"{real_bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+    }
+    out = subprocess.run(
+        [_posix_bash(), "-c", script], env=env, capture_output=True, text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert out == [
+        "token=fresh-2 args=install --purge",
+        "token=fresh-3 args=build",
+        "outer=fresh-1",
+    ]
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_keeps_previous_token_when_mint_fails(tmp_path):
+    home = tmp_path / "home"
+    helper = home / ".local" / "bin" / "ado-auth-helper"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("#!/usr/bin/env bash\nexit 1\n")
+    helper.chmod(0o755)
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir()
+    npm = real_bin / "npm"
+    npm.write_text('#!/usr/bin/env bash\necho "token=$FEED_TOKEN"\n')
+    npm.chmod(0o755)
+
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "npm ci; rushx --version; echo rc=$?"
+    )
+    env = {"HOME": str(home), "PATH": f"{real_bin}:/usr/bin:/bin"}
+    out = subprocess.run(
+        [_posix_bash(), "-c", script], env=env, capture_output=True, text=True,
+        check=True,
+    )
+    assert out.stdout.splitlines() == ["token=launch", "rc=127"]
+    assert "rushx: command not found" in out.stderr
 
 
 def test_current_identity_prefers_short_user_alias(monkeypatch):

@@ -480,7 +480,12 @@ For launch-time credential extras, `credentials.feed_token_env` exports fresh
 relay-minted Azure bearer tokens into named env vars, and
 `credentials.identity_env` exports the host Azure-login identity string those
 tokens represent. Ordinary user principals export the short alias (UPN local
-part); other principal types keep the reported identity string.
+part); other principal types keep the reported identity string. Because a
+reused or resumed session outlives that launch-time bearer, the launch also
+puts a session-scoped wrapper directory first on `PATH` so each `rush`,
+`rushx`, `pnpm`, `npm`, `npx`, `yarn`, `nuget` or `dotnet` invocation re-mints
+the named vars (keeping the previous value if minting fails) before running the
+real tool.
 
 ### Installer reuse
 

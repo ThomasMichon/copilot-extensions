@@ -241,8 +241,9 @@ def build_feed_token_exports(var_names) -> str:
     Best-effort: a missing helper yields an empty value (no worse than today).
     The helper needs ``LC_GIT_CREDENTIAL_RELAY`` (exported just above in the
     prelude), so callers MUST emit this AFTER the relay exports. Minted at
-    launch, so it is fresh for the session (the token is short-lived; a run that
-    outlives it re-borrows on the next launch, matching the relay's own model).
+    launch as the initial value; :func:`build_feed_token_refresh_shim` re-mints
+    it on each feed-client invocation so a reused session never sends an
+    expired bearer.
     """
     out = ""
     for name in _valid_env_names(var_names):
@@ -250,6 +251,81 @@ def build_feed_token_exports(var_names) -> str:
             f'export {name}="$({ADO_AUTH_HELPER} get-access-token '
             '2>/dev/null || true)"; '
         )
+    return out
+
+
+FEED_TOKEN_REFRESH_DIR = "$HOME/.cache/agent-codespaces/feed-token-path"
+FEED_TOKEN_REFRESH_VARS_ENV = "AGENT_CODESPACES_FEED_TOKEN_VARS"
+FEED_TOKEN_REFRESH_TOOLS = (
+    "rush", "rushx", "pnpm", "npm", "npx", "yarn", "nuget", "dotnet",
+)
+
+# Wrapper installed under FEED_TOKEN_REFRESH_DIR for each feed client. It
+# re-mints the bearer, keeps the previous value when minting fails, and execs
+# the next same-named binary on PATH (skipping its own directory).
+_FEED_TOKEN_REFRESH_SCRIPT = """#!/usr/bin/env bash
+self_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)"
+name="$(basename "$0")"
+if [ -n "${%(vars)s:-}" ]; then
+  token="$("%(helper)s" get-access-token 2>/dev/null || true)"
+  if [ -n "$token" ]; then
+    for var in ${%(vars)s}; do
+      case "$var" in
+        [A-Za-z_]*) export "$var=$token" ;;
+      esac
+    done
+  fi
+  unset token
+fi
+real=""
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] || continue
+  resolved="$(cd "$dir" 2>/dev/null && pwd -P)"
+  [ "$resolved" = "$self_dir" ] && continue
+  if [ -x "$dir/$name" ] && [ ! -d "$dir/$name" ]; then
+    real="$dir/$name"
+    break
+  fi
+done
+unset IFS
+if [ -z "$real" ]; then
+  echo "$name: command not found" >&2
+  exit 127
+fi
+exec "$real" "$@"
+""" % {"vars": FEED_TOKEN_REFRESH_VARS_ENV, "helper": ADO_AUTH_HELPER}
+
+
+def build_feed_token_refresh_shim(var_names) -> str:
+    """POSIX snippet that re-mints feed tokens on every feed-client invocation.
+
+    :func:`build_feed_token_exports` mints the bearer once, at launch. A
+    reused or resumed session outlives that short-lived token, so a later
+    ``rush install`` sends an expired bearer and the feed answers 401. This
+    prepends a launch-scoped PATH directory with wrappers for the common feed
+    clients; each wrapper mints a fresh bearer through the relay-backed
+    ``ado-auth-helper`` and then execs the real binary. Like the
+    ``azure-auth-helper`` compat shim, PATH is exported only for this launch
+    and never written to a dotfile.
+    """
+    names = _valid_env_names(var_names)
+    if not names:
+        return ""
+    d = FEED_TOKEN_REFRESH_DIR
+    script = shlex.quote(_FEED_TOKEN_REFRESH_SCRIPT)
+    out = (
+        f"export {FEED_TOKEN_REFRESH_VARS_ENV}={shlex.quote(' '.join(names))}; "
+        f'mkdir -p "{d}" 2>/dev/null && '
+        f'printf %s {script} > "{d}/.feed-token-exec.$$" 2>/dev/null && '
+        f'chmod 755 "{d}/.feed-token-exec.$$" 2>/dev/null && '
+        f'mv -f "{d}/.feed-token-exec.$$" "{d}/feed-token-exec" 2>/dev/null && '
+        "{ "
+    )
+    for tool in FEED_TOKEN_REFRESH_TOOLS:
+        out += f'ln -sf feed-token-exec "{d}/{tool}"; '
+    out += f'export PATH="{d}:$PATH"; '
+    out += "} || true; "
     return out
 
 
@@ -328,7 +404,8 @@ def build_relay_env(
     ``feed_token_env`` var names -- exports a feed-auth token minted from the
     ADO auth helper so env-token feed auth (npm/nuget/rush) works over the
     relay (dotfiles#1221). The feed-token exports come LAST so they can use the
-    just-exported ``LC_GIT_CREDENTIAL_RELAY``.
+    just-exported ``LC_GIT_CREDENTIAL_RELAY``; the refresh shim that follows
+    re-mints them per feed-client invocation (:func:`build_feed_token_refresh_shim`).
     """
     from .codespace_assets import build_auth_error_policy_command
 
@@ -355,6 +432,7 @@ def build_relay_env(
         env += build_relay_portmap_write(relay_port)
         env += build_azure_auth_helper_compat_shim()
         env += build_feed_token_exports(feed_token_env)
+        env += build_feed_token_refresh_shim(feed_token_env)
     return env
 
 
