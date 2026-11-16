@@ -55,6 +55,17 @@ def _resource(path: Path) -> bytes:
     return data
 
 
+def _path_key(path: Path) -> Path:
+    """Compare Windows verbatim aliases without changing resource I/O paths."""
+    spelling = str(path.absolute())
+    if sys.platform == "win32":
+        if spelling.upper().startswith("\\\\?\\UNC\\"):
+            spelling = "\\\\" + spelling[8:]
+        elif spelling.startswith("\\\\?\\") and len(spelling) >= 7 and spelling[5:7] == ":\\":
+            spelling = spelling[4:]
+    return Path(spelling)
+
+
 def installed_catalog() -> dict[str, Any]:
     """Return exact isolated argv only after checking the imported installed closure."""
     try:
@@ -71,8 +82,8 @@ def installed_catalog() -> dict[str, Any]:
         if len(commands) != 1 or commands[0].value != "agent_chat_service.cli:main":
             _refuse()
         package = Path(__file__).absolute().parent
-        sites = {Path(sysconfig.get_path(key)).absolute() for key in ("purelib", "platlib")}
-        if package.parent not in sites:
+        sites = {_path_key(Path(sysconfig.get_path(key))) for key in ("purelib", "platlib")}
+        if _path_key(package.parent) not in sites:
             _refuse()
         if {item.name for item in package.glob("*.py")} != set(PACKAGE_FILES):
             _refuse()
@@ -87,7 +98,7 @@ def installed_catalog() -> dict[str, Any]:
                 _refuse()
             # SimplePath does not promise PathLike; Path retains the validating conversion.
             path = Path(cast(Any, distribution.locate_file(entry))).absolute()
-            if path != package / name:
+            if _path_key(path) != _path_key(package / name):
                 _refuse()
             data = _resource(path)
             digest = hashlib.sha256(data).digest()

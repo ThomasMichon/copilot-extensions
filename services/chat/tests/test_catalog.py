@@ -140,6 +140,10 @@ def test_exact_current_interpreter_not_path_or_source_selection(
     installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PATH", "")
+    if os.name == "nt":
+        monkeypatch.setattr(
+            catalog, "__file__", "\\\\?\\" + str(installation.package / "catalog.py"),
+        )
     result = catalog.installed_catalog()
     assert result["commands"][0]["argv"] == [
         catalog.sys.executable, "-I", "-m", "agent_chat_service.cli",
@@ -192,7 +196,11 @@ def test_catalog_refuses_unusable_installed_evidence(
     elif damage == "oversized":
         path.write_bytes(b"x" * (catalog.MAX_RESOURCE_BYTES + 1))
     elif damage == "foreign-location":
-        distribution.locate_file = lambda entry: installation.package.parent / "foreign"
+        foreign = installation.package.parent / "foreign" / path.name
+        foreign.parent.mkdir()
+        foreign.hardlink_to(path)
+        locate_file = distribution.locate_file
+        distribution.locate_file = lambda candidate: foreign if candidate is entry else locate_file(candidate)
     elif damage == "outside-isolated-site":
         monkeypatch.setattr(catalog.sysconfig, "get_path", lambda key: str(path.parent / "other"))
     elif damage == "missing-entrypoint":

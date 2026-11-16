@@ -115,9 +115,6 @@ def test_completed_slot_cannot_prepare_bootstrap(tmp_path: Path, monkeypatch: py
     if os.name == "nt":
         native_slot = Path("\\\\?\\" + str(slot))
         monkeypatch.setattr(construction.sys, "prefix", str(native_slot))
-        monkeypatch.setattr(
-            construction, "__file__", str(native_slot / "site" / "agent_chat_service" / "construction.py"),
-        )
         claimed_slot = slot
     runtime: Any = ModuleType("agent_chat_service._versioned_runtime")
     runtime.marker_path = lambda root, version: marker
@@ -139,6 +136,8 @@ def test_installed_health_refuses_bootstrap_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
 ) -> None:
     slot, value = installed_slot(tmp_path, monkeypatch)
+    if os.name == "nt":
+        monkeypatch.setattr(construction.sys, "prefix", "\\\\?\\" + str(slot))
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir()
     for name in construction._BOOTSTRAP.values():

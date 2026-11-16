@@ -19,7 +19,7 @@ from typing import Any, Iterator, TYPE_CHECKING
 if TYPE_CHECKING:
     from installer_engine import ReadyCandidate
 
-from .catalog import _resource, installed_catalog
+from .catalog import _path_key, _resource, installed_catalog
 from .client import ClientError
 
 _ENGINE: ModuleType | None = None
@@ -100,7 +100,7 @@ def _client_slot() -> Path:
         raise ClientError(
             "construction_slot_invalid", "Chat construction requires an immutable numbered slot.",
         )
-    if not Path(__file__).is_relative_to(slot):
+    if not _path_key(Path(__file__)).is_relative_to(_path_key(slot)):
         raise ClientError("construction_slot_invalid", "Chat construction is outside its slot.")
     return slot
 
@@ -176,7 +176,7 @@ def validate_service() -> None:
         origin = getattr(module, "__file__", None)
         if (
             not origin or not Path(origin).is_file()
-            or not Path(origin).resolve().is_relative_to(slot)
+            or not _path_key(Path(origin).resolve()).is_relative_to(_path_key(slot))
         ):
             raise ClientError(
                 "construction_service_unavailable",
