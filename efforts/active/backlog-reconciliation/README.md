@@ -374,6 +374,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [accepted ZDD tracking and current-contract unit](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
+records #12888's actual reviewed merge, complete direct #4477 receiving and
+the independently verified #870 `NOT_PLANNED` tracking retirement. All eight
+technical rows and every actual keeper/retirement/relay owner remain.
+#2350's owner-map credit does not establish its complete positive-activation
+convention; #84/#356 retain their whole canonical outcomes after the
+commit-identity-only stops were reconciled. #2556's independent current
+POSIX installer read confirms the finite ensure/stop fallback remains.
+The current #12879/#12886/#12889 inflow retains its respective fixture,
+legacy-cache-notice/accounting and non-activating credential-read owners.
+The complete 2026-11-16 20:23:21 UTC census is 858 whole open, 129 above
+fixed 729, with no additional departure since the post-#870 census.
+No implementation, native execution, rollout or custody change is claimed.
+
 The [runtime source and authoring-contract unit](journal/2026/11.16-runtime-source-and-authoring-contract.md)
 records #12763/#12834's independently verified whole source requests and
 acknowledged `COMPLETED` dispositions through merged #12767/#12835, with no
