@@ -101,6 +101,7 @@ def test_recovery_keeps_prepared_engine_snapshot_in_its_named_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.syspath_prepend(str(REPOSITORY / "tools"))
+    monkeypatch.syspath_prepend(str(REPOSITORY / "plugins" / "agent-worktrees" / "src"))
     recovery: ModuleType = importlib.import_module("recover_source")
     repair = importlib.import_module("worktree_manager.runtime_source_repair")
     snapshot = tmp_path / "snapshot"
