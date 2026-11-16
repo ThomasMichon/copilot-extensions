@@ -21,6 +21,11 @@ Histories have a 100-row per-source limit. Truncation is visible and refuses
 recovery rather than treating an incomplete history as empty. Diagnostic output
 omits prompts, payloads, raw agent receipts, delivery tokens and send identity
 blobs. The opaque `revision` fences the captured task and retained records.
+The separate opaque `reconciliation_revision` is for original-wake
+reconciliation. It fences the task's semantic state and the same retained
+records, but does not become stale merely because the original owner renews
+its lease or publishes liveness/activity observations. Private task content
+participates in that fence without appearing in diagnostics.
 Diagnostics never wake, claim, repair, start optional infrastructure or mutate.
 The CLI and default stdio MCP diagnostic factories use existing read-only
 client discovery: they do not ensure a local coordinator, open SSH failover or
@@ -110,6 +115,20 @@ Neither current task state nor request identity is an authentication token.
 ```text
 agent-dispatch reconcile-wake <task-id> --outbox wake_outbox --wake-id <wake-id> --expected-revision <revision> --actor <actor> --reason "<reason>"
 ```
+
+For this operation, select `reconciliation_revision` from the current
+diagnostic response when available. The general `revision` remains accepted
+with its stricter timestamp fence for existing callers. Reset and agent
+detachment accept only the general revision; a wake-specific revision cannot
+authorize those lifecycle changes.
+
+The additional diagnostic field is optional for independently updated
+callers. An older receiver supplies only its general revision. After rollback,
+a token issued by a newer receiver can be rejected as stale: refresh diagnostics
+from that actual receiver rather than retrying an unknown operation.
+Meaningful task changes, including payload, routing, holds and ownership,
+and any retained-execution change still invalidate wake reconciliation both
+before and after provider observation.
 
 `run_waiter_wakes` is the other supported outbox. The corresponding endpoint is
 `POST /tasks/{task_id}/wakes/reconcile`; its fields are `outbox`, `wake_id`,
