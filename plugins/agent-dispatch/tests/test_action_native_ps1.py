@@ -11,7 +11,10 @@ import subprocess
 import sys
 import time
 
+import agent_procutil
 import pytest
+
+from agent_dispatch import procutil
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 INSTALLER = SCRIPTS / "install.ps1"
@@ -22,7 +25,10 @@ HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process scope and command-line parsing")
-@pytest.mark.parametrize("scenario", ["inventory", "foreign-endpoint", "retirement-refused"])
+@pytest.mark.parametrize(
+    "scenario",
+    ["inventory", "foreign-endpoint", "retirement-refused", "late-endpoint", "endpoint-query-failed"],
+)
 def test_stop_scope_preserves_foreign_processes_and_uncertain_endpoint(
     tmp_path: Path, scenario: str,
 ) -> None:
@@ -30,8 +36,12 @@ def test_stop_scope_preserves_foreign_processes_and_uncertain_endpoint(
     (root / "run").mkdir(parents=True)
     endpoint = root / "run" / "endpoint.json"
     if scenario != "inventory":
+        endpoint_pid = (
+            12 if scenario == "foreign-endpoint" else
+            99 if scenario in ("late-endpoint", "endpoint-query-failed") else 11
+        )
         endpoint.write_text(
-            json.dumps({"pid": 12 if scenario == "foreign-endpoint" else 11}),
+            json.dumps({"pid": endpoint_pid}),
             encoding="utf-8",
         )
     own_python = str(root / "versions" / "one" / "Scripts" / "python.exe")
@@ -67,6 +77,10 @@ $script:effects = @()
 function Get-CimInstance {
     param($ClassName, $Filter, $ErrorAction)
     if ($Filter -match '^ProcessId=(\d+)$') {
+        if ($scenario -eq 'endpoint-query-failed') { throw 'endpoint process query denied' }
+        if ($scenario -eq 'late-endpoint' -and [int]$Matches[1] -eq 99) {
+            return [pscustomobject]@{ProcessId=99}
+        }
         return @($script:rows | Where-Object ProcessId -eq ([int]$Matches[1]))
     }
     return $script:rows
@@ -108,7 +122,9 @@ if ($scenario -eq 'inventory') {
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows scoped process retirement")
-def test_stop_scope_native_handle_retires_only_the_owned_finite_child(tmp_path: Path) -> None:
+def test_stop_scope_native_handle_retires_only_the_owned_finite_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     package = tmp_path / "agent_dispatch"
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")
@@ -119,15 +135,25 @@ def test_stop_scope_native_handle_retires_only_the_owned_finite_child(tmp_path: 
     )
     roots = [tmp_path / "owned", tmp_path / "foreign"]
     children: list[subprocess.Popen[bytes]] = []
+    commands: list[list[str]] = []
+
+    def capture(argv: list[str], **_options: object) -> None:
+        commands.append(list(argv))
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", capture)
     try:
         for index, root in enumerate(roots):
             root.mkdir()
             ready = tmp_path / f"ready-{index}"
             env = dict(os.environ, PYTHONPATH=str(tmp_path), DISPATCH_STOP_READY=str(ready))
-            child = subprocess.Popen(
+            monkeypatch.setattr(procutil, "runtime_root", lambda: root)
+            procutil.spawn_dispatch_daemon(
                 [getattr(sys, "_base_executable", sys.executable),
-                 "-X", "agent_dispatch_install_dir=" + str(root),
-                 "-S", "-B", "-m", "agent_dispatch", "serve"],
+                 "-m", "agent_dispatch", "serve"],
+                log_name="finite-test.log",
+            )
+            child = subprocess.Popen(
+                commands[-1],
                 cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=HEADLESS,
             )

@@ -13,10 +13,14 @@ installation marker for a physical base-Python executable. Another
 installation, a path-prefix collision, another user or an opaque command line
 does not authorize termination. The shared native retirement helper pins the
 observed process birth to its open kernel handle before termination.
+Windows Python daemon producers emit that existing marker before SDK executable
+normalization; POSIX and non-Python command arguments remain unchanged.
 
 An endpoint PID alone is not ownership evidence. A live, unclassified endpoint
 process or an unconfirmed retirement refuses the stop and preserves the
-endpoint. A successfully retired or already-dead endpoint is removed only
+endpoint. A PID absent from the owned inventory is queried again after reading
+the endpoint; a live result or failed query refuses before retirement.
+A successfully retired or already-dead endpoint is removed only
 when its observed content has not changed. This does not claim atomic
 compare-and-delete against a concurrent publisher.
 

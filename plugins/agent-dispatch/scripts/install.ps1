@@ -2648,9 +2648,12 @@ function Stop-DispatchProcess {
         if (($endpoint.pid -isnot [int] -and $endpoint.pid -isnot [long]) -or $endpoint.pid -le 0) {
             throw 'Dispatch endpoint process identity is invalid'
         }
-        if (@($rows | Where-Object ProcessId -eq $endpoint.pid).Count -and
-            -not @($owned | Where-Object ProcessId -eq $endpoint.pid).Count) {
-            throw 'Dispatch endpoint names an unconfirmed process; no retirement attempted'
+        if (-not @($owned | Where-Object ProcessId -eq $endpoint.pid).Count) {
+            $endpointProcess = @(Get-CimInstance Win32_Process `
+                -Filter "ProcessId=$($endpoint.pid)" -ErrorAction Stop)
+            if ($endpointProcess.Count) {
+                throw 'Dispatch endpoint names an unconfirmed process; no retirement attempted'
+            }
         }
     }
 
