@@ -1,0 +1,9 @@
+{
+  "comment": "Expose negotiated original native-send settlement through CLI and authenticated HTTP without prompt replay or automatic consumer adoption",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

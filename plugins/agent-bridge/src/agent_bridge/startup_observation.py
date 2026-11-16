@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, cast
 
 from agent_procutil.startup import PROGRESS_PREFIX, StartupClock, StartupTimeouts
 
@@ -33,14 +33,18 @@ class StartupObservationError(Exception):
             boundary = "prompt admission acknowledgement unavailable"
         elif reason == "resume_unknown":
             boundary = "resume readiness acknowledgement unavailable"
+        elif reason == "native_send_settlement_unknown":
+            boundary = "native send settlement acknowledgement unavailable"
         elif clock is None:
             boundary = f"startup observation unavailable at {phase}"
         else:
             boundary = f"startup {clock} timeout after {elapsed:.1f}s at {phase}"
-        super().__init__(
-            f"{boundary}; target outcome is unconfirmed; "
-            "inspect the original operation, do not resend"
+        guidance = (
+            "inspect the original settlement, do not resend the prompt"
+            if reason == "native_send_settlement_unknown"
+            else "inspect the original operation, do not resend"
         )
+        super().__init__(f"{boundary}; target outcome is unconfirmed; {guidance}")
 
 
 def current() -> StartupObservation | None:
@@ -312,7 +316,7 @@ class StartupObservation:
                     caller.start()
                 elif kind == "result":
                     self.check()
-                    return value
+                    return cast(dict[str, Any], value)
                 elif kind == "request-error":
                     if isinstance(value, (BridgeClientError, StartupObservationError)):
                         raise value

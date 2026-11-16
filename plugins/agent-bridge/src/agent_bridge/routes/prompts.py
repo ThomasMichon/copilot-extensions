@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -17,6 +17,7 @@ from ..session_status import SessionStatus
 from ..native_keyed_admission import KeyedNativePrompt, submit as keyed_submit
 from ..native_send_admission import NativeSendPrompt, read_receipt, submit as native_send
 from ..acquisition_contract import AcquisitionRefused
+from ..native_send_settlement import settle as settle_native_send
 
 if TYPE_CHECKING:
     from ..session_manager import SessionManager
@@ -24,10 +25,25 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
+@router.post("/{session_id}/turns/native-bound/send/settle")
+async def settle_native_send_route(
+    session_id: str, req: NativeSendPrompt, request: Request,
+) -> dict[str, Any]:
+    """Settle only the original key; never interpret a passive receipt miss as absence."""
+    try:
+        return await settle_native_send(request.app.state.session_manager, session_id, req)
+    except KeyError as exc:
+        raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
+    except DaemonDrainingError as exc:
+        raise HTTPException(503, detail={"code": "draining"}) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+
+
 @router.post("/{session_id}/turns/native-bound/send/receipt")
 async def read_native_send(
     session_id: str, req: NativeSendPrompt, request: Request,
-) -> dict:
+) -> dict[str, Any]:
     """Missing historical evidence is unproven, never permission to send."""
     try:
         result = await read_receipt(request.app.state.session_manager, session_id, req)
@@ -43,7 +59,7 @@ async def read_native_send(
 @router.post("/{session_id}/turns/native-bound/send")
 async def submit_native_send(
     session_id: str, req: NativeSendPrompt, request: Request,
-) -> dict:
+) -> dict[str, Any]:
     """The ordinary send command owns its key and exact retained native target."""
     try:
         return await native_send(request.app.state.session_manager, session_id, req)
@@ -57,7 +73,9 @@ async def submit_native_send(
         raise HTTPException(409, detail={"code": str(exc)}) from exc
 
 
-async def _keyed(session_id: str, req: KeyedNativePrompt, request: Request, *, read_only: bool):
+async def _keyed(
+    session_id: str, req: KeyedNativePrompt, request: Request, *, read_only: bool,
+) -> dict[str, Any]:
     try:
         result = await keyed_submit(
             request.app.state.session_manager, session_id, req, read_only=read_only,
@@ -76,12 +94,16 @@ async def _keyed(session_id: str, req: KeyedNativePrompt, request: Request, *, r
 
 
 @router.post("/{session_id}/turns/native-bound/keyed")
-async def submit_keyed_native(session_id: str, req: KeyedNativePrompt, request: Request):
+async def submit_keyed_native(
+    session_id: str, req: KeyedNativePrompt, request: Request,
+) -> dict[str, Any]:
     return await _keyed(session_id, req, request, read_only=False)
 
 
 @router.post("/{session_id}/turns/native-bound/keyed/receipt")
-async def read_keyed_native(session_id: str, req: KeyedNativePrompt, request: Request):
+async def read_keyed_native(
+    session_id: str, req: KeyedNativePrompt, request: Request,
+) -> dict[str, Any]:
     """Read past admission only; never calls fresh admission on a miss."""
     return await _keyed(session_id, req, request, read_only=True)
 
