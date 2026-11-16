@@ -1,0 +1,9 @@
+{
+  "comment": "Keep retained Worktrees writers usable after their Bridge transport slot retires",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

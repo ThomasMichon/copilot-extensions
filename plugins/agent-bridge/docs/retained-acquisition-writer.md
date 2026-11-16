@@ -102,6 +102,15 @@ pre-import checks of the original completion/build identity. Selector movement
 does not replace this writer. Removed or recreated slots refuse; this feature
 does not veto an authorized installer replacement or preserve a second registry.
 
+Bridge-owned pinned wrappers use the serving Bridge interpreter and launcher,
+not the retired Bridge slot recorded alongside the writer. Both legacy and
+same-cell wrappers retain the original Worktrees interpreter, installation
+context and completion/build identity at execution. The original journal is
+not rewritten. Direct owner prefixes remain unchanged; foreign Bridge roots
+and incomplete wrappers refuse rather than selecting another writer or PATH.
+This transport compatibility does not add capabilities to the retained
+Worktrees build, authorize a native resume or settle an unknown send.
+
 ## Ordinary keyed creation
 
 The optional `retained_workspace_creation_writer: 1` capability accepts the

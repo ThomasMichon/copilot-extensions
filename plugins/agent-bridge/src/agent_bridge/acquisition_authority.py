@@ -63,8 +63,10 @@ async def _run_worktree_command(
     args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
     timeout: float = 120, owner_prefix: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    from .retained_writer_transport import execution_prefix
+
     try:
-        prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
+        prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else execution_prefix(owner_prefix)
     except ContextRefused as exc:
         raise AcquisitionRefused("worktrees_unavailable", str(exc)) from exc
     if not prefix:
