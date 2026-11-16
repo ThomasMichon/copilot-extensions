@@ -3634,6 +3634,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
+  The agent-recommended [first-use CodeSpace doctor proposal](venue-doctor-first-use-receiving.md)
+  would directly retain #9281's three remediation-OR-command cases and
+  failing-command stderr in existing #954 acceptance. Its
+  [dated journal](journal/2026/11.15-venue-doctor-first-use-receiving.md)
+  preserves all incumbent venue owners and gates; both issues remain OPEN
+  pending review, actual receiving and a separate disposition.
   The agent-recommended [accepted Manager bytecode-uninstall contract](manager-bytecode-uninstall-receiving.md)
   directly retains #9375's narrow inventory/removal repair in planned #1886
   acceptance, preserving the existing Manager repair, #8864 and #8669 owners
