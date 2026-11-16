@@ -44,8 +44,9 @@ not replaced or declared complete by this amendment.
    bounded source slices through their existing owners before implementation.
 2. Extend the existing shared Python lifecycle implementation and reuse its
    record protocol, locks, process-birth checks and Linux pidfd acquisition.
-   Thin shell entrypoints use setup's explicit uv-managed Python selection
-   to invoke that shared implementation. Preserve same-process
+   Thin shell entrypoints use PATH `uv` to invoke the declared managed-Python
+   project and that shared implementation without ambient Python lookup or
+   assumed interpreter locations. Preserve same-process
    admission where required; do not add a central supervisor service or another
    inventory.
 3. Replace Linux C supervision/reconciliation with standard-library Python and
@@ -56,7 +57,8 @@ not replaced or declared complete by this amendment.
 4. Qualify the interpreter/bootstrap boundary before migrating Windows
    callers that currently run before their plugin runtime. Reuse the
    [existing Python prerequisite](#python-prerequisite-boundary), rather than
-   preserve a Python-free helper implementation. Preserve authenticated pipe
+   preserve a Python-free helper implementation. The acquisition front door
+   itself must run before Python exists. Preserve authenticated pipe
    endpoints, process handles, strict atomic Job containment, headlessness,
    operation-lock compatibility, filesystem/reparse/ACL checks and uncertain
    launch outcomes. Use the setup-selected uv-managed interpreter; do not retain
@@ -76,26 +78,32 @@ not replaced or declared complete by this amendment.
 
 The [installer vision's uv-managed Python
 contract](../../../visions/installer/README.md#uv-managed-python) governs this
-prerequisite. The existing installation owner uses uv to prepare the declared
-supported Python before shared safety helpers need it, then passes the explicit
-selection into helpers and application environments. A cold plugin runtime
-does not imply a missing toolchain, and preparing that toolchain must not require
-an already-working system Python. Standalone installation owns equivalent
-preparation without requiring Manager or an Agent Machines service.
+prerequisite. The [current operator request and setup sequence](../source-managed-runtime-installs/managed-python.md)
+extend it to every app launcher and supersede the earlier machine-wide/PATH
+prerequisite. Each project declares the
+Python version it needs; its existing installation owner uses `uv` to acquire
+or reuse managed Python and construct the addressed environment. System/user
+PATH Python need not exist or be compatible. Projects with different version
+requirements coexist without a global Python change.
 
-This architecture supersedes the earlier choice to provision official system
-Python through Agent Machines and trust the first `python` on PATH. The
-2026-10-27 removal of interpreter attestation remains applicable: this is not
-permission to restore signature/publisher, registry-only, physical-namespace
-or file-pinning admission, or venv/worktree/temporary-path blacklists.
-Operating-system code-integrity enforcement remains independent.
+The shell-native explicit setup front door establishes `uv` and the declared
+managed bootstrap interpreter before Python-dependent safety helpers,
+installation-context evaluation or application construction. Bootstrap helpers
+have static setup declarations too; they cannot require Python to discover or
+acquire Python. Reuse this one acquisition owner, not a downloader in every
+helper. Standalone setup works without an Agent Machines service or an already
+installed Manager/application runtime.
 
-Read-only helpers consume the prepared supported interpreter without acquiring
-one, mutating PATH or trying progressively broader ambient Python candidates.
-An older Machine-PATH Python, active virtual environment, absent `py` launcher
-or fresh terminal must not change the declared version. Source-only distributions
-carry the complete helper source through the existing packaging owner, without
-a new physical-source admission ceremony.
+Every application launcher uses `uv` from PATH and lets it handle interpreter
+selection for the declared project. Scripts do not assume installed Python
+locations, including `uv` storage. The earlier rejection of interpreter
+attestation still applies. Thin shells reach the setup-selected environment
+through `uv`; they do not inspect signatures, rediscover
+PEP 514 registrations, require a special physical namespace, pin interpreter
+files or blacklist venv/worktree/temporary paths. Selecting the declared managed
+interpreter is environment selection, not another admission service.
+Source-only distributions retain their complete helper source through the
+existing packaging owner.
 
 Existing process, lease, update-driver and installation-context owners still
 own their protocols and native OS bindings through ctypes. Trusting Python
@@ -103,32 +111,31 @@ does not relax process identity, atomic Job containment, authenticated pipes,
 operation-lock compatibility or exact cleanup custody. Artifact/source receipts
 for managed application runtimes remain distinct from interpreter attestation.
 
-The prerequisite remains owned by explicit setup/repair, using uv's Python
-management rather than a second interpreter installer. Acquisition and missing
-or unsupported toolchain failures name the real prerequisite and its supported
-setup path. Status, discovery and ordinary launch never install Python or
-compile an interop helper. Already prepared toolchains work offline. Services
-retain their explicit environment interpreters; adding `uv run` before an old
-bound executable is not a migration.
+Explicit installation owns permitted acquisition and actionable offline,
+unavailable-version, platform and OS-policy errors. Status, discovery and
+ordinary launch only resolve an already-prepared managed environment; they
+never acquire Python, silently use ambient Python or compile an interop helper.
+The [managed-Python contract](../../../docs/install-contract.md#project-owned-managed-python)
+owns declaration/construction details and retained-environment safety.
 
 Before removing a Windows compiled implementation:
 
-- [ ] Replace compiled interpreter admission with explicit uv-managed Python
-  selection prepared by the existing installation owner.
+- [ ] Replace remaining compiled interpreter admission with invocation of the
+  setup-selected, project-declared `uv`-managed interpreter.
   Remove signature/publisher, registry-only, PE/path-attestation and physical
   namespace launch gates without adding venv/worktree/temporary-path filters.
 - [ ] Apply the same setup-owned prerequisite boundary to shared installer
   Python rediscovery and signature-driven base selection. Preserve copied-venv
   construction and module invocation where needed, without reimplementing
   Windows code-integrity policy or changing package/feed integrity checks.
-- [ ] Exercise the prepared supported Python with an incompatible first PATH
-  Python, active venv, absent launcher and fresh terminal. Cover missing uv or
-  managed interpreter, offline reuse and acquisition/execution failure without
-  read-only downloads, system-PATH repair or per-helper attestation.
-- [ ] Prove the actual first-entry order: explicit uv-owned Python preparation,
-  selected-interpreter standard-library helper, then runtime construction or
-  application work. Prove service launch retains its environment interpreter
-  and that existing supported environments and rollback survive preparation.
+- [ ] Exercise setup with no Python, old/incompatible Python and differing
+  project versions on one host, an active venv, absent launcher and fresh
+  terminal. Qualify offline managed reuse, missing-version and startup failure
+  without ambient fallback or per-helper attestation.
+- [ ] Prove the actual first-entry order: shell-native `uv` setup, declared
+  managed bootstrap interpreter, standard-library helper, then each project's
+  runtime construction. No Python-dependent probe precedes acquisition.
+  Prove existing supported environments and rollback survive preparation.
 - [ ] Preserve byte-range/operation-lock compatibility, authenticated pipe
   peers, strict atomic child Job assignment, headlessness and uncertain cleanup
   outcomes through the existing Python owners.
@@ -158,7 +165,7 @@ post-start assignment substitutes for that separate safety contract.
 - [ ] Production remains non-expiring. Protected/live/foreign/changed state and
   inconclusive inspection remain explicit holds; cleanup remains limited to
   declared disposable artifacts.
-- [ ] Windows proves uv-managed Python prerequisite ordering and genuine
+- [ ] Windows proves project-owned managed-Python prerequisite ordering and genuine
   cold plugin-runtime bootstrap, native-handle identity,
   authenticated pipes, operation-lock compatibility, filesystem custody,
   strict Job containment and zero unintended windows/focus changes, without

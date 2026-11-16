@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 import hashlib
 import json
@@ -10,6 +11,16 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import ModuleType
+from typing import TYPE_CHECKING, TypedDict, TypeVar, cast
+
+if TYPE_CHECKING:
+    from update_driver.participant import BorrowedCustody
+
+    class _CleanupOptions(TypedDict, total=False):
+        controller_custody: BorrowedCustody | None
+
+T = TypeVar("T")
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -21,7 +32,9 @@ WHEEL_FIELDS = (
     ("wheel_python", "-WheelPython"), ("wheel_uv", "-WheelUv"),
 )
 RECIPES = {
-    "agent-bridge": frozenset({"Repair", "RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun"}),
+    "agent-bridge": frozenset({
+        "Repair", "NoService", "RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun",
+    }),
     "agent-codespaces": frozenset({"Force", "DryRun", "Repair"}),
     "agent-dispatch": frozenset({
         "NoService", "NoSupervisor", "Interactive", "Purge", "Force",
@@ -90,7 +103,9 @@ INSTALLATION_SELECTORS = {
 SELECTOR_KEYS = (*INSTALLATION_SELECTORS.values(), "AGENT_INDEX_CONFIG_ROOT")
 
 
-def selector_context(args, environment, *, cwd: Path | None = None) -> dict[str, str]:
+def selector_context(
+    args: argparse.Namespace, environment: Mapping[str, str], *, cwd: Path | None = None,
+) -> dict[str, str]:
     """Resolve explicit selectors before staging; never replace one with defaults."""
     selected = {}
     base = Path.cwd() if cwd is None else cwd
@@ -127,24 +142,24 @@ def selector_context(args, environment, *, cwd: Path | None = None) -> dict[str,
                 raise ValueError("Linked native installation selector: AGENT_INDEX_CONFIG_ROOT")
         if directory.exists() and not directory.is_dir():
             raise ValueError("AGENT_INDEX_CONFIG_ROOT must select a directory")
-    name = INSTALLATION_SELECTORS.get(args.plugin)
-    if name not in selected:
+    selected_name = INSTALLATION_SELECTORS.get(args.plugin)
+    if selected_name is None or selected_name not in selected:
         return selected
-    path = Path(selected[name])
+    path = Path(selected[selected_name])
     for member in (path, *path.parents):
         try:
             info = member.lstat()
         except FileNotFoundError:
             continue
         if member.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
-            raise ValueError(f"Linked native installation selector: {name}")
+            raise ValueError(f"Linked native installation selector: {selected_name}")
     info = path.stat()
     if not path.is_file() or info.st_size > 65536:
-        raise ValueError(f"Native installation selector is not a bounded file: {name}")
+        raise ValueError(f"Native installation selector is not a bounded file: {selected_name}")
     with path.open("rb") as stream:
         content = stream.read(65537)
     if len(content) > 65536:
-        raise ValueError(f"Native installation selector exceeds its bound: {name}")
+        raise ValueError(f"Native installation selector exceeds its bound: {selected_name}")
     document = json.loads(content)
     installation = document.get("installation") if isinstance(document, dict) else None
     root = installation.get("root") if isinstance(installation, dict) else None
@@ -152,11 +167,11 @@ def selector_context(args, environment, *, cwd: Path | None = None) -> dict[str,
         not isinstance(root, str) or not Path(root).is_absolute()
         or os.path.normcase(os.path.abspath(root)) != os.path.normcase(str(args.root.resolve()))
     ):
-        raise ValueError(f"Native installation selector belongs to a foreign root: {name}")
+        raise ValueError(f"Native installation selector belongs to a foreign root: {selected_name}")
     return selected
 
 
-def bootstrap(payload: Path):
+def bootstrap(payload: Path) -> ModuleType:
     import installer_engine as engine
 
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
@@ -173,7 +188,7 @@ def bootstrap(payload: Path):
 
 
 @contextmanager
-def custody():
+def custody() -> Iterator[BorrowedCustody | None]:
     from update_driver import core, borrowed_custody, participant, participant_environment
     from update_driver.participant import ENVIRONMENT_KEY, MAX_FRAME, ParticipantError
 
@@ -204,10 +219,11 @@ def custody():
 def source_digest(payload: Path) -> str:
     import installer_engine as engine
 
-    return engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
+    runtime = cast(ModuleType, getattr(engine, "runtime"))
+    return cast(str, runtime.fingerprint_source(engine._source_files(engine._package_roots(payload))))
 
 
-def native_arguments(args) -> list[str]:
+def native_arguments(args: argparse.Namespace) -> list[str]:
     if getattr(args, "cell_context", None) is not None:
         return cell_arguments(args)
     if any(getattr(args, name, None) is not None for name, _flag in CELL_FIELDS):
@@ -225,13 +241,19 @@ def native_arguments(args) -> list[str]:
         "-Action", args.action, "-InstallDir", str(args.root.resolve()),
         *("-" + option for option in sorted(options)),
     ]
-    install_source = getattr(args, "install_source", None)
+    install_source: Path | None = getattr(args, "install_source", None)
     wheel_values = [getattr(args, name, None) for name, _flag in WHEEL_FIELDS]
+    if args.plugin == "agent-bridge" and "NoService" in options and (
+        args.action not in {"install", "update"} or not all(wheel_values)
+        or install_source is not None
+        or set(options) - {"NoService", "ZeroDowntime"}
+    ):
+        raise ValueError("NoService requires complete closed wheels for install/update without service or repair options")
     if any(value is not None for value in wheel_values):
         if (
             install_source is not None or not all(wheel_values)
             or args.action not in {"install", "update", "init", "provision"}
-            or any(not Path(value).is_absolute() for value in wheel_values)
+            or any(not Path(cast(Path, value)).is_absolute() for value in wheel_values)
             or Path(args.wheel_python).resolve(strict=True) != Path(sys.executable).resolve(strict=True)
         ):
             raise ValueError("Closed wheels require one complete native input and its selected interpreter")
@@ -260,8 +282,10 @@ def native_arguments(args) -> list[str]:
             or not install_source.is_absolute()
         ):
             raise ValueError("Unsupported native installation-source operation")
-        from install_source import native_selection, project_inputs, sources
+        import install_source as source_module
+        from install_source import native_selection, project_inputs
 
+        sources = cast(ModuleType, getattr(source_module, "sources"))
         with project_inputs(install_source, args.plugin) as (selected, inputs):
             if selected.source_descriptor is None or sources.read_source_identity(
                 args.payload, selected.identity.package_version, plugin=args.plugin,
@@ -307,7 +331,7 @@ CELL_FIELDS = (
 )
 
 
-def cell_arguments(args) -> list[str]:
+def cell_arguments(args: argparse.Namespace) -> list[str]:
     if (
         args.plugin != "agent-pull-requests"
         or args.action not in {
@@ -333,7 +357,7 @@ def cell_arguments(args) -> list[str]:
     return arguments
 
 
-def request_arguments(args) -> tuple[str, ...]:
+def request_arguments(args: argparse.Namespace) -> tuple[str, ...]:
     arguments = native_arguments(args)
     if args.action == "restore":
         # The helper pins the same bytes at a private path while holding retention.
@@ -342,7 +366,7 @@ def request_arguments(args) -> tuple[str, ...]:
     return tuple(arguments)
 
 
-def _settle(wait):
+def _settle(wait: Callable[[], T]) -> T:
     while True:
         try:
             return wait()
@@ -350,24 +374,29 @@ def _settle(wait):
             continue
 
 
-def admit_broker_removal(args, *, controller_custody=None) -> None:
+def admit_broker_removal(
+    args: argparse.Namespace, *, controller_custody: BorrowedCustody | None = None,
+) -> None:
     from installer_engine_uninstall import cleanup
 
     profile = args.payload / "scripts" / "uninstall-profile.json"
+    options: _CleanupOptions = {}
+    if args.plugin == "agent-vault":
+        options["controller_custody"] = controller_custody
     cleanup(
         args.payload, args.plugin, args.root, str(args.shell),
         profile=profile if profile.is_file() else None, check_consumers=True,
-        **({"controller_custody": controller_custody} if args.plugin == "agent-vault" else {}),
+        **options,
     )
 
 
-def execute(args) -> int:
+def execute(args: argparse.Namespace) -> int:
     from update_driver import core, participant_environment
 
     with custody() as owner:
         if owner is None:
             raise RuntimeError("Native installer participant requires live driver custody")
-        request = core.status(owner.request_id, root=owner.root)
+        request = cast(core.Request, core.status(owner.request_id, root=owner.root))
         arguments = native_arguments(args)
         environment = {**os.environ, **participant_environment()}
         selectors = selector_context(args, environment)
@@ -430,7 +459,7 @@ def execute(args) -> int:
         process = subprocess.Popen(
             command,
             env=environment, stdout=sys.stdout, stderr=sys.stderr,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         try:
             code = process.wait()
@@ -443,7 +472,7 @@ def execute(args) -> int:
         return code
 
 
-def foreground(args, driver) -> int:
+def foreground(args: argparse.Namespace, driver: ModuleType) -> int:
     if any(os.environ.get(key) for key in (
         "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
     )):
@@ -492,7 +521,7 @@ def foreground(args, driver) -> int:
     result = driver.wait(request.id, output=sys.stdout)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Native plugin installation did not complete: {result.state}")
-    return result.exit_code
+    return cast(int, result.exit_code)
 
 
 def main(argv: list[str] | None = None) -> int:

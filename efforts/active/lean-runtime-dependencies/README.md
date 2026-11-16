@@ -21,7 +21,10 @@ also governs shared process helpers: foreground update work is cancellable;
 accepted service startup has independent, qualified lifetime. Preserve the
 compiler-free requirements and use uv as the suite's Python manager, independent
 of ambient Python PATH order. The [Python strategy amendment](#2026-11-16---uv-managed-python)
-records the operator's wording and the remaining migration controls.
+records the operator's wording and the remaining migration controls. The
+[current prerequisite amendment](compiler-free-execution.md#python-prerequisite-boundary)
+adds project declarations and PATH-`uv` dispatch for every app launcher,
+without assumed Python locations or a change to existing owners.
 
 ## Guiding Intent
 
@@ -164,6 +167,19 @@ helpers and managed application environments consume explicit interpreters.
 Read-only status and ordinary launch do not acquire a toolchain. This records
 source architecture, not implemented migration or installed rollout.
 
+### 2026-11-16 - All-launcher refinement
+
+The [current request, verbatim](../source-managed-runtime-installs/managed-python.md#current-direction-and-scope)
+requires each project install to declare its Python version and let `uv` manage
+it without dependence on system/user PATH. Every app launcher uses PATH `uv`,
+not an assumed installed Python location. This supersedes the earlier
+machine-wide/PATH selection requirement, not the decision against interpreter
+attestation or the compiler-free and process-safety guarantees. The existing
+installation owner establishes managed Python before shared helpers execute.
+Historical requests and #9262's delivered PATH-selector credit remain above
+and below; they do not qualify the new boundary. #12775 is the bounded
+architecture/plan revision, not an implementation or rollout assignment.
+
 ## Plan
 
 - [ ] Carry the updater/service lifetime distinction through the existing
@@ -264,10 +280,11 @@ source architecture, not implemented migration or installed rollout.
 - [ ] Replace remaining executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
-  uv-managed Python prerequisite before these helpers, carry the selected
-  interpreter without interpreter attestation, and remove the superseded
-  signature, registry and physical-path gates rather than introduce helper-owned
-  acquisition or a new admission path.
+  project-declared `uv`-managed Python foundation before these helpers,
+  independent of system/user PATH. Use the existing installation owner and
+  [shared managed-Python sequence](../source-managed-runtime-installs/managed-python.md),
+  without interpreter attestation, another downloader or helper-owned setup.
+  Remove superseded signature, registry and physical-path gates.
 - [x] Land the compiler-free finite owned-process helper, retained lazy
   accounting, complete construction-resource closure and original client
   startup deadline through #9687. This is source closure only; current native
@@ -340,6 +357,10 @@ open.
 - [ ] The compiler-free amendment's complete source, packaging, bootstrap,
   kernel-identity, Windows Job/headlessness and minimal-machine checks pass;
   unsupported lanes remain explicit blockers, not assumed parity.
+- [ ] The [managed-Python boundary](compiler-free-execution.md#python-prerequisite-boundary)
+  passes no-Python/old-Python PATH, differing project versions, offline reuse,
+  acquisition-free ordinary launch and real shell-to-helper cold-start
+  qualification through the existing installation/native owners.
 
 ## Proposal
 

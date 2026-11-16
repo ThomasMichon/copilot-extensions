@@ -29,6 +29,10 @@
 .PARAMETER RequireGracefulCutover
     On update: require a live local versioned predecessor and confirmed
     graceful cutover. Never force retirement or fall back to stop/start.
+
+.PARAMETER NoService
+    Closed-wheel install/update only: prepare the runtime without changing
+    services or scheduled tasks. The caller owns stop, restore and verification.
 #>
 [CmdletBinding()]
 param(
@@ -41,6 +45,8 @@ param(
     [switch]$Purge,
 
     [switch]$RequireGracefulCutover,
+
+    [switch]$NoService,
 
     # Opt-in: run the daemon "whether the user is logged on or not" (a headless
     # boot-triggered S4U task) instead of the default at-logon task that only
@@ -79,6 +85,14 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($NoService -and (
+    $Action -notin @('install', 'update') -or
+    -not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+    $RequireGracefulCutover -or $NonInteractive -or $ForceTaskRepair -or $Purge -or $DryRun
+)) {
+    throw '-NoService requires complete closed wheels for install/update without service or repair options'
 }
 
 if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
@@ -131,7 +145,7 @@ if ($env:OS -eq 'Windows_NT' -and
     $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
         else { Join-Path $env:USERPROFILE '.agent-bridge' }
     $driverOptions = @()
-    foreach ($name in @('RequireGracefulCutover', 'NonInteractive', 'ZeroDowntime', 'Purge', 'DryRun')) {
+    foreach ($name in @('RequireGracefulCutover', 'NoService', 'NonInteractive', 'ZeroDowntime', 'Purge', 'DryRun')) {
         if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
             $driverOptions += $name
         }
@@ -2773,7 +2787,7 @@ function Invoke-Install {
     if (-not (Ensure-Uv)) { exit 1 }
 
     # Check for migration from old installer
-    Invoke-MigrationCheck
+    if (-not $NoService) { Invoke-MigrationCheck }
 
     # Strict same-content no-op (ce#776/#777): if the target version is already
     # the active slot AND healthy with matching content, do NOT rebuild it -- the
@@ -2787,7 +2801,7 @@ function Invoke-Install {
         Ensure-RuntimeSlotRetention -PayloadHash $preLockHash
         if (-not (Enter-InstallLock)) { throw 'Bridge installer lock is held' }
         try {
-            Ensure-ScheduledTask
+            if (-not $NoService) { Ensure-ScheduledTask }
             Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
             Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         } finally { Exit-InstallLock }
@@ -2812,7 +2826,7 @@ function Invoke-Install {
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
-        Ensure-ScheduledTask
+        if (-not $NoService) { Ensure-ScheduledTask }
         Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
         return
@@ -2897,7 +2911,7 @@ function Invoke-Install {
     # unresolved -- which would otherwise re-trigger the reconcile every session.
     Write-DeployManifest -PayloadHash $payloadHash
 
-    Ensure-ScheduledTask
+    if (-not $NoService) { Ensure-ScheduledTask }
 
     # Ensure ~/.local/bin is on user PATH
     $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
@@ -2917,6 +2931,10 @@ function Invoke-Install {
         Write-Host '  Binstub:     global compatibility wrapper unchanged (scoped install)'
     }
     Write-Host "  Config:      agent-bridge config show"
+    if ($NoService) {
+        Write-Ok 'Runtime ready; service restore and verification remain with the caller'
+        return
+    }
     $__ep = Get-ActiveEndpoint
     Write-Host "  API:         http://$($__ep.Bind):$($__ep.Port)"
 
@@ -3704,12 +3722,18 @@ function Invoke-Update {
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         try {
             Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
-            Ensure-ScheduledTask
-            # Slot/import health proves reusable bytes, not the serving version.
-            # This guarded seam never rebuilds, cold-starts or falls back to stop.
-            Invoke-ServingRuntimeReconcile
+            if (-not $NoService) {
+                Ensure-ScheduledTask
+                # Slot/import health proves reusable bytes, not the serving version.
+                # This guarded seam never rebuilds, cold-starts or falls back to stop.
+                Invoke-ServingRuntimeReconcile
+            }
             Write-DeployManifest -PayloadHash $payloadHash
-            Write-Ok "agent-bridge $SrcVersion content matched; serving runtime reconciled without rebuilding."
+            if ($NoService) {
+                Write-Ok "agent-bridge $SrcVersion runtime content matched; service lifecycle left unchanged."
+            } else {
+                Write-Ok "agent-bridge $SrcVersion content matched; serving runtime reconciled without rebuilding."
+            }
         } finally {
             Exit-InstallLock
         }
@@ -3741,20 +3765,20 @@ function Invoke-Update {
     # uniformly -- PowerShell's `finally` runs even on `exit` within the
     # same call stack, exactly like this codebase already relies on for the
     # install lock.
-    $activeForward = Test-ActiveIsForward
+    $activeForward = (-not $NoService) -and (Test-ActiveIsForward)
     if ($activeForward) {
         Write-Step 'Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon'
     }
-    if (-not $activeForward) {
+    if (-not $NoService -and -not $activeForward) {
         Write-UpdateMarker
     }
     try {
 
-    $predecessorSignature = if ($activeForward) { '' } else { Get-ActiveSignature }
+    $predecessorSignature = if ($NoService -or $activeForward) { '' } else { Get-ActiveSignature }
 
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
-    $wasRunning = (-not $activeForward) -and ($null -ne (Get-RunningProcess))
+    $wasRunning = (-not $NoService) -and (-not $activeForward) -and ($null -ne (Get-RunningProcess))
 
     # Thread B: the ZDD active/passive cutover is now the DEFAULT whenever a live
     # daemon is running -- activation always cuts over automatically (no opt-in).
@@ -3906,6 +3930,11 @@ function Invoke-Update {
     # clearing drift must not depend on the best-effort task step succeeding.
     Write-DeployManifest -PayloadHash $payloadHash
 
+    if ($NoService) {
+        Write-Ok 'Runtime ready; service restore and verification remain with the caller'
+        return
+    }
+
     # Scheduled task: routine updates NEVER rewrite it. The task is version-stable
     # bootstrap infrastructure (its action points at the start-agent-bridge.ps1
     # supervisor, which resolves the live runtime from the `current-version`
@@ -3966,7 +3995,7 @@ function Invoke-Update {
 
     Write-Ok 'Update complete'
     } finally {
-            Clear-UpdateMarker
+        if (-not $NoService) { Clear-UpdateMarker }
     }
 }
 
