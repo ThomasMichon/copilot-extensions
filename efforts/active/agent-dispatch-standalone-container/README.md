@@ -84,6 +84,15 @@ things beside it, reusing its runtime mechanics rather than duplicating them:
   "Role deployments and container managers" -- "Adopter-specific provisioning
   remains outside the portable fleet core"). This effort ships a reusable
   package and image; it does not deploy either anywhere.
+- **Finite #3439 receiving:** The existing package, Dispatch routing/coordinator
+  and clean-room validation custodians retain the exact Dispatch-only plugin
+  scenario below. It complements standalone-package interoperability; do not
+  replace its plugin-delivered fixture with the service bootstrap or require a
+  companion plugin. No executor, source claim or resource changes hands.
+  Complete reviewed Plan/local/global Validation receiving, actual merge and
+  current readback precede a separate source-specific tracking judgment.
+  Planned receiving is not a passing scenario or technical completion, and
+  does not start a daemon, installer, test, native operation or deployment.
 
 ## Context
 
@@ -255,7 +264,57 @@ for review before any implementation.
   (dedicated `install/` proxy dir, chosen over a unified dispatcher command)
   and the same-day clean-room validation.
 
+### Exact Dispatch-only inbox/health qualification from #3439
+
+**Agent-recommended tracking amendment.** This is the existing Phase 3
+validation/interoperability consumer, not a coordinator-lifecycle rewrite.
+
+- [ ] **S3439-P1:** Preserve the actual `agent-dispatch-solo` Tier-P/F1
+  fresh-standalone plugin composition: only Dispatch, no implicit Worktrees,
+  Bridge or Machines, adopter configuration, inherited runtime or endpoint
+  state. Retain the real supported installer/binstub prerequisites and
+  installed version/import checks; service-bootstrap success is not a
+  substitute for this fixture.
+- [ ] **S3439-P2:** Establish the fixture alias's local-machine identity under
+  current launch/installation authority, without SSH merely because a local
+  alias differs from the hostname and without treating genuine remote targets
+  as local or bypassing namespace policy. Make `read-inbox-empty` observe a
+  real empty local queue through supported lazy autostart. Retain the actual
+  authority, selected scope and local/remote decision without private payloads.
+- [ ] **S3439-P3:** Then make `read-health` discover that SAME coordinator
+  through the current installation/rendezvous scope, with no fixed port, and
+  report the actual installed package version. Investigate whether a failed
+  inbox prevented startup before claiming an independent health defect.
+  Preserve honest actionable fail-fast results for unavailable peers, bad
+  identity, failed startup and missing/invalid rendezvous. No existing
+  coordinator, mock output, companion plugin or settings-only change may
+  hide the fresh-solo failure.
+
+#### Local Validation - #3439
+
+- [ ] **S3439-V1:** Qualify the exact Phase 4 fixture's ordered
+  `read-inbox-empty` AND subsequent `read-health` checks with an owner-qualified
+  current source AND installed clean-room witness. Verify the empty local
+  queue, supported lazy startup, same-coordinator dynamic rendezvous and real
+  installed-version comparison in the Dispatch-only fresh composition.
+  An unchanged fixture or historical failure is not a current passing or
+  failing result; report unavailable coverage honestly.
+- [ ] **S3439-V2:** Retain local-alias and genuine-remote controls plus bad
+  identity, failed-startup and missing/invalid-rendezvous error behavior.
+  Distinguish an inbox-caused missing coordinator from a separately established
+  health defect. Preserve namespace/identity policy and existing lifecycle
+  ownership; qualification must not borrow a pre-existing endpoint, inherited
+  state or companion runtime to obtain a green result.
+
 ## Validation Plan
+
+- [ ] **S3439-G:** Resolve every S3439-P1/P2/P3 and S3439-V1/V2 clause
+  together, preserving the original fixture, ordered two-check acceptance and
+  actual source/installed distinction. #3425's namespace-provider change,
+  #5396's scenario-settings change and #5922's Bridge-solo composition are not
+  this complete Dispatch outcome; #3421 retains its separate version-source
+  scope. Documentary receiving leaves all technical rows unchecked, changes no
+  custodian and supplies no scenario execution, runtime activation or rollout.
 
 - [ ] Standalone bootstrap: fresh-machine install (no Copilot, no marketplace,
   no `git`/`uv` preinstalled) succeeds via `bootstrap.sh`/`bootstrap.ps1`;
@@ -287,6 +346,20 @@ for review before any implementation.
 _Pending._
 
 ## Journal
+
+### 2026-11-16 - Complete Dispatch-only inbox/health receiving proposal
+
+- Proposed three direct S3439 Plan rows, two local Validation rows and actual
+  global S3439-G, with continuing Coordination and a complete
+  [whole-contract crosswalk](../backlog-reconciliation/journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md#whole-3439-receiving-crosswalk).
+  Every new technical row is unchecked; all incumbent rows retain their state.
+- The standalone effort's existing plugin-flow/interoperability acceptance is
+  the receiving interface, not permission to replace the exact Dispatch-only
+  plugin fixture with the non-plugin service bootstrap. Source, installed
+  scenario and broader package/container acceptance remain distinct.
+- Normal review, actual merge/current readback and separate source judgment
+  remain before tracking retirement. No implementation, scenario, installer,
+  daemon, native operation, cleanup or deployment was performed.
 
 ### 2026-10-11 -- Kickoff
 - Captured the operator's request and the investigation that narrowed scope

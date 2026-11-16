@@ -3421,6 +3421,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete standalone-consumer receiving proposal](journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md)
+  directly retains #3439's exact Dispatch-only plugin composition, local alias,
+  real empty inbox, subsequent same-coordinator dynamic health/version and
+  honest failure controls in the existing standalone effort's Plan/local/global
+  Validation and Coordination. Every technical row remains unchecked; normal
+  review, actual merge/readback and separate source judgment precede retirement.
+  The same journal records actual #12913 delivery and distinct whole-original
+  #2861/#2908/#3296/#3342 canonical retentions without repeated implementation
+  studies, forced ownership changes or new closure credit.
   The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
   preserves #2729's five-package AND inherited #2726 contract in the existing
   Active Installer Engine Plan/local/global Validation and Coordination.
