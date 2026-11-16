@@ -12,7 +12,7 @@ __all__ = ["LocalLaunchPreparationError", "start_refusal"]
 
 
 def start_refusal(
-    exc: Exception, *, agent_name: str, target_dir: object, log: logging.Logger
+    exc: Exception, *, agent_name: str | None, target_dir: object, log: logging.Logger
 ) -> HTTPException:
     """Map a pre-launch session-start failure to its typed HTTP refusal."""
     if isinstance(exc, LocalLaunchPreparationError):

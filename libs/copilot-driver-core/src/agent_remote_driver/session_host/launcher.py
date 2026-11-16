@@ -36,7 +36,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar, cast
 
 from agent_procutil import (
     contained_test_mode,
@@ -61,6 +61,16 @@ class LaunchOwner(Protocol):
     def begin_host(self) -> None: ...
     def retain_process(self, proc: Any, state_file: str, nonce: str) -> None: ...
     def admit_host_child(self, context: str, request: dict[str, Any]) -> None: ...
+
+_CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
+
+
+class _DaemonDecorator(Protocol):
+    def __call__(self, function: _CallableT, /) -> _CallableT: ...
+
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(Callable[..., _DaemonDecorator], daemon_entrypoint)
+
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
@@ -149,7 +159,7 @@ def host_spawn_kwargs() -> dict[str, Any]:
 
 
 def _kill_host_process_tree(
-    proc: subprocess.Popen, expected_identity: str | None,
+    proc: subprocess.Popen[Any], expected_identity: str | None,
 ) -> None:
     """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
 
@@ -203,7 +213,7 @@ class HostHandle:
     child_pid: int
     port: int
     state_file: str
-    proc: subprocess.Popen
+    proc: subprocess.Popen[bytes]
     protocol_version: int = proto.PROTOCOL_VERSION
     nonce: str = field(default="", repr=False)
 
@@ -264,7 +274,9 @@ def launch_session_host(
     # Frontend-only helper; the compact host archive does not carry it.
     from .launcher_scratch import launch_state
 
-    with launch_state(state_dir, session_id, acquisition_launch) as (sd, phase):
+    with launch_state(
+        os.fspath(state_dir) if state_dir is not None else None, session_id, acquisition_launch,
+    ) as (sd, phase):
         return _launch_in(
             sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
             session_id=session_id, host_version=host_version,
@@ -554,7 +566,7 @@ async def _spawn_child(
     # hard host kill -- the Linux counterpart to the Windows kill-on-close job,
     # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)
     # on Windows, where preexec_fn is unsupported.
-    preexec = child_preexec()
+    preexec = cast(Callable[[], Callable[[], None] | None], child_preexec)()
     spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
     admission = child_env.pop(_ACQUISITION_ENV, None)
     if admission is not None:
@@ -562,6 +574,7 @@ async def _spawn_child(
             raise ValueError("Original launch context requires its receiving owner")
     if before_exec is not None:
         before_exec()
+    descriptor_options: dict[str, Any] = {"pass_fds": pass_fds} if pass_fds else {}
     return await asyncio.create_subprocess_exec(
         *spawn_argv,
         stdin=asyncio.subprocess.PIPE,
@@ -572,7 +585,7 @@ async def _spawn_child(
         limit=_ACP_STDIO_LIMIT_BYTES,
         preexec_fn=preexec,
         creationflags=no_window_flags(),
-        **({"pass_fds": pass_fds} if pass_fds else {}),
+        **descriptor_options,
     )
 
 
@@ -701,7 +714,7 @@ async def run_host(
                        preference_receipt=preference_receipt,
                        lifetime_policy=lifetime_policy)
     websocket = None
-    tasks: list[asyncio.Task] = []
+    tasks: list[asyncio.Task[Any]] = []
     try:
         bound_port = await host.serve(port=port)
         if ws_port is not None:
@@ -848,43 +861,11 @@ def main(
         ("acp", "legacy", "cli") if headed_available else ("acp", "legacy")
     )
     if argv == ["--support-json"]:
-        recovery_intents = []
-        if headed_available:
-            from ..headed.recovery import PERMIT_INTENT_CONTRACT, PERMIT_INTENT_VERSION
+        from .support import support_info
 
-            recovery_intents = [{
-                "contract": PERMIT_INTENT_CONTRACT, "versions": [PERMIT_INTENT_VERSION],
-                "scope": "data-only", "owner_store": "unqualified", "effects_wired": False,
-            }]
-        sdk_available = False
-        if not legacy and find_spec("agent_remote_driver.session_host.sdk_backend") is not None:
-            from .sdk_backend import available
-
-            sdk_available = available()
-        websocket_available = (
-            not legacy
-            and find_spec("agent_remote_driver.session_host.ws_transport") is not None
-            and find_spec("websockets") is not None
-        )
-        print(json.dumps({
-            "contract": "agent-remote-driver.session-host",
-            "version": 1,
-            "modes": ["headless"] + (["headed"] if headed_available else []),
-            "headless_backends": ["native-acp"] + (["sdk"] if sdk_available else []),
-            "transports": ["tcp-frame"] + (["acp.v1"] if websocket_available else []),
-            "protocol_version": proto.PROTOCOL_VERSION,
-            "lifetime_policies": list(lifetime_policies),
-            "startup_admission": ["live-owner-v1"],
-            "headed_process_receipts": ["native-child-v1"] if headed_available else [],
-            "headed_receivers": ["explicit-inprocess-v1"] if headed_available else [],
-            "headed_client": ["native-send-v1"] if headed_available else [],
-            "headed_recovery_intents": recovery_intents,
-            "mux_creation": ["posix-private-create-v1"] if not legacy and sys.platform != "win32" else [],
-            "automatic_idle_retirement": {
-                "availability": "unavailable",
-                "reason": "structured-runtime-work-inventory-unqualified",
-            },
-        }))
+        print(json.dumps(support_info(
+            legacy=legacy, headed_available=headed_available, lifetime_policies=lifetime_policies,
+        )))
         return 0
     if not legacy and argv == ["--mux-create-private"]:
         from ..mux_creation import private_main
@@ -957,7 +938,7 @@ def main(
         try:
             for signum in interrupt_signals:
                 previous_handlers[signum] = signal.signal(signum, lambda _signal, _frame: None)
-            result = asyncio.run((headed_run or run_headed)(
+            result: int = asyncio.run((headed_run or run_headed)(
                 child_argv, session_id=args.session_id, attempt_directory=args.attempt_directory,
                 state_file=args.state_file, cwd=args.cwd, port=args.port, ws_port=args.ws_port,
                 policy_context=args.repository_policy_context,

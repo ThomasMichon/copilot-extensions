@@ -1,0 +1,75 @@
+{
+  "captured_from": {
+    "commit": "313465c15931525a21549346e349109d2ce7c690",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 1,
+    "source_path": "libs/copilot-driver-core/src/agent_remote_driver/session_host/protocol.py",
+    "source_git_blob": "3fa9aeb6729336889449bb66e6e34f67b8d0c93c",
+    "source_sha256": "fdf861ec9f63bf6b92ad46b0ff157233b2063d20e921a9f27db84f369c703fed"
+  },
+  "scope": "Committed-source H1 codec, Host first-message handler and client inspection; in-memory streams and synthetic child/controller, no listener, process, installed provider or native Copilot qualification. Normalize only Host PID, Host generation and nonnegative RTT; preserve historical message vectors.",
+  "inputs": {
+    "libs/agent-procutil/src/agent_procutil/__init__.py": "fb5da4d1258fb706d95c5644a0a24e5d6e9fdef6e972518af8bc98baf3d809b2",
+    "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "dfc32ceb85acacf180a8786638843d3334e4f1e3b0a1de2a82b466bc010a79d6",
+    "libs/copilot-driver-core/src/agent_remote_driver/__init__.py": "22b026e6e6e0d5e13363cb46301abb950f691395abdd6703f96fc27c308f5dba",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/__init__.py": "03e75fefd4bd5ed8f55c87f6ba81cc922f0d3f2fb3d019b854570b5f4d759fb4",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/client.py": "c6a6308fcc43007e2fd0915429f9d2d17f133025b96833c0c50bb7269392c1fd",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/host.py": "195f32aca9886b4a06ea139bcba0b538699ea4c1114983fe8b96a64bbfeeea4d",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/inspection.py": "96dad7bb95ba583a36caca54e5a9f9c996c99ed77f3370a2bb628b9a4237be66",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/osutil.py": "da5e65f3831826179d22200b941967081d7fdd391b696eb3fb133cd2727c1d67",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/protocol.py": "fdf861ec9f63bf6b92ad46b0ff157233b2063d20e921a9f27db84f369c703fed",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_preferences.py": "69563733d2af36b8153c1227f9d96a53180919f4e4f67cc9369c481fe0d6581c",
+    "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json": "997d4369f40c60f6b0a361e26cd87e32c057d3e488280019978faa9095b1a74f",
+    "plugins/agent-bridge/contract/inputs/session-host/inspection-v1.json": "93358702613330d5b63b984ff3ad2db442347909869484180e609694f13cba96",
+    "plugins/agent-bridge/plugin.json": "eb478d1a0fa60d5bb7276d333d0ae53e777a746a1ca2f88d90bf42b47493e7ab",
+    "tools/agent_bridge_contract_git.py": "364e2767db2c0bf3e1ec57cf37afd283e35a15ba21dd00a1cc5f5b2443f548f4",
+    "tools/agent_bridge_contract_paths.py": "3dcd451c7e72f65acd8a2b68fdc9cd736e6557b18a1d4cae383e81ded89278ac",
+    "tools/agent_bridge_contract_publication.py": "4d3c2800a01305d22b9a0fbdc8f16d675892088c5fa1b54f6d58844efaa141c0",
+    "tools/agent_bridge_contract_registry.py": "063d21bc89cd90fb93f153e913ead6681bf4d04b5525caa4ded8fc6d18eb2548",
+    "tools/capture_bridge_host_inspection.py": "1e0e8568e7a170ddbaeedc4835f50f8bf96098065ac2695f02c742a22c8a7e11"
+  },
+  "observed": {
+    "request_base64": "AAAAiT97ImNvbnRyYWN0IjoiY29waWxvdC1kcml2ZXIuaG9zdC1pbnNwZWN0aW9uIiwidmVyc2lvbiI6MSwibm9uY2UiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsImNyZWRlbnRpYWwiOiJzeW50aGV0aWMtaW5zcGVjdGlvbiJ9",
+    "reply": {
+      "contract": "copilot-driver.host-inspection",
+      "version": 1,
+      "nonce": "00000000000000000000000000000000",
+      "host_pid": "<positive-host-pid>",
+      "host_generation": "<32-hex-host-generation>",
+      "child_pid": 4242,
+      "child_alive": true,
+      "turn_in_flight": true,
+      "max_seq": 1,
+      "frontend_ack": 0,
+      "last_child_frame_age_s": null,
+      "buffer_depth": 1
+    },
+    "state": "responsive",
+    "refused": {
+      "state": "unsupported",
+      "reason": "no-inspection-response"
+    },
+    "private": {
+      "state": "unsupported",
+      "reason": "provider-has-no-read-only-inspection"
+    },
+    "custody_unchanged": true,
+    "early_caps": [
+      "?",
+      "!"
+    ],
+    "historical_messages": [
+      "attach",
+      "ack",
+      "write",
+      "terminate",
+      "status",
+      "detach",
+      "hello",
+      "frame",
+      "liveness",
+      "unknown",
+      "attach_private"
+    ]
+  }
+}

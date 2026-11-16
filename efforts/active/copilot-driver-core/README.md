@@ -227,6 +227,14 @@ fix in #12687. Their exact source, runs and timings are recorded in the journal.
 This qualifies those fresh Manager decisions, not local shared-machine execution,
 every reuse/window mode, caller-Job loss or installed adoption.
 
+The detached public Worktrees caller-Job packet also passes after the
+original-owner fixture correction in #12804: fresh/resume, caller cleanup,
+generation replacement/restoration, retained-conversation reuse and exact
+retirement. The distinct attached packet stopped during fresh Manager wheel
+acquisition, before native caller execution, and remains unqualified. The
+six-request hosted allowance is exhausted; its larger underlying cap does not
+permit another submission. No complete mode/lifetime aggregate closes.
+
 The source-complete actor-free recovery-intent adapter supports original-owner
 persistence but does not prove this outcome. Its bounded source acceptance is
 recorded in the journal, not counted as root acceptance. Select the portable
