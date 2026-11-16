@@ -366,7 +366,7 @@ Strict direct TCP selection bypasses the legacy Unix socket, including when
 the configured port otherwise uses its default. Unsupported native transports
 refuse rather than dialing another daemon; configured before-builtin transport
 extensions retain their existing priority.
-A present but unreachable or foreign-installation advertisement is not absence.
+A present but unreachable, invalid or foreign-installation advertisement is not absence.
 Preferred extensions retain their existing priority; if they decline, the
 strict discovery error is propagated without native or legacy fallback.
 Ordinary non-strict discovery retains its existing fallback behavior.

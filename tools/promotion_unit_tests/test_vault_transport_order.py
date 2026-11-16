@@ -25,18 +25,24 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     ]
     assert len(selected) == 2
     calls: list[str] = []
-    state = SimpleNamespace(response=None, discovered=True)
+    state = SimpleNamespace(response=None, discovered=True, invalid=False)
 
     class DiscoveryRefusal(RuntimeError):
         pass
 
+    class InvalidDiscovery(RuntimeError):
+        pass
+
     original = DiscoveryRefusal("selected endpoint is unavailable")
+    invalid = InvalidDiscovery("selected endpoint state is invalid")
 
     def discover(_context: object, *, strict: bool) -> None:
         assert strict is True
         calls.append("discovery")
         if not state.discovered:
             return None
+        if state.invalid:
+            raise invalid
         raise original
 
     def native(*_arguments: object, **_options: object) -> NoReturn:
@@ -70,32 +76,41 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             port=10170, sources={"port": "default"},
         )),
         "os": SimpleNamespace(environ={}),
-        "rendezvous": SimpleNamespace(EndpointUnavailable=DiscoveryRefusal),
+        "rendezvous": SimpleNamespace(
+            EndpointUnavailable=DiscoveryRefusal, EndpointStateError=InvalidDiscovery,
+        ),
         "IS_WSL": False, "IS_WINDOWS": False,
         "_discover_endpoint": discover, "_send_socket": native, "_send_tcp": native,
     }
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
     return SimpleNamespace(
         send=namespace["send_command"], original=original,
-        error=DiscoveryRefusal, state=state, calls=calls, package=package_name,
+        error=DiscoveryRefusal, state_error=InvalidDiscovery, invalid=invalid,
+        state=state, calls=calls, package=package_name,
     )
 
 
-@pytest.mark.parametrize("mode", ["preferred", "declined", "absent"])
+@pytest.mark.parametrize("mode", [
+    "preferred", "declined", "absent", "invalid-preferred", "invalid-declined",
+])
 def test_unavailable_discovery_preserves_preferred_authority_without_native_fallback(
     boundary: SimpleNamespace, mode: str,
 ) -> None:
     request = {"action": "get", "entry": "Example/service"}
     boundary.state.discovered = mode != "absent"
-    if mode == "preferred":
+    boundary.state.invalid = mode.startswith("invalid-")
+    if mode in ("preferred", "invalid-preferred"):
         boundary.state.response = {"ok": True, "value": "synthetic-value"}
         assert boundary.send(
             request, strict_endpoint=True, require_endpoint=True,
         ) is boundary.state.response
     else:
-        with pytest.raises(boundary.error) as caught:
+        expected = boundary.state_error if boundary.state.invalid else boundary.error
+        with pytest.raises(expected) as caught:
             boundary.send(request, strict_endpoint=True, require_endpoint=True)
-        if mode == "declined":
+        if mode == "invalid-declined":
+            assert caught.value is boundary.invalid
+        elif mode == "declined":
             assert caught.value is boundary.original
     assert boundary.calls == ["discovery", "preferred"]
 

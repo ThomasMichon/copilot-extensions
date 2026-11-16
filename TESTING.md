@@ -7464,10 +7464,10 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
-Five Vault read/transport units execute the actual `read_credential` and
+Seven Vault read/transport units execute the actual `read_credential` and
 `send_command` bodies with substituted context, discovery, extension and native
-owners. Preferred extensions retain authority; when they decline, unavailable
-or absent required native advertisements cannot reach legacy dialing. The
+owners. Preferred extensions retain authority even with invalid endpoint state;
+when they decline, unusable or absent required advertisements cannot reach legacy dialing. The
 reader must require discovery on both readiness and read, while old strict
 callers keep their existing default. These actor-free units start no service,
 socket or child and do not qualify installed transport or credential handling.
