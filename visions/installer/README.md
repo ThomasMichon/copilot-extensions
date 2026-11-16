@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-15
+- **Last revised:** 2026-11-16
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -342,6 +342,36 @@ administration merely because it selected a harness.
 ### prerequisite-provisioning
 Detects and installs the foundational prerequisites, and **prompts to restart**
 when a change requires it before continuing.
+
+### uv-managed-python
+
+The suite uses uv to manage its supported Python versions. Explicit installation
+prepares the declared interpreter independently of the machine's default
+`python`, active virtual environment, Python launcher registrations or PATH
+ordering. A supported system Python installation and a machine-wide PATH repair
+are not prerequisites for preparing the suite's Python.
+
+The installation owner carries that selection into bootstrap helpers and
+application environments. Services and ordinary commands launch their selected
+environment's explicit interpreter; wrapping an existing executable in
+`uv run` does not retarget the environment to which it is already bound.
+Fresh terminals, repair and update use the same declared selection rather than
+rediscovering ambient Python. The standalone installation path owns the same
+preparation without requiring Manager, a sibling service or a plugin session.
+
+Interpreter acquisition belongs to explicit, authorized installation or repair,
+not status, discovery or ordinary command launch. Already prepared toolchains
+remain usable offline; missing inputs and acquisition or execution failures
+produce actionable outcomes without silently selecting an incompatible system
+interpreter. Upgrading the managed toolchain preserves supported installed
+environments and rollback until their installation owners replace them.
+
+uv manages interpreter selection and acquisition, not process custody or trust
+policy. Existing caller lifetimes, authenticated pipes, native containment,
+deadlines and exact cleanup remain intact, including while preparing a toolchain.
+Source and package integrity and operating-system execution policy still apply;
+an OS refusal is not permission to disable policy, elevate or substitute an
+unqualified interpreter.
 
 ### core-install-via-real-flow
 Establishes Manager through the real upstream installation owner, then derives
