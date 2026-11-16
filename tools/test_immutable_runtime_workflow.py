@@ -166,7 +166,7 @@ def test_manual_selection_preserves_every_existing_route_and_default() -> None:
         "windows_broker_consumers": {
             "windows-broker-portable", "windows-native-process", "windows-broker-consumers",
         },
-        "native_daemon_exit": {"native-daemon-exit-windows"},
+        "native_daemon_exit": {"native-daemon-exit-windows", "wmi-durable-launch-windows"},
     }
     defaults: dict[str, bool | str] = {
         name: entry["default"] for name, entry in inputs.items()

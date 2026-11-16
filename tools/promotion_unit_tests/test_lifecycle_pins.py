@@ -4,11 +4,14 @@ from contextlib import contextmanager
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
 import pytest
 
-from tools import plugin_test_lifecycle as lifecycle
+if TYPE_CHECKING:
+    import plugin_test_lifecycle as lifecycle
+else:
+    from tools import plugin_test_lifecycle as lifecycle
 
 
 @pytest.mark.parametrize("native_application", [False, True])
