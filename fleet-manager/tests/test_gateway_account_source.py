@@ -13,7 +13,7 @@ import pytest
 from fleet_manager.gateway_account_source import (
     LEASE_CONTRACT, AccountSource, AccountSourceGrant, AccountSourceHandler,
 )
-from fleet_manager.gateway_vault_available import NORMAL_FETCH_CONTRACT
+from fleet_manager.gateway_vault_available import NORMAL_FETCH_CONTRACT, NORMAL_LEASE_SUPPORT
 from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest, ServiceResponse
 
 
@@ -165,6 +165,7 @@ def test_support_uses_selected_handler_without_fetching_credentials() -> None:
         "installationId": "source-installation",
         "source_credentials_contract": {"lease_contract": LEASE_CONTRACT, "exchange": "http/v1"},
         "normal_fetch_contract": NORMAL_FETCH_CONTRACT,
+        "normal_source_lease_contract": NORMAL_LEASE_SUPPORT,
     }
     assert source.calls == []
 
@@ -292,7 +293,7 @@ def test_normal_fetch_preserves_unknown_expiry_without_requesting_a_source_lease
 
 @pytest.mark.parametrize("changes,status", [
     ({"installationId": "replacement"}, 409), ({"fetch_contract": "unsupported"}, 409),
-    ({"lease_contract": LEASE_CONTRACT}, 400), ({"account": "foreign"}, 403),
+    ({"lease_contract": "unsupported"}, 409), ({"account": "foreign"}, 403),
     ({"source": "foreign"}, 403), ({"recipient": "foreign"}, 403),
 ])
 def test_normal_fetch_never_acquires_without_exact_contract_pin_and_grant(

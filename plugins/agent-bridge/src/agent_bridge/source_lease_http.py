@@ -12,6 +12,7 @@ import stat
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -19,6 +20,10 @@ from credential_relay.http_auth import HttpAuthContext, HttpAuthInjector
 
 LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
 HTTP_SUPPORT = {"lease_contract": LEASE_CONTRACT, "exchange": "http/v1"}
+NORMAL_FETCH_CONTRACT = "fleet-manager.vault-normal-fetch/v1"
+NORMAL_LEASE_SUPPORT = {
+    "fetch_contract": NORMAL_FETCH_CONTRACT, "lease_contract": LEASE_CONTRACT,
+}
 INSTALLATION_HEADER = "X-Agent-Index-Installation-Id"
 
 
@@ -39,6 +44,7 @@ class HttpSourceLease:
     _wall: float = field(repr=False)
     _monotonic: float = field(repr=False)
     _remaining: float = field(repr=False)
+    token_expires_at: float | None = None
     _expired: bool = field(default=False, init=False, repr=False)
 
     def remaining_seconds(self) -> float:
@@ -50,6 +56,8 @@ class HttpSourceLease:
             self._remaining - max(monotonic - self._monotonic, wall - self._wall),
             self.expires_at - wall,
         )
+        if self.token_expires_at is not None:
+            self._remaining = min(self._remaining, self.token_expires_at - wall)
         self._wall, self._monotonic = wall, monotonic
         self._expired |= self._remaining <= 0
         return 0.0 if self._expired else self._remaining
@@ -93,18 +101,25 @@ def _capability(path: Path) -> str:
     return value
 
 
-class HttpSourceLeaseClient:
+class SourceLeaseClient(Protocol):
+    async def acquire(self, *, timeout: float = 20) -> HttpSourceLease:
+        """Acquire current source authorization without execution authority."""
+        ...
+
+
+class _HttpLeaseClient:
     """One explicit endpoint, account binding and caller capability; no fallback.
 
     The embedding owns approval of the injected auth source and the HTTPS
     endpoint. Construction does not approve or acquire either credential.
     """
 
+    _installation_header: str | None = INSTALLATION_HEADER
+
     def __init__(
         self, endpoint: str, *, auth: HttpAuthInjector, context: HttpAuthContext,
         discovery_endpoint: str, discovery_auth: HttpAuthInjector,
         discovery_context: HttpAuthContext, installation_id: str,
-        source: str, account: str, recipient: str, host: str, capability_file: Path,
         tls_context: ssl.SSLContext | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
@@ -125,8 +140,6 @@ class HttpSourceLeaseClient:
                 or discovery_context.origin != f"https://{discovery.netloc.lower()}"
                 or not discovery_context.identity or not discovery_context.generation
                 or not _text(installation_id)
-                or not capability_file.is_absolute()
-                or any(not _text(item) for item in (source, account, recipient, host))
                 or tls_context is not None and (
                     not tls_context.check_hostname or tls_context.verify_mode != ssl.CERT_REQUIRED
                 )
@@ -138,12 +151,8 @@ class HttpSourceLeaseClient:
         self._discovery_endpoint = discovery_endpoint
         self._discovery_auth, self._discovery_context = discovery_auth, discovery_context
         self._installation_id = installation_id
-        self._capability_file, self._transport = capability_file, transport
+        self._transport = transport
         self._tls_context = tls_context
-        self._binding = {
-            "source": source, "account": account, "recipient": recipient,
-            "host": host, "action": "get-github-token",
-        }
 
     async def acquire(self, *, timeout: float = 20) -> HttpSourceLease:
         """Negotiate before reading the capability; never retry an uncertain POST."""
@@ -158,31 +167,26 @@ class HttpSourceLeaseClient:
             raise SourceLeaseError("source-lease-unavailable") from None
 
     async def _acquire(self, started_wall: float, started: float) -> HttpSourceLease:
-        async with httpx.AsyncClient(
+        raise NotImplementedError
+
+    def _client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             trust_env=False, follow_redirects=False, transport=self._transport,
             verify=self._tls_context if self._tls_context is not None else True,
             timeout=None,
-        ) as client:
-            support = await self._request(client, "GET", discovery=True)
-            if (
-                support.get("source_credentials_contract") != HTTP_SUPPORT
-                or support.get("installationId") != self._installation_id
-            ):
-                raise SourceLeaseError("source-lease-unsupported")
-            capability = _capability(self._capability_file)
-            value = await self._request(client, "POST", {
-                **self._binding, "capability": capability, "lease_contract": LEASE_CONTRACT,
-            })
-        expected = {
-            "account", "host", "token", "lease_contract", "lease_id",
+        )
+
+    def _lease(
+        self, value: dict[str, Any], expected: dict[str, Any], started_wall: float, started: float,
+    ) -> HttpSourceLease:
+        keys = set(expected) | {
+            "token", "lease_contract", "lease_id",
             "lease_issued_at", "lease_expires_at", "lease_remaining_seconds",
-            "installationId",
         }
         if (
-            set(value) != expected or value["lease_contract"] != LEASE_CONTRACT
-            or value["installationId"] != self._installation_id
-            or value["account"] != self._binding["account"]
-            or value["host"] != self._binding["host"] or not _text(value["token"], 16384)
+            set(value) != keys or value["lease_contract"] != LEASE_CONTRACT
+            or any(value[name] != item for name, item in expected.items())
+            or not _text(value["token"], 16384)
             or not isinstance(value["lease_id"], str)
             or re.fullmatch("[0-9a-f]{32}", value["lease_id"]) is None
         ):
@@ -205,21 +209,30 @@ class HttpSourceLeaseClient:
         )
         if budget <= 0:
             raise SourceLeaseError("source-lease-expired")
+        token_expiry = value.get("token_expires_at")
+        if token_expiry is not None:
+            if (type(token_expiry) not in (int, float) or not math.isfinite(token_expiry)
+                    or not 0 < token_expiry < 1e12):
+                raise SourceLeaseError("source-lease-response-invalid")
+            budget = min(budget, token_expiry - wall)
+            if budget <= 0:
+                raise SourceLeaseError("source-lease-expired")
         return HttpSourceLease(
             value["token"], value["account"], value["host"], value["lease_id"],
-            issued, expires, wall, monotonic, budget,
+            issued, expires, wall, monotonic, budget, token_expiry,
         )
 
     async def _request(
-        self, client: httpx.AsyncClient, method: str, payload: dict[str, str] | None = None,
+        self, client: httpx.AsyncClient, method: str, payload: dict[str, object] | None = None,
         *, discovery: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         auth, context, endpoint = (
             (self._discovery_auth, self._discovery_context, self._discovery_endpoint)
             if discovery else (self._auth, self._context, self._endpoint)
         )
         headers = httpx.Headers(await auth.headers(context))
-        headers[INSTALLATION_HEADER] = self._installation_id
+        if self._installation_header is not None:
+            headers[self._installation_header] = self._installation_id
         headers["Accept"] = "application/json"
         headers["Accept-Encoding"] = "identity"
         async with client.stream(
@@ -242,3 +255,95 @@ class HttpSourceLeaseClient:
             if not isinstance(value, dict):
                 raise SourceLeaseError("source-lease-response-invalid")
             return value
+
+
+class HttpSourceLeaseClient(_HttpLeaseClient):
+    """Fixed source/account HTTP lease; legacy exchange semantics are unchanged."""
+
+    def __init__(
+        self, endpoint: str, *, auth: HttpAuthInjector, context: HttpAuthContext,
+        discovery_endpoint: str, discovery_auth: HttpAuthInjector,
+        discovery_context: HttpAuthContext, installation_id: str,
+        source: str, account: str, recipient: str, host: str, capability_file: Path,
+        tls_context: ssl.SSLContext | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        super().__init__(
+            endpoint, auth=auth, context=context, discovery_endpoint=discovery_endpoint,
+            discovery_auth=discovery_auth, discovery_context=discovery_context,
+            installation_id=installation_id, tls_context=tls_context, transport=transport,
+        )
+        if (not isinstance(capability_file, Path) or not capability_file.is_absolute()
+                or any(not _text(item) for item in (source, account, recipient, host))):
+            raise SourceLeaseError("source-lease-binding-invalid")
+        self._capability_file = capability_file
+        self._binding = {
+            "source": source, "account": account, "recipient": recipient,
+            "host": host, "action": "get-github-token",
+        }
+
+    async def _acquire(self, started_wall: float, started: float) -> HttpSourceLease:
+        async with self._client() as client:
+            support = await self._request(client, "GET", discovery=True)
+            if (support.get("source_credentials_contract") != HTTP_SUPPORT
+                    or support.get("installationId") != self._installation_id):
+                raise SourceLeaseError("source-lease-unsupported")
+            value = await self._request(client, "POST", {
+                **self._binding, "capability": _capability(self._capability_file),
+                "lease_contract": LEASE_CONTRACT,
+            })
+        return self._lease(value, {
+            "account": self._binding["account"], "host": self._binding["host"],
+            "installationId": self._installation_id,
+        }, started_wall, started)
+
+
+class GatewaySourceLeaseClient(_HttpLeaseClient):
+    """One Gateway lookup over explicit consumer-owned Controller capabilities.
+
+    Discovery precedes capability reads. The Gateway selects the source; this
+    client never retries Controllers or downgrades an uncertain POST.
+    """
+
+    _installation_header = None
+
+    def __init__(
+        self, endpoint: str, *, auth: HttpAuthInjector, context: HttpAuthContext,
+        discovery_endpoint: str, discovery_auth: HttpAuthInjector,
+        discovery_context: HttpAuthContext, installation_id: str,
+        binding: str, account: str, host: str, capability_files: dict[str, Path],
+        tls_context: ssl.SSLContext | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        super().__init__(
+            endpoint, auth=auth, context=context, discovery_endpoint=discovery_endpoint,
+            discovery_auth=discovery_auth, discovery_context=discovery_context,
+            installation_id=installation_id, tls_context=tls_context, transport=transport,
+        )
+        if (any(not _text(item) for item in (binding, account, host))
+                or type(capability_files) is not dict or not 0 < len(capability_files) <= 32
+                or any(not _text(name) or not isinstance(path, Path) or not path.is_absolute()
+                       for name, path in capability_files.items())):
+            raise SourceLeaseError("source-lease-binding-invalid")
+        self._binding, self._account, self._host = binding, account, host
+        self._capability_files = dict(capability_files)
+
+    async def _acquire(self, started_wall: float, started: float) -> HttpSourceLease:
+        async with self._client() as client:
+            support = await self._request(client, "GET", discovery=True)
+            if (support.get("normal_source_lease_contract") != NORMAL_LEASE_SUPPORT
+                    or support.get("installationId") != self._installation_id):
+                raise SourceLeaseError("source-lease-unsupported")
+            value = await self._request(client, "POST", {
+                "fetch_contract": NORMAL_FETCH_CONTRACT, "lease_contract": LEASE_CONTRACT,
+                "binding": self._binding, "installationId": self._installation_id,
+                "sources": {name: _capability(path)
+                            for name, path in self._capability_files.items()},
+            })
+        return self._lease(value, {
+            "fetch_contract": NORMAL_FETCH_CONTRACT, "state": "fetched",
+            "acquisition": "normal-fetch", "binding": self._binding,
+            "account": self._account, "host": self._host,
+            "installationId": self._installation_id,
+            "token_expires_at": value.get("token_expires_at"),
+        }, started_wall, started)
