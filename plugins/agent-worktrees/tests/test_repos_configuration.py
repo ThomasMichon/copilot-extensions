@@ -3,30 +3,39 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterator
+from argparse import Namespace
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import stat
+import runpy
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any, cast
 import threading
 import time
 
 from agent_procutil import no_window_kwargs
 from agent_procutil.owned_process import run_caller_owned
+from plugin_activation import resolve_active_plugins
 import pytest
 import yaml
 
-from agent_worktrees import config as cfg, repos
+from agent_worktrees import config as cfg, git_ops, project_state, repos
+from agent_worktrees.tracking_claims import format_claim_ref
 from agent_worktrees.repos_configuration import apply, preview
 from agent_worktrees.repos_configuration_sources import ConfigurationError
+from agent_worktrees.repos_registry_reader import RepositoryResolutionError
+from agent_worktrees.repos_registry_transaction import read_bytes, registry_lock
 
 SECRET = "github_pat_SENTINEL_DO_NOT_RENDER"
 
 
 @pytest.mark.parametrize("outcome", ["absent", "disappeared", "empty"])
-def test_mapping_acquisition_owner_distinguishes_empty_without_replay(tmp_path, monkeypatch, outcome):
+def test_mapping_acquisition_owner_distinguishes_empty_without_replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str) -> None:
     """Strict acquisition distinguishes empty values without repeating native reads."""
     from agent_worktrees import repos_configuration_sources as sources
 
@@ -36,18 +45,18 @@ def test_mapping_acquisition_owner_distinguishes_empty_without_replay(tmp_path, 
     original_read, original_parse, original_exists = Path.read_bytes, sources.parse_mapping, Path.exists
     reads, parses = [], []
 
-    def read(candidate):
+    def read(candidate: Any) -> Any:
         if candidate == path:
             reads.append(candidate)
             if outcome == "disappeared":
                 raise FileNotFoundError("synthetic disappearance after selection")
         return original_read(candidate)
 
-    def parse(text):
+    def parse(text: Any) -> Any:
         parses.append(text)
         return original_parse(text)
 
-    def exists(candidate):
+    def exists(candidate: Any) -> Any:
         if candidate == path:
             pytest.fail("strict owner must use its original read, not add a presence probe")
         return original_exists(candidate)
@@ -70,7 +79,7 @@ def test_mapping_acquisition_owner_distinguishes_empty_without_replay(tmp_path, 
     assert "stable-owner-input-frontier" in report.missing_coverage
 
 
-def test_mapping_acquisition_owner_preserves_invalid_composition(tmp_path, monkeypatch):
+def test_mapping_acquisition_owner_preserves_invalid_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The strict report keeps the parser's fatal sanitized failure."""
     from agent_worktrees import config_acquisition, repos_configuration_sources as sources
 
@@ -79,7 +88,7 @@ def test_mapping_acquisition_owner_preserves_invalid_composition(tmp_path, monke
     original = Path.read_bytes
     reads = []
 
-    def read(candidate):
+    def read(candidate: Any) -> Any:
         if candidate == path:
             reads.append(candidate)
         return original(candidate)
@@ -95,7 +104,7 @@ def test_mapping_acquisition_owner_preserves_invalid_composition(tmp_path, monke
         assert config_acquisition.current_observations() is None
 
 
-def test_mapping_acquisition_owner_preserves_nonabsence_exception_identity(tmp_path, monkeypatch):
+def test_mapping_acquisition_owner_preserves_nonabsence_exception_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A raw non-absence failure must not become an optional empty mapping."""
     import errno
     from agent_worktrees import config_acquisition, repos_configuration_sources as sources
@@ -104,7 +113,7 @@ def test_mapping_acquisition_owner_preserves_nonabsence_exception_identity(tmp_p
     failure = OSError(errno.ELOOP, "synthetic non-absence read failure")
     reads = []
 
-    def read(candidate):
+    def read(candidate: Any) -> Any:
         assert candidate == path
         reads.append(candidate)
         raise failure
@@ -120,7 +129,7 @@ def test_mapping_acquisition_owner_preserves_nonabsence_exception_identity(tmp_p
 
 
 @pytest.fixture
-def native(tmp_path, monkeypatch):
+def native(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     previous = cfg.active_project()
@@ -155,27 +164,27 @@ def native(tmp_path, monkeypatch):
         cfg.set_active_project(previous)
 
 
-def cli(*args):
+def cli(*args: str) -> subprocess.CompletedProcess[str]:
     return run_caller_owned(
         [sys.executable, "-m", "agent_worktrees", "repos", "configuration", *args],
         timeout=15, max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
     )
 
 
-def request(command, *args, name="sample"):
+def request(command: str, *args: str, name: str="sample") -> subprocess.CompletedProcess[str]:
     return cli(
         command, "--context-project", "sample", "--repository", name, *args,
     )
 
 
-def tree(root):
+def tree(root: Path) -> dict[str, bytes | None]:
     return {
         str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
         for path in root.rglob("*")
     }
 
 
-def local_knowledge(native, *, bare=False):
+def local_knowledge(native: Path, *, bare: bool | str=False) -> Path:
     source = native / "repository" / ".agent-worktrees" / "config.yaml"
     source.parent.mkdir()
     source.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
@@ -202,7 +211,7 @@ def local_knowledge(native, *, bare=False):
     return root
 
 
-def prepared_knowledge_observer(native):
+def prepared_knowledge_observer(native: Path) -> tuple[Path, Path, Any]:
     from agent_worktrees import guarded_anchors
 
     root = local_knowledge(native)
@@ -220,7 +229,8 @@ def prepared_knowledge_observer(native):
     }
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     assert guarded_anchors.prepare(caller) == ""
-    return root, caller, guarded_anchors._reader()
+    reader: Callable[[], Any] = guarded_anchors._reader
+    return root, caller, reader()
 
 
 @pytest.mark.parametrize(("bare", "remote", "included"), [
@@ -228,7 +238,7 @@ def prepared_knowledge_observer(native):
     (False, "https://github.com/example/knowledge.git", False),
     (False, "https://github.com/example/knowledge.git", True),
 ], ids=["checkout", "bare", "converted-bare", "remote-metadata", "included-origin"])
-def test_real_local_knowledge_registration_is_registry_only_and_does_not_bind(native, bare, remote, included):
+def test_real_local_knowledge_registration_is_registry_only_and_does_not_bind(native: Path, bare: bool | str, remote: str, included: bool) -> None:
     root = local_knowledge(native, bare=bare)
     if remote:
         arguments = ["remote", "add", "origin", remote]
@@ -290,7 +300,7 @@ def test_real_local_knowledge_registration_is_registry_only_and_does_not_bind(na
 
 
 @pytest.mark.parametrize("change", ["registry", "binding", "origin"])
-def test_local_knowledge_registration_rechecks_the_proposal_without_git_or_binding_writes(native, change):
+def test_local_knowledge_registration_rechecks_the_proposal_without_git_or_binding_writes(native: Path, change: str) -> None:
     from agent_worktrees import repos_knowledge_registration as registration
 
     root = local_knowledge(native)
@@ -316,7 +326,7 @@ def test_local_knowledge_registration_rechecks_the_proposal_without_git_or_bindi
 
 
 @pytest.mark.parametrize("owner", ["unregistered", "registered", "harness", "registered-metadata"])
-def test_local_knowledge_registration_refuses_converted_bare_metadata_aliases(native, owner):
+def test_local_knowledge_registration_refuses_converted_bare_metadata_aliases(native: Path, owner: str) -> None:
     root = local_knowledge(native, bare="converted")
     registry = repos._repos_yaml_path()
     raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
@@ -344,7 +354,7 @@ def test_local_knowledge_registration_refuses_converted_bare_metadata_aliases(na
 
 
 @pytest.mark.parametrize("classification", ["reference", "singleton", "knowledge"])
-def test_local_knowledge_registration_requires_the_binding_owners_worktree_class(native, classification):
+def test_local_knowledge_registration_requires_the_binding_owners_worktree_class(native: Path, classification: str) -> None:
     local_knowledge(native)
     path = repos._repos_yaml_path()
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -362,7 +372,7 @@ def test_local_knowledge_registration_requires_the_binding_owners_worktree_class
     assert tree(native) == before
 
 
-def symlink_registry(native):
+def symlink_registry(native: Path) -> Path:
     registry = repos._repos_yaml_path()
     backing = native / "registry-source.yaml"
     registry.rename(backing)
@@ -373,7 +383,7 @@ def symlink_registry(native):
     return backing
 
 
-def test_local_knowledge_registration_rejects_nonregular_registry_before_fingerprinting(native, monkeypatch):
+def test_local_knowledge_registration_rejects_nonregular_registry_before_fingerprinting(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos_knowledge_registration as registration
 
     root = local_knowledge(native)
@@ -381,10 +391,10 @@ def test_local_knowledge_registration_rejects_nonregular_registry_before_fingerp
     before = tree(native)
     original_stat, original_read = Path.stat, Path.read_bytes
 
-    def fifo_mode(path, *args, **kwargs):
+    def fifo_mode(path: Any, *args: Any, **kwargs: Any) -> Any:
         return SimpleNamespace(st_mode=stat.S_IFIFO) if path == registry else original_stat(path, *args, **kwargs)
 
-    def read(path):
+    def read(path: Any) -> Any:
         if path == registry:
             pytest.fail("A nonregular registry must be rejected before attempting to open it.")
         return original_read(path)
@@ -392,18 +402,19 @@ def test_local_knowledge_registration_rejects_nonregular_registry_before_fingerp
     with monkeypatch.context() as patch:
         patch.setattr(Path, "stat", fifo_mode)
         patch.setattr(Path, "read_bytes", read)
-        with pytest.raises(repos.RepositoryResolutionError, match="regular file"):
+        with pytest.raises(RepositoryResolutionError, match="regular file"):
             registration.preview("sample", "local-knowledge", str(root), "main")
     assert tree(native) == before
 
 
-@pytest.mark.skipif(not hasattr(repos.os, "mkfifo"), reason="native FIFO creation is unavailable")
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native FIFO creation is unavailable")
 @pytest.mark.parametrize("operation", ["preview", "apply"])
-def test_local_knowledge_registration_refuses_real_fifo_registry_promptly(native, operation):
+def test_local_knowledge_registration_refuses_real_fifo_registry_promptly(native: Path, operation: str) -> None:
     root = local_knowledge(native)
     registry = repos._repos_yaml_path()
     registry.unlink()
-    repos.os.mkfifo(registry)
+    make_fifo: Callable[[Path], None] = getattr(os, "mkfifo")
+    make_fifo(registry)
     before = tree(root)
     started = time.monotonic()
     result = request(
@@ -417,7 +428,7 @@ def test_local_knowledge_registration_refuses_real_fifo_registry_promptly(native
     assert stat.S_ISFIFO(registry.stat().st_mode) and tree(root) == before
 
 
-def test_local_knowledge_registration_refuses_symlinked_registry_without_replacing_its_owner(native):
+def test_local_knowledge_registration_refuses_symlinked_registry_without_replacing_its_owner(native: Path) -> None:
     root = local_knowledge(native)
     backing = symlink_registry(native)
     registry = repos._repos_yaml_path()
@@ -437,7 +448,7 @@ def test_local_knowledge_registration_refuses_symlinked_registry_without_replaci
 
 
 @pytest.mark.parametrize("phase", ["before-apply", "before-write"])
-def test_local_knowledge_registration_rechecks_registry_indirection(native, monkeypatch, phase):
+def test_local_knowledge_registration_rechecks_registry_indirection(native: Path, monkeypatch: pytest.MonkeyPatch, phase: str) -> None:
     from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
 
     root = local_knowledge(native)
@@ -449,7 +460,7 @@ def test_local_knowledge_registration_rechecks_registry_indirection(native, monk
         original = guarded_anchors.managed_write
         backing = native / "registry-source.yaml"
 
-        def redirected(write, **kwargs):
+        def redirected(write: Any, **kwargs: Any) -> Any:
             symlink_registry(native)
             return original(write, **kwargs)
 
@@ -463,7 +474,7 @@ def test_local_knowledge_registration_rechecks_registry_indirection(native, monk
 @pytest.mark.parametrize("invalid", [
     "case-collision", "path-collision", "identity-collision", "descendant", "secret-origin", "relative", "indirect-metadata",
 ])
-def test_local_knowledge_registration_refuses_unsafe_or_registered_inputs_without_effects(native, monkeypatch, invalid):
+def test_local_knowledge_registration_refuses_unsafe_or_registered_inputs_without_effects(native: Path, monkeypatch: pytest.MonkeyPatch, invalid: str) -> None:
     from agent_worktrees import repos_knowledge_registration as registration
 
     root = local_knowledge(native)
@@ -484,9 +495,9 @@ def test_local_knowledge_registration_refuses_unsafe_or_registered_inputs_withou
     elif invalid == "relative":
         path = "relative-knowledge"
     elif invalid == "indirect-metadata":
-        original = registration.project_state._is_link_or_reparse
+        original = project_state._is_link_or_reparse
         monkeypatch.setattr(
-            registration.project_state, "_is_link_or_reparse",
+            project_state, "_is_link_or_reparse",
             lambda selected: selected == root / ".git" or original(selected),
         )
     else:
@@ -506,7 +517,7 @@ def test_local_knowledge_registration_refuses_unsafe_or_registered_inputs_withou
     assert tree(native) == before
 
 
-def test_local_knowledge_registration_refuses_real_linked_task_and_checkout_shorthand(native):
+def test_local_knowledge_registration_refuses_real_linked_task_and_checkout_shorthand(native: Path) -> None:
     from agent_worktrees import repos_knowledge_registration as registration
 
     root = local_knowledge(native)
@@ -529,15 +540,15 @@ def test_local_knowledge_registration_refuses_real_linked_task_and_checkout_shor
     assert tree(native) == before
 
 
-def test_local_knowledge_registration_uses_one_owned_git_budget_and_scrubbed_context(native, monkeypatch):
+def test_local_knowledge_registration_uses_one_owned_git_budget_and_scrubbed_context(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_worktrees import repos_knowledge_registration as registration
 
     root = local_knowledge(native)
-    original = registration.run_caller_owned
+    original = run_caller_owned
     calls = []
 
-    def measured(argv, **kwargs):
+    def measured(argv: Any, **kwargs: Any) -> Any:
         assert "GIT_DIR" not in kwargs["env"] and "GIT_CONFIG_COUNT" not in kwargs["env"]
         calls.append(kwargs["budget"])
         return original(argv, **kwargs)
@@ -551,32 +562,32 @@ def test_local_knowledge_registration_uses_one_owned_git_budget_and_scrubbed_con
     assert len(calls) == 3 and all(budget is calls[0] for budget in calls)
     before = tree(native)
     expired = OwnedExecutionBudget(time.monotonic() - 1, 0.1)
-    monkeypatch.setattr(registration.OwnedExecutionBudget, "from_timeout", lambda *args, **kwargs: expired)
+    monkeypatch.setattr(OwnedExecutionBudget, "from_timeout", lambda *args, **kwargs: expired)
     with pytest.raises((ConfigurationError, TimeoutError)):
         registration.preview("sample", "local-knowledge", str(root), "main")
     assert tree(native) == before
 
 
-def test_local_knowledge_registration_waiter_rechecks_the_winning_native_write(native, monkeypatch):
+def test_local_knowledge_registration_waiter_rechecks_the_winning_native_write(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos_knowledge_registration as registration
 
     root = local_knowledge(native)
     token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
-    original_lock = registration.registry_lock
+    original_lock = registry_lock
     waiting = threading.Event()
     locked_paths = {
         repos._repos_yaml_path().with_suffix(".lock"),
         repos._repos_yaml_path().parent / "pr-rewrite-authority.lock",
     }
 
-    def content():
+    def content() -> Any:
         return {
             str(path.relative_to(native)): path.read_bytes() if path.is_file() else None
             for path in native.rglob("*") if path not in locked_paths
         }
 
     @contextmanager
-    def observed_lock(path, **kwargs):
+    def observed_lock(path: Any, **kwargs: Any) -> Iterator[None]:
         waiting.set()
         with original_lock(path, **kwargs):
             yield
@@ -598,8 +609,8 @@ def test_local_knowledge_registration_waiter_rechecks_the_winning_native_write(n
 
 @pytest.mark.parametrize("failure", [None, "before", "after"])
 def test_local_knowledge_registration_refreshes_prepared_guards_and_reports_committed_failure(
-    native, monkeypatch, capsys, failure,
-):
+    native: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: str,
+) -> None:
     from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
     from agent_worktrees.repos_configuration import command
 
@@ -610,7 +621,7 @@ def test_local_knowledge_registration_refreshes_prepared_guards_and_reports_comm
     before_git = {directory: tree(directory) for directory in (caller, root, native / "repository")}
     token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
     if failure is not None:
-        def failed_refresh(*args, **kwargs):
+        def failed_refresh(*args: Any, **kwargs: Any) -> Any:
             raise guarded_anchors.GuardPublicationError("synthetic publication failure")
 
         monkeypatch.setattr(
@@ -638,11 +649,11 @@ def test_local_knowledge_registration_refreshes_prepared_guards_and_reports_comm
 
 @pytest.mark.parametrize("phase", ["validation", "publication"])
 def test_local_knowledge_registration_bounds_real_slow_policy_probes_before_and_after_commit(
-    native, monkeypatch, phase,
-):
+    native: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_procutil.owned_process import run_caller_owned
-    from agent_worktrees import inrepo_config_source as policy, repos_knowledge_registration as registration
+    from agent_worktrees import repos_knowledge_registration as registration
 
     root, caller, reader = prepared_knowledge_observer(native)
     selected, registry = registration._selection(
@@ -655,10 +666,10 @@ def test_local_knowledge_registration_bounds_real_slow_policy_probes_before_and_
     monkeypatch.setattr(registration, "OwnedExecutionBudget", SimpleNamespace(
         from_timeout=lambda *args, **kwargs: OwnedExecutionBudget.from_timeout(1.4, cleanup_reserve=0.2),
     ))
-    original = policy.git_ops.git
+    original = git_ops.git
     timeouts = []
 
-    def slow_git(*args, **kwargs):
+    def slow_git(*args: Any, **kwargs: Any) -> Any:
         if args[:2] != ("symbolic-ref", "-q") or not args[2].startswith("refs/remotes/"):
             return original(*args, **kwargs)
         timeout = kwargs["timeout"]
@@ -670,7 +681,7 @@ def test_local_knowledge_registration_bounds_real_slow_policy_probes_before_and_
             timeout=timeout, max_stdout_bytes=1024, max_stderr_bytes=1024,
         )
 
-    monkeypatch.setattr(policy.git_ops, "git", slow_git)
+    monkeypatch.setattr(git_ops, "git", slow_git)
     started = time.monotonic()
     if phase == "validation":
         with pytest.raises((ConfigurationError, TimeoutError)):
@@ -686,7 +697,7 @@ def test_local_knowledge_registration_bounds_real_slow_policy_probes_before_and_
 
 
 @pytest.mark.parametrize("kind", ["authority", "registry", "publication"])
-def test_local_knowledge_registration_contention_respects_aggregate_apply_deadline(native, monkeypatch, kind):
+def test_local_knowledge_registration_contention_respects_aggregate_apply_deadline(native: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_worktrees import guarded_anchors, pr_authority, repos_knowledge_registration as registration, tracking
 
@@ -699,9 +710,10 @@ def test_local_knowledge_registration_contention_respects_aggregate_apply_deadli
     monkeypatch.setattr(registration, "_selection", lambda *args: (selected, registry))
     original_budget = OwnedExecutionBudget.from_timeout
     monkeypatch.setattr(
-        registration.OwnedExecutionBudget, "from_timeout",
+        OwnedExecutionBudget, "from_timeout",
         lambda *args, **kwargs: original_budget(0.5, cleanup_reserve=0.1),
     )
+    held: Any
     if kind == "authority":
         held = pr_authority.guard()
     else:
@@ -720,7 +732,7 @@ def test_local_knowledge_registration_contention_respects_aggregate_apply_deadli
     assert repos._repos_yaml_path().read_bytes() == before
 
 
-def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_spends_deadline(native, monkeypatch):
+def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_spends_deadline(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
 
@@ -733,7 +745,7 @@ def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_sp
     monkeypatch.setattr(registration, "_selection", lambda *args: (selected, registry))
     budgets = []
 
-    def budget(*args, **kwargs):
+    def budget(*args: Any, **kwargs: Any) -> Any:
         value = OwnedExecutionBudget.from_timeout(1.4, cleanup_reserve=0.6)
         budgets.append(value)
         return value
@@ -746,7 +758,7 @@ def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_sp
     before_files = set(directory.iterdir())
     original = guarded_anchors._withdraw_views
 
-    def slow_withdrawal(*args, **kwargs):
+    def slow_withdrawal(*args: Any, **kwargs: Any) -> Any:
         original(*args, **kwargs)
         assert reader.read_map(caller, registry_path.parent).status == "unusable"
         time.sleep(max(0, budgets[-1].execution_deadline - time.monotonic()) + 0.02)
@@ -761,7 +773,7 @@ def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_sp
 
 
 @pytest.mark.parametrize("change", ["origin", "defaults"])
-def test_local_knowledge_registration_rechecks_after_publication_lock_wait(native, monkeypatch, change):
+def test_local_knowledge_registration_rechecks_after_publication_lock_wait(native: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
     from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration, tracking
 
     root, caller, reader = prepared_knowledge_observer(native)
@@ -773,7 +785,7 @@ def test_local_knowledge_registration_rechecks_after_publication_lock_wait(nativ
     inspected = threading.Event()
     original = registration._selection
 
-    def observed(*args):
+    def observed(*args: Any) -> Any:
         selected = original(*args)
         inspected.set()
         return selected
@@ -806,7 +818,7 @@ def test_local_knowledge_registration_rechecks_after_publication_lock_wait(nativ
     assert map_path.read_bytes() == before_map
 
 
-def test_local_registration_parser_rejects_unrelated_preference_fields_before_inspection(native, capsys):
+def test_local_registration_parser_rejects_unrelated_preference_fields_before_inspection(native: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees.repos_configuration import command
 
     before = tree(native)
@@ -819,7 +831,7 @@ def test_local_registration_parser_rejects_unrelated_preference_fields_before_in
     assert tree(native) == before
 
 
-def test_missing_binding_owner_refuses_without_any_native_configuration_write(native):
+def test_missing_binding_owner_refuses_without_any_native_configuration_write(native: Path) -> None:
     before = tree(native)
     result = request("knowledge-preview", name="sample")
     assert result.returncode != 0
@@ -829,7 +841,7 @@ def test_missing_binding_owner_refuses_without_any_native_configuration_write(na
 
 
 @pytest.mark.parametrize("operation", ["identities", "knowledge-resolve", "knowledge-preview"])
-def test_real_cli_portable_knowledge_identity_and_owner_refusal(native, operation):
+def test_real_cli_portable_knowledge_identity_and_owner_refusal(native: Path, operation: str) -> None:
     from agent_worktrees import project_state
 
     path = repos._repos_yaml_path()
@@ -865,7 +877,7 @@ def test_real_cli_portable_knowledge_identity_and_owner_refusal(native, operatio
     assert tree(native) == before
 
 
-def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(native):
+def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(native: Path) -> None:
     source = native / "repository" / ".agent-worktrees" / "config.yaml"
     source.parent.mkdir()
     source.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
@@ -883,22 +895,22 @@ def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(n
 
 
 @pytest.mark.parametrize("selection", ["project-installed", "global-installed", "sandbox-missing"])
-def test_binding_owner_uses_selected_home_and_project_activation(native, monkeypatch, selection):
+def test_binding_owner_uses_selected_home_and_project_activation(native: Path, monkeypatch: pytest.MonkeyPatch, selection: str) -> None:
     from agent_worktrees import repos_knowledge_configuration as binding
 
     host = native / "host-home"
     project = native / "repository"
     monkeypatch.setenv("HOME", str(host))
     monkeypatch.setenv("USERPROFILE", str(host))
-    monkeypatch.setattr(binding.cfg, "load_project_config", lambda *_args, **_kwargs: SimpleNamespace(
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_args, **_kwargs: SimpleNamespace(
         default_repo=SimpleNamespace(anchor=str(project)),
     ))
 
-    def write(path, value):
+    def write(path: Any, value: Any) -> Any:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value), encoding="utf-8")
 
-    def payload(root):
+    def payload(root: Any) -> Any:
         write(root / "plugin.json", {"name": "harness-knowledge"})
         script = root / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
         script.parent.mkdir(parents=True)
@@ -924,10 +936,11 @@ def test_binding_owner_uses_selected_home_and_project_activation(native, monkeyp
         write(project / ".github" / "copilot" / "settings.json", {**enabled, "extraKnownMarketplaces": {
             "binding-source": {"source": {"source": "github", "repo": "example/marketplace"}},
         }})
-        observed = binding.resolve_active_plugins(
+        observed = resolve_active_plugins(
             home=native, project_root=project, plugin_names=("harness-knowledge",),
         ).active["harness-knowledge@binding-source"]
         assert observed.root == (market / "payload").resolve()
+        assert expected is not None
         assert observed.root_for_scope("project:current") == expected.parents[3]
     before = tree(native)
     if expected is None:
@@ -938,14 +951,14 @@ def test_binding_owner_uses_selected_home_and_project_activation(native, monkeyp
 
 
 @pytest.mark.parametrize("portable", [False, True])
-def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch, portable):
+def test_old_binding_owner_is_not_invoked_for_apply(native: Path, monkeypatch: pytest.MonkeyPatch, portable: bool) -> None:
     from agent_procutil import owned_process
     from agent_worktrees import repos_knowledge_configuration as binding
 
     calls = []
     monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
 
-    def execute(argv, **kwargs):
+    def execute(argv: Any, **kwargs: Any) -> Any:
         calls.append(argv)
         capabilities = {"version": 1}
         if portable:
@@ -953,10 +966,13 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch, portabl
         return subprocess.CompletedProcess(argv, 0, json.dumps(capabilities), "")
 
     monkeypatch.setattr(owned_process, "run_caller_owned", execute)
+    options: dict[str, Any] = (
+        {"portable_resolution": {"execution_machine": "example-worker"}} if portable else {}
+    )
     with pytest.raises(ConfigurationError) as caught:
         binding.invoke(
             "sample", "sample", "apply", "a" * 64,
-            **({"portable_resolution": {"execution_machine": "example-worker"}} if portable else {}),
+            **options,
         )
     assert caught.value.code == "binding-owner-unsupported"
     assert len(calls) == 1 and "--capabilities" in calls[0]
@@ -966,18 +982,20 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch, portabl
 @pytest.mark.parametrize("freshness", [None, True, 0, "1", 1])
 @pytest.mark.parametrize("mode", ["baseline", "preview", "accepted-apply"])
 def test_accepted_defaults_require_writer_freshness_without_breaking_baseline(
-    native, monkeypatch, freshness, mode,
-):
+    native: Path, monkeypatch: pytest.MonkeyPatch, freshness: object, mode: str,
+) -> None:
     from agent_procutil import owned_process
     from agent_worktrees import repos_knowledge_configuration as binding
 
     monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
     calls = []
 
-    def execute(argv, **kwargs):
+    def execute(argv: Any, **kwargs: Any) -> Any:
         calls.append(argv)
         if "--capabilities" in argv:
-            value = {"version": 1, "existing_binding_configuration": 2, "portable_binding_precondition": 1}
+            value: dict[str, Any] = {
+                "version": 1, "existing_binding_configuration": 2, "portable_binding_precondition": 1,
+            }
             if freshness is not None:
                 value["binding_precondition_freshness"] = freshness
         else:
@@ -988,7 +1006,7 @@ def test_accepted_defaults_require_writer_freshness_without_breaking_baseline(
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
     monkeypatch.setattr(owned_process, "run_caller_owned", execute)
-    options = (
+    options: dict[str, Any] = (
         {"require_preference_freshness": True} if mode == "preview" else
         {"portable_resolution": {}, "preference_selection": {}} if mode == "accepted-apply" else {}
     )
@@ -1003,7 +1021,7 @@ def test_accepted_defaults_require_writer_freshness_without_breaking_baseline(
         assert len(calls) == 1 and "--capabilities" in calls[0]
 
 
-def test_native_binding_capability_and_worker_share_the_caller_deadline(native, monkeypatch):
+def test_native_binding_capability_and_worker_share_the_caller_deadline(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_procutil import owned_process
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_worktrees import repos_knowledge_configuration as binding
@@ -1012,9 +1030,9 @@ def test_native_binding_capability_and_worker_share_the_caller_deadline(native, 
     budgets = []
     monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
 
-    def execute(argv, **kwargs):
+    def execute(argv: Any, **kwargs: Any) -> Any:
         budgets.append(kwargs["budget"])
-        value = (
+        value: dict[str, Any] = (
             {"version": 1, "existing_binding_configuration": 2} if "--capabilities" in argv else
             {"version": 1, "operation": "set", "target": {"resource": "sample/sample"}}
         )
@@ -1025,12 +1043,12 @@ def test_native_binding_capability_and_worker_share_the_caller_deadline(native, 
     assert budgets == [aggregate, aggregate]
 
 
-def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native, monkeypatch):
+def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos_knowledge_configuration as binding
 
     started, completed = threading.Event(), threading.Event()
 
-    def write():
+    def write() -> Any:
         started.set()
         try:
             return repos.set_copilot_account("sample", "after")
@@ -1042,7 +1060,7 @@ def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native
         script = native / "qualified-binding.py"
         script.write_text("# Owned binding fixture\n", encoding="utf-8")
 
-        def delegated(_path, *, run_name, init_globals):
+        def delegated(_path: Any, *, run_name: Any, init_globals: Any) -> Any:
             assert run_name == "__main__"
             assert callable(init_globals["_NATIVE_BINDING_READ_RUNNER"])
             futures.append(pool.submit(write))
@@ -1051,23 +1069,23 @@ def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native
             return {}
 
         monkeypatch.setattr(binding, "owner_script", lambda _project: script)
-        monkeypatch.setattr(binding.runpy, "run_path", delegated)
+        monkeypatch.setattr(runpy, "run_path", delegated)
         binding._apply_worker("sample", "sample", "a" * 64, str(script))
         assert futures[0].result(timeout=5)
     assert repos.read_registry(strict=True).repos["sample"].copilot_account == "after"
 
 
-def test_binding_worker_refuses_a_changed_payload_before_execution(native, monkeypatch):
+def test_binding_worker_refuses_a_changed_payload_before_execution(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos_knowledge_configuration as binding
 
     monkeypatch.setattr(binding, "owner_script", lambda _project: native / "new-owner.py")
-    monkeypatch.setattr(binding.runpy, "run_path", lambda *_args, **_kwargs: pytest.fail("changed owner executed"))
+    monkeypatch.setattr(runpy, "run_path", lambda *_args, **_kwargs: pytest.fail("changed owner executed"))
     with pytest.raises(ConfigurationError) as caught:
         binding._apply_worker("sample", "knowledge", "a" * 64, str(native / "old-owner.py"))
     assert caught.value.code == "binding-owner-changed"
 
 
-def test_native_preview_worker_preserves_read_only_scope_without_a_writer_lock(native, monkeypatch):
+def test_native_preview_worker_preserves_read_only_scope_without_a_writer_lock(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos_knowledge_configuration as binding, repos_registry_transaction
 
     script = native / "qualified-preview.py"
@@ -1080,26 +1098,26 @@ def test_native_preview_worker_preserves_read_only_scope_without_a_writer_lock(n
     previous = sys.argv
     calls = []
 
-    def delegated(path, *, run_name, init_globals):
+    def delegated(path: Any, *, run_name: Any, init_globals: Any) -> Any:
         assert path == str(script) and run_name == "__main__"
         assert sys.argv[sys.argv.index("--configuration") + 1] == "preview"
         assert "--preview-token" not in sys.argv
         assert callable(init_globals["_NATIVE_BINDING_READ_RUNNER"])
         calls.append(path)
 
-    monkeypatch.setattr(binding.runpy, "run_path", delegated)
+    monkeypatch.setattr(runpy, "run_path", delegated)
     before = tree(native)
     binding._preview_worker("sample", "knowledge", str(script))
     assert calls == [str(script)] and sys.argv is previous
     assert tree(native) == before
 
 
-def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(native, monkeypatch):
+def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_worktrees import repos_knowledge_configuration as binding
     from agent_worktrees.repos_registry_transaction import registry_lock
 
-    def write(path, value):
+    def write(path: Any, value: Any) -> Any:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value), encoding="utf-8")
 
@@ -1133,7 +1151,7 @@ def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(nati
     original = OwnedExecutionBudget.from_timeout
     budgets = []
 
-    def budget(_cls, timeout, *, cleanup_reserve):
+    def budget(_cls: Any, timeout: Any, *, cleanup_reserve: Any) -> Any:
         value = original(6 if timeout == 26 else timeout, cleanup_reserve=cleanup_reserve)
         if timeout == 26:
             budgets.append(value)
@@ -1151,7 +1169,7 @@ def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(nati
     assert yaml.safe_load(config.read_text("utf-8")).get("knowledge_repo") is None
 
 
-def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, monkeypatch, capsys):
+def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import repos_configuration, repos_knowledge_configuration
 
     monkeypatch.setattr(repos_knowledge_configuration, "invoke", lambda *_args: {
@@ -1165,7 +1183,7 @@ def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, 
     assert receipt["pointer_committed"] is True and receipt["status"] == "incomplete"
 
 
-def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native):
+def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native: Path) -> None:
     before = tree(native)
     catalog = request("catalog")
     assert catalog.returncode == 0, catalog.stderr
@@ -1218,7 +1236,7 @@ def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native):
     ])
 
 
-def test_secret_shaped_repository_name_remains_browsable_and_editable(native):
+def test_secret_shaped_repository_name_remains_browsable_and_editable(native: Path) -> None:
     """A registered repository literally named like a secret (e.g. ``sk-ui``)
     is a resource name, not a credential: the secret-token rejection applies
     only to login values, never to repository/project identifiers."""
@@ -1240,7 +1258,7 @@ def test_secret_shaped_repository_name_remains_browsable_and_editable(native):
     assert repos.copilot_account_for("sk-ui") == "chosen"
 
 
-def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native, monkeypatch):
+def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A registered name longer than the shared character-length cap (native
     `add_repo()` imposes none) must only mark that one row unsupported, never
     abort the whole catalog for the properly named selected project."""
@@ -1277,7 +1295,7 @@ def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(nati
     ("sample", "_knowledge"), ("sample", ".knowledge"),
     ("sample", "-knowledge"), ("_project", "knowledge"),
 ])
-def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferences(native, monkeypatch, project, name):
+def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferences(native: Path, monkeypatch: pytest.MonkeyPatch, project: str, name: str) -> None:
     from agent_worktrees import repos_configuration_catalog as catalog, repos_knowledge_configuration as binding
 
     registry = repos._repos_yaml_path()
@@ -1305,7 +1323,7 @@ def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferenc
 
 
 @pytest.mark.parametrize("change", ["registry", "global", "machine", "drop-in", "target", "login"])
-def test_stale_previews_and_old_host_refuse_writes(native, change):
+def test_stale_previews_and_old_host_refuse_writes(native: Path, change: str) -> None:
     proposed = preview("sample", "sample", "set", "chosen")
     name, login = "sample", "chosen"
     if change == "registry":
@@ -1337,7 +1355,7 @@ def test_stale_previews_and_old_host_refuse_writes(native, change):
         assert tree(native) == before
 
 
-def test_competing_real_cli_applies_have_one_winner(native):
+def test_competing_real_cli_applies_have_one_winner(native: Path) -> None:
     token = preview("sample", "sample", "set", "chosen")["token"]
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(
@@ -1356,7 +1374,7 @@ def test_competing_real_cli_applies_have_one_winner(native):
     f"? {{{SECRET}: value}}\n: invalid-key\n",
 ])
 @pytest.mark.parametrize("source", ["global", "drop-in"])
-def test_invalid_composition_is_unknown_not_empty_identity_and_sanitized(native, content, source):
+def test_invalid_composition_is_unknown_not_empty_identity_and_sanitized(native: Path, content: str, source: str) -> None:
     path = cfg.global_config_path()
     if source == "drop-in":
         directory = cfg.project_dir("sample") / "config.d"
@@ -1377,7 +1395,7 @@ def test_invalid_composition_is_unknown_not_empty_identity_and_sanitized(native,
         repos.copilot_account_for("sample", project="sample", strict=True)
 
 
-def test_absent_registration_and_fresh_root_are_read_only(tmp_path, monkeypatch):
+def test_absent_registration_and_fresh_root_are_read_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first-touch"))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     result = request("catalog")
@@ -1387,7 +1405,7 @@ def test_absent_registration_and_fresh_root_are_read_only(tmp_path, monkeypatch)
     assert not (tmp_path / "first-touch").exists()
 
 
-def test_malformed_projects_registry_is_sanitized_native_inspection(native):
+def test_malformed_projects_registry_is_sanitized_native_inspection(native: Path) -> None:
     from agent_worktrees import installer
 
     installer.projects_yaml_path().write_text(f"projects: [{SECRET}\n", encoding="utf-8")
@@ -1403,7 +1421,7 @@ def test_malformed_projects_registry_is_sanitized_native_inspection(native):
 
 
 @pytest.fixture
-def repository_activation(native, monkeypatch):
+def repository_activation(native: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from agent_worktrees import installer, related
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: native))
@@ -1431,7 +1449,7 @@ def repository_activation(native, monkeypatch):
     return settings
 
 
-def activation_inputs(root):
+def activation_inputs(root: Path) -> dict[str, bytes | None]:
     sources = tree(root)
     # Activation may refresh its derived Git-identity memo, never configuration.
     sources.pop(str(Path(".agent-worktrees") / "cache" / "project-identities.json"), None)
@@ -1441,8 +1459,8 @@ def activation_inputs(root):
 
 @pytest.mark.parametrize("readable_preference", [False, True])
 def test_repository_activation_failure_is_unknown_without_managed_pointers(
-    native, repository_activation, readable_preference,
-):
+    native: Path, repository_activation: Path, readable_preference: bool,
+) -> None:
     from agent_worktrees.repos_configuration_catalog import inspect_project
 
     if not readable_preference:
@@ -1472,8 +1490,8 @@ def test_repository_activation_failure_is_unknown_without_managed_pointers(
 
 @pytest.mark.parametrize("enabled", [None, False, True])
 def test_repository_activation_known_empty_and_active_remain_distinct(
-    native, repository_activation, enabled,
-):
+    native: Path, repository_activation: Path, enabled: bool | None,
+) -> None:
     from agent_worktrees.repos_configuration_catalog import catalog
 
     root = native / "repository"
@@ -1514,14 +1532,14 @@ def test_repository_activation_known_empty_and_active_remain_distinct(
 
 
 def test_repository_activation_resolution_failure_is_sanitized_once(
-    native, repository_activation, monkeypatch,
-):
+    native: Path, repository_activation: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import related
     from agent_worktrees.repos_configuration_catalog import inspect_project
 
     calls = []
 
-    def unavailable(**kwargs):
+    def unavailable(**kwargs: Any) -> Any:
         calls.append(kwargs)
         raise OSError(SECRET)
 
@@ -1537,8 +1555,8 @@ def test_repository_activation_resolution_failure_is_sanitized_once(
 
 
 def test_repository_activation_filesystem_override_keeps_diagnostic_discovery(
-    native, repository_activation, monkeypatch,
-):
+    native: Path, repository_activation: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import related
     from agent_worktrees.repos_configuration_catalog import catalog
 
@@ -1570,7 +1588,7 @@ def test_repository_activation_filesystem_override_keeps_diagnostic_discovery(
 
 
 @pytest.mark.parametrize("command", ["catalog", "knowledge-preview"])
-def test_missing_default_repository_is_sanitized_and_read_only(native, command):
+def test_missing_default_repository_is_sanitized_and_read_only(native: Path, command: str) -> None:
     from agent_worktrees import installer
 
     project = "multi"
@@ -1607,7 +1625,7 @@ def test_missing_default_repository_is_sanitized_and_read_only(native, command):
     assert tree(native) == before
 
 
-def test_disabled_managed_dropin_does_not_block_valid_preferences(native):
+def test_disabled_managed_dropin_does_not_block_valid_preferences(native: Path) -> None:
     source = "sample@example-marketplace"
     root = native / "plugin"
     target = root / "config.yaml"
@@ -1639,14 +1657,16 @@ def test_disabled_managed_dropin_does_not_block_valid_preferences(native):
 
 
 @pytest.mark.parametrize("location", ["worktree", "anchor", "outside", "foreign"])
-def test_picker_bootstrap_workspace_is_a_tracked_selected_project_root(native, monkeypatch, capfd, location):
+def test_picker_bootstrap_workspace_is_a_tracked_selected_project_root(native: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], location: str) -> None:
     from agent_worktrees import context_cli, tracking
 
-    monkeypatch.setattr(context_cli._core(), "_INVOCATION_CWD", None)
+    core: Callable[[], Any] = context_cli._core
+    monkeypatch.setattr(core(), "_INVOCATION_CWD", None)
     workspace = native / "sample-worktree"
     nested = workspace / "nested"
     nested.mkdir(parents=True)
-    record = tracking.WorktreeRecord(
+    record_factory = cast(Callable[..., tracking.WorktreeRecord], tracking.WorktreeRecord)
+    record = record_factory(
         worktree_id="wt-sample", branch="worktree/wt-sample", worktree_path=str(workspace),
         repo="foreign" if location == "foreign" else "sample",
         machine="fixture", platform=repos._current_platform(),
@@ -1658,7 +1678,7 @@ def test_picker_bootstrap_workspace_is_a_tracked_selected_project_root(native, m
         native / "repository" if location == "anchor" else native if location == "outside" else nested,
     )
     before = tree(native)
-    assert context_cli.cmd_picker_bootstrap(SimpleNamespace(json=True)) == 0
+    assert context_cli.cmd_picker_bootstrap(Namespace(json=True)) == 0
     payload = json.loads(capfd.readouterr().out)
     assert payload["project"] == "sample"
     assert payload["workspace"] == (str(workspace) if location == "worktree" else None)
@@ -1666,7 +1686,7 @@ def test_picker_bootstrap_workspace_is_a_tracked_selected_project_root(native, m
     assert tree(native) == before
 
 
-def test_request_errors_never_echo_raw_values(native):
+def test_request_errors_never_echo_raw_values(native: Path) -> None:
     result = cli("preview", "--context-project", "sample", "--operation", SECRET)
     assert result.returncode != 0 and SECRET not in result.stdout + result.stderr
     with pytest.raises(ConfigurationError):
@@ -1674,7 +1694,7 @@ def test_request_errors_never_echo_raw_values(native):
 
 
 @pytest.fixture(params=["base", "marketplace"])
-def route_policy(native, monkeypatch, request):
+def route_policy(native: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Path:
     from agent_worktrees import project_state, registry_paths
 
     policy = native / "repository" / ".copilot-extensions" / "agent-worktrees"
@@ -1708,7 +1728,7 @@ def route_policy(native, monkeypatch, request):
     "related:\n  external: {role: 42}\n",
     "related:\n  external: {delegate: {via: 42}}\n",
 ])
-def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native, route_policy, route):
+def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native: Path, route_policy: Path, route: str) -> None:
     from agent_worktrees.repos_configuration_catalog import catalog
 
     route_policy.write_text(route, encoding="utf-8")
@@ -1729,7 +1749,7 @@ def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native, r
     {"delegate": {"via": {"secret": SECRET}}},
     {"delegate": {"via": SECRET}},
 ])
-def test_route_projection_never_stringifies_or_exposes_invalid_source_values(native, route_policy, entry):
+def test_route_projection_never_stringifies_or_exposes_invalid_source_values(native: Path, route_policy: Path, entry: Any) -> None:
     from agent_worktrees.repos_configuration_catalog import catalog
 
     route_policy.write_text(yaml.safe_dump({"related": {"external": entry}}), encoding="utf-8")
@@ -1745,7 +1765,7 @@ def test_route_projection_never_stringifies_or_exposes_invalid_source_values(nat
 @pytest.mark.parametrize("entry", [
     None, 42, SECRET, {"base_repo": "false"}, {"base_repo": {"secret": SECRET}},
 ])
-def test_invalid_project_entry_with_matching_route_is_a_sanitized_finding(native, route_policy, entry):
+def test_invalid_project_entry_with_matching_route_is_a_sanitized_finding(native: Path, route_policy: Path, entry: Any) -> None:
     from agent_worktrees import installer
     from agent_worktrees.repos_configuration_catalog import catalog
 
@@ -1763,7 +1783,7 @@ def test_invalid_project_entry_with_matching_route_is_a_sanitized_finding(native
     assert tree(native) == before
 
 
-def test_native_minimal_related_link_is_valid(native, route_policy):
+def test_native_minimal_related_link_is_valid(native: Path, route_policy: Path) -> None:
     from agent_worktrees.repos_configuration_catalog import catalog
     from agent_worktrees.repos_configuration_sources import defaults
 
@@ -1778,7 +1798,7 @@ def test_native_minimal_related_link_is_valid(native, route_policy):
 
 
 @pytest.mark.parametrize("content", ["[broken", "stateless: true\nstateless: false\n", "42\n"])
-def test_invalid_selected_repository_configuration_is_unknown(native, route_policy, content):
+def test_invalid_selected_repository_configuration_is_unknown(native: Path, route_policy: Path, content: str) -> None:
     from agent_worktrees.repos_configuration_catalog import catalog
 
     route_policy.with_name("config.yaml").write_text(content, encoding="utf-8")
@@ -1789,7 +1809,7 @@ def test_invalid_selected_repository_configuration_is_unknown(native, route_poli
     assert tree(native) == before
 
 
-def test_machine_route_keeps_the_resolved_peer(native):
+def test_machine_route_keeps_the_resolved_peer(native: Path) -> None:
     from agent_worktrees.repos_configuration_catalog import catalog
 
     policy = native / "repository" / ".copilot-extensions" / "agent-worktrees"
@@ -1802,13 +1822,13 @@ def test_machine_route_keeps_the_resolved_peer(native):
     assert row["configuration"]["route"]["target_machine"] == "peer-one"
 
 
-def test_invalid_committed_configuration_cannot_hide_behind_valid_disk_copy(native):
+def test_invalid_committed_configuration_cannot_hide_behind_valid_disk_copy(native: Path) -> None:
     from agent_worktrees import git_ops
     from agent_worktrees.repos_configuration_catalog import catalog
 
     root = native / "repository"
 
-    def git(*args):
+    def git(*args: str) -> Any:
         return git_ops.git(*args, cwd=root, capture=True, timeout=15)
 
     git("init", "-q", "-b", "main")
@@ -1831,7 +1851,7 @@ def test_invalid_committed_configuration_cannot_hide_behind_valid_disk_copy(nati
     assert tree(native) == before
 
 
-def test_default_dropin_and_machine_precedence(native):
+def test_default_dropin_and_machine_precedence(native: Path) -> None:
     directory = cfg.project_dir("sample") / "config.d"
     directory.mkdir(parents=True)
     (directory / "local.yaml").write_text("default_copilot_account: dropin\n", encoding="utf-8")
@@ -1847,7 +1867,7 @@ def test_default_dropin_and_machine_precedence(native):
     assert repos.copilot_account_for("sample", project="sample", strict=True) == "machine"
 
 
-def test_catalog_source_winners_are_independent_per_repository(native):
+def test_catalog_source_winners_are_independent_per_repository(native: Path) -> None:
     path = repos._repos_yaml_path()
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     raw["repos"]["sample"]["copilot_account"] = "chosen"
@@ -1865,7 +1885,7 @@ def test_catalog_source_winners_are_independent_per_repository(native):
 
 
 @pytest.mark.parametrize("operation", ["set", "reset"])
-def test_preference_edit_does_not_modify_aliased_unselected_data(native, operation):
+def test_preference_edit_does_not_modify_aliased_unselected_data(native: Path, operation: str) -> None:
     path = repos._repos_yaml_path()
     path.write_text(
         "metadata: &shared\n  copilot_account: existing\n  custom: unchanged\n"
@@ -1888,7 +1908,7 @@ def test_preference_edit_does_not_modify_aliased_unselected_data(native, operati
 @pytest.mark.parametrize("condition", [
     "present", "missing-sample", "missing-knowledge", "retired", "stale", "absent",
 ])
-def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native, condition):
+def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native: Path, condition: str) -> None:
     from agent_worktrees import tracking
 
     registry_path = repos._repos_yaml_path()
@@ -1916,13 +1936,14 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
     reporter = cfg.detect_machine()
     for name, role, sibling in (("sample", "harness", "knowledge"), ("knowledge", "knowledge", "sample")):
         paths[name].mkdir()
-        record = tracking.WorktreeRecord(
+        record_factory = cast(Callable[..., tracking.WorktreeRecord], tracking.WorktreeRecord)
+        record = record_factory(
             worktree_id=f"wt-{name}", branch=f"worktree/wt-{name}", worktree_path=str(paths[name]),
             repo=name, machine=reporter, platform=repos._current_platform(),
             started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
             resume_count=0, title=None, status="active", completed_at=None, sessions=[],
             pair_id="fixture-pair", pair_role=role,
-            pair_ref=tracking.format_claim_ref(reporter, sibling, f"wt-{sibling}"),
+            pair_ref=format_claim_ref(reporter, sibling, f"wt-{sibling}"),
             pair_kind="worktree",
         )
         path = cfg.project_dir(name) / "worktrees" / f"wt-{name}.yaml"
@@ -1967,7 +1988,7 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
 
 
 @pytest.mark.parametrize("mode", ["empty", "populated", "bytes-only"])
-def test_mapping_report_replacement_is_opaque_without_reacquisition(tmp_path, monkeypatch, mode):
+def test_mapping_report_replacement_is_opaque_without_reacquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     from agent_worktrees import repos_configuration_sources as sources
 
     path = tmp_path / "strict.yaml"
@@ -1976,12 +1997,12 @@ def test_mapping_report_replacement_is_opaque_without_reacquisition(tmp_path, mo
     calls = []
     original_read, original_exists = Path.read_bytes, Path.exists
 
-    def read(selected):
+    def read(selected: Any) -> Any:
         if selected == path:
             calls.append("native-read")
         return original_read(selected)
 
-    def exists(selected):
+    def exists(selected: Any) -> Any:
         if selected == path:
             pytest.fail("report added a presence probe")
         return original_exists(selected)
@@ -1989,11 +2010,11 @@ def test_mapping_report_replacement_is_opaque_without_reacquisition(tmp_path, mo
     monkeypatch.setattr(Path, "read_bytes", read)
     monkeypatch.setattr(Path, "exists", exists)
 
-    def replacement(selected):
+    def replacement(selected: Any) -> Any:
         assert selected == path
         calls.append("mapping")
         if mode == "bytes-only":
-            sources.read_bytes(selected)
+            read_bytes(selected)
             calls.append("original-bytes")
         return value
 

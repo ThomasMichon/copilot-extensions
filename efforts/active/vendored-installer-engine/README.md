@@ -140,12 +140,21 @@ judgment; no implementation, next adopter or rollout starts here.
 
 ### Continuing #2729 custody
 
-Keep #2729 as the complete hygiene canonical, current package/installer/interpreter and
-source/resource/activation custodians and original #2726 inheritance. Engine owner
-coordinates only its actual shared-mechanics/adopter boundary;
-Procutil/Manager/Worktrees are not silently lost to the service-engine rollout subset.
-Reviewed mapping is not accepted transfer, source appointment, owner expiry, environment
-scan or remediation permission.
+Retain #2729's complete hygiene contract, including its original #2726 inheritance,
+through R2729-P1-P5, local V1-V3 and actual global G1 below. Current package,
+installer, interpreter and source/resource/activation custodians remain responsible;
+the engine owner coordinates only its actual shared-mechanics/adopter boundary.
+Procutil, Manager and Worktrees are not lost to the service-engine rollout subset,
+and Worktrees' permanent engine exception does not exclude its hygiene obligations.
+
+Until this receiving reconciliation clears normal review, actually merges and receives
+complete current Plan/local/global Validation, Coordination and Journal readback,
+#2729 remains the canonical open tracking token. After those conditions, a separate
+fresh source judgment may retire redundant issue tracking while this Active effort's
+complete hygiene work remains planned and unchecked. Preserve any intervening source
+change or actual claimant condition; a reference, authored proposal or merge alone is
+insufficient. Administrative consolidation is not technical completion, implementer
+appointment, owner expiry, environment scanning, cleanup or resource transfer.
 
 ## Context
 
@@ -641,10 +650,15 @@ seven-row ledger.
 
 <!-- backlog-reconciliation:7556:qualified-fifteen:2729:Plan -->
 
-### Direct proposed acceptance from #2729
+### Complete planned hygiene acceptance from #2729
 
 _Agent-recommended additive tracking proposal; the entire original/refined/directly
 inherited acceptance and its finite evidence tiers remain binding._
+
+Credit #2728's distribution-generic report-first/manual-fix baseline without treating
+it as cross-package adoption, intended-global-interpreter inspection, prevention or
+installer integration. The scope remains all five named distributions below, not only
+the current shared-engine adopter set.
 
 Preserve the incumbent Request, status, Participants, Coordination, every old
 Plan/global Validation row and check state, first unresolved gates and full Journal.
@@ -677,8 +691,11 @@ universal ACK, every-host or whole-parent completion gate is introduced.
 - [ ] **R2729-P4:** Carry applicable named Windows/POSIX owner-installer best-effort
   NONFATAL detection/warnings, with at least ONE actual automatic post-update
   integration and proved nonfatal failure. Keep result/health/lifecycle and manual
-  remediation; no automatic --fix/global uninstall. Consider existing fleet
-  coordination/shared-library reuse without mandating another watcher/framework.
+  remediation; no automatic --fix/global uninstall. Consider extracting the shared
+  detector at the second adoption, following existing vendoring and byte-sync guards,
+  rather than drifting independent copies. Evaluate the existing fleet/requirement-
+  package owner for periodic cross-plugin coordination without mandating another
+  watcher/framework.
 
 - [ ] **R2729-P5:** Preserve package/interpreter/artifact ownership, explicit
   remediation consent, foreign/active metadata and .worktrees-not-ownership truth. Any
@@ -903,6 +920,23 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-11-16 - Complete hygiene receiving reconciliation
+
+Reconciled the complete #2729 original and both discussions against this entire
+current ROOT, including all direct #2726 inherited requirements. The existing five
+Plan, three local Validation and actual global Validation rows retain all five
+distributions, literal alternatives, finite negative cases and unchanged custodians.
+Made the detector/extraction and existing fleet-home considerations explicit, and
+credited #2728 without claiming the broader outcome.
+
+The former keep-canonical wording now states its prospective receiving gate:
+normal review, actual merge, complete current direct contract readback and a separate
+fresh source judgment. Until then the issue remains open; afterward redundant tracking
+may retire without resolving any technical checkbox, resuming paused adopters or
+transferring interpreter/resource authority. Every incumbent check state, pause,
+exception, participant and prior Journal entry remains unchanged. No implementation,
+test, environment operation or installed/native result occurred.
 
 ### 2026-11-13 - Separate #5956 architecture receiving proposed
 
