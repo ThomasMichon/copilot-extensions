@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from zdd import diagnostics
+from zdd import diagnostics, routing
 from zdd.routing import Endpoint
 
 from .serving_reconcile import ServingReconcileError
@@ -65,9 +65,13 @@ async def complete_source_start(
             await _retire_previous_daemon(
                 app, previous, current, initial_recovery_task=initial_recovery_task,
             )
+        table = await settled_thread_call(routing.read_table, config_dir())
+        if not isinstance(table, dict) or table.get("active") != current.to_dict():
+            return
         if (
             app.state.cold_recovery_ready and not app.state.shutting_down
             and app.state.config.enable_credential_relay
+            and not getattr(app.state, "credential_relay_ready", False)
         ):
             await app.state.adopt_relay()
         if previous is not None:

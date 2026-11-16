@@ -14,7 +14,6 @@ from zdd.routing import Endpoint
 
 class _Client(Protocol):
     def health(self) -> dict[str, Any]: ...
-    def shutdown(self) -> dict[str, Any]: ...
 
 
 def retire_predecessor(
@@ -24,12 +23,12 @@ def retire_predecessor(
     """Keep cleanup failure separate from the incoming generation's readiness."""
     from .service_process_cli import _pid_is_agent_bridge
 
-    def verify_route() -> None:
+    def verify_route(*, require_previous: bool = True) -> None:
         table = routing.read_table(root, strict=True) or {}
         routing._validate_endpoint_rows(table)
         if (
             table.get("active") != successor.to_dict()
-            or table.get("previous") != previous.to_dict()
+            or (require_previous and table.get("previous") != previous.to_dict())
             or successor.generation <= previous.generation
             or successor.pid == previous.pid
             or successor.pid is None
@@ -47,7 +46,7 @@ def retire_predecessor(
             raise RuntimeError("central predecessor identity is unavailable")
 
     try:
-        verify_route()
+        verify_route(require_previous=False)
         if not previous.pid or not previous.process_start_time:
             raise RuntimeError("central predecessor has no native identity")
         if process_exit.observe_original_exit(previous.pid, previous.process_start_time):
@@ -68,10 +67,8 @@ def retire_predecessor(
             verify_route()
             if pinned.exited():
                 return {"exit_confirmed": True, "forced": False}
-            try:
-                make_client(previous).shutdown()
-            except Exception:
-                pass
+            # Observe self-retirement only. An old /shutdown request cannot be
+            # fenced against reselection or recalled after an HTTP timeout.
             if pinned.exited(graceful_timeout):
                 return {"exit_confirmed": True, "forced": False}
             # Serialize the irreversible signal with route publication. The

@@ -83,9 +83,7 @@ def generations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generations:
             }
 
         def shutdown(self) -> dict[str, Any]:
-            assert self.endpoint == old
-            calls.append("shutdown")
-            raise OSError("old control endpoint is unresponsive")
+            pytest.fail("unfenced predecessor HTTP shutdown is not permitted")
 
     return tmp_path, old, new, Client, calls
 
@@ -97,9 +95,25 @@ def test_unresponsive_predecessor_is_forced_through_native_central_pin(generatio
     outcome = retire_predecessor(root, old, new, make_client=client)
     assert outcome == {"exit_confirmed": True, "forced": True}
     assert calls == [
-        "pin", ("wait", 0), "shutdown", ("wait", 5.0),
+        "pin", ("wait", 0), ("wait", 5.0),
         ("terminate-central", 5.0), "close",
     ]
+
+
+@pytest.mark.parametrize("old_exited", [False, True])
+def test_missing_previous_row_only_allows_already_confirmed_native_exit(
+    generations: Generations, monkeypatch: pytest.MonkeyPatch, old_exited: bool,
+) -> None:
+    from agent_bridge.central_retirement import retire_predecessor
+
+    root, old, new, client, calls = generations
+    monkeypatch.setattr(
+        routing, "read_table", lambda *_a, **_kw: {"active": new.to_dict(), "previous": None},
+    )
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda *_: old_exited)
+    result = retire_predecessor(root, old, new, make_client=client)
+    assert result["exit_confirmed"] is old_exited
+    assert ("terminate-central", 5.0) not in calls
 
 
 @pytest.mark.parametrize("change", ["route", "birth", "role", "unhealthy"])
@@ -123,23 +137,55 @@ def test_changed_authority_never_terminates_predecessor(
     assert not any(isinstance(c, tuple) and c[0] == "terminate-central" for c in calls)
 
 
-def test_reselection_during_shutdown_preserves_predecessor(
+def test_reselection_during_native_exit_observation_preserves_predecessor(
     generations: Generations, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_bridge.central_retirement import retire_predecessor
+    from agent_procutil import process_retirement
 
     root, old, new, client, calls = generations
 
-    def restore(_: FixtureClient) -> dict[str, bool]:
-        assert new.pid is not None
-        assert routing.restore_previous_if_owner(root, pid=new.pid, generation=new.generation)
-        calls.append("restored")
-        return {"shutting_down": True}
+    def restore(_: Any, timeout: float = 0) -> bool:
+        if timeout:
+            assert new.pid is not None
+            assert routing.restore_previous_if_owner(root, pid=new.pid, generation=new.generation)
+            calls.append("restored")
+        return False
 
-    monkeypatch.setattr(client, "shutdown", restore)
+    monkeypatch.setattr(process_retirement.PinnedProcess, "exited", restore)
     outcome = retire_predecessor(root, old, new, make_client=client)
     assert outcome["exit_confirmed"] is False
     assert "restored" in calls and calls[-1] == "close"
+    assert ("terminate-central", 5.0) not in calls
+
+
+def test_reselection_after_pin_cannot_send_shutdown_to_active_owner(
+    generations: Generations, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge.central_retirement import retire_predecessor
+    from agent_procutil import process_retirement
+
+    root, old, new, client, calls = generations
+    assert new.pid is not None
+    restored = False
+
+    def wait(_self: Any, timeout: float = 0) -> bool:
+        nonlocal restored
+        if not restored:
+            assert new.pid is not None
+            assert routing.restore_previous_if_owner(root, pid=new.pid, generation=new.generation)
+            restored = True
+        return False
+
+    def shutdown(_self: FixtureClient) -> dict[str, bool]:
+        calls.append("wrong-owner-shutdown")
+        return {"shutting_down": True}
+
+    monkeypatch.setattr(process_retirement.PinnedProcess, "exited", wait)
+    monkeypatch.setattr(client, "shutdown", shutdown)
+    result = retire_predecessor(root, old, new, make_client=client)
+    assert result["exit_confirmed"] is False
+    assert "wrong-owner-shutdown" not in calls
     assert ("terminate-central", 5.0) not in calls
 
 
@@ -219,8 +265,7 @@ def test_ordinary_deploy_bounds_retirement_before_relay_and_host_adoption(
             }
 
         def shutdown(self) -> dict[str, Any]:
-            calls.append("shutdown")
-            raise OSError("nonsettling predecessor")
+            pytest.fail("ordinary deploy cannot issue an unfenced shutdown request")
 
         def drain(self, **_: Any) -> None:
             pytest.fail("an unreliable predecessor cannot gate incoming readiness")
@@ -290,8 +335,9 @@ async def test_selected_start_does_not_wait_forever_for_predecessor(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reselected", [False, True])
 async def test_selected_start_adopts_relay_before_slow_host_reattach(
-    generations: Generations, monkeypatch: pytest.MonkeyPatch,
+    generations: Generations, monkeypatch: pytest.MonkeyPatch, reselected: bool,
 ) -> None:
     from agent_bridge import app as app_module, lifecycle_hooks, routing_state
     from agent_bridge import runtime_version, source_start
@@ -307,6 +353,9 @@ async def test_selected_start_adopts_relay_before_slow_host_reattach(
 
     async def retired(app: FastAPI, *_a: Any, **_kw: Any) -> None:
         app.state.cold_recovery_ready = True
+        if reselected:
+            assert new.pid is not None
+            assert routing.restore_previous_if_owner(root, pid=new.pid, generation=new.generation)
 
     async def relay() -> None:
         calls.append("relay")
@@ -329,5 +378,6 @@ async def test_selected_start_adopts_relay_before_slow_host_reattach(
     for key, value in vars(state).items():
         setattr(app.state, key, value)
     await source_start.complete_source_start(app, published, None)
-    assert published.is_set() and calls == ["relay", "reattach"]
+    assert published.is_set()
+    assert calls == ([] if reselected else ["relay", "reattach"])
     assert not state.uvicorn_server.should_exit

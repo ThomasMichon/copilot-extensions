@@ -136,6 +136,37 @@ async def retire_previous_daemon(
     """Retire a predecessor with native exit evidence before owned cold recovery."""
     from zdd import process_exit
 
+    async def recover_after_exit() -> None:
+        if self_retire_only:
+            from .config import config_dir
+            from zdd import routing
+
+            table = await asyncio.to_thread(routing.read_table, config_dir())
+            raw = table.get("active") if isinstance(table, dict) else None
+            active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            server = getattr(app.state, "uvicorn_server", None)
+            if (
+                active != successor or not owns_generation(active, successor)
+                or getattr(app.state, "shutting_down", False)
+                or getattr(server, "should_exit", False)
+            ):
+                return
+            app.state.cold_recovery_ready = True
+            config = getattr(app.state, "config", None)
+            if (
+                getattr(app.state, "ready", False)
+                and getattr(config, "enable_credential_relay", False)
+                and not getattr(app.state, "credential_relay_ready", False)
+            ):
+                try:
+                    await app.state.adopt_relay()
+                except Exception:
+                    log.warning("Post-exit relay adoption deferred", exc_info=True)
+        await recover_owned_cold(
+            app, successor, initial_recovery_task=initial_recovery_task,
+            predecessor_exited=True,
+        )
+
     reference = None
     if previous.pid and previous.process_start_time:
         try:
@@ -149,10 +180,7 @@ async def retire_previous_daemon(
                 log.warning("Predecessor original-exit evidence is unavailable; recovery fenced", exc_info=True)
                 return
             if exited:
-                await recover_owned_cold(
-                    app, successor, initial_recovery_task=initial_recovery_task,
-                    predecessor_exited=True,
-                )
+                await recover_after_exit()
             return
         except (OSError, ValueError, NotImplementedError):
             log.warning("Predecessor native identity could not be pinned; retirement refused", exc_info=True)
@@ -178,10 +206,7 @@ async def retire_previous_daemon(
                     log.warning("Predecessor native exit is unavailable; cold recovery remains fenced", exc_info=True)
                     return
                 if exited:
-                    await recover_owned_cold(
-                        app, successor, initial_recovery_task=initial_recovery_task,
-                        predecessor_exited=True,
-                    )
+                    await recover_after_exit()
                     return
                 from .central_retirement import retire_predecessor
                 from .client import BridgeClient
@@ -197,12 +222,25 @@ async def retire_previous_daemon(
                 )
                 app.state.predecessor_cleanup = cleanup
                 if cleanup.get("exit_confirmed") is True:
-                    await recover_owned_cold(
-                        app, successor, initial_recovery_task=initial_recovery_task,
-                        predecessor_exited=True,
-                    )
+                    await recover_after_exit()
                 else:
                     log.warning("Central predecessor retirement remains unconfirmed: %s", cleanup)
+                    # The existing post-publication task retains native exit
+                    # observation, not another control attempt or readiness gate.
+                    while not getattr(app.state, "shutting_down", False):
+                        table = await asyncio.to_thread(routing.read_table, config_dir())
+                        raw = table.get("active") if isinstance(table, dict) else None
+                        active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                        if active != successor or not owns_generation(active, successor):
+                            return
+                        try:
+                            exited = await settled_thread_call(reference.wait, 1.0)
+                        except (OSError, ValueError, NotImplementedError):
+                            log.warning("Late predecessor exit observation unavailable", exc_info=True)
+                            return
+                        if exited:
+                            await recover_after_exit()
+                            return
             return
         if reference is not None and reference.wait(0):
             await recover_owned_cold(
