@@ -16,6 +16,10 @@ from agent_procutil import no_window_kwargs
 from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest as _read_cache_manifest
 from .cache_recovery import status_command as cmd_cache_status
+from .cli_status import (
+    _TRANSPORT_LABELS as _TRANSPORT_LABELS,
+    _vault_status_label as _vault_status_label,
+)
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get as cmd_get, legacy_cache_entry
 from .prompt import prompt_password as gui_prompt_password
@@ -677,22 +681,6 @@ def cmd_search(args: Any) -> int:
     error = resp.get("error", "unknown") if resp else "service unreachable"
     print(f"Error: {error}", file=sys.stderr)
     return 1
-
-
-def _vault_status_label(cli_state: str) -> str:
-    """Translate internal cli state to user-facing status."""
-    if cli_state == "unlocked":
-        return "available"
-    return "locked"
-
-
-_TRANSPORT_LABELS = {
-    "unix-socket": "unix socket",
-    "tcp": "local TCP",
-    "discovered-pipe": "named pipe (discovered)",
-    "discovered-unix": "unix socket (discovered)",
-    "discovered-tcp": "local TCP (discovered)",
-}
 
 
 def cmd_ping(args: Any) -> int:
