@@ -3913,22 +3913,47 @@ retains the existing setup, engine, bootstrap and application owners.
   SAC-enforcing Windows migration requires a successful supported managed
   interpreter path under that policy, not only an actionable refusal.
 
+### Explicit Python handoff and compatibility evaluator bootstrap
+
+The ordinary Manager bootstrap carries its uv-managed Python selection into
+finite installer children as `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`. This is an
+absolute executable path, not a version request, acquisition permission or
+persistent installation selector. PowerShell restores its caller's previous
+value on success or failure; POSIX exports it only within the bootstrap process
+tree. Queued installations clear stale inherited hints through the existing
+runner's context-key handling. Each finite Manager request scope then uses the
+explicitly launched application's own interpreter, not the draining worker's
+hint, and restores the previous environment afterward. The strict legacy
+request-context record is unchanged, so older prepared Manager sources still
+accept it. Self-install uses the same finite interpreter scope.
+The installation-context caller-owned adapter and the evaluator selector
+below consume it without rediscovering PATH Python. Their optional `-Python`
+argument overrides the inherited value. Invalid paths and interpreter execution
+failures are terminal, not permission to fall back. The original process,
+private-pipe, Job/group, startup/deadline and cleanup protocols are unchanged.
+
+This closes the setup-process handoff portion of
+[uv-managed Python](../visions/installer/README.md#uv-managed-python), not the
+whole migration. It neither publishes a global Python preference nor changes
+installed application interpreters. Independently installed, fresh-terminal
+and legacy callers without a supplied selection retain the compatibility path
+below until their installation owners carry the same explicit selection.
+
 ### Legacy PATH evaluator adoption
 
-The following describes the existing selector, not the target above. Its PATH
-requirement is remaining migration work; it must not be copied into new setup
-plans as an architectural prerequisite. Historical source and native validation
-credit remain valid only for the behavior they actually exercised.
-
-### PATH Python evaluator bootstrap
+The no-selection fallback below is remaining migration work, not the managed
+target above. Its PATH requirement must not be copied into new setup plans as
+an architectural prerequisite. Historical source and native validation credit
+remain valid only for the behavior they actually exercised.
 
 `bootstrap-python.ps1` is a standalone, read-only selector for the existing
-`python` application on PATH that evaluates the owning payload's stdlib SDK.
+explicit interpreter or compatibility `python` application on PATH that
+evaluates the owning payload's stdlib SDK.
 `sync-installer-engine.py` delivers byte-identical copies only to the declared
 Containers and Codespaces adopters. Loading the file or delivering a copy does
 not opt a caller into another evaluator or change its installer selection.
 
-`Resolve-EvaluatorBootstrapPython` uses ordinary application-only `Get-Command`
+Without an explicit selection, `Resolve-EvaluatorBootstrapPython` uses ordinary application-only `Get-Command`
 lookup, preserving PATH order without executing candidates, compiling native
 code, consulting the registry, verifying signatures or pinning interpreter files.
 Aliases and functions do not override the application. The compatibility
@@ -3942,7 +3967,8 @@ removal of per-launch interpreter attestation; it does not qualify this existing
 PATH selector as migrated.
 
 The result retains `Status`, `Reason`, `Python` and `Guard` for caller
-compatibility. `selected` / `path-python` returns the resolved application path
+compatibility. `selected` / `explicit-python` returns the supplied absolute path, while
+`selected` / `path-python` returns the resolved compatibility application path
 and a null guard; `unavailable` / `python-not-on-path` has neither. Only command
 absence becomes `unavailable`; unexpected discovery errors propagate.
 There is no interpreter acquisition, state write, persistent admission cache

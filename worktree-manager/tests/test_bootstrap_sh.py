@@ -138,6 +138,8 @@ def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(
             "PATH": ("tools" if relative_uv else str(tools)) + os.pathsep + os.environ.get("PATH", ""),
             "VIRTUAL_ENV": str(tmp_path / "active-venv"),
             "UV_PYTHON": str(tmp_path / "ambient-python"),
+            "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": "previous-selection",
+            "BOOTSTRAP_PYTHON_HANDOFF": str(tmp_path / "python-handoff"),
             "BOOTSTRAP_UV_TRACE": str(trace),
             "BOOTSTRAP_UV_MISSING": "1" if missing else "0",
         },
@@ -150,6 +152,10 @@ def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(
     assert result.stdout == ""
     if uv_version == "0.7.0":
         assert (tmp_path / "uv-prepared").exists()
+    expected_python = (
+        home / ".local" / "bin" if uv_version == "0.7.0" else tools
+    ) / "fake-python"
+    assert (tmp_path / "python-handoff").read_text(encoding="utf-8").strip() == str(expected_python)
 
 
 def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_path: Path) -> None:

@@ -266,6 +266,8 @@ architecture/plan revision, not an implementation or rollout assignment.
   offline prepared use, read-only non-acquisition and caller custody. Qualify
   incompatible first PATH Python, fresh-terminal, failure and rollback cases
   before claiming installed adoption.
+  Ordinary Manager bootstrap source is delivered in #12783; shared helpers,
+  standalone application preparation and installed acceptance remain open.
 - [x] Replace the compiled installation-context PowerShell SDK with its shared
   standard-library Python owner and preserve original-shell lifetime, strict
   action/policy behavior and source-only distribution. The complete bounded

@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Worker,
     [Parameter(Mandatory = $true)][hashtable]$Request,
     [ValidateRange(0, 2147483647)][int]$TimeoutSeconds = 0,
-    [ValidateSet('caller-owned', 'installation-context')][string]$DiagnosticPrefix = 'caller-owned'
+    [ValidateSet('caller-owned', 'installation-context')][string]$DiagnosticPrefix = 'caller-owned',
+    [string]$Python = $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,13 +26,22 @@ $stderr = $null
 $childDiagnostic = ''
 $diagnosticFailure = ''
 try {
-    try {
-        $python = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0]
-    } catch [System.Management.Automation.CommandNotFoundException] {
-        throw (
-            'Python 3.10+ must be available as python on PATH. ' +
-            'Run the harness Python prerequisite setup, or install the standalone prerequisite, then retry.'
-        )
+    if ($Python -or $PSBoundParameters.ContainsKey('Python')) {
+        $root = if ([string]::IsNullOrWhiteSpace($Python)) { '' } else { [IO.Path]::GetPathRoot($Python) }
+        if (-not $root -or -not [IO.Path]::IsPathRooted($Python) -or
+            ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+                ($root -in @('\', '/') -or $root -match '^[A-Za-z]:$'))) {
+            throw 'Bootstrap Python must be an absolute executable path.'
+        }
+    } else {
+        try {
+            $Python = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0].Path
+        } catch [System.Management.Automation.CommandNotFoundException] {
+            throw (
+                'Python 3.10+ must be available as python on PATH, or explicitly selected by setup. ' +
+                'Run the harness Python prerequisite setup, or install the standalone prerequisite, then retry.'
+            )
+        }
     }
     $windowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
     $caller = [Diagnostics.Process]::GetCurrentProcess()
@@ -50,13 +60,13 @@ try {
     $bootstrap = @'
 import base64,json,runpy,sys
 if sys.version_info < (3,10):
-    sys.stderr.write('caller-owned: Python 3.10+ is required on PATH; run the harness prerequisite setup or install the standalone prerequisite.\n')
+    sys.stderr.write('caller-owned: Python 3.10+ is required for helpers; run the harness prerequisite setup or install the standalone prerequisite.\n')
     sys.exit(1)
 packet=json.loads(base64.b64decode(sys.stdin.buffer.raw.readline()).decode('utf-8'))
 sys.exit(runpy.run_path(packet['worker'])['main'](packet['request']))
 '@
     $startInfo = New-Object Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $python.Path
+    $startInfo.FileName = $Python
     $startInfo.Arguments = '-I -S -B -X utf8 -c "' + $bootstrap + '"'
     $startInfo.WorkingDirectory = [Environment]::CurrentDirectory
     $startInfo.UseShellExecute = $false
