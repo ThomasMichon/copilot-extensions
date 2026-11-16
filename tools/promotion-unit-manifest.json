@@ -5056,7 +5056,10 @@
         "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_unrelated_cleanup_does_not_acquire_task_evidence[retired]",
         "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_unrelated_cleanup_does_not_acquire_task_evidence[other-driver]",
         "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_unrelated_cleanup_does_not_acquire_task_evidence[no-local-handle]",
-        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_terminal_observation_cannot_authorize_a_later_reopened_task"
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_terminal_observation_cannot_authorize_a_later_reopened_task",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_cache_policy_refuses_malformed_allowlist_references",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_cache_policy_preserves_anchors_and_manifest_owners",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_invalid_manifest_aborts_collection_without_substitute_targets"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/cli.py",
@@ -5377,10 +5380,14 @@
         "libs/installer-engine/runtime_application_install.py",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py",
         "libs/payload-invocation/bootstrap_python.py",
-        "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py"
+        "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py",
+        "plugins/agent-vault/src/agent_vault/cache_targets.py",
+        "plugins/agent-vault/src/agent_vault/cache_sources.py",
+        "plugins/agent-vault/src/agent_vault/cache_manifests.py",
+        "plugins/agent-vault/src/agent_vault/credential_fields.py"
     ],
     "sources": {
-        "plugins/agent-vault/src/agent_vault/cli.py": "b716daa358dc4c1bc654693d47c1d5461ffe79d5befc074182dec48badc2c3ff",
+        "plugins/agent-vault/src/agent_vault/cli.py": "f425a4de48470f965e28ddadca9fc5251f017e7b7163ea08e86d23b31507081e",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
         "tools/promotion_unit_tests/test_vault_transport_order.py": "303bf33bcd030779bc24bbf5340783e76a5198646d062f0276f951db2c89fc7a",
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
@@ -6167,6 +6174,11 @@
         "libs/payload-invocation/bootstrap_python.py": "92b949933b98e1419caf01e459ab61752c937aa81dcc3ac8878f62d45633d0f0",
         "plugins/agent-dispatch/src/agent_dispatch/queue_records.py": "cdc7ba97d1b52a3460e00770afa728d5838b60829237ac35345ca0b064238e73",
         "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py": "266dfef299089318b384dbebef622cdb1a99ef997483a2b95b55e00f68e64ac6",
-        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py": "68de298c2f78faccb7767dad3bf5c7af15e18eb0a1a9fd374eb6cb93bfc0836b"
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py": "68de298c2f78faccb7767dad3bf5c7af15e18eb0a1a9fd374eb6cb93bfc0836b",
+        "plugins/agent-vault/src/agent_vault/cache_targets.py": "f4c48c2fa4b5a90c543cf375218ac694b6d0ce4aa20c1020c17a04027e827625",
+        "plugins/agent-vault/src/agent_vault/cache_sources.py": "ce5804d0558bb44626174b71ac98d9f47c03f12de737f625725cbaecf7bdd278",
+        "plugins/agent-vault/src/agent_vault/cache_manifests.py": "40df9c3eeb2ed784486e99b8653f1de2d67481b12df996c692b620a63b957882",
+        "plugins/agent-vault/src/agent_vault/credential_fields.py": "ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py": "d567a039ae03530db2e40990dfb2345cd9b1170ec57380f6c12138edc1cc4c77"
     }
 }

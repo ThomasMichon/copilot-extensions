@@ -6,7 +6,9 @@ files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
 still fail. Optional absence never qualifies an unvalidated delivered projection.
 
 [`src/agent_vault/config.py`](../src/agent_vault/config.py) owns the human-authored
-JSON schema and `resolve_context`; configuration reads do not open a database,
+selection schema and `resolve_context`;
+[`cache_targets.py`](../src/agent_vault/cache_targets.py) validates declared cache
+references. Configuration reads do not open a database,
 unlock a vault, start a daemon, fetch a credential, or install anything.
 
 ## Sources and selection
@@ -144,6 +146,8 @@ router supplies `--configuration-root <absolute-checkout>` to Vault. This select
 repository and bound-knowledge discovery without changing the caller directory
 or rewriting native environment selectors. The same routing applies to other
 Vault verbs, including operations with relative input/output files.
+Relative cache manifests are the exception: they use the selected repository
+configuration's directory, as described below, not the caller's directory.
 `AGENT_VAULT_CONFIG`, `KPDB`, local/core endpoints, discovery paths and KEK/cache
 settings therefore keep their native expansion, symlink and Unix-address-length
 semantics. The parent environment and process directory are unchanged.
@@ -289,6 +293,8 @@ database, credential, installation, cache, KEK, or rendezvous custody.
 | Field | Type/default and scope |
 |---|---|
 | `enabled` | Optional strict boolean, default false; runtime participation opt-in. Allowed in portable repository/knowledge and native machine configuration. Not inferred from database configuration. |
+| `cache_entries` | Optional array, default empty. Each item is a nonempty entry string (password field) or a two-string `[entry, field]` pair. Portable allowlist references, not credential values or cache placement. |
+| `cache_manifests` | Optional array of nonempty manifest-path strings, default empty. Paths belong to their declaring configuration layer. |
 | `vaults` | Optional global object keyed by nonempty vault names; each value is an object with required nonempty `kpdb`. Registry records are machine-local custody, not ordinary portable preferences. |
 | `default_vault` | Optional nonempty string naming a member of that file's `vaults`; strict validation refuses a missing registration. |
 | `vault` | Optional nonempty string selecting a registered vault in repository/extension settings; `AGENT_VAULT` wins. |
@@ -301,10 +307,60 @@ database, credential, installation, cache, KEK, or rendezvous custody.
 `_validate_config_data`, `_vault_registry`, `_legacy_flat_config`,
 `_pick_vault_name` and `resolve_context` are the canonical schema/selection
 sections. Known optional null values behave as absent in this **native selector**;
-this is not a generic deep-map merge. Lists have no schema here. Unknown fields
+this is not a generic deep-map merge. Cache-reference arrays have the separate
+strict schema below; null is not an empty allowlist. Unknown fields
 are retained in loaded JSON but do not affect this selector. There is no schema
 version field or automatic file rewrite on read. `save_global_config` is a
 separate explicit writer.
+
+### Declared cache targets
+
+For example, a selected repository can declare:
+
+```json
+{
+  "cache_entries": ["/Root Account", ["Service", "username"]],
+  "cache_manifests": ["config/cache.conf"]
+}
+```
+
+These are references only. `/Root Account` means an entry at the database root;
+`Service` uses the selected default group, and an already-qualified path retains
+its group. Standard field aliases use the existing credential-field owner.
+Collection preserves root anchors until the backend/cache identity boundary;
+it never merges a root subject with its default-group namesake.
+
+Each manifest uses the existing `entry | field` format. Configured manifest
+paths expand native `~`/environment references and resolve against the declaring
+file's directory before ordinary composition. Arrays replace atomically:
+extension and repository/base, bound knowledge, native machine, then qualified
+repository+machine; an empty higher-priority array intentionally clears that
+field. Without an optional configuration owner, repository values override
+extension values, which override global values, matching native selection.
+Extension-relative manifest paths use the selected discovery directory.
+The native vault registry and cache/key/service locations remain independent.
+
+Population, verification and status share explicit entries, an explicit manifest,
+the declared entries/manifests, then extension targets, deduping entry/field pairs.
+A relative CLI `--manifest` is anchored to the selected repository configuration
+directory, or its discovery directory when no file exists; an absolute manifest
+keeps its native path. No other relative input/output selector changes meaning.
+Malformed declarations and unreadable manifests fail without substituting
+extension targets or selecting another context. `cache-status --json` adds
+`configured_target_count`; this count is not proof that those targets are cached.
+
+Resolving declarations does not enable cache, unlock a database or change
+protected-storage custody. No-argument population/verification use those
+declarations; population's separate prompting/service/cache rules still apply.
+The selected resident also
+uses the declarations for [bounded unlock warming](cache-warming.md).
+The executing CLI advertises `repository-cache-targets-v1` in its existing
+invocation contract; the running service's full ping separately advertises that
+policy in `cache_warm.target_policy`. Old clients ignore these additive fields.
+An older reader may ignore new configuration keys: that is not enforcement.
+Adopters requiring declared-target semantics must qualify both selected CLI and
+resident support before activation or after rollback; no matching package version
+or installed capability substitutes for the running service's evidence.
 
 Database paths expand environment variables and `~`; relative repository paths
 use the declaring `.agent-vault.json` directory, global/named paths use the
@@ -353,13 +409,15 @@ validation regardless of ordinary preference composition.
 ### Ordinary selection composition
 
 For an admitted configuration context, the real `resolve_context` consumer
-composes `vault`, `group` and boolean `enabled`: built-in unset selections and
+composes `vault`, `group`, boolean `enabled` and cache-reference arrays:
+built-in unset selections and
 inactive runtime default → native extension
 and selected repository data plus base then bound knowledge `.agent-vault.json`
 → existing global `default_vault`/`group` (`vault_group` compatibility alias)
 → `.agent-vault.json` beneath the owner's exact `repository_machine_root`.
-Knowledge and repository+machine files may contain selection/activation fields only;
-database, port, registry, cache, endpoint and KEK fields refuse portable override.
+Knowledge and repository+machine files may contain selection, activation and
+cache-reference fields only; database, port, registry, cache placement/protection,
+endpoint and KEK fields refuse portable override.
 Source documents retain physical-root and JSON-pointer provenance.
 
 The native same-cell peer-launch adapter validates Vault ownership before a

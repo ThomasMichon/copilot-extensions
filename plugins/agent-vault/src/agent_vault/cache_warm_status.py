@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .cache_targets import CAPABILITY as CACHE_TARGET_CAPABILITY
+
 CONTRACT = "agent-vault.cache-warm"
 VERSION = 1
 STATES = frozenset(
@@ -51,6 +53,7 @@ class WarmState:
         return {
             "contract": CONTRACT,
             "version": VERSION,
+            "target_policy": CACHE_TARGET_CAPABILITY,
             "state": self.state,
             "reason": self.reason,
             "selected": self.selected,

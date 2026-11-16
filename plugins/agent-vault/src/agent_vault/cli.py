@@ -14,8 +14,9 @@ from typing import Any, cast
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
-from .cache_manifests import read_cache_manifest as _read_cache_manifest
+from .cache_manifests import read_cache_manifest
 from .cache_recovery import status_command as cmd_cache_status
+from .cache_targets import command_entries
 from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,
@@ -28,6 +29,8 @@ from .terminal_input import (
     _read_password_from_tty as _read_password_from_tty,
 )
 from .winpipe import pipe_send
+
+_read_cache_manifest = read_cache_manifest
 
 
 def _detect_wsl() -> bool:
@@ -1286,38 +1289,14 @@ def cmd_cache_populate(args: Any) -> int:
     """Pre-warm the vault cache for a set of entries.
 
     Entries come from (deduped, in order): explicit ``--entry`` values, a
-    ``--manifest`` file, and every registered cache-source extension. Each entry
-    is fetched so the daemon caches it (and missing entries surface early).
+    ``--manifest`` file, declared targets, and registered cache-source extensions.
+    Each entry is fetched so the daemon caches it (and missing entries surface early).
     """
-    from .extensions import get_registry
-    from .credential_fields import canonical_field
-
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(entry: str, field: str) -> None:
-        pair = (entry, canonical_field(field or "password"))
-        if pair[0] and pair not in seen:
-            seen.add(pair)
-            pairs.append(pair)
-
-    for entry in (args.entry or []):
-        e, sep, f = entry.partition(":")
-        _add(e.strip(), (f.strip() if sep else "password"))
-
-    if args.manifest:
-        manifest = Path(args.manifest)
-        if not manifest.exists():
-            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
-            return 1
-        for e, f in _read_cache_manifest(manifest):
-            _add(e, f)
-
-    for e, f in get_registry().collect_cache_entries(args.machine):
-        _add(e, f)
-
+    pairs = command_entries(args)
+    if pairs is None:
+        return 1
     if not pairs:
-        print("No entries to cache (no --entry, --manifest, or cache-source extension).",
+        print("No entries to cache (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
@@ -1421,39 +1400,18 @@ def cmd_cache_clear(args: Any) -> int:
 def cmd_cache_verify(args: Any) -> int:
     """Check the persistent cache holds a set of entries without unlocking.
 
-    Entries come from ``--entry`` / ``--manifest`` / cache-source extensions,
+    Entries come from explicit selectors, declared targets and cache-source extensions,
     exactly like ``cache-populate``. Exits non-zero (2) if any are missing, so a
     launch-time gate can confirm an unattended box is primed while still locked.
     """
     from .cache import get_cache
-    from .credential_fields import attribute_name, canonical_field
+    from .credential_fields import attribute_name
 
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(entry: str, field: str) -> None:
-        pair = (entry, canonical_field(field or "password"))
-        if pair[0] and pair not in seen:
-            seen.add(pair)
-            pairs.append(pair)
-
-    for entry in (getattr(args, "entry", None) or []):
-        e, sep, f = entry.partition(":")
-        _add(e.strip(), (f.strip() if sep else "password"))
-    if getattr(args, "manifest", None):
-        manifest = Path(args.manifest)
-        if not manifest.exists():
-            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
-            return 1
-        for e, f in _read_cache_manifest(manifest):
-            _add(e, f)
-    from .extensions import get_registry
-
-    for e, f in get_registry().collect_cache_entries(getattr(args, "machine", None)):
-        _add(e, f)
-
+    pairs = command_entries(args)
+    if pairs is None:
+        return 1
     if not pairs:
-        print("No entries to verify (no --entry, --manifest, or cache-source extension).",
+        print("No entries to verify (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 

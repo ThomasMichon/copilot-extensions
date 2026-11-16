@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 import logging
 import time
 
+from .cache_targets import CacheTargetError
+
 log = logging.getLogger(__name__)
 CacheSource = Callable[[str | None], Iterable[object] | None]
 
@@ -73,6 +75,8 @@ def collect(
                     if max_entries is not None and len(result.entries) >= max_entries:
                         result.truncated = True
                         return result
+        except CacheTargetError:
+            raise
         except Exception as exc:
             result.failed_sources += 1
             log.warning("Configured cache source failed (%s)", type(exc).__name__)

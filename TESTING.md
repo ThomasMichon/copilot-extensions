@@ -7098,6 +7098,13 @@ on unconfigured paths. These actor-free models do not qualify real filesystem,
 registration, pairing or lifecycle effects; the opt-in native reader portfolio
 retains those separate boundaries.
 
+Three actor-free `test_vault_cache_targets.py` controls admit the original Vault
+allowlist validator, declaring-directory path projection, root/group distinction
+and fail-closed manifest collection with an injected iterator. They perform no
+native cache/protection, backend, service or process work. The selected Vault
+plugin packet separately exercises real files, CLI wiring and bounded warming;
+real Windows DPAPI and installed-client/service qualification remain distinct.
+
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
 

@@ -493,8 +493,13 @@ def prepare_cache(base: Path) -> dict:
 
 def status_command(args) -> int:
     from .cache import get_cache
+    from .cache_targets import command_entries
 
+    targets = command_entries(args)
+    if targets is None:
+        return 1
     status = get_cache().status()
+    status["configured_target_count"] = len(targets)
     if getattr(args, "json", False):
         print(json.dumps(status, indent=2, sort_keys=True))
         return 0
@@ -504,6 +509,7 @@ def status_command(args) -> int:
     print(f"cache: {state}")
     print(f"dir: {status['cache_dir']}")
     print(f"entries: {status['entry_count']} ({status['field_count']} field(s))")
+    print(f"configured targets: {status['configured_target_count']}")
     if not status["readable"]:
         print("protected data: unreadable (originals retained; use cache-populate for live recovery)")
     if status["recovery"]:

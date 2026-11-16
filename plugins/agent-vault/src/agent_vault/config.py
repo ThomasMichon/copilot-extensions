@@ -215,6 +215,9 @@ def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _validate_config_data(data: dict[str, Any], label: str) -> None:
+    from .cache_targets import validate_configuration
+
+    validate_configuration(data, label)
     if "windows_scheduled_task" in data and data["windows_scheduled_task"] not in (
         "preserve", "enabled", "absent",
     ):
@@ -397,7 +400,9 @@ def resolve_context(
 
     from .configuration import compose_preferences
 
-    ordinary = compose_preferences(cwd, repo_data, global_data, ext_data)
+    ordinary = compose_preferences(
+        cwd, repo_data, global_data, ext_data, repository_directory=repo_base_dir,
+    )
     if ordinary is not None:
         repo_data = {**repo_data, **ordinary["values"]}
 

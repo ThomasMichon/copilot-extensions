@@ -1,15 +1,21 @@
 # Unlock-triggered cache warming
 
-An opted-in protected cache and registered `cache_source` extensions allow the
+An opted-in protected cache and declared targets or `cache_source` extensions allow the
 selected service to warm configured credentials after a successful unlock.
 Provider-based, explicit-password and attended unlocks use the same path.
 Nothing enables the cache, unlocks a database or registers targets implicitly.
 
-The existing extension registry owns the target allowlist. Sources receive the
+The [configuration owner](configuration.md#declared-cache-targets) supplies the
+declared allowlist, followed by the existing extension registry. Sources receive the
 ordinary optional machine hint as `None`; each source remains responsible for
 returning the targets appropriate to that service. Warming never lists or scans
 the database, starts a session ceremony, or adds a timer. Manual population
 retains its existing uncapped collection behavior through the same collector.
+Declared configuration is snapshotted at enqueue with owner-anchored manifest
+references; manifest contents are streamed when the worker collects targets.
+Invalid declarations refuse enqueue. An unreadable/invalid declared manifest
+fails that work before credential reads rather than falling through to extensions.
+The declared source counts toward the unchanged source/item/target budgets.
 
 ## Work and lifetime
 
@@ -69,6 +75,8 @@ actual work settlement before executor and service cleanup.
 The existing full `ping` response adds `cache_warm` using contract
 `agent-vault.cache-warm`, version `1`. It reports only state, a fixed reason,
 `selected`, `cached`, `failed`, `remaining`, `failed_sources` and `truncated`.
+The additive `target_policy: "repository-cache-targets-v1"` identifies support
+in the running generation, separately from an installed CLI's capability.
 Counts and status are scoped to the selected database/group; no entry names,
 database paths, credential values or callback exception messages are included.
 Full ping never reloads configuration to select warming status. An omitted group

@@ -12,7 +12,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from . import cache_sources, config
+from . import cache_sources, cache_targets, config
 from .cache import cache_enabled
 from .cache_warm_status import WarmState
 from .credential_fields import canonical_field
@@ -93,9 +93,12 @@ class CacheWarmQueue:
         selected_group = group
         try:
             selected_group = group if group is not None else config.load_config().group or ""
+            declared = cache_targets.configured_source()
             sources = tuple(
                 source.fn for source in get_registry().cache_sources[: MAX_SOURCES + 1]
             )
+            if declared is not None:
+                sources = (declared, *sources[:MAX_SOURCES])
         except Exception:
             state = WarmState("not-queued", "configuration-unavailable")
             if selected_group is not None:
@@ -354,6 +357,8 @@ class CacheWarmRuntime:
                 or progress.truncated
                 else "complete"
             )
+        except cache_targets.CacheTargetError:
+            progress.state, progress.reason = "failed", "configuration-unavailable"
         except Exception:
             progress.state, progress.reason = "failed", "cache-unavailable"
         finally:
