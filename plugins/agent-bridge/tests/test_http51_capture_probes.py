@@ -1,14 +1,23 @@
 """Actual standard-send parser/ASGI/journal evidence, not native SDK proof."""
 
+from __future__ import annotations
+
+from argparse import Namespace
+from collections.abc import Callable, Sequence
+from importlib import import_module
 import json
 import io
 import os
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Any, Protocol, cast
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
+from urllib.request import Request
 
+from fastapi import FastAPI
+import httpx
 import pytest
 import test_host_status as host_status
 import test_host_status_remote as host_status_remote
@@ -119,60 +128,102 @@ native_send = native_controls.native_send
 @pytest.mark.parametrize("state", [
     "preparing", "invoking", "unknown", "complete", "not-started", "malformed", "gate-only",
 ])
-def test_retained_recovery_gc_preserves_original_inspection_handles(tmp_db, status, state):
-    gc_controls.TestDbGcPrimitives().test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc(
+def test_retained_recovery_gc_preserves_original_inspection_handles(
+    tmp_db: Database, status: str, state: str,
+) -> None:
+    cast(
+        Callable[[Database, str, str], None],
+        gc_controls.TestDbGcPrimitives().test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc,
+    )(
         tmp_db, status, state,
     )
 
 
 @pytest.mark.parametrize("state", ["preparing", "unknown"])
-def test_successor_recovery_journal_retains_original_handle(tmp_db, tmp_path, state):
-    gc_controls.TestDbGcPrimitives().test_successor_recovery_journal_retains_original_handle(
+def test_successor_recovery_journal_retains_original_handle(
+    tmp_db: Database, tmp_path: Path, state: str,
+) -> None:
+    cast(
+        Callable[[Database, Path, str], None],
+        gc_controls.TestDbGcPrimitives().test_successor_recovery_journal_retains_original_handle,
+    )(
         tmp_db, tmp_path, state,
     )
 
 
 @pytest.mark.parametrize("query", ["retained", "eligible"])
 @pytest.mark.parametrize("pending", [False, True])
-def test_retention_query_work_scales_with_history(tmp_db, query, pending):
-    gc_controls.TestDbGcPrimitives().test_retention_query_work_scales_with_history(tmp_db, query, pending)
+def test_retention_query_work_scales_with_history(
+    tmp_db: Database, query: str, pending: bool,
+) -> None:
+    cast(
+        Callable[[Database, str, bool], None],
+        gc_controls.TestDbGcPrimitives().test_retention_query_work_scales_with_history,
+    )(tmp_db, query, pending)
 
 
 @pytest.mark.parametrize("state", ["complete", "not-started"])
 @pytest.mark.parametrize("malformed", [
     "missing-request", "extra-field", "invalid-request", "different-operation",
 ])
-def test_malformed_terminal_recovery_retains_original_and_successor(tmp_db, state, malformed):
-    gc_controls.TestDbGcPrimitives().test_malformed_terminal_recovery_retains_original_and_successor(
+def test_malformed_terminal_recovery_retains_original_and_successor(
+    tmp_db: Database, state: str, malformed: str,
+) -> None:
+    cast(
+        Callable[[Database, str, str], None],
+        gc_controls.TestDbGcPrimitives().test_malformed_terminal_recovery_retains_original_and_successor,
+    )(
         tmp_db, state, malformed,
     )
 
 
-def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(tmp_db):
-    gc_controls.TestDbGcPrimitives().test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(
+def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(
+    tmp_db: Database,
+) -> None:
+    cast(
+        Callable[[Database], None],
+        gc_controls.TestDbGcPrimitives().test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards,
+    )(
         tmp_db,
     )
 
 
-def test_host_status_coalesced_flow(host_status_api, tmp_db):
-    host_status.test_real_http_inbox_consumer_gets_one_notice_and_consumption_is_not_ack(host_status_api, tmp_db)
+def test_host_status_coalesced_flow(host_status_api: TestClient, tmp_db: Database) -> None:
+    cast(
+        Callable[[TestClient, Database], None],
+        host_status.test_real_http_inbox_consumer_gets_one_notice_and_consumption_is_not_ack,
+    )(host_status_api, tmp_db)
 
 
-def test_host_status_shared_host_stream(tmp_db):
-    host_status_remote.test_two_watchers_and_two_aliases_share_one_stream_and_resume_after_restart(tmp_db)
+def test_host_status_shared_host_stream(tmp_db: Database) -> None:
+    cast(
+        Callable[[Database], None],
+        host_status_remote.test_two_watchers_and_two_aliases_share_one_stream_and_resume_after_restart,
+    )(tmp_db)
 
 
-def test_host_status_prior_and_rollback_refusal(host_status_provider):
+def test_host_status_prior_and_rollback_refusal(
+    host_status_provider: host_status_remote.ProviderClient,
+) -> None:
     for capability in (None, False, 0, 2, "1"):
-        host_status_remote.test_prior_missing_invalid_and_rollback_provider_refuse_before_stream(
+        cast(
+            Callable[[host_status_remote.ProviderClient, object], None],
+            host_status_remote.test_prior_missing_invalid_and_rollback_provider_refuse_before_stream,
+        )(
             host_status_provider, capability,
         )
 
 
-def test_host_status_legacy_timeout_compatibility(host_status_api, monkeypatch):
-    host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout(host_status_api, monkeypatch)
+def test_host_status_legacy_timeout_compatibility(
+    host_status_api: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cast(
+        Callable[[TestClient, pytest.MonkeyPatch], None],
+        host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout,
+    )(host_status_api, monkeypatch)
 
-import bridge_http52_evidence as evidence
+# These tool modules are made available by the capture harness's sys.path bootstrap.
+evidence = import_module("bridge_http52_evidence")
 from test_execution_context import (
     test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records
     as test_rename_is_visible_on_next_request_without_restarting_or_rewriting_records,
@@ -189,12 +240,19 @@ from test_execution_context import (
     test_machine_rename_rollover_retains_alias_and_cli_claim
     as test_machine_rename_rollover_retains_alias_and_cli_claim,
 )
-from bridge_http_retained_probes import capture_request, record_observations
+_retained_probes = import_module("bridge_http_retained_probes")
+capture_request = cast(
+    Callable[[ModuleType, Path], dict[str, Any] | None], _retained_probes.capture_request,
+)
+record_observations = cast(
+    Callable[[ModuleType, dict[str, Any], str, dict[str, Any]], None],
+    _retained_probes.record_observations,
+)
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
 
 
-def test_execution_context_extension_controls():
+def test_execution_context_extension_controls() -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     node = shutil.which("node")
@@ -307,13 +365,16 @@ from test_live_exact_rollback import (
     as test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint,
 )
 from agent_bridge import __main__ as core
-from agent_bridge.models import SessionStatus
+from agent_bridge.db import Database
+from agent_bridge.inbox_custody import InboxConsumer
+from agent_bridge.native_send_admission import NativeSendPrompt
+from agent_bridge.session_status import SessionStatus
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.client import BridgeClient
 from agent_bridge.events import EventLog
-from agent_bridge.session_manager import Session
+from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
-from test_native_send_admission import _command
+from test_native_send_admission import _command as _untyped_command
 from test_native_send_admission import (
     test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race
     as test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race,
@@ -519,7 +580,7 @@ from test_creation_worktree_writer import (
     as test_required_creation_writer_cli_invalid_input_refuses_before_connect,
     test_required_creation_writer_cli_rejects_remote_before_connect
     as test_required_creation_writer_cli_rejects_remote_before_connect,
-    creation_rig as creation_rig, writer_creation as writer_creation,
+    writer_creation as writer_creation,
     test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses
     as test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses,
     test_keyed_creation_writer_retains_original_scope_and_strict_resume
@@ -553,6 +614,7 @@ from test_creation_worktree_writer import (
     test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim
     as test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim,
 )
+from test_workspace_creation import creation_rig as creation_rig
 from test_retained_host_recovery import (
     test_real_host_boundary_retains_stop_and_uncertain_custody
     as test_real_host_boundary_retains_stop_and_uncertain_custody,
@@ -576,19 +638,71 @@ from test_creation_writer_resume import (
 ROOT = Path(__file__).resolve().parents[3]
 inspection_rig = _inspection_fixture
 
+Serving = tuple[FastAPI, TestClient, Database, InboxConsumer]
+NativeSend = tuple[SessionManager, Session, NativeSendPrompt]
+
+
+class ClientFactory(Protocol):
+    __module__: str
+    __name__: str
+
+    def __call__(
+        self, *, ensure: bool = True, require_available: bool = False,
+    ) -> BridgeClient: ...
+
+
+class NativeCommand(Protocol):
+    def __call__(
+        self, native_send: NativeSend, monkeypatch: pytest.MonkeyPatch, *,
+        generation: int = 51,
+        transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        api: TestClient | None = None, capabilities: dict[str, Any] | None = None,
+    ) -> tuple[Namespace, list[tuple[str, str, dict[str, Any] | None]]]: ...
+
+
+_command = cast(NativeCommand, _untyped_command)
+
+
+class ReceiptObserver(Protocol):
+    def __call__(
+        self, api: TestClient, manager: SessionManager, session: Session,
+        body: dict[str, Any], vector: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str], *, client_factory: ClientFactory,
+    ) -> dict[str, Any]: ...
+
+
+class LiveCliObserver(Protocol):
+    def __call__(
+        self, api: TestClient, db: Database, vector: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *,
+        client_factory: ClientFactory,
+    ) -> dict[str, Any]: ...
+
 
 @pytest.mark.parametrize("supported", ["current", "prior", "rollback"])
-def test_retained_writer_inspection_cli_http(inspection_rig, monkeypatch, capsys, supported):
-    _inspect_cli_http(inspection_rig, monkeypatch, capsys, supported)
+def test_retained_writer_inspection_cli_http(
+    inspection_rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], supported: str,
+) -> None:
+    cast(
+        Callable[[SimpleNamespace, pytest.MonkeyPatch, pytest.CaptureFixture[str], str], None],
+        _inspect_cli_http,
+    )(inspection_rig, monkeypatch, capsys, supported)
 
 
 @pytest.mark.parametrize("operation", ["resource-relationship", "record"])
 @pytest.mark.parametrize("failure", [FileNotFoundError, PermissionError])
-def test_retained_writer_inspection_unavailable_http(inspection_rig, monkeypatch, operation, failure):
-    _inspect_unavailable(inspection_rig, monkeypatch, operation, failure)
+def test_retained_writer_inspection_unavailable_http(
+    inspection_rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    operation: str, failure: type[OSError],
+) -> None:
+    cast(
+        Callable[[SimpleNamespace, pytest.MonkeyPatch, str, type[OSError]], None],
+        _inspect_unavailable,
+    )(inspection_rig, monkeypatch, operation, failure)
 
 
-def _membership_transcript_clock(monkeypatch):
+def _membership_transcript_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import owner_membership_read as reader
 
     # Transcript assertions use a virtual reader clock, not a host scheduling guarantee.
@@ -600,16 +714,19 @@ def _membership_transcript_clock(monkeypatch):
     monkeypatch.setattr(reader, "ReadBudget", lambda: budget_type(started=0.0))
 
 
-def test_adopted_writable_connection_preserves_membership_commits(tmp_path, monkeypatch):
+def test_adopted_writable_connection_preserves_membership_commits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _membership_transcript_clock(monkeypatch)
-    _adopted_writable_connection_preserves_membership_commits(tmp_path)
+    cast(Callable[[Path], None], _adopted_writable_connection_preserves_membership_commits)(tmp_path)
 
 
 def test_http51_capture_actual_observations(
-    serving, native_send, request, monkeypatch, capsys,
+    serving: Serving, native_send: NativeSend, request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     bound = capture_request(evidence, ROOT)
-    receipt_client_factory = core._get_client
+    receipt_client_factory = cast(ClientFactory, core._get_client)
     assert HTTP_PROTOCOL_VERSION == evidence.GENERATION
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     app, client, db, _ = serving
@@ -617,9 +734,9 @@ def test_http51_capture_actual_observations(
     app.state.session_manager = manager
     native_send = manager, session, original.model_copy(update={"prompt": vector["requests"]["prompt"]})
     # Keep ordinary middleware/installation binding while allowing an actual HTTP 500 response.
-    api = TestClient(app, headers=client.headers, raise_server_exceptions=False)
+    api = TestClient(app, headers=dict(client.headers), raise_server_exceptions=False)
     assert api.get("/health").json()["capabilities"]["bridge-session-tool-statistics-v1"] == 1
-    observed = {"advertised": {
+    observed: dict[str, Any] = {"advertised": {
         key: api.get("/health").json()[key]
         for key in ("protocol_version", "min_protocol_version")
     }}
@@ -672,7 +789,7 @@ def test_http51_capture_actual_observations(
     session.status = SessionStatus.IDLE
     saved_update = manager.db.update_session_status
 
-    def fail_after_commit(*args, **kwargs):
+    def fail_after_commit(*args: object, **kwargs: object) -> None:
         raise RuntimeError("synthetic response failure after journal commit")
 
     lost, _ = _command(native_send, monkeypatch, api=api)
@@ -707,15 +824,15 @@ def test_http51_capture_actual_observations(
         "turns": len(db.get_turns(session.session_id)),
     }
     event, = [
-        event for event in session.event_log.get_events(0) if event.event == "user_message"
+        event for event in cast(EventLog, session.event_log).get_events(0) if event.event == "user_message"
     ]
     observed["caller_provenance"] = event.data
     observed["no_inbox"] = db.execute_read("SELECT * FROM live_messages") == []
-    observed["receipt_only"] = observe_receipt(
+    observed["receipt_only"] = cast(ReceiptObserver, observe_receipt)(
         api, manager, session, body, vector, monkeypatch, capsys,
         client_factory=receipt_client_factory,
     )
-    observed["live_cli"] = observe_live_cli(
+    observed["live_cli"] = cast(LiveCliObserver, observe_live_cli)(
         api, db, vector, monkeypatch, capsys, client_factory=receipt_client_factory,
     )
     observed["observations"] = observe_sessions(
@@ -737,7 +854,11 @@ def test_http51_capture_actual_observations(
         record_observations(evidence, bound, request.node.callspec.params["installation"], observed)
 
 
-def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_factory):
+def observe_sessions(
+    api: TestClient, manager: SessionManager, db: Database, vector: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *,
+    client_factory: ClientFactory,
+) -> dict[str, Any]:
     """Execute real root/client/frame parsers against private authenticated ASGI."""
     spec = vector["requests"]["observations"]
     capabilities = (
@@ -762,14 +883,14 @@ def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_fa
         table: db.execute_read("SELECT * FROM " + table)
         for table in ("sessions", "events", "turns", "pending_prompts", "live_messages")
     }
-    observed = {"capabilities": {
+    observed: dict[str, Any] = {"capabilities": {
         name: api.get("/health").json()["capabilities"][name] for name in capabilities
     }}
-    reads = []
+    reads: list[str] = []
     old_capability = [False]
 
     class Response(io.BytesIO):
-        def __init__(self, response):
+        def __init__(self, response: httpx.Response) -> None:
             payload = response.content
             if old_capability[0] and response.request.url.path == "/health":
                 body = response.json()
@@ -780,7 +901,7 @@ def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_fa
             self.status = response.status_code
             self.headers = response.headers
 
-    def open_private(request, **_kwargs):
+    def open_private(request: Request, **_kwargs: object) -> Response:
         selected = urlsplit(request.full_url)
         assert selected.netloc == "testserver"
         assert request.get_method() == "GET"
@@ -793,12 +914,13 @@ def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_fa
         assert response.status_code == 200
         return Response(response)
 
-    def configured_client(_cls):
+    def configured_client(_cls: type[BridgeClient]) -> BridgeClient:
         token = api.headers["Authorization"].split(" ", 1)[1]
         return BridgeClient("http://testserver", token, connect_grace=0)
 
-    def command(argv):
+    def command(argv: Sequence[str]) -> tuple[int | str | None, dict[str, Any]]:
         capsys.readouterr()
+        code: int | str | None
         try:
             core.main(list(argv))
             code = 0
@@ -905,19 +1027,23 @@ def observe_sessions(api, manager, db, vector, monkeypatch, capsys, *, client_fa
     return observed
 
 
-def test_http51_observation_boundaries(serving, native_send, monkeypatch, capsys):
+def test_http51_observation_boundaries(
+    serving: Serving, native_send: NativeSend,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     """Both source installation modes execute the owning passive read path."""
     app, api, db, _ = serving
     manager, _session, _request = native_send
     app.state.session_manager = manager
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     assert observe_sessions(
-        api, manager, db, vector, monkeypatch, capsys, client_factory=core._get_client,
+        api, manager, db, vector, monkeypatch, capsys,
+        client_factory=cast(ClientFactory, core._get_client),
     ) == vector["expected"]["observations"]
 
 
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
-def test_http51_observer_payload_abbreviations(tmp_path, mode):
+def test_http51_observer_payload_abbreviations(tmp_path: Path, mode: str) -> None:
     """Run the actual payload gate with inert resolution/publication/install spies."""
     from test_payload_invocation import test_passive_observer_attributed_payload_never_provisions
 
@@ -932,7 +1058,10 @@ def test_http51_observer_payload_abbreviations(tmp_path, mode):
         )
 
 
-def test_http51_owner_membership_observations(serving, native_send, monkeypatch, capsys):
+def test_http51_owner_membership_observations(
+    serving: Serving, native_send: NativeSend,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     """Canonical SQLite producer -> generation journal -> authenticated HTTP/root CLI."""
     app, api, db, _ = serving
     manager, _session, _request = native_send
@@ -940,11 +1069,15 @@ def test_http51_owner_membership_observations(serving, native_send, monkeypatch,
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     assert observe_owner_membership(
         app, api, manager, db, vector, monkeypatch, capsys,
-        client_factory=core._get_client,
+        client_factory=cast(ClientFactory, core._get_client),
     ) == vector["expected"]["owner_membership"]
 
 
-def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys, *, client_factory):
+def observe_owner_membership(
+    app: FastAPI, api: TestClient, manager: SessionManager, db: Database,
+    vector: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], *, client_factory: ClientFactory,
+) -> dict[str, Any]:
     """Produce the independently expected membership section of the shared report."""
     from agent_bridge.owner_membership import CAPABILITY
     from agent_bridge.session_observation_contract import decode
@@ -958,7 +1091,7 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
         "cwd": "/private/fixture", "env": {"TOKEN": private},
     }
 
-    def create_member(sid):
+    def create_member(sid: str) -> None:
         db.create_session(
             sid, "fixture", None, "/private/fixture", "local", "starting", 1.0,
             target_json=json.dumps(target),
@@ -968,7 +1101,7 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
     query = {"owner_ref": spec["owner_ref"], "contract_version": "1"}
     path = "/api/v1/owner-observations"
 
-    def body(**changes):
+    def body(**changes: str) -> dict[str, Any]:
         response = api.get(path, params={**query, **changes})
         assert response.status_code == 200
         frame = decode(response.content.split(b"data: ", 1)[1].strip())
@@ -977,7 +1110,7 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
         return frame
 
     snapshot = body()
-    observed = {"capability": api.get("/health").json()["capabilities"][CAPABILITY]}
+    observed: dict[str, Any] = {"capability": api.get("/health").json()["capabilities"][CAPABILITY]}
     observed["snapshot"] = {
         "kind": snapshot["kind"], "completeness": snapshot["completeness"],
         **{key: snapshot["members"][0][key] for key in (
@@ -990,10 +1123,10 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
         "kind": delta["kind"], "state": delta["changes"][0]["member"]["state"],
         "evidence_kind": delta["changes"][0]["evidence_kind"],
     }
-    reads = []
+    reads: list[str] = []
     old = [False]
     class Response(io.BytesIO):
-        def __init__(self, response):
+        def __init__(self, response: httpx.Response) -> None:
             payload = response.content
             if old[0] and response.request.url.path == "/health":
                 value = response.json()
@@ -1002,7 +1135,7 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
             super().__init__(payload)
             self.status, self.headers = response.status_code, response.headers
 
-    def transport(request, **_kwargs):
+    def transport(request: Request, **_kwargs: object) -> Response:
         selected = urlsplit(request.full_url)
         assert selected.netloc == "testserver" and request.get_method() == "GET"
         if selected.path != "/health":
@@ -1028,8 +1161,9 @@ def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys,
         ))
         patch.setattr("urllib.request.urlopen", transport)
 
-        def command():
+        def command() -> tuple[int | str | None, dict[str, Any]]:
             capsys.readouterr()
+            status: int | str | None
             try:
                 core.main(list(spec["command"]))
                 status = 0
