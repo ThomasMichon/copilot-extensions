@@ -1,0 +1,91 @@
+"""Focused failures for the additive H1 inspection capture owner."""
+
+import asyncio
+import copy
+import json
+from pathlib import Path
+
+import pytest
+
+import capture_bridge_host_inspection as capture
+
+
+def _vector():
+    return json.loads((capture.ROOT / capture.INPUT).read_bytes())
+
+
+def test_real_h1_inspection_matches_independent_vector():
+    assert asyncio.run(capture.observe(_vector())) == _vector()["expected"]
+
+
+def test_h1_capture_does_not_hide_dispatch_side_effects(monkeypatch):
+    from agent_remote_driver.session_host.host import SessionHost
+
+    original = SessionHost._handle_front
+
+    async def altered(host, reader, writer):
+        await original(host, reader, writer)
+        host._ack_cursor = 1
+
+    monkeypatch.setattr(SessionHost, "_handle_front", altered)
+    with pytest.raises(ValueError, match="custody"):
+        asyncio.run(capture.observe(_vector()))
+
+
+def test_h1_capture_does_not_relabel_changed_historical_frames(monkeypatch):
+    from agent_remote_driver.session_host import protocol
+
+    original = protocol.encode
+
+    def altered(kind, payload=b""):
+        value = original(kind, payload)
+        return value + b"changed" if kind == protocol.MsgType.ATTACH else value
+
+    monkeypatch.setattr(protocol, "encode", altered)
+    with pytest.raises(ValueError, match="historical H1 encoding"):
+        asyncio.run(capture.observe(_vector()))
+
+
+def test_h1_capture_requires_matching_independent_request():
+    vector = copy.deepcopy(_vector())
+    vector["nonce"] = "1" * 32
+    observed = asyncio.run(capture.observe(vector))
+    assert observed != vector["expected"]
+
+
+@pytest.mark.parametrize("fault", ["none", "incomplete", "observation", "binding", "source"])
+def test_packet_validation_keeps_source_bound_observations(tmp_path, monkeypatch, fault):
+    vector = _vector()
+    target = tmp_path / capture.INPUT
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps(vector), encoding="utf-8")
+    proof = dict.fromkeys((
+        *capture.SOURCES, capture.INPUT, capture.SCRIPT, capture.CURRENT + "messages.json",
+    ), "a" * 64)
+    fixtures = []
+    for source in capture.SOURCES:
+        relative = capture.CURRENT + "inspection-" + Path(source).stem + "-v1.json"
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        packet = {
+            "captured_from": {
+                "commit": "b" * 40, "source_path": source, "source_sha256": proof[source],
+            },
+            "scope": capture.SCOPE, "inputs": proof, "observed": vector["expected"],
+        }
+        if fault == "observation":
+            packet["observed"] = {}
+        if fault == "source":
+            packet["captured_from"]["source_path"] = capture.SOURCES[0]
+        target.write_text(json.dumps(packet), encoding="utf-8")
+        fixtures.append({"path": relative})
+    if fault == "incomplete":
+        fixtures.pop()
+    monkeypatch.setattr(capture.git, "ensure_commit_available", lambda commit: True)
+    monkeypatch.setattr(
+        capture.git, "git_file_sha256",
+        lambda commit, source: "c" * 64 if fault == "binding" else proof[source],
+    )
+    errors = []
+    capture.validate_packets(tmp_path, {"fixtures": fixtures}, errors)
+    assert bool(errors) == (fault != "none")
