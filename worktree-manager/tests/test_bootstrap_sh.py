@@ -13,9 +13,9 @@ import pytest
 from test_bootstrap_ps1 import _fake_tools, _retained_sparse, _source_repo
 
 BOOTSTRAP = Path(__file__).resolve().parents[1] / "bootstrap.sh"
-BASH = shutil.which("bash")
+BASH = shutil.which("bash") or ""
 pytestmark = pytest.mark.skipif(
-    os.name == "nt" or BASH is None or shutil.which("git") is None,
+    os.name == "nt" or not BASH or shutil.which("git") is None,
     reason="native POSIX bash and git required",
 )
 
@@ -25,8 +25,8 @@ pytestmark = pytest.mark.skipif(
     [(0, False, False), (17, False, False), (0, True, False), (0, False, True)],
 )
 def test_bootstrap_progress_keeps_command_exit_and_stdout(
-    tmp_path, python_exit, incomplete_checkout, retained_sparse,
-):
+    tmp_path: Path, python_exit: int, incomplete_checkout: bool, retained_sparse: bool,
+) -> None:
     repo = _source_repo(tmp_path)
     root = tmp_path / "manager-root"
     root.mkdir()
@@ -89,7 +89,7 @@ def test_bootstrap_progress_keeps_command_exit_and_stdout(
         ), line
 
 
-def test_bootstrap_invalid_repair_is_an_explicit_failed_diagnostic(tmp_path):
+def test_bootstrap_invalid_repair_is_an_explicit_failed_diagnostic(tmp_path: Path) -> None:
     result = subprocess.run(
         [BASH, str(BOOTSTRAP), "--repair-update"],
         env={**os.environ, "WORKTREE_MANAGER_ROOT": str(tmp_path / "manager-root")},
@@ -104,8 +104,12 @@ def test_bootstrap_invalid_repair_is_an_explicit_failed_diagnostic(tmp_path):
     ), result.stderr
 
 
-@pytest.mark.parametrize("missing", [False, True])
-def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(tmp_path, missing):
+@pytest.mark.parametrize(("missing", "relative_uv", "uv_version"), [
+    (False, True, "0.13.7"), (True, False, "0.13.7"), (True, False, "0.7.0"),
+])
+def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(
+    tmp_path: Path, missing: bool, relative_uv: bool, uv_version: str,
+) -> None:
     repo = _source_repo(tmp_path)
     root = tmp_path / "manager-root"
     root.mkdir()
@@ -113,28 +117,42 @@ def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(tmp_p
         f'[source]\nrepo = "{repo.as_posix()}"\nref = "main"\n', encoding="utf-8",
     )
     tools = tmp_path / "tools"
-    _fake_tools(tools, uv_exit=0, python_exit=0)
+    _fake_tools(tools, uv_exit=0, python_exit=0, uv_version=uv_version)
+    home = tmp_path / "profile"
+    if uv_version == "0.7.0":
+        _fake_tools(home / ".local" / "bin", uv_exit=0, python_exit=0)
+        curl = tools / "curl"
+        curl.write_text(
+            "#!/bin/sh\n"
+            '[ "$2" = https://astral.sh/uv/install.sh ] || exit 1\n'
+            f"printf '%s\\n' {shlex.quote('touch ' + shlex.quote(str(tmp_path / 'uv-prepared')))}\n",
+            encoding="utf-8",
+        )
+        curl.chmod(0o755)
     trace = tmp_path / "uv-trace.txt"
     result = subprocess.run(
         [BASH, str(BOOTSTRAP), "--version"],
         env={
             **os.environ, "WORKTREE_MANAGER_ROOT": str(root),
-            "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+            "HOME": str(home), "USERPROFILE": str(home),
+            "PATH": ("tools" if relative_uv else str(tools)) + os.pathsep + os.environ.get("PATH", ""),
             "VIRTUAL_ENV": str(tmp_path / "active-venv"),
             "UV_PYTHON": str(tmp_path / "ambient-python"),
             "BOOTSTRAP_UV_TRACE": str(trace),
             "BOOTSTRAP_UV_MISSING": "1" if missing else "0",
         },
-        capture_output=True, text=True, timeout=20,
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     lookup = "python find --no-project --system --managed-python --no-python-downloads 3.11"
     expected = [lookup, "python install --no-bin --no-registry 3.11", lookup] if missing else [lookup]
     assert trace.read_text(encoding="utf-8").splitlines() == expected
     assert result.stdout == ""
+    if uv_version == "0.7.0":
+        assert (tmp_path / "uv-prepared").exists()
 
 
-def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_path):
+def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_path: Path) -> None:
     root = tmp_path / "manager-root"
     result = subprocess.run(
         [BASH, str(BOOTSTRAP), "--system-python", "--version"],
@@ -146,7 +164,7 @@ def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_p
     assert not root.exists()
 
 
-def test_bootstrap_progress_frames_each_physical_message_line():
+def test_bootstrap_progress_frames_each_physical_message_line() -> None:
     header = BOOTSTRAP.read_text(encoding="utf-8").split("\nROOT=", 1)[0]
     result = subprocess.run(
         [BASH, "-c", header + '\n_bootstrap_progress "$1" warning', "--", "first\nsecond"],

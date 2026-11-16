@@ -40,6 +40,15 @@ _bootstrap_progress() {
     done <<< "$message"
 }
 
+_bootstrap_uv_supported() {
+    local version
+    version="$("$1" --version)" || return 1
+    if [[ ! "$version" =~ ^uv[[:space:]]+([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+        return 1
+    fi
+    [ "${BASH_REMATCH[1]}" -gt 0 ] || [ "${BASH_REMATCH[2]}" -ge 8 ]
+}
+
 if [ "${1-}" = --system-python ]; then
     _bootstrap_progress '--system-python is a Windows WinGet bootstrap mode; unsupported on POSIX.' failed
     exit 2
@@ -184,9 +193,11 @@ _bootstrap_progress 'Worktree Manager bootstrap'
 
 LOCAL_BIN="$HOME/.local/bin"
 
-if ! command -v uv >/dev/null 2>&1; then
-    _bootstrap_progress 'uv not found - installing (user-local, no admin)...'
+uv_prepared=0
+if ! command -v uv >/dev/null 2>&1 || ! _bootstrap_uv_supported "$(command -v uv)"; then
+    _bootstrap_progress 'uv 0.8.0+ required - preparing it (user-local, no admin)...'
     curl -LsSf https://astral.sh/uv/install.sh | sh
+    uv_prepared=1
     # uv installs into ~/.local/bin (or its env file); amend THIS session's PATH
     # so we can continue without a restart (the installer persists it for future
     # shells).
@@ -199,6 +210,14 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 UV="$(command -v uv)"
+case "$UV" in
+    /*) ;;
+    *) UV="$(pwd -P)/$UV" ;;
+esac
+if [ "$uv_prepared" -eq 1 ] && ! _bootstrap_uv_supported "$UV"; then
+    _bootstrap_progress 'uv 0.8.0 or newer is required after prerequisite preparation.' failed
+    exit 1
+fi
 
 have_git=0
 command -v git >/dev/null 2>&1 && have_git=1

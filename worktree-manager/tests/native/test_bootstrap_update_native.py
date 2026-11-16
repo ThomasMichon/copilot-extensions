@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import sys
 from textwrap import indent
 import time
+from typing import Any, BinaryIO, TypeAlias, TypeVar
 import venv
 
 import pytest
@@ -28,6 +30,12 @@ LIBRARIES = (
     "update-driver", "single-instance-lease", "agent-procutil", "zdd",
     "worktree-identity", "update-telemetry",
 )
+_T = TypeVar("_T")
+BootstrapFixture: TypeAlias = tuple[
+    Path, Path, Path,
+    Callable[..., tuple[subprocess.Popen[bytes], Path]],
+    Callable[[], list[dict[str, Any]]],
+]
 
 CONSTRUCTOR = '''
 def _fixture_install(args):
@@ -206,7 +214,9 @@ raise SystemExit(driver.drain(executor=_fixture_execute))
 '''
 
 
-def _eventually(check, *, processes=(), timeout=20):
+def _eventually(
+    check: Callable[[], _T], *, processes: Sequence[subprocess.Popen[Any]] = (), timeout: float = 20,
+) -> _T:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = check()
@@ -217,7 +227,7 @@ def _eventually(check, *, processes=(), timeout=20):
     raise AssertionError("native bootstrap observation timed out")
 
 
-def _git(source, *arguments):
+def _git(source: Path, *arguments: str) -> str:
     from agent_procutil.owned_process import run_owned
 
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
@@ -236,7 +246,7 @@ def _git(source, *arguments):
 
 
 @pytest.fixture(scope="session")
-def bootstrap_source(tmp_path_factory):
+def bootstrap_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     started = time.monotonic()
     host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
     if host is None:
@@ -274,6 +284,7 @@ def bootstrap_source(tmp_path_factory):
         "runtime_launchers", "self_install_recovery", "mux_file_lock",
         "engine_client", "engine_progress", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
         "engine_environment", "worktree_rows_contract", "worktree_observation_contract",
+        "worktree_reporting_contract",
         "update_orchestration", "update_events", "project_update_controller",
     ):
         shutil.copy2(SOURCE / "worktree-manager" / "src" / "worktree_manager" / f"{name}.py", package)
@@ -323,9 +334,10 @@ def bootstrap_source(tmp_path_factory):
 
 
 @pytest.fixture
-def bootstrap(tmp_path, bootstrap_source):
+def bootstrap(tmp_path: Path, bootstrap_source: Path) -> Iterator[BootstrapFixture]:
     started = time.monotonic()
     host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
+    assert host is not None
     source = tmp_path / "source"
     shutil.copytree(bootstrap_source, source)
     _git(source, "update-index", "--refresh")
@@ -347,9 +359,10 @@ def bootstrap(tmp_path, bootstrap_source):
     launcher.write_text(SUITE, encoding="utf-8")
     tools = tmp_path / "tools"
     tools.mkdir()
-    python = str(Path(sys._base_executable).resolve())
+    python = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     if os.name == "nt":
         (tools / "uv.ps1").write_text(
+            "if ($args[0] -eq '--version') { 'uv 0.13.7'; exit 0 }\n"
             f"'{python.replace(chr(39), chr(39) * 2)}'\n$global:LASTEXITCODE = 0\n",
             encoding="utf-8",
         )
@@ -359,7 +372,11 @@ def bootstrap(tmp_path, bootstrap_source):
         ]
     else:
         uv = tools / "uv"
-        uv.write_text(f"#!/bin/sh\nprintf '%s\\n' '{python}'\n", encoding="utf-8")
+        uv.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = --version ]; then printf "%s\\n" "uv 0.13.7"; exit 0; fi\n'
+            f"printf '%s\\n' '{python}'\n", encoding="utf-8",
+        )
         uv.chmod(0o755)
         command = [host, str(source / "worktree-manager" / "bootstrap.sh")]
     environment = {
@@ -370,17 +387,22 @@ def bootstrap(tmp_path, bootstrap_source):
         "GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
         "UV_OFFLINE": "1",
     }
-    for key in ("UPDATE_DRIVER_WITNESS", "UPDATE_DRIVER_STARTUP"):
+    for key in (
+        "UPDATE_DRIVER_WITNESS", "UPDATE_DRIVER_STARTUP",
+        "WORKTREE_MANAGER_ENGINE_CMD", "WORKTREE_MANAGER_ENGINE_ARGV",
+    ):
         environment.pop(key, None)
     environment.pop(TIMEOUT_ENV, None)
     environment.pop(SOURCE_ANCHOR_ENV, None)
     driver = profile / ".copilot-extensions" / "update-driver"
-    callers, streams = [], []
+    callers: list[subprocess.Popen[bytes]] = []
+    streams: list[BinaryIO] = []
 
     def start(
-        *arguments, install_source=None, command_name="update", acquisition_budget=None,
-        direct=False, source_anchor=None,
-    ):
+        *arguments: str, install_source: Path | None = None, command_name: str = "update",
+        acquisition_budget: str | None = None, direct: bool = False,
+        source_anchor: Path | str | None = None,
+    ) -> tuple[subprocess.Popen[bytes], Path]:
         log = tmp_path / f"caller-{len(callers)}.log"
         stream = log.open("wb")
         streams.append(stream)
@@ -410,7 +432,7 @@ def bootstrap(tmp_path, bootstrap_source):
         callers.append(process)
         return process, log
 
-    def effects():
+    def effects() -> list[dict[str, Any]]:
         path = root / "effects.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
@@ -442,8 +464,8 @@ def bootstrap(tmp_path, bootstrap_source):
 
 @pytest.mark.timeout(180)
 def test_retained_controller_prepares_dev_source_without_its_acquisition(
-    bootstrap, tmp_path, monkeypatch,
-):
+    bootstrap: BootstrapFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import runtime_source_prepare as preparation
     from worktree_manager.runtime_source import ResolvedSource
     from worktree_manager.runtime_source_config import RuntimeSource
@@ -501,12 +523,12 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
 
 @pytest.mark.parametrize("lose_caller", [False, True])
 def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller_loss(
-    bootstrap, lose_caller,
-):
+    bootstrap: BootstrapFixture, lose_caller: bool,
+) -> None:
     root, source, driver, start, effects = bootstrap
     started = time.monotonic()
 
-    def milestone(stage):
+    def milestone(stage: str) -> None:
         print(json.dumps({
             "stage": stage, "elapsed": round(time.monotonic() - started, 3),
             "states": [row.state for row in core.status(root=driver)],
@@ -595,8 +617,8 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
 
 @pytest.mark.parametrize("lose_caller", [False, True])
 def test_native_bootstrap_latest_waiter_preserves_active_worker_after_caller_loss(
-    bootstrap, lose_caller,
-):
+    bootstrap: BootstrapFixture, lose_caller: bool,
+) -> None:
     root, _source, driver, start, effects = bootstrap
     first, first_log = start("--project", "sample")
     _eventually(
@@ -643,7 +665,9 @@ def test_native_bootstrap_latest_waiter_preserves_active_worker_after_caller_los
     assert {row["request"] for row in effects()[3:]} == {newest_id}
 
 
-def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_worker(bootstrap):
+def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_worker(
+    bootstrap: BootstrapFixture,
+) -> None:
     root, _source, driver, start, effects = bootstrap
     preserved = root / "bootstrap-acquisition" / "failed-earlier"
     preserved.mkdir(parents=True)
@@ -681,7 +705,9 @@ def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_work
         assert windows.surfaced == {} and windows.focus_changes == {}
 
 
-def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisition(bootstrap):
+def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisition(
+    bootstrap: BootstrapFixture,
+) -> None:
     root, source, driver, start, effects = bootstrap
     caller, log = start("--project", "sample")
     _eventually(
@@ -733,8 +759,8 @@ def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisiti
 @pytest.mark.parametrize("linked_parent", [False, True])
 @pytest.mark.parametrize("automatic", [False, True])
 def test_native_installed_cli_retains_source_anchor_and_caller_hold(
-    tmp_path, monkeypatch, linked_parent, automatic,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked_parent: bool, automatic: bool,
+) -> None:
     import update_driver
     from worktree_manager import source_config, update_driver_cli
 
@@ -767,6 +793,8 @@ def test_native_installed_cli_retains_source_anchor_and_caller_hold(
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", hold.name)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_UPDATE_CONTEXT", raising=False)
+    monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_CMD", raising=False)
+    monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_ARGV", raising=False)
     admitted = update_driver_cli._source_key()
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
     monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
@@ -786,7 +814,7 @@ def test_native_installed_cli_retains_source_anchor_and_caller_hold(
     assert request.spec.source == admitted
     calls = []
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         with update_driver_cli._request_environment(
             transaction.request.spec.context, cwd=transaction.request.spec.cwd,
             killswitch_path=transaction.request.spec.killswitch_path,
@@ -803,7 +831,9 @@ def test_native_installed_cli_retains_source_anchor_and_caller_hold(
     assert hold.read_text(encoding="utf-8") == '{"active":true}'
 
 
-def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(bootstrap):
+def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(
+    bootstrap: BootstrapFixture,
+) -> None:
     root, source, _driver, start, effects = bootstrap
     anchor = root.parent / "anchor"
     selected = anchor / "source"
@@ -827,7 +857,9 @@ def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(bootst
     assert Path(effects()[1]["source_repo"]) == selected
 
 
-def test_native_shell_controller_runs_a_prepared_source_without_new_bootstrap_code(bootstrap):
+def test_native_shell_controller_runs_a_prepared_source_without_new_bootstrap_code(
+    bootstrap: BootstrapFixture,
+) -> None:
     root, source, driver, start, effects = bootstrap
     scripts = source / "worktree-manager" / "scripts"
     sys.path.insert(0, str(scripts))
@@ -890,7 +922,9 @@ def test_native_shell_controller_runs_a_prepared_source_without_new_bootstrap_co
     assert not (old / "scripts").exists()
 
 
-def test_native_auth_report_preserves_json_stdout_without_installation(bootstrap):
+def test_native_auth_report_preserves_json_stdout_without_installation(
+    bootstrap: BootstrapFixture,
+) -> None:
     _root, _source, driver, start, effects = bootstrap
     caller, log = start("--auth-report", "--json")
     assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
@@ -899,14 +933,16 @@ def test_native_auth_report_preserves_json_stdout_without_installation(bootstrap
     assert effects() == [{"phase": "auth-report"}]
 
 
-def test_native_request_controls_preserve_fences_and_run_explicit_recovery(bootstrap):
+def test_native_request_controls_preserve_fences_and_run_explicit_recovery(
+    bootstrap: BootstrapFixture,
+) -> None:
     root, _source, driver, start, effects = bootstrap
     old = core.enqueue(
         core.RequestSpec("interrupted-fixture"),
         runner=core.TrustedRunner((sys.executable,), str(root)), root=driver,
     )
 
-    def interrupt(transaction):
+    def interrupt(transaction: Any) -> None:
         raise RuntimeError("original fixture interruption")
 
     with pytest.raises(RuntimeError, match="original fixture interruption"):
@@ -928,7 +964,9 @@ def test_native_request_controls_preserve_fences_and_run_explicit_recovery(boots
 
 
 @pytest.mark.skipif(os.name == "nt", reason="source-only POSIX non-update entry")
-def test_native_posix_non_update_resolves_driver_without_creating_a_queue(bootstrap):
+def test_native_posix_non_update_resolves_driver_without_creating_a_queue(
+    bootstrap: BootstrapFixture,
+) -> None:
     _root, _source, driver, start, effects = bootstrap
     caller, log = start("--indicator-state", command_name="stage-update", direct=True)
     assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
@@ -938,8 +976,8 @@ def test_native_posix_non_update_resolves_driver_without_creating_a_queue(bootst
 
 @pytest.mark.timeout(180)
 def test_full_declared_repository_inputs_reach_immutable_retention(
-    tmp_path, monkeypatch, request,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> None:
     scripts = SOURCE / "worktree-manager" / "scripts"
     monkeypatch.syspath_prepend(str(scripts))
     import bootstrap_inputs

@@ -224,6 +224,17 @@ function Add-BootstrapPythonPath([string]$Path, [string]$Directory) {
     return (@($Directory) + $remaining) -join ';'
 }
 
+function Test-BootstrapUvVersion([string]$Uv) {
+    $ErrorActionPreference = 'Continue'
+    $output = @(& $Uv --version 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw ('uv version qualification failed: ' + ($output -join "`n"))
+    }
+    $match = [regex]::Match(($output -join "`n"), '\Auv[ \t]+([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t(+]|$)')
+    if (-not $match.Success) { throw 'uv returned an invalid version report.' }
+    return [version]$match.Groups[1].Value -ge [version]'0.8.0'
+}
+
 function Find-BootstrapPython([string]$Uv) {
     $ErrorActionPreference = 'Continue'
     $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
@@ -452,13 +463,18 @@ $SystemPython = if ($SystemPythonRequested) { Find-SystemBootstrapPython } else 
 
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-BootstrapProgress 'uv not found - installing (user-local, no admin)...'
+$uvPrepared = $false
+$uvCandidateCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+$uvCandidate = if ($uvCandidateCommand) { Resolve-BootstrapExecutable $uvCandidateCommand.Source } else { $null }
+if (-not $uvCandidate -or -not (Test-BootstrapUvVersion $uvCandidate)) {
+    Write-BootstrapProgress 'uv 0.8.0+ required - preparing it (user-local, no admin)...'
     try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression }
     catch { throw "uv install failed: $_" }
+    $uvPrepared = $true
     # uv installs into ~\.local\bin; amend THIS session's PATH so we can continue
     # without a restart (the installer persists PATH for future shells).
-    if (Test-Path (Join-Path $LocalBin 'uv.exe')) { $env:PATH = "$LocalBin;$env:PATH" }
+    $env:PATH = "$LocalBin;$env:PATH"
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         Write-BootstrapProgress 'uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap.' warning
         exit 1
@@ -466,7 +482,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 $UvCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction Stop |
     Select-Object -First 1
-$Uv = Resolve-BootstrapExecutable $UvCommand.Source
+$Uv = if ($uvCandidate -and -not $uvPrepared) { $uvCandidate }
+    else { Resolve-BootstrapExecutable $UvCommand.Source }
+if ($uvPrepared -and -not (Test-BootstrapUvVersion $Uv)) {
+    throw 'uv 0.8.0 or newer is required after prerequisite preparation.'
+}
 
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 if (-not $HaveGit -and -not $InstallSource) {

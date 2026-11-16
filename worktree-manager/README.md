@@ -832,6 +832,8 @@ automatic downloads; when preparation is needed, the explicit bootstrap uses
 `uv python install --no-bin --no-registry 3.11`, then repeats the same lookup.
 It does not publish Python command aliases or register Python with the Windows
 launcher. These controls are supported by uv 0.8.0 and newer.
+Bootstrap qualifies the selected uv version first and uses its existing
+user-local prerequisite installation path for an absent or older uv.
 The selected explicit interpreter is passed into construction, where the engine
 retains the source/dependency/configuration inputs and constructs a non-editable
 runtime. Governed `uv pip install` selects runtime dependencies for this platform,
@@ -842,6 +844,8 @@ before its first Python lookup and retains that physical path for acquisition
 and the subsequent lookup. It does not launch a WinGet executable link or
 reselect UV if PATH changes during bootstrap; missing or unsupported targets
 fail before runtime construction without changing Windows mitigation policy.
+POSIX bootstrap retains an absolute uv path before changing directories, including
+when the original PATH entry is relative.
 Git staging checkout also enables long-path handling only for that invocation,
 without changing user or repository Git configuration. Before constructing the
 runtime, bootstrap verifies the tracked checkout is complete and unchanged;
