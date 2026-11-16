@@ -77,6 +77,55 @@ starts with a fresh ownership/issue check, a bounded implementation issue, and
 its own design where contracts are not already defined. The reviewed plan is
 permission to plan/claim a wave, not blanket deployment or destructive authority.
 
+### Complete finite first-repository adoption from #356
+
+This agent-recommended direct planned intake preserves the whole first-use
+outcome, not a new implementation claim. Historical #398 read-model/Projects/
+Repos delivery and subsequent bounded native registration/binding increments
+retain their credit; they are not complete guided first adoption.
+
+- [ ] **FA356-P1:** Guide fresh first-repository adoption through all three
+  literal choices: use an existing local checkout; clone a selected remote
+  URL into a user-chosen source root; OR skip. Show the selected target and
+  effects before confirmation. Skip remains a valid choice, not implicit
+  cloning, registration, setup or enrollment.
+- [ ] **FA356-P2:** Adopt/register the selected local or cloned result through
+  the existing acquisition/registration and setup/trust/readiness owners, so
+  the system has a usable selected repository. Preserve reference/no-agent
+  scope and repository-configured setup authority. A successful clone or
+  read-model display is not completed trusted setup/readiness.
+- [ ] **FA356-P3:** Discover other candidate repositories already present OR
+  named by a work arrangement and offer consent-driven registration through
+  the existing mesh/registry owner. No hand editing, parallel registry,
+  silent clone/register, account switch or discovery-triggered side effect.
+- [ ] **FA356-P4:** Preserve actual knowledge-repository linking/pairing,
+  not merely inspection of an existing binding. Compose supported owning
+  binding/local-selection APIs and keep repository participation, checkout
+  registration, plugin enablement, venue and knowledge pairing distinct.
+  Existing registration, creation/acquisition, authentication and first
+  restarted-model prompting remain separately owned contracts.
+- [ ] **FA356-P5:** Compose the transferred #8545 shared seam instead of
+  implementing a competing register command or taking back its source files.
+  Preserve Manager self-update source and no-repository behavior; ordinary
+  discovery and session launch must not enroll automatic maintenance.
+  Repository-specific policy remains outside this general-purpose contract.
+- [ ] **FA356-P6:** Preserve all incumbent Configuration waves and source
+  immutability. Configuration source views remain read-only; permitted direct
+  changes use owner-declared machine-local operations. Explicitly confirmed
+  acquisition/setup runs through its existing owner and is not a generic
+  configuration-file writer or implicit permission to edit an anchor.
+- [ ] **FA356-P7:** Keep the existing per-wave implementation-claim process
+  and actual #542/#8545/#11989/#11976 and domain/native/source/release owners.
+  Planned intake appoints no executor, resumes no implementation or rollout,
+  and neither claims universal source delivery nor changes acceptance state.
+
+The [actual shared-seam transfer](https://github.com/ThomasMichon/copilot-extensions/issues/356#issuecomment-6388288228)
+under reviewed #8584 moved the bounded first-repository acquisition/
+registration/setup/trust/readiness seam to the #8545 driver. It explicitly
+excluded discovery/UI, guided local/remote/skip, unrelated source-managed
+maintenance and broader Configurator. Preserve that transfer; this block
+neither renews the earlier claim nor enlarges or reverses its scope.
+
 ### Wave 0 - Review contracts and reconcile owners
 
 - [x] Inventory current production section/action/form contracts, effective
@@ -256,6 +305,40 @@ their separate owners; this amendment claims no runtime result.
 
 ## Validation Plan
 
+### Complete first-repository adoption validation from #356
+
+- [ ] **FA356-V1:** From a fresh installation, exercise each actual guided
+  local-checkout, remote-URL-with-chosen-root and skip path. Assert the real
+  resulting selected registration/readiness or explicit unbound/skip state,
+  preserving user work. A parser, screenshot or historical views are partial.
+- [ ] **FA356-V2:** Exercise candidates already present AND candidates named
+  by a work arrangement. Assert actual owning mesh/registry registration
+  after consent, and no clone/register/setup/maintenance enrollment when
+  discovery is read, canceled or declined. Both finite cases receive coverage;
+  ordinary discovery may return either class and does not require both inputs.
+- [ ] **FA356-V3:** Exercise actual knowledge linking/pairing and next
+  resolution through the existing owner, including conflict/unavailable and
+  decline outcomes. Existing usable bindings, unrelated configuration,
+  sessions, leases and source bytes survive; inspection alone is not linking.
+- [ ] **FA356-V4:** Apply the existing wave-specific owner-consumer,
+  compatibility, stale/invalid/absent-provider, fresh-install and actual
+  UI/readiness matrix at the source request's tier. Keep unavailable native,
+  installed and rollout evidence explicit without substituting a source
+  milestone or adding every unrelated Manager phase as a prerequisite.
+- [ ] **FA356-V5:** Before any redundant-tracking retirement, land this whole
+  direct contract through normal review in actual Phase 5 Plan, local AND
+  ROOT global Validation, continuing Coordination and dated Journal. Read
+  back the ENTIRE CURRENT ROOT and complete current Phase 5 contract with
+  concurrent incumbent content preserved. Refresh current source authored
+  histories, complete rosters and actual claims, and read its whole original
+  and discussion. Then make a separate source-specific judgment, preserving
+  any newly observed actual owner hold. A proposal or old phase merge is not
+  receiving delivery.
+
+The ROOT's FA356-G row retains every local clause at its applicable finite
+tier. No test runner, native experiment, provider operation or resource
+authority is supplied by this tracker intake.
+
 ### Terminal-theme consumer validation from #3939
 
 - [ ] **V3939-THEME-1:** With no custom theme, both consumers retain their
@@ -419,6 +502,29 @@ custody.
 
 ## Coordination
 
+**FA356 continuing coordination:** The complete FA356 Plan/local Validation
+and ROOT global/Coordination/Journal intake prospectively reconcile **only
+#356's administrative separate-OPEN execution-token reference** in the
+historical #357 preservation prose above, after reviewed actual delivery and
+the full current readback in FA356-V5. Do not treat that historical prose as
+absent or claim it was already a complete #356 receipt.
+
+The bounded shared setup seam remains with #8545 under the actual transfer;
+remaining discovery/UI/local-remote-skip acceptance stays here with the
+existing Manager and domain owners. #542's assignment, #11989 dependency
+preparation, #11976 acquisition, #6379/#6283 backstage/remote and all
+authentication, ambient prompting, knowledge, native, source, release and
+resource owners remain unchanged. Closed #352/#357 are historical
+provenance, not live implementation claims. Use the existing Journal/open
+bounded-source process; no executor, wave or resource is assigned here.
+
+Only complete planned receiving can support a separate `NOT_PLANNED`
+redundant-tracking judgment. It cannot support technical `COMPLETED`.
+Preserve the original #356 body and discussion at its historical source.
+If any literal choice, whole scope or actual owner restriction cannot
+survive, retain #356. Every incumbent checkbox keeps its state, all FA356
+technical rows remain unchecked and the parent stays Active.
+
 The finite #3939 theme mapping retains the current Manager presentation/
 configuration and Worktrees configuration/output owners. It claims no wave,
 appoints no implementer and transfers no settings authority. If ownership or
@@ -437,6 +543,18 @@ issue and owner in the parent Journal before implementation. Historical #357
 is acceptance provenance, not a replacement for those live execution tokens.
 
 ## Journal
+
+### 2026-11-16 - Complete first-repository adoption receiving proposal
+
+Added seven direct FA356 Plan rows, five local Validation rows and explicit
+continuing Coordination, paired with ROOT Plan/global Validation/Coordination
+and its dated Journal. The original guided local/remote/chosen-root/skip,
+discovery and consent-driven registration and actual knowledge linking
+remain. The actual #356-to-#8545 shared setup seam transfer and its exclusions
+are preserved, not re-claimed. Only #356's historical separate-OPEN tracking
+reference is proposed for prospective reconciliation after actual complete
+reviewed receiving and full current ROOT/Phase 5/source readback. No receipt,
+retirement, implementation, native execution or custody change is claimed.
 
 ### 2026-11-14 - Theme-specific consumer receiving proposal
 

@@ -3,7 +3,7 @@
 Part of [Task Relevance Reconciliation](README.md), continuing
 [#12696](https://github.com/ThomasMichon/copilot-extensions/issues/12696)
 and [#9532](https://github.com/ThomasMichon/copilot-extensions/issues/9532).
-**Status: proposal before implementation.** This slice repairs retained writer
+**Status: plan reviewed in #12884; implementation qualification remains open.** This slice repairs retained writer
 compatibility, not task policy, production activation or unknown-send recovery.
 
 ## Intent and existing gap
