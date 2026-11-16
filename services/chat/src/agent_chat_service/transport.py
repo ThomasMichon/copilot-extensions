@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http as http
 import http.client
 import ipaddress
 import math
@@ -13,6 +14,8 @@ import stat
 import subprocess
 import sys
 from urllib.parse import urlsplit
+from urllib.parse import SplitResult
+from typing import Any, Protocol, cast
 
 from .client import ClientError
 from .store import (
@@ -27,6 +30,13 @@ MAX_HTTP_INPUT = 3 * MAX_BODY_BYTES
 MAX_STDERR_BYTES = 64 * 1024
 MAX_CREDENTIAL_BYTES = 32768 + 2
 MAX_ENDPOINT_BYTES = 16384
+
+
+class CommandRunner(Protocol):
+    def __call__(
+        self, argv: list[str], *, timeout: float, payload: bytes | None = None,
+        max_capture: int = MAX_PAGE_BYTES,
+    ) -> bytes: ...
 
 
 def command(value: object) -> list[str]:
@@ -91,7 +101,7 @@ def authorization(token: str) -> dict[str, str]:
     return {"Authorization": scheme + token}
 
 
-def _origin(endpoint):
+def _origin(endpoint: object) -> tuple[SplitResult, bool]:
     try:
         if not isinstance(endpoint, str) or len(endpoint) > 4096:
             raise ValueError("endpoint type or bound")
@@ -116,7 +126,7 @@ def _origin(endpoint):
     return parsed, loopback
 
 
-def _endpoint_directory(value):
+def _endpoint_directory(value: object) -> str:
     if (not isinstance(value, str) or not value or len(value.encode("utf-8")) > 4096
             or not value.isprintable() or not Path(value).is_absolute()):
         raise ClientError("invalid_configuration", "Provide an explicit absolute local endpoint directory.")
@@ -124,17 +134,17 @@ def _endpoint_directory(value):
 
 
 class _UnixConnection(http.client.HTTPConnection):
-    def __init__(self, address, *, timeout):
+    def __init__(self, address: str, *, timeout: float) -> None:
         super().__init__("localhost", timeout=timeout)
         self.address = address
 
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    def connect(self) -> None:
+        self.sock = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
         self.sock.settimeout(self.timeout)
         self.sock.connect(self.address)
 
 
-def _local_connection(directory, timeout):
+def _local_connection(directory: object, timeout: float) -> http.client.HTTPConnection:
     try:
         from endpoint_rendezvous import Endpoint, endpoint_file, is_stale
     except ImportError:
@@ -193,7 +203,7 @@ def _local_connection(directory, timeout):
         parsed, loopback = _origin("http://" + endpoint.address)
         if not loopback or parsed.port is None:
             raise ValueError("nonlocal or incomplete endpoint")
-        return http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
+        return http.client.HTTPConnection(cast(str, parsed.hostname), parsed.port, timeout=timeout)
     except (OSError, ValueError, TypeError, KeyError, OverflowError, ChatError):
         raise ClientError(
             "endpoint_unavailable", "The explicit local endpoint record is absent or invalid; no fallback or replay.",
@@ -201,7 +211,9 @@ def _local_connection(directory, timeout):
 
 
 class GatewayTransport:
-    def __init__(self, config: dict, *, runner=run_command):
+    def __init__(
+        self, config: dict[str, Any], *, runner: CommandRunner = run_command,
+    ) -> None:
         if ("endpoint" in config) == ("endpoint_dir" in config):
             raise ClientError("invalid_configuration", "Select exactly one explicit origin or local endpoint directory.")
         self.endpoint_dir = _endpoint_directory(config["endpoint_dir"]) if "endpoint_dir" in config else None
@@ -214,10 +226,13 @@ class GatewayTransport:
         if self.request_command is not None and (not loopback or self.endpoint_dir is not None):
             raise ClientError("invalid_configuration", "The fixed-route stdio provider requires loopback.")
         self.parsed, self.runner = parsed, runner
-        self.identity = "local:" + self.endpoint_dir if self.endpoint_dir is not None else endpoint.rstrip("/")
+        self.identity = (
+            "local:" + self.endpoint_dir if self.endpoint_dir is not None
+            else cast(str, endpoint).rstrip("/")
+        )
 
     @staticmethod
-    def _result(status: int, result: dict) -> dict:
+    def _result(status: int, result: dict[str, Any]) -> dict[str, Any]:
         if status != 200:
             code = result.get("error")
             if not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,64}", code):
@@ -225,7 +240,7 @@ class GatewayTransport:
             raise ClientError(code, f"Service refused the request with HTTP {status}.", status=status)
         return result
 
-    def call(self, payload: dict) -> dict:
+    def call(self, payload: dict[str, Any]) -> dict[str, Any]:
         op = validate_request(payload)
         raw = json_bytes(payload)
         if len(raw) > MAX_BODY_BYTES:
@@ -250,7 +265,7 @@ class GatewayTransport:
             return self._result(value["status"], value["result"])
         try:
             token = self.runner(
-                self.token_command, timeout=30, max_capture=MAX_CREDENTIAL_BYTES,
+                cast(list[str], self.token_command), timeout=30, max_capture=MAX_CREDENTIAL_BYTES,
             ).decode("utf-8").strip()
         except UnicodeError:
             raise ClientError("invalid_credential", "Credential provider returned invalid UTF-8.") from None
@@ -286,7 +301,7 @@ class GatewayTransport:
         return self._result(control["status"], result)
 
 
-def _http_exchange(frame: dict) -> tuple[int, bytes]:
+def _http_exchange(frame: dict[str, Any]) -> tuple[int, bytes]:
     if (not isinstance(frame, dict)
             or set(frame) not in ({"endpoint", "payload", "credential", "timeout"},
                                   {"endpoint_dir", "payload", "credential", "timeout"})
@@ -304,7 +319,9 @@ def _http_exchange(frame: dict) -> tuple[int, bytes]:
     else:
         parsed, _ = _origin(frame["endpoint"])
         connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
-        connection = connection_type(parsed.hostname, parsed.port, timeout=frame["timeout"])
+        connection = connection_type(
+            cast(str, parsed.hostname), parsed.port, timeout=frame["timeout"],
+        )
     try:
         connection.request("POST", "/api/v1/chat", body=raw, headers=headers)
         response = connection.getresponse()

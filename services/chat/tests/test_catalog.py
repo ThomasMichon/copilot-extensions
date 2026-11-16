@@ -1,8 +1,10 @@
 import base64
 import hashlib
+import os
 from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
@@ -18,8 +20,9 @@ import agent_chat_service.catalog as catalog
     ("1.2.3", "'", "'", '["project"] # package metadata'),
 ])
 def test_source_version_reads_only_its_own_project_metadata(
-    tmp_path, monkeypatch, version, quote, key_quote, header,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, quote: str,
+    key_quote: str, header: str,
+) -> None:
     project = tmp_path / "source"
     package = project / "src/agent_chat_service"
     package.mkdir(parents=True)
@@ -30,7 +33,7 @@ def test_source_version_reads_only_its_own_project_metadata(
         "[project.optional-dependencies]\nclient=[]\n",
         encoding="utf-8",
     )
-    def missing(name):
+    def missing(name: str) -> NoReturn:
         assert name == "agent-chat-service"
         raise metadata.PackageNotFoundError(name)
 
@@ -62,14 +65,14 @@ def test_source_version_reads_only_its_own_project_metadata(
     '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[[project]]\nname = "other"\n',
 ])
 def test_source_version_refuses_invalid_metadata_without_installed_fallback(
-    tmp_path, monkeypatch, text,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str,
+) -> None:
     project = tmp_path / "source"
     package = project / "src/agent_chat_service"
     package.mkdir(parents=True)
     monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
     (project / "pyproject.toml").write_text(text, encoding="utf-8")
-    def missing(name):
+    def missing(name: str) -> NoReturn:
         raise metadata.PackageNotFoundError(name)
 
     monkeypatch.setattr(metadata, "version", missing)
@@ -84,20 +87,20 @@ def test_source_version_refuses_invalid_metadata_without_installed_fallback(
     ("0.1.20.dev1", "0.1.20-dev1"), ("1.2.3", "1.2.3"),
 ])
 def test_installed_version_uses_distribution_metadata_and_preserves_display(
-    tmp_path, monkeypatch, version, expected,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, expected: str,
+) -> None:
     package = tmp_path / "site-packages/agent_chat_service"
     package.mkdir(parents=True)
     monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
 
-    def installed(name):
+    def installed(name: str) -> str:
         assert name == "agent-chat-service"
         return version
 
     monkeypatch.setattr(metadata, "version", installed)
     assert chat._resolve_version() == expected
 
-    def missing(name):
+    def missing(name: str) -> NoReturn:
         raise metadata.PackageNotFoundError(name)
 
     monkeypatch.setattr(metadata, "version", missing)
@@ -106,7 +109,7 @@ def test_installed_version_uses_distribution_metadata_and_preserves_display(
 
 
 @pytest.fixture
-def installation(tmp_path, monkeypatch):
+def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     site = tmp_path / "site-packages"
     package = site / "agent_chat_service"
     package.mkdir(parents=True)
@@ -133,8 +136,14 @@ def installation(tmp_path, monkeypatch):
     return SimpleNamespace(package=package, distribution=distribution, entries=entries)
 
 
-def test_exact_current_interpreter_not_path_or_source_selection(installation, monkeypatch):
+def test_exact_current_interpreter_not_path_or_source_selection(
+    installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("PATH", "")
+    if os.name == "nt":
+        monkeypatch.setattr(
+            catalog, "__file__", "\\\\?\\" + str(installation.package / "catalog.py"),
+        )
     result = catalog.installed_catalog()
     assert result["commands"][0]["argv"] == [
         catalog.sys.executable, "-I", "-m", "agent_chat_service.cli",
@@ -155,7 +164,9 @@ def test_exact_current_interpreter_not_path_or_source_selection(installation, mo
     "extra-source", "oversized", "foreign-location", "outside-isolated-site",
     "missing-entrypoint", "duplicate-entrypoint", "wrong-entrypoint",
 ])
-def test_catalog_refuses_unusable_installed_evidence(installation, monkeypatch, damage):
+def test_catalog_refuses_unusable_installed_evidence(
+    installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     distribution = installation.distribution
     path = installation.package / "transport.py"
     entry = next(item for item in installation.entries if str(item).endswith("/transport.py"))
@@ -185,7 +196,11 @@ def test_catalog_refuses_unusable_installed_evidence(installation, monkeypatch, 
     elif damage == "oversized":
         path.write_bytes(b"x" * (catalog.MAX_RESOURCE_BYTES + 1))
     elif damage == "foreign-location":
-        distribution.locate_file = lambda entry: installation.package.parent / "foreign"
+        foreign = installation.package.parent / "foreign" / path.name
+        foreign.parent.mkdir()
+        foreign.hardlink_to(path)
+        locate_file = distribution.locate_file
+        distribution.locate_file = lambda candidate: foreign if candidate is entry else locate_file(candidate)
     elif damage == "outside-isolated-site":
         monkeypatch.setattr(catalog.sysconfig, "get_path", lambda key: str(path.parent / "other"))
     elif damage == "missing-entrypoint":
@@ -200,8 +215,8 @@ def test_catalog_refuses_unusable_installed_evidence(installation, monkeypatch, 
     assert str(installation.package) not in caught.value.message
 
 
-def test_missing_distribution_is_an_explicit_offline_error(monkeypatch):
-    def unavailable(name):
+def test_missing_distribution_is_an_explicit_offline_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(name: str) -> NoReturn:
         raise metadata.PackageNotFoundError(name)
     monkeypatch.setattr(catalog.metadata, "distribution", unavailable)
     with pytest.raises(ClientError) as caught:
@@ -209,11 +224,13 @@ def test_missing_distribution_is_an_explicit_offline_error(monkeypatch):
     assert caught.value.code == "client_not_installed"
 
 
-def test_catalog_refuses_linked_resource_evidence(installation, monkeypatch):
+def test_catalog_refuses_linked_resource_evidence(
+    installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = Path.lstat
     target = installation.package / "transport.py"
 
-    def lstat(path, *args, **kwargs):
+    def lstat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
         info = original(path, *args, **kwargs)
         if path == target:
             return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
@@ -227,7 +244,9 @@ def test_catalog_refuses_linked_resource_evidence(installation, monkeypatch):
 
 
 @pytest.mark.parametrize("damage", ["changed", "missing", "unhashed"])
-def test_catalog_includes_the_host_module_in_its_verified_closure(installation, damage):
+def test_catalog_includes_the_host_module_in_its_verified_closure(
+    installation: SimpleNamespace, damage: str,
+) -> None:
     resource = installation.package / "hosting.py"
     entry = next(item for item in installation.entries if str(item).endswith("/hosting.py"))
     if damage == "changed":
@@ -242,7 +261,9 @@ def test_catalog_includes_the_host_module_in_its_verified_closure(installation, 
 
 
 @pytest.mark.parametrize("damage", ["changed", "missing", "unhashed"])
-def test_catalog_includes_the_workspace_module_in_its_verified_closure(installation, damage):
+def test_catalog_includes_the_workspace_module_in_its_verified_closure(
+    installation: SimpleNamespace, damage: str,
+) -> None:
     resource = installation.package / "workspace.py"
     entry = next(item for item in installation.entries if str(item).endswith("/workspace.py"))
     if damage == "changed":
@@ -257,7 +278,9 @@ def test_catalog_includes_the_workspace_module_in_its_verified_closure(installat
 
 
 @pytest.mark.parametrize("damage", ["changed", "missing", "unhashed"])
-def test_catalog_includes_collaboration_in_its_verified_closure(installation, damage):
+def test_catalog_includes_collaboration_in_its_verified_closure(
+    installation: SimpleNamespace, damage: str,
+) -> None:
     resource = installation.package / "collaboration.py"
     entry = next(item for item in installation.entries if str(item).endswith("/collaboration.py"))
     if damage == "changed":
@@ -273,14 +296,14 @@ def test_catalog_includes_collaboration_in_its_verified_closure(installation, da
 
 @pytest.mark.parametrize("name", [
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-    "versioned_runtime_publication.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py", "versioned_runtime_source.py", "versioned_runtime_cache.py",
     "installer_engine.py", "installer_engine_process.py",
     "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     "installer_source_wheel_cache.py", "installer_source_build.py",
     "installer_wheel_inputs.py", "installer_wheel_snapshot.py",
     "construction.py", "runtime_launcher.py",
 ])
-def test_catalog_refuses_changed_construction_resources(installation, name):
+def test_catalog_refuses_changed_construction_resources(installation: SimpleNamespace, name: str) -> None:
     (installation.package / name).write_bytes(b"changed construction resource")
     with pytest.raises(ClientError) as caught:
         catalog.installed_catalog()

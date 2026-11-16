@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Complete standalone-consumer receiving and canonical boundaries](journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md)
+
 - [2026-11-16 - Complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
 
 - [2026-11-16 - Complete first-adoption receiving and retained inflow](journal/2026/11.16-first-adoption-receiving-and-inflow.md)

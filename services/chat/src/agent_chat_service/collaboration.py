@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    import sqlite3
+
+    from .store import ChatStore
 
 from .store import ChatError, MAX_PAGE_BYTES, _identifier, _integer, _printable, _unicode, json_bytes
 
@@ -18,7 +24,7 @@ RELATIONS = {
 MAX_INBOX_CANDIDATES = 100
 
 
-def normalize(value):
+def normalize(value: object) -> dict[str, Any]:
     try:
         _unicode(value)
     except RecursionError:
@@ -32,7 +38,9 @@ def normalize(value):
             or type(value["version"]) is not int or value["version"] != 1
             or type(value["kind"]) is not str or value["kind"] not in KINDS):
         raise ChatError("invalid", "Invalid collaboration fields or version.")
-    result = {**value, "to": value.get("to", []), "evidence": value.get("evidence", [])}
+    result: dict[str, Any] = {
+        **value, "to": value.get("to", []), "evidence": value.get("evidence", []),
+    }
     for name, maximum in (("to", 16), ("evidence", 8)):
         items = result[name]
         if type(items) is not list or len(items) > maximum:
@@ -54,7 +62,7 @@ def normalize(value):
     return result
 
 
-def validate_view(request):
+def validate_view(request: dict[str, Any]) -> None:
     _integer(request.get("limit", 50), "limit", 1, 100)
     _integer(request.get("max_bytes", MAX_PAGE_BYTES), "max_bytes", 1024, MAX_PAGE_BYTES)
     _integer(request.get("after", 0), "after", 0, 2**63 - 1)
@@ -75,20 +83,25 @@ def validate_view(request):
             raise ChatError("invalid", "Continuation requires a captured history boundary.")
 
 
-def metadata(store, event_id):
-    return store._db.execute(
+def metadata(store: ChatStore, event_id: int) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = store._db.execute(
         "SELECT * FROM collaborations WHERE event_id=?", (event_id,),
     ).fetchone()
+    return row
 
 
-def relationship(store, request, value):
+def relationship(
+    store: ChatStore, request: dict[str, Any], value: dict[str, Any],
+) -> tuple[int | None, int | None, str | None]:
     channel, codename = request["channel"], request["codename"]
     for recipient in value["to"]:
         if store._db.execute(
             "SELECT 1 FROM memberships WHERE channel=? AND codename=?", (channel, recipient),
         ).fetchone() is None:
             raise ChatError("invalid", "A recipient is not a recorded channel member.")
-    reply = value.get("reply_to")
+    reply: int | None = value.get("reply_to")
+    root: int | None
+    reply_author: str | None
     root = reply_author = None
     if reply is not None:
         target = store._db.execute(
@@ -120,10 +133,16 @@ def relationship(store, request, value):
     return reply, root, reply_author
 
 
-def receipt(store, row, duplicate, value):
-    result = {"event": store._event(row), "duplicate": duplicate}
+def receipt(
+    store: ChatStore, row: sqlite3.Row, duplicate: bool, value: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"event": store._event(row), "duplicate": duplicate}
     if value is not None:
-        result.update(collaboration=value, thread_root=metadata(store, row["id"])["thread_root"])
+        # _post inserts metadata or validates its exact stored value before forming a receipt.
+        result.update(
+            collaboration=value,
+            thread_root=cast("sqlite3.Row", metadata(store, row["id"]))["thread_root"],
+        )
     return result
 
 
@@ -181,7 +200,9 @@ ORDER BY p.event_id
 """
 
 
-def _entry(store, row, attention=None):
+def _entry(
+    store: ChatStore, row: sqlite3.Row, attention: str | None = None,
+) -> dict[str, Any]:
     return {
         "event": store._event(row),
         "collaboration": json.loads(row["collaboration_metadata"])
@@ -191,7 +212,7 @@ def _entry(store, row, attention=None):
     }
 
 
-def view(store, request):
+def view(store: ChatStore, request: dict[str, Any]) -> dict[str, Any]:
     channel, viewer = request["channel"], request["codename"]
     store._member(channel, viewer)
     head = store._db.execute(
@@ -212,12 +233,13 @@ def view(store, request):
     controls = {
         "channel": channel, "viewer": viewer, "head": head, "after": after, "limit": limit + 1,
     }
-    result = {
+    result: dict[str, Any] = {
         "schema": "agent-chat.collaboration-view", "version": 1, "view": request["op"],
         "channel": channel, "codename": viewer, "epoch": store.log_epoch, "head": head,
         "entries": [], "recent": [], "count": 0, "more": False, "next": None,
     }
-    recent = []
+    recent: list[sqlite3.Row] = []
+    entries: list[sqlite3.Row]
     pending_more, pending_after = False, after
     if request["op"] == "thread":
         target = store._db.execute(

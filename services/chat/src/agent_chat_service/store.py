@@ -13,6 +13,10 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Iterator, NoReturn, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from os import PathLike
 
 from . import __version__ as VERSION
 
@@ -48,23 +52,23 @@ STATUS = {
 
 
 class ChatError(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = STATUS[code]
 
-    def as_dict(self):
+    def as_dict(self) -> dict[str, str]:
         return {"error": self.code, "message": self.message}
 
 
-def json_bytes(value) -> bytes:
+def json_bytes(value: object) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
     ).encode("utf-8")
 
 
-def _unicode(value):
+def _unicode(value: object) -> None:
     if isinstance(value, str):
         try:
             value.encode("utf-8")
@@ -81,22 +85,22 @@ def _unicode(value):
         raise ChatError("invalid", "Nonfinite numbers are not allowed.")
 
 
-def strict_json(data: bytes, *, max_bytes=MAX_BODY_BYTES):
+def strict_json(data: bytes, *, max_bytes: int = MAX_BODY_BYTES) -> Any:
     """Decode one bounded UTF-8 JSON value, without ambiguous extensions."""
     if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_PAGE_BYTES:
         raise ChatError("invalid", "Invalid JSON byte bound.")
     if len(data) > max_bytes:
         raise ChatError("invalid", "Request body is too large.")
 
-    def pairs(items):
-        result = {}
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         for key, value in items:
             if key in result:
                 raise ValueError("duplicate key")
             result[key] = value
         return result
 
-    def constant(_):
+    def constant(_: str) -> NoReturn:
         raise ValueError("nonfinite number")
 
     try:
@@ -110,13 +114,13 @@ def strict_json(data: bytes, *, max_bytes=MAX_BODY_BYTES):
         raise ChatError("invalid", "Invalid JSON.") from None
 
 
-def _identifier(value, field):
+def _identifier(value: object, field: str) -> str:
     if not isinstance(value, str) or not IDENTIFIER.fullmatch(value):
         raise ChatError("invalid", f"Invalid {field}.")
     return value
 
 
-def _printable(value, field, maximum=1024):
+def _printable(value: object, field: str, maximum: int = 1024) -> str:
     if not isinstance(value, str) or not value or not value.isprintable():
         raise ChatError("invalid", f"Invalid {field}.")
     if len(value.encode("utf-8")) > maximum:
@@ -124,7 +128,7 @@ def _printable(value, field, maximum=1024):
     return value
 
 
-def _integer(value, field, minimum, maximum=None):
+def _integer(value: object, field: str, minimum: int, maximum: int | None = None) -> int:
     if type(value) is not int or value < minimum or (
         maximum is not None and value > maximum
     ):
@@ -132,23 +136,23 @@ def _integer(value, field, minimum, maximum=None):
     return value
 
 
-def _utc():
+def _utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace(
         "+00:00", "Z"
     )
 
 
-def _identity_collision(recorded, expected):
+def _identity_collision(recorded: dict[str, Any], expected: dict[str, Any]) -> bool:
     return any(
         key in recorded and key in expected and recorded[key] != expected[key]
         for key in IDENTITY_KEYS
     )
 
 
-def validate_request(request):
+def validate_request(request: object) -> str:
     if type(request) is not dict or type(request.get("op")) is not str:
         raise ChatError("invalid", "An operation object is required.")
-    op = request["op"]
+    op: str = request["op"]
     if op not in FIELDS:
         raise ChatError("invalid", "Unknown operation.")
     required, optional = FIELDS[op]
@@ -236,12 +240,12 @@ class ChatStore:
     """
 
     def __init__(
-        self, data_dir, installation_id, *, max_events=100000,
-        max_message_bytes=64 * 1024 * 1024, max_channels=256,
-        max_actors=4096, max_memberships=4096, max_channel_members=256,
-        max_waiters=16,
-        create=True,
-    ):
+        self, data_dir: str | PathLike[str], installation_id: str, *, max_events: int = 100000,
+        max_message_bytes: int = 64 * 1024 * 1024, max_channels: int = 256,
+        max_actors: int = 4096, max_memberships: int = 4096, max_channel_members: int = 256,
+        max_waiters: int = 16,
+        create: bool = True,
+    ) -> None:
         _unicode(installation_id)
         _printable(installation_id, "installation_id", 128)
         for name, value in (
@@ -263,7 +267,7 @@ class ChatStore:
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._waiters = threading.BoundedSemaphore(max_waiters)
-        self._membership_generations = {}
+        self._membership_generations: dict[tuple[str, str], object] = {}
         self._closed = False
         self._draining = False
         self._service_generation = object()
@@ -409,7 +413,7 @@ class ChatStore:
             raise
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self) -> Iterator[None]:
         self._db.execute("BEGIN IMMEDIATE")
         try:
             yield
@@ -419,7 +423,7 @@ class ChatStore:
             raise
 
     @contextmanager
-    def _locked(self):
+    def _locked(self) -> Iterator[None]:
         if not self._lock.acquire(timeout=1):
             raise ChatError("busy", "Store is busy.")
         try:
@@ -431,28 +435,28 @@ class ChatStore:
         finally:
             self._lock.release()
 
-    def close(self):
+    def close(self) -> None:
         with self._changed:
             if not self._closed:
                 self._closed = True
                 self._changed.notify_all()
                 self._db.close()
 
-    def health(self):
+    def health(self) -> dict[str, Any]:
         with self._locked():
             return {
                 "status": "ok", "service": "chat", "schema": 1,
                 "version": VERSION, "installation_id": self.installation_id,
             }
 
-    def _check_serving(self, generation=None):
+    def _check_serving(self, generation: object | None = None) -> None:
         if self._closed:
             raise ChatError("busy", "Store is closed.")
         if self._draining or generation is not None and generation is not self._service_generation:
             raise ChatError("draining", "Store is draining; reconnect through the owning service.")
 
     @contextmanager
-    def _waiter(self):
+    def _waiter(self) -> Iterator[object]:
         with self._locked():
             self._check_serving()
             if not self._waiters.acquire(blocking=False):
@@ -467,14 +471,14 @@ class ChatStore:
                 self._waiters.release()
                 self._changed.notify_all()
 
-    def _lifecycle_state(self):
+    def _lifecycle_state(self) -> dict[str, Any]:
         return {
             "state": ("draining" if self._active_waiters else "drained") if self._draining else "active",
             "active_waiters": self._active_waiters,
             "storage_schema": 1, "installation_id": self.installation_id,
         }
 
-    def drain(self):
+    def drain(self) -> dict[str, Any]:
         """Freeze RPC admission after committed transactions and invalidate held waits."""
         with self._locked():
             if not self._draining:
@@ -483,14 +487,15 @@ class ChatStore:
                 self._changed.notify_all()
             return self._lifecycle_state()
 
-    def undrain(self):
+    def undrain(self) -> dict[str, Any]:
         """Resume new admission without reviving waits from a drained generation."""
         with self._locked():
             self._draining = False
             return self._lifecycle_state()
 
-    def dispatch(self, request):
+    def dispatch(self, request: object) -> dict[str, Any]:
         op = validate_request(request)
+        request = cast(dict[str, Any], request)
         if op == "wait":
             return self._wait(request)
         if op == "scan":
@@ -498,20 +503,21 @@ class ChatStore:
         with self._locked():
             self._check_serving()
             with self._transaction():
-                result = getattr(self, "_" + op)(request)
+                result: dict[str, Any] = getattr(self, "_" + op)(request)
             if op == "leave":
                 self._membership_generations.pop((request["channel"], request["codename"]), None)
             if op in {"post", "leave", "cursor"}:
                 self._changed.notify_all()
             return result
 
-    def _count(self, table, where="", args=()):
-        return self._db.execute(
+    def _count(self, table: str, where: str = "", args: tuple[object, ...] = ()) -> int:
+        count: int = self._db.execute(
             f"SELECT count(*) FROM {table} {where}", args
         ).fetchone()[0]
+        return count
 
-    def _member(self, channel, codename, *, active=True):
-        row = self._db.execute(
+    def _member(self, channel: str, codename: str, *, active: bool = True) -> sqlite3.Row:
+        row: sqlite3.Row | None = self._db.execute(
             "SELECT * FROM memberships WHERE channel=? AND codename=?",
             (channel, codename),
         ).fetchone()
@@ -519,17 +525,18 @@ class ChatStore:
             raise ChatError("notjoined", "An explicit active membership is required.")
         return row
 
-    def _actor(self, codename):
+    def _actor(self, codename: str) -> dict[str, Any] | None:
         row = self._db.execute(
             "SELECT metadata FROM actors WHERE codename=?", (codename,)
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        actor: dict[str, Any] | None = json.loads(row[0]) if row else None
+        return actor
 
-    def _membership_generation(self, channel, codename):
+    def _membership_generation(self, channel: str, codename: str) -> object:
         self._member(channel, codename)
         return self._membership_generations.setdefault((channel, codename), object())
 
-    def _join(self, request):
+    def _join(self, request: dict[str, Any]) -> dict[str, Any]:
         channel, actor = request["channel"], request["actor"]
         codename = actor["codename"]
         old = self._actor(codename)
@@ -575,7 +582,7 @@ class ChatStore:
             "cursor": member["cursor"] if member else 0,
         }
 
-    def _leave(self, request):
+    def _leave(self, request: dict[str, Any]) -> dict[str, Any]:
         channel, codename = request["channel"], request["codename"]
         if "actor" in request:
             member = self._db.execute(
@@ -592,14 +599,14 @@ class ChatStore:
         return {"channel": channel, "codename": codename, "active": False}
 
     @staticmethod
-    def _event(row):
+    def _event(row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"], "channel": row["channel"],
             "timestamp": row["timestamp"], "author": json.loads(row["author"]),
             "text": row["text"], "request_id": row["request_id"],
         }
 
-    def _post(self, request):
+    def _post(self, request: dict[str, Any]) -> dict[str, Any]:
         from .collaboration import metadata, normalize, receipt, relationship
 
         channel, codename = request["channel"], request["codename"]
@@ -661,22 +668,22 @@ class ChatStore:
         row = self._db.execute("SELECT * FROM events WHERE id=?", (row_id,)).fetchone()
         return receipt(self, row, False, value)
 
-    def _thread(self, request):
+    def _thread(self, request: dict[str, Any]) -> dict[str, Any]:
         from .collaboration import view
         return view(self, request)
 
-    def _inbox(self, request):
+    def _inbox(self, request: dict[str, Any]) -> dict[str, Any]:
         from .collaboration import view
         return view(self, request)
 
-    def _read(self, request):
+    def _read(self, request: dict[str, Any]) -> dict[str, Any]:
         channel, codename = request["channel"], request["codename"]
         cursor = self._member(channel, codename)["cursor"]
         rows = self._db.execute(
             "SELECT * FROM events WHERE channel=? AND id>? ORDER BY id LIMIT ?",
             (channel, cursor, request.get("limit", 50) + 1),
         ).fetchall()
-        result = {
+        result: dict[str, Any] = {
             "channel": channel, "codename": codename, "cursor": cursor,
             "next_cursor": cursor, "messages": [], "more": False,
         }
@@ -693,7 +700,7 @@ class ChatStore:
         result["more"] = len(rows) > len(result["messages"])
         return result
 
-    def _cursor(self, request):
+    def _cursor(self, request: dict[str, Any]) -> dict[str, Any]:
         channel, codename = request["channel"], request["codename"]
         stored = self._member(channel, codename, active=False)["cursor"]
         expected, next_cursor = request["expected_cursor"], request["next_cursor"]
@@ -711,7 +718,7 @@ class ChatStore:
         )
         return {"channel": channel, "codename": codename, "cursor": next_cursor}
 
-    def _unread(self, channel, codename):
+    def _unread(self, channel: str, codename: str) -> dict[str, Any]:
         cursor = self._member(channel, codename)["cursor"]
         count, latest = self._db.execute(
             "SELECT count(*), max(id) FROM events WHERE channel=? AND id>?",
@@ -722,16 +729,16 @@ class ChatStore:
             "unread_count": count, "next_cursor": latest if count else cursor,
         }
 
-    def _scan_page(self, request):
+    def _scan_page(self, request: dict[str, Any]) -> dict[str, Any]:
         if request["epoch"] not in (None, self.log_epoch):
             raise ChatError("scan_epoch_mismatch", "Log epoch changed; explicit recovery required.")
-        result = {
+        result: dict[str, Any] = {
             "schema": "agent-chat.scan", "version": 1,
             "installation_id": self.installation_id, "epoch": self.log_epoch,
             "codename": request["codename"], "channels": [], "events": [], "more": False,
         }
-        rows = []
-        states = {}
+        rows: list[sqlite3.Row] = []
+        states: dict[str, dict[str, Any]] = {}
         limit = request.get("limit", 100)
         for position in request["after"]:
             channel, after = position["channel"], position["event_id"]
@@ -769,7 +776,7 @@ class ChatStore:
         result["more"] = any(s["scan_cursor"] < s["head"] for s in result["channels"])
         return result
 
-    def _scan(self, request):
+    def _scan(self, request: dict[str, Any]) -> dict[str, Any]:
         with self._waiter() as service_generation:
             deadline = time.monotonic() + request.get("timeout", 30)
             batch_end = None
@@ -793,7 +800,7 @@ class ChatStore:
                         return result
                     self._changed.wait(end - now)
 
-    def _wait(self, request):
+    def _wait(self, request: dict[str, Any]) -> dict[str, Any]:
         with self._waiter() as service_generation:
             deadline = time.monotonic() + request.get("timeout", 30)
             batch_end = None
@@ -818,7 +825,7 @@ class ChatStore:
                         return result
                     self._changed.wait(end - now)
 
-    def _members(self, request):
+    def _members(self, request: dict[str, Any]) -> dict[str, Any]:
         channel = request["channel"]
         if not self._db.execute(
             "SELECT 1 FROM channels WHERE name=?", (channel,)
@@ -828,7 +835,7 @@ class ChatStore:
         query = """SELECT actors.metadata, memberships.joined_at
             FROM memberships JOIN actors USING(codename)
             WHERE channel=? AND active=1"""
-        parameters = (channel,)
+        parameters: tuple[object, ...] = (channel,)
         if paged:
             query += " AND codename>?"
             parameters += (request.get("after", ""),)
@@ -841,7 +848,7 @@ class ChatStore:
             {**json.loads(row["metadata"]), "joined_at": row["joined_at"]}
             for row in self._db.execute(query, parameters)
         ]
-        result = {
+        result: dict[str, Any] = {
             "channel": channel,
             "members": members[:limit] if paged else members,
         }
@@ -853,7 +860,7 @@ class ChatStore:
             )
         return result
 
-    def _resolve(self, request):
+    def _resolve(self, request: dict[str, Any]) -> dict[str, Any]:
         codename = request["codename"]
         channels = [
             row[0] for row in self._db.execute(
