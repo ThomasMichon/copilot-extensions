@@ -28,20 +28,24 @@ def _shell_executable(shell: str) -> str:
     return executable
 
 
-def _run(tmp_path: Path, shell: str, script: str, *args: str):
+def _run(
+    tmp_path: Path, shell: str, script: str, *args: str,
+) -> subprocess.CompletedProcess[str]:
     executable = _shell_executable(shell)
     path = tmp_path / f"exercise.{shell}"
     path.write_text(script, encoding="utf-8")
     prefix = [] if shell == "sh" else ["-NoProfile", "-NonInteractive", "-File"]
     return subprocess.run(
         [executable, *prefix, str(path), *args], capture_output=True, text=True,
-        timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
 
 @pytest.mark.parametrize("shell", ["sh", "ps1"])
 @pytest.mark.parametrize("action", ["update", "install", "stop"])
-def test_required_cutover_argument_is_bound_and_validated(tmp_path, shell, action):
+def test_required_cutover_argument_is_bound_and_validated(
+    tmp_path: Path, shell: str, action: str,
+) -> None:
     text = (_SCRIPTS / f"install.{shell}").read_text(encoding="utf-8")
     if shell == "sh":
         source = text[text.index('ACTION="${1:-status}"'):text.index('INSTALL_DIR="$(_normalize')]
@@ -86,7 +90,9 @@ def _helper_script(tmp_path: Path, shell: str, output: str, rc: int) -> str:
 
 
 @pytest.mark.parametrize("unavailable", ["windows", "missing-shell"])
-def test_helper_checks_shell_before_creating_files(tmp_path, monkeypatch, unavailable):
+def test_helper_checks_shell_before_creating_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unavailable: str,
+) -> None:
     from types import SimpleNamespace
 
     module = sys.modules[__name__]
@@ -116,7 +122,9 @@ def test_helper_checks_shell_before_creating_files(tmp_path, monkeypatch, unavai
     ("not json", 0, False),
     ("", 0, False),
 ])
-def test_required_cutover_requires_boolean_success_and_zero_exit(tmp_path, shell, output, rc, accepted):
+def test_required_cutover_requires_boolean_success_and_zero_exit(
+    tmp_path: Path, shell: str, output: str, rc: int, accepted: bool,
+) -> None:
     result = _run(tmp_path, shell, _helper_script(tmp_path, shell, output, rc))
     assert result.returncode == 0, result.stdout + result.stderr
     assert ("accepted" if accepted else "rejected") in result.stdout.splitlines()
@@ -156,6 +164,7 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
     return "\n".join([
         "Set-StrictMode -Version 2.0",
         "$ErrorActionPreference = 'Stop'",
+        "$NoService = $false",
         f"$RequireGracefulCutover = ${str(strict).lower()}",
         f"$VersionedRuntime = ${str(outcome != 'legacy').lower()}",
         "$script:RuntimeConstructionReuse = $false",
@@ -197,7 +206,9 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
 @pytest.mark.parametrize("shell", ["sh", "ps1"])
 @pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize("outcome", ["success", "failed", "stopped", "forward", "same-slot", "legacy", "complete"])
-def test_update_preserves_required_cutover_and_legacy_fallback(tmp_path, shell, strict, outcome):
+def test_update_preserves_required_cutover_and_legacy_fallback(
+    tmp_path: Path, shell: str, strict: bool, outcome: str,
+) -> None:
     result = _run(tmp_path, shell, _update_script(tmp_path, shell, strict, outcome))
     output = result.stdout + result.stderr
     refused = strict and outcome in {"failed", "stopped", "forward", "same-slot", "legacy"}
@@ -217,7 +228,7 @@ def test_update_preserves_required_cutover_and_legacy_fallback(tmp_path, shell, 
 
 
 @pytest.mark.parametrize("strict", [False, True])
-def test_windows_completion_failure_preserves_update_rollback(tmp_path, strict):
+def test_windows_completion_failure_preserves_update_rollback(tmp_path: Path, strict: bool) -> None:
     result = _run(tmp_path, "ps1", _update_script(tmp_path, "ps1", strict, "completion-failed"))
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
@@ -228,7 +239,9 @@ def test_windows_completion_failure_preserves_update_rollback(tmp_path, strict):
 
 
 @pytest.mark.parametrize("reusable,complete", [(True, True), (False, True), (True, False)])
-def test_windows_reused_slot_retains_completion_without_broker(tmp_path, reusable, complete):
+def test_windows_reused_slot_retains_completion_without_broker(
+    tmp_path: Path, reusable: bool, complete: bool,
+) -> None:
     script = "\n".join([
         "$ErrorActionPreference='Stop'",
         "$env:OS='Windows_NT'; $env:COPILOT_EXTENSIONS_TEST_CONTAINED=''",

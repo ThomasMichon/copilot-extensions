@@ -15,6 +15,7 @@ proceeded past admission.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import os
 import re
@@ -22,6 +23,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -152,7 +154,7 @@ def _plugin_source(tmp_path: Path) -> Path:
 
 
 def _published_hash(tmp_path: Path) -> str:
-    return json.loads(_slot_marker(tmp_path).read_text(encoding="utf-8"))["payload_hash"]
+    return cast(str, json.loads(_slot_marker(tmp_path).read_text(encoding="utf-8"))["payload_hash"])
 
 
 def _reported(output: str, key: str) -> str:
@@ -180,7 +182,7 @@ def _tree(root: Path) -> dict[str, bytes]:
 
 
 def _assert_outcome(
-    tmp_path: Path, result: subprocess.CompletedProcess, expected: str, *, failure_code: int = 42
+    tmp_path: Path, result: subprocess.CompletedProcess[str], expected: str, *, failure_code: int = 42
 ) -> None:
     events = _events(tmp_path)
     detail = (
@@ -268,12 +270,16 @@ def _ps_harness(
     body = f"""Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $ScriptDir = {_ps_quote(_SCRIPTS)}
+. (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
 $PluginDir = {_ps_quote(_fake_plugin(tmp_path, libraries=libraries))}
 $InstallDir = {_ps_quote(tmp_path / "install")}
 $LinkDir = Join-Path $InstallDir 'venv'
 $SrcVersion = '{_VERSION}'
 $VersionedRuntime = $true
 $RequireGracefulCutover = $false
+$NoService = $false
+$NativeWheelSelection = $null
+$WheelProfile = ''; $WheelDirectory = ''; $WheelPython = ''; $WheelUv = ''
 $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
 $RealPython = {_ps_quote(sys.executable)}
 # The slot interpreter is a function so `-m agent_bridge ...` (config migrate)
@@ -290,6 +296,7 @@ function Write-Fail {{ param([string]$Msg) Write-Host "  [FAIL] $Msg" }}
 function Write-Step {{ param([string]$Msg) }}
 function Write-Warn {{ param([string]$Msg) Write-Host "  [WARN] $Msg" }}
 function Ensure-Uv {{ return $true }}
+function Ensure-ScheduledTask {{ }}
 function Invoke-MigrationCheck {{ }}
 function Enter-InstallLock {{ return $true }}
 function Exit-InstallLock {{ }}
@@ -343,12 +350,8 @@ $vr = Join-Path $ScriptDir 'versioned_runtime.py'
 $ph = Get-PayloadHash
 if (-not $ph) {{ throw 'payload hash unavailable' }}
 function Mark([string]$hash) {{
-    $bootstrap = Join-Path $VenvDir '.runtime-bootstrap'
-    New-Item -ItemType Directory -Force -Path $bootstrap | Out-Null
-    foreach ($name in @('runtime_launcher.py', 'versioned_runtime.py', 'versioned_runtime_leases.py',
-        'versioned_runtime_source.py', 'versioned_runtime_construction.py', 'versioned_runtime_publication.py')) {{
-        Copy-Item -LiteralPath (Join-Path $ScriptDir $name) -Destination (Join-Path $bootstrap $name) -Force
-    }}
+    & $RealPython -I -B -c "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); import versioned_runtime as runtime; slot = Path(sys.argv[2]); runtime.retain_runtime_helpers(slot, complete=(slot / '.runtime-bootstrap').exists())" $ScriptDir $VenvDir
+    if ($LASTEXITCODE -ne 0) {{ throw 'setup runtime-helper retention failed' }}
     & $RealPython $vr --root $InstallDir --link-name venv mark-complete $SrcVersion --payload-hash $hash | Out-Null
     if ($LASTEXITCODE -ne 0) {{ throw 'setup mark-complete failed' }}
 }}
@@ -376,7 +379,8 @@ try {{
     return harness
 
 
-def _run_ps(harness: Path) -> subprocess.CompletedProcess:
+def _run_ps(harness: Path) -> subprocess.CompletedProcess[str]:
+    assert _PWSH is not None
     return subprocess.run(
         [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         capture_output=True,
@@ -415,7 +419,9 @@ def test_ps1_harness_settles_a_defined_construction_function(tmp_path: Path) -> 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
 @pytest.mark.parametrize("after_wait", [False, True], ids=["selected", "selected-during-lock"])
-def test_ps1_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, after_wait):
+def test_ps1_serving_reconcile_failure_never_publishes_or_rebuilds(
+    tmp_path: Path, after_wait: bool,
+) -> None:
     action = "$env:SERVING_PROBE_EXIT_CODE = '10'\n$env:SERVING_EXIT_CODE = '17'\n"
     if after_wait:
         action += "function Enter-InstallLock { Activate; return $true }\n"
@@ -437,7 +443,7 @@ def test_ps1_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, aft
 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
-def test_ps1_serving_transition_marker_is_cleared_after_success(tmp_path):
+def test_ps1_serving_transition_marker_is_cleared_after_success(tmp_path: Path) -> None:
     result = _run_ps(_ps_harness(
         tmp_path, "match-active", "$env:SERVING_PROBE_EXIT_CODE = '10'\nInvoke-Update",
         libraries=False,
@@ -542,7 +548,7 @@ _LIB_ARTIFACTS = (
 )
 
 
-def _assert_hash_steps(result: subprocess.CompletedProcess) -> None:
+def _assert_hash_steps(result: subprocess.CompletedProcess[str]) -> None:
     """H0 (baseline) == H1 (after build/test artifacts), then every shared-lib
     source edit (H-<lib>) changes the hash again."""
     detail = result.stdout + result.stderr
@@ -597,7 +603,7 @@ _MID_BUILD_IDS = ["sources-unchanged", "sources-edited-mid-build"]
 
 
 def _assert_mid_build_outcome(
-    tmp_path: Path, result: subprocess.CompletedProcess, *, edited: bool, update: bool
+    tmp_path: Path, result: subprocess.CompletedProcess[str], *, edited: bool, update: bool
 ) -> None:
     """Unchanged sources publish the admitted hash and activate; sources
     edited after admission but before publication refuse the install: no
@@ -673,6 +679,7 @@ _WINDOWS_POWERSHELL = shutil.which("powershell") if os.name == "nt" else None
 def test_ps1_payload_hash_is_identical_on_both_powershell_hosts(tmp_path: Path) -> None:
     """Either host may run the installer against the same slot, so the hash
     must not depend on the host's culture-aware sort order (NLS vs ICU)."""
+    assert _PWSH is not None and _WINDOWS_POWERSHELL is not None
     harness = _ps_harness(tmp_path, "absent", "Write-Host \"PH=$ph\"\n")
     for name in ("a-b.py", "a_b.py", "a.b.py", "ab.py", "aB.py"):
         (_plugin_source(tmp_path).parent / name).write_text("X = 1\n", encoding="utf-8")
@@ -684,6 +691,7 @@ def test_ps1_payload_hash_is_identical_on_both_powershell_hosts(tmp_path: Path) 
             text=True,
             timeout=120,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         hashes[host] = _reported(result.stdout, "PH")
         assert hashes[host], result.stdout + result.stderr
@@ -899,9 +907,11 @@ rec START
     return path
 
 
-def _run_sh(harness: Path) -> subprocess.CompletedProcess:
+def _run_sh(harness: Path) -> subprocess.CompletedProcess[str]:
+    bash = _bash()
+    assert bash is not None
     return subprocess.run(
-        [_bash(), str(harness)],
+        [bash, str(harness)],
         capture_output=True,
         text=True,
         timeout=_SH_TIMEOUT_SECONDS,
@@ -910,7 +920,9 @@ def _run_sh(harness: Path) -> subprocess.CompletedProcess:
     )
 
 
-def _assert_same_version_reruns(tmp_path: Path, harness: Path, run) -> None:
+def _assert_same_version_reruns(
+    tmp_path: Path, harness: Path, run: Callable[[Path], subprocess.CompletedProcess[str]],
+) -> None:
     source = harness.read_text(encoding="utf-8")
     setup_marker = "# admission-fixture: setup\n"
     action_marker = "# admission-fixture: action\n"
@@ -931,7 +943,7 @@ def _assert_same_version_reruns(tmp_path: Path, harness: Path, run) -> None:
     for path in (slot, marker):
         os.utime(path, ns=(old_mtime, old_mtime))
 
-    def identity(path: Path):
+    def identity(path: Path) -> tuple[int, int, int]:
         info = path.stat()
         return info.st_dev, info.st_ino, info.st_mtime_ns
 
@@ -976,7 +988,9 @@ def test_sh_completed_slot_admission(
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize("after_wait", [False, True], ids=["selected", "selected-during-lock"])
-def test_sh_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, after_wait):
+def test_sh_serving_reconcile_failure_never_publishes_or_rebuilds(
+    tmp_path: Path, after_wait: bool,
+) -> None:
     action = "export SERVING_PROBE_EXIT_CODE=10 SERVING_EXIT_CODE=17\n"
     if after_wait:
         action += "_enter_install_lock() { activate; return 0; }\n"
@@ -998,7 +1012,7 @@ def test_sh_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, afte
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
-def test_sh_serving_transition_marker_is_cleared_after_success(tmp_path):
+def test_sh_serving_transition_marker_is_cleared_after_success(tmp_path: Path) -> None:
     result = _run_sh(_sh_harness(
         tmp_path, "match-active", "export SERVING_PROBE_EXIT_CODE=10\ndo_update",
         libraries=False,
@@ -1087,6 +1101,8 @@ def test_sh_call_sites_fail_on_refused_completion_and_guard_precedes_mutation() 
 def test_sh_payload_hash_does_not_depend_on_locale(tmp_path: Path) -> None:
     """Identical-content files tie on their digest and are ordered by path;
     that order must not follow the caller's locale (shell vs service manager)."""
+    bash = _bash()
+    assert bash is not None
     harness = _sh_harness(tmp_path, "absent", 'echo "PH=$ph"\n')
     for name in ("a-b.py", "a_b.py", "aB.py", "ab.py"):
         (_plugin_source(tmp_path).parent / name).write_text("", encoding="utf-8")
@@ -1094,7 +1110,8 @@ def test_sh_payload_hash_does_not_depend_on_locale(tmp_path: Path) -> None:
     for locale in ("C", "en_US.UTF-8"):
         env = {**os.environ, "LC_ALL": locale}
         result = subprocess.run(
-            [_bash(), str(harness)], capture_output=True, text=True, timeout=120, check=False, env=env
+            [bash, str(harness)], capture_output=True, text=True, timeout=120, check=False, env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         hashes.add(_reported(result.stdout, "PH"))
     assert len(hashes) == 1 and "" not in hashes, hashes
@@ -1307,7 +1324,7 @@ function Install-SiblingPlugins {
 
 
 def _assert_mutation_precedes_publication(
-    tmp_path: Path, result: subprocess.CompletedProcess, *, prune_fails: bool, update: bool
+    tmp_path: Path, result: subprocess.CompletedProcess[str], *, prune_fails: bool, update: bool
 ) -> None:
     events = _events(tmp_path)
     detail = f"rc={result.returncode}\nevents={events}\nstdout={result.stdout}\nstderr={result.stderr}"
@@ -1426,7 +1443,7 @@ def test_sh_provider_prune_never_rewrites_a_published_slot_through_the_venv_link
 
 
 def _assert_published_slot_survives_failed_update(
-    tmp_path: Path, result: subprocess.CompletedProcess
+    tmp_path: Path, result: subprocess.CompletedProcess[str]
 ) -> None:
     events = _events(tmp_path)
     detail = f"rc={result.returncode}\nevents={events}\nstdout={result.stdout}\nstderr={result.stderr}"

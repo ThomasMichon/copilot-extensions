@@ -273,26 +273,35 @@ silently fall back to compiling native dependencies.
 
 ### setup-owned-python-prerequisite
 
-Python is a normal, composable prerequisite prepared through upfront harness
-or standalone setup using the
-[installer's uv-managed Python contract](../installer/README.md#uv-managed-python).
-Helper launchers consume the explicit supported selection independently of
-ambient Python PATH order rather than rediscovering, signing, attesting or
-physically pinning the interpreter on each invocation. Python provenance and
-signature checks, registry-only selection and special physical launch
-namespaces are not prerequisites for running the suite's helpers.
+Each independently installable Python project declares the Python version it
+needs. Its installation owner uses `uv` to acquire and manage a compatible
+interpreter and construct its environment. A host needs no preinstalled Python,
+particular system or user PATH ordering, global Python upgrade or manual
+interpreter choice. Different projects can require different Python versions
+on the same machine without changing one another's environments.
 
-Setup owns supported Python preparation and explicit interpreter handoff, not
-repair of the user's default Python or PATH order. The suite does not
-accidentally publish interpreters from disposable worktrees or temporary
-environments onto durable PATH. This is provisioning and environment hygiene,
-not a per-launch blacklist or another interpreter-admission service. Missing
-or incompatible Python produces a clear prerequisite failure and uses the
-existing explicit setup owner, never an implicit helper-owned download.
+Every application launcher uses `uv` from PATH and delegates interpreter
+installation/selection to it. Suite scripts do not assume where Python is
+installed, including where `uv` stores it, or use bare PATH Python.
 
-Trusting the interpreter does not waive process-birth identity, containment,
-lease ownership, authenticated endpoints, operation locks or safe cleanup.
-Those protect the work the helper performs, not the provenance of Python.
+The [installer's uv-managed Python contract](../installer/README.md#uv-managed-python)
+owns the same setup and launcher boundary for standalone and integrated use.
+
+The same boundary covers bootstrap and standard-library helpers that run before
+an application environment exists. Explicit setup establishes their declared
+managed interpreter before Python-dependent installation work, without needing
+Python to obtain Python or requiring another plugin's service. Installed
+commands reach their selected project environment through `uv`; they do not
+rediscover ambient Python or select another application generation.
+Status and ordinary launch do not acquire an interpreter or repair setup.
+
+Setup owns acquisition and useful missing/offline/unsupported-platform
+diagnostics, not a new interpreter-attestation service. Existing OS execution
+policy and dependency/source admission remain in force. Per-launch signature,
+registry, physical-path attestation or disposable-location blacklists are not
+substitutes for the declared managed environment. This does not waive
+process-birth identity, containment, lease ownership, authenticated endpoints,
+operation locks or safe cleanup.
 
 ### attributed-daemon-instances
 

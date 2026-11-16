@@ -117,15 +117,25 @@ The extension and payload-local CLI share one SDK-free core and must reach
 `agent-worktrees` and `agent-dispatch` without changing prompt bytes or command
 ownership.
 
+The [managed-Python target](../install-contract.md#project-owned-managed-python)
+extends these invariants. The existing direct sibling-interpreter and first-use
+provisioning implementation is legacy adoption, not qualification of this
+target; migration remains in the
+[all-launcher setup plan](../../efforts/active/source-managed-runtime-installs/managed-python.md).
+
 1. Resolve the sibling beneath the current plugin's marketplace installation
    root, and verify its manifest name and canonical repository provenance.
    Never search arbitrary marketplaces or use ambient `PATH` to choose the
    sibling payload or its Python runtime.
-2. Use the sibling payload's authoritative resolver to locate or first-use
-   provision its versioned runtime. Provisioning receives an installation-sized
-   timeout independent of the shorter operation timeout.
-3. Invoke the resolved Python interpreter directly with exact argv in isolated
-   UTF-8 mode (`-I -X utf8`).
+2. Use the sibling's authoritative resolver to locate its prepared, completed
+   application generation. Missing setup produces the existing explicit setup
+   diagnostic; ordinary handoff/status does not provision a runtime or acquire
+   Python. Explicit setup retains its separate installation-sized timeout.
+3. Invoke PATH `uv` for that generation's declared project environment with
+   exact argv and isolated UTF-8 Python execution (`-I -X utf8`). PATH selects
+   only uv, never the sibling payload, application generation or Python.
+   Preserve selected marketplace ownership and do not wrap an old bound
+   executable as a substitute for selecting the declared environment.
 4. Remove inherited `PYTHONHOME` and `PYTHONPATH`; set the owning payload-root
    environment required by the target plugin.
 5. Never render user-controlled prompt, title, identifier, or payload text into

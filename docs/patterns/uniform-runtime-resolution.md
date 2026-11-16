@@ -18,6 +18,22 @@ is exactly the divergence the single-instance model exists to prevent.
 
 ## Standard approach
 
+### Managed-Python launcher target
+
+The [project-owned managed-Python contract](../install-contract.md#project-owned-managed-python)
+extends this pattern: every application launcher uses `uv` from PATH and
+delegates interpreter installation/selection to it for the declared project.
+The uniform resolver still selects one completed immutable application
+generation; it does not guess the managed Python installation directory.
+`uv` must not select another application generation, source checkout or mutable
+dependency closure. Explicit setup owns acquisition; ordinary installed
+launches retain the prepared environment and do not install or repair it.
+Current marker-to-interpreter adapters below describe existing adoption, not
+qualification of the new launcher flow. Migration and complete launcher
+coverage remain tracked by the [setup plan](../../efforts/active/source-managed-runtime-installs/managed-python.md).
+
+### Existing runtime-resolution adapters
+
 **Exactly one resolution, marker-only, reachable identically from every caller.**
 
 - **Python callers** use `versioned_runtime.resolve_python(root)` — the canonical
@@ -40,8 +56,9 @@ Binding rules that make it real:
 - **Never a PATH python.** An unresolved runtime returns *nothing*
   (`resolve_python` → `None`, `AGENT_RT_PY` empty) so the caller **degrades
   deliberately** — self-provisions, or no-ops — rather than silently binding the
-  system interpreter. Finding a python to *build* the venv (bootstrap/uv) is a
-  different, legitimate act and is not a launch.
+  system interpreter. The managed-Python target replaces host-Python discovery
+  for construction too: explicit setup delegates that selection to `uv` using
+  the project's declaration, not a guessed interpreter directory.
 - **One source of truth.** The three-tier order lives once (in the primitive and
   the shared shell resolver); a launch site copies the resolver, never the logic.
   `tools/check-runtime-resolution.py` guards against re-divergence.
@@ -159,8 +176,11 @@ Notes:
   [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)) is a
   separate, intentional runtime and keeps its explicit venv — annotate it with
   `# runtime-resolution: allow` if a launch line names it.
-- **Bootstrap python ≠ launch python.** `command -v python3` to *create* the venv
-  is fine; a service *launched* under `python3` is the violation.
+- **Construction and launch both delegate Python selection.** The former
+  allowance for `command -v python3` during construction is superseded by the
+  managed-Python target. Use PATH `uv` with the project's declared requirement
+  for construction and launch; never copy a guessed managed-Python location
+  into a script. Application-generation selection remains uniform.
 - **Self-contained binstubs.** A binstub may run before anything is deployed
   (confined-host self-provision), so it embeds the canonical snippet rather than
   depending on a not-yet-deployed resolver file.

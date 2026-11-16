@@ -345,16 +345,21 @@ when a change requires it before continuing.
 
 ### uv-managed-python
 
-The suite uses uv to manage its supported Python versions. Explicit installation
+Each Python project installation declares the Python version it needs, and the
+suite uses uv to manage those versions. Different project requirements coexist
+without changing unrelated environments. Explicit installation
 prepares the declared interpreter independently of the machine's default
 `python`, active virtual environment, Python launcher registrations or PATH
 ordering. A supported system Python installation and a machine-wide PATH repair
 are not prerequisites for preparing the suite's Python.
 
 The installation owner carries that selection into bootstrap helpers and
-application environments. Services and ordinary commands launch their selected
-environment's explicit interpreter; wrapping an existing executable in
-`uv run` does not retarget the environment to which it is already bound.
+application environments before Python-dependent installation work. All app
+launchers, including service and ordinary-command launchers, use `uv` from PATH
+and delegate interpreter selection to it for the declared project environment.
+Scripts never assume where Python is installed, including where uv stores it.
+Wrapping an old bound executable is not a migration: uv must receive the
+selected project/environment, not an instruction to run that old interpreter.
 Fresh terminals, repair and update use the same declared selection rather than
 rediscovering ambient Python. The standalone installation path owns the same
 preparation without requiring Manager, a sibling service or a plugin session.

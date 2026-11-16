@@ -52,6 +52,30 @@ the addressed owners. It does not erase the fixture approval above or make its
 resource bounds a universal production grant. Reconcile target-specific holds
 at the deployment boundary; this fixture remains disposable and two-application.
 
+### Protected-owner feed extension approval
+
+The operator was asked:
+
+> Native qualification is blocked by the constructor’s governed-feed prerequisite. The existing feed mechanism is restricted to protected, named Windows qualification packets—not the candidate-branch workflow.
+>
+> May I prepare and review a named Manager/Worktrees adapter through that existing protected owner, retaining its feed/sanitizer protections and this runner’s original bounds? No feed URL or credentials are needed here; production rollout remains outside this approval.
+
+The `protected_feed_extension` field was presented as:
+
+> Approve the bounded protected-owner extension
+>
+> Plan and review first, then implement only the disposable two-application qualification adapter. Do not expose the feed to candidate workflows, relax feed policy, or expand production scope.
+
+The operator answered `true`.
+
+**Interpretation and limits:** land this reviewed plan before implementing the
+named adapter. Reuse the protected owner, immutable candidate/source admission,
+feed handling and independent sanitizer with the original fixture bounds.
+This approves no generic secret reader, candidate-workflow feed access,
+public-index fallback, feed-policy weakening, productive installation,
+unrelated native actor or rollout. The parent Goal and all other holds remain
+unchanged. No feed value or credentials were requested or received.
+
 ## Current evidence and dependencies
 
 - The original integration #11121 and containing Main #12353 retain their
@@ -73,6 +97,105 @@ application/profile association, wheel closure, interpreters, executable
 entrypoints, selected fixture inventory and exact case/runner allocation.
 Distinguish released inputs from an unpromoted candidate. A changing branch
 name or previously green receipt is not an immutable source selection.
+
+## Protected-owner adapter plan - agent-recommended, not implemented
+
+The authentic-source fixture's third hosted attempt reached the real
+constructor but lacked its required governed package feed. Its application
+installation never began; neither that failure nor subsequent source controls
+qualifies the native consumer. The existing candidate-branch portfolio must not
+receive the protected feed to work around this prerequisite.
+
+This closes the existing
+[clean-room independence intent](../../../visions/clean-room-validation/README.md#independent-source-installation)
+and [runtime replacement contract](../../../visions/installer/README.md#authoritative-runtime-replacement)
+through the current Windows qualification owner, not a second installer,
+secret reader, execution service or acceptance authority. The parent Q2-Q5 and
+VQ1-VQ6 remain open.
+
+- [ ] PF1 - Review before implementation: land this plan alone through normal
+  review and required CI. Preserve the existing authentic-source implementation
+  branch and its native hold. Plan approval does not qualify that branch,
+  authorize a workflow dispatch or publish the protected controller.
+- [ ] PF2 - Add exactly one typed packet, `manager-worktrees-source`, to the
+  existing `windows-qualification` client, protected contract/worker and support
+  declaration. Bind the candidate SHA separately from full immutable Main seed
+  and merged-Dev runtime SHAs. Admit those two extra source inputs only for this
+  packet; reject omitted, malformed, foreign-field and generic-selector uses.
+  Bind all three identities into request, transport, result and local receipt.
+  Check candidate fixture/runner files are regular source entries, and preserve
+  the current original/rerun-owner and protected-default-branch checks.
+- [ ] PF3 - Compose the existing `run-manager-suite-acceptance.py --mode source`
+  owner, not the generic plugin-test command or a new fixture. Forward the two
+  frozen runtime inputs; retain actual donor provenance, real complete
+  application construction, the private fixture allocation and fixture-owned
+  cleanup. Address only Manager, Worktrees and their actual declared closure.
+  Do not acquire or run Copilot/PSMux prerequisites: this packet does not launch
+  Copilot actors, New/Resume or installation-survival cases. Keep existing
+  packets' native prerequisites and selectors unchanged.
+- [ ] PF4 - Extend only this named packet's existing protected feed allowlist,
+  after implementation review and controller publication. Validate the same
+  credential-free governed HTTPS URL without reading or publishing its value.
+  Feed propagation must survive the fixture's fake HOME and intentional UV
+  environment scrubbing through a narrow explicit construction input. Keep all
+  other environment scrubbing and feed-policy checks; do not copy credentials,
+  configuration or host state into the fixture. Generic tools/plugin requests
+  and the candidate-branch workflow remain without feed access.
+- [ ] PF5 - Reuse the protected worker's redaction and independent always-run
+  sanitizer for this packet, including interrupted execution. Export only
+  bounded named runner, preparation, command, settlement, observer, frontdoor
+  and assertion evidence through its current artifact owner. Remove URLs and
+  the configured feed hostname from logs, JSON, JSONL and JUnit before upload;
+  omit unsafe or oversized evidence and fail qualification rather than upload
+  unsanitized output. No private Git repository, home, build tree or environment
+  dump becomes an artifact.
+- [ ] PF6 - Preserve the suite's existing limits: preparation 1800 seconds,
+  exercise 900, assertions 300, settlement 90, observer 3320 and hosted job
+  allocation 60 minutes. The protected workflow currently allocates 40 minutes;
+  select 60 only for this packet and leave all existing packet allocations
+  unchanged. Do not sum new independent stage retries or enlarge these limits.
+  Account for setup and final sanitization inside the original hosted ceiling;
+  failure, cancellation or exhausted time cannot become a qualification pass.
+- [ ] PF7 - Qualify source contracts first, then review and merge the adapter,
+  verify the containing protected-controller release and its published support,
+  and only then admit the next fixture attempt with exact immutable inputs.
+  Retain request/run/attempt/controller/candidate/runtime identities. Observe
+  the actual installed Manager update, complete Worktrees environment and
+  settlement through the same fixture owner. An unknown dispatch or cleanup
+  result is reconciled by its existing owner, never replayed as a fresh attempt.
+  Record literal failure and retain Q2-Q5/VQ1-VQ6 until their real evidence
+  passes. No installed adoption or parent completion is inferred.
+
+### Adapter validation and execution hold
+
+- [ ] VF1 - Focused contract/client/worker tests reject unsupported control,
+  owner/rerun mismatch, incorrect input identities, arbitrary command/selector
+  fields and packet confusion. Existing packet behavior and prerequisite pins
+  remain unchanged; generic requests cannot inherit the feed.
+- [ ] VF2 - A lightweight real subprocess test exercises the actual environment
+  boundary under fake HOME and UV scrubbing with a nonsecret example HTTPS
+  index. A genuine constructor prerequisite failure remains failure; no mock
+  may stand in for the hosted application's construction or ordinary update.
+- [ ] VF3 - Sanitizer tests cover the packet's JSONL and copied evidence, URL
+  and bare-hostname leakage, timeout/interruption, symlink/oversize omission and
+  the independent post-worker path. Artifact selection cannot bypass sanitation.
+- [ ] VF4 - Validate one-packet command construction, original aggregate/stage
+  deadlines, exact result case and stage identities, negative/skipped/empty
+  outcomes and required settlement. Retain the current runner's cleanup and
+  read-only Git-object regression controls.
+- [ ] VF5 - Run required lint, whole-file typing and documentation/structure
+  gates for the implementation, then the disposable hosted-Windows clean-room
+  consumer after the protected controller supports this exact packet. Bind the
+  native receipt to actual source inputs and inspect retained sanitized evidence.
+  Passing unit/source controls, a plan merge or adapter release alone is not
+  native qualification.
+
+**Hold:** no further native attempt until PF1-PF6 implementation has cleared
+review and the existing publication path has made the protected controller and
+support declaration available. The approved extension does not expose a feed
+to candidate workflows or authorize a production installation. If the owner
+cannot represent this packet, its original bounds or independently sanitized
+evidence, record the exact missing boundary rather than bypass it.
 
 ## Plan - agent-recommended
 
