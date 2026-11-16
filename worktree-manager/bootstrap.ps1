@@ -474,7 +474,7 @@ if (-not $uvCandidate -or -not (Test-BootstrapUvVersion $uvCandidate)) {
     $uvPrepared = $true
     # uv installs into ~\.local\bin; amend THIS session's PATH so we can continue
     # without a restart (the installer persists PATH for future shells).
-    $env:PATH = "$LocalBin;$env:PATH"
+    $env:PATH = $LocalBin + [IO.Path]::PathSeparator + $env:PATH
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         Write-BootstrapProgress 'uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap.' warning
         exit 1
