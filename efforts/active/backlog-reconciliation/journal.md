@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Complete status, catalog and roster receiving proposal](journal/2026/11.16-status-catalog-roster-receiving.md)
+
 - [2026-11-16 - Accepted ZDD tracking and current unfinished contracts](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
 
 - [2026-11-16 - Runtime source completion and finite authoring-contract intake](journal/2026/11.16-runtime-source-and-authoring-contract.md)
