@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 import pytest
 from agent_procutil import no_window_flags
 from agent_remote_driver.session_host.bundle import build_session_host_bundle
-from agent_remote_driver.session_host.inspection import CONTRACT, probe
+from agent_remote_driver.session_host.inspection import CONTRACT, probe, request as inspection_request
 from agent_remote_driver.session_host import protocol as proto
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.host import ChildProcess, SessionHost
@@ -31,7 +31,7 @@ from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.session_status import SessionStatus
 from agent_bridge.routes.sessions import router
-from agent_bridge.session_inspection import _semantic
+from agent_bridge.session_inspection import _age, _iso, _semantic
 from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
 from test_session_host import _FakeChild, _stub_tree_kill as _stub_tree_kill
@@ -213,8 +213,8 @@ async def test_dead_child_reconnect_and_turn_silence_are_distinct() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", [
-    "blackhole", "legacy", "bad-nonce", "partial", "oversized",
-    "bad-child", "bad-generation", "bad-age", "bad-version", "boolean-pid", "additive",
+    "blackhole", "legacy", "bad-nonce", "partial", "oversized", "deep-json",
+    "bad-child", "bad-generation", "bad-age", "overflow-age", "bad-version", "boolean-pid", "additive",
 ])
 async def test_unknown_legacy_and_invalid_observers_do_not_attach_or_retry(fault: str) -> None:
     requests: list[tuple[proto.MsgType | None, bytes]] = []
@@ -233,6 +233,10 @@ async def test_unknown_legacy_and_invalid_observers_do_not_attach_or_retry(fault
                 await release.wait()
             elif fault == "legacy":
                 return
+            elif fault == "deep-json":
+                payload = b"[" * 1500 + b"0" + b"]" * 1500
+                assert inspection_request(payload, "") is None
+                await proto.write_message(writer, proto.MsgType.PONG, payload)
             elif fault == "oversized":
                 writer.write(struct.pack(">I", 8192) + proto.MsgType.PONG.value)
                 await writer.drain()
@@ -253,6 +257,7 @@ async def test_unknown_legacy_and_invalid_observers_do_not_attach_or_retry(fault
                         "bad-child": {"child_pid": 7777},
                         "bad-generation": {"host_generation": ""},
                         "bad-age": {"last_child_frame_age_s": float("nan")},
+                        "overflow-age": {"last_child_frame_age_s": 10**400},
                         "bad-version": {"version": 2},
                         "boolean-pid": {"host_pid": True},
                         "additive": {"future": "safe additive field"},
@@ -405,6 +410,57 @@ def test_requested_blocked_and_quiet_tool_metadata(status: str, expected: str) -
     assert result["freshness"] == "stale"
     assert result["terminal_result"] == "not-terminal"
     assert result["milestones"]["derived"][0]["basis"] == "derived"
+
+
+@pytest.mark.parametrize("value", [10**400, -(10**400)])
+def test_oversized_numeric_observations_remain_unknown(value: int) -> None:
+    session = _session()
+    now = time.time()
+    event = session.event_log.append("agent_message", {"text": "fixture"}, timestamp=now)
+    event.timestamp = value
+    result = _semantic(session, "running", now, {})
+    assert result["signal_age_s"] is None and result["freshness"] == "unknown"
+    assert _age(value, now) is None and _iso(value) is None
+
+
+@pytest.mark.parametrize("events,expected", [
+    ([
+        ("ask_user_request", {"tool_call_id": "a"}),
+        ("ask_user_request", {"tool_call_id": "b"}),
+        ("ask_user_resolved", {"tool_call_id": "b"}),
+    ], "blocked"),
+    ([
+        ("ask_user_request", {"tool_call_id": "a"}),
+        ("permission_resolved", {"request_id": "a"}),
+    ], "blocked"),
+    ([
+        ("permission_request", {"request_id": "a"}),
+        ("permission_request", {"request_id": "b"}),
+        ("permission_resolved", {"request_id": "b"}),
+    ], "blocked"),
+    ([
+        ("ask_user_request", {"request_id": "a", "tool_call_id": "same"}),
+        ("ask_user_request", {"request_id": "b", "tool_call_id": "same"}),
+        ("ask_user_resolved", {"request_id": "b", "tool_call_id": "same"}),
+    ], "blocked"),
+    ([
+        ("ask_user_request", {"tool_call_id": "a"}),
+        ("ask_user_request", {"tool_call_id": "b"}),
+        ("ask_user_resolved", {"tool_call_id": "a"}),
+        ("ask_user_withdrawn", {"tool_call_id": "b"}),
+    ], "running"),
+])
+def test_pending_input_resolutions_only_clear_their_correlated_family(
+    events: list[tuple[str, dict[str, str]]], expected: str,
+) -> None:
+    session = _session()
+    now = time.time()
+    for kind, data in events:
+        session.event_log.append(kind, data, timestamp=now)
+    result = _semantic(session, "running", now, {})
+    assert result["request_state"] == expected
+    assert result["terminal_result"] == "not-terminal"
+    assert session.event_log.latest_id == len(events)
 
 
 @pytest.mark.asyncio

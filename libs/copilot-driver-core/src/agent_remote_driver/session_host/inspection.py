@@ -37,7 +37,7 @@ def request(payload: bytes, credential: str) -> str | None:
         ):
             return None
         return cast(str, value["nonce"])
-    except (ValueError, UnicodeError, TypeError):
+    except (ValueError, UnicodeError, TypeError, RecursionError):
         return None
 
 
@@ -111,7 +111,7 @@ async def probe(
         return await asyncio.wait_for(exchange(), timeout)
     except (TimeoutError, asyncio.TimeoutError):
         return {"state": "timed_out", "reason": "inspection-deadline"}
-    except (proto.ProtocolError, ValueError, UnicodeError):
+    except (proto.ProtocolError, ValueError, UnicodeError, OverflowError, RecursionError):
         return {"state": "invalid", "reason": "malformed-inspection-response"}
     except (OSError, ConnectionError):
         return {"state": "unavailable", "reason": "inspection-transport-unavailable"}

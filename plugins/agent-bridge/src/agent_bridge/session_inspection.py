@@ -10,6 +10,8 @@ from typing import Any
 
 from agent_remote_driver.session_host.client import SessionHostClient
 
+from .attention_current import _REQUESTS, _RESOLUTIONS, _TURN_ENDS
+from .attention_wait import _input_correlation
 from .events import is_nested_event_data
 from .result_snapshot import _event_parts
 from .result_tokens import _event_ref
@@ -19,15 +21,20 @@ FRESH_SECONDS = 60.0
 
 
 def _age(value: Any, now: float) -> float | None:
-    if type(value) not in (int, float) or not math.isfinite(value) or value > now:
+    try:
+        if type(value) not in (int, float) or not math.isfinite(value) or value > now:
+            return None
+        return max(0.0, now - float(value))
+    except OverflowError:
         return None
-    return max(0.0, now - float(value))
 
 
 def _iso(value: Any) -> str | None:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         return None
     try:
+        if not math.isfinite(value):
+            return None
         return datetime.fromtimestamp(value, timezone.utc).isoformat()
     except (ValueError, OverflowError, OSError):
         return None
@@ -111,21 +118,39 @@ def _semantic(
     reason: str | None = "no-semantic-result"
     if latest is None:
         request_state, terminal = "unknown", "unknown"
-    pending = None
+    pending: dict[tuple[str, str, str], Any] = {}
+    unkeyed: list[Any] = []
     last_end = None
     for event in root:
-        if event.event in {"ask_user_request", "permission_request", "policy_required"}:
-            pending = event
-        elif event.event in {"ask_user_resolved", "ask_user_withdrawn", "permission_resolved"}:
-            pending = None
-        elif event.event == "turn_complete":
-            last_end, pending = event, None
+        if event.event in _TURN_ENDS:
+            pending.clear()
+            unkeyed.clear()
+            last_end = event if event.event == "turn_complete" else None
+        elif event.event in _REQUESTS:
+            family, key, _reason = _REQUESTS[event.event]
+            key, correlation = (
+                _input_correlation(event.data) if family == "input"
+                else (key, str(event.data.get(key) or ""))
+            )
+            if correlation:
+                pending[(family, key, correlation)] = event
+            else:
+                unkeyed.append(event)
+            last_end = None
+        elif event.event in _RESOLUTIONS:
+            family, key = _RESOLUTIONS[event.event]
+            key, correlation = (
+                _input_correlation(event.data) if family == "input"
+                else (key, str(event.data.get(key) or ""))
+            )
+            pending.pop((family, key, correlation), None)
         elif event.event in {"user_message", "tool_call_start", "agent_message", "agent_thought"} or (
             event.event == "session_state_changed" and event.data.get("status") == "running"
         ):
             last_end = None
-    if pending is not None and status in {"running", "idle"}:
-        request_state = "blocked"
+    has_pending = bool(pending or unkeyed)
+    if has_pending and status in {"running", "idle"}:
+        request_state, terminal = "blocked", "not-terminal"
     if last_end is not None and status == "idle":
         stop = last_end.data.get("stop_reason")
         if stop == "end_turn":
@@ -152,7 +177,7 @@ def _semantic(
         "truncation": "truncated" if truncated else ("none" if events else "unknown"),
         "request_state": request_state, "terminal_result": terminal, "unknown_result": reason,
         "current_phase": _text(session.progress.get("phase")) or (
-            "tool" if active else ("awaiting-input" if pending else status)
+            "tool" if active else ("awaiting-input" if has_pending else status)
         ),
         "active_tool": tool,
         "event_sequence_delta": (
