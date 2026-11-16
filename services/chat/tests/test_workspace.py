@@ -5,6 +5,8 @@ import json
 import math
 from pathlib import Path
 import sys
+from types import SimpleNamespace
+from typing import Any, NoReturn, TypedDict
 from unittest.mock import patch
 
 import pytest
@@ -14,12 +16,21 @@ from agent_chat_service.cli import main
 import agent_chat_service.workspace as workspace
 
 
+class OwnerFixture(TypedDict):
+    values: dict[tuple[str, ...], Any]
+    calls: list[tuple[str, ...]]
+    selected: list[str]
+    anchor: Path
+    root: Path
+    cwd: str
+
+
 @pytest.fixture
-def owner(tmp_path, monkeypatch):
+def owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> OwnerFixture:
     anchor, worktree = tmp_path / "anchor", tmp_path / "worktree"
     anchor.mkdir()
     (worktree / "nested").mkdir(parents=True)
-    values = {
+    values: dict[tuple[str, ...], Any] = {
         ("get", "repo-dir"): str(anchor),
         ("get", "worktree-dir"): str(worktree),
         ("get", "execution-identity"): {
@@ -43,7 +54,7 @@ def owner(tmp_path, monkeypatch):
     calls = []
     selected = [sys.executable, "-I", "-m", "example_owner"]
 
-    def read(argv, **options):
+    def read(argv: list[str], **options: Any) -> bytes:
         assert argv[:5] == [sys.executable, "-I", "-c", workspace._CWD_RUNNER,
                            str((worktree / "nested").resolve())]
         assert argv[5:5 + len(selected)] == selected
@@ -61,7 +72,7 @@ def owner(tmp_path, monkeypatch):
     }
 
 
-def owner_response(values):
+def owner_response(values: dict[tuple[str, ...], Any]) -> bytes:
     rows = values[("list", "--json", "--cache-only", "--worktree-id", "worktree-1")]
     if isinstance(rows, bytes):
         return rows
@@ -82,13 +93,15 @@ def owner_response(values):
     return json.dumps({"ok": True, "version": 1, "context": context}).encode("utf-8")
 
 
-def resolve(owner, session="startup-1"):
+def resolve(owner: OwnerFixture, session: str = "startup-1") -> dict[str, Any]:
     return workspace.resolve_workspace(
         worktrees_command=owner["selected"], session_id=session, cwd=owner["cwd"],
     )
 
 
-def test_worktree_identity_survives_sessions_and_label_changes_without_adoption(owner, monkeypatch):
+def test_worktree_identity_survives_sessions_and_label_changes_without_adoption(
+    owner: OwnerFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "unrelated-environment")
     before = Path.cwd()
     first = resolve(owner)
@@ -113,7 +126,7 @@ def test_worktree_identity_survives_sessions_and_label_changes_without_adoption(
     assert ("get", "execution-identity") not in owner["calls"]
 
 
-def test_anchor_segments_startup_session_and_never_queries_a_synthetic_head(owner):
+def test_anchor_segments_startup_session_and_never_queries_a_synthetic_head(owner: OwnerFixture) -> None:
     values = owner["values"]
     values[("get", "worktree-dir")] = ""
     values[("get", "repo-dir")] = str(owner["root"])
@@ -129,7 +142,7 @@ def test_anchor_segments_startup_session_and_never_queries_a_synthetic_head(owne
 
 
 @pytest.mark.parametrize("state", ["other", "unassigned", "transition", "versioned"])
-def test_existing_owner_head_and_execution_tuple_are_not_reassigned(owner, state):
+def test_existing_owner_head_and_execution_tuple_are_not_reassigned(owner: OwnerFixture, state: str) -> None:
     head = owner["values"][("head-session", "--worktree-id", "worktree-1", "--json")]
     if state == "other":
         head["head_session"] = "other-session"
@@ -153,7 +166,8 @@ def test_existing_owner_head_and_execution_tuple_are_not_reassigned(owner, state
 @pytest.mark.parametrize("change", [
     "session-missing", "session-path", "session-large", "cwd-relative", "cwd-missing", "cwd-file",
 ])
-def test_invalid_initialization_refuses_before_executing_owner(owner, change):
+def test_invalid_initialization_refuses_before_executing_owner(owner: OwnerFixture, change: str) -> None:
+    session: str | None
     session, cwd = "startup-1", owner["cwd"]
     if change == "session-missing":
         session = None
@@ -181,7 +195,7 @@ def test_invalid_initialization_refuses_before_executing_owner(owner, change):
     "head-worktree", "head-active", "head-state", "head-revision", "head-pending",
     "head-missing-session", "head-missing-state",
 ])
-def test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback(owner, damage):
+def test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback(owner: OwnerFixture, damage: str) -> None:
     values = owner["values"]
     identity = values[("get", "execution-identity")]
     rows = values[("list", "--json", "--cache-only", "--worktree-id", "worktree-1")]["worktrees"]
@@ -241,7 +255,9 @@ def test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback(owne
     assert len(owner["calls"]) <= 6
 
 
-def test_workspace_reads_share_one_finite_deadline(owner, monkeypatch):
+def test_workspace_reads_share_one_finite_deadline(
+    owner: OwnerFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     instants = iter([10, 11, 71])
     monkeypatch.setattr(workspace.time, "monotonic", lambda: next(instants))
     with pytest.raises(ClientError) as caught:
@@ -252,15 +268,15 @@ def test_workspace_reads_share_one_finite_deadline(owner, monkeypatch):
 
 @pytest.mark.parametrize("boundary", [512.0, 1024.0])
 def test_workspace_deadline_rounding_never_exceeds_original_budget(
-    owner, monkeypatch, boundary,
-):
+    owner: OwnerFixture, monkeypatch: pytest.MonkeyPatch, boundary: float,
+) -> None:
     instant = math.nextafter(boundary, 0.0)
     assert (instant + 60) - instant > 60
     monkeypatch.setattr(workspace.time, "monotonic", lambda: instant)
     original = workspace.run_command
     timeouts = []
 
-    def read(*args, **options):
+    def read(*args: Any, **options: Any) -> bytes:
         timeouts.append(options["timeout"])
         return original(*args, **options)
 
@@ -269,7 +285,9 @@ def test_workspace_deadline_rounding_never_exceeds_original_budget(
     assert timeouts == [60.0]
 
 
-def test_late_owner_response_cannot_turn_deadline_expiry_into_success(owner, monkeypatch):
+def test_late_owner_response_cannot_turn_deadline_expiry_into_success(
+    owner: OwnerFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     instants = iter([10, 11, 71])
     monkeypatch.setattr(workspace.time, "monotonic", lambda: next(instants))
     with pytest.raises(ClientError) as caught:
@@ -279,16 +297,18 @@ def test_late_owner_response_cannot_turn_deadline_expiry_into_success(owner, mon
 
 
 @pytest.mark.parametrize("selected", [None, [], ["agent-worktrees"], ["selected.ps1"]])
-def test_workspace_requires_explicit_complete_owner_argv_before_execution(owner, selected):
+def test_workspace_requires_explicit_complete_owner_argv_before_execution(owner: OwnerFixture, selected: object) -> None:
     with pytest.raises(ClientError) as caught:
         workspace.resolve_workspace(worktrees_command=selected, session_id="startup-1", cwd=owner["cwd"])
     assert caught.value.code == "invalid_configuration" and not owner["calls"]
 
 
-def test_owner_failure_is_not_retried_or_downgraded_to_anchor(owner, monkeypatch):
+def test_owner_failure_is_not_retried_or_downgraded_to_anchor(
+    owner: OwnerFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = []
 
-    def failed(*args, **kwargs):
+    def failed(*args: object, **kwargs: object) -> NoReturn:
         calls.append(args)
         raise ClientError("provider_failed", "Selected owner refused.")
 
@@ -299,7 +319,7 @@ def test_owner_failure_is_not_retried_or_downgraded_to_anchor(owner, monkeypatch
 
 
 @pytest.mark.parametrize("raw", [b"not json", b'{"duplicate":1,"duplicate":2}', b"\xff", b"null"])
-def test_malformed_owner_json_has_the_client_response_error_boundary(owner, raw):
+def test_malformed_owner_json_has_the_client_response_error_boundary(owner: OwnerFixture, raw: bytes) -> None:
     owner["values"][("list", "--json", "--cache-only", "--worktree-id", "worktree-1")] = raw
     with pytest.raises(ClientError) as caught:
         resolve(owner)
@@ -308,7 +328,7 @@ def test_malformed_owner_json_has_the_client_response_error_boundary(owner, raw)
 
 
 @pytest.mark.parametrize("source", [[], {}, None, 1, True, "detected"])
-def test_anchor_source_type_is_checked_before_configured_provenance(owner, source):
+def test_anchor_source_type_is_checked_before_configured_provenance(owner: OwnerFixture, source: object) -> None:
     owner["values"][("get", "repo-dir")] = str(owner["root"])
     owner["values"][("get", "worktree-dir")] = ""
     owner["values"][("get", "execution-identity")]["source"] = source
@@ -318,7 +338,7 @@ def test_anchor_source_type_is_checked_before_configured_provenance(owner, sourc
 
 
 @pytest.mark.parametrize("damage", ["schema", "version", "extra", "missing"])
-def test_workspace_cli_requires_exact_explicit_initialization_before_owner(owner, damage):
+def test_workspace_cli_requires_exact_explicit_initialization_before_owner(owner: OwnerFixture, damage: str) -> None:
     fields = {
         "schema": "agent-chat.workspace-request", "version": 1, "session_id": "startup-1",
         "cwd": owner["cwd"], "worktrees_command": owner["selected"],
@@ -340,8 +360,8 @@ def test_workspace_cli_requires_exact_explicit_initialization_before_owner(owner
 
 
 def test_installed_workspace_uses_trusted_cwd_and_selected_owner_without_source_or_environment(
-    installed_chat, owner, monkeypatch,
-):
+    installed_chat: SimpleNamespace, owner: OwnerFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "not-the-host-initialization")
     script = installed_chat.root / "selected_owner.py"
     fixture = installed_chat.root / "owner.json"

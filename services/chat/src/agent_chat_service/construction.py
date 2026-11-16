@@ -7,15 +7,19 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import hashlib
-import importlib
+import importlib as importlib
 import importlib.util
 import os
 from pathlib import Path
-import sys
+import sys as sys
 import threading
 from types import ModuleType
+from typing import Any, Iterator, TYPE_CHECKING
 
-from .catalog import _resource, installed_catalog
+if TYPE_CHECKING:
+    from installer_engine import ReadyCandidate
+
+from .catalog import _path_key, _resource, installed_catalog
 from .client import ClientError
 
 _ENGINE: ModuleType | None = None
@@ -96,14 +100,24 @@ def _client_slot() -> Path:
         raise ClientError(
             "construction_slot_invalid", "Chat construction requires an immutable numbered slot.",
         )
-    if not Path(__file__).is_relative_to(slot):
+    if not _path_key(Path(__file__)).is_relative_to(_path_key(slot)):
         raise ClientError("construction_slot_invalid", "Chat construction is outside its slot.")
     return slot
 
 
-def _prepare_client(data: dict) -> None:
+def _prepare_client(data: dict[str, Any]) -> None:
     """Called by canonical construction only, before immutable completion."""
-    if set(data) != {"slot", "frozen_plugin"} or data["slot"] != str(_client_slot()):
+    try:
+        # Retained Windows interpreters can report the same slot with a verbatim prefix.
+        same_slot = (
+            set(data) == {"slot", "frozen_plugin"}
+            and isinstance(data["slot"], str)
+            and Path(data["slot"]).is_absolute()
+            and Path(data["slot"]).samefile(_client_slot())
+        )
+    except (OSError, ValueError):
+        same_slot = False
+    if not same_slot:
         raise ClientError("construction_slot_invalid", "Chat construction has inconsistent inputs.")
     catalog = installed_catalog()
     slot = _client_slot()
@@ -162,7 +176,7 @@ def validate_service() -> None:
         origin = getattr(module, "__file__", None)
         if (
             not origin or not Path(origin).is_file()
-            or not Path(origin).resolve().is_relative_to(slot)
+            or not _path_key(Path(origin).resolve()).is_relative_to(_path_key(slot))
         ):
             raise ClientError(
                 "construction_service_unavailable",
@@ -174,14 +188,18 @@ def validate_service() -> None:
 def client_candidate(
     root: Path, version: str, *, project: Path, uv: Path, python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
-):
+) -> Iterator[ReadyCandidate]:
     """Retain a completed client candidate without publishing or selecting it.
 
     ``project`` supplies complete independent source-distribution build inputs
     and the unchanged declared local library layout, not a live runtime.
     """
     engine = _engine()
-    with engine.numbered_candidate(
+    if TYPE_CHECKING:
+        from installer_engine import numbered_candidate
+    else:
+        numbered_candidate = engine.numbered_candidate
+    with numbered_candidate(
         root, version, plugin=project, uv=uv, base_python=python,
         extras=("client",), local_packages=_CLIENT_PACKAGES,
         health_module="agent_chat_service.construction", health_callable="validate_client",
@@ -196,14 +214,18 @@ def client_candidate(
 def service_candidate(
     root: Path, version: str, *, project: Path, uv: Path, python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
-):
+) -> Iterator[ReadyCandidate]:
     """Retain a sealed service-role candidate without selecting or starting it.
 
     Validation imports the installed host and its dependencies; it never opens
     storage, acquires a live writer lease or publishes a serving endpoint.
     """
     engine = _engine()
-    with engine.numbered_candidate(
+    if TYPE_CHECKING:
+        from installer_engine import numbered_candidate
+    else:
+        numbered_candidate = engine.numbered_candidate
+    with numbered_candidate(
         root, version, plugin=project, uv=uv, base_python=python,
         extras=("service",), local_packages=_SERVICE_PACKAGES,
         health_module="agent_chat_service.construction", health_callable="validate_service",

@@ -1,26 +1,38 @@
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Protocol, cast
 
 import pytest
 
 from conftest import pytest_runtest_logreport, run_artifact
-from qualification import PARAMETER_COUNTS, execution_summary, membership, membership_digest
+from qualification import (
+    PARAMETER_COUNTS, ExecutionReport, execution_summary, membership, membership_digest,
+)
 
 
-def original_nodes():
+class TemporaryConfig(Protocol):
+    @property
+    def _tmp_path_factory(self) -> pytest.TempPathFactory: ...
+
+
+def original_nodes() -> list[str]:
     return [
         family + (f"[case-{index}]" if count > 1 else "")
         for family, count in PARAMETER_COUNTS.items() for index in range(count)
     ]
 
 
-def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypatch, capsys):
+def test_membership_is_exact_and_full_retains_every_parameter(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     report = getattr(request.config, "_chat_membership", None)
     if os.environ.get("AGENT_CHAT_TEST_SUITE"):
         assert report is not None
-        path = request.config._tmp_path_factory.getbasetemp() / "chat-membership.json"
+        path = cast(TemporaryConfig, request.config)._tmp_path_factory.getbasetemp() / "chat-membership.json"
         assert json.loads(path.read_text("utf-8")) == report
         assert not path.with_suffix(".tmp").exists()
     else:
@@ -44,17 +56,18 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
     assert membership_digest(mapping) != membership_digest(membership(changed))
     assert sum(PARAMETER_COUNTS.values()) == (
         236 + 6 + 18 + 7 + 46 + 3 + 10 + 28 + 6 + 21 + 3 + 1 + 2 + 1 + 8
-        + 10 + 4 + 11 + 10 + 9 + 14 + 2 + 6 + 14 + 2 + 8 + 4 + 8 + 2 + 4
+        + 10 + 4 + 11 + 10 + 9 + 14 + 2 + 6 + 14 + 2 + 8 + 4 + 8 + 2 + 4 + 1
     )
     for profile in ("acceptance", "full"):
         selected = {
             node for node, lane in mapping.items() if profile == "full" or lane == "acceptance"
         }
-        reports = [
+        reports: list[ExecutionReport] = [
             SimpleNamespace(nodeid="tests/" + node, when="call", outcome="passed")
             for node in sorted(selected)
         ]
         assert execution_summary(mapping, profile, reports)["status"] == "complete"
+        incomplete: list[ExecutionReport]
         for incomplete in (
             [], reports[:-1], [*reports, reports[0]],
             [*reports, SimpleNamespace(nodeid="foreign", when="call", outcome="passed")],
@@ -71,7 +84,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
             "test_client.py::test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process",
             "test_local_endpoint.py::test_local_endpoint_real_unix_client_uses_the_published_host",
         ):
-            platform_reports = [
+            platform_reports: list[ExecutionReport] = [
                 SimpleNamespace(nodeid=report.nodeid, when="setup", outcome="skipped")
                 if report.nodeid == "tests/" + family else report
                 for report in reports
@@ -86,7 +99,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
 
 
 @pytest.mark.parametrize("change", ["missing", "new", "duplicate", "parameter"])
-def test_membership_refuses_missing_unassigned_or_duplicate_nodes(change):
+def test_membership_refuses_missing_unassigned_or_duplicate_nodes(change: str) -> None:
     nodes = original_nodes()
     if change == "missing":
         nodes.pop()
@@ -100,7 +113,9 @@ def test_membership_refuses_missing_unassigned_or_duplicate_nodes(change):
         membership(nodes)
 
 
-def test_artifact_helper_preserves_cwd_stdin_and_environment(tmp_path, monkeypatch):
+def test_artifact_helper_preserves_cwd_stdin_and_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "unselected-source"))
     result = json.loads(run_artifact([
         sys.executable, "-I", "-c",

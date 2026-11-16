@@ -124,6 +124,16 @@ core of the principles above; a reviewer checks a change against these.
   and the [receiving plan](../../efforts/active/source-managed-runtime-installs/app-footprint-transition.md).
   Existing source mechanisms are adoption evidence, not exceptions to this target.
 
+- **Separate application versions from state lifetimes.** New application
+  footprints use the common application hierarchy and can coexist with legacy
+  installs until explicit global-command activation. Version code/setup inputs
+  remain immutable after construction. Durable configuration/state lives outside
+  slots; only disposable state owned exclusively by one executing version may
+  occupy that slot's separate `state/` directory. No successor depends on that
+  disposable state, and the exception does not waive live-slot retention.
+  See [clean-break state boundaries](../../visions/installer/application-footprints/README.md#clean-break-layout-and-state-lifetimes);
+  repository relocation remains separately scoped.
+
 - **Python belongs to the project installation, not ambient PATH.** Each
   independently installed Python project declares its interpreter requirement;
   its setup owner uses `uv`-managed Python to construct the environment.

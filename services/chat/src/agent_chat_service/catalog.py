@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from importlib import metadata
+from importlib import metadata as metadata
 from pathlib import Path
-import stat
-import sys
-import sysconfig
+import stat as stat
+import sys as sys
+import sysconfig as sysconfig
+from typing import Any, NoReturn, cast
 
-from . import __version__
+from . import __version__ as __version__
 from .client import ClientError
 
 MAX_RESOURCE_BYTES = 1024 * 1024
@@ -19,7 +20,7 @@ PACKAGE_FILES = (
     "client.py", "store.py", "transport.py", "hosting.py", "workspace.py", "collaboration.py",
     "construction.py", "setup.py",
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-    "versioned_runtime_publication.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py", "versioned_runtime_source.py", "versioned_runtime_cache.py",
     "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py",
     "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     "installer_dependency_arguments.py",
@@ -28,7 +29,7 @@ PACKAGE_FILES = (
 )
 
 
-def _refuse() -> None:
+def _refuse() -> NoReturn:
     raise ClientError(
         "invalid_installation",
         "Catalog requires an ordinary interpreter-local wheel installation with intact RECORD resources.",
@@ -54,7 +55,18 @@ def _resource(path: Path) -> bytes:
     return data
 
 
-def installed_catalog() -> dict:
+def _path_key(path: Path) -> Path:
+    """Compare Windows verbatim aliases without changing resource I/O paths."""
+    spelling = str(path.absolute())
+    if sys.platform == "win32":
+        if spelling.upper().startswith("\\\\?\\UNC\\"):
+            spelling = "\\\\" + spelling[8:]
+        elif spelling.startswith("\\\\?\\") and len(spelling) >= 7 and spelling[5:7] == ":\\":
+            spelling = spelling[4:]
+    return Path(spelling)
+
+
+def installed_catalog() -> dict[str, Any]:
     """Return exact isolated argv only after checking the imported installed closure."""
     try:
         distribution = metadata.distribution("agent-chat-service")
@@ -70,8 +82,8 @@ def installed_catalog() -> dict:
         if len(commands) != 1 or commands[0].value != "agent_chat_service.cli:main":
             _refuse()
         package = Path(__file__).absolute().parent
-        sites = {Path(sysconfig.get_path(key)).absolute() for key in ("purelib", "platlib")}
-        if package.parent not in sites:
+        sites = {_path_key(Path(sysconfig.get_path(key))) for key in ("purelib", "platlib")}
+        if _path_key(package.parent) not in sites:
             _refuse()
         if {item.name for item in package.glob("*.py")} != set(PACKAGE_FILES):
             _refuse()
@@ -84,8 +96,9 @@ def installed_catalog() -> dict:
             entry = matches[0]
             if entry.hash is None or entry.hash.mode != "sha256":
                 _refuse()
-            path = Path(distribution.locate_file(entry)).absolute()
-            if path != package / name:
+            # SimplePath does not promise PathLike; Path retains the validating conversion.
+            path = Path(cast(Any, distribution.locate_file(entry))).absolute()
+            if _path_key(path) != _path_key(package / name):
                 _refuse()
             data = _resource(path)
             digest = hashlib.sha256(data).digest()
