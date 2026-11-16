@@ -114,3 +114,14 @@ former installer-derived admission stop was reconciled as commit-identity-only;
 historical incomplete reads are not relabeled complete. No product source,
 PR description, test, native operation or provider mutation establishes this
 planned mapping. Review, actual direct receiving and separate judgment remain.
+
+## Actual receiving acceptance
+
+#12888 subsequently merged as `83344757b98cb9a8072f0d36f58ab1061c70c51d`.
+The complete direct #4477 body intake and full readback are verified, preserving
+the incumbent prefix, verbatim source, all eight unchecked technical rows and
+every actual owner, including the newer retirement/relay investigation.
+The separate #870 judgment retired redundant tracking `NOT_PLANNED`, not
+`COMPLETED`. The [dated receiving record](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
+retains the actual merge, public explanation and complete queue measurement.
+#4477 remains OPEN; no product, native, release or resource completion follows.
