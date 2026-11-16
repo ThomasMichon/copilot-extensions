@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from dataclasses import asdict
+from typing import Any
 
+from .ordinary_native_bindings import is_native_retired, reservation_native_identity
 from .queue_common import _task_transition_spec
 from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_records import SpawnState, Status, TaskError
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
-from .ordinary_native_bindings import is_native_retired, reservation_native_identity
 from .wake_recovery_target import HISTORY_LIMIT, reconciliation_plan
 
 RECOVERY_OPERATIONS = ("detach_agent", "reset_proposed", "reset_queued")
@@ -23,13 +25,17 @@ TASK_FIELDS = (
     "id", "status", "generation", "updated_at", "owner", "owner_session_id",
     "target_machine", "target_worktree", "hold_reason", "attempts", "exclusive_key",
 )
+TASK_OBSERVATIONS = {
+    "updated_at", "lease_expires_at", "last_seen_at",
+    "last_liveness", "activity", "activity_updated_at",
+}
 
 
 def _encoded(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def _history(conn: sqlite3.Connection, table: str, task_id: str) -> list[dict]:
+def _history(conn: sqlite3.Connection, table: str, task_id: str) -> list[dict[str, Any]]:
     # All callers supply a fixed queue-owned table, never an HTTP table name.
     return [dict(row) for row in conn.execute(
         f"SELECT * FROM {table} WHERE task_id=? ORDER BY rowid DESC LIMIT ?",  # noqa: S608
@@ -37,12 +43,18 @@ def _history(conn: sqlite3.Connection, table: str, task_id: str) -> list[dict]:
     )]
 
 
-def _captured(queue, conn: sqlite3.Connection, task_id: str) -> dict:
+def _captured(queue: Any, conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
     task = queue._fetch(conn, task_id)
     if task is None:
         raise TaskError("no such task")
     return {
-        "task": {name: getattr(task, name) for name in TASK_FIELDS},
+        "task": {
+            **{name: getattr(task, name) for name in TASK_FIELDS},
+            "_reconciliation_state": hashlib.sha256(_encoded({
+                name: value for name, value in asdict(task).items()
+                if name not in TASK_OBSERVATIONS
+            }).encode("utf-8")).hexdigest(),
+        },
         "attachments": _history(conn, "task_attachments", task_id),
         "reservations": _history(conn, "spawn_reservations", task_id),
         "wake_outbox": _history(conn, "wake_outbox", task_id),
@@ -60,15 +72,28 @@ def _captured(queue, conn: sqlite3.Connection, task_id: str) -> dict:
     }
 
 
-def _revision(captured: dict) -> str:
+def _revision(captured: dict[str, Any]) -> str:
     return hashlib.sha256(_encoded(captured).encode("utf-8")).hexdigest()
 
 
-def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
+def reconciliation_revision(captured: dict[str, Any]) -> str:
+    """Fence original-wake repair without treating liveness as a task mutation."""
+    snapshot = {
+        **captured,
+        "task": {name: value for name, value in captured["task"].items() if name != "updated_at"},
+    }
+    return hashlib.sha256(_encoded({
+        "operation": "wake-reconciliation/v1", "snapshot": snapshot,
+    }).encode("utf-8")).hexdigest()
+
+
+def _blockers(conn: sqlite3.Connection, captured: dict[str, Any]) -> list[str]:
     task = captured["task"]
     reasons = []
     if any(len(rows) > HISTORY_LIMIT for key, rows in captured.items() if key != "task"):
-        reasons.append("retained history exceeds the bounded recovery view; inspect owning history")
+        reasons.append(
+            "retained history exceeds the bounded recovery view; inspect owning history"
+        )
     if task["hold_reason"] is not None:
         reasons.append("task is held; clear the independent hold explicitly")
     if task["status"] in {*Status.OWNED, Status.QUEUED} and any(
@@ -93,7 +118,9 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
         if row["cooling_token"] is not None:
             reasons.append("reservation cooling remains unresolved")
         if row["state"] in SpawnState.ACTIVE:
-            reasons.append("retained reservation still owns execution; conclude it through its owner")
+            reasons.append(
+                "retained reservation still owns execution; conclude it through its owner"
+            )
         if (
             row["state"] in SpawnState.ACTIVE
             and row["exclusive_key"] is not None and not row["exclusive_released"]
@@ -118,7 +145,9 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
     if task["owner_session_id"]:
         sessions.add(task["owner_session_id"])
     if sessions - retired_sessions:
-        reasons.append("native assignment has no qualified retirement; stopping and detaching are separate")
+        reasons.append(
+            "native assignment has no qualified retirement; stopping and detaching are separate"
+        )
     for table in ("wake_outbox", "run_waiter_wakes"):
         for row in captured[table]:
             if table == "run_waiter_wakes" and row["sender"] == CLAIM_RELEASE_SENDER:
@@ -132,7 +161,7 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
     return list(dict.fromkeys(reasons))
 
 
-def _reset_blockers(captured: dict) -> list[str]:
+def _reset_blockers(captured: dict[str, Any]) -> list[str]:
     for row in captured["task_relationships"]:
         try:
             closed = json.loads(row["task_relationship"])["state"] == "closed"
@@ -146,7 +175,7 @@ def _reset_blockers(captured: dict) -> list[str]:
     return []
 
 
-def _generation_change_blockers(captured: dict) -> list[str]:
+def _generation_change_blockers(captured: dict[str, Any]) -> list[str]:
     if any(row["acknowledgement"] is None for row in captured["relevance_closeouts"]):
         return [
             "pending relevance closeout retains its original generation; "
@@ -155,7 +184,7 @@ def _generation_change_blockers(captured: dict) -> list[str]:
     return []
 
 
-def require_task_recovery_safe(queue, conn: sqlite3.Connection, task_id: str) -> None:
+def require_task_recovery_safe(queue: Any, conn: sqlite3.Connection, task_id: str) -> None:
     """Prevent legacy reset from bypassing the same retained-execution fences."""
     captured = _captured(queue, conn, task_id)
     reasons = _blockers(conn, captured) + _reset_blockers(captured)
@@ -163,7 +192,7 @@ def require_task_recovery_safe(queue, conn: sqlite3.Connection, task_id: str) ->
         raise TaskError("; ".join(reasons))
 
 
-def _action(reasons: list[str], *, command: str) -> dict:
+def _action(reasons: list[str], *, command: str) -> dict[str, Any]:
     return {
         "allowed": not reasons, "reasons": reasons, "command": command,
         "authority": "action owner rechecks authority and all effect-time prerequisites",
@@ -179,7 +208,7 @@ class TaskRecoveryMixin:
             "result_json TEXT NOT NULL, PRIMARY KEY(task_id, request_id))"
         )
 
-    def task_diagnostics(self, task_id: str) -> dict:
+    def task_diagnostics(self: Any, task_id: str) -> dict[str, Any]:
         """One queue snapshot; no Bridge call, prompt, process action or repair."""
         with self._connect() as conn:
             conn.execute("BEGIN")
@@ -207,7 +236,10 @@ class TaskRecoveryMixin:
                     wakes.append({
                         "outbox": table, "id": row["id"], "status": row["status"],
                         "attempts": row["attempts"],
-                        "generation": row["generation"] if table == "wake_outbox" else row["task_generation"],
+                        "generation": (
+                            row["generation"] if table == "wake_outbox"
+                            else row["task_generation"]
+                        ),
                         "owner_session_id": row["owner_session_id"],
                         "outcome": state or ("unknown" if row["attempts"] else "not_attempted"),
                         "qualified_custody": row["execution_send"] is not None,
@@ -215,13 +247,17 @@ class TaskRecoveryMixin:
                         "reconcile_reasons": reconcile_reasons,
                     })
             return {
-                "contract": "task_recovery/v1", "task": task, "revision": _revision(captured),
+                "contract": "task_recovery/v1",
+                "task": {name: task[name] for name in TASK_FIELDS},
+                "revision": _revision(captured),
+                "reconciliation_revision": reconciliation_revision(captured),
                 "evidence": {
                     "source": "coordinator_snapshot", "liveness": "unknown",
                     "detail": "stored state is not a current Bridge/process liveness observation",
                     "history_limit": HISTORY_LIMIT,
                     "truncated": any(
-                        len(rows) > HISTORY_LIMIT for key, rows in captured.items() if key != "task"
+                        len(rows) > HISTORY_LIMIT
+                        for key, rows in captured.items() if key != "task"
                     ),
                 },
                 "attachments": captured["attachments"][:HISTORY_LIMIT],
@@ -249,13 +285,20 @@ class TaskRecoveryMixin:
                         [] if task["status"] == Status.STARTED else ["requires started"],
                         command="force-stop",
                     ),
-                    "hold": _action([] if task["hold_reason"] is None else ["already held"], command="hold"),
-                    "unhold": _action([] if task["hold_reason"] is not None else ["not held"], command="unhold"),
+                    "hold": _action(
+                        [] if task["hold_reason"] is None else ["already held"], command="hold",
+                    ),
+                    "unhold": _action(
+                        [] if task["hold_reason"] is not None else ["not held"], command="unhold",
+                    ),
                     "release": _action(
                         [] if task["status"] == Status.SUSPENDED else ["requires suspended"],
                         command="release",
                     ),
-                    "rearm": _action(["inspect the exact failed reservation with rearm before acting"], command="rearm"),
+                    "rearm": _action(
+                        ["inspect the exact failed reservation with rearm before acting"],
+                        command="rearm",
+                    ),
                     "reconcile_wake": _action(
                         [] if any(row["reconcile_supported"] for row in wakes) else (
                             list(dict.fromkeys(
@@ -267,9 +310,9 @@ class TaskRecoveryMixin:
             }
 
     def recover_task(
-        self, task_id: str, *, operation: str, expected_revision: str,
+        self: Any, task_id: str, *, operation: str, expected_revision: str,
         request_id: str, actor: str, reason: str, now: float | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Apply one explicit recovery once, fencing the complete retained snapshot."""
         if operation not in RECOVERY_OPERATIONS:
             raise TaskError("unsupported task recovery operation")
@@ -307,7 +350,7 @@ class TaskRecoveryMixin:
                 ):
                     raise TaskError("task has no agent assignment")
                 destination = Status.QUEUED if task.status in Status.OWNED else task.status
-                fields = {
+                fields: dict[str, Any] = {
                     "owner": None, "owner_session_id": None, "lease_expires_at": None,
                     "claimed_at": None, "last_liveness": None,
                 }
