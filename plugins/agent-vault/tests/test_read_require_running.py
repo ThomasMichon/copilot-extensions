@@ -6,6 +6,7 @@ import io
 import json
 import sys
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -201,3 +202,38 @@ def test_unsupported_native_selection_refuses_but_keeps_configured_extension_pri
         assert actual is not None and actual["value"] == "extension-value"
     else:
         assert actual is None
+
+
+@pytest.mark.parametrize("case", ["unreachable", "local-foreign", "windows-foreign"])
+def test_present_unusable_advertisement_never_becomes_legacy_discovery(
+    isolated_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, case: str,
+) -> None:
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "IS_WSL", True)
+    monkeypatch.delenv("AGENT_VAULT_ENDPOINT", raising=False)
+    monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(
+        kpdb=None, group="Example", vault_name=None, port=10170,
+        sources={"port": "default"},
+    ))
+    local, windows = tmp_path / "local", tmp_path / "windows"
+    local.mkdir()
+    windows.mkdir()
+    monkeypatch.setattr(config, "run_dir", lambda: local)
+    monkeypatch.setattr(config, "installation_id", lambda: "expected/agent-vault")
+    monkeypatch.setattr(cli, "_windows_run_dirs", lambda: [windows])
+    rendezvous.write_endpoint(
+        windows if case == "windows-foreign" else local,
+        "tcp", "127.0.0.1:12345",
+        installation_id="expected/agent-vault" if case == "unreachable" else "other/agent-vault",
+    )
+    monkeypatch.setattr(rendezvous, "connect_probe", lambda _endpoint: False)
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    for name in ("_send_socket", "_send_tcp"):
+        monkeypatch.setattr(
+            cli, name, lambda *_a, **_kw: pytest.fail("unusable advertisement used another daemon"),
+        )
+    with pytest.raises(rendezvous.EndpointUnavailable, match="Selected vault endpoint"):
+        cli.send_command({"action": "get"}, strict_endpoint=True)

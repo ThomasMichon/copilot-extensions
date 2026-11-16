@@ -198,8 +198,10 @@ def _discover_endpoint(
             and expected_installation
             and endpoint.installation_id not in (None, expected_installation)
         ):
-            endpoint = None
-        if endpoint is not None and not rendezvous.is_stale(endpoint, probe=rendezvous.connect_probe):
+            raise rendezvous.EndpointUnavailable("Selected vault endpoint has another installation")
+        if endpoint is not None:
+            if rendezvous.is_stale(endpoint, probe=rendezvous.connect_probe):
+                raise rendezvous.EndpointUnavailable("Selected vault endpoint is unavailable")
             return endpoint
     else:
         try:
@@ -223,6 +225,8 @@ def _discover_endpoint(
             and expected_installation
             and endpoint.installation_id not in (None, expected_installation)
         ):
+            if strict:
+                raise rendezvous.EndpointUnavailable("Selected vault endpoint has another installation")
             return None
         return endpoint
     return None
