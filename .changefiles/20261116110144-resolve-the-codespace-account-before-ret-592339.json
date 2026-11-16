@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve the CodeSpace account before retiring a persisted remote Session Host.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

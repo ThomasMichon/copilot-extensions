@@ -79,6 +79,7 @@ _RETAINED_AFFECTED = (
         "retained_session_recovery.py", "routes/session_resume.py",
         "session_host_launch_custody.py", "session_host/local_spawner.py",
         "cold_outages.py", "session_host/launcher.py", "session_host_connection.py",
+        "session_host_retirement.py",
         "session_manager.py", "startup_progress.py",
         "db_sessions.py", "db_maintenance.py",
         "session_lifecycle.py",
