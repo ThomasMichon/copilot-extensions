@@ -46,6 +46,7 @@ import json
 import logging
 import os
 import subprocess
+from typing import Any
 
 from agent_procutil import no_window_flags
 
@@ -74,10 +75,11 @@ def _run(
     run_cwd = cwd if (cwd and os.path.isdir(cwd)) else None
     try:
         from .acquisition_worktree_writer import require_scope, session_write_args
+        from .retained_writer_transport import execution_prefix
 
         require_scope(args, cwd=cwd)
         args = session_write_args(args)
-        prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
+        prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else execution_prefix(owner_prefix)
         if not prefix:
             from .acquisition_worktree_writer import current
             from .acquisition_contract import AcquisitionRefused
@@ -213,7 +215,7 @@ def note_handoff(
 def session_role(
     worktree_id: str, session_id: str, *, worktree_dir: str | None = None,
     owner_prefix: tuple[str, ...] | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Return the ground-layer role envelope for ``session_id`` (fail-open).
 
     ``{role, head_session, head_state, is_head, registered,
@@ -271,7 +273,7 @@ def history_digest(
 
 
 def build_succession_seed_header(
-    role: dict | None,
+    role: dict[str, Any] | None,
     digest: str | None,
     predecessor: str | None = None,
 ) -> str:
