@@ -53,6 +53,7 @@ _RETAINED_AFFECTED = (
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
         "retained_writer_transport.py",
+        "native_send_history.py", "native_send_settlement.py", "native_send_settlement_schema.py",
         "acquisition_worktree_writer.py", "acquisition_writer_inspection.py", "acquisition_authority.py",
         "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
@@ -117,6 +118,9 @@ AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
     "plugins/agent-bridge/tests/test_native_send_unavailable.py",
+    "plugins/agent-bridge/tests/test_native_send_settlement.py",
+    "plugins/agent-bridge/tests/test_native_send_settlement_process.py",
+    "plugins/agent-bridge/docs/native-send-settlement.md",
     "plugins/agent-bridge/tests/test_host_status.py",
     "plugins/agent-bridge/tests/test_host_status_remote.py",
     "plugins/agent-bridge/tests/test_host_status_clients.py",

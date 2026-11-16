@@ -1,0 +1,9 @@
+{
+  "comment": "Add an internal original native-send settlement foundation with persistent late-admission exclusion; front doors remain unwired",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

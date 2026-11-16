@@ -79,6 +79,10 @@ the fresh resolver guard, so downgrade refusal does not become an ACP fallback.
 A synthetic admission receipt whose evidence is no longer current does not advertise a
 message-specific receipt read; the CLI instead offers session-state inspection.
 
+The internal [native-send settlement foundation](native-send-settlement.md)
+adds a persistent original-key exclusion, not a new operational front door.
+Receipt-only observation still cannot turn missing evidence into non-admission.
+
 Represented-message consumption removes the input from delivery polling even
 when its separate SDK acknowledgement is lost; it never fabricates that
 acknowledgement. Idle-only acquisition treats unconsumed prompts as pending work,

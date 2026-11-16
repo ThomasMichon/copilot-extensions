@@ -52,6 +52,7 @@ async def submit(
     manager: Any, session_id: str, request: NativeSendPrompt,
 ) -> dict[str, Any]:
     from .native_keyed_admission import stored_receipt
+    from .native_send_settlement import require_unsettled
     from .session_manager import DaemonDrainingError
     from .session_prompts import SessionNotRunningError
     from .session_status import SessionStatus
@@ -73,6 +74,7 @@ async def submit(
             saved = stored_receipt(manager.db, session_id, request)
             if saved is not None:
                 return saved
+            require_unsettled(manager.db, request)
             if manager.is_draining:
                 raise DaemonDrainingError("turn")
             if request.no_resume and session.status == SessionStatus.STOPPED:
