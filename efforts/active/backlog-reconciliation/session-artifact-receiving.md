@@ -91,6 +91,10 @@ participants, delivery records and remaining acceptance stay intact.
   state. This is not a request to relocate all session state or create another
   storage/cleanup service.
 - [ ] **F4:** Address the source-to-sync data-handling boundary explicitly.
+  Treat anything written to session `files/` as leaving the device. Product
+  source code and browser credential material must never land there, including
+  inside an otherwise small curated log or document; curated status is not a
+  sensitive-content exemption.
   Destination exclusion/deletion is not proof of source prevention, cleanup
   across originating replicas, or protection against reappearance from a
   surviving writer. Preserve the escalated sensitive-source/browser-auth-state
@@ -116,7 +120,10 @@ participants, delivery records and remaining acceptance stay intact.
   than asserting prevention from a warning.
 - [ ] **FV3:** Exercise the originating-writer and sync-round-trip distinction
   with fixtures, including destination removal followed by a surviving source
-  writer. State exactly what the implemented control establishes and what
+  writer. Include small, nominally curated log/document fixtures containing
+  synthetic product-source or browser-credential material and verify F4's
+  content prohibition independently of F2's category-level block OR flag
+  choice. State exactly what the implemented control establishes and what
   would still need separately authorized replica remediation.
 - [ ] **FV4:** Before technical completion, verify the full implemented
   contract rather than infer it from an earlier cleanup, guidance or sync
@@ -135,6 +142,7 @@ participants, delivery records and remaining acceptance stay intact.
 | All escalated categories, including browser profiles and raw captures | F1-F2, FV1 | Category controls are not merely a filename/DLP filter |
 | Structural block **OR** flag at originating write time | F2, FV1-FV2 | Flagging does not establish non-persistence |
 | Source material may repopulate a cleared destination | F4, FV3 | Destination deletion is not whole-replica remediation |
+| Everything in `files/` is treated as leaving the device; product source and browser credential material must never land there | F4, FV3 | Small size or curated format does not exempt sensitive content; category-level block OR flag remains a distinct choice |
 | Sensitive-source/auth-state risk versus initial false positives | F4, FV1 | No incident-specific content is reproduced |
 | Useful delivered sync exclusions and scratch guidance | F5, FV2, FV4 | Reported partial delivery is not reverified implementation or whole fulfillment |
 | Actual technical acceptance and current ownership | F5, FV4 | No implementation assignment, cleanup or resource release follows |
