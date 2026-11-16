@@ -378,6 +378,15 @@ publication is verified separately. At 2026-11-16 12:49:23 UTC, another excluded
 arrival yields 852 whole open, 123 above fixed 729, with no additional closure
 credit or change to the earlier #12841 completion.
 
+The same record now reconciles #3002's already-audited retirement into #2879
+without replaying it, and retains the distinct #688/#870 contracts and
+#912/#1088 source reservations. Proposed receiving comparisons that stop at
+source admission establish neither a whole transfer nor technical absence.
+New #12872 retains its bounded paired-Sync fixture-repair owner; its reported
+native failure and skipped constructor steps are not independent qualification.
+The complete 2026-11-16 13:56:09 UTC census is 855 whole open, 126 above fixed
+729; three arrivals since the dated 852-open observation add no closure credit.
+
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
 authentication, multiple-account routing and actual owning-plugin installer
