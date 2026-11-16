@@ -15,13 +15,13 @@ from .. import compatible_inbox
 from ..db_live_message_receipts import MAX_RECOVERY_MESSAGE_ID
 from ..inbox_custody import InboxConsumer
 from ..live_inbox_models import (
-    InboxBeginResult, InboxEnrollRequest, InboxHandoffRequest, InboxPollRequest,
+    InboxBeginResult, InboxBindingInfo, InboxEnrollRequest, InboxHandoffRequest, InboxPollRequest,
     InboxNegotiateRequest, InboxNegotiationInfo, InboxOutcomeRequest, InboxOutcomeResult,
     InboxPollResult, InboxHandoffReceipt, InboxRecoveryResult, RetainedInboxMessage,
 )
 from ..live_inbox_runtime import LiveInboxRuntime
+from ..live_message_models import SendMessageRequest
 from ..loop_governance import LoopGovernance
-from ..models import SendMessageRequest
 from ..runtime_custody import RuntimeCustodyError
 
 router = APIRouter(
@@ -114,6 +114,18 @@ def _consumer(session_id: str, body: InboxNegotiateRequest) -> InboxConsumer:
     return consumer
 
 
+def _native_receiving(request: Request, body: InboxNegotiateRequest) -> bool:
+    """Select the adapter; automatic requests still require a stored native venue."""
+    if body.receiving_api == "native-sdk-v1":
+        return True
+    governance = getattr(request.app.state, "loop_governance", None)
+    return (
+        body.consumer.portable_launch is None
+        and isinstance(governance, LoopGovernance)
+        and governance.unconfigured_legacy()
+    )
+
+
 def _compatible_binding(body: InboxEnrollRequest | InboxPollRequest | InboxHandoffRequest) -> None:
     if body.binding.installation != compatible_inbox.BINDING or body.binding.epoch != 1:
         raise RuntimeCustodyError("Unsupported native SDK inbox binding")
@@ -177,14 +189,15 @@ def enqueue_message(
 def negotiate(
     session_id: str, body: InboxNegotiateRequest, request: Request,
 ) -> InboxNegotiationInfo:
-    if body.receiving_api == "native-sdk-v1":
+    if _native_receiving(request, body):
         db = _serving_database(request)
         with _refusals():
             predecessor = compatible_inbox.negotiate(
                 db, _consumer(session_id, body), now=time.time(),
+                native_only=body.receiving_api is None,
             )
         return InboxNegotiationInfo(
-            binding={"installation": compatible_inbox.BINDING, "epoch": 1},
+            binding=InboxBindingInfo(installation=compatible_inbox.BINDING, epoch=1),
             expected_incarnation=predecessor,
         )
     db, governance, runtime = _current_owners(request)
@@ -199,13 +212,14 @@ def negotiate(
 def enroll(
     session_id: str, body: InboxEnrollRequest, request: Request,
 ) -> InboxNegotiationInfo:
-    if body.receiving_api == "native-sdk-v1":
+    if _native_receiving(request, body):
         db = _serving_database(request)
         with _refusals():
             _compatible_binding(body)
             compatible_inbox.enroll(
                 db, _consumer(session_id, body),
                 expected_incarnation=body.expected_incarnation, now=time.time(),
+                native_only=body.receiving_api is None,
             )
         return InboxNegotiationInfo(
             binding=body.binding, expected_incarnation=body.expected_incarnation,
@@ -225,12 +239,13 @@ def enroll(
 def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPollResult:
     from .live_startup_controls import startup_readiness
 
-    if body.receiving_api == "native-sdk-v1":
+    if _native_receiving(request, body):
         db = _serving_database(request)
         with _refusals():
             _compatible_binding(body)
             rows = compatible_inbox.poll(
                 db, _consumer(session_id, body), now=time.time(), limit=body.limit,
+                native_only=body.receiving_api is None,
             )
     else:
         db, governance, runtime = _current_owners(request)
@@ -249,12 +264,13 @@ def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPoll
 
 @router.post("/begin", response_model=InboxBeginResult)
 def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> InboxBeginResult:
-    if body.receiving_api == "native-sdk-v1":
+    if _native_receiving(request, body):
         db = _serving_database(request)
         with _refusals():
             _compatible_binding(body)
             granted = compatible_inbox.begin(
                 db, _consumer(session_id, body), body.message_id, body.handoff_id, now=time.time(),
+                native_only=body.receiving_api is None,
             )
         return InboxBeginResult(begin=granted)
     db, governance, runtime = _current_owners(request)
@@ -279,4 +295,4 @@ def outcome(
             outcome=body.outcome, now=time.time(),
             compatible_consumer=body.receiving_api == "native-sdk-v1",
         )
-    return InboxOutcomeResult(stage=stage)
+    return InboxOutcomeResult.model_validate({"stage": stage})
