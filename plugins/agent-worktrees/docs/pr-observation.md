@@ -209,6 +209,23 @@ policy evidence. Native required policies are never disabled by this block.
 
 ### Renewable observation credentials
 
+An explicitly selected `snapshot <repo> <number> --config <file>
+--credential-command <JSON-argv>` resolves its target through the same bounded
+selected-file binding owner as repository inventory. No local anchor, project,
+registry or layered configuration is needed for this form. The file must contain
+one matching `repos.<name>.pr` provider/repository binding; relative paths retain
+their caller-directory meaning. Unavailable paths return a sanitized selection
+error, not a traceback. Gitea and Azure DevOps
+also require their explicit endpoint. GitHub retains its supported public
+default when the endpoint is omitted. Invalid or ambiguous selection refuses
+before credential acquisition. Ordinary reads without this explicit typed-source
+form retain their existing layered configuration behavior.
+
+The existing inventory contract declares this additive support as
+`snapshot_explicit_binding` version 1 (`scope: selected-file`,
+`local_checkout: not-required`). Older readers lacking that declaration must
+not be assumed checkout-free; no CLI option is added or retired.
+
 The native Python observation boundary (`pr_watch.build_fetch` and
 `pr_observation.configured_snapshot`) accepts an optional `credential_source`.
 It is a zero-argument callable returning typed material with `token`,

@@ -1,15 +1,23 @@
 """The shared owner can read target evidence without owning a caller checkout."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from types import SimpleNamespace
 import json
 from pathlib import Path
 import sys
 import textwrap
+from typing import Any, cast
 
 import pytest
 
 from agent_worktrees import config, pr_cli, pr_config, pr_read_context, pr_related_binding, pr_watch, related, repos
 from agent_worktrees.pr_snapshot import PRSnapshot
+
+_control_plane_pr_map = cast(
+    Callable[[], dict[str, Any]], pr_related_binding.control_plane_pr_map,
+)
 
 
 @pytest.mark.parametrize("argv", [
@@ -18,7 +26,10 @@ from agent_worktrees.pr_snapshot import PRSnapshot
     ["pr-status", "--repo", "owner/repository", "--pr", "7", "--json"],
     ["pr-status", "--repo=owner/repository", "--pr=7", "--json"],
 ])
-def test_front_door_explicit_read_from_neutral_cwd(monkeypatch, tmp_path, capsys, argv):
+def test_front_door_explicit_read_from_neutral_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+) -> None:
     from agent_worktrees import __main__ as main
 
     monkeypatch.chdir(tmp_path)
@@ -38,7 +49,9 @@ def test_front_door_explicit_read_from_neutral_cwd(monkeypatch, tmp_path, capsys
     assert "agent-worktrees.pr-snapshot" in capsys.readouterr().out
 
 
-def test_front_door_threads_read_from_neutral_cwd(monkeypatch, tmp_path, capsys):
+def test_front_door_threads_read_from_neutral_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_worktrees import __main__ as main, providers, pr_thread_report
 
     monkeypatch.chdir(tmp_path)
@@ -67,14 +80,16 @@ def test_front_door_threads_read_from_neutral_cwd(monkeypatch, tmp_path, capsys)
     ["reply", "owner/repository", "7"],
     ["subscribe", "owner/repository", "7"],
 ])
-def test_other_watch_routes_retain_the_deferred_cluster(monkeypatch, arguments):
+def test_other_watch_routes_retain_the_deferred_cluster(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str],
+) -> None:
     from agent_worktrees import __main__ as main
 
-    calls = []
-    monkeypatch.setattr(main.front_door_cli, "resolve_invocation_project", lambda *args: True)
+    calls: list[str] = []
+    monkeypatch.setattr(getattr(main, "front_door_cli"), "resolve_invocation_project", lambda *args: True)
     monkeypatch.setattr(main, "_ensure_cluster_loaded", lambda: calls.append("cluster"))
 
-    def dispatch(argv):
+    def dispatch(argv: list[str]) -> int:
         assert argv == arguments
         assert calls == ["cluster"]
         return 37
@@ -88,7 +103,9 @@ def test_other_watch_routes_retain_the_deferred_cluster(monkeypatch, arguments):
     ["pr-status", "--json"],
     ["create-pr", "--json"],
 ])
-def test_front_door_project_operations_still_require_context(monkeypatch, tmp_path, argv):
+def test_front_door_project_operations_still_require_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str],
+) -> None:
     from agent_worktrees import __main__ as main
 
     monkeypatch.chdir(tmp_path)
@@ -98,7 +115,9 @@ def test_front_door_project_operations_still_require_context(monkeypatch, tmp_pa
     assert main.main(argv) == 41
 
 
-def test_context_free_read_uses_the_registered_control_plane_not_an_invented_project(monkeypatch, tmp_path):
+def test_context_free_read_uses_the_registered_control_plane_not_an_invented_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     anchor = tmp_path / "control"
     monkeypatch.setattr(config, "active_project", lambda: None)
     monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(anchor))
@@ -110,14 +129,148 @@ def test_context_free_read_uses_the_registered_control_plane_not_an_invented_pro
     assert pr_read_context.load_read_config() is result
 
 
-def test_context_free_read_refuses_missing_control_plane(monkeypatch):
+def test_context_free_read_refuses_missing_control_plane(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "active_project", lambda: None)
     monkeypatch.setattr(related, "find_control_plane_anchor", lambda: None)
     with pytest.raises(ValueError, match="--project"):
         pr_read_context.load_read_config()
 
 
-def test_one_shot_snapshot_has_no_mutating_or_durable_claimant_requirement(monkeypatch, capsys):
+@pytest.mark.parametrize("provider,endpoint", [
+    ("github", "https://api.github.com"),
+    ("github", ""),
+    ("gitea", "https://forge.example/api/v1"),
+    ("azure-devops", "https://dev.azure.com/example"),
+])
+@pytest.mark.parametrize("relative", [False, True])
+def test_typed_explicit_snapshot_needs_no_anchor_or_layered_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    provider: str, endpoint: str, relative: bool,
+) -> None:
+    from agent_worktrees import __main__ as main, pr_credential_command
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "active_project", lambda: None)
+    monkeypatch.setattr(main, "_resolve_active_project", lambda explicit: (None, None))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: pytest.fail("layered project load"))
+    monkeypatch.setattr(main, "_ensure_cluster_loaded", lambda: pytest.fail("lifecycle load"))
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned",
+                        lambda *a, **k: pytest.fail("configuration acquired credentials"))
+    selected = {"provider": provider, "repository": "owner/repository"}
+    if endpoint:
+        selected["api_base"] = endpoint
+    path = tmp_path / "read.json"
+    path.write_text(json.dumps({"repos": {"selected": {"pr": selected}}}), encoding="utf-8")
+    calls: list[tuple[str, str, str, int]] = []
+
+    def fetch(
+        prcfg: config.PRConfig, repository: str, number: int, **kwargs: Any,
+    ) -> Callable[[], PRSnapshot]:
+        assert callable(kwargs["credential_source"])
+        calls.append((prcfg.provider, prcfg.api_base, repository, number))
+        return lambda: PRSnapshot(head_sha="head")
+
+    monkeypatch.setattr(pr_watch, "build_fetch", fetch)
+    assert main.main([
+        "pr-watch", "snapshot", "owner/repository", "7", "--config",
+        path.name if relative else str(path),
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 0
+    assert calls == [(provider, endpoint, "owner/repository", 7)]
+    assert json.loads(capsys.readouterr().out)["provider"] == provider
+
+
+@pytest.mark.parametrize("payload", [
+    json.dumps({"repos": {name: {"pr": {
+        "provider": "gitea", "api_base": "https://forge.example",
+        "repository": "owner/repository",
+    }} for name in ("first", "second")}}),
+    '{"repos":{"a":{"pr":{"provider":"gitea","repository":"owner/repository"}}}}',
+    '{"repos":{"a":{"pr":{"provider":"gitea","api_base":42,"repository":"owner/repository"}}}}',
+    '{"repos":{"a":{"pr":{"provider":"gitea","api_base":"https://forge.example","repository":"other/repository"}}}}',
+    '{"repos":{"a":{},"a":{}}}',
+    '{"repos":null}',
+])
+def test_invalid_typed_explicit_snapshot_refuses_before_material_or_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    payload: str,
+) -> None:
+    from agent_worktrees import pr_credential_command
+
+    path = tmp_path / "read.json"
+    path.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: pytest.fail("layered project load"))
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned",
+                        lambda *a, **k: pytest.fail("invalid config acquired credentials"))
+    monkeypatch.setattr(pr_watch, "build_fetch", lambda *a, **k: pytest.fail("invalid provider selected"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--config", str(path),
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 2
+    captured = capsys.readouterr()
+    assert str(path) not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("unavailable", ["missing", "directory", "permission"])
+def test_unavailable_explicit_snapshot_config_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    unavailable: str,
+) -> None:
+    from agent_worktrees import pr_inventory_config, pr_credential_command
+
+    path = tmp_path / "private-config"
+    if unavailable == "directory":
+        path.mkdir()
+    elif unavailable == "permission":
+        def denied(*args: Any, **kwargs: Any) -> Any:
+            raise PermissionError("synthetic-private-diagnostic")
+        monkeypatch.setattr(pr_inventory_config, "load_binding", denied)
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned",
+                        lambda *a, **k: pytest.fail("unavailable config acquired credentials"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--config", str(path),
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 2
+    captured = capsys.readouterr()
+    assert "explicit snapshot configuration is unavailable" in captured.out + captured.err
+    assert str(path) not in captured.out + captured.err
+    assert "synthetic-private" not in captured.out + captured.err
+
+
+def test_legacy_explicit_snapshot_keeps_its_layered_read_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "read.yaml"
+    loaded = object()
+    calls: list[Path] = []
+    repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig())
+
+    def load(selected: Path) -> object:
+        assert selected == path
+        calls.append(selected)
+        return loaded
+
+    def resolve(
+        selected: object, repository: str, *, explicit: bool,
+    ) -> pr_config.ForeignRepoResolution:
+        assert selected is loaded and repository == "owner/repository" and explicit
+        return pr_config.ForeignRepoResolution(repo, "target")
+
+    monkeypatch.setattr(pr_read_context, "load_read_config", load)
+    monkeypatch.setattr(pr_read_context, "resolve_read_repo_config", resolve)
+    monkeypatch.setattr(pr_read_context, "explicit_observation_config",
+                        lambda *a, **k: pytest.fail("legacy read changed selection owner"))
+    monkeypatch.setattr(pr_watch, "build_fetch", lambda *a, **k: lambda: PRSnapshot(head_sha="head"))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "owner/repository", "7", "--config", str(path), "--json",
+    ]) == 0
+    assert calls == [path]
+    capsys.readouterr()
+
+
+def test_one_shot_snapshot_has_no_mutating_or_durable_claimant_requirement(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig())
     monkeypatch.setattr(config, "active_project", lambda: None)
     monkeypatch.setattr(pr_cli, "require_claimant_worktree",
@@ -131,23 +284,25 @@ def test_one_shot_snapshot_has_no_mutating_or_durable_claimant_requirement(monke
 
 
 @pytest.mark.parametrize("verb", ["snapshot", "status", "threads", "diff"])
-def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, capsys, verb):
+def test_one_shot_read_reuses_discovery_but_next_read_reacquires(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], verb: str,
+) -> None:
     from agent_worktrees import config_cache, pr_diff_report, pr_thread_report, providers
 
-    discoveries = []
-    endpoints = []
+    discoveries: list[str] = []
+    endpoints: list[str] = []
     endpoint = "https://forge.example/first"
 
-    def discover():
+    def discover() -> dict[str, Any]:
         discoveries.append(endpoint)
         return {"target": {"provider": "azure-devops", "api_base": endpoint,
                            "repository": "project/repository"}}
 
-    def load(path=None):
-        pr_related_binding.control_plane_pr_map()
+    def load(path: Path | None = None) -> SimpleNamespace:
+        _control_plane_pr_map()
         return SimpleNamespace(repo_name="caller", default_repo=object(), repos={})
 
-    def fetch(prcfg, *args, **kwargs):
+    def fetch(prcfg: config.PRConfig, *args: Any, **kwargs: Any) -> Callable[[], PRSnapshot]:
         endpoints.append(prcfg.api_base)
         return lambda: PRSnapshot(head_sha="head")
 
@@ -159,7 +314,7 @@ def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, ca
     monkeypatch.setattr(providers, "get_provider", lambda name: object())
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: None)
 
-    def threads(*args, api_base="", **kwargs):
+    def threads(*args: Any, api_base: str = "", **kwargs: Any) -> dict[str, Any]:
         endpoints.append(api_base)
         return {"supported": True, "threads": []}
 
@@ -167,7 +322,7 @@ def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, ca
     monkeypatch.setattr(pr_diff_report, "diff_report", threads)
     # An enclosing resident cache must not supply a prior read's policy.
     with config_cache.ConfigCacheSession().scope():
-        pr_related_binding.control_plane_pr_map()
+        _control_plane_pr_map()
         discoveries.clear()
         for endpoint in ("https://forge.example/second", "https://forge.example/third"):
             assert pr_cli.cmd_pr_watch_dispatch([verb, "project/repository", "7", "--json"]) == 0
@@ -175,41 +330,41 @@ def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, ca
     capsys.readouterr()
 
 
-def test_read_discovery_scope_is_released_after_failure(monkeypatch):
+def test_read_discovery_scope_is_released_after_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import config_cache
 
-    calls = []
+    calls: list[bool] = []
 
-    def discover():
+    def discover() -> dict[str, Any]:
         calls.append(True)
         return {}
 
-    def fail(path=None):
-        pr_related_binding.control_plane_pr_map()
+    def fail(path: Path | None = None) -> Any:
+        _control_plane_pr_map()
         raise RuntimeError("read failed")
 
     monkeypatch.setattr(config, "_control_plane_related_pr_map", discover)
     monkeypatch.setattr(pr_read_context, "load_read_config", fail)
     with config_cache.ConfigCacheSession().scope():
-        pr_related_binding.control_plane_pr_map()
+        _control_plane_pr_map()
         with pytest.raises(RuntimeError, match="read failed"):
             pr_cli.cmd_pr_watch_dispatch(["snapshot", "project/repository", "7"])
-        pr_related_binding.control_plane_pr_map()
+        _control_plane_pr_map()
     assert len(calls) == 2
-    pr_related_binding.control_plane_pr_map()
+    _control_plane_pr_map()
     assert len(calls) == 3
 
 
-def test_wait_does_not_acquire_a_read_cache(monkeypatch):
-    calls = []
+def test_wait_does_not_acquire_a_read_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
 
-    def discover():
+    def discover() -> dict[str, Any]:
         calls.append(True)
         return {}
 
-    def wait(argv):
-        pr_related_binding.control_plane_pr_map()
-        pr_related_binding.control_plane_pr_map()
+    def wait(argv: list[str]) -> int:
+        _control_plane_pr_map()
+        _control_plane_pr_map()
         return 124
 
     monkeypatch.setattr(config, "_control_plane_related_pr_map", discover)
@@ -217,7 +372,7 @@ def test_wait_does_not_acquire_a_read_cache(monkeypatch):
     assert len(calls) == 2
 
 
-def test_foreground_only_wait_cannot_be_unbounded(monkeypatch):
+def test_foreground_only_wait_cannot_be_unbounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pr_cli, "require_claimant_worktree",
                         lambda verb: (_ for _ in ()).throw(AssertionError("finite caller-only wait")))
     assert pr_cli.cmd_pr_watch_dispatch([
@@ -225,12 +380,14 @@ def test_foreground_only_wait_cannot_be_unbounded(monkeypatch):
     ]) == 2
 
 
-def test_existing_durable_wait_still_requires_its_claimant(monkeypatch):
+def test_existing_durable_wait_still_requires_its_claimant(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pr_cli, "require_claimant_worktree", lambda verb: (None, "claimant required"))
     assert pr_cli.cmd_pr_watch_dispatch(["wait", "owner/repository", "7", "--timeout", "1"]) == 2
 
 
-def test_foreground_only_wait_uses_the_existing_poll_loop_and_terminal_event(monkeypatch):
+def test_foreground_only_wait_uses_the_existing_poll_loop_and_terminal_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig())
     cfg = SimpleNamespace(default_repo=repo)
     monkeypatch.setattr(pr_cli, "require_claimant_worktree",
@@ -249,8 +406,9 @@ def test_foreground_only_wait_uses_the_existing_poll_loop_and_terminal_event(mon
 @pytest.mark.parametrize("provider_case", ["github", "gitea", "azure-devops", "ado-changed", "ado-partial"])
 @pytest.mark.parametrize("new_frontend", [False, True])
 def test_real_thread_read_process_uses_actual_target_provider_and_preserves_evidence(
-    monkeypatch, tmp_path, capsys, provider_case, new_frontend,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    provider_case: str, new_frontend: bool,
+) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
     from agent_pull_requests import __main__ as frontend, native_command
     from agent_pull_requests.watch_invocation import WatchInvocation
