@@ -15,8 +15,9 @@ git `pre-push` hook).
 For Python acquisition and application-launcher dispatch, the
 [project-owned managed-Python contract](#project-owned-managed-python) is the
 normative target. Later descriptions of PATH/launcher Python discovery,
-signed-system-base selection or direct-interpreter application launch record
-legacy adoption, not exceptions for new/migrated launchers. Their independent
+signed-system-base selection, direct-interpreter application launch or
+ordinary first-use runtime provisioning record legacy adoption, not exceptions
+for new/migrated launchers. Their independent
 generation selection, isolated argv, OS-policy and process/removal-custody
 requirements remain binding.
 
@@ -2262,8 +2263,14 @@ construction, interruption and prior-runtime preservation contracts.
      (e.g. don't `if (Register-Task) { Start }` — a locked-down box that can't
      create the task would then never start the daemon). Registration and
      start are independent; start is always user-mode.
-10. **Fast install + deferred self-provision — the entrypoint declares `stamp`
-    and `provision` (dotfiles#1393).** The base install a `sessionStart` hook /
+10. **Legacy fast install + deferred self-provision — the entrypoint declares `stamp`
+    and `provision` (dotfiles#1393).** This rule records current legacy
+    self-provisioning behavior and its existing guard, not the
+    [explicit-setup target](#project-owned-managed-python). Migration keeps
+    ordinary first use acquisition-free and reports missing setup rather than
+    building a runtime; the description below does not authorize a new
+    hook/launch provisioning path or claim current implementations changed.
+    The legacy base install a `sessionStart` hook /
     `copilot plugin update` triggers must be **fast** and must never hold the
     singleton marketplace payload open long enough to wedge a concurrent update:
     - **`stamp`** — snapshot the payload SOURCE into the versioned slot area
