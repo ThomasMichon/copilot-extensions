@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,7 +22,7 @@ from agent_codespaces.relay_launch import (
 )
 
 
-def test_build_relay_env_scrubs_and_exports():
+def test_build_relay_env_scrubs_and_exports() -> None:
     env = build_relay_env(
         9857, "tok123", use_relay=True, ado_host="example.visualstudio.com",
         github_account="bound-user",
@@ -43,7 +45,7 @@ def test_build_relay_env_scrubs_and_exports():
     assert env.index("unset") < env.index("LC_GIT_CREDENTIAL_RELAY")
 
 
-def test_build_relay_env_no_relay_still_scrubs():
+def test_build_relay_env_no_relay_still_scrubs() -> None:
     env = build_relay_env(9857, "tok", use_relay=False)
     assert "unset MS_ADO_PAT;" in env
     assert "unset AZURE_ARTIFACTS_ENV_ACCESS_TOKEN;" in env
@@ -53,7 +55,7 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
 
 
-def test_build_azure_auth_helper_compat_shim_maps_bare_name():
+def test_build_azure_auth_helper_compat_shim_maps_bare_name() -> None:
     # #415: RushStack's AdoCodespacesAuthCredential hard-codes the bare
     # "azure-auth-helper" name; map it to the relay-first ado-auth-helper
     # wrapper via a compat directory, never a persisted dotfile.
@@ -69,7 +71,7 @@ def test_build_azure_auth_helper_compat_shim_maps_bare_name():
     assert ".profile" not in snippet
 
 
-def test_build_relay_env_includes_azure_auth_helper_shim_when_relay_used():
+def test_build_relay_env_includes_azure_auth_helper_shim_when_relay_used() -> None:
     env = build_relay_env(9857, "tok123", use_relay=True)
     assert AZURE_AUTH_HELPER_COMPAT_DIR in env
     assert "azure-auth-helper" in env
@@ -80,13 +82,13 @@ def test_build_relay_env_includes_azure_auth_helper_shim_when_relay_used():
     )
 
 
-def test_build_relay_env_no_relay_omits_azure_auth_helper_shim():
+def test_build_relay_env_no_relay_omits_azure_auth_helper_shim() -> None:
     env = build_relay_env(9857, "tok", use_relay=False)
     assert "azure-auth-helper" not in env
     assert AZURE_AUTH_HELPER_COMPAT_DIR not in env
 
 
-def test_build_feed_token_exports_emits_helper_backed_export():
+def test_build_feed_token_exports_emits_helper_backed_export() -> None:
     # dotfiles#1221: env-token feed auth (npm/nuget/rush) is bridged from the
     # relay-minted ADO bearer via the ado-auth-helper.
     snippet = build_feed_token_exports(["EXAMPLE_NPM_AUTH_TOKEN"])
@@ -96,7 +98,7 @@ def test_build_feed_token_exports_emits_helper_backed_export():
     )
 
 
-def test_build_feed_token_exports_multiple_and_empty():
+def test_build_feed_token_exports_multiple_and_empty() -> None:
     assert build_feed_token_exports(None) == ""
     assert build_feed_token_exports([]) == ""
     assert build_feed_token_exports(["", None]) == ""
@@ -104,20 +106,20 @@ def test_build_feed_token_exports_multiple_and_empty():
     assert "export A_TOKEN=" in two and "export B_TOKEN=" in two
 
 
-def test_build_feed_token_exports_skips_invalid_env_names():
+def test_build_feed_token_exports_skips_invalid_env_names() -> None:
     assert build_feed_token_exports(["VALID_TOKEN", "bad-name", "A=B"]) == (
         'export VALID_TOKEN="$($HOME/.local/bin/ado-auth-helper '
         'get-access-token 2>/dev/null || true)"; '
     )
 
 
-def test_build_identity_env_exports_emits_host_identity(monkeypatch):
+def test_build_identity_env_exports_emits_host_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     snippet = build_identity_env_exports(["GITHUB_USER"])
     assert snippet == "export GITHUB_USER=owner_user; "
 
 
-def test_build_identity_env_exports_multiple_and_empty(monkeypatch):
+def test_build_identity_env_exports_multiple_and_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     assert build_identity_env_exports(None) == ""
     assert build_identity_env_exports([]) == ""
@@ -127,12 +129,12 @@ def test_build_identity_env_exports_multiple_and_empty(monkeypatch):
     assert "export UPLOAD_USER=owner_user; " in snippet
 
 
-def test_build_identity_env_exports_skips_when_identity_unavailable(monkeypatch):
+def test_build_identity_env_exports_skips_when_identity_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: None)
     assert build_identity_env_exports(["GITHUB_USER"]) == ""
 
 
-def test_build_identity_env_exports_skips_invalid_env_names(monkeypatch):
+def test_build_identity_env_exports_skips_invalid_env_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_codespaces.relay_launch.current_identity",
         lambda: (_ for _ in ()).throw(AssertionError("should not resolve identity")),
@@ -140,7 +142,7 @@ def test_build_identity_env_exports_skips_invalid_env_names(monkeypatch):
     assert build_identity_env_exports(["bad-name", "A=B"]) == ""
 
 
-def test_build_relay_env_exports_identity_without_relay(monkeypatch):
+def test_build_relay_env_exports_identity_without_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     env = build_relay_env(
         9857,
@@ -152,7 +154,7 @@ def test_build_relay_env_exports_identity_without_relay(monkeypatch):
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
 
 
-def test_build_relay_env_exports_identity_before_relay(monkeypatch):
+def test_build_relay_env_exports_identity_before_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     env = build_relay_env(
         9857,
@@ -169,7 +171,7 @@ def test_build_relay_env_exports_identity_before_relay(monkeypatch):
     )
 
 
-def test_build_relay_env_exports_feed_token_after_relay():
+def test_build_relay_env_exports_feed_token_after_relay() -> None:
     env = build_relay_env(
         9857,
         "tok123",
@@ -186,7 +188,7 @@ def test_build_relay_env_exports_feed_token_after_relay():
     )
 
 
-def test_build_relay_env_no_feed_token_by_default():
+def test_build_relay_env_no_feed_token_by_default() -> None:
     env = build_relay_env(9857, "tok123", use_relay=True)
     assert "EXAMPLE_NPM_AUTH_TOKEN" not in env
     # No feed-token export is emitted by default; the ado-auth-helper
@@ -195,7 +197,7 @@ def test_build_relay_env_no_feed_token_by_default():
     assert "get-access-token" not in env
 
 
-def test_build_relay_env_no_relay_omits_feed_token():
+def test_build_relay_env_no_relay_omits_feed_token() -> None:
     # Without the relay there is no LC_GIT_CREDENTIAL_RELAY for the helper, so
     # the feed-token export is not emitted either.
     env = build_relay_env(
@@ -205,14 +207,14 @@ def test_build_relay_env_no_relay_omits_feed_token():
     assert FEED_TOKEN_REFRESH_DIR not in env
 
 
-def test_build_feed_token_refresh_shim_empty_without_feed_vars():
+def test_build_feed_token_refresh_shim_empty_without_feed_vars() -> None:
     assert build_feed_token_refresh_shim(None) == ""
     assert build_feed_token_refresh_shim(["bad-name"]) == ""
     env = build_relay_env(9857, "tok123", use_relay=True)
     assert FEED_TOKEN_REFRESH_DIR not in env
 
 
-def test_build_relay_env_installs_refresh_shim_after_feed_export():
+def test_build_relay_env_installs_refresh_shim_after_feed_export() -> None:
     env = build_relay_env(
         9857, "tok123", use_relay=True, feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"]
     )
@@ -223,14 +225,14 @@ def test_build_relay_env_installs_refresh_shim_after_feed_export():
     assert ".bashrc" not in env and ".profile" not in env
 
 
-def _posix_bash():
+def _posix_bash() -> str | None:
     if os.name == "nt":
         return None
     return shutil.which("bash")
 
 
 @pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
-def test_refresh_shim_remints_token_per_invocation(tmp_path):
+def test_refresh_shim_remints_token_per_invocation(tmp_path: Path) -> None:
     home = tmp_path / "home"
     helper = home / ".local" / "bin" / "ado-auth-helper"
     helper.parent.mkdir(parents=True)
@@ -269,7 +271,7 @@ def test_refresh_shim_remints_token_per_invocation(tmp_path):
 
 
 @pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
-def test_refresh_shim_keeps_previous_token_when_mint_fails(tmp_path):
+def test_refresh_shim_keeps_previous_token_when_mint_fails(tmp_path: Path) -> None:
     home = tmp_path / "home"
     helper = home / ".local" / "bin" / "ado-auth-helper"
     helper.parent.mkdir(parents=True)
@@ -295,7 +297,7 @@ def test_refresh_shim_keeps_previous_token_when_mint_fails(tmp_path):
     assert "rushx: command not found" in out.stderr
 
 
-def test_current_identity_prefers_short_user_alias(monkeypatch):
+def test_current_identity_prefers_short_user_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_codespaces.relay_launch as rl
 
     class Result:
@@ -303,11 +305,11 @@ def test_current_identity_prefers_short_user_alias(monkeypatch):
         stdout = '{"user":{"name":"someone@example.com","type":"user"}}'
 
     monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
-    monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Result())
     assert rl.current_identity() == "someone"
 
 
-def test_current_identity_keeps_non_user_principal_name(monkeypatch):
+def test_current_identity_keeps_non_user_principal_name(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_codespaces.relay_launch as rl
 
     class Result:
@@ -315,11 +317,11 @@ def test_current_identity_keeps_non_user_principal_name(monkeypatch):
         stdout = '{"user":{"name":"app://principal@example.com","type":"servicePrincipal"}}'
 
     monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
-    monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Result())
     assert rl.current_identity() == "app://principal@example.com"
 
 
-def test_current_identity_rejects_multiline_value(monkeypatch):
+def test_current_identity_rejects_multiline_value(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_codespaces.relay_launch as rl
 
     class Result:
@@ -327,11 +329,11 @@ def test_current_identity_rejects_multiline_value(monkeypatch):
         stdout = '{"user":{"name":"someone\\nelse@example.com","type":"user"}}'
 
     monkeypatch.setattr(rl, "_az_argv", lambda args: ["az", *args])
-    monkeypatch.setattr(rl.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Result())
     assert rl.current_identity() is None
 
 
-def test_build_relay_launch_env(monkeypatch, tmp_path):
+def test_build_relay_launch_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import agent_codespaces.relay_launch as rl
 
     class _Creds:
@@ -357,7 +359,7 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
     assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=bound-user" in env
 
 
-def test_build_relay_launch_env_live_port_override(monkeypatch):
+def test_build_relay_launch_env_live_port_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """An injected (live) relay port wins over the static config port."""
     import agent_codespaces.relay_launch as rl
 
@@ -378,7 +380,7 @@ def test_build_relay_launch_env_live_port_override(monkeypatch):
     assert "9999" not in env
 
 
-def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
+def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     """The agent-bridge Session Host dispatch path calls this seam before
     establishing the CodeSpace ``-R`` forward, so the host relay is preflighted
     here rather than only in direct ``agent-codespaces ssh``."""
@@ -390,7 +392,12 @@ def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
     class _Cfg:
         credentials = _Creds()
 
-    calls = []
+    calls: list[tuple[int, str, str]] = []
+
+    def _record(port: int, name: str, *, context: str) -> bool:
+        calls.append((port, name, context))
+        return False
+
     monkeypatch.setattr("agent_codespaces.config.load_merged_config",
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
@@ -398,7 +405,7 @@ def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
     monkeypatch.setattr(
         rl,
         "warn_if_relay_unavailable",
-        lambda port, name, *, context: calls.append((port, name, context)) or False,
+        _record,
     )
 
     _env, port = rl.build_relay_launch_env("cs-foo", relay_port=51234)
@@ -407,7 +414,7 @@ def test_build_relay_launch_env_preflights_dispatch_relay(monkeypatch):
     assert calls == [(51234, "cs-foo", "Session Host dispatch")]
 
 
-def test_warn_if_relay_unavailable_prints_restart_remediation(capsys):
+def test_warn_if_relay_unavailable_prints_restart_remediation(capsys: pytest.CaptureFixture[str]) -> None:
     import socket
 
     from agent_codespaces.relay_launch import warn_if_relay_unavailable
@@ -426,7 +433,7 @@ def test_warn_if_relay_unavailable_prints_restart_remediation(capsys):
     assert "Session Host dispatch" in err
 
 
-def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path):
+def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """``relay_port=None`` falls back to the configured relay port when no live
     port has been published."""
     import agent_codespaces.relay_launch as rl
@@ -448,7 +455,7 @@ def test_build_relay_launch_env_none_falls_back_to_config(monkeypatch, tmp_path)
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
 
 
-def test_build_relay_launch_env_none_uses_published_live_port(monkeypatch, tmp_path):
+def test_build_relay_launch_env_none_uses_published_live_port(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """``relay_port=None`` prefers the daemon's published live port (#540 pt3)
     over the static config port, so an ephemeral relay bind is honored even on
     the standalone agent-codespaces path."""
@@ -474,7 +481,7 @@ def test_build_relay_launch_env_none_uses_published_live_port(monkeypatch, tmp_p
     assert "9999" not in env
 
 
-def test_build_relay_launch_env_resolves_elevated_config_dir(monkeypatch, tmp_path):
+def test_build_relay_launch_env_resolves_elevated_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An elevated sub-daemon's config dir (``<primary>/elevated``) resolves to
     the primary parent when reading the published live port (#540 pt3)."""
     import agent_codespaces.relay_launch as rl
@@ -486,7 +493,7 @@ def test_build_relay_launch_env_resolves_elevated_config_dir(monkeypatch, tmp_pa
     assert rl._published_live_relay_port() == 52002
 
 
-def test_prelude_publishes_port_mapping_file():
+def test_prelude_publishes_port_mapping_file() -> None:
     """When the relay is in use, the prelude publishes a discoverable
     port-mapping file keyed by port (Stage 2 port-discovery)."""
     from agent_codespaces.relay_launch import RELAY_PORTMAP_DIR, build_relay_env
@@ -503,7 +510,7 @@ def test_prelude_publishes_port_mapping_file():
     assert "relay-ports" not in build_relay_env(51234, "tok", use_relay=False)
 
 
-def test_build_relay_portmap_write_shape():
+def test_build_relay_portmap_write_shape() -> None:
     from agent_codespaces.relay_launch import build_relay_portmap_write
 
     snip = build_relay_portmap_write(51234)
@@ -520,9 +527,9 @@ def test_build_relay_portmap_write_shape():
 
 # --- effective_relay_port (the direct -R / ssh / provision resolution, #694) ---
 
-def _cfg(relay_port):
+def _cfg(relay_port: int) -> Any:
     class _Creds:
-        pass
+        relay_port: int = 0
 
     class _Cfg:
         credentials = _Creds()
@@ -532,7 +539,7 @@ def _cfg(relay_port):
     return c
 
 
-def test_effective_relay_port_prefers_published_live(monkeypatch, tmp_path):
+def test_effective_relay_port_prefers_published_live(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A published (ephemeral) live port wins over the configured value.
     import agent_codespaces.relay_launch as rl
     (tmp_path / "relay-port").write_text("52731", encoding="utf-8")
@@ -542,25 +549,25 @@ def test_effective_relay_port_prefers_published_live(monkeypatch, tmp_path):
     assert rl.effective_relay_port(_cfg(9857)) == 52731
 
 
-def test_effective_relay_port_dynamic_default_falls_back_to_legacy(monkeypatch, tmp_path):
+def test_effective_relay_port_dynamic_default_falls_back_to_legacy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # No published port + the dynamic default (0) -> the legacy backstop.
     import agent_codespaces.relay_launch as rl
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))  # empty: no relay-port file
     assert rl.effective_relay_port(_cfg(0)) == rl.LEGACY_RELAY_PORT == 9857
 
 
-def test_effective_relay_port_honors_configured_pin(monkeypatch, tmp_path):
+def test_effective_relay_port_honors_configured_pin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # No published port but an explicit positive config pin -> use the pin.
     import agent_codespaces.relay_launch as rl
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     assert rl.effective_relay_port(_cfg(9500)) == 9500
 
 
-def test_credentials_config_relay_port_defaults_to_dynamic_sentinel():
+def test_credentials_config_relay_port_defaults_to_dynamic_sentinel() -> None:
     from agent_codespaces.config import CredentialsConfig
     assert CredentialsConfig().relay_port == 0
 
-def test_build_relay_portmap_publish_carries_token_and_account_without_the_prelude():
+def test_build_relay_portmap_publish_carries_token_and_account_without_the_prelude() -> None:
     from agent_codespaces.relay_launch import build_relay_portmap_publish
 
     cmd = build_relay_portmap_publish(

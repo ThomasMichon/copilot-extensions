@@ -100,7 +100,7 @@ def current_identity(*, timeout: float = 10.0) -> str | None:
     return raw
 
 
-def _valid_env_names(var_names) -> list[str]:
+def _valid_env_names(var_names: Any) -> list[str]:
     """Return only safe shell env-var names."""
     return [
         name for name in (var_names or ())
@@ -227,7 +227,7 @@ def build_relay_portmap_write(relay_port: int) -> str:
 ADO_AUTH_HELPER = "$HOME/.local/bin/ado-auth-helper"
 
 
-def build_feed_token_exports(var_names) -> str:
+def build_feed_token_exports(var_names: Any) -> str:
     """POSIX snippet exporting each feed-token env var from the ADO auth helper.
 
     The credential relay only wires **git** auth. A tool that authenticates to an
@@ -297,7 +297,7 @@ exec "$real" "$@"
 """ % {"vars": FEED_TOKEN_REFRESH_VARS_ENV, "helper": ADO_AUTH_HELPER}
 
 
-def build_feed_token_refresh_shim(var_names) -> str:
+def build_feed_token_refresh_shim(var_names: Any) -> str:
     """POSIX snippet that re-mints feed tokens on every feed-client invocation.
 
     :func:`build_feed_token_exports` mints the bearer once, at launch. A
@@ -329,7 +329,7 @@ def build_feed_token_refresh_shim(var_names) -> str:
     return out
 
 
-def build_identity_env_exports(var_names) -> str:
+def build_identity_env_exports(var_names: Any) -> str:
     """POSIX snippet exporting each identity env var from the host Azure login.
 
     Unlike feed-token exports, these values are resolved on the HOST while the
@@ -436,7 +436,7 @@ def build_relay_env(
     return env
 
 
-def relay_azure_resources(cfg) -> list[str]:
+def relay_azure_resources(cfg: Any) -> list[str]:
     """The Azure resources a codespace's relay token may mint tokens for.
 
     The default ADO REST + Storage resources, plus any the adopting repo's
@@ -452,7 +452,7 @@ def relay_azure_resources(cfg) -> list[str]:
     return resources
 
 
-def scoped_relay_token(codespace_name: str, cfg) -> str:
+def scoped_relay_token(codespace_name: str, cfg: Any) -> str:
     """Mint/reuse the codespace's relay token with its configured Azure scope.
 
     Every connect path must mint through this: a token minted without a scope
@@ -553,7 +553,7 @@ def _published_live_relay_port() -> int | None:
 LEGACY_RELAY_PORT = 9857
 
 
-def effective_relay_port(config) -> int:
+def effective_relay_port(config: Any) -> int:
     """Resolve the relay port for a directly-constructed SSH ``-R`` forward + env.
 
     The relay now binds a **dynamic** port by default (``credentials.relay_port``
