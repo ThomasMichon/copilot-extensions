@@ -17,6 +17,11 @@ source controls merged in #10528; supported local rescue/finalization
 qualification merged in #10539; private native Windows allocation/retry and
 complete-export qualification merged in #10777.**
 Combined native integration, actual archive acknowledgment and D5 remain open.
+The bounded [native Windows local collection follow-through](windows-worktree-state.md)
+proposes the missing Logger private publication/staging edge and complete
+Windows/POSIX owner-flow qualification. It retains this same parent, the
+existing D4/D5 ownership and every independent operational gate; no behavior
+change precedes its source review.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
 [D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and

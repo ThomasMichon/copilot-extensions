@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import sys
+from argparse import _SubParsersAction
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any, NoReturn, TextIO
 
 from .credential_reads import read_credential
 
 
-def _invalid_constant(_value):
+def _invalid_constant(_value: str) -> NoReturn:
     raise ValueError("non-finite JSON number")
 
 
-def _unique_object(pairs):
-    result = {}
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("duplicate JSON object key")
@@ -22,7 +25,7 @@ def _unique_object(pairs):
     return result
 
 
-def _requests(stream):
+def _requests(stream: TextIO) -> list[tuple[str, str]]:
     requests = json.load(
         stream, object_pairs_hook=_unique_object, parse_constant=_invalid_constant,
     )
@@ -40,7 +43,7 @@ def _requests(stream):
     return normalized
 
 
-def cmd_batch_get(args):
+def cmd_batch_get(args: Any) -> int:
     from .cache_dpapi import CacheProtectionError
     from .kek import KekError
 
@@ -49,11 +52,12 @@ def cmd_batch_get(args):
     except (ValueError, OSError, UnicodeError) as exc:
         print(f"Error: invalid batch input ({exc})", file=sys.stderr)
         return 1
-    results = []
+    results: list[dict[str, Any]] = []
     for entry, field in requests:
         try:
             result = read_credential(SimpleNamespace(
                 entry=entry, field=field, refresh=args.refresh, prompt=False, strict_cache=True,
+                require_running=getattr(args, "require_running", False),
             ))
         except (CacheProtectionError, KekError, ValueError):
             results.append({
@@ -86,7 +90,7 @@ def cmd_batch_get(args):
     return 0 if successes == len(results) else 2 if successes else 1
 
 
-def add_commands(sub, get_handler):
+def add_commands(sub: _SubParsersAction[Any], get_handler: Callable[[Any], int]) -> None:
     p = sub.add_parser("get", help="Read a credential")
     p.add_argument("entry", help="Entry path")
     p.add_argument("field", nargs="?", default="password",
@@ -100,9 +104,13 @@ def add_commands(sub, get_handler):
                    help="Use the persistent cache only when it is at most this many seconds old")
     p.add_argument("--cache-only", action="store_true", dest="cache_only",
                    help="Read from the persistent cache only; never contact the service")
+    p.add_argument("--require-running", action="store_true",
+                   help="Use cached values or an already-running service; never activate it")
     p.set_defaults(func=get_handler)
 
     p = sub.add_parser("batch-get", help="Read ordered entry/field requests from JSON stdin")
     p.add_argument("--refresh", action="store_true",
                    help="Bypass the persistent cache and reconcile live values")
+    p.add_argument("--require-running", action="store_true",
+                   help="Use cached values or an already-running service; never activate it")
     p.set_defaults(func=cmd_batch_get)
