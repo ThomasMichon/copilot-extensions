@@ -1435,6 +1435,7 @@ def activation_inputs(root):
     sources = tree(root)
     # Activation may refresh its derived Git-identity memo, never configuration.
     sources.pop(str(Path(".agent-worktrees") / "cache" / "project-identities.json"), None)
+    sources.pop(str(Path(".agent-worktrees") / "cache"), None)
     return sources
 
 
