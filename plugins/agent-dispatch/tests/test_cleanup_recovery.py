@@ -1,15 +1,18 @@
 """Held housekeeping recovery never reopens the business task."""
 from dataclasses import asdict
+from argparse import Namespace
 import json
+from typing import Any
 
 import pytest
 
-from agent_dispatch.queue import TaskError
+from agent_dispatch.queue_records import TaskError
+from agent_dispatch.client_errors import DispatchError
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
-def _held_cleanup(tmp_path, *, labels=None):
-    queue = TaskQueue(tmp_path / "tasks.db")
+def _held_cleanup(tmp_path: Any, *, labels: Any=None) -> Any:
+    queue: Any = TaskQueue(tmp_path / "tasks.db")
     task = queue.create("finished work", exclusive_key="logical-work", labels=labels)
     reservation, _ = queue.reserve_spawn(task.id, now=10)
     queue.record_spawn_worktree(
@@ -37,12 +40,17 @@ def _held_cleanup(tmp_path, *, labels=None):
     return queue, task.id, reservation.key
 
 
+def _record(calls: list[Any], value: Any, result: Any) -> Any:
+    calls.append(value)
+    return result
+
+
 @pytest.fixture
-def held(tmp_path):
+def held(tmp_path: Any) -> Any:
     return _held_cleanup(tmp_path)
 
 
-def preview(held, **over):
+def preview(held: Any, **over: Any) -> Any:
     queue, task_id, key = held
     return queue.recover_held_cleanup(
         key, expected_generation=queue.get(task_id).generation,
@@ -50,14 +58,14 @@ def preview(held, **over):
     )
 
 
-def apply(held, plan, **over):
+def apply(held: Any, plan: Any, **over: Any) -> Any:
     return preview(
         held, apply=True, reason="underlying fault corrected", request_id="recovery-1",
         expected_preview=plan["preview_token"], **over,
     )
 
 
-def test_held_cleanup_preview_and_idempotent_apply_preserve_task(held):
+def test_held_cleanup_preview_and_idempotent_apply_preserve_task(held: Any) -> None:
     queue, task_id, key = held
     before = asdict(queue.get(task_id))
     attachments = queue.attachment_history(task_id)
@@ -91,7 +99,7 @@ def test_held_cleanup_preview_and_idempotent_apply_preserve_task(held):
     ("status", "submitted"), ("status", "started"), ("status", "queued"),
     ("generation", 99),
 ])
-def test_recovery_rejects_changed_task_fence(held, column, value):
+def test_recovery_rejects_changed_task_fence(held: Any, column: Any, value: Any) -> None:
     queue, task_id, _ = held
     plan = preview(held)
     with queue._connect() as conn:
@@ -105,7 +113,7 @@ def test_recovery_rejects_changed_task_fence(held, column, value):
     ("creating_host", "another-host"), ("driver", None), ("conclusion_detail", "{}"),
     ("state", "spawned"),
 ])
-def test_recovery_preserves_unknown_or_active_ownership(held, column, value):
+def test_recovery_preserves_unknown_or_active_ownership(held: Any, column: Any, value: Any) -> None:
     queue, _, key = held
     with queue._connect() as conn:
         conn.execute(f"UPDATE spawn_reservations SET {column}=? WHERE key=?", (value, key))
@@ -113,7 +121,7 @@ def test_recovery_preserves_unknown_or_active_ownership(held, column, value):
         preview(held)
 
 
-def test_recovery_rejects_newer_allocation_even_when_settled(held):
+def test_recovery_rejects_newer_allocation_even_when_settled(held: Any) -> None:
     queue, _, key = held
     plan = preview(held)
     newer = queue.create("newer")
@@ -128,7 +136,7 @@ def test_recovery_rejects_newer_allocation_even_when_settled(held):
 
 
 @pytest.mark.parametrize("obligation", [0, "unknown", -1])
-def test_recovery_rejects_missing_existing_cleanup_obligation(held, obligation):
+def test_recovery_rejects_missing_existing_cleanup_obligation(held: Any, obligation: Any) -> None:
     queue, task_id, key = held
     with queue._connect() as conn:
         conn.execute("UPDATE spawn_reservations SET release_requested=? WHERE key=?", (obligation, key))
@@ -149,7 +157,7 @@ def test_recovery_rejects_missing_existing_cleanup_obligation(held, obligation):
 
 @pytest.mark.parametrize("settled", [False, True])
 @pytest.mark.parametrize("reserved_at", [10, 20])
-def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeypatch, settled, reserved_at):
+def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held: Any, monkeypatch: Any, settled: Any, reserved_at: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -176,13 +184,13 @@ def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeyp
         claims = []
         original = client.claim_spawn_conclusion_retry
 
-        def claim(exact_key, **kwargs):
+        def claim(exact_key: Any, **kwargs: Any) -> Any:
             claims.append(exact_key)
             return original(exact_key, **kwargs)
 
         monkeypatch.setattr(client, "claim_spawn_conclusion_retry", claim)
 
-        def forbidden(*args, **kwargs):
+        def forbidden(*args: Any, **kwargs: Any) -> Any:
             pytest.fail("newer allocation must not permit cleanup or task spawn")
 
         supervisor = Supervisor(
@@ -201,7 +209,7 @@ def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeyp
         assert len(queue.cleanup_recovery_history(key)) == 1
 
 
-def test_recovery_revalidates_generation_after_cleanup_lease(held):
+def test_recovery_revalidates_generation_after_cleanup_lease(held: Any) -> None:
     queue, task_id, key = held
     apply(held, preview(held))
     _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
@@ -220,10 +228,12 @@ def test_recovery_revalidates_generation_after_cleanup_lease(held):
     ("release_requested", 0),
 ])
 @pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
-def test_recovery_fences_complete_allocation_identity(held, column, value, boundary):
+def test_recovery_fences_complete_allocation_identity(held: Any, column: Any, value: Any, boundary: Any) -> None:
     queue, task_id, key = held
     before = asdict(queue.get(task_id))
     with queue._connect() as conn:
+        # Exercise receiver fences after simulated legacy-store corruption.
+        conn.execute("DROP TRIGGER spawn_allocation_cohort_retained")
         conn.execute(
             "UPDATE spawn_reservations SET allocation_project='fixture-project', "
             "worktree_path='fixture-checkout', allocation_reservation_key=?, "
@@ -259,7 +269,7 @@ def test_recovery_fences_complete_allocation_identity(held, column, value, bound
     {"cleanup_kind": "terminal", "unknown_component": {"state": "held"}},
     {"cleanup_kind": "terminal", "worktree_cleanup": {"state": "complete"}},
 ])
-def test_recovery_requires_incomplete_structured_component(held, payload):
+def test_recovery_requires_incomplete_structured_component(held: Any, payload: Any) -> None:
     queue, _, key = held
     raw = json.dumps(payload)
     with queue._connect() as conn:
@@ -272,9 +282,9 @@ def test_recovery_requires_incomplete_structured_component(held, payload):
 
 @pytest.mark.parametrize("field", ["cleanup_kind", "action", "structured-action"])
 @pytest.mark.parametrize("value", [[], {}])
-def test_recovery_rpc_refuses_non_string_envelope_values(held, field, value):
+def test_recovery_rpc_refuses_non_string_envelope_values(held: Any, field: Any, value: Any) -> None:
     from fastapi.testclient import TestClient
-    from agent_dispatch.client import DispatchClient, DispatchError
+    from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
 
     queue, task_id, key = held
@@ -303,7 +313,7 @@ def test_recovery_rpc_refuses_non_string_envelope_values(held, field, value):
 
 
 @pytest.mark.parametrize("kind", ["worktree", "session", "legacy"])
-def test_supervisor_uses_recovery_reset_after_list_claim_race(held, monkeypatch, kind):
+def test_supervisor_uses_recovery_reset_after_list_claim_race(held: Any, monkeypatch: Any, kind: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -328,7 +338,7 @@ def test_supervisor_uses_recovery_reset_after_list_claim_race(held, monkeypatch,
         original_claim = client.claim_spawn_conclusion_retry
         claims = []
 
-        def recover_between_list_and_claim(exact_key, **kwargs):
+        def recover_between_list_and_claim(exact_key: Any, **kwargs: Any) -> Any:
             claims.append(exact_key)
             exhausted = json.loads(queue.get_reservation(key).conclusion_detail)
             exhausted["attempts"] = 12
@@ -364,7 +374,7 @@ def test_supervisor_uses_recovery_reset_after_list_claim_race(held, monkeypatch,
 
 
 @pytest.mark.parametrize("listed_attempts", [11, 12])
-def test_full_poll_legacy_cleanup_uses_claimed_recovery_snapshot(tmp_path, monkeypatch, listed_attempts):
+def test_full_poll_legacy_cleanup_uses_claimed_recovery_snapshot(tmp_path: Any, monkeypatch: Any, listed_attempts: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -377,13 +387,14 @@ def test_full_poll_legacy_cleanup_uses_claimed_recovery_snapshot(tmp_path, monke
     queue.record_spawn_conclusion(key, conclusion_state="pending", conclusion_detail=json.dumps({
         "action": "failed", "reason": "legacy failure", "attempts": listed_attempts,
     }))
-    claims, conclusions = [], []
+    claims: list[Any] = []
+    conclusions: list[Any] = []
     with DispatchClient("http://testserver") as client:
         client._http.close()
         client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
         original_claim = client.claim_spawn_conclusion_retry
 
-        def reset_between_list_and_claim(exact_key, **kwargs):
+        def reset_between_list_and_claim(exact_key: Any, **kwargs: Any) -> Any:
             claims.append(exact_key)
             _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
             assert claimed
@@ -398,7 +409,7 @@ def test_full_poll_legacy_cleanup_uses_claimed_recovery_snapshot(tmp_path, monke
         monkeypatch.setattr(client, "claim_spawn_conclusion_retry", reset_between_list_and_claim)
         supervisor = Supervisor(
             client, spawn_fn=lambda *a: pytest.fail("business work must not replay"),
-            conclusion_fn=lambda *a: conclusions.append(a) or {"action": "failed", "reason": "retry"},
+            conclusion_fn=lambda *a: _record(conclusions, a, {"action": "failed", "reason": "retry"}),
             attempt_conclusion_fn=lambda *a: pytest.fail("legacy terminal policy must not change"),
             repo=TEST_REPO, machine="host", disposable_cli_labels=["disposable"],
             heartbeat=False, nudge=False, recover=False, consistency_sweep=False,
@@ -414,9 +425,9 @@ def test_full_poll_legacy_cleanup_uses_claimed_recovery_snapshot(tmp_path, monke
 
 
 @pytest.mark.parametrize("kind", ["attempt", "terminal", None])
-def test_session_only_recovery_never_ends_session_without_lease(held, kind):
+def test_session_only_recovery_never_ends_session_without_lease(held: Any, kind: Any) -> None:
     from fastapi.testclient import TestClient
-    from agent_dispatch.client import DispatchClient, DispatchError
+    from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
     from agent_dispatch.supervisor import Supervisor
     from tests._helpers import TEST_REPO
@@ -446,13 +457,13 @@ def test_session_only_recovery_never_ends_session_without_lease(held, kind):
             )
         except DispatchError as exc:
             rejected = exc
-        ended = []
+        ended: list[tuple[Any, Any]] = []
 
-        def end_session(session):
+        def end_session(session: Any) -> Any:
             ended.append((session, queue.get_reservation(key).cleanup_claim_token))
             return True
 
-        def no_work(*args, **kwargs):
+        def no_work(*args: Any, **kwargs: Any) -> Any:
             return {"action": "skipped", "reason": "fixture-preservation"}
 
         supervisor = Supervisor(
@@ -469,7 +480,7 @@ def test_session_only_recovery_never_ends_session_without_lease(held, kind):
 
 @pytest.mark.parametrize("state", ["held", "pending", "complete", False])
 @pytest.mark.parametrize("boundary", ["preview", "apply"])
-def test_unknown_state_bearing_component_preserves_cleanup_obligation(held, state, boundary):
+def test_unknown_state_bearing_component_preserves_cleanup_obligation(held: Any, state: Any, boundary: Any) -> None:
     queue, task_id, key = held
     plan = preview(held)
     payload = json.loads(queue.get_reservation(key).conclusion_detail)
@@ -486,7 +497,7 @@ def test_unknown_state_bearing_component_preserves_cleanup_obligation(held, stat
     assert queue.cleanup_recovery_history(key) == []
 
 
-def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypatch):
+def test_session_retry_with_producer_worktree_component_is_leased(held: Any, monkeypatch: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -510,18 +521,18 @@ def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypa
         claim = client.claim_spawn_conclusion_retry
         validate = client.validate_spawn_conclusion_claim
 
-        def claimed(exact_key, **kwargs):
+        def claimed(exact_key: Any, **kwargs: Any) -> Any:
             stages.append("claim")
             return claim(exact_key, **kwargs)
 
-        def validated(exact_key, token, **kwargs):
+        def validated(exact_key: Any, token: Any, **kwargs: Any) -> Any:
             stages.append("validate")
             return validate(exact_key, token, **kwargs)
 
         monkeypatch.setattr(client, "claim_spawn_conclusion_retry", claimed)
         monkeypatch.setattr(client, "validate_spawn_conclusion_claim", validated)
 
-        def end_session(session):
+        def end_session(session: Any) -> Any:
             stages.append("end")
             assert session == "native-session"
             token = queue.get_reservation(key).cleanup_claim_token
@@ -529,7 +540,7 @@ def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypa
             queue.validate_spawn_conclusion_claim(key, token, claimant_machine="host")
             return True
 
-        def forbidden(*args, **kwargs):
+        def forbidden(*args: Any, **kwargs: Any) -> Any:
             pytest.fail("completed worktree cleanup and business work must not replay")
 
         supervisor = Supervisor(
@@ -545,19 +556,17 @@ def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypa
 
 
 @pytest.mark.parametrize("command", ["retry-cleanup", "cleanup-history"])
-def test_cleanup_cli_errors_name_selected_command(monkeypatch, capsys, command):
-    import types
+def test_cleanup_cli_errors_name_selected_command(monkeypatch: Any, capsys: Any, command: Any) -> None:
     from contextlib import nullcontext
     from agent_dispatch import producers_cli
-    from agent_dispatch.client import DispatchError
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> Any:
         raise DispatchError(409, "fixture rejection")
 
-    client = types.SimpleNamespace(recover_held_cleanup=fail, cleanup_recovery_history=fail)
+    client = Namespace(recover_held_cleanup=fail, cleanup_recovery_history=fail)
     monkeypatch.setattr(producers_cli, "_client", lambda args: nullcontext(client))
     monkeypatch.setattr(producers_cli, "_registration_scope", lambda args: ("host", "default"))
-    args = types.SimpleNamespace(
+    args = Namespace(
         reservations_command=command, key="exact-reservation", expected_generation=1,
         apply=False, expected_preview=None, reason=None, request_id=None,
     )
@@ -565,7 +574,7 @@ def test_cleanup_cli_errors_name_selected_command(monkeypatch, capsys, command):
     assert f"reservations {command}: HTTP 409" in capsys.readouterr().err
 
 
-def test_recovery_supports_recorded_legacy_retry_progress(held):
+def test_recovery_supports_recorded_legacy_retry_progress(held: Any) -> None:
     queue, _, key = held
     with queue._connect() as conn:
         conn.execute(
@@ -580,7 +589,7 @@ def test_recovery_supports_recorded_legacy_retry_progress(held):
     assert "cleanup_kind" not in payload
 
 
-def test_recovery_concurrent_lost_response_replay_is_one_transaction(held):
+def test_recovery_concurrent_lost_response_replay_is_one_transaction(held: Any) -> None:
     from concurrent.futures import ThreadPoolExecutor
     queue, _, key = held
     plan = preview(held)
@@ -595,11 +604,11 @@ def test_recovery_concurrent_lost_response_replay_is_one_transaction(held):
         )
 
 
-def test_recovery_interrupted_audit_rolls_back_eligibility(held, monkeypatch):
+def test_recovery_interrupted_audit_rolls_back_eligibility(held: Any, monkeypatch: Any) -> None:
     queue, _, key = held
     plan = preview(held)
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("injected audit publication failure")
 
     monkeypatch.setattr(queue, "_audit", fail)
@@ -611,7 +620,7 @@ def test_recovery_interrupted_audit_rolls_back_eligibility(held, monkeypatch):
 
 @pytest.mark.parametrize("field", ["reason", "request_id", "expected_preview"])
 @pytest.mark.parametrize("value", [None, False, 0, True, 1, [], {}, ["value"], {"key": "value"}, "", "  "])
-def test_direct_recovery_apply_rejects_invalid_request_identity_before_sql(held, monkeypatch, field, value):
+def test_direct_recovery_apply_rejects_invalid_request_identity_before_sql(held: Any, monkeypatch: Any, field: Any, value: Any) -> None:
     queue, task_id, key = held
     plan = preview(held)
     before = asdict(queue.get_reservation(key)), queue.events(task_id)
@@ -622,7 +631,7 @@ def test_direct_recovery_apply_rejects_invalid_request_identity_before_sql(held,
     }
     arguments[field] = value
 
-    def forbidden():
+    def forbidden() -> Any:
         raise AssertionError("invalid recovery identity reached SQLite")
 
     with monkeypatch.context() as patch:
@@ -633,7 +642,7 @@ def test_direct_recovery_apply_rejects_invalid_request_identity_before_sql(held,
     assert queue.cleanup_recovery_history(key) == []
 
 
-def test_recovery_history_survives_later_success(held):
+def test_recovery_history_survives_later_success(held: Any) -> None:
     queue, _, key = held
     prior = queue.get_reservation(key).conclusion_detail
     apply(held, preview(held))
@@ -647,7 +656,7 @@ def test_recovery_history_survives_later_success(held):
     assert history[0]["request"]["reason"] == "underlying fault corrected"
 
 
-def test_recovery_rejects_stale_preview_and_unknown_lease(held):
+def test_recovery_rejects_stale_preview_and_unknown_lease(held: Any) -> None:
     queue, _, key = held
     plan = preview(held)
     queue.record_spawn_conclusion(key, conclusion_state="held", conclusion_detail=json.dumps({
@@ -664,9 +673,9 @@ def test_recovery_rejects_stale_preview_and_unknown_lease(held):
         preview(held)
 
 
-def test_recovery_rpc_requires_control_authority_and_strict_fences(held):
+def test_recovery_rpc_requires_control_authority_and_strict_fences(held: Any) -> None:
     from fastapi.testclient import TestClient
-    from agent_dispatch.client import DispatchClient, DispatchError
+    from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
     queue, task_id, key = held
     app = create_app(queue, control_token="fixture-control", enable_mcp=False)
@@ -696,7 +705,7 @@ def test_recovery_rpc_requires_control_authority_and_strict_fences(held):
 
 @pytest.mark.parametrize("identity", ["{", "null", "[]", "true", "1", '"host"'])
 @pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
-def test_recovery_rpc_corrupt_history_is_typed_and_preserved(held, identity, boundary):
+def test_recovery_rpc_corrupt_history_is_typed_and_preserved(held: Any, identity: Any, boundary: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
@@ -709,7 +718,7 @@ def test_recovery_rpc_corrupt_history_is_typed_and_preserved(held, identity, bou
     with queue._connect() as conn:
         conn.execute("UPDATE cleanup_recoveries SET identity=?", (identity,))
     before = asdict(queue.get_reservation(key)), asdict(queue.get(task_id)), queue.events(task_id)
-    body = {"claimant_machine": "host"}
+    body: dict[str, Any] = {"claimant_machine": "host"}
     suffix = "/claim" if boundary == "claim" else "/validate" if boundary == "validate" else ""
     if boundary != "claim":
         body["claim_token"] = token
@@ -731,14 +740,14 @@ def test_recovery_rpc_corrupt_history_is_typed_and_preserved(held, identity, bou
     ("unexpected_fence", "host"),
 ])
 @pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
-def test_cleanup_claim_rpc_rejects_invalid_bodies_before_queue(held, monkeypatch, field, value, boundary):
+def test_cleanup_claim_rpc_rejects_invalid_bodies_before_queue(held: Any, monkeypatch: Any, field: Any, value: Any, boundary: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
     queue, _, key = held
     before = asdict(queue.get_reservation(key))
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("invalid request reached cleanup queue")
 
     for method in ("claim_spawn_conclusion_retry", "validate_spawn_conclusion_claim",
@@ -760,7 +769,7 @@ def test_cleanup_claim_rpc_rejects_invalid_bodies_before_queue(held, monkeypatch
 
 @pytest.mark.parametrize("value", [1, True, [], {}])
 @pytest.mark.parametrize("boundary", ["validate", "outcome"])
-def test_cleanup_claim_rpc_rejects_invalid_token(held, value, boundary):
+def test_cleanup_claim_rpc_rejects_invalid_token(held: Any, value: Any, boundary: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
@@ -777,7 +786,7 @@ def test_cleanup_claim_rpc_rejects_invalid_token(held, value, boundary):
     assert asdict(queue.get_reservation(key)) == before
 
 
-def test_legacy_cleanup_claim_rpc_preserves_omitted_body(held):
+def test_legacy_cleanup_claim_rpc_preserves_omitted_body(held: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
@@ -795,7 +804,7 @@ def test_legacy_cleanup_claim_rpc_preserves_omitted_body(held):
 
 @pytest.mark.parametrize("claimant", ["other-host", None, ""])
 @pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
-def test_recovery_rpc_fences_claimant_host_at_every_boundary(held, claimant, boundary):
+def test_recovery_rpc_fences_claimant_host_at_every_boundary(held: Any, claimant: Any, boundary: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
@@ -833,7 +842,7 @@ def test_recovery_rpc_fences_claimant_host_at_every_boundary(held, claimant, bou
 
 
 @pytest.mark.parametrize("component", ["session", "worktree"])
-def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held, component):
+def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held: Any, component: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -854,12 +863,12 @@ def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held, compone
     with DispatchClient("http://testserver") as client:
         client._http.close()
         client._http = TestClient(app)
-        ended = []
-        worktrees = []
+        ended: list[str] = []
+        worktrees: list[Any] = []
         foreign = Supervisor(
             client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
-            local_end_fn=lambda sid: ended.append(sid) or True,
-            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {"action": "primed"},
+            local_end_fn=lambda sid: _record(ended, sid, True),
+            attempt_conclusion_fn=lambda *a: _record(worktrees, a, {"action": "primed"}),
             repo=TEST_REPO, machine="other-host", nudge=False,
         )
         foreign.release_requested_bodies()
@@ -867,8 +876,8 @@ def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held, compone
         assert asdict(queue.get_reservation(key)) == before
         local = Supervisor(
             client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
-            local_end_fn=lambda sid: ended.append(sid) or True,
-            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {"action": "primed"},
+            local_end_fn=lambda sid: _record(ended, sid, True),
+            attempt_conclusion_fn=lambda *a: _record(worktrees, a, {"action": "primed"}),
             repo=TEST_REPO, machine="host", nudge=False,
         )
         local.release_requested_bodies()
@@ -877,7 +886,7 @@ def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held, compone
 
 
 @pytest.mark.parametrize("claimant", ["host", "other-host", None])
-def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch, claimant):
+def test_ordinary_bridge_identity_and_housekeeping_host_fence(held: Any, monkeypatch: Any, claimant: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -896,21 +905,21 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
         monkeypatch.setattr(remote_dispatch, "local_machine", lambda: None)
 
     @app.middleware("http")
-    async def observe_lease_host(request, call_next):
+    async def observe_lease_host(request: Any, call_next: Any) -> Any:
         if (request.method == "POST" and request.url.path.startswith("/spawn-reservations/")
                 and request.url.path.rsplit("/", 1)[-1] in {"claim", "validate", "conclusion"}):
             body = json.loads(await request.body() or b"{}")
             rpc_hosts.append((request.url.path.rsplit("/", 1)[-1], body.get("claimant_machine")))
         return await call_next(request)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
         pytest.fail("ordinary Bridge allocation must remain owned by the real spawn")
 
     monkeypatch.setattr(embody, "prepare_reusable_worktree", forbidden)
     routed = make_label_routed_spawn(lambda _: (False, {}), overrides={
         "review": make_headless_spawn(agent="local", charter="reviewer"),
     })
-    worktrees = []
+    worktrees: list[Any] = []
     with DispatchClient("http://testserver") as client:
         client._http.close()
         client._http = TestClient(app)
@@ -920,9 +929,9 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
         ordinary_before = asdict(queue.get(ordinary["id"]))
         supervisor = Supervisor(
             client, spawn_fn=routed, repo=TEST_REPO, machine=claimant, nudge=False,
-            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {
+            attempt_conclusion_fn=lambda *a: _record(worktrees, a, {
                 "action": "primed", "managed_gc_eligible": True,
-            },
+            }),
         )
         snapshot = supervisor._prepare_spawn_task(
             {**ordinary, "labels": ["review"]}, {"key": reservation.key},
@@ -946,13 +955,13 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
 
 @pytest.mark.parametrize("claimant", [None, "host"])
 @pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
-def test_conclusion_client_preserves_legacy_request_shape(claimant, boundary):
+def test_conclusion_client_preserves_legacy_request_shape(claimant: Any, boundary: Any) -> None:
     import httpx
     from agent_dispatch.client import DispatchClient
 
     observed = []
 
-    def respond(request):
+    def respond(request: Any) -> Any:
         observed.append(request)
         return httpx.Response(200, json={"ok": True}, request=request)
 
@@ -985,10 +994,10 @@ def test_conclusion_client_preserves_legacy_request_shape(claimant, boundary):
 @pytest.mark.parametrize("machine_arg,local_machine", [
     (None, "host"), ("host", "other-host"), (None, "other-host"), (None, None),
 ])
-def test_actual_supervise_constructor_consumes_held_cleanup(held, monkeypatch, machine_arg, local_machine):
-    from types import SimpleNamespace
+def test_actual_supervise_constructor_consumes_held_cleanup(held: Any, monkeypatch: Any, machine_arg: Any, local_machine: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch import __main__ as cli, remote_dispatch, supervisor as sup_mod
+    from agent_dispatch.supervise_cli import _cmd_supervise
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
     from tests._helpers import TEST_REPO
@@ -998,19 +1007,19 @@ def test_actual_supervise_constructor_consumes_held_cleanup(held, monkeypatch, m
     before = asdict(queue.get_reservation(key))
     app = create_app(queue, enable_mcp=False, verification_interval=0)
     constructed = []
-    worktrees = []
+    worktrees: list[Any] = []
     real_supervisor = sup_mod.Supervisor
 
-    def create_supervisor(*args, **kwargs):
+    def create_supervisor(*args: Any, **kwargs: Any) -> Any:
         instance = real_supervisor(*args, **kwargs)
         constructed.append(instance)
-        instance.attempt_conclusion_fn = lambda *a: worktrees.append(a) or {
+        instance.attempt_conclusion_fn = lambda *a: _record(worktrees, a, {
             "action": "primed", "managed_gc_eligible": True,
-        }
-        instance.poll_once = lambda: (instance.release_requested_bodies(), [])[1]
+        })
+        monkeypatch.setattr(instance, "poll_once", lambda: (instance.release_requested_bodies(), [])[1])
         return instance
 
-    def open_client(*args, **kwargs):
+    def open_client(*args: Any, **kwargs: Any) -> Any:
         client = DispatchClient("http://testserver")
         client._http.close()
         client._http = TestClient(app)
@@ -1021,13 +1030,13 @@ def test_actual_supervise_constructor_consumes_held_cleanup(held, monkeypatch, m
     monkeypatch.setattr(cli, "_spawn_route", lambda *a: None)
     monkeypatch.setattr(remote_dispatch, "local_machine", lambda: local_machine)
     monkeypatch.setattr(sup_mod, "Supervisor", create_supervisor)
-    args = SimpleNamespace(
+    args = Namespace(
         all_repos=False, repo=TEST_REPO, url=None, token=None, label=None,
         max_concurrent=1, verify_timeout=0, once=True, interval=30,
         no_heartbeat=True, max_attempts=3, embody_backend="cli",
         cli_label=None, headless_label=None, machine=machine_arg,
     )
-    assert cli._cmd_supervise(args) == 0
+    assert _cmd_supervise(args) == 0
     expected_machine = machine_arg or local_machine
     if expected_machine == "host":
         assert queue.get_reservation(key).conclusion_state == "complete"
@@ -1038,7 +1047,7 @@ def test_actual_supervise_constructor_consumes_held_cleanup(held, monkeypatch, m
     assert constructed[0].machine == expected_machine
 
 
-def test_default_constructor_identity_reaches_recovery_rpc(held, monkeypatch):
+def test_default_constructor_identity_reaches_recovery_rpc(held: Any, monkeypatch: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch import remote_dispatch
     from agent_dispatch.client import DispatchClient
@@ -1050,13 +1059,13 @@ def test_default_constructor_identity_reaches_recovery_rpc(held, monkeypatch):
     task_before = asdict(queue.get(task_id))
     apply(held, preview(held))
     monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host")
-    worktrees = []
+    worktrees: list[Any] = []
     with DispatchClient("http://testserver") as client:
         client._http.close()
         client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
         supervisor = Supervisor(
             client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
-            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {"action": "primed"},
+            attempt_conclusion_fn=lambda *a: _record(worktrees, a, {"action": "primed"}),
             repo=TEST_REPO, nudge=False,
         )
         assert supervisor.machine == "host"
@@ -1067,7 +1076,7 @@ def test_default_constructor_identity_reaches_recovery_rpc(held, monkeypatch):
     assert asdict(queue.get(task_id)) == task_before
 
 
-def test_full_poll_preserves_session_component_before_legacy_reconcile(tmp_path):
+def test_full_poll_preserves_session_component_before_legacy_reconcile(tmp_path: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -1083,16 +1092,17 @@ def test_full_poll_preserves_session_component_before_legacy_reconcile(tmp_path)
         "worktree_cleanup": {"state": "complete", "outcome": {"action": "primed"}},
     }))
     apply(fixture, preview(fixture))
-    ended, worktrees = [], []
+    ended: list[str] = []
+    worktrees: list[Any] = []
     with DispatchClient("http://testserver") as client:
         client._http.close()
         client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
         supervisor = Supervisor(
             client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
-            local_end_fn=lambda sid: ended.append(sid) or True,
-            conclusion_fn=lambda *a: worktrees.append(a) or {
+            local_end_fn=lambda sid: _record(ended, sid, True),
+            conclusion_fn=lambda *a: _record(worktrees, a, {
                 "action": "primed", "managed_gc_eligible": True,
-            },
+            }),
             repo=TEST_REPO, machine="host", disposable_cli_labels=["disposable"],
             heartbeat=False, nudge=False, recover=False, consistency_sweep=False,
         )
@@ -1108,7 +1118,7 @@ def test_full_poll_preserves_session_component_before_legacy_reconcile(tmp_path)
     assert len(queue.cleanup_recovery_history(key)) == 1
 
 
-def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(held):
+def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(held: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
@@ -1132,7 +1142,7 @@ def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(hel
 
 
 @pytest.mark.parametrize("boundary", ["validate", "record"])
-def test_legacy_cleanup_lease_rejects_equal_timestamp_competitor(held, boundary):
+def test_legacy_cleanup_lease_rejects_equal_timestamp_competitor(held: Any, boundary: Any) -> None:
     queue, _, key = held
     queue.settle_spawn(key, conclusion_state="pending")
     _, claimed, token = queue.claim_spawn_conclusion_retry(key, now=11)
@@ -1160,14 +1170,14 @@ def test_legacy_cleanup_lease_rejects_equal_timestamp_competitor(held, boundary)
     "claim_spawn_conclusion_retry", "validate_spawn_conclusion_claim", "record_spawn_conclusion",
 ])
 @pytest.mark.parametrize("claimant", [None, "host", "other-host"])
-def test_host_bound_cleanup_client_validates_explicit_claimant(method, claimant):
+def test_host_bound_cleanup_client_validates_explicit_claimant(method: Any, claimant: Any) -> None:
     from agent_dispatch.client_cleanup_recovery import HostBoundConclusionClient
 
     calls = []
 
     class Client:
-        def __getattr__(self, name):
-            def call(*args, **kwargs):
+        def __getattr__(self: Any, name: Any) -> Any:
+            def call(*args: Any, **kwargs: Any) -> Any:
                 calls.append((name, args, kwargs))
                 return {"accepted": True}
             return call
@@ -1184,7 +1194,7 @@ def test_host_bound_cleanup_client_validates_explicit_claimant(method, claimant)
 
 
 @pytest.mark.parametrize("operation", ["settle", "fail"])
-def test_unbound_terminal_alias_cannot_publish_recovery_outcome(held, operation):
+def test_unbound_terminal_alias_cannot_publish_recovery_outcome(held: Any, operation: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
@@ -1203,7 +1213,7 @@ def test_unbound_terminal_alias_cannot_publish_recovery_outcome(held, operation)
 
 
 @pytest.mark.parametrize("invalid_token", [None, "", " ", [], True, 0])
-def test_supervisor_rejects_malformed_claim_token_before_validation(held, monkeypatch, caplog, invalid_token):
+def test_supervisor_rejects_malformed_claim_token_before_validation(held: Any, monkeypatch: Any, caplog: Any, invalid_token: Any) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -1218,7 +1228,7 @@ def test_supervisor_rejects_malformed_claim_token_before_validation(held, monkey
         client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
         original = client.claim_spawn_conclusion_retry
 
-        def malformed_claim(*args, **kwargs):
+        def malformed_claim(*args: Any, **kwargs: Any) -> Any:
             return {**original(*args, **kwargs), "claim_token": invalid_token}
 
         monkeypatch.setattr(client, "claim_spawn_conclusion_retry", malformed_claim)
@@ -1237,7 +1247,7 @@ def test_supervisor_rejects_malformed_claim_token_before_validation(held, monkey
 
 
 @pytest.mark.parametrize("native_operation", ["preview", "apply", "replay", "history", "completed-replay"])
-def test_native_cli_first_touch_preview_apply_and_history(held, native_operation):
+def test_native_cli_first_touch_preview_apply_and_history(held: Any, native_operation: Any) -> None:
     """Actual CLI -> loopback HTTP -> supervisor consumer -> fixture database."""
     import socket
     import os
@@ -1247,7 +1257,7 @@ def test_native_cli_first_touch_preview_apply_and_history(held, native_operation
     import time
 
     from agent_procutil import no_window_kwargs
-    import uvicorn
+    from importlib import import_module
     from agent_dispatch.coordinator import create_app
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.supervisor import Supervisor
@@ -1260,6 +1270,7 @@ def test_native_cli_first_touch_preview_apply_and_history(held, native_operation
     app = create_app(queue, control_token="fixture-control", enable_mcp=False, verification_interval=0)
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
+    uvicorn = import_module("uvicorn")
     server = uvicorn.Server(uvicorn.Config(app, log_level="error"))
     thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
     thread.start()
@@ -1276,7 +1287,7 @@ def test_native_cli_first_touch_preview_apply_and_history(held, native_operation
 
         native_calls = []
 
-        def run(*argv):
+        def run(*argv: Any) -> Any:
             native_calls.append(argv)
             result = subprocess.run(
                 [*base, *argv], capture_output=True, text=True, timeout=15,
@@ -1289,11 +1300,11 @@ def test_native_cli_first_touch_preview_apply_and_history(held, native_operation
         args = ("retry-cleanup", key, "--expected-generation", str(before["generation"]))
         conclusions = []
 
-        def conclude(*args):
+        def conclude(*args: Any) -> Any:
             conclusions.append(args)
             return {"action": "primed", "managed_gc_eligible": True}
 
-        def forbidden(*args, **kwargs):
+        def forbidden(*args: Any, **kwargs: Any) -> Any:
             pytest.fail("housekeeping recovery must not spawn business work")
 
         with DispatchClient(
@@ -1308,7 +1319,7 @@ def test_native_cli_first_touch_preview_apply_and_history(held, native_operation
                 "--request-id", "native-request", "--reason", "fixture fault corrected",
             )
 
-            def apply_http():
+            def apply_http() -> Any:
                 return client.recover_held_cleanup(
                     key, expected_generation=before["generation"], current_host="fixture-host",
                     apply=True, expected_preview=plan["preview_token"],

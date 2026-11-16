@@ -54,6 +54,19 @@ exclusive ownership and unexpired cleanup claims reject recovery. Historical
 `exclusive_released: false` on a settled reservation is not an active fence,
 and `conversation_retired` is not evidence of process absence.
 
+For an ordinary local Bridge body, failed-attempt retirement does not retire
+its original conversation. While that conversation remains unretired and its
+task is non-terminal, the queue grants no housekeeping lease for its retained
+handle. The unchanged pending envelope keeps its original counters and history;
+a completed attempt can release allocation capacity after independently proved
+body absence without ending the conversation or deleting its Bridge turn rows.
+Cleanup checkpoint, lease validation and outcome publication recheck this
+custody under the existing queue transaction. Missing task evidence also holds.
+Terminal task or explicit conversation retirement still permits the existing
+host, allocation, wake and cleanup guards to decide; neither bypasses them.
+Other drivers retain their existing admission. This safeguard does not
+reconstruct a previously missing handle, reopen task policy or authorize resume.
+
 Only housekeeping retry eligibility, counters and due times are reset.
 Already-complete housekeeping components remain complete. Task lifecycle,
 attempts, generation, result, timestamps, logs and session/worktree attachment
