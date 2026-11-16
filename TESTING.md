@@ -4340,6 +4340,24 @@ errors or extending the original deadline.
 Expired source-lock consumption retains an active typed subprocess timeout
 and its diagnostics; successful consumption still checks the outer deadline.
 
+## Optional shell-native UV bootstrap provider
+
+`python -m pytest -q tools/test_uv_bootstrap_provider.py` exercises the separately
+delivered Worktrees provider in Windows PowerShell and PowerShell Core when
+available. Captured-boundary cases cover exact helper declarations, managed-only
+UV arguments, explicit preparation versus read-only lookup, missing prerequisites,
+confirmed exit/stream results and OS-policy refusal without fallback. The real
+materializer covers candidate delivery and refusal of a foreign replacement.
+
+The native lookup witness copies an already installed UV executable into an
+otherwise empty PATH and uses production `Invoke-Hidden` with private empty
+managed-Python/cache roots and downloads disabled. It proves an acquisition-free
+missing-toolchain result without PATH Python. It does not acquire an interpreter,
+qualify a fresh installation, prove managed-Python execution under Smart App
+Control, or migrate an installer/launcher. Missing UV/PowerShell is an explicit
+skip, not a pass. These subprocess packets remain on-demand, outside required
+unit-only PR testing.
+
 ## Optional stock Windows bootstrap building blocks
 
 Select `bootstrap_file_guard`, `bootstrap_file_trust`, `bootstrap_path_guard`,
