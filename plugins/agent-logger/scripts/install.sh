@@ -733,9 +733,8 @@ if [[ "$ACTION" != "status" ]]; then
         fi
         __version_cmp() {
             local left="$1" right="$2"
-            # Source hashes are opaque, never an ordering dimension.
-            left="${left%%+*}"; right="${right%%+*}"
             if [[ -z "$__lock_py" ]]; then
+                left="${left%%+*}"; right="${right%%+*}"
                 local left_major left_minor left_patch left_dev
                 local right_major right_minor right_patch right_dev
                 if [[ "$left" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-dev([0-9]+))?$ ]]; then
@@ -770,17 +769,22 @@ if [[ "$ACTION" != "status" ]]; then
                 printf '%s' 0
                 return
             fi
-            "$__lock_py" -c '
+            "$__lock_py" -I -S -B -c '
 import re, sys
+sys.path.insert(0, sys.argv[1])
 def key(value):
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", value)
+    pattern = r"(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?"
+    match = re.fullmatch(pattern, value.split("+", 1)[0])
+    if not match:
+        import versioned_runtime as runtime
+        match = re.fullmatch(pattern, runtime.package_version(value).split("+", 1)[0])
     if not match:
         return None
     major, minor, patch, dev = match.groups()
     return (int(major), int(minor), int(patch), int(dev) if dev is not None else sys.maxsize)
-left, right = key(sys.argv[1]), key(sys.argv[2])
+left, right = key(sys.argv[2]), key(sys.argv[3])
 print((left > right) - (left < right) if left is not None and right is not None else -1)
-' "$left" "$right" 2>/dev/null || printf '%s' -1
+' "$SCRIPT_DIR" "$left" "$right" 2>/dev/null || printf '%s' -1
         }
         __stamped=""
         if [[ -f "$INSTALL_DIR/stamped-version" ]]; then
