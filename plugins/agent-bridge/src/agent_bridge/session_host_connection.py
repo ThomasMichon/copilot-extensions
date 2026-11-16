@@ -942,87 +942,14 @@ class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
         task.add_done_callback(self._remote_reap_tasks.discard)
 
     async def _remote_reap(self, rec: Any, endpoint: dict[str, Any]) -> bool:
-        from ssh_manager import ConnectionManager, SSHConfig
+        from .session_host_retirement import reap_remote_host
 
-        from .session_host.endpoints import ssh_config_from_endpoint
-
-        class _StaticSource:
-            def __init__(self, cfg: SSHConfig) -> None:
-                self._cfg = cfg
-
-            def get_ssh_config(self) -> SSHConfig:
-                return self._cfg
-
-            def refresh(self) -> SSHConfig:
-                return self._cfg
-
-        host = None
-        mgr = None
-        confirmed_dead = False
-        try:
-            mgr = ConnectionManager()
-            # Kill the host's whole PROCESS GROUP, not just the host pid. The
-            # host was launched via ``setsid`` (so it leads its own group,
-            # pgid == host_pid) and the ``bash -lc`` wrapper + the copilot
-            # grandchild inherit that group -- so ``kill -- -<pgid>`` takes the
-            # host AND copilot in one shot, with nothing orphaned (killing only
-            # host_pid would leave copilot reparented to init). Fall back to the
-            # bare pid if the group send is rejected. SIGTERM first (lets copilot
-            # flush), then SIGKILL as a backstop.
-            pid = int(rec.host_pid)
-            child_pid = int(rec.child_pid)
-            command = (
-                f"kill -TERM -{pid} 2>/dev/null || kill -TERM {pid} 2>/dev/null; "
-                f"sleep 1; kill -KILL -{pid} 2>/dev/null || kill -KILL {pid} "
-                "2>/dev/null || true; "
-                "alive() { test -r /proc/$1/stat && "
-                "test \"$(awk '{print $3}' /proc/$1/stat 2>/dev/null)\" != Z; }; "
-                "i=0; while { alive "
-                f"{pid} || alive {child_pid}; "
-                "} && test $i -lt 20; do sleep 0.1; i=$((i+1)); done; "
-                f"if alive {pid} || alive {child_pid}; then exit 42; fi; "
-                "printf __REAPED__"
-            )
-            if endpoint.get("kind") == "codespace" and "codespace" in endpoint:
-                from .session_host.codespace_transport import CodeSpaceTransport
-
-                host = endpoint.get("codespace")
-                if not isinstance(host, str) or not host.strip():
-                    raise ValueError("remote reap requires the persisted CodeSpace name")
-                # Durable endpoints intentionally contain no credentials.
-                # Reuse the transport's account resolution before dialing SSH.
-                transport = CodeSpaceTransport(
-                    host, str(endpoint.get("repo") or ""), manager=mgr,
-                )
-                rc, stdout, _stderr = await transport.run(command, timeout=20.0)
-            else:
-                # Legacy descriptors contain only the captured SSH configuration.
-                cfg = ssh_config_from_endpoint(endpoint)
-                host = cfg.host_alias
-                await mgr.ensure_connected(host, _StaticSource(cfg), [])
-                result = await mgr.exec_command(host, command, timeout=20.0)
-                rc, stdout = result.exit_code, result.stdout
-            confirmed_dead = rc == 0 and "__REAPED__" in (stdout or "")
-            if not confirmed_dead:
-                raise RuntimeError(
-                    f"remote reap could not verify process death "
-                    f"(rc={rc}, output={stdout!r})"
-                )
-            log.info("Remote-reaped Session Host group for session %s (far pid=%s)",
-                     rec.session_id, rec.host_pid)
-        except Exception:
-            log.warning(
-                "Best-effort remote reap failed for session %s (far pid=%s); "
-                "the detached Host will exit when the CodeSpace stops",
-                rec.session_id, rec.host_pid, exc_info=True,
-            )
-        finally:
-            if mgr is not None and host:
-                with contextlib.suppress(Exception):
-                    await mgr.disconnect(host)
-            if confirmed_dead:
-                self._set_container_launch_pending(rec.session_id, False)
-                self._release_container_lock(rec.session_id)
-                # Admission/teardown still owns the claim after the host dies.
-                self._release_unprotected_codespace_lock(rec.session_id)
+        confirmed_dead = await reap_remote_host(
+            rec.session_id, rec.host_pid, rec.child_pid, endpoint,
+        )
+        if confirmed_dead:
+            self._set_container_launch_pending(rec.session_id, False)
+            self._release_container_lock(rec.session_id)
+            # Admission/teardown still owns the claim after the host dies.
+            self._release_unprotected_codespace_lock(rec.session_id)
         return confirmed_dead
