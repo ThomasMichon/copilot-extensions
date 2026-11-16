@@ -3456,8 +3456,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   inherited #3984 migration acceptance and exact #6342 opt-in pack in the
   existing declarative-control-plane effort. Actual capability inventory,
   parity and owner acceptance still gate legacy retirement; #3115's separate
-  live umbrella remains unsatisfied. Normal reviewed actual receiving and
-  current readback precede a separate source-tracking judgment, not restore.
+  live umbrella remains unsatisfied. #3983's literal whole-original/validation
+  OPEN condition remains: reviewed planned receiving does not waive it or
+  authorize source retirement, restore or machine operations.
   The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
   preserves #2729's five-package AND inherited #2726 contract in the existing
   Active Installer Engine Plan/local/global Validation and Coordination.

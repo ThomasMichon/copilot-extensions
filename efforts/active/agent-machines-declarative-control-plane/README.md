@@ -83,12 +83,12 @@ retire before the actual capability parity and owner acceptance already
 required by M3983; administrative issue tracking is a different decision.
 
 Normal review, actual receiving merge and complete current Plan/local/global
-Validation, Coordination and Journal readback precede a separate fresh #3983
-source judgment. Until then it remains open; afterward redundant tracking may
-retire while every unfinished M3983 technical row remains unchecked. Preserve
-intervening source changes and actual claimant conditions. This does not open
-or satisfy #3115's separate LIVE owning umbrella, appoint an implementer, release
-a claim or create a generic new ACK/native-completion prerequisite to planning.
+Validation, Coordination and Journal readback establish planned receiving, not
+permission to retire #3983. Its current source explicitly requires it OPEN
+until its entire original scope and validation resolve; preserve that actual
+condition alongside capability parity/owner acceptance before legacy retirement.
+This does not open or satisfy #3115's separate LIVE owning umbrella, appoint an
+implementer, release a claim or add a new generic ACK/native prerequisite.
 
 ## Context
 
@@ -630,12 +630,9 @@ unchanged. These are two distinct outcomes, not a source-to-source fold._
   released payload and authorized installed/live adopter results.
 
 - [ ] **M3983-GV1:** Crosswalk every M3983 Plan, local Validation and
-  Coordination clause with the accepted migration inventory before accepting
-  capability conversion or retiring legacy entrypoints/shadow configuration.
-  Preserve existing Phase 1/3, actual parity/owner acceptance and #3115
-  source-specific gates. Separately, complete reviewed planned receiving and
-  current readback permit administrative source-tracking judgment, not a
-  technical pass; no all-host or whole-parent prerequisite is added.
+  Coordination clause with the accepted migration inventory before separate
+  source adjudication. Preserve existing Phase 1/3 and #3115 source-specific
+  gates without adding an all-host or whole-parent prerequisite.
 
 ## Proposal
 
@@ -653,14 +650,14 @@ discussions, including all seven inherited #3984 migration rows and the five
 four-workstream Plan/Validation mapping so a settings pack or provider example
 cannot silently replace the whole portable-machine programme.
 
-Separated complete planned issue receiving from actual capability conversion
-and legacy-entrypoint retirement: the latter still requires the accepted
-capability inventory, parity and original owner acceptance. Normal reviewed
-actual delivery, complete current direct contract readback and separate source
-judgment precede administrative tracking retirement. #3115's LIVE owning-
-umbrella condition stays independently unsatisfied; neither this intake nor
-closing another tracker supplies it. No implementation claimant, settings
-change, restore/migration, legacy retirement or resource transfer occurred.
+Complete planned receiving does not resolve actual capability conversion or
+legacy-entrypoint retirement: the latter still requires the accepted capability
+inventory, parity and original owner acceptance. The source also explicitly
+requires #3983 OPEN until its entire original scope and validation resolve;
+planned receiving and its review do not waive that independent condition.
+#3115's LIVE owning-umbrella condition stays independently unsatisfied.
+No implementation claimant, settings change, restore/migration, legacy
+retirement or resource transfer occurred.
 
 ### 2026-11-15 - Restore migration and exact opt-in pack proposed
 
