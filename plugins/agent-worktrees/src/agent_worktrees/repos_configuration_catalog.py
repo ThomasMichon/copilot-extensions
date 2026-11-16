@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from dropin_registry import ScanAuthority
 import yaml
@@ -18,17 +18,17 @@ from .repos_registry_reader import RepositoryResolutionError
 
 @dataclass
 class Inspection:
-    routes: dict = field(default_factory=dict)
-    projects: dict = field(default_factory=dict)
-    binding: dict = field(default_factory=lambda: {"status": "unknown"})
-    pair: dict = field(default_factory=lambda: {
+    routes: dict[str, related.RelatedEntry] = field(default_factory=dict)
+    projects: dict[str, Any] = field(default_factory=dict)
+    binding: dict[str, Any] = field(default_factory=lambda: {"status": "unknown"})
+    pair: dict[str, Any] = field(default_factory=lambda: {
         "status": "unsupported", "reason": "No explicit tracked workspace was supplied.",
     })
-    findings: list = field(default_factory=list)
-    readiness: dict = field(default_factory=lambda: {"ready": None, "code": "unavailable"})
+    findings: list[dict[str, str]] = field(default_factory=list)
+    readiness: dict[str, Any] = field(default_factory=lambda: {"ready": None, "code": "unavailable"})
 
 
-def _validate_routes(raw: dict) -> None:
+def _validate_routes(raw: dict[str, Any]) -> None:
     def invalid() -> NoReturn:
         raise ConfigurationError("invalid-route-source", "A route source needs owner repair.")
 
@@ -91,7 +91,7 @@ def inspect_project(project: str, workspace: str) -> Inspection:
                 })
             else:
                 plugin_anchors = contributions.value
-        anchors = [
+        anchors: list[str | Path] = [
             *plugin_anchors,
             *[
                 related.config_contribution_anchor(
@@ -105,12 +105,12 @@ def inspect_project(project: str, workspace: str) -> Inspection:
         ]
         for source in sources:
             cfg._load_inrepo_config(str(source.anchor), strict=True)
-        for source in anchors:
+        for route_source in anchors:
             paths = (
-                (related.legacy_related_path(source),)
-                if related._looks_like_plugin_anchor(Path(source)) else
-                (related._repo_base_related_path(Path(source)),
-                 related._repo_marketplace_overlay_related_path(Path(source)))
+                (related.legacy_related_path(route_source),)
+                if related._looks_like_plugin_anchor(Path(route_source)) else
+                (related._repo_base_related_path(Path(route_source)),
+                 related._repo_marketplace_overlay_related_path(Path(route_source)))
             )
             for path in paths:
                 if path is None:
@@ -165,7 +165,7 @@ def inspect_project(project: str, workspace: str) -> Inspection:
     return result
 
 
-def catalog(project: str, *, workspace: str = "") -> dict:
+def catalog(project: str, *, workspace: str = "") -> dict[str, Any]:
     from .repos_knowledge_configuration import binding_names_supported, owner_status
     from .repos_knowledge_default import observe
 
