@@ -5,6 +5,31 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path, PurePosixPath
+from subprocess import CompletedProcess
+from typing import Any, Callable, Protocol
+
+
+class QualificationTransport(Protocol):
+    """Typed boundary for the existing source-transport adapter."""
+
+    def git(
+        self, *args: str, data: str | None = None, check: bool = True,
+        transport_push: bool = False,
+    ) -> CompletedProcess[str]: ...
+
+    def scoped_credentials(self, login: str) -> None: ...
+
+    def validate_tip(self, tip: str) -> None: ...
+
+    def observe(
+        self, history: str | None, persist: Callable[[dict[str, Any]], None], *,
+        observed_tip: str | None = None,
+    ) -> str | None: ...
+
+    def append(
+        self, candidate: str, persist: Callable[[dict[str, Any]], None], *,
+        required_history: str | None = None, observed_tip: str | None = None,
+    ) -> str: ...
 
 VERSION = 1
 WORKFLOW = "windows-qualification.yml"
@@ -68,6 +93,14 @@ MCP_LIFETIME_PACKET = "mcp-caller-lifetime"
 MCP_LIFETIME_CASE = "test_native_caller_jobs_and_session_owner_lifetime"
 DESKTOP_PACKET = "desktop-capability"
 DESKTOP_CASE = "test_hosted_desktop_capability"
+SOURCE_PACKET = "manager-worktrees-source"
+SOURCE_MODULE = "test_manager_source_replacement"
+SOURCE_CASE = "test_installed_manager_updates_frozen_source"
+SOURCE_FILES = (
+    "tools/run-manager-suite-acceptance.py",
+    "worktree-manager/tests/native/manager_source_fixture.py",
+    "worktree-manager/tests/native/test_manager_source_replacement.py",
+)
 DESKTOP_FILES = (
     "tools/test_windows_qualification_desktop_native.py",
     "tools/windows_qualification_desktop.py",
@@ -76,14 +109,14 @@ DESKTOP_FILES = (
         "sdk_native_win32", "sdk_visibility_sources", "sdk_visibility_cases",
     )),
 )
-PACKETS = ("bridge-http52", MCP_LIFETIME_PACKET, DESKTOP_PACKET, *NATIVE_PACKETS)
+PACKETS = ("bridge-http52", MCP_LIFETIME_PACKET, DESKTOP_PACKET, SOURCE_PACKET, *NATIVE_PACKETS)
 NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 
 
-def canonical(value: dict) -> str:
+def canonical(value: dict[str, Any]) -> str:
     """Encode the public identity without platform-dependent whitespace."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -95,14 +128,22 @@ def sha(value: str) -> str:
     return value
 
 
-def selection(value: dict) -> dict:
+def selection(value: dict[str, Any]) -> dict[str, Any]:
     """Reject omitted broad intent, shell commands and path/flag injection."""
     if not isinstance(value, dict):
         raise ValueError("selection must be an object")
     kind = value.get("kind")
     if kind == "packet":
-        if set(value) != {"kind", "name"} or value["name"] not in PACKETS:
+        fields = {"kind", "name"}
+        if value.get("name") == SOURCE_PACKET:
+            fields.update(("main_sha", "dev_sha"))
+        if set(value) != fields or value["name"] not in PACKETS:
             raise ValueError("unsupported named packet")
+        if value["name"] == SOURCE_PACKET:
+            sha(value["main_sha"])
+            sha(value["dev_sha"])
+            if value["main_sha"] == value["dev_sha"]:
+                raise ValueError("source packet requires distinct Main and merged-Dev inputs")
         return value
     expected = {"kind", "files", "k", "full", "explicit_tiers"}
     if kind == "plugin":
@@ -140,7 +181,7 @@ def selection(value: dict) -> dict:
     return value
 
 
-def request(value: dict) -> dict:
+def request(value: dict[str, Any]) -> dict[str, Any]:
     """Validate a request identically at submission and protected admission."""
     if not isinstance(value, dict) or set(value) != {
         "version", "request_id", "source_sha", "selection", "envelope_sha",
@@ -160,8 +201,8 @@ def request(value: dict) -> dict:
 
 
 def admit(
-    event: dict, *, actor: str, triggering_actor: str, ref: str, ref_protected: bool,
-) -> dict:
+    event: dict[str, Any], *, actor: str, triggering_actor: str, ref: str, ref_protected: bool,
+) -> dict[str, Any]:
     """Admit only the individual repository owner on the protected controller."""
     repo = event["repository"]
     owner = repo["owner"]
@@ -180,10 +221,16 @@ def admit(
     return value
 
 
-def validate_files(root: Path, selected: dict) -> None:
+def validate_files(root: Path, selected: dict[str, Any]) -> None:
     """Resolve focused files beneath the actual candidate, never another root."""
     selection(selected)
     if selected["kind"] == "packet":
+        if selected["name"] != SOURCE_PACKET:
+            return
+        for file in SOURCE_FILES:
+            target = root / file
+            if not target.is_file() or target.is_symlink() or not target.resolve().is_relative_to(root.resolve()):
+                raise ValueError(f"source packet file missing or redirected: {file}")
         return
     from plugin_test_selection import resolve_plugin_root
     base = resolve_plugin_root(root, selected["plugin"]) if selected["kind"] == "plugin" else root
@@ -194,7 +241,8 @@ def validate_files(root: Path, selected: dict) -> None:
 
 
 def validate_result(
-    value: dict, expected: dict, *, run_id: int, control_sha: str, run_attempt: int,
+    value: dict[str, Any], expected: dict[str, Any], *,
+    run_id: int, control_sha: str, run_attempt: int,
 ) -> None:
     """Bind downloaded evidence to this request, source, control and run."""
     if (
@@ -212,8 +260,9 @@ def validate_result(
     native = NATIVE_PACKETS.get(expected["selection"].get("name"))
     lifetime = expected["selection"].get("name") == MCP_LIFETIME_PACKET
     desktop = expected["selection"].get("name") == DESKTOP_PACKET
+    source = expected["selection"].get("name") == SOURCE_PACKET
     if value["outcome"] == "qualified" and (
-        expected["selection"]["kind"] != "packet" or native or lifetime or desktop
+        expected["selection"]["kind"] != "packet" or native or lifetime or desktop or source
     ):
         if not cases or any(case.get("outcome") != "passed" for case in cases):
             raise ValueError("empty, failed or skipped selection cannot qualify")
@@ -234,8 +283,17 @@ def validate_result(
                 or cases[0].get("class", "").split(".")[-1] != "test_windows_qualification_desktop_native"
             ):
                 raise ValueError("desktop capability caller identity mismatch")
-            from windows_qualification_desktop import validate_evidence
-            validate_evidence(value.get("desktop", {}), expected["request_id"])
+            from windows_qualification_desktop import validate_evidence as validate_desktop_evidence
+            validate_desktop_evidence(value.get("desktop", {}), expected["request_id"])
+        if source:
+            if (
+                len(cases) != 1 or cases[0].get("name") != SOURCE_CASE
+                or cases[0].get("class", "").split(".")[-1] != SOURCE_MODULE
+                or value.get("manager_source", {}).get("runner_sha") != expected["source_sha"]
+            ):
+                raise ValueError("source application caller identity mismatch")
+            from windows_qualification_manager_source import validate_evidence as validate_source_evidence
+            validate_source_evidence(value.get("manager_source", {}), expected["selection"])
     if value["outcome"] == "qualified":
         required = {
             "plugin": {"source-and-selection", "canonical-plugin-tests", "test-runtime"},
@@ -259,12 +317,14 @@ def validate_result(
             }
         elif desktop:
             required = {"source-and-selection", DESKTOP_PACKET, "test-runtime"}
+        elif source:
+            required = {"source-and-selection", "governed-feed", SOURCE_PACKET, "test-runtime"}
         phases = value.get("phases", [])
         if {phase.get("name") for phase in phases} != required or any(
             phase.get("status") != "passed" for phase in phases
         ):
             raise ValueError("required qualification phases are incomplete")
-        if expected["selection"]["kind"] == "packet" and not native and not lifetime and not desktop and (
+        if expected["selection"]["kind"] == "packet" and not native and not lifetime and not desktop and not source and (
             value.get("packet", {}).get("source_commit") != expected["source_sha"]
             or value.get("packet", {}).get("generation") != 52
             or not value.get("packet", {}).get("case_count")

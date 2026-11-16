@@ -138,6 +138,51 @@ qualified original custody remain explicitly unresolved. An empty history
 cannot produce `not_sent`. No force-clear, new wake, replacement conversation,
 second queue or automatic replay is introduced.
 
+### Explicit original-key settlement
+
+Passive reconciliation remains the default. Separately authorized recovery may
+select `--settle-native-send` on that same command. Python `reconcile_wake` and
+the REST body accept the strict boolean `settle_native_send`, defaulting to
+false; MCP remains receipt-only. Clients require the running coordinator's
+additional `task_recovery/v1` operation `settle_wake` before requesting it.
+An older coordinator refuses the unsupported effect; no legacy mutation is tried.
+
+The coordinator resolves the same original outbox, reservation, native target,
+key, caller and private prompt internally. It discovers the selected executing
+Bridge CLI's version-1 `agent-bridge.send` settlement capability, then invokes
+its explicit [original-key settlement](../../agent-bridge/docs/native-send-settlement.md)
+front door. That CLI requires the actual daemon's settlement capability before
+its non-retrying POST. Receipt-only observation is never upgraded implicitly.
+An admitted send still marked `pending` is in flight and refuses settlement
+before contacting Bridge. Its original sender must first publish its transport
+outcome; expiry alone cannot grant settlement. This prevents a late busy or
+not-attempted completion from racing a provider fence, including a lost reply.
+
+A matching accepted result settles `sent`. A matching `not_admitted` result,
+including the provider's durable fence and original-request digest, settles
+`not_sent` and terminal `failed` delivery status on the original wake row,
+before either outbox's lease recovery or drainer can reclaim it. The owner's
+task wake-status mirror is updated, without changing the task lifecycle.
+The digest covers the version-1 Bridge
+request document: session ID and the original invocation key, native ID,
+prompt, `agent-dispatch:<wake-id>` caller and `no_resume: false`.
+The queue rechecks its opaque revision after the provider operation. A changed
+task/outbox refuses local settlement even if Bridge already persisted its
+original-key result; fresh diagnostics and an explicit repeat can recover it.
+Lost, malformed, conflicting or unavailable responses retain unknown custody.
+No automatic retry, ordinary send or other-target fallback occurs.
+
+Settlement preserves attempts, generations, delivery tokens, deadlines,
+workspace and native bindings. Its negative detail is not the retryable
+busy/not-attempted receipt, so it cannot authorize another delivery of the
+fenced key. A pre-existing `not_sent` row is eligible only when it already
+retains matching qualified fenced-settlement evidence; a retryable refusal
+is rejected before contacting Bridge, even if a settlement reply could be lost.
+An already committed matching outcome can be observed again;
+contradictory terminal outcomes refuse. Any independent later lifecycle action
+retains its own policy and authority gates. This source capability neither
+qualifies legacy admission history nor performs runtime adoption.
+
 ## Support and authority
 
 The running coordinator advertises

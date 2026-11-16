@@ -94,6 +94,8 @@ Bridge's pending project reuses the existing hash-locked service-index checker
 profile for FastAPI, Pydantic and HTTPX declarations. This makes its selected
 route and consumer-contract files checkable without admitting the full plugin
 or changing its runtime dependencies.
+Dispatch's pending project uses that same profile for its selected recovery
+route, client and test files; the remaining project is not thereby admitted.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.

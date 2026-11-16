@@ -437,7 +437,8 @@
         "plugins/agent-dispatch"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-service-index-requirements.txt"
     },
     {
       "name": "agent-index",

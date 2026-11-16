@@ -12,7 +12,7 @@ from fleet_manager.gateway_vault_available import (
     AVAILABLE_CONTRACT, AvailableLookup, AvailableSource, AvailableToken, AvailableTokenCoordinator,
     AvailableTokenProvider, NormalTokenProvider,
     NORMAL_FETCH_CONTRACT, FetchedToken, NormalFetchCoordinator,
-    SourceAvailability, SourceIdentity, TokenKey,
+    SourceAvailability, SourceIdentity, SourceLease, TokenKey,
 )
 
 
@@ -70,6 +70,43 @@ def test_available_provider_cannot_smuggle_normal_fetch_into_strict_profile() ->
 def test_normal_fetch_invalid_expiry_is_not_unknown_or_infinite(expiry: float | int) -> None:
     with pytest.raises(ValueError, match="invalid-vault-fetched-token"):
         FetchedToken(KEY, "synthetic-token", expiry)
+
+
+def test_source_lease_clock_regression_cannot_revive_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wall, monotonic = [1000.0], [200.0]
+    monkeypatch.setattr("fleet_manager.gateway_vault_available.time.time", lambda: wall[0])
+    monkeypatch.setattr("fleet_manager.gateway_vault_available.time.monotonic", lambda: monotonic[0])
+    lease = SourceLease("a" * 32, 999, 1059, 55, wall[0], monotonic[0])
+    wall[0] += 5
+    assert lease.remaining_seconds() == 50
+    wall[0] -= 1
+    assert lease.remaining_seconds() == 0
+    wall[0] += 1
+    assert lease.remaining_seconds() == 0
+
+
+def test_expired_source_lease_cannot_pass_normal_selection_with_unknown_token_expiry() -> None:
+    async def run() -> None:
+        class LeasedProvider:
+            contract = NORMAL_FETCH_CONTRACT
+
+            async def fetch_normal(self, key: TokenKey, *, deadline: float) -> SourceAvailability:
+                lease = SourceLease("a" * 32, time.time() - 10, time.time() + 50, 1)
+                lease.remaining = 0
+                return SourceAvailability("fetched", FetchedToken(
+                    key, "synthetic-token", source_lease=lease,
+                ))
+
+        provider = LeasedProvider()
+        selected = source("one", provider)
+        coordinator = NormalFetchCoordinator(lambda key: (selected,))
+        result = await coordinator.lookup(KEY)
+        assert result.state != "fetched" and result.token is None
+        assert await coordinator.drain()
+
+    asyncio.run(run())
 
 
 class Provider:

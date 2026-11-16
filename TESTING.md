@@ -301,6 +301,33 @@ Each capture retains its own existing aggregate clock, including managed test
 environment preparation; the workflow timeout does not enlarge it.
 Returned files are data: the client never applies the generated outputs.
 
+`submit --packet manager-worktrees-source --source <candidate-commit>
+--main-commit <released-main-commit> --dev-commit <merged-dev-commit>` selects
+the candidate's existing `run-manager-suite-acceptance.py --mode source` owner.
+All three inputs are full immutable commits; the runtime inputs must be
+distinct and reachable from the repository's published Main/Dev histories.
+Only this named packet accepts those extra source inputs. It constructs and
+updates only Manager, Worktrees and their actual declared closure in the
+fixture's private disposable home, not an operator installation.
+
+This packet uses the protected controller's existing URL-only governed feed
+and independent post-interruption sanitizer. Generic selections and candidate
+workflows do not receive that feed. The source fixture forwards only its
+validated default-index URL across fake HOME and UV scrubbing; it does not
+copy host configuration, credentials or supplemental indexes. It does not
+download Copilot/PSMux or launch New/Resume or survival actors.
+
+The original 1800/900/300/90-second prepare/exercise/assertion/settlement limits,
+3320-second observer bound and 60-minute suite job allocation remain; other
+protected packets retain their existing allocations. The protected adapter's
+3500-second outer wait includes the runner's preparation, stages and cleanup
+inside that job. Actual case, stage, source and settled-observer evidence must
+all pass. Only named bounded diagnostics and JUnit are exported, after URL and
+feed-hostname redaction including JSONL command logs. A missing, skipped,
+failed, interrupted or unsettled consumer never qualifies. Controller support
+must be reviewed and promoted before submission; source support or passing
+unit controls alone is not native qualification or rollout authority.
+
 `submit --packet desktop-capability` selects only
 `tools/test_windows_qualification_desktop_native.py::test_hosted_desktop_capability`.
 This independently scored, optional venue prerequisite composes the existing
