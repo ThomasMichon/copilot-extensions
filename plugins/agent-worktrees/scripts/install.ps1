@@ -1833,7 +1833,8 @@ function Resolve-CopilotCommand {
 
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
+       An explicit prepared interpreter excludes discovery fallbacks.
+       Otherwise prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none.
@@ -1856,6 +1857,39 @@ function Get-BootstrapPython {
        either fallback could still resolve straight back into $VenvDir and
        defeat the whole exclusion. #>
     param([switch]$ExcludeVenvDir, [switch]$ExcludeRuntimeRoot)
+    $prepared = Get-Variable -Name BootstrapPython -ValueOnly -ErrorAction SilentlyContinue
+    if ($prepared) {
+        if (-not [IO.Path]::IsPathRooted($prepared) -or
+            [IO.Path]::GetPathRoot($prepared) -match '^(?:[/\\]|[A-Za-z]:)$' -or
+            -not [IO.File]::Exists($prepared)) {
+            throw 'The prepared bootstrap Python must be an existing absolute executable.'
+        }
+        $excludedRoot = if ($ExcludeRuntimeRoot) { $InstallDir } elseif ($ExcludeVenvDir) { $VenvDir } else { '' }
+        $probe = @'
+import json,sys
+from pathlib import Path
+assert sys.version_info >= (3, 11), 'Prepared bootstrap Python requires 3.11+'
+if sys.argv[2]:
+    boundary = Path(sys.argv[2]).resolve()
+    for value in (sys.argv[1], sys.executable, sys.prefix, sys.base_prefix,
+                  getattr(sys, '_base_executable', sys.executable)):
+        assert not Path(value).resolve().is_relative_to(boundary), 'Prepared bootstrap Python is inside the excluded runtime'
+print(json.dumps(str(Path(sys.executable).resolve())))
+'@
+        $probeError = ''
+        $selected = Invoke-Hidden -FilePath $prepared -ArgList @(
+            '-I', '-S', '-B', '-X', 'utf8', '-c', $probe, $prepared, [string]$excludedRoot
+        ) -ErrorOutput ([ref]$probeError)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Prepared bootstrap Python failed qualification (exit ${LASTEXITCODE}): $selected$probeError"
+        }
+        $resolved = $selected | ConvertFrom-Json -ErrorAction Stop
+        if ($resolved -isnot [string] -or -not [IO.Path]::IsPathRooted($resolved) -or
+            -not [IO.File]::Exists($resolved)) {
+            throw 'Prepared bootstrap Python returned an invalid executable.'
+        }
+        return $resolved
+    }
     $dirs = if ($ExcludeRuntimeRoot) { @() } elseif ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
     foreach ($d in $dirs) {
         if (-not $d) { continue }
@@ -3126,7 +3160,9 @@ function Deploy-VenvAndPackage {
 }
 
 function Deploy-PythonRuntime {
-    $base = if ($WheelProfile) { $WheelPython } else { Get-SignedBasePython }
+    $base = if ($WheelProfile) { $WheelPython } elseif ($BootstrapPython) {
+        Get-BootstrapPython -ExcludeVenvDir
+    } else { Get-SignedBasePython }
     if (-not $base) { $base = Get-BootstrapPython -ExcludeVenvDir }
     if (-not $base) {
         throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'
