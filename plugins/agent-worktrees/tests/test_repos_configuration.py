@@ -1913,14 +1913,16 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
     (machine / "config.yaml").write_text("knowledge_repo: knowledge\n", encoding="utf-8")
     paths = {name: native / f"{name}-worktree" for name in ("sample", "knowledge")}
     records = {}
+    reporter = cfg.detect_machine()
     for name, role, sibling in (("sample", "harness", "knowledge"), ("knowledge", "knowledge", "sample")):
         paths[name].mkdir()
         record = tracking.WorktreeRecord(
             worktree_id=f"wt-{name}", branch=f"worktree/wt-{name}", worktree_path=str(paths[name]),
-            repo=name, machine="fixture", platform=repos._current_platform(),
+            repo=name, machine=reporter, platform=repos._current_platform(),
             started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
             resume_count=0, title=None, status="active", completed_at=None, sessions=[],
-            pair_id="fixture-pair", pair_role=role, pair_ref=f"fixture/{sibling}/wt-{sibling}",
+            pair_id="fixture-pair", pair_role=role,
+            pair_ref=tracking.format_claim_ref(reporter, sibling, f"wt-{sibling}"),
             pair_kind="worktree",
         )
         path = cfg.project_dir(name) / "worktrees" / f"wt-{name}.yaml"
