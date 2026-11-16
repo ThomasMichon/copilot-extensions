@@ -590,7 +590,8 @@ async def test_required_creation_resume_refuses_changed_custody_before_effect(
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_writer_rehydrates_same_native_with_current_serializer(writer_creation: Any) -> None:
+async def test_keyed_creation_writer_rehydrates_same_native_without_reselection(writer_creation: Any) -> None:
+    # Preserve the historical capture entrypoint; qualification now selects the current serializer.
     from agent_bridge.session_manager import SessionManager
 
     fixture = writer_creation
