@@ -6,21 +6,26 @@ import json
 import os
 import signal
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
+from machine_transport import detect_platform
 
 from agent_worktrees import config as cfg, launch_execution as audit
-from agent_worktrees import launch_seed_exec as legacy, launch_seed_native as native
+from agent_worktrees import launch_seed_native as native
 from agent_worktrees import launch_seed_state as seeds, tracking
 from agent_worktrees import launch_seed_posix
+from agent_worktrees import sessions
 from agent_worktrees.sessions import LiveVerdict
+from agent_worktrees.tracking_lifecycle import create_new_record
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native POSIX fork/exec contract")
 
 
 @pytest.mark.parametrize("fault", ["truncated", "invalid-presence"])
-def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descriptor(fault):
+def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descriptor(fault: str | None) -> None:
     fields = [
         b"agent-worktrees.backend-environment.v1",
         b"x", b"literal ' \n", b"", b"", b"x", b"", b"x", b"mac launcher",
@@ -44,7 +49,7 @@ def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descript
 @pytest.mark.parametrize("name", [
     name for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
 ])
-def test_non_python_backend_receives_default_spawn_signals(record, tmp_path, native_bash, name):
+def test_non_python_backend_receives_default_spawn_signals(record: Path, tmp_path: Path, native_bash: str, name: str) -> None:
     signum = getattr(signal, name)
     _seed, _prepared, _correlation, _assets, result = _run(
         record, tmp_path, native_bash, ["/bin/sh", "-c", f"kill -{name[3:]} $$; exit 42"],
@@ -53,20 +58,24 @@ def test_non_python_backend_receives_default_spawn_signals(record, tmp_path, nat
 
 
 @pytest.fixture
-def record(tmp_path, monkeypatch):
+def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project = cfg.project_dir("demo")
     project.mkdir(parents=True, exist_ok=True)
     (project / "config.yaml").write_text(json.dumps({
         "repo_name": "demo", "machine": "test",
-        "repos": {"demo": {"anchor": str(tmp_path), "default_branch": "dev"}},
+        "platform": detect_platform(),
+        "repos": {"demo": {
+            "anchor": str(tmp_path), "default_branch": "dev",
+            "worktree_root": str(tmp_path / "checkouts"),
+        }},
     }), encoding="utf-8")
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    path = tracking.create_new_record(
+    checkout = tmp_path / "checkouts" / "wt-exec"
+    checkout.mkdir(parents=True)
+    path = create_new_record(
         "wt-exec", "worktree/wt-exec", str(checkout), "demo", "test",
-        cfg.detect_platform(), tmp_path,
+        detect_platform(), project / "worktrees",
     ).yaml_path
-    monkeypatch.setattr(legacy.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
+    monkeypatch.setattr(sessions, "verify_worktree_active", lambda *a: LiveVerdict())
     return path
 
 
@@ -115,7 +124,7 @@ raise SystemExit(code)
 '''
 
 
-def _run(record, tmp_path, native_bash, command, *, fault=None, admission_only=False, retained=None):
+def _run(record: Path, tmp_path: Path, native_bash: str, command: list[str], *, fault: str | None=None, admission_only: bool=False, retained: dict[str, Any] | None=None) -> tuple[Any, dict[str, Any], audit.Correlation, Path, Any]:
     seed = seeds.stage(record, kind="new", text="literal prompt ' \" \u03a9\n") if not admission_only else None
     prepared = native.prepare(
         record, command, seed_id=seed.seed_id if seed else None, admission_only=admission_only,
@@ -268,8 +277,8 @@ raise SystemExit(code)
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
-    record, tmp_path, native_bash, monkeypatch, changed,
-):
+    record: Path, tmp_path: Path, native_bash: str, monkeypatch: pytest.MonkeyPatch, changed: Any,
+) -> None:
     from agent_worktrees import resource_relationship, session_liveness
     from agent_worktrees.retained_native_resume import ENVIRONMENT_KEY
 
@@ -279,7 +288,7 @@ def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
     current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
     tracking.save_record(current, record)
     current = tracking.load_record(record)
-    intent = {
+    intent: dict[str, Any] = {
         "version": 1, "operation_id": "original-recovery",
         "writer": {
             "version": 1, "identity": {
@@ -290,7 +299,7 @@ def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
         },
         "head": {"session_id": "native-original", "revision": current.head_revision},
     }
-    monkeypatch.setattr(legacy.sessions, "has_mux_session", lambda *_: False)
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *_: False)
     monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
     monkeypatch.setattr(resource_relationship, "writer_identity", lambda: intent["writer"]["identity"])
     monkeypatch.setenv(ENVIRONMENT_KEY, json.dumps(intent))
@@ -310,8 +319,8 @@ def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_no_seed_exec_keeps_creation_fence_until_kernel_exec_and_refuses_new_intent(
-    record, tmp_path, native_bash, changed,
-):
+    record: Path, tmp_path: Path, native_bash: str, changed: Any,
+) -> None:
     command = [
         sys.executable, "-c",
         BACKEND.replace(
@@ -328,7 +337,9 @@ def test_no_seed_exec_keeps_creation_fence_until_kernel_exec_and_refuses_new_int
     assert (assets / ".native-seed-exec.complete").read_text() == ("3\n" if changed else "0\n")
     if changed:
         assert not (assets / "backend.json").exists()
-        assert seeds.peek(record).handoff_id is None
+        observed_seed = seeds.peek(record)
+        assert observed_seed is not None
+        assert observed_seed.handoff_id is None
     else:
         backend = json.loads((assets / "backend.json").read_text())
         before = json.loads((assets / "before.json").read_text())
@@ -347,8 +358,8 @@ def test_no_seed_exec_keeps_creation_fence_until_kernel_exec_and_refuses_new_int
     (0, None), (7, None), (-signal.SIGTERM, None), (7, "inherited-fd"),
 ])
 def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
-    record, tmp_path, native_bash, exit_code, fault,
-):
+    record: Path, tmp_path: Path, native_bash: str, exit_code: Any, fault: str | None,
+) -> None:
     # The backend finds its launch-owned completion file without receiving
     # shell source or having a Python lifetime waiter above it.
     assets_parent = record.parent / "launch-attempts"
@@ -384,8 +395,8 @@ def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
 
 @pytest.mark.parametrize("failure", ["missing", "not-executable"])
 def test_definite_exec_failure_restores_without_backend_spawn(
-    record, tmp_path, native_bash, failure,
-):
+    record: Path, tmp_path: Path, native_bash: str, failure: Any,
+) -> None:
     executable = tmp_path / failure
     if failure == "not-executable":
         executable.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
@@ -397,6 +408,7 @@ def test_definite_exec_failure_restores_without_backend_spawn(
     assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
     assert (assets / "signals-restored").read_text() == "True"
     restored = seeds.peek(record)
+    assert restored is not None
     assert restored.seed_id == seed.seed_id and restored.handoff_id is None
     events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
     assert [event["phase"] for event in events] == [
@@ -404,7 +416,7 @@ def test_definite_exec_failure_restores_without_backend_spawn(
     ]
 
 
-def test_fast_success_is_spawned_or_unknown_never_restored(record, tmp_path, native_bash):
+def test_fast_success_is_spawned_or_unknown_never_restored(record: Path, tmp_path: Path, native_bash: str) -> None:
     seed, prepared, correlation, assets, result = _run(
         record, tmp_path, native_bash, [sys.executable, "-c", "raise SystemExit(0)"],
     )
@@ -418,6 +430,7 @@ def test_fast_success_is_spawned_or_unknown_never_restored(record, tmp_path, nat
         assert status == "3\n"
         assert events[-1]["phase"] == "unknown"
         retained = seeds.peek(record)
+        assert retained is not None
         assert retained.seed_id == seed.seed_id and retained.handoff_id
     assert not any(
         event["phase"] == "execution-returned" and event["details"].get("exit_code") == 3
@@ -427,8 +440,8 @@ def test_fast_success_is_spawned_or_unknown_never_restored(record, tmp_path, nat
 
 @pytest.mark.parametrize("fault", ["interrupt", "encoding", "interrupt-success"])
 def test_catchable_pre_exec_loss_cannot_finish_or_restore(
-    record, tmp_path, native_bash, fault,
-):
+    record: Path, tmp_path: Path, native_bash: str, fault: str | None,
+) -> None:
     seed, prepared, _correlation, assets, result = _run(
         record, tmp_path, native_bash, [sys.executable, "-c", "raise SystemExit(99)"], fault=fault,
     )
@@ -440,10 +453,11 @@ def test_catchable_pre_exec_loss_cannot_finish_or_restore(
         "execution-requested", "seed-claimed", "unknown",
     ]
     retained = seeds.peek(record)
+    assert retained is not None
     assert retained.seed_id == seed.seed_id and retained.handoff_id
 
 
-def test_observer_timeout_is_finite_unknown_not_a_lifetime_waiter(record, tmp_path, native_bash):
+def test_observer_timeout_is_finite_unknown_not_a_lifetime_waiter(record: Path, tmp_path: Path, native_bash: str) -> None:
     seed, prepared, _correlation, assets, result = _run(
         record, tmp_path, native_bash,
         [sys.executable, "-c", "import time; time.sleep(0.1)"], fault="observer-timeout",
@@ -453,10 +467,11 @@ def test_observer_timeout_is_finite_unknown_not_a_lifetime_waiter(record, tmp_pa
     events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
     assert events[-1]["phase"] == "unknown"
     retained = seeds.peek(record)
+    assert retained is not None
     assert retained.seed_id == seed.seed_id and retained.handoff_id
 
 
-def test_sigint_during_failed_exec_cleanup_cannot_finish_seed(record, tmp_path, native_bash):
+def test_sigint_during_failed_exec_cleanup_cannot_finish_seed(record: Path, tmp_path: Path, native_bash: str) -> None:
     seed, prepared, _correlation, assets, result = _run(
         record, tmp_path, native_bash, [str(tmp_path / "absent-backend")],
         fault="restore-interrupt",
@@ -465,6 +480,7 @@ def test_sigint_during_failed_exec_cleanup_cannot_finish_seed(record, tmp_path, 
     assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
     assert (assets / "signals-restored").read_text() == "True"
     restored = seeds.peek(record)
+    assert restored is not None
     assert restored.seed_id == seed.seed_id and restored.handoff_id is None
     events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
     assert [event["phase"] for event in events] == [
