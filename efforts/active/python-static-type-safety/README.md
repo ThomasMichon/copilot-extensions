@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Establish strict enforcement for all new Python before continuing the existing-code admission cohorts. The selector prerequisite merged in #12541; its checker code is already strictly enforced, but a repository-wide new-code gate is not yet proven. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
+- **Current slice:** Sweep every project through temporary strict opt-in, catalog all failures, fix low-risk typing deltas in waves, and resweep before finishing projects in descending measured completion order. Persistent strict-new-code selection, arbitrary emitted coverage and exact-candidate parity remain open; they no longer serialize independent diagnostic and annotation preparation. The bounded physical-file/known-composition ratchet merged in #12679; a changed-file check is not persistent admission or complete repository-wide new-code coverage. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
 - **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 delivers emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. Preserve full-composed-consumer qualification under #10362 independently while progressing the other assigned slices.
 - **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
 - **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
@@ -42,8 +42,16 @@ named owners. A partial PR, diagnostic, transfer or prepared implementation does
 not make unchecked code compliant. Only then recommend managed finalization.
 
 The selector prerequisite aligns with this goal by strictly checking its new
-checker code and exposing previously unchecked programs. The next outcome is
-the repository-wide strict-new-code gate, before further legacy admission.
+checker code and exposing previously unchecked programs.
+
+Subsequent operator execution direction, verbatim:
+
+> Right. Run all project builds in strict mode via temp opt-in, catalog all failures, handle low hanging fruit in waves. Finish up projects closest to 100% completion, in that order, after doing subsequent sweeps
+
+The repository-wide strict-new-code gate remains required. The sweep and
+low-risk annotation waves proceed without waiting for that separate gate;
+diagnostic passes do not constitute persistent admission or waive any
+project's existing acceptance criteria.
 
 ## Guiding Intent
 
@@ -69,6 +77,24 @@ definition of success.
 - **Delegates:** The shared checker foundation (#10400 / #10553) has merged; Versioned Runtime (#10331), the Copilot Extensions Harness payload helpers/tests (#10362) and canonical Payload Invocation (#10371) remain distinct pending admissions in their assigned worktrees. Retained effort-helper, SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
+- **Execution transfer:** the operator directed relocation to another
+  execution host after a safe checkpoint. Preserve the pushed continuation
+  branch and this active effort; the successor must explicitly accept the
+  lead role before the predecessor parks. No source-hosted authoring agent,
+  installed-runtime operation, resource-limit increase or service authority
+  is implied. Local retained evidence, protected allocations and unrelated
+  claims remain with their current custodians until separately accepted.
+- **Transfer checkpoint:** #12679 is merged and its PR claim is released;
+  no owned open PR, review thread, test process or scheduled run remains.
+  The latest merged inventory is 43/74 strict projects and 481/9,392 strict
+  physical files; 31 pending projects own 8,911 files. The new sweep has not
+  run. Next, inspect the successor's actual prepared checker environments,
+  run the complete diagnostic matrix and retain every failure before edits.
+  Prior one-shot qualification budgets remain spent, retained allocations
+  stay protected, and all native/minimum-runtime, original-corpus,
+  emitted/copy/candidate, provider, publication and deployment holds remain.
+  Migration does not convert an unavailable coordination observation to
+  an empty inbox or transfer unrelated resource claims.
 
 - **Finite #9177 tracking:** The direct Phase 4 item and paired local/global
   validation below preserve the existing separate owner/claim. Normal reviewed
@@ -294,18 +320,35 @@ rewrite.
 - [x] Prove live candidate enforcement and regression rejection under the adopted Main controller.
 - [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
-### Phase 1a - Strict new-code gate before further legacy admission
+### Phase 1a - Strict new-code gate
 
-- [ ] Land the bounded physical-file ratchet and existing composed-input
+- [x] Land the bounded physical-file ratchet and existing composed-input
   selectors, without treating that prerequisite as complete emitted/candidate
-  coverage or pending-project admission.
+  coverage or pending-project admission (#12679).
+- [ ] Preserve strict coverage of newly touched files across later PRs and
+  dependency changes, not merely while their own diff selects them.
 - [ ] Define and review complete new-code coverage: new files, new code in
   existing pending files, tests/tools and executed or generated Python.
 - [ ] Enforce that coverage strictly in required source CI without admitting
   untouched legacy debt, weakening diagnostics or hiding first-party code.
 - [ ] Prove actual rejection of newly introduced type errors inside pending
-  owners, plus local/CI and exact-candidate parity, before resuming the
-  remaining existing-code admission cohorts.
+  owners, plus local/CI and exact-candidate parity. Retain this gate
+  independently of the subsequent diagnostic/annotation waves and
+  nearest-complete-project scheduling; no acceptance requirement is removed.
+
+### Strict diagnostic and annotation waves
+
+Agent-recommended realization of the subsequent operator direction:
+
+- [ ] Run every declared project's complete interpreter/platform matrix with
+  temporary strict opt-in. Catalog full diagnostics, setup/module/composition
+  blockers, absent scopes and exact source inputs without changing admission.
+- [ ] Group low-risk annotation/narrowing fixes into bounded, non-overlapping
+  waves; preserve behavior, assertions, source ownership and typed boundaries.
+- [ ] Resweep after each wave and rerank pending projects by measured clean-file
+  fraction, distinguishing complete analyses from blocked or unexecuted scope.
+- [ ] Finish the nearest-complete projects first through their existing
+  acceptance, review and CI gates; record only merged persistent strict coverage.
 
 ### Phase 2 - Source and platform qualification
 
@@ -454,6 +497,13 @@ plugin admission or the already-qualified Index service.
 
 ## Validation Plan
 
+- [x] The bounded whole-file selector rejects missing annotations and an old
+  error outside the edited lines, includes developer edits, retains known
+  composed-program bindings and rejects missing owners/full-body targets.
+  Nineteen pure controls, real Git/MyPy/source/frozen checks, both final-source
+  strict checker targets, accepted review and required CI pass for #12679.
+  This does not certify persistent selection, arbitrary emitted programs or
+  release-candidate ratchet parity.
 - [ ] The strict-new-code gate rejects actual regressions under pending owners
   and in the reviewed new-code forms; required source CI and the exact-candidate
   gate cannot silently omit new Python while legacy debt remains pending.
@@ -475,6 +525,11 @@ plugin admission or the already-qualified Index service.
   43 strict projects, 478 strict files and 31 pending projects owning 8,851
   files, with no basic or unclassified scopes. All nineteen further file
   additions are pending; selector visibility adds no admission credit.
+  The merged `4d04e79c` snapshot reconciles all 74 projects and 9,392 files:
+  43 strict projects, 481 strict files and 31 pending projects owning 8,911
+  files, with no basic or unclassified scopes. Two new checker-owned files
+  and one upstream Machine Transport file grow already strict scopes; sixty
+  further file additions remain pending. No new project admission is inferred.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
@@ -561,6 +616,20 @@ See [rollout](rollout.md) for the CLI contract, per-PR boundaries, setup and
 composition prerequisites, and review/validation rules.
 
 ## Journal
+
+### 2026-11-15 - Strict sweep direction and execution transfer
+
+- Captured the operator's complete temporary-opt-in, failure-catalog,
+  low-risk-wave and nearest-completion ordering direction above. The
+  persistent new-code, emitted-program and exact-candidate gaps remain open.
+- Prepared a clean documentation-only continuation checkpoint after #12679;
+  no new sweep, typing fix, qualification run or admission is claimed.
+  Documentation validation checks the exact request capture and Git whitespace.
+- The successor must resume the pushed branch, accept the same active effort,
+  preserve the original scope approvals and individual holds, and start with
+  the complete diagnostic matrix. The predecessor keeps local retained
+  evidence and resource custody, does not finalize, and parks only after
+  explicit successor pickup. This transfer grants no deployment authority.
 
 - [2026-11-09 - Bounded promotion qualification and return](journal/2026/11.09%20Bounded%20promotion%20qualification%20and%20return.md)
 - [2026-11-07 - Promotion-owned copies and source qualification](journal/2026/11.07%20Promotion-owned%20copies%20and%20source%20qualification.md)
@@ -3296,3 +3365,35 @@ composition prerequisites, and review/validation rules.
   process/admission/sandbox cleanup remain verified. Fresh final-head CI and
   a passing subsequent review still gate this open PR; Phase 1a and the
   overall campaign remain Active.
+
+### 2026-11-15 - Bounded whole-file ratchet merged; persistent coverage next
+
+- #12679 merges as `4d04e79c3eca8e962c13e26f09ff7b1bfa943c20` at
+  07:02:16 UTC after Copilot approval on exact head
+  `d5cad511a43843031c420ee17a9785563c66df2a`, both addressed threads resolved,
+  required source CI, source attribution and workflow lockdown pass.
+  The final required PR gate belongs to
+  [run 43687309234](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43687309234);
+  the preceding exact-head run also passes all 5,010 admitted units and both
+  checker targets. A metadata-only missing-marker failure is corrected and
+  its failed job passes re-evaluation; no code gate is bypassed.
+- The canonical Plan and Validation Plan are reread. Only the bounded
+  physical/known-composition prerequisite and its actual validation item
+  complete. The original strict-first Goal, arbitrary executed/emitted forms,
+  exact-candidate parity and all independent legacy/native/corpus gates remain.
+  A passing changed-file check does not keep a pending file selected when a
+  later dependency edit breaks it; persistent new-code selection is the next
+  bounded design outcome before further legacy admission.
+- The fresh merged inventory reports 43/74 strict projects and 481/9,392
+  strict-owned physical files, with 31 pending projects owning 8,911 files
+  and no basic or unclassified scopes. All 74 tracker rows and area totals
+  are reconciled. The two new checker files add strict file coverage, not
+  a pending-project admission; an upstream Machine Transport file supplies
+  the third strict-file increase since `16f10b7f`.
+- Managed synchronization cleanly aborts a replay conflict. Exact Git-blob
+  equality of all eleven owned paths with the actual merge proves there is
+  no unmerged survivor before a backed-up empty-range advance. Unrelated
+  incoming Bridge changes are preserved. The merged PR obligation settles;
+  unavailable inbound coordination evidence is not treated as an empty
+  roster. No source/caller ownership transfer, installed rollout, cleanup
+  waiver or whole-effort completion is inferred.
