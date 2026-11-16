@@ -6,9 +6,10 @@ import json
 import os
 import secrets
 import stat
+import sys
 from pathlib import Path
 
-from .source_lease_http import HttpSourceLease, HttpSourceLeaseClient, _invalid_constant, _pairs, _text
+from .source_lease_http import HttpSourceLease, SourceLeaseClient, _invalid_constant, _pairs, _text
 
 _MAX_CONFIG_BYTES = 1024 * 1024
 
@@ -26,16 +27,16 @@ class CopilotAccountFile:
     """
 
     def __init__(self, path: Path, *, account: str) -> None:
-        if os.name != "posix":
+        if sys.platform == "win32" or os.name != "posix":
             raise CopilotFileAuthError("copilot-account-file-platform-unsupported")
         if not path.is_absolute() or path.name != "config.json" or not _text(account):
             raise CopilotFileAuthError("copilot-account-file-binding-invalid")
         self._path, self._key = path, "https://github.com:" + account
-        self._account = account
+        self._account: str = account
         self._token: str | None = None
         self._withdrawn = False
 
-    async def renew(self, client: HttpSourceLeaseClient) -> HttpSourceLease:
+    async def renew(self, client: SourceLeaseClient) -> HttpSourceLease:
         """Acquire fresh source authorization before changing the native file."""
         lease = await client.acquire()
         self.install(lease)
@@ -56,7 +57,7 @@ class CopilotAccountFile:
         self._change(None)
 
     def _change(self, token: str | None, lease: HttpSourceLease | None = None) -> None:
-        if os.name != "posix":
+        if sys.platform == "win32" or os.name != "posix":
             raise CopilotFileAuthError("copilot-account-file-platform-unsupported")
         import fcntl
 
@@ -157,6 +158,8 @@ class CopilotAccountFile:
 
     @staticmethod
     def _private(metadata: os.stat_result) -> None:
+        if sys.platform == "win32" or os.name != "posix":
+            raise ValueError
         if (
             not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
             or metadata.st_mode & 0o077 or metadata.st_nlink != 1

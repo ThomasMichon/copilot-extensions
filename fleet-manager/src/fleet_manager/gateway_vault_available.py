@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Callable
@@ -14,6 +15,10 @@ from typing import Literal, Protocol
 
 AVAILABLE_CONTRACT = "fleet-manager.vault-available/v1"
 NORMAL_FETCH_CONTRACT = "fleet-manager.vault-normal-fetch/v1"
+SOURCE_LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
+NORMAL_LEASE_SUPPORT = {
+    "fetch_contract": NORMAL_FETCH_CONTRACT, "lease_contract": SOURCE_LEASE_CONTRACT,
+}
 AvailabilityState = Literal[
     "available", "fetched", "cache-miss", "unavailable", "uncertain", "unsupported",
 ]
@@ -67,6 +72,51 @@ class AvailableToken:
             raise ValueError("invalid-vault-available-token")
 
 
+@dataclass
+class SourceLease:
+    """Custodian-issued delivery authorization, never actual credential expiry."""
+
+    lease_id: str
+    issued_at: float
+    expires_at: float
+    remaining: float
+    wall: float = field(default_factory=time.time, repr=False)
+    monotonic: float = field(default_factory=time.monotonic, repr=False)
+    _expired: bool = field(default=False, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if (type(self.lease_id) is not str
+                or re.fullmatch("[0-9a-f]{32}", self.lease_id) is None
+                or any(type(value) not in (int, float) or not -1e12 < value < 1e12
+                       or not math.isfinite(value)
+                       for value in (self.issued_at, self.expires_at, self.remaining,
+                                     self.wall, self.monotonic))
+                or not 0 < self.issued_at < self.expires_at < 1e12
+                or self.expires_at - self.issued_at > 3600
+                or not 0 < self.remaining <= self.expires_at - self.issued_at
+                or self.issued_at > self.wall):
+            raise ValueError("invalid-vault-source-lease")
+
+    def remaining_seconds(self) -> float:
+        wall, monotonic = time.time(), time.monotonic()
+        if wall < self.wall or monotonic < self.monotonic:
+            self._expired = True
+        self.remaining = min(
+            self.expires_at - wall,
+            self.remaining - max(0, wall - self.wall, monotonic - self.monotonic),
+        )
+        self.wall, self.monotonic = wall, monotonic
+        self._expired |= self.remaining <= 0
+        return 0 if self._expired else self.remaining
+
+    def fields(self) -> dict[str, str | float]:
+        return {
+            "lease_contract": SOURCE_LEASE_CONTRACT, "lease_id": self.lease_id,
+            "lease_issued_at": self.issued_at, "lease_expires_at": self.expires_at,
+            "lease_remaining_seconds": self.remaining_seconds(),
+        }
+
+
 @dataclass(frozen=True)
 class FetchedToken:
     """Normal provider retrieval, not a cache-only or known-expiry attestation."""
@@ -75,6 +125,7 @@ class FetchedToken:
     value: str = field(repr=False)
     expires_at: float | None = None
     acquisition: Literal["normal-fetch"] = "normal-fetch"
+    source_lease: SourceLease | None = None
 
     def __post_init__(self) -> None:
         if (type(self.key) is not TokenKey or type(self.value) is not str
@@ -84,7 +135,8 @@ class FetchedToken:
                     type(self.expires_at) not in (int, float)
                     or not -1e12 < self.expires_at < 1e12
                     or not math.isfinite(self.expires_at)))
-                or self.acquisition != "normal-fetch"):
+                or self.acquisition != "normal-fetch"
+                or self.source_lease is not None and type(self.source_lease) is not SourceLease):
             raise ValueError("invalid-vault-fetched-token")
 
 
@@ -213,7 +265,9 @@ class AvailableTokenCoordinator:
 
     def _usable(self, key: TokenKey, token: AvailableToken | FetchedToken) -> bool:
         return (type(token) is self._token_type and token.key == key
-                and (token.expires_at is None or token.expires_at > time.time()))
+                and (token.expires_at is None or token.expires_at > time.time())
+                and (not isinstance(token, FetchedToken) or token.source_lease is None
+                     or token.source_lease.remaining_seconds() > 0))
 
     async def _probe(
         self, key: TokenKey, source: AvailableSource, deadline: float,

@@ -361,6 +361,33 @@ implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
 
+### 2026-11-16 - Initial normal-retrieval source accepted
+
+PR #12807 merged to `dev` at `2026-11-16T05:43:43Z` as
+`2759dce666e29bd4dd1b6ca6827ac1755c795827`, from exact head
+`7a4c969440f4bd7959ebb600a40ea97f768773e8`. Copilot review
+`5915476463` approved that head without active issues; required CI and
+its metadata-triggered rerun passed. The managed merge used the authorized
+exception to the additional code-owner vote, not a CI or findings exception.
+
+The opt-in SDK Gateway owner now composes current authorized Controller offers,
+the shared bounded selector and the existing account custodian. Normal provider
+retrieval and refresh are explicit, with unknown credential expiry kept separate
+from source leases. The strict available-only profile and legacy lease exchange
+retain their meanings. The existing vision and proposal now explicitly cover
+the independent cache, local/central broker role and standard provider drivers.
+
+The exact published source passed 168 focused real TLS/channel/custodian and
+Gateway regressions. All seven changed Python files passed whole-file strict
+analysis for Linux and Windows with the Python 3.10 target retained; source,
+install, documentation and required CI gates passed. Credentials were synthetic.
+
+This is the initial R2 source flow, not full R2-R4 or parent acceptance. Continue
+the actual consumer/source-lease composition, qualified cache/provider contract,
+deliberate interaction and native optional-profile construction/adoption.
+Durable transactions and every remaining Plan/Validation item stay open.
+No live credential, installed runtime, enrollment or shared service changed.
+
 ### 2026-11-15 - Local transaction and admitted relay scopes distinguished
 
 The effort is Active for the separately admitted federated-relay slice.
