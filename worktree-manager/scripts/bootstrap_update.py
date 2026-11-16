@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
 import sys
+from types import ModuleType
 import uuid
 
 
-def _request_control(options, forwarded) -> bool:
+def _request_control(options: argparse.Namespace, forwarded: list[str]) -> bool:
     if options.request_status == "":
         raise ValueError("Request status requires a nonempty ID")
     return any((
@@ -18,8 +20,8 @@ def _request_control(options, forwarded) -> bool:
     ))
 
 
-def execute(args, driver, *, source_digest: str) -> int:
-    from runtime_install import _bootstrap_hold_path, _source_digest, engine
+def execute(args: argparse.Namespace, driver: ModuleType, *, source_digest: str) -> int:
+    from runtime_install import BOOTSTRAP_PYTHON, _bootstrap_hold_path, _source_digest, engine
     from worktree_manager.update_python_path import finish_update
     from worktree_manager.update_driver_cli import (
         _CONTEXT_KEYS, _current_authority, _report, _source_key, _update_context_directory, parse_options,
@@ -96,7 +98,7 @@ def execute(args, driver, *, source_digest: str) -> int:
         authority="standalone" if selected.configured else "",
     )
     runner = driver.TrustedRunner(
-        tuple(arguments), str(payload), context_keys=_CONTEXT_KEYS,
+        tuple(arguments), str(payload), context_keys=(*_CONTEXT_KEYS, BOOTSTRAP_PYTHON),
     )
     # Frozen control code does not pin the suite's later marketplace targets.
     try:

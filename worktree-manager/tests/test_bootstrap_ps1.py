@@ -227,7 +227,13 @@ def _fake_tools(
     bin_dir.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         python = bin_dir / "fake-python.cmd"
-        python.write_text(f"@echo off\r\nexit /b {python_exit}\r\n", "utf-8")
+        python.write_text(
+            "@echo off\r\n"
+            'if defined BOOTSTRAP_PYTHON_HANDOFF >"%BOOTSTRAP_PYTHON_HANDOFF%" '
+            "echo %COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON%\r\n"
+            f"exit /b {python_exit}\r\n",
+            "utf-8",
+        )
         # PowerShell resolves .ps1 before PATHEXT executables.
         (bin_dir / "uv.ps1").write_text(
             f"if ($args[0] -eq '--version') {{ Write-Output 'uv {uv_version}'; exit 0 }}\n"
@@ -244,7 +250,14 @@ def _fake_tools(
         )
     else:
         python = bin_dir / "fake-python"
-        python.write_text(f"#!/bin/sh\nexit {python_exit}\n", "utf-8")
+        python.write_text(
+            "#!/bin/sh\n"
+            'if [ -n "${BOOTSTRAP_PYTHON_HANDOFF:-}" ]; then\n'
+            '  printf "%s\\n" "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" > "$BOOTSTRAP_PYTHON_HANDOFF"\n'
+            "fi\n"
+            f"exit {python_exit}\n",
+            "utf-8",
+        )
         python.chmod(0o755)
         uv = bin_dir / "uv"
         uv.write_text(
@@ -286,6 +299,7 @@ def _run(
     long_path: bool = False, incomplete_checkout: bool = False,
     longpaths_disabled: bool = False, retained_sparse: bool = False,
     uv_version: str = "0.13.7",
+    handoff: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path, long_path=long_path)
     root = tmp_path / "manager-root"
@@ -323,6 +337,9 @@ def _run(
     env["WORKTREE_MANAGER_ROOT"] = str(root)
     env["USERPROFILE"] = str(tmp_path / "profile")
     env["PATH"] = str(selected_bin) + os.pathsep + env.get("PATH", "")
+    if handoff:
+        env["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = "previous-selection"
+        env["BOOTSTRAP_PYTHON_HANDOFF"] = str(tmp_path / "python-handoff")
     installer_mock = ""
     if uv_version == "0.7.0":
         _fake_tools(Path(env["USERPROFILE"]) / ".local" / "bin", uv_exit, python_exit)
@@ -349,12 +366,18 @@ def _run(
         env["BOOTSTRAP_UV_TRACE"] = str(tmp_path / "uv-trace.txt")
         env["BOOTSTRAP_UV_POISON"] = str(poison)
     command = [host or PWSH, "-NoProfile", "-NonInteractive"]
-    if encoded or installer_mock:
+    if encoded or installer_mock or handoff:
         script = str(BOOTSTRAP).replace("'", "''")
         text = installer_mock + (
             "[Threading.Thread]::CurrentThread.CurrentCulture = "
             "[Globalization.CultureInfo]::GetCultureInfo('de-DE'); "
-            f"& '{script}' --version; exit $LASTEXITCODE"
+            f"& '{script}' --version; $code = $LASTEXITCODE; "
+            + (
+                f"[IO.File]::WriteAllText({_quote(tmp_path / 'restored-python')}, "
+                "$env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON); "
+                if handoff else ""
+            )
+            + "exit $code"
         )
         command += ["-EncodedCommand", base64.b64encode(text.encode("utf-16le")).decode("ascii")]
     else:
@@ -381,6 +404,17 @@ def test_failed_runtime_command_fails_the_bootstrap(tmp_path: Path) -> None:
 def test_successful_uv_succeeds(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=0)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("python_exit", [0, 4])
+def test_bootstrap_hands_selected_python_to_children_and_restores_caller(
+    tmp_path: Path, python_exit: int,
+) -> None:
+    result = _run(tmp_path, uv_exit=0, python_exit=python_exit, handoff=True)
+    assert result.returncode == python_exit, result.stdout + result.stderr
+    expected = tmp_path / "fake-bin" / ("fake-python.cmd" if os.name == "nt" else "fake-python")
+    assert Path((tmp_path / "python-handoff").read_text(encoding="utf-8").strip()) == expected
+    assert (tmp_path / "restored-python").read_text(encoding="utf-8") == "previous-selection"
 
 
 def test_fresh_bootstrap_restores_engine_sdk_from_retained_sparse_staging(tmp_path: Path) -> None:

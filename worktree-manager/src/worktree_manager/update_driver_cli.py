@@ -8,12 +8,17 @@ import os
 import re
 import sys
 from contextlib import contextmanager
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from urllib.parse import urlsplit
 
 from .engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
+if TYPE_CHECKING:
+    from update_driver import Request
+
+_BOOTSTRAP_PYTHON = "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"
 _CONTEXT_KEYS = (
     "AGENT_HOME",
     "AGENT_WORKTREES_UPDATE_CONTEXT",
@@ -25,9 +30,14 @@ _CONTEXT_KEYS = (
     "WORKTREE_MANAGER_ENGINE_CMD",
     "CE_UPDATE_AUTH",
 )
+_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _BOOTSTRAP_PYTHON)
 
 
-def _current_authority(driver, **kwargs):
+class _EngineLaunchOptions(TypedDict, total=False):
+    headless: bool
+
+
+def _current_authority(driver: Any, **kwargs: Any) -> Any:
     inspect = getattr(driver, "current_authority", None)
     if not callable(inspect):
         raise driver.StateError("selected update driver lacks authority support")
@@ -191,7 +201,10 @@ def request_source_anchor() -> str:
 
 
 @contextmanager
-def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
+def _request_environment(
+    context: Mapping[str, str] | Iterable[tuple[str, str]], *,
+    killswitch_path: str | None = None, cwd: str | None = None,
+) -> Iterator[None]:
     from .source_config import SOURCE_ANCHOR_ENV
 
     values = dict(context)
@@ -213,7 +226,11 @@ def _request_environment(context, *, killswitch_path: str | None = None, cwd: st
             if not root.is_absolute():
                 raise ValueError("Manager root cannot resolve against request cwd")
         values["WORKTREE_MANAGER_ROOT"] = str(root)
-    keys = (*_CONTEXT_KEYS, SOURCE_ANCHOR_ENV)
+    base_python = getattr(sys, "_base_executable", None)
+    values[_BOOTSTRAP_PYTHON] = (
+        base_python if isinstance(base_python, str) and base_python else sys.executable
+    )
+    keys: tuple[str, ...] = (*_RUNNER_CONTEXT_KEYS, SOURCE_ANCHOR_ENV)
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
         if killswitch_path:
@@ -231,7 +248,7 @@ def _request_environment(context, *, killswitch_path: str | None = None, cwd: st
 
 
 @contextmanager
-def _acquisition_environment(value: str | None):
+def _acquisition_environment(value: str | None) -> Iterator[None]:
     previous = os.environ.get(TIMEOUT_ENV)
     selected = None if value is None else str(acquisition_timeout({TIMEOUT_ENV: value}))
     try:
@@ -251,7 +268,7 @@ def _source_key() -> str:
     return json.dumps(source_identity(), sort_keys=True, separators=(",", ":"))
 
 
-def _summary(request) -> dict:
+def _summary(request: Any) -> dict[str, object]:
     return {
         "request_id": request.id,
         "state": request.state,
@@ -265,7 +282,7 @@ def _summary(request) -> dict:
     }
 
 
-def _report(request, *, as_json: bool) -> None:
+def _report(request: Any, *, as_json: bool) -> None:
     summary = _summary(request)
     if as_json:
         print(json.dumps(summary))
@@ -285,7 +302,8 @@ def self_install_request(operation: Callable[[], int]) -> int:
     from .runtime_identity import running_application_slot
 
     try:
-        with _runtime_installer()._installation_custody() as custody:
+        installer_factory: Callable[[], Any] = _runtime_installer
+        with _request_environment(request_context()), installer_factory()._installation_custody() as custody:
             if custody is not None:
                 return operation()
             argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
@@ -302,7 +320,7 @@ def self_install_request(operation: Callable[[], int]) -> int:
                     authority="standalone" if selected.configured and selected.mode == "standalone" else "",
                 ),
                 runner=driver.TrustedRunner(
-                    argv, str(workspace), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+                    argv, str(workspace), env=tuple(environment.items()), context_keys=_RUNNER_CONTEXT_KEYS,
                 ),
             )
             driver.drain()
@@ -323,7 +341,7 @@ def cmd_update_request(rest: list[str]) -> int:
     from .update_orchestration import extract_project
 
     options, forwarded = parse_options(rest)
-    request = None
+    request: Request | None = None
     try:
         if options.recovery_status:
             state = driver.recovery_status()
@@ -351,7 +369,7 @@ def cmd_update_request(rest: list[str]) -> int:
                   "cleanup remains unconfirmed; no update was run.")
             return 0
         if options.request_status:
-            request = driver.status(options.request_status)
+            request = cast("Request", driver.status(options.request_status))
             _report(request, as_json=options.json)
             return 0
         if "--auth-report" in forwarded:
@@ -364,7 +382,7 @@ def cmd_update_request(rest: list[str]) -> int:
         custody = driver.borrowed_custody()
         if custody is not None:
             with custody:
-                request = driver.status(custody.request_id, root=custody.root)
+                request = cast("Request", driver.status(custody.request_id, root=custody.root))
                 if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
                     raise driver.StateError("Manager does not own the active update request")
                 with _request_environment(
@@ -438,10 +456,11 @@ def cmd_update_request(rest: list[str]) -> int:
                 for name in ("detach", "wait", "supervised_debug", "json")
                 if getattr(options, name)
             ]
+            launch_options: _EngineLaunchOptions = {"headless": True} if options.detach else {}
             with _request_environment(context):
                 return engine_client.run_engine_passthrough(
                     project, ["update", "--no-manager", *arguments, *observer],
-                    **({"headless": True} if options.detach else {}),
+                    **launch_options,
                 )
         project, _args = extract_project(forwarded)
         _update_context_directory(context)
@@ -465,7 +484,7 @@ def cmd_update_request(rest: list[str]) -> int:
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
-                argv, str(cwd), env=tuple(env.items()), context_keys=_CONTEXT_KEYS,
+                argv, str(cwd), env=tuple(env.items()), context_keys=_RUNNER_CONTEXT_KEYS,
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
