@@ -17,11 +17,12 @@ import threading
 import time
 import uuid
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol, TypedDict, cast
 
 from . import _daemon_instance_clock as lease_clock
+from ._daemon_instance_io import read_cursor, read_record, write_cursor, write_record
 from ._daemon_instance_owner import assert_path_owner, mkdir_private, open_private
 from ._daemon_instance_identity import (
     birth_identity, delete_owned_file, identity_state, path_identity, retire_self, stop_identity,
@@ -31,8 +32,29 @@ from ._daemon_instance_records import (
 )
 from .daemon_instances import (
     INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV, DaemonInstanceGuard, DaemonInstanceReceipt,
-    DaemonInstanceSpec, DaemonLeasePolicy, InstanceCleanupResult,
+    DaemonInstanceSpec, DaemonLeasePolicy, InstanceCleanupResult, Purpose,
 )
+
+
+class _OwnerFields(TypedDict):
+    run_id: str
+    owner: str
+    pid: int
+    birth: str
+    registry_root: str
+    purpose: str
+    ttl: float
+    max_lifetime: float
+    next_renew: float
+
+
+class _OwnerContext(_OwnerFields, total=False):
+    qualification_deadline: float
+
+
+class _DeadlineOptions(TypedDict, total=False):
+    deadline: float
+
 
 _MAX_RECORD = 65536
 _ID = re.compile(r"[a-f0-9]{32}\Z")
@@ -40,9 +62,9 @@ _local_lock = threading.RLock()
 _guards: dict[str, tuple[DaemonInstanceReceipt, threading.Event]] = {}
 _monitor: threading.Thread | None = None
 _monitor_pid = 0
-_owners: dict[str, dict] = {}
+_owners: dict[str, _OwnerContext] = {}
 _admitted: tuple[int, DaemonInstanceReceipt, int] | None = None
-_expiry_job = None
+_expiry_job: object | None = None
 _pause = threading.Event()
 _wall_clock = time.time
 _monotonic_clock = time.monotonic
@@ -51,7 +73,7 @@ _cursor_guard = threading.Lock()
 _CURSOR_HEADER = b"copilot-daemon-reconcile-v1\n"
 
 
-def _after_fork():
+def _after_fork() -> None:
     global _local_lock, _monitor, _monitor_pid, _admitted, _pause, _cursor_guard
     _local_lock = threading.RLock()
     _monitor = None
@@ -67,7 +89,7 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_after_fork)
 
 
-def _test_context(environment=None):
+def _test_context(environment: Mapping[str, str] | None = None) -> dict[str, str] | None:
     encoded = (os.environ if environment is None else environment).get(TEST_CONTEXT_ENV)
     if not encoded:
         encoded = os.environ.get(TEST_CONTEXT_ENV)
@@ -75,7 +97,7 @@ def _test_context(environment=None):
         return None
     if len(encoded) > 8192:
         raise ValueError("test lifecycle declaration exceeds its bound")
-    context = {}
+    context: dict[str, str] = {}
     for line in base64.b64decode(encoded, validate=True).splitlines():
         key, value = line.split(b"\t")
         name = key.decode("ascii")
@@ -91,7 +113,7 @@ def _test_context(environment=None):
     return context
 
 
-def require_declaration(purpose):
+def require_declaration(purpose: Purpose | None) -> None:
     with _local_lock:
         nested = _admitted is not None and _admitted[0] == os.getpid()
     if nested or os.environ.get(INSTANCE_ENV) or _test_context() is not None:
@@ -104,7 +126,7 @@ def registry_root() -> Path:
     override = os.environ.get(REGISTRY_ENV)
     if override:
         return Path(override)
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
 
         buffer = ctypes.create_unicode_buffer(32768)
@@ -125,7 +147,7 @@ def _plain(path: Path, *, directory: bool = False, owned: bool = True) -> os.sta
         or getattr(info, "st_file_attributes", 0) & 0x400
     ):
         raise OSError("daemon instance path is not an owned plain entry")
-    if owned and os.name != "nt" and info.st_uid != os.getuid():
+    if owned and sys.platform != "win32" and info.st_uid != os.getuid():
         raise OSError("daemon instance path has a foreign owner")
     if owned and os.name == "nt":
         assert_path_owner(path)
@@ -175,11 +197,12 @@ def _receipt(receipt: DaemonInstanceReceipt) -> Path:
 def _locked(
     receipt: DaemonInstanceReceipt, *, wait_seconds: float = 0, nonblocking: bool = False,
     deadline: float | None = None,
-):
+) -> Iterator[Path]:
     record = _receipt(receipt)
+    options: _DeadlineOptions = {"deadline": deadline} if deadline is not None else {}
     with _file_lock(
         record.with_suffix(".lock"), wait_seconds=wait_seconds, nonblocking=nonblocking,
-        **({"deadline": deadline} if deadline is not None else {}),
+        **options,
     ):
         yield record
 
@@ -223,7 +246,10 @@ def _local_custody(
 
 
 @contextlib.contextmanager
-def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False, deadline=None):
+def _file_lock(
+    path: Path, *, wait_seconds: float = 0, guard: _CustodyLock | None = None,
+    nonblocking: bool = False, deadline: float | None = None,
+) -> Iterator[None]:
     guard = _local_lock if guard is None else guard
     with _local_custody(guard, deadline=deadline, nonblocking=nonblocking):
         try:
@@ -245,7 +271,7 @@ def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False, deadline=
                 while True:
                     try:
                         _remaining(deadline)
-                        if os.name == "nt":
+                        if sys.platform == "win32":
                             import msvcrt
                             stream.seek(1 << 30)
                             msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
@@ -266,50 +292,11 @@ def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False, deadline=
 
 
 def _read(path: Path) -> dict[str, str]:
-    before = _plain(path)
-    with path.open("rb") as stream:
-        if not os.path.samestat(before, os.fstat(stream.fileno())):
-            raise OSError("daemon instance record replaced")
-        raw = stream.read(_MAX_RECORD + 1)
-    if len(raw) > _MAX_RECORD:
-        raise ValueError("daemon instance record exceeds its bound")
-    record = {}
-    for line in raw.splitlines():
-        key, value = line.split(b"\t")
-        name = key.decode("ascii")
-        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) or name in record:
-            raise ValueError("invalid daemon instance field")
-        record[name] = base64.b64decode(value, validate=True).decode("utf-8", errors="surrogateescape")
-    if (
-        record.get("schema") not in ("1", "2") or record.get("instance_id") != path.stem
-        or not _ID.fullmatch(record.get("instance_id", ""))
-    ):
-        raise ValueError("invalid daemon instance record identity")
-    return record
+    return read_record(path, plain=_plain, maximum=_MAX_RECORD, identity=_ID)
 
 
 def _write(path: Path, record: dict[str, str]) -> None:
-    data = b"".join(
-        key.encode("ascii") + b"\t" + base64.b64encode(
-            str(value).encode("utf-8", errors="surrogateescape")
-        ) + b"\n"
-        for key, value in sorted(record.items())
-    )
-    if len(data) > _MAX_RECORD:
-        raise ValueError("daemon instance record exceeds its bound")
-    staging = path.with_name(path.name + "." + uuid.uuid4().hex + ".pending")
-    try:
-        fd = open_private(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if os.path.lexists(path):
-            _plain(path)
-        os.replace(staging, path)
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            staging.unlink()
+    write_record(path, record, plain=_plain, maximum=_MAX_RECORD, open_private=open_private)
 
 
 def source_provenance(source: Path) -> tuple[Path, str]:
@@ -317,7 +304,7 @@ def source_provenance(source: Path) -> tuple[Path, str]:
     source = Path(source)
     if not source.is_absolute():
         raise ValueError("daemon source provenance must be absolute")
-    candidate, members = source, []
+    candidate, members = source, list[str]()
     while not candidate.exists():
         members.insert(0, candidate.name)
         if candidate.parent == candidate:
@@ -342,7 +329,9 @@ def source_provenance(source: Path) -> tuple[Path, str]:
     return artifact, member
 
 
-def reserve(spec: DaemonInstanceSpec, *, environment=None) -> DaemonInstanceReceipt:
+def reserve(
+    spec: DaemonInstanceSpec, *, environment: Mapping[str, str] | None = None,
+) -> DaemonInstanceReceipt:
     return reserve_for_process(spec, ProcessIdentity.current(), environment=environment)
 
 
@@ -351,7 +340,7 @@ def bind_process(receipt: DaemonInstanceReceipt, pid: int, *, observed_birth: st
     bind_for_process(receipt, ProcessIdentity(pid, birth), ProcessIdentity.current())
 
 
-def cancel_reservation(receipt, creation_refused):
+def cancel_reservation(receipt: DaemonInstanceReceipt, creation_refused: bool) -> None:
     if creation_refused is not True:
         raise ValueError("unknown creation outcomes must retain their instance record")
     with _locked(receipt) as path:
@@ -366,7 +355,10 @@ def cancel_reservation(receipt, creation_refused):
         path.unlink()
 
 
-def finish_failed_launch(receipt, identity, *, exit_confirmed, admission_possible):
+def finish_failed_launch(
+    receipt: DaemonInstanceReceipt, identity: tuple[int, str] | None, *,
+    exit_confirmed: bool, admission_possible: bool,
+) -> bool:
     """Settle tracking only; failed launch never grants application-file deletion."""
     with _locked(receipt, wait_seconds=1) as path:
         record = _read(path)
@@ -414,8 +406,10 @@ def _expire(record: dict[str, str], now: float) -> bool:
 
 
 def admit(
-    service, *, runtime_root=None, source=None, purpose=None,
-    owner=None, registry_root=None, lease=None,
+    service: str, *, runtime_root: str | os.PathLike[str] | None = None,
+    source: str | os.PathLike[str] | None = None, purpose: Purpose | None = None,
+    owner: str | None = None, registry_root: str | os.PathLike[str] | None = None,
+    lease: DaemonLeasePolicy | None = None,
 ) -> DaemonInstanceGuard:
     with _local_lock:
         return _admit_owned(
@@ -425,8 +419,10 @@ def admit(
 
 
 def _admit_owned(
-    service, *, runtime_root=None, source=None, purpose=None,
-    owner=None, registry_root=None, lease=None,
+    service: str, *, runtime_root: str | os.PathLike[str] | None = None,
+    source: str | os.PathLike[str] | None = None, purpose: Purpose | None = None,
+    owner: str | None = None, registry_root: str | os.PathLike[str] | None = None,
+    lease: DaemonLeasePolicy | None = None,
 ) -> DaemonInstanceGuard:
     global _admitted
     with _local_lock:
@@ -444,7 +440,10 @@ def _admit_owned(
         if context:
             if purpose == "interactive-test" and context["purpose"] != "interactive-test":
                 raise ValueError("interactive daemon requires a pause-tolerant lifecycle owner")
-            purpose = context["purpose"]
+            if context["purpose"] == "interactive-test":
+                purpose = "interactive-test"
+            else:
+                purpose = "unattended-test"
             lease = DaemonLeasePolicy(float(context["ttl"]), float(context["max_lifetime"]))
         elif purpose is None:
             raise ValueError(
@@ -496,7 +495,7 @@ def renew(receipt: DaemonInstanceReceipt) -> None:
         _write(path, record)
 
 
-def _register_monitor(receipt, record):
+def _register_monitor(receipt: DaemonInstanceReceipt, record: dict[str, str]) -> None:
     global _monitor, _monitor_pid, _expiry_job
     if record["purpose"] == "production":
         return
@@ -514,7 +513,7 @@ def _register_monitor(receipt, record):
         _ensure_monitor()
 
 
-def _ensure_monitor():
+def _ensure_monitor() -> None:
     global _monitor
     if _monitor is None or not _monitor.is_alive():
         _monitor = threading.Thread(target=_observe_expiry, name="daemon-instance-lifecycle", daemon=True)
@@ -526,6 +525,7 @@ def test_lifecycle(
     owner: str, root: Path, purpose: str, policy: DaemonLeasePolicy | None,
     *, deadline: float | None = None, cleanup_results: list[InstanceCleanupResult] | None = None,
 ) -> Iterator[dict[str, str]]:
+    options: _DeadlineOptions = {"deadline": deadline} if deadline is not None else {}
     _remaining(deadline)
     if not owner or len(owner) > 200 or any(ord(char) < 32 for char in owner):
         raise ValueError("test lifecycle owner must be explicit and printable")
@@ -536,7 +536,7 @@ def test_lifecycle(
             raise ValueError("interactive tests require an explicit pause-tolerant lease")
         policy = DaemonLeasePolicy()
     root = _root(root, create=True)
-    context = {
+    context: _OwnerContext = {
         "run_id": uuid.uuid4().hex, "owner": owner, "pid": os.getpid(),
         "birth": birth_identity(os.getpid()), "registry_root": str(root),
         "purpose": purpose, "ttl": policy.ttl_seconds,
@@ -574,7 +574,7 @@ def test_lifecycle(
                 _remaining(deadline)
                 with _locked(
                     receipt, wait_seconds=1,
-                    **({"deadline": deadline} if deadline is not None else {}),
+                    **options,
                 ) as path:
                     current = _read(path)
                     if sys.platform.startswith("linux") or current.get("schema") == "2":
@@ -583,7 +583,7 @@ def test_lifecycle(
                     current["deadline"] = str(min(_wall_clock(), float(current["deadline"])))
                     _write(path, current)
                 outcome = cleanup(
-                    receipt, **({"deadline": deadline} if deadline is not None else {}),
+                    receipt, **options,
                 )
                 if cleanup_results is not None:
                     cleanup_results.append(outcome)
@@ -618,8 +618,8 @@ def _settle_lifecycle_monitor(deadline: float) -> None:
     _remaining(deadline)
 
 
-def _observe_expiry():
-    observations = {}
+def _observe_expiry() -> None:
+    observations: dict[str, float | lease_clock.WallLeaseObservation] = {}
     while True:
         with _local_lock:
             entries = list(_guards.values())
@@ -672,21 +672,22 @@ def _observe_expiry():
                         if _monotonic_clock() >= min(deadline, hard):
                             retire_self()
                         continue
-                previous = observations.get(receipt.instance_id)
+                observation = observations.get(receipt.instance_id)
                 monotonic = _monotonic_clock()
-                if previous is None:
-                    previous = lease_clock.WallLeaseObservation(
+                if observation is None:
+                    observation = lease_clock.WallLeaseObservation(
                         record, wall=_wall_clock(), monotonic=monotonic,
                     )
-                observations[receipt.instance_id] = previous
-                if previous.expired(record, wall=_wall_clock(), monotonic=monotonic):
+                observations[receipt.instance_id] = observation
+                wall_observation = cast(lease_clock.WallLeaseObservation, observation)
+                if wall_observation.expired(record, wall=_wall_clock(), monotonic=monotonic):
                     retire_self()
             except OSError as error:
                 if error.errno in (errno.EACCES, errno.EAGAIN):
-                    hard = observations.get(receipt.instance_id)
-                    if hard is not None and (
-                        _monotonic_clock() >= hard if sys.platform.startswith("linux")
-                        else hard.past_hard(_monotonic_clock())
+                    hard_bound = observations.get(receipt.instance_id)
+                    if hard_bound is not None and (
+                        _monotonic_clock() >= cast(float, hard_bound) if sys.platform.startswith("linux")
+                        else cast(lease_clock.WallLeaseObservation, hard_bound).past_hard(_monotonic_clock())
                     ):
                         retire_self()
                     continue
@@ -724,7 +725,7 @@ def add_artifact(receipt: DaemonInstanceReceipt, artifact: Path) -> None:
         _write(path, record)
 
 
-def close_guard(receipt):
+def close_guard(receipt: DaemonInstanceReceipt) -> None:
     global _admitted
     with _local_lock:
         if _admitted is not None and _admitted[:2] == (os.getpid(), receipt):
@@ -739,7 +740,7 @@ def close_guard(receipt):
             entry[1].set()
 
 
-def _inventory_paths(root):
+def _inventory_paths(root: Path) -> Iterator[Path]:
     if not os.access(root, os.R_OK | os.X_OK):
         raise PermissionError(errno.EACCES, "daemon instance inventory unreadable", str(root))
     # pathlib.glob suppresses PermissionError and would turn denied inventory
@@ -750,7 +751,7 @@ def _inventory_paths(root):
                 yield root / entry.name
 
 
-def _inventory_exists(root):
+def _inventory_exists(root: Path) -> bool:
     if not root.is_absolute():
         raise ValueError("daemon registry root must be absolute")
     try:
@@ -760,7 +761,7 @@ def _inventory_exists(root):
     return True
 
 
-def inspect(root=None):
+def inspect(root: str | os.PathLike[str] | None = None) -> list[dict[str, str]]:
     root = Path(root) if root is not None else registry_root()
     if not _inventory_exists(root):
         return []
@@ -775,11 +776,16 @@ def inspect(root=None):
 
 
 def cleanup(
-    receipt, *, terminate=True, stop_timeout=5, _caller_pid=None, deadline=None, runtime_root=None,
-):
-    removed = []
+    receipt: DaemonInstanceReceipt, *, terminate: bool = True, stop_timeout: float = 5,
+    _caller_pid: int | None = None, deadline: float | None = None,
+    runtime_root: str | os.PathLike[str] | None = None,
+) -> InstanceCleanupResult:
+    options: _DeadlineOptions = {"deadline": deadline} if deadline is not None else {}
+    removed: list[str] = []
 
-    def result(status, reason):
+    def result(
+        status: Literal["settled", "held", "live", "missing"], reason: str,
+    ) -> InstanceCleanupResult:
         return InstanceCleanupResult(receipt.instance_id, status, reason, tuple(removed))
 
     def stop_budget() -> float:
@@ -788,7 +794,7 @@ def cleanup(
 
     try:
         _remaining(deadline)
-        with _locked(receipt, **({"deadline": deadline} if deadline is not None else {})) as path:
+        with _locked(receipt, **options) as path:
             try:
                 record = _read(path)
             except FileNotFoundError:
@@ -918,57 +924,37 @@ def cleanup(
         return result("held", type(error).__name__)
 
 
-def _runtime_scope_key(runtime_root):
+def _runtime_scope_key(runtime_root: str | os.PathLike[str]) -> bytes:
     return os.fsencode(os.path.normcase(os.fspath(Path(runtime_root))))
 
 
-def _cursor_path(root, runtime_root=None):
+def _cursor_path(root: Path, runtime_root: str | os.PathLike[str] | None = None) -> Path:
     if runtime_root is None:
         return root / ".reconcile.cursor"
     scope = _runtime_scope_key(runtime_root)
     return root / (".reconcile." + hashlib.sha256(scope).hexdigest() + ".cursor")
 
 
-def _read_cursor(root, runtime_root=None):
-    path = _cursor_path(root, runtime_root)
-    try:
-        info = _plain(path)
-    except FileNotFoundError:
-        return ""
-    with path.open("rb") as stream:
-        if not os.path.samestat(info, os.fstat(stream.fileno())):
-            raise OSError("inventory cursor replaced")
-        raw = stream.read(97)
-    if not raw.startswith(_CURSOR_HEADER) or not raw.endswith(b"\n"):
-        raise ValueError("invalid inventory cursor")
-    key = raw[len(_CURSOR_HEADER):-1].decode("ascii")
-    if key and not _ID.fullmatch(key):
-        raise ValueError("invalid inventory cursor")
-    return key
+def _read_cursor(root: Path, runtime_root: str | os.PathLike[str] | None = None) -> str:
+    return read_cursor(
+        _cursor_path(root, runtime_root), plain=_plain, header=_CURSOR_HEADER, identity=_ID,
+    )
 
 
-def _write_cursor(root, key, runtime_root=None):
-    path = _cursor_path(root, runtime_root)
-    if os.path.lexists(path):
-        _plain(path)
-    pending = root / (".reconcile." + uuid.uuid4().hex + ".pending")
-    try:
-        fd = open_private(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(_CURSOR_HEADER + key.encode("ascii") + b"\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        if os.path.lexists(path):
-            _plain(path)
-        os.replace(pending, path)
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            pending.unlink()
+def _write_cursor(
+    root: Path, key: str, runtime_root: str | os.PathLike[str] | None = None,
+) -> None:
+    write_cursor(
+        _cursor_path(root, runtime_root), key, plain=_plain, header=_CURSOR_HEADER,
+        open_private=open_private,
+    )
 
 
 def reconcile(
-    root, limit, max_seconds=5, *, _caller_pid=None, terminate=False, runtime_root=None,
-):
+    root: str | os.PathLike[str] | None, limit: int, max_seconds: float = 5, *,
+    _caller_pid: int | None = None, terminate: bool = False,
+    runtime_root: str | os.PathLike[str] | None = None,
+) -> list[InstanceCleanupResult]:
     from ._daemon_instance_reconcile import reconcile as collect
 
     return collect(
