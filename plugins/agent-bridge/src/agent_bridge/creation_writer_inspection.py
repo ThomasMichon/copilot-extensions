@@ -16,7 +16,7 @@ CAPABILITY = "retained_workspace_creation_writer_inspection"
 SCHEMA = "copilot-extensions.creation-worktree-writer"
 
 
-async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) -> dict:
+async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) -> dict[str, Any]:
     from .acquisition_authority import read_worktree_record, worktree_command
 
     before = _instance()
@@ -82,7 +82,7 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
 
 
 async def session_info(
-    session_id: str, request: Any, render: Callable, *, worktree_writer: bool = False,
+    session_id: str, request: Any, render: Callable[..., Any], *, worktree_writer: bool = False,
 ) -> Any:
     from fastapi import HTTPException
     from fastapi.responses import JSONResponse
@@ -111,7 +111,7 @@ async def session_info(
     raise HTTPException(404, detail=f"Session {session_id} not found")
 
 
-def get_session(client: Any, session_id: str) -> dict:
+def get_session(client: Any, session_id: str) -> dict[str, Any]:
     """Negotiate optional evidence and reject an older reader's ignored query."""
     from .client import BridgeClientError
     from .client_protocol_floor import protocol_floored_request

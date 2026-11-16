@@ -18,7 +18,7 @@ DEFAULT_CLI_WORKER_TARGET = "task-worker"
 
 
 class InstalledWorktreeWriter(BaseModel):
-    """Serializer provenance or an invocation fence, never a caller command."""
+    """Expected serializer identity, never a caller-selected command."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -27,7 +27,7 @@ class InstalledWorktreeWriter(BaseModel):
 
 
 class WorktreeWriterRequirement(BaseModel):
-    """Original incarnation and writer provenance under the version-1 contract."""
+    """The original workspace incarnation and required delegated writer."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

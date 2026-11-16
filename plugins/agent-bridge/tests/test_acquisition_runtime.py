@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import time
 import json
 import asyncio
@@ -20,7 +23,7 @@ from agent_bridge.acquisition_store import AcquisitionStore
 from agent_bridge.acquisition_executor import executor
 from agent_bridge.acquisition_runtime import AcquisitionRuntime
 from agent_bridge.client import BridgeClient, BridgeClientError
-from agent_bridge.models import SessionStatus
+from agent_bridge.session_status import SessionStatus
 from agent_bridge.protocol import PLUGIN_READINESS_PROTOCOL_VERSION
 from agent_bridge.routes.acquisitions import router
 from agent_bridge.session_manager import SessionManager
@@ -29,7 +32,7 @@ from agent_bridge.transport import SpawnTarget
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.runtime")
 
 
-def writer_request(path, **changes):
+def writer_request(path: Any, **changes: Any) -> AcquisitionRequest:
     return req(
         version=3, worktree_path=str(path), worktree_writer={
             "identity": {"installation_root": str(path / "owner"), "runtime_generation": "a" * 32},
@@ -38,7 +41,7 @@ def writer_request(path, **changes):
     )
 
 
-def req(**changes):
+def req(**changes: Any) -> AcquisitionRequest:
     return AcquisitionRequest.model_validate({
         "target": "task-worker", "mode": "acp", "task_id": "task-a",
         "task_generation": 0, "worktree_id": "worktree-a", "allocation": "created",
@@ -49,9 +52,9 @@ def req(**changes):
 
 
 @pytest.fixture
-def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
+def rig(tmp_db: Any, session_manager: Any, mock_acp_client: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     owner_command = acquisition_authority.worktree_command
-    head = {"id": None}
+    head: dict[str, str | None] = {"id": None}
     calls = []
     source = {
         "task": {"id": "task-a", "generation": 0, "status": "queued"},
@@ -64,13 +67,13 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         },
     }
 
-    async def resolve(name, **_kwargs):
+    async def resolve(name: Any, **_kwargs: Any) -> Any:
         if name == "dispatch:task-a":
             return SpawnTarget(type="session", worktree_id="worktree-a", venue=source)
         assert name == "task-worker"
         return SpawnTarget(type="local", cwd=str(tmp_path))
 
-    async def provider_run(argv):
+    async def provider_run(argv: Any) -> Any:
         assert argv[0] in {"acquisition-bind", "acquisition-mark"}
         assert argv[1] == "--request-json"
         return 0, argv[2], ""
@@ -79,7 +82,7 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         namespace_resolvers={"dispatch": SimpleNamespace(_run=provider_run)},
     )
 
-    async def command(args, project):
+    async def command(args: Any, project: Any) -> Any:
         calls.append((args, project))
         if args[0] == "list":
             assert args == [
@@ -126,7 +129,7 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
     monkeypatch.setattr(acquisition_runtime, "worktree_command", command)
     monkeypatch.setattr(acquisition_runtime, "local_pid_alive", lambda _pid: False)
 
-    async def host_connect(self, target, **kwargs):
+    async def host_connect(self: Any, target: Any, **kwargs: Any) -> Any:
         return mock_acp_client, mock_acp_client.acp_session_id
 
     monkeypatch.setattr(SessionManager, "_connect_via_session_host", host_connect)
@@ -153,10 +156,10 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_default_cli_worker_needs_no_acp_registry_profile(rig):
+async def test_default_cli_worker_needs_no_acp_registry_profile(rig: Any) -> None:
     resolve = rig.resolver.resolve_async
 
-    async def without_worker_profile(name):
+    async def without_worker_profile(name: Any) -> Any:
         if name == "task-worker":
             raise AssertionError("default CLI worker must not resolve an ACP profile")
         return await resolve(name)
@@ -171,22 +174,24 @@ async def test_default_cli_worker_needs_no_acp_registry_profile(rig):
 
 
 @pytest.fixture
-def writer_rig(rig, tmp_path, monkeypatch):
+def writer_rig(rig: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     from agent_bridge import acquisition_worktree_writer as writer, session_lifecycle_cli as lifecycle
     from agent_bridge import worktree_lineage
 
     request = writer_request(tmp_path)
+    assert request.worktree_writer is not None
     rig.source["acquisition_reservation"].update(
         allocation_project=request.project, worktree_path=request.worktree_path,
     )
     selected = MagicMock(return_value=(
         ("retained-owner", "original-build"), tmp_path / "owner", tmp_path / "python",
     ))
+    observed_identity = request.worktree_writer.identity.model_dump()
     monkeypatch.setattr(lifecycle, "_agent_worktrees_pinned_selection", selected)
     original = acquisition_authority.worktree_command
     calls = []
 
-    async def command(args, project, *, owner_prefix=None):
+    async def command(args: Any, project: Any, *, owner_prefix: Any=None) -> Any:
         calls.append((args, owner_prefix, writer.current()))
         if args[0] == "resource-relationship":
             assert args == ["resource-relationship", "capabilities", "--json"]
@@ -195,13 +200,14 @@ def writer_rig(rig, tmp_path, monkeypatch):
                 "expected_creation_nonce": True, "expected_writer_identity": True,
                 "writer_scope": "executing-process",
                 "retained_session_writes": 1,
-                "writer_identity": request.worktree_writer.identity.model_dump(),
+                "writer_identity": observed_identity.copy(),
                 "writer_contract": {
                     "schema": "copilot-extensions.worktree-record-writer",
                     "version": 1, "retained_relationships": 1, "creation_nonce": 1,
                 },
             }
-        assert writer.current().prefix == ("retained-owner", "original-build")
+        active = writer.current()
+        assert active is not None and active.prefix == selected.return_value[0]
         return await original(args, project)
 
     monkeypatch.setattr(acquisition_authority, "worktree_command", command)
@@ -209,11 +215,12 @@ def writer_rig(rig, tmp_path, monkeypatch):
     monkeypatch.setattr(worktree_lineage, "register_session", lambda *a, **kw: True)
     return SimpleNamespace(
         rig=rig, request=request, selected=selected, calls=calls, command=command,
+        observed_identity=observed_identity,
     )
 
 
 @pytest.mark.asyncio
-async def test_retained_writer_recovery_uses_original_journal_with_current_executor(writer_rig, monkeypatch):
+async def test_retained_writer_recovery_uses_original_journal_with_current_executor(writer_rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import acquisition_worktree_writer as writer
 
     rig, request = writer_rig.rig, writer_rig.request
@@ -250,8 +257,8 @@ async def test_retained_writer_recovery_uses_original_journal_with_current_execu
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_metadata", [False, True])
 async def test_required_writer_survives_stopped_resume_and_later_acquisition(
-    writer_rig, monkeypatch, provider_metadata,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, provider_metadata: Any,
+) -> None:
     from agent_bridge import acquisition_worktree_writer as writer
     from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
 
@@ -271,6 +278,7 @@ async def test_required_writer_survives_stopped_resume_and_later_acquisition(
     assert resumed.target.venue[writer.DELIVERY_KEY] == request.delivery_id
     assert REQUEST_OVERRIDES_KEY in resumed.target.venue
     persisted = SpawnTarget.from_json(rig.db.get_session(session.session_id)["target_json"])
+    assert persisted.venue is not None
     assert persisted.venue[writer.DELIVERY_KEY] == request.delivery_id
     rig.source["acquisition_reservation"]["worktree_ownership"] = "reused"
     later = await rig.runtime.acquire(request.model_copy(update={
@@ -282,6 +290,47 @@ async def test_required_writer_survives_stopped_resume_and_later_acquisition(
 
 
 @pytest.mark.asyncio
+async def test_later_stopped_delivery_keeps_qualified_executor_and_birth_prefix(writer_rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_bridge import acquisition_worktree_writer as writer
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    await rig.manager.stop_session(first.session_id, force=True)
+    rig.source["acquisition_reservation"]["worktree_ownership"] = "reused"
+    original_prefix = writer_rig.selected.return_value[0]
+    current_selection = (
+        ("retained-owner", "compatible-build"), *writer_rig.selected.return_value[1:],
+    )
+    writer_rig.selected.return_value = current_selection
+    writer_rig.observed_identity["runtime_generation"] = "b" * 32
+    writer_rig.selected.side_effect = [
+        current_selection, AssertionError("nested continuation must keep the qualified executor"),
+    ]
+    later = request.model_copy(update={"delivery_id": "later-stopped", "allocation": "reused"})
+    result = await rig.runtime.acquire(later)
+    assert result.session_id == first.session_id
+    assert result.native_session_id == first.native_session_id
+    _, _, data = rig.runtime.store.recovery(later)
+    assert data is not None
+    assert data[writer.JOURNAL_KEY]["prefix"] == list(original_prefix)
+    assert data["_request"]["worktree_writer"] == request.worktree_writer.model_dump()
+    assert rig.manager.get_session(first.session_id).target.venue[writer.DELIVERY_KEY] == request.delivery_id
+    assert any(
+        selected is not None and selected.request == request and selected.prefix == current_selection[0]
+        for _, _, selected in writer_rig.calls
+    )
+    # A prior reader can still qualify the unchanged birth binding after rollback.
+    writer_rig.selected.side_effect = None
+    writer_rig.selected.return_value = (original_prefix, *current_selection[1:])
+    writer_rig.observed_identity["runtime_generation"] = "a" * 32
+    following = request.model_copy(update={"delivery_id": "after-rollback", "allocation": "reused"})
+    binding = writer._retained(rig.db, following)
+    support = await writer._qualify(writer.RetainedWriter(following, writer._prefix(binding)))
+    assert support["writer_identity"] == request.worktree_writer.identity.model_dump()
+    assert (await rig.runtime.acquire(following)).native_session_id == first.native_session_id
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("target_changes", [
     {"type": "ssh"}, {"type": "command"},
     {"spawn_command": ["example-command"]},
@@ -289,8 +338,8 @@ async def test_required_writer_survives_stopped_resume_and_later_acquisition(
     {"codespace": {"name": "example-codespace"}},
 ])
 async def test_required_writer_refuses_provider_type_change_before_persist_or_launch(
-    writer_rig, monkeypatch, target_changes,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, target_changes: Any,
+) -> None:
     from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
 
     rig, request = writer_rig.rig, writer_rig.request
@@ -319,8 +368,8 @@ async def test_required_writer_refuses_provider_type_change_before_persist_or_la
 
 @pytest.mark.asyncio
 async def test_required_queued_send_refusal_keeps_startup_recovery_dormant(
-    writer_rig, monkeypatch, tmp_path,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from agent_bridge import acquisition_worktree_writer as writer
     from agent_bridge.session_host.host_index import HostRecord
 
@@ -332,7 +381,7 @@ async def test_required_queued_send_refusal_keeps_startup_recovery_dormant(
         await writer.registration_pending(rig.manager, session)
     rig.db.enqueue_prompt(session.session_id, "Original queued work", time.time())
 
-    async def unavailable(*args, **kwargs):
+    async def unavailable(*args: Any, **kwargs: Any) -> None:
         raise AcquisitionRefused("owner_pending", "original writer unavailable")
 
     monkeypatch.setattr(acquisition_authority, "worktree_command", unavailable)
@@ -355,13 +404,14 @@ async def test_required_queued_send_refusal_keeps_startup_recovery_dormant(
     assert await recovered.reattach_session_hosts(recover_cold=False) == 0
     attach.assert_not_awaited()
     restored = recovered.get_session(session.session_id)
+    assert restored is not None
     assert restored.acp_session_id == first.native_session_id
     assert restored.status == SessionStatus.STOPPED and restored.client is None
     assert rig.db.count_pending_prompts(session.session_id) == 2
 
 
 @pytest.mark.asyncio
-async def test_required_writer_resume_exhaustion_cannot_recreate(writer_rig, monkeypatch):
+async def test_required_writer_resume_exhaustion_cannot_recreate(writer_rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     rig, request = writer_rig.rig, writer_rig.request
     first = await rig.runtime.acquire(request)
     session = rig.manager.get_session(first.session_id)
@@ -380,8 +430,8 @@ async def test_required_writer_resume_exhaustion_cannot_recreate(writer_rig, mon
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recovery", ["load", "reattach", "startup"])
 async def test_required_handoff_retries_registration_on_original_native(
-    writer_rig, monkeypatch, recovery, tmp_path,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, recovery: Any, tmp_path: Path,
+) -> None:
     from agent_bridge import acquisition_worktree_writer as writer, worktree_lineage
 
     rig, request = writer_rig.rig, writer_rig.request
@@ -395,8 +445,10 @@ async def test_required_handoff_retries_registration_on_original_native(
     monkeypatch.setattr(rig.manager, "submit_prompt", seed)
     registrations = []
 
-    def register(worktree_id, native, **kwargs):
-        registrations.append((native, writer.current().prefix))
+    def register(worktree_id: Any, native: Any, **kwargs: Any) -> Any:
+        active = writer.current()
+        assert active is not None
+        registrations.append((native, active.prefix))
         if len(registrations) <= 2:
             raise AcquisitionRefused("owner_pending", "registration unavailable")
         return True
@@ -404,7 +456,7 @@ async def test_required_handoff_retries_registration_on_original_native(
     monkeypatch.setattr(worktree_lineage, "register_session", register)
     linked = []
 
-    def link(*args, **kwargs):
+    def link(*args: Any, **kwargs: Any) -> None:
         assert registrations[-1][0] == "native-successor"
         assert len(registrations) == 3
         linked.append(args[2])
@@ -439,17 +491,19 @@ async def test_required_handoff_retries_registration_on_original_native(
         assert await recovered.reattach_session_hosts(recover_cold=False) == 0
         attach.assert_not_awaited()
         successor = recovered.get_session(successor.session_id)
+        assert successor is not None
         assert successor.status == SessionStatus.STOPPED and successor.client is None
         assert not successor.background_recovery_enabled
         assert recovered._host_index.get(successor.session_id) is not None
         predecessor = recovered.get_session(predecessor.session_id)
+        assert predecessor is not None
         predecessor.client = rig.client
         predecessor.status = SessionStatus.IDLE
         rig.manager = recovered
         monkeypatch.setattr(recovered, "start_session", start)
         monkeypatch.setattr(recovered, "submit_prompt", seed)
 
-    async def reattach_host(session):
+    async def reattach_host(session: Any) -> Any:
         session.client = rig.client
         session.status = SessionStatus.IDLE
         return True
@@ -473,15 +527,15 @@ async def test_required_handoff_retries_registration_on_original_native(
     assert successor.target.venue[writer.DELIVERY_KEY] == request.delivery_id
     assert start.await_count == 1 and len(rig.manager.list_sessions()) == 2
     assert rig.client.new_session.await_count == new_count
-    assert linked == ["native-successor"] and seed.await_count == 1
+    assert linked == ["native-successor"] and int(seed.await_count) == 1
     assert registrations == [("native-successor", ("retained-owner", "original-build"))] * 3
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", ["start", "resume"])
 async def test_required_registration_failure_detaches_before_normal_send(
-    writer_rig, monkeypatch, boundary,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, boundary: Any,
+) -> None:
     from agent_bridge import acquisition_worktree_writer as writer, worktree_lineage
 
     rig, request = writer_rig.rig, writer_rig.request
@@ -493,8 +547,9 @@ async def test_required_registration_failure_detaches_before_normal_send(
     unavailable = [True]
     registrations = []
 
-    def register(worktree_id, native, **kwargs):
-        assert writer.current().prefix == ("retained-owner", "original-build")
+    def register(worktree_id: Any, native: Any, **kwargs: Any) -> Any:
+        active = writer.current()
+        assert active is not None and active.prefix == ("retained-owner", "original-build")
         registrations.append(native)
         if unavailable[0]:
             raise AcquisitionRefused("owner_pending", "registration unavailable")
@@ -510,7 +565,7 @@ async def test_required_registration_failure_detaches_before_normal_send(
         await rig.manager.stop_session(session.session_id, force=True)
         detach.reset_mock()
 
-        async def reattach_host(holder):
+        async def reattach_host(holder: Any) -> Any:
             holder.client = rig.client
             holder.status = SessionStatus.IDLE
             return True
@@ -540,8 +595,8 @@ async def test_required_registration_failure_detaches_before_normal_send(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed", ["link", "note", "role", "digest"])
 async def test_required_handoff_retry_reuses_original_successor_after_lineage_failure(
-    writer_rig, monkeypatch, failed,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, failed: Any,
+) -> None:
     from agent_bridge import worktree_lineage
     from agent_bridge import acquisition_worktree_writer as writer
 
@@ -555,7 +610,7 @@ async def test_required_handoff_retry_reuses_original_successor_after_lineage_fa
     seed = AsyncMock(return_value=0)
     monkeypatch.setattr(rig.manager, "submit_prompt", seed)
 
-    async def stop(session_id, **_kwargs):
+    async def stop(session_id: Any, **_kwargs: Any) -> None:
         session = rig.manager.get_session(session_id)
         session.status = SessionStatus.STOPPED
         rig.db.update_session_status(session_id, "stopped", time.time())
@@ -563,8 +618,8 @@ async def test_required_handoff_retry_reuses_original_successor_after_lineage_fa
     monkeypatch.setattr(rig.manager, "stop_session", AsyncMock(side_effect=stop))
     failures = [failed]
 
-    def step(name):
-        def run(*args, **kwargs):
+    def step(name: Any) -> Any:
+        def run(*args: Any, **kwargs: Any) -> Any:
             if failures == [name]:
                 failures.clear()
                 raise AcquisitionRefused("owner_refused", "post-spawn lineage failure")
@@ -592,13 +647,14 @@ async def test_required_handoff_retry_reuses_original_successor_after_lineage_fa
     assert successor.session_id == successor_id
     assert successor.acp_session_id == "native-successor"
     assert start.await_count == 1 and len(rig.manager.list_sessions()) == 2
-    assert seed.await_count == 1
+    assert int(seed.await_count) == 1
+    assert seed.await_args is not None
     assert "Original continuation" in seed.await_args.args[1]
     assert predecessor.status == SessionStatus.STOPPED
     repeated = await rig.manager.handoff_session(
         predecessor.session_id, reason="fixture", seed_text="Original continuation",
     )
-    assert repeated is successor and seed.await_count == 1 and start.await_count == 1
+    assert repeated is successor and int(seed.await_count) == 1 and start.await_count == 1
     data = json.loads(rig.db.execute_read(
         "SELECT data_json FROM acquisition_effects WHERE delivery_id=?", (request.delivery_id,),
     )[0]["data_json"])
@@ -611,8 +667,8 @@ async def test_required_handoff_retry_reuses_original_successor_after_lineage_fa
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed", ["start-response", "seed-response"])
 async def test_required_handoff_retains_unknown_effect_without_replacement(
-    writer_rig, monkeypatch, failed,
-):
+    writer_rig: Any, monkeypatch: pytest.MonkeyPatch, failed: Any,
+) -> None:
     from agent_bridge import worktree_lineage
 
     rig, request = writer_rig.rig, writer_rig.request
@@ -623,20 +679,20 @@ async def test_required_handoff_retains_unknown_effect_without_replacement(
     original_start = rig.manager.start_session
     failures = [failed]
 
-    async def start(*args, **kwargs):
+    async def start(*args: Any, **kwargs: Any) -> Any:
         successor = await original_start(*args, **kwargs)
         if failures == ["start-response"]:
             failures.clear()
             raise AcquisitionRefused("owner_pending", "successor response lost")
         return successor
 
-    async def seed(*args, **kwargs):
+    async def seed(*args: Any, **kwargs: Any) -> Any:
         if failures == ["seed-response"]:
             failures.clear()
             raise AcquisitionRefused("owner_pending", "seed response lost")
         return 0
 
-    async def stop(session_id, **_kwargs):
+    async def stop(session_id: Any, **_kwargs: Any) -> None:
         rig.manager.get_session(session_id).status = SessionStatus.STOPPED
 
     start = AsyncMock(side_effect=start)
@@ -668,10 +724,10 @@ async def test_required_handoff_retains_unknown_effect_without_replacement(
 @pytest.mark.parametrize("bad", [
     "identity", "birth-generation", "preservation", "old", "unavailable", "nonce", "resident-only",
 ])
-async def test_required_writer_refuses_before_native_effects(writer_rig, monkeypatch, bad):
+async def test_required_writer_refuses_before_native_effects(writer_rig: Any, monkeypatch: pytest.MonkeyPatch, bad: Any) -> None:
     rig, request = writer_rig.rig, writer_rig.request
 
-    async def command(args, project, **kwargs):
+    async def command(args: Any, project: Any, **kwargs: Any) -> Any:
         if bad == "unavailable":
             raise AcquisitionRefused("owner_refused", "retained owner unavailable")
         value = await writer_rig.command(args, project, **kwargs)
@@ -699,15 +755,16 @@ async def test_required_writer_refuses_before_native_effects(writer_rig, monkeyp
     assert not any(args[0] in {"bind-session", "embody"} for args, *_ in writer_rig.calls)
 
 
-def test_required_writer_cannot_downgrade_wire_protocol(tmp_path):
+def test_required_writer_cannot_downgrade_wire_protocol(tmp_path: Path) -> None:
     request = writer_request(tmp_path)
     client = BridgeClient("http://unused", "unused", connect_grace=0)
     client._daemon_proto = (PLUGIN_READINESS_PROTOCOL_VERSION - 1, 1)
-    client._request = MagicMock(side_effect=AssertionError("unsupported request must not be sent"))
+    send = MagicMock(side_effect=AssertionError("unsupported request must not be sent"))
+    setattr(client, "_request", send)
     with pytest.raises(BridgeClientError) as failure:
         client_acquire(client, request)
     assert failure.value.detail["effect"] == "not_started"
-    client._request.assert_not_called()
+    send.assert_not_called()
     app = FastAPI()
     app.include_router(router)
     with TestClient(app) as http:
@@ -718,25 +775,25 @@ def test_required_writer_cannot_downgrade_wire_protocol(tmp_path):
     assert refused.json()["detail"]["effect"] == "not_started"
 
 
-def test_required_writer_negotiates_the_named_capability_before_post(tmp_path):
+def test_required_writer_negotiates_the_named_capability_before_post(tmp_path: Path) -> None:
     from agent_bridge.acquisition_worktree_writer import CAPABILITY
 
     client = BridgeClient("http://unused", "unused", connect_grace=0)
     client._daemon_proto = (52, 1)
     calls = []
 
-    def request(method, path, *_args, **_kwargs):
+    def request(method: Any, path: Any, *_args: Any, **_kwargs: Any) -> Any:
         calls.append((method, path))
         assert method == "GET" and path == "/health"
         return {"protocol_version": 52, "min_protocol_version": 1, "capabilities": {}}
 
-    client._request = request
+    setattr(client, "_request", request)
     with pytest.raises(BridgeClientError, match=CAPABILITY):
         client_acquire(client, writer_request(tmp_path))
     assert calls == [("GET", "/health")]
 
 
-def test_required_writer_round_trips_through_the_existing_http_owner(writer_rig):
+def test_required_writer_round_trips_through_the_existing_http_owner(writer_rig: Any) -> None:
     from agent_bridge.acquisition_worktree_writer import CAPABILITY, JOURNAL_KEY
     from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 
@@ -749,7 +806,7 @@ def test_required_writer_round_trips_through_the_existing_http_owner(writer_rig)
     app.state.acquisition_runtime = rig.runtime
 
     @app.get("/health")
-    def health():
+    def health() -> Any:
         return {
             "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
             "capabilities": {CAPABILITY: 1},
@@ -758,12 +815,12 @@ def test_required_writer_round_trips_through_the_existing_http_owner(writer_rig)
     with TestClient(app) as http:
         client = BridgeClient("http://unused", "unused", connect_grace=0)
 
-        def send(method, path, body=None, **_kwargs):
+        def send(method: Any, path: Any, body: Any=None, **_kwargs: Any) -> Any:
             response = http.request(method, path, json=body)
             assert response.status_code == 200, response.text
             return response.json()
 
-        client._request = send
+        setattr(client, "_request", send)
         result = client_acquire(client, request)
     assert result.delivery_id == request.delivery_id
     assert len(rig.manager.list_sessions()) == 1
@@ -774,7 +831,7 @@ def test_required_writer_round_trips_through_the_existing_http_owner(writer_rig)
     assert data["_request"]["worktree_writer"] == request.worktree_writer.model_dump()
     assert data[JOURNAL_KEY]["prefix"] == ["retained-owner", "original-build"]
 @pytest.mark.asyncio
-async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_call(writer_rig):
+async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_call(writer_rig: Any) -> None:
     with pytest.raises(AcquisitionRefused) as failure:
         await writer_rig.rig.runtime.acquire(writer_rig.request.model_copy(update={"mode": "cli"}))
     assert failure.value.effect == "not_started"
@@ -785,7 +842,7 @@ async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_ca
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(120)
-async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes(rig, tmp_path, monkeypatch):
+async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes(rig: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
     started = time.monotonic()
@@ -805,8 +862,9 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         monkeypatch.syspath_prepend(str(root / "libs" / library / "src"))
     from agent_worktrees import tracking as owner_tracking
 
-    def snapshot():
+    def snapshot() -> Any:
         record = owner_tracking.load_record(state / "project/worktrees/worktree-a.yaml")
+        assert record.sessions is not None
         return {
             "creation_nonce": record.creation_nonce,
             "resources": [item.to_dict() for item in record.resources],
@@ -838,14 +896,14 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
             monkeypatch.setattr(worktree_lineage, "_LINEAGE_TIMEOUT_S", 30.0)
         lineage_run = worktree_lineage._run
 
-        def traced_lineage(command, *args, **kwargs):
+        def traced_lineage(command: Any, *args: Any, **kwargs: Any) -> Any:
             print(f"lineage {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
             try:
                 return lineage_run(command, *args, **kwargs)
             finally:
                 print(f"lineage {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
 
-        async def traced_owner(command, *args, **kwargs):
+        async def traced_owner(command: Any, *args: Any, **kwargs: Any) -> Any:
             print(f"owner {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
             try:
                 return await rig.owner_command(command, *args, **kwargs)
@@ -901,7 +959,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     session = rig.manager.get_session(result.session_id)
     session.status = SessionStatus.IDLE
     rig.client.acp_session_id = "native-successor"
-    async def stop(session_id, **_kwargs):
+    async def stop(session_id: Any, **_kwargs: Any) -> None:
         rig.manager.get_session(session_id).status = SessionStatus.STOPPED
     monkeypatch.setattr(rig.manager, "stop_session", AsyncMock(side_effect=stop))
     successor = await rig.manager.handoff_session(
@@ -923,6 +981,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     )
     journal_before = [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")]
     observed = await rig.runtime.inspect_pending(request.delivery_id, worktree_writer=True)
+    assert request.worktree_writer is not None
     assert observed["worktree_writer_observation"]["worktree_writer"] == request.worktree_writer.model_dump()
     assert snapshot() == linked
     assert [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")] == journal_before
@@ -943,8 +1002,8 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     assert writer.current() is None
 
 @pytest.mark.asyncio
-async def test_exact_prepared_refusal_reports_not_started_on_replay(rig, monkeypatch):
-    async def missing(_request):
+async def test_exact_prepared_refusal_reports_not_started_on_replay(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def missing(_request: Any) -> None:
         raise AcquisitionRefused("worktree_unknown", "owner did not resolve target")
     monkeypatch.setattr(acquisition_runtime, "verify_worktree", missing)
     for _ in range(2):
@@ -956,8 +1015,8 @@ async def test_exact_prepared_refusal_reports_not_started_on_replay(rig, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_launching_refusal_never_claims_not_started(rig, monkeypatch):
-    async def uncertain(_request, *_args):
+async def test_launching_refusal_never_claims_not_started(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def uncertain(_request: Any, *_args: Any) -> None:
         raise AcquisitionRefused("owner_operation_pending", "launch outcome unknown")
     monkeypatch.setattr(rig.runtime, "_launch", uncertain)
     with pytest.raises(AcquisitionRefused) as failure:
@@ -968,15 +1027,17 @@ async def test_launching_refusal_never_claims_not_started(rig, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_real_dispatch_allocation_qualifies_bridge_acquisition(rig, tmp_path, monkeypatch, mode):
+async def test_real_dispatch_allocation_qualifies_bridge_acquisition(rig: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     from pathlib import Path
     from dataclasses import asdict
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"))
     from agent_dispatch.queue import TaskQueue
+    from agent_dispatch.queue_common import Task
     from agent_dispatch.session_acquisition import spawn_snapshot
 
     queue = TaskQueue(tmp_path / "dispatch.db")
     task = queue.create(title="work", repo="queue-repo")
+    assert isinstance(task, Task)
     reservation, _ = queue.reserve_spawn(task.id)
     recorded = queue.record_spawn_worktree(
         reservation.key, "worktree-a", ownership="created", creating_host="fixture-host",
@@ -988,13 +1049,13 @@ async def test_real_dispatch_allocation_qualifies_bridge_acquisition(rig, tmp_pa
     rig.source["task"] = asdict(task)
     rig.source["acquisition_reservation"] = asdict(recorded)
     original_resolve = rig.resolver.resolve_async
-    async def resolve(name):
+    async def resolve(name: Any) -> Any:
         if name == f"dispatch:{task.id}":
             return SpawnTarget(type="session", worktree_id="worktree-a", venue=rig.source)
         return await original_resolve(name)
     rig.resolver.resolve_async = resolve
     original_command = acquisition_authority.worktree_command
-    async def command(args, project):
+    async def command(args: Any, project: Any) -> Any:
         result = await original_command(args, project)
         if args[0] == "list":
             result["worktrees"][0]["repo"] = "test-project"
@@ -1015,15 +1076,15 @@ async def test_real_dispatch_allocation_qualifies_bridge_acquisition(rig, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_default_cli_retry_reconciles_legacy_missing_profile_before_creation(rig, monkeypatch):
+async def test_default_cli_retry_reconciles_legacy_missing_profile_before_creation(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     resolve = rig.resolver.resolve_async
 
-    async def missing_worker_profile(name):
+    async def missing_worker_profile(name: Any) -> Any:
         if name == "task-worker":
             raise KeyError(name)
         return await resolve(name)
 
-    async def legacy_preparation(request, _row):
+    async def legacy_preparation(request: Any, _row: Any) -> Any:
         return await rig.resolver.resolve_async(request.target), {}
 
     rig.resolver.resolve_async = missing_worker_profile
@@ -1063,10 +1124,10 @@ async def test_default_cli_retry_reconciles_legacy_missing_profile_before_creati
 @pytest.mark.parametrize("mode,target", [
     ("acp", "task-worker"), ("cli", "named-missing"), ("acp", "named-missing"),
 ])
-async def test_missing_registry_target_is_typed_and_refuses_prepared_journal(rig, mode, target):
+async def test_missing_registry_target_is_typed_and_refuses_prepared_journal(rig: Any, mode: str, target: Any) -> None:
     resolve = rig.resolver.resolve_async
 
-    async def missing_target(name):
+    async def missing_target(name: Any) -> Any:
         if name == target:
             raise KeyError(name)
         return await resolve(name)
@@ -1089,11 +1150,11 @@ async def test_missing_registry_target_is_typed_and_refuses_prepared_journal(rig
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("venue", ["local", "ssh"])
-async def test_explicit_named_cli_target_retains_resolver_and_local_venue_checks(rig, venue):
+async def test_explicit_named_cli_target_retains_resolver_and_local_venue_checks(rig: Any, venue: Any) -> None:
     resolve = rig.resolver.resolve_async
     names = []
 
-    async def named_target(name):
+    async def named_target(name: Any) -> Any:
         names.append(name)
         if name == "named-worker":
             return SpawnTarget(type=venue, cwd="/named")
@@ -1113,10 +1174,10 @@ async def test_explicit_named_cli_target_retains_resolver_and_local_venue_checks
 
 
 @pytest.mark.asyncio
-async def test_missing_registry_target_http_refusal_is_not_a_500(rig):
+async def test_missing_registry_target_http_refusal_is_not_a_500(rig: Any) -> None:
     resolve = rig.resolver.resolve_async
 
-    async def missing_target(name):
+    async def missing_target(name: Any) -> Any:
         if name == "named-missing":
             raise KeyError(name)
         return await resolve(name)
@@ -1138,7 +1199,7 @@ async def test_missing_registry_target_http_refusal_is_not_a_500(rig):
     assert not rig.db.execute_read("SELECT * FROM live_messages")
 
 
-def test_workspace_request_cannot_downgrade_its_protocol():
+def test_workspace_request_cannot_downgrade_its_protocol() -> None:
     app = FastAPI()
     app.include_router(router)
     request = req(version=2, worktree_path="workspace-path")
@@ -1152,7 +1213,7 @@ def test_workspace_request_cannot_downgrade_its_protocol():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("binding", ["task-worker", " task-worker \n"])
-async def test_prepare_target_does_not_layer_same_padded_binding_twice(rig, binding):
+async def test_prepare_target_does_not_layer_same_padded_binding_twice(rig: Any, binding: Any) -> None:
     original_args = ["--agent", "task-worker"]
     target = SpawnTarget(type="local", cwd="/synthetic", copilot_args=original_args)
     resolver = MagicMock()
@@ -1176,7 +1237,7 @@ async def test_prepare_target_does_not_layer_same_padded_binding_twice(rig, bind
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("history", ["absent", "journal", "spawned"])
-async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig, monkeypatch, history):
+async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig: Any, monkeypatch: pytest.MonkeyPatch, history: Any) -> None:
     if history == "journal":
         await rig.runtime.acquire(req())
     if history == "spawned":
@@ -1199,7 +1260,7 @@ async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig
     assert rig.db.execute_read("SELECT COUNT(*) AS n FROM acquisition_attempts")[0]["n"] == before + 1
 
 
-async def preflight_retry(rig, monkeypatch, mode="acp"):
+async def preflight_retry(rig: Any, monkeypatch: pytest.MonkeyPatch, mode: str="acp") -> Any:
     first = req(mode=mode)
     with monkeypatch.context() as patch:
         patch.setattr(
@@ -1224,7 +1285,7 @@ async def preflight_retry(rig, monkeypatch, mode="acp"):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_receipt_proven_preflight_retry_creates_first_conversation_once(rig, monkeypatch, mode):
+async def test_receipt_proven_preflight_retry_creates_first_conversation_once(rig: Any, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     retry = await preflight_retry(rig, monkeypatch, mode)
     assert rig.db.execute_read(
         "SELECT state,refusal_code FROM acquisition_attempts WHERE delivery_id='delivery-a'",
@@ -1238,7 +1299,7 @@ async def test_receipt_proven_preflight_retry_creates_first_conversation_once(ri
 
 
 @pytest.mark.asyncio
-async def test_every_preflight_retry_retains_a_bound_refusal_receipt(rig, monkeypatch):
+async def test_every_preflight_retry_retains_a_bound_refusal_receipt(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     second = await preflight_retry(rig, monkeypatch)
     with monkeypatch.context() as patch:
         patch.setattr(
@@ -1269,7 +1330,7 @@ async def test_every_preflight_retry_retains_a_bound_refusal_receipt(rig, monkey
     "stale_current", "retired", "future_generation", "strict_continuation", "existing_head",
     "active_predecessor",
 ])
-async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monkeypatch, defect):
+async def test_initial_creation_refuses_unproven_or_historical_launch(rig: Any, monkeypatch: pytest.MonkeyPatch, defect: Any) -> None:
     retry = await preflight_retry(rig, monkeypatch)
     history = rig.source["acquisition_reservation_history"]
     previous = history["reservations"][1]
@@ -1319,7 +1380,7 @@ async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monke
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_lost_receipt_stays_ambiguous_when_owner_ledger_is_empty(rig, monkeypatch, mode):
+async def test_lost_receipt_stays_ambiguous_when_owner_ledger_is_empty(rig: Any, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     # An interrupted launch followed by bridge-database loss leaves no receipt
     # while the owner ledger is still empty; that ledger is not no-launch proof.
     retry = await preflight_retry(rig, monkeypatch, mode)
@@ -1330,7 +1391,7 @@ async def test_lost_receipt_stays_ambiguous_when_owner_ledger_is_empty(rig, monk
         "execution_leg": None, "session_backend": None,
     }
 
-    async def command(args, project):
+    async def command(args: Any, project: Any) -> Any:
         result = await original(args, project)
         if args[0] == "record":
             result["worktree"] = {**result["worktree"], **sessionless}
@@ -1347,10 +1408,10 @@ async def test_lost_receipt_stays_ambiguous_when_owner_ledger_is_empty(rig, monk
 
 
 @pytest.mark.asyncio
-async def test_first_conversation_revalidates_authority_after_target_preparation(rig, monkeypatch):
+async def test_first_conversation_revalidates_authority_after_target_preparation(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     retry = await preflight_retry(rig, monkeypatch)
     prepare = rig.runtime._prepare_target
-    async def changed(*args):
+    async def changed(*args: Any) -> Any:
         target = await prepare(*args)
         rig.source["acquisition_reservation_history"]["reservations"][1]["state"] = "spawned"
         return target
@@ -1365,7 +1426,7 @@ async def test_first_conversation_revalidates_authority_after_target_preparation
 @pytest.mark.asyncio
 @pytest.mark.parametrize("allocation", ["reused", "targeted"])
 @pytest.mark.parametrize("blocker", ["none", "unknown_head", "live_holder", "revoked"])
-async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner(rig, monkeypatch, blocker, allocation):
+async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner(rig: Any, monkeypatch: pytest.MonkeyPatch, blocker: Any, allocation: Any) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         attempt=167, worktree_ownership=allocation, conversation_retired=True,
@@ -1383,7 +1444,7 @@ async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner
         return
     elif blocker == "revoked":
         original = rig.runtime._prepare_target
-        async def revoke(*args):
+        async def revoke(*args: Any) -> Any:
             result = await original(*args)
             rig.source["acquisition_reservation"]["conversation_retired"] = False
             return result
@@ -1403,7 +1464,7 @@ async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_new_live_and_stopped_resume_preserve_native_id(rig, mode):
+async def test_new_live_and_stopped_resume_preserve_native_id(rig: Any, mode: str) -> None:
     first = req(mode=mode)
     created = await rig.runtime.acquire(first)
     assert created.acquired == "created"
@@ -1474,7 +1535,7 @@ async def test_new_live_and_stopped_resume_preserve_native_id(rig, mode):
 
 
 @pytest.mark.asyncio
-async def test_current_generation_refuses_stale_admission(rig):
+async def test_current_generation_refuses_stale_admission(rig: Any) -> None:
     rig.source["task"]["generation"] = 1
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req())
@@ -1483,7 +1544,7 @@ async def test_current_generation_refuses_stale_admission(rig):
 
 
 @pytest.mark.asyncio
-async def test_real_constructed_client_envelope_and_http_response(rig):
+async def test_real_constructed_client_envelope_and_http_response(rig: Any) -> None:
     app = FastAPI()
     app.include_router(router)
     app.state.session_manager = rig.manager
@@ -1520,11 +1581,11 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     client._daemon_proto = (PLUGIN_READINESS_PROTOCOL_VERSION, 1)
     sent = []
 
-    def request(method, path, body, **kw):
+    def request(method: Any, path: Any, body: Any, **kw: Any) -> Any:
         sent.append((method, path, body, kw))
         return response.json() | {"future_observation": {"status": "ready"}}
 
-    client._request = request
+    setattr(client, "_request", request)
     result = client_acquire(client, req(mode="cli"))
     assert result.native_session_id == response.json()["native_session_id"]
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
@@ -1541,7 +1602,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_after_delivery_does_not_redeliver(rig):
+async def test_reconciliation_after_delivery_does_not_redeliver(rig: Any) -> None:
     first = req(mode="cli")
     original = rig.runtime.store.journal.complete
     rig.runtime.store.journal.complete = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("caller lost"))
@@ -1556,7 +1617,7 @@ async def test_reconciliation_after_delivery_does_not_redeliver(rig):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tracked", [False, True])
-async def test_cli_busy_evidence_does_not_retain_consumed_input_or_legacy_history(rig, tracked):
+async def test_cli_busy_evidence_does_not_retain_consumed_input_or_legacy_history(rig: Any, tracked: Any) -> None:
     request = req(mode="cli")
     result = await rig.runtime.acquire(request)
     native = result.native_session_id
@@ -1578,19 +1639,19 @@ async def test_cli_busy_evidence_does_not_retain_consumed_input_or_legacy_histor
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_inspection_requires_actual_durable_prompt_admission(rig, monkeypatch, mode):
-    captured = {}
+async def test_inspection_requires_actual_durable_prompt_admission(rig: Any, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    captured: dict[str, Any] = {}
     if mode == "cli":
         original = rig.db.enqueue_live_message_if_fresh
-        def interrupted(*args, **kwargs):
+        def interrupted(*args: Any, **kwargs: Any) -> None:
             captured.update(args=args, kwargs=kwargs)
             raise RuntimeError("before durable admission")
         monkeypatch.setattr(rig.db, "enqueue_live_message_if_fresh", interrupted)
     else:
-        async def interrupted(session_id, prompt, **kwargs):
+        async def interrupted_acp(session_id: Any, prompt: Any, **kwargs: Any) -> None:
             captured.update(session_id=session_id, prompt=prompt, kwargs=kwargs)
             raise RuntimeError("before durable admission")
-        monkeypatch.setattr(rig.manager, "_submit_prompt_locked", interrupted)
+        monkeypatch.setattr(rig.manager, "_submit_prompt_locked", interrupted_acp)
     with pytest.raises(RuntimeError, match="before durable admission"):
         await rig.runtime.acquire(req(mode=mode))
     before = await rig.runtime.inspect_pending("delivery-a")
@@ -1623,10 +1684,10 @@ async def test_inspection_requires_actual_durable_prompt_admission(rig, monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("race", ["message", "turn"])
-async def test_cli_admission_atomically_refuses_competing_work(rig, monkeypatch, race):
+async def test_cli_admission_atomically_refuses_competing_work(rig: Any, monkeypatch: pytest.MonkeyPatch, race: Any) -> None:
     original = rig.db.enqueue_live_message_if_fresh
-    captured = {}
-    def competing(session_id, **kwargs):
+    captured: dict[str, Any] = {}
+    def competing(session_id: Any, **kwargs: Any) -> Any:
         captured.update(session_id=session_id, kwargs=kwargs)
         if race == "message":
             rig.db.enqueue_live_message(session_id, "other", "competing work", time.time())
@@ -1656,7 +1717,7 @@ async def test_cli_admission_atomically_refuses_competing_work(rig, monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_cli_overrides_are_refused_not_dropped(rig):
+async def test_cli_overrides_are_refused_not_dropped(rig: Any) -> None:
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req(mode="cli", model="requested-model"))
     assert error.value.code == "cli_options_unsupported"
@@ -1665,9 +1726,9 @@ async def test_cli_overrides_are_refused_not_dropped(rig):
 
 
 @pytest.mark.asyncio
-async def test_cli_actual_launch_native_rename_is_refused_without_delivery(rig, monkeypatch):
-    original = acquisition_runtime.worktree_command
-    async def renamed(args, project):
+async def test_cli_actual_launch_native_rename_is_refused_without_delivery(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = getattr(acquisition_runtime, "worktree_command")
+    async def renamed(args: Any, project: Any) -> Any:
         result = await original(args, project)
         if args[0] == "embody" and "--dry-run" not in args:
             rig.head["id"] = "renamed-native"
@@ -1680,7 +1741,7 @@ async def test_cli_actual_launch_native_rename_is_refused_without_delivery(rig, 
 
 
 @pytest.mark.asyncio
-async def test_existing_cli_reservation_refuses_before_installing_acquisition_gate(rig):
+async def test_existing_cli_reservation_refuses_before_installing_acquisition_gate(rig: Any) -> None:
     rig.db.create_cli_mode_reservation("worktree-a", now=time.time())
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req(mode="cli"))
@@ -1690,9 +1751,9 @@ async def test_existing_cli_reservation_refuses_before_installing_acquisition_ga
 
 
 @pytest.mark.asyncio
-async def test_drain_during_preflight_refuses_native_launch(rig, monkeypatch):
+async def test_drain_during_preflight_refuses_native_launch(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     original = rig.runtime._prepare_target
-    async def prepare(*args):
+    async def prepare(*args: Any) -> Any:
         output = await original(*args)
         rig.manager.set_draining(True)
         return output
@@ -1705,7 +1766,7 @@ async def test_drain_during_preflight_refuses_native_launch(rig, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_drain_waits_for_active_acquisition_executor(rig, monkeypatch):
+async def test_drain_waits_for_active_acquisition_executor(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rig.manager, "graceful_cancel_for_redeploy", AsyncMock())
     monkeypatch.setattr(rig.manager, "_live_host_records", lambda: [])
     rig.manager._active_acquisitions = 1
@@ -1717,9 +1778,9 @@ async def test_drain_waits_for_active_acquisition_executor(rig, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_exact_owned_native_recovers_after_crash_before_ledger_registration(rig, monkeypatch):
-    original = acquisition_runtime.worktree_command
-    async def interrupted(args, project):
+async def test_exact_owned_native_recovers_after_crash_before_ledger_registration(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = getattr(acquisition_runtime, "worktree_command")
+    async def interrupted(args: Any, project: Any) -> Any:
         if args[0] == "bind-session":
             raise RuntimeError("crash before register")
         return await original(args, project)
@@ -1738,9 +1799,9 @@ async def test_exact_owned_native_recovers_after_crash_before_ledger_registratio
 
 
 @pytest.mark.asyncio
-async def test_new_attempt_refreshes_native_head_after_prior_reconciliation(rig, monkeypatch):
-    original = acquisition_runtime.worktree_command
-    async def interrupted(args, project):
+async def test_new_attempt_refreshes_native_head_after_prior_reconciliation(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = getattr(acquisition_runtime, "worktree_command")
+    async def interrupted(args: Any, project: Any) -> Any:
         if args[0] == "bind-session":
             raise RuntimeError("crash before register")
         return await original(args, project)
@@ -1762,7 +1823,7 @@ async def test_new_attempt_refreshes_native_head_after_prior_reconciliation(rig,
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
 @pytest.mark.parametrize("retired", [False, True])
-async def test_interrupted_launch_reconciles_before_new_attempt_without_second_process(rig, mode, retired):
+async def test_interrupted_launch_reconciles_before_new_attempt_without_second_process(rig: Any, mode: str, retired: Any) -> None:
     if retired:
         rig.source["task"]["generation"] = 1
         rig.source["acquisition_reservation"].update(
@@ -1805,7 +1866,7 @@ async def test_interrupted_launch_reconciles_before_new_attempt_without_second_p
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("defect", ["new_generation", "retired_binding", "foreign_binding", "no_binding", "explicit_fresh"])
-async def test_fresh_retry_never_adopts_unproven_or_reauthorized_holder(rig, defect):
+async def test_fresh_retry_never_adopts_unproven_or_reauthorized_holder(rig: Any, defect: Any) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         worktree_ownership="reused", conversation_retired=True,
@@ -1822,7 +1883,7 @@ async def test_fresh_retry_never_adopts_unproven_or_reauthorized_holder(rig, def
         sample.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"}),
         {"path": "unused"}, rig.head["id"],
     )
-    changes = {}
+    changes: dict[str, Any] = {}
     if defect == "new_generation":
         rig.source["task"]["generation"] = 2
         changes["task_generation"] = 2
@@ -1845,7 +1906,7 @@ async def test_fresh_retry_never_adopts_unproven_or_reauthorized_holder(rig, def
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
 @pytest.mark.parametrize("new_attempt", [False, True])
-async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, mode, new_attempt):
+async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig: Any, mode: str, new_attempt: Any) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         worktree_ownership="reused", conversation_retired=True,
@@ -1859,7 +1920,7 @@ async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, 
     rig.source["acquisition_reservation"]["key"] = "reservation-b"
     retry = sample.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
     original_complete = rig.runtime.store.journal.complete
-    def interrupted_complete(request, *args, **kwargs):
+    def interrupted_complete(request: Any, *args: Any, **kwargs: Any) -> Any:
         if request.delivery_id == "delivery-b":
             raise RuntimeError("after admission")
         return original_complete(request, *args, **kwargs)
@@ -1888,7 +1949,7 @@ async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
 @pytest.mark.parametrize("defect", ["none", "caller", "binding", "generation", "retired", "head", "authority", "fresh"])
-async def test_legacy_superseded_launch_requires_exact_positive_native_provenance(rig, mode, defect):
+async def test_legacy_superseded_launch_requires_exact_positive_native_provenance(rig: Any, mode: str, defect: Any) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         worktree_ownership="reused", conversation_retired=True,
@@ -1951,13 +2012,13 @@ async def test_legacy_superseded_launch_requires_exact_positive_native_provenanc
             await session._prompt_task
 
 
-def test_retirement_proof_uses_persistent_history_index(tmp_db, monkeypatch):
+def test_retirement_proof_uses_persistent_history_index(tmp_db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     store = AcquisitionStore(tmp_db)
     tmp_db.execute_write("DROP INDEX idx_acquisition_history")
     store = AcquisitionStore(tmp_db)
     original_read = tmp_db.execute_read
     queries = []
-    def capture(sql, parameters=()):
+    def capture(sql: Any, parameters: Any=()) -> Any:
         queries.append((sql, parameters))
         return original_read(sql, parameters)
     monkeypatch.setattr(tmp_db, "execute_read", capture)
@@ -1972,7 +2033,7 @@ def test_retirement_proof_uses_persistent_history_index(tmp_db, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_completed_retirement_recovery_cannot_authorize_another_delivery(rig, mode):
+async def test_completed_retirement_recovery_cannot_authorize_another_delivery(rig: Any, mode: str) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         worktree_ownership="reused", conversation_retired=True,
@@ -2004,7 +2065,7 @@ async def test_completed_retirement_recovery_cannot_authorize_another_delivery(r
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("new_attempt", [False, True])
-async def test_cli_retirement_recovery_survives_launching_with_previous_driver(rig, monkeypatch, new_attempt):
+async def test_cli_retirement_recovery_survives_launching_with_previous_driver(rig: Any, monkeypatch: pytest.MonkeyPatch, new_attempt: Any) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         worktree_ownership="reused", conversation_retired=True,
@@ -2016,7 +2077,7 @@ async def test_cli_retirement_recovery_survives_launching_with_previous_driver(r
         await rig.runtime.acquire(first)
     rig.runtime._deliver = deliver
     stage = rig.runtime.store.stage
-    def interrupted(request, name, **data):
+    def interrupted(request: Any, name: Any, **data: Any) -> None:
         if request.delivery_id == "delivery-b" and name == "launched":
             raise RuntimeError("after reuse before receipt")
         stage(request, name, **data)
@@ -2039,7 +2100,7 @@ async def test_cli_retirement_recovery_survives_launching_with_previous_driver(r
 
 
 @pytest.mark.asyncio
-async def test_new_reservation_recovers_interrupted_retirement_registration(rig, monkeypatch):
+async def test_new_reservation_recovers_interrupted_retirement_registration(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         worktree_ownership="reused", conversation_retired=True,
@@ -2050,8 +2111,8 @@ async def test_new_reservation_recovers_interrupted_retirement_registration(rig,
     with pytest.raises(RuntimeError):
         await rig.runtime.acquire(sample)
     rig.runtime._deliver = deliver
-    register = acquisition_runtime.worktree_command
-    async def interrupted(args, project):
+    register = getattr(acquisition_runtime, "worktree_command")
+    async def interrupted(args: Any, project: Any) -> Any:
         if args[0] == "bind-session":
             raise RuntimeError("registration interrupted")
         return await register(args, project)
@@ -2072,7 +2133,7 @@ async def test_new_reservation_recovers_interrupted_retirement_registration(rig,
 
 
 @pytest.mark.asyncio
-async def test_dropped_retired_handle_cannot_reuse_authoritative_native_id(rig):
+async def test_dropped_retired_handle_cannot_reuse_authoritative_native_id(rig: Any) -> None:
     first = await rig.runtime.acquire(req())
     session = rig.manager.get_session(first.session_id)
     if session._prompt_task:
@@ -2095,7 +2156,7 @@ async def test_dropped_retired_handle_cannot_reuse_authoritative_native_id(rig):
 
 
 @pytest.mark.asyncio
-async def test_unknown_historic_registration_is_not_a_current_holder(rig):
+async def test_unknown_historic_registration_is_not_a_current_holder(rig: Any) -> None:
     rig.db.register_live_session(
         "historic-native", machine="test-machine", cwd="/example", worktree_id="worktree-a",
         repo="test-project", branch="old", pid=None, role="worker", now=0,
@@ -2108,7 +2169,7 @@ async def test_unknown_historic_registration_is_not_a_current_holder(rig):
         await session._prompt_task
 
 
-def test_launch_gate_blocks_both_legacy_and_duplicate_owned_starts(tmp_db):
+def test_launch_gate_blocks_both_legacy_and_duplicate_owned_starts(tmp_db: Any) -> None:
     store = AcquisitionStore(tmp_db)
     sample = req()
     store.gate(sample, None, None)
@@ -2129,7 +2190,7 @@ def test_launch_gate_blocks_both_legacy_and_duplicate_owned_starts(tmp_db):
 
 
 @pytest.mark.asyncio
-async def test_executor_exclusion_prevents_reconciling_an_operation_still_running(rig):
+async def test_executor_exclusion_prevents_reconciling_an_operation_still_running(rig: Any) -> None:
     with executor(rig.db, "worktree-a"):
         with pytest.raises(AcquisitionRefused) as error:
             await rig.runtime.acquire(req())
@@ -2138,7 +2199,7 @@ async def test_executor_exclusion_prevents_reconciling_an_operation_still_runnin
 
 
 @pytest.mark.asyncio
-async def test_first_targeted_task_creates_without_inheriting_history(rig):
+async def test_first_targeted_task_creates_without_inheriting_history(rig: Any) -> None:
     rig.source["acquisition_reservation"].update(worktree_ownership="targeted", attempt=1)
     output = await rig.runtime.acquire(req(mode="cli", allocation="targeted"))
     assert output.acquired == "created"
@@ -2146,7 +2207,7 @@ async def test_first_targeted_task_creates_without_inheriting_history(rig):
 
 
 @pytest.mark.asyncio
-async def test_missing_marker_retained_task_never_creates(rig):
+async def test_missing_marker_retained_task_never_creates(rig: Any) -> None:
     rig.source["acquisition_reservation"].update(worktree_ownership="reused", conversation_retired=None)
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req(allocation="reused", conversation_retired=None))
@@ -2155,7 +2216,7 @@ async def test_missing_marker_retained_task_never_creates(rig):
 
 
 @pytest.mark.asyncio
-async def test_foreign_binding_cannot_be_overridden_by_current_carried_handle(rig):
+async def test_foreign_binding_cannot_be_overridden_by_current_carried_handle(rig: Any) -> None:
     output = await rig.runtime.acquire(req(mode="cli"))
     rig.db.execute_write("UPDATE live_messages SET delivered_at=?, outcome='applied'", (time.time(),))
     rig.db.execute_write("UPDATE acquisition_bindings SET task_id='foreign-task'")
@@ -2172,7 +2233,7 @@ async def test_foreign_binding_cannot_be_overridden_by_current_carried_handle(ri
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_foreign_target_binding_refuses_before_any_resume_or_delivery(rig, mode):
+async def test_foreign_target_binding_refuses_before_any_resume_or_delivery(rig: Any, mode: str) -> None:
     output = await rig.runtime.acquire(req(mode=mode))
     if mode == "acp":
         session = rig.manager.get_session(output.session_id)
@@ -2197,7 +2258,7 @@ async def test_foreign_target_binding_refuses_before_any_resume_or_delivery(rig,
 
 
 @pytest.mark.asyncio
-async def test_unacknowledged_cli_delivery_blocks_a_second_turn(rig):
+async def test_unacknowledged_cli_delivery_blocks_a_second_turn(rig: Any) -> None:
     await rig.runtime.acquire(req(mode="cli"))
     rig.source["acquisition_reservation"].update(key="reservation-b", worktree_ownership="reused")
     with pytest.raises(AcquisitionRefused) as error:
@@ -2210,7 +2271,7 @@ async def test_unacknowledged_cli_delivery_blocks_a_second_turn(rig):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("persist_failed_record", [False, True])
-async def test_missing_native_after_host_attach_failure_retains_ambiguity(rig, persist_failed_record):
+async def test_missing_native_after_host_attach_failure_retains_ambiguity(rig: Any, persist_failed_record: Any) -> None:
     sample = req()
     token = rig.runtime.store.journal.claim(sample).token
     rig.runtime.store.gate(sample, None, None)
@@ -2243,8 +2304,8 @@ async def test_missing_native_after_host_attach_failure_retains_ambiguity(rig, p
 
 
 @pytest.mark.asyncio
-async def test_preflight_interrupt_persists_prepared_request_for_next_reservation(rig, monkeypatch):
-    async def interrupted(*args):
+async def test_preflight_interrupt_persists_prepared_request_for_next_reservation(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def interrupted(*args: Any) -> None:
         raise RuntimeError("preflight interrupted")
     original = rig.runtime._prepare_target
     monkeypatch.setattr(rig.runtime, "_prepare_target", interrupted)
@@ -2268,7 +2329,7 @@ async def test_preflight_interrupt_persists_prepared_request_for_next_reservatio
 
 
 @pytest.mark.asyncio
-async def test_launched_receipt_after_restart_strictly_resumes_before_delivery(rig, monkeypatch):
+async def test_launched_receipt_after_restart_strictly_resumes_before_delivery(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     original = rig.runtime._deliver
     monkeypatch.setattr(rig.runtime, "_deliver", AsyncMock(side_effect=RuntimeError("restart")))
     with pytest.raises(RuntimeError, match="restart"):
@@ -2294,8 +2355,8 @@ async def test_launched_receipt_after_restart_strictly_resumes_before_delivery(r
 @pytest.mark.parametrize("boundary", ["resume", "turn_lock"])
 @pytest.mark.parametrize("change", ["generation", "hold", "reservation", "cancel", "head"])
 async def test_recovery_revalidates_admission_after_every_lifecycle_wait(
-    rig, monkeypatch, boundary, change,
-):
+    rig: Any, monkeypatch: pytest.MonkeyPatch, boundary: Any, change: Any,
+) -> None:
     original = rig.runtime._deliver
     monkeypatch.setattr(rig.runtime, "_deliver", AsyncMock(side_effect=RuntimeError("interrupted")))
     with pytest.raises(RuntimeError, match="interrupted"):
@@ -2306,7 +2367,7 @@ async def test_recovery_revalidates_admission_after_every_lifecycle_wait(
     session.client = None
     rig.db.update_session_status(session.session_id, "stopped", time.time())
 
-    def move_authority():
+    def move_authority() -> None:
         if change == "generation":
             rig.source["task"]["generation"] += 1
         elif change == "hold":
@@ -2320,7 +2381,7 @@ async def test_recovery_revalidates_admission_after_every_lifecycle_wait(
 
     if boundary == "resume":
         resume = rig.manager.resume_session
-        async def racing_resume(*args, **kwargs):
+        async def racing_resume(*args: Any, **kwargs: Any) -> Any:
             resumed = await resume(*args, **kwargs)
             move_authority()
             return resumed
@@ -2330,10 +2391,10 @@ async def test_recovery_revalidates_admission_after_every_lifecycle_wait(
         await lock.acquire()
         waiting = asyncio.Event()
         class RacingLock:
-            async def __aenter__(self):
+            async def __aenter__(self) -> None:
                 waiting.set()
                 await lock.acquire()
-            async def __aexit__(self, *args):
+            async def __aexit__(self, *args: Any) -> bool:
                 lock.release()
                 return False
         session._turn_start_lock = RacingLock()

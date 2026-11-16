@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+from collections.abc import Awaitable, Callable
+
 import asyncio
 from dataclasses import replace
 import json
@@ -17,7 +21,8 @@ from agent_bridge import acquisition_authority, acquisition_worktree_writer as w
 from agent_bridge import creation_worktree_writer as creation, session_lifecycle_cli, workspace_creation
 from agent_bridge.acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
-from agent_bridge.models import SessionStatus, StartSessionRequest
+from agent_bridge.session_status import SessionStatus
+from agent_bridge.session_start_models import StartSessionRequest
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION, HTTP_PROTOCOL_MIN_SUPPORTED
 from test_workspace_creation import creation_rig  # noqa: F401
 from test_workspace_creation import rig as _connected_rig
@@ -27,7 +32,7 @@ rig = _connected_rig
 pytestmark = pytest.mark.contract("agent_bridge.workspace_creation")
 
 
-def test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses(tmp_path):
+def test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses(tmp_path: Path) -> None:
     from agent_bridge import creation_writer_schema
     from agent_bridge.db import Database
 
@@ -63,7 +68,7 @@ def test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuse
 
 
 @pytest.fixture
-def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
+def writer_creation(creation_rig: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:  # noqa: F811
     rig = creation_rig
     requirement = WorktreeWriterRequirement.model_validate({
         "identity": {"installation_root": str(tmp_path / "owner"), "runtime_generation": "a" * 32},
@@ -73,10 +78,10 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
         ("retained-owner", "original-build"), tmp_path / "owner", tmp_path / "python",
     ))
     monkeypatch.setattr(session_lifecycle_cli, "_agent_worktrees_pinned_selection", selected)
-    original = workspace_creation.worktree_command
+    original = getattr(workspace_creation, "worktree_command")
     executing_identity = requirement.identity.model_dump()
 
-    async def command(args, project, *, owner_prefix=None):
+    async def command(args: Any, project: Any, *, owner_prefix: Any=None) -> Any:
         if args[0] == "resource-relationship":
             assert owner_prefix == ("retained-owner", "original-build")
             return {
@@ -90,7 +95,8 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
                 },
             }
         if owner_prefix is None:
-            assert writers.current().prefix == ("retained-owner", "original-build")
+            active = writers.current()
+            assert active is not None and active.prefix == ("retained-owner", "original-build")
         else:
             assert owner_prefix == ("retained-owner", "original-build")
         if args[0] == "bind-session":
@@ -104,8 +110,9 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(workspace_creation, "worktree_command", command)
     from agent_bridge import worktree_lineage
 
-    def register(*_args, **_kwargs):
-        assert isinstance(writers.current().request, creation.CreationWriterScope)
+    def register(*_args: Any, **_kwargs: Any) -> Any:
+        active = writers.current()
+        assert active is not None and isinstance(active.request, creation.CreationWriterScope)
         assert rig.db.execute_read("SELECT creation_writer_json FROM workspace_embodiments")[0][0]
         return True
 
@@ -113,7 +120,7 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
     starts = []
     connect = rig.manager._connect_via_session_host
 
-    async def host_connect(*args, **kwargs):
+    async def host_connect(*args: Any, **kwargs: Any) -> Any:
         result = await connect(*args, **kwargs)
         starts.append(result[1])
         return result
@@ -127,7 +134,7 @@ def writer_creation(creation_rig, monkeypatch, tmp_path):  # noqa: F811
 
 
 @pytest.mark.asyncio
-async def test_new_creation_requires_its_observed_birth_writer_before_legacy_adoption(writer_creation):
+async def test_new_creation_requires_its_observed_birth_writer_before_legacy_adoption(writer_creation: Any) -> None:
     fixture = writer_creation
     fixture.executing_identity["runtime_generation"] = "b" * 32
     with pytest.raises(AcquisitionRefused, match="serializer"):
@@ -141,7 +148,7 @@ async def test_new_creation_requires_its_observed_birth_writer_before_legacy_ado
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(writer_creation):
+async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(writer_creation: Any) -> None:
     fixture = writer_creation
     rig = fixture.rig
     first, receipt = await workspace_creation.start(
@@ -169,7 +176,7 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
     assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == saved
 
 
-async def recovery_fixture(writer_creation, monkeypatch):
+async def recovery_fixture(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     from agent_bridge import creation_writer_inspection as inspection
     from agent_bridge.models import RetainedRecoveryRequest
 
@@ -179,14 +186,14 @@ async def recovery_fixture(writer_creation, monkeypatch):
     )
     session.status, session.client = SessionStatus.STOPPED, None
     rig.db.update_session_status(session.session_id, SessionStatus.STOPPED.value, time.time())
-    instance = {"installation_root": "original-bridge-owner", "pid": 42, "generation": 1}
+    instance: dict[str, Any] = {"installation_root": "original-bridge-owner", "pid": 42, "generation": 1}
     monkeypatch.setattr(inspection, "_instance", lambda: dict(instance))
     rig.manager._host_index = SimpleNamespace(locked_inventory=lambda: SimpleNamespace(
         storage_complete=True, records=[],
     ))
     command = fixture.command
 
-    async def recovery_command(args, project, *, owner_prefix=None):
+    async def recovery_command(args: Any, project: Any, *, owner_prefix: Any=None) -> Any:
         if args[0] == "embody":
             return {
                 "ok": True, "dry_run": True, "native_admission_version": 1,
@@ -209,14 +216,14 @@ async def recovery_fixture(writer_creation, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(writer_creation, monkeypatch):
+async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import retained_session_recovery as recovery
 
     fixture, rig = writer_creation, writer_creation.rig
     session, request, _command = await recovery_fixture(fixture, monkeypatch)
     fixture.executing_identity["runtime_generation"] = "b" * 32
 
-    async def preflight_pins_executor(args, project, **kwargs):
+    async def preflight_pins_executor(args: Any, project: Any, **kwargs: Any) -> Any:
         result = await _command(args, project, **kwargs)
         if args[0] == "embody":
             fixture.selected.side_effect = AssertionError("recovery must retain its qualified invocation")
@@ -229,7 +236,7 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
     connect = rig.manager._connect_via_session_host
     admitted = []
 
-    async def launch(target, **kwargs):
+    async def launch(target: Any, **kwargs: Any) -> Any:
         guard = json.loads(target.env[recovery.ENVIRONMENT_KEY])
         assert target.native_resume_id == session.acp_session_id == kwargs["load_session_id"]
         assert guard["head"] == {"session_id": request.native_session_id, "revision": 1}
@@ -260,7 +267,7 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
 
 
 @pytest.mark.asyncio
-async def test_ordinary_resume_preserves_completed_recovery_permission_hold(writer_creation, monkeypatch):
+async def test_ordinary_resume_preserves_completed_recovery_permission_hold(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import acp_client, retained_session_recovery as recovery, session_manager as core
     from test_session_host import _assert_reattached_permission_waits
 
@@ -271,13 +278,13 @@ async def test_ordinary_resume_preserves_completed_recovery_permission_hold(writ
     )
     session.status, session.client = SessionStatus.STOPPED, None
     rig.db.update_session_status(session.session_id, SessionStatus.STOPPED.value, time.time())
-    clients = []
+    clients: list[Any] = []
 
-    def client_factory(**kwargs):
+    def client_factory(**kwargs: Any) -> Any:
         client = acp_client.AcpClient(**kwargs)
-        client.start = AsyncMock()
-        client.load_session = AsyncMock()
-        client.shutdown = AsyncMock()
+        monkeypatch.setattr(client, "start", AsyncMock())
+        monkeypatch.setattr(client, "load_session", AsyncMock())
+        monkeypatch.setattr(client, "shutdown", AsyncMock())
         clients.append(client)
         return client
 
@@ -289,16 +296,17 @@ async def test_ordinary_resume_preserves_completed_recovery_permission_hold(writ
     assert resumed is session and len(clients) == 1
     assert session.client is clients[0] and session.acp_session_id == request.native_session_id
     clients[0].load_session.assert_awaited_once()
-    await _assert_reattached_permission_waits(clients[0], session.acp_session_id)
+    permission_check: Callable[..., Awaitable[None]] = _assert_reattached_permission_waits
+    await permission_check(clients[0], session.acp_session_id)
 
 
 @pytest.mark.asyncio
-async def test_uncertain_retained_recovery_never_relaunches_or_falls_back(writer_creation, monkeypatch):
+async def test_uncertain_retained_recovery_never_relaunches_or_falls_back(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import retained_session_recovery as recovery
 
     fixture, rig = writer_creation, writer_creation.rig
     session, request, _command = await recovery_fixture(fixture, monkeypatch)
-    async def uncertain_connect(_target, **kwargs):
+    async def uncertain_connect(_target: Any, **kwargs: Any) -> None:
         kwargs["recovery_operation"].begin_host()
         raise TimeoutError("native load outcome unknown")
 
@@ -329,7 +337,7 @@ async def test_uncertain_retained_recovery_never_relaunches_or_falls_back(writer
 
 
 @pytest.mark.asyncio
-async def test_retained_recovery_round_trips_through_actual_http_native_owner(writer_creation, monkeypatch):
+async def test_retained_recovery_round_trips_through_actual_http_native_owner(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from agent_bridge.routes import health, sessions
@@ -348,7 +356,7 @@ async def test_retained_recovery_round_trips_through_actual_http_native_owner(wr
     connect = rig.manager._connect_via_session_host
     launches = []
 
-    async def launch(*args, **kwargs):
+    async def launch(*args: Any, **kwargs: Any) -> Any:
         launches.append(kwargs["load_session_id"])
         return await connect(*args, **kwargs)
 
@@ -356,13 +364,13 @@ async def test_retained_recovery_round_trips_through_actual_http_native_owner(wr
     with TestClient(app) as http:
         client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
 
-        def send(method, path, body=None, **_kwargs):
+        def send(method: Any, path: Any, body: Any=None, **_kwargs: Any) -> Any:
             response = http.request(method, path, json=body)
             if response.status_code >= 400:
                 raise BridgeClientError(response.status_code, response.json().get("detail"))
             return response.json()
 
-        client._request = send
+        setattr(client, "_request", send)
         endpoint = f"/api/v1/sessions/{session.session_id}/resume"
         invalid = {
             "worktree_writer": fixture.requirement.model_dump(),
@@ -388,14 +396,14 @@ async def test_retained_recovery_round_trips_through_actual_http_native_owner(wr
 
 
 @pytest.mark.asyncio
-async def test_native_stop_race_retains_hold_and_records_no_native_entry(writer_creation, monkeypatch):
+async def test_native_stop_race_retains_hold_and_records_no_native_entry(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import retained_session_recovery as recovery
     from agent_bridge.cold_outages import ColdRecoveryStoppedError
 
     fixture, rig = writer_creation, writer_creation.rig
     session, request, command = await recovery_fixture(fixture, monkeypatch)
 
-    async def stop_during_preflight(args, project, **kwargs):
+    async def stop_during_preflight(args: Any, project: Any, **kwargs: Any) -> Any:
         result = await command(args, project, **kwargs)
         if args[0] == "embody":
             rig.db.execute_write(
@@ -422,8 +430,8 @@ async def test_native_stop_race_retains_hold_and_records_no_native_entry(writer_
     "host", "inventory", "native", "capability", "installation", "not-ready", "gate", "stop",
 ])
 async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocation(
-    writer_creation, monkeypatch, boundary,
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, boundary: Any,
+) -> None:
     from agent_bridge import retained_session_recovery as recovery
 
     fixture, rig = writer_creation, writer_creation.rig
@@ -438,7 +446,7 @@ async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocat
     elif boundary == "installation":
         request = request.model_copy(update={"bridge_installation": "another-installation"})
     elif boundary == "capability":
-        async def unsupported(*args, **kwargs):
+        async def unsupported(*args: Any, **kwargs: Any) -> Any:
             result = await command(*args, **kwargs)
             result.pop("retained_native_resume", None)
             return result
@@ -477,8 +485,8 @@ async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocat
     (True, "daemon-lost"),
 ])
 def test_retained_recovery_cli_negotiates_and_never_replays_native_request(
-    monkeypatch, capsys, supported, outcome,
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], supported: Any, outcome: Any,
+) -> None:
     import io
     import sys
     from agent_bridge import __main__ as core, hosting_admission_cli
@@ -503,7 +511,7 @@ def test_retained_recovery_cli_negotiates_and_never_replays_native_request(
     client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
     posts = []
 
-    def request(method, path, *values, **kwargs):
+    def request(method: Any, path: Any, *values: Any, **kwargs: Any) -> Any:
         if path == "/health":
             return {
                 "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
@@ -553,8 +561,8 @@ def test_retained_recovery_cli_negotiates_and_never_replays_native_request(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["requirement", "pointer", "native", "alias"])
 async def test_required_creation_resume_refuses_changed_custody_before_effect(
-    writer_creation, monkeypatch, changed,
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, changed: Any,
+) -> None:
     fixture = writer_creation
     rig = fixture.rig
     session, _receipt = await workspace_creation.start(
@@ -582,7 +590,7 @@ async def test_required_creation_resume_refuses_changed_custody_before_effect(
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_writer_rehydrates_same_native_with_current_serializer(writer_creation):
+async def test_keyed_creation_writer_rehydrates_same_native_with_current_serializer(writer_creation: Any) -> None:
     from agent_bridge.session_manager import SessionManager
 
     fixture = writer_creation
@@ -604,7 +612,7 @@ async def test_keyed_creation_writer_rehydrates_same_native_with_current_seriali
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate(writer_creation):
+async def test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate(writer_creation: Any) -> None:
     fixture = writer_creation
     rig = fixture.rig
     results = await asyncio.gather(*(
@@ -625,13 +633,13 @@ async def test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_re
 
 @pytest.mark.asyncio
 async def test_keyed_creation_writer_reconciles_lost_completion_without_new_native(
-    writer_creation, monkeypatch,
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = writer_creation
     rig = fixture.rig
     update = workspace_creation._update
 
-    def lose_completion(db, digest, **fields):
+    def lose_completion(db: Any, digest: Any, **fields: Any) -> None:
         if fields.get("state") == "complete":
             raise RuntimeError("lost completion")
         update(db, digest, **fields)
@@ -656,7 +664,7 @@ async def test_keyed_creation_writer_reconciles_lost_completion_without_new_nati
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["dropped", "nonce", "path", "pointer", "missing-journal"])
-async def test_keyed_creation_writer_refuses_changed_custody_before_effects(writer_creation, changed):
+async def test_keyed_creation_writer_refuses_changed_custody_before_effects(writer_creation: Any, changed: Any) -> None:
     fixture = writer_creation
     rig = fixture.rig
     first, _receipt = await workspace_creation.start(
@@ -686,7 +694,7 @@ async def test_keyed_creation_writer_refuses_changed_custody_before_effects(writ
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal(writer_creation):
+async def test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal(writer_creation: Any) -> None:
     fixture = writer_creation
     rig = fixture.rig
     await workspace_creation.start(
@@ -714,7 +722,7 @@ async def test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal
     {"target_dir": "/another"}, {"remote_session_id": "remote"},
     {"parity_fault": "fault"},
 ])
-def test_required_creation_writer_parser_rejects_unsupported_forms(changes):
+def test_required_creation_writer_parser_rejects_unsupported_forms(changes: Any) -> None:
     with pytest.raises(ValidationError, match="prepared local worktree"):
         StartSessionRequest.model_validate({
             "creation_key": "original-key", "worktree_id": "worktree-a",
@@ -726,12 +734,12 @@ def test_required_creation_writer_parser_rejects_unsupported_forms(changes):
 
 
 @pytest.mark.parametrize("capability", [None, False, "1", 0])
-def test_required_creation_writer_client_refuses_unsupported_active_provider(capability):
+def test_required_creation_writer_client_refuses_unsupported_active_provider(capability: Any) -> None:
     client = BridgeClient("http://fixture", token="fixture")
-    client.daemon_supports = lambda _floor: True
+    setattr(client, "daemon_supports", lambda _floor: True)
     calls = []
 
-    def request(method, path, *args, **kwargs):
+    def request(method: Any, path: Any, *args: Any, **kwargs: Any) -> Any:
         calls.append((method, path))
         assert (method, path) == ("GET", "/health")
         return {
@@ -739,7 +747,7 @@ def test_required_creation_writer_client_refuses_unsupported_active_provider(cap
             "capabilities": {creation.CAPABILITY: capability},
         }
 
-    client._request = request
+    setattr(client, "_request", request)
     with pytest.raises(BridgeClientError) as refused:
         client.start_session(
             agent="worker", creation_key="original-key", worktree_id="worktree-a",
@@ -752,13 +760,13 @@ def test_required_creation_writer_client_refuses_unsupported_active_provider(cap
     assert calls == [("GET", "/health")]
 
 
-def test_required_creation_writer_rechecks_capability_after_provider_cutover():
+def test_required_creation_writer_rechecks_capability_after_provider_cutover() -> None:
     client = BridgeClient("http://fixture", token="fixture", connect_grace=2)
-    client.daemon_supports = lambda _floor: True
+    setattr(client, "daemon_supports", lambda _floor: True)
     client._reresolve = lambda: "http://older"
-    posts = []
+    posts: list[tuple[str, str]] = []
 
-    def request(method, path, *args, **kwargs):
+    def request(method: Any, path: Any, *args: Any, **kwargs: Any) -> Any:
         assert kwargs["allow_retry"] is False
         if path == "/health":
             return {
@@ -768,7 +776,7 @@ def test_required_creation_writer_rechecks_capability_after_provider_cutover():
         posts.append((method, path))
         raise BridgeClientError(503, "draining")
 
-    client._request = request
+    setattr(client, "_request", request)
     with pytest.raises(BridgeClientError) as refused:
         client.start_session(
             agent="worker", creation_key="original-key", worktree_id="worktree-a",
@@ -784,8 +792,8 @@ def test_required_creation_writer_rechecks_capability_after_provider_cutover():
 @pytest.mark.parametrize("from_file", [False, True])
 @pytest.mark.parametrize("supported", [False, True])
 def test_required_creation_writer_cli_carries_requirement_to_actual_client(
-    monkeypatch, tmp_path, capsys, from_file, supported,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], from_file: Any, supported: Any,
+) -> None:
     import io
     import sys
     from agent_bridge import __main__ as core, session_start_cli, session_targeting_cli
@@ -809,7 +817,7 @@ def test_required_creation_writer_cli_carries_requirement_to_actual_client(
     monkeypatch.setattr(client, "daemon_supports", lambda _floor: True)
     posts = []
 
-    def request(method, endpoint, *values, **kwargs):
+    def request(method: Any, endpoint: Any, *values: Any, **kwargs: Any) -> Any:
         if endpoint == "/health":
             return {
                 "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
@@ -864,8 +872,8 @@ def test_required_creation_writer_cli_carries_requirement_to_actual_client(
     (["--creation-key", "original", "--worktree-id", "w"], "[]"),
 ])
 def test_required_creation_writer_cli_invalid_input_refuses_before_connect(
-    monkeypatch, options, text,
-):
+    monkeypatch: pytest.MonkeyPatch, options: Any, text: Any,
+) -> None:
     import io
     import sys
     from agent_bridge import __main__ as core, session_targeting_cli
@@ -881,7 +889,7 @@ def test_required_creation_writer_cli_invalid_input_refuses_before_connect(
 
 
 @pytest.mark.parametrize("target", ["remote-acp:fixture", "https://example.com/acp"])
-def test_required_creation_writer_cli_rejects_remote_before_connect(monkeypatch, target):
+def test_required_creation_writer_cli_rejects_remote_before_connect(monkeypatch: pytest.MonkeyPatch, target: Any) -> None:
     import io
     import sys
     from agent_bridge import __main__ as core, session_targeting_cli
@@ -902,8 +910,8 @@ def test_required_creation_writer_cli_rejects_remote_before_connect(monkeypatch,
 
 
 def test_required_creation_writer_round_trips_through_actual_http_owner(
-    writer_creation, monkeypatch, capsys,
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from agent_bridge import creation_writer_inspection as inspection
@@ -919,7 +927,7 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
     app.state.ready = True
     activations = []
 
-    async def resolve(_name, *, sender_repo=None, activate=True):
+    async def resolve(_name: Any, *, sender_repo: Any=None, activate: Any=True) -> Any:
         activations.append(activate)
         return rig.target
 
@@ -933,13 +941,13 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
     with TestClient(app) as http:
         client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
 
-        def send(method, path, body=None, **_kwargs):
+        def send(method: Any, path: Any, body: Any=None, **_kwargs: Any) -> Any:
             response = http.request(method, path, json=body)
             if response.status_code >= 400:
                 raise BridgeClientError(response.status_code, response.json().get("detail"))
             return response.json()
 
-        client._request = send
+        setattr(client, "_request", send)
         result = client.start_session(
             agent="worker", creation_key="original-key", worktree_id=rig.row["id"],
             worktree_writer=fixture.requirement.model_dump(),
@@ -987,7 +995,7 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
 
 
 @pytest.mark.asyncio
-async def test_terminal_creation_writer_remains_inspectable_without_reopening(writer_creation, monkeypatch):
+async def test_terminal_creation_writer_remains_inspectable_without_reopening(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import creation_writer_inspection as inspection
 
     fixture = writer_creation
@@ -1013,8 +1021,8 @@ async def test_terminal_creation_writer_remains_inspectable_without_reopening(wr
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["instance", "journal", "readiness", "nonce"])
 async def test_creation_writer_inspection_refuses_changed_owner_without_effects(
-    writer_creation, monkeypatch, changed,
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, changed: Any,
+) -> None:
     from agent_bridge import creation_writer_inspection as inspection
 
     fixture = writer_creation
@@ -1027,7 +1035,7 @@ async def test_creation_writer_inspection_refuses_changed_owner_without_effects(
     command = fixture.command
     ready = [True]
 
-    async def changing_owner(args, project, **kwargs):
+    async def changing_owner(args: Any, project: Any, **kwargs: Any) -> Any:
         result = await command(args, project, **kwargs)
         if args[0] == "record":
             if changed == "journal":
@@ -1045,12 +1053,12 @@ async def test_creation_writer_inspection_refuses_changed_owner_without_effects(
     assert writers.current() is None
 
 
-def test_required_creation_writer_inspection_rejects_ignored_legacy_query():
+def test_required_creation_writer_inspection_rejects_ignored_legacy_query() -> None:
     from agent_bridge.creation_writer_inspection import CAPABILITY
 
     client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
 
-    def request(_method, path, **_kwargs):
+    def request(_method: Any, path: Any, **_kwargs: Any) -> Any:
         if path == "/health":
             return {
                 "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
@@ -1058,7 +1066,7 @@ def test_required_creation_writer_inspection_rejects_ignored_legacy_query():
             }
         return {"session_id": "original-session"}
 
-    client._request = request
+    setattr(client, "_request", request)
     with pytest.raises(BridgeClientError) as refused:
         client.get_session("original-session", worktree_writer=True)
     assert refused.value.status == 502
@@ -1067,8 +1075,8 @@ def test_required_creation_writer_inspection_rejects_ignored_legacy_query():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed", ["link", "seed"])
 async def test_keyed_creation_handoff_retains_original_successor_and_seed(
-    writer_creation, monkeypatch, failed,
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, failed: Any,
+) -> None:
     from agent_bridge import worktree_lineage
 
     fixture = writer_creation
@@ -1080,7 +1088,7 @@ async def test_keyed_creation_handoff_retains_original_successor_and_seed(
     rig.client.acp_session_id = "native-successor"
     failures = [failed]
 
-    def link(_worktree, _predecessor, successor, **_kwargs):
+    def link(_worktree: Any, _predecessor: Any, successor: Any, **_kwargs: Any) -> None:
         if failures == ["link"]:
             failures.clear()
             raise AcquisitionRefused("owner_pending", "lineage pending")
@@ -1090,7 +1098,7 @@ async def test_keyed_creation_handoff_retains_original_successor_and_seed(
     for name in ("note_handoff", "session_role", "history_digest"):
         monkeypatch.setattr(worktree_lineage, name, lambda *_a, **_kw: None)
 
-    async def seed(*_args, **_kwargs):
+    async def seed(*_args: Any, **_kwargs: Any) -> Any:
         if failures == ["seed"]:
             failures.clear()
             raise AcquisitionRefused("owner_pending", "seed pending")
@@ -1125,13 +1133,13 @@ async def test_keyed_creation_handoff_retains_original_successor_and_seed(
 
 
 @pytest.mark.asyncio
-async def test_keyed_creation_registration_failure_retains_native_and_dormancy(writer_creation, monkeypatch):
+async def test_keyed_creation_registration_failure_retains_native_and_dormancy(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import worktree_lineage
 
     fixture = writer_creation
     rig = fixture.rig
 
-    def refuse_registration(*_args, **_kwargs):
+    def refuse_registration(*_args: Any, **_kwargs: Any) -> None:
         raise AcquisitionRefused("owner_pending", "registration pending")
 
     monkeypatch.setattr(worktree_lineage, "register_session", refuse_registration)
@@ -1160,8 +1168,8 @@ async def test_keyed_creation_registration_failure_retains_native_and_dormancy(w
 @pytest.mark.asyncio
 @pytest.mark.timeout(120)
 async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim(
-    rig, tmp_path, monkeypatch,
-):
+    rig: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import time
 
     started = time.monotonic()
@@ -1179,8 +1187,9 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "src"))
     from agent_worktrees import tracking
 
-    def snapshot():
+    def snapshot() -> Any:
         record = tracking.load_record(state / "project" / "worktrees" / "worktree-a.yaml")
+        assert record.sessions is not None
         return {
             "creation_nonce": record.creation_nonce,
             "resources": [item.to_dict() for item in record.resources],
@@ -1211,14 +1220,14 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
             monkeypatch.setattr(worktree_lineage, "_LINEAGE_TIMEOUT_S", 30.0)
         lineage_run = worktree_lineage._run
 
-        def traced_lineage(command, *args, **kwargs):
+        def traced_lineage(command: Any, *args: Any, **kwargs: Any) -> Any:
             print(f"lineage {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
             try:
                 return lineage_run(command, *args, **kwargs)
             finally:
                 print(f"lineage {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
 
-        async def traced_owner(command, *args, **kwargs):
+        async def traced_owner(command: Any, *args: Any, **kwargs: Any) -> Any:
             print(f"owner {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
             try:
                 return await rig.owner_command(command, *args, **kwargs)
@@ -1256,7 +1265,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     )
     monkeypatch.setattr(worktree_lineage, "register_session", rig.register_session)
 
-    async def resolve(target, **_kwargs):
+    async def resolve(target: Any, **_kwargs: Any) -> Any:
         return ["copilot", "--acp", "--stdio"], target.cwd, {}
 
     monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
@@ -1283,7 +1292,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     session.status = SessionStatus.IDLE
     rig.client.acp_session_id = "native-successor"
 
-    async def stop(session_id, **_kwargs):
+    async def stop(session_id: Any, **_kwargs: Any) -> None:
         rig.manager.get_session(session_id).status = SessionStatus.STOPPED
 
     monkeypatch.setattr(rig.manager, "stop_session", AsyncMock(side_effect=stop))
@@ -1300,8 +1309,12 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     identity_file.write_text(json.dumps(current_identity), encoding="utf-8")
     current_prefix = (prefix[0], "-B", *prefix[1:])
     selected.return_value = (current_prefix, Path(identity["installation_root"]), Path(sys.executable))
-    async def current_command(args, project, *, owner_prefix=None):
-        assert owner_prefix == current_prefix if owner_prefix is not None else writers.current().prefix == current_prefix
+    async def current_command(args: Any, project: Any, *, owner_prefix: Any=None) -> Any:
+        if owner_prefix is None:
+            active = writers.current()
+            assert active is not None and active.prefix == current_prefix
+        else:
+            assert owner_prefix == current_prefix
         return await receiving_command(args, project, owner_prefix=owner_prefix)
 
     monkeypatch.setattr(acquisition_authority, "worktree_command", current_command)

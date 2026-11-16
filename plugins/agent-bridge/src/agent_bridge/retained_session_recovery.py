@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Iterator
 from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -10,12 +11,13 @@ import asyncio
 import json
 import os
 import time
-from typing import Any
+from typing import Any, cast
 
 from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from .acquisition_executor import executor
 from .creation_worktree_writer import JOURNAL_KEY, _binding, _read, retained
-from .models import RetainedRecoveryRequest, SessionStatus
+from .models import RetainedRecoveryRequest
+from .session_status import SessionStatus
 
 CAPABILITY = "retained_native_session_recovery"
 ENVIRONMENT_KEY = "AGENT_WORKTREES_RETAINED_NATIVE_RESUME"
@@ -30,7 +32,7 @@ def permission_held(db: Any, target: Any) -> bool:
     return row is not None and row.get("creation_recoveries_json") is not None
 
 
-def _operations(row: dict) -> dict:
+def _operations(row: dict[str, Any]) -> dict[str, Any]:
     try:
         value = json.loads(row["creation_recoveries_json"] or "{}")
         if not isinstance(value, dict):
@@ -48,13 +50,13 @@ def _operations(row: dict) -> dict:
         raise _refuse("Original native recovery journal is unconfirmed") from exc
 
 
-def inspect(manager: Any, session_id: str, operation_id: str) -> dict:
+def inspect(manager: Any, session_id: str, operation_id: str) -> dict[str, Any]:
     session = manager.get_session(session_id)
     if session is None or session.session_id != session_id:
         raise _refuse("Native recovery requires the exact retained Bridge session")
     row = _read(manager.db, (session.target.venue or {}).get(JOURNAL_KEY))
     operation = _operations(row).get(operation_id) if row is not None else None
-    if not isinstance(operation, dict) or set(operation) != {"request", "state"}:
+    if row is None or not isinstance(operation, dict) or set(operation) != {"request", "state"}:
         raise _refuse("Original native recovery operation is unavailable; do not replay")
     request = RetainedRecoveryRequest.model_validate(operation["request"])
     if (
@@ -88,7 +90,7 @@ class RetainedRecovery:
 
     @property
     def session_id(self) -> str:
-        return self.session.session_id
+        return cast(str, self.session.session_id)
 
     def require_current(self, *, check_task: bool = True) -> None:
         if (
@@ -134,7 +136,7 @@ class RetainedRecovery:
     def retain_host(self, host: Any) -> None:
         self.host_record = self.manager._register_host_launch(host, self.session_id)
 
-    def admit_host_child(self, context: str, request: dict) -> None:
+    def admit_host_child(self, context: str, request: dict[str, Any]) -> None:
         self.require_current(check_task=False)
         expected = json.loads(context)
         if (
@@ -150,8 +152,10 @@ class RetainedRecovery:
         if self.session.client is not client or session_id != self.request.native_session_id:
             raise _refuse("Original retained recovery native transport changed")
 
-    def native_method(self, client: Any, session_id: str, method: Any) -> Any:
-        async def invoke(**kwargs):
+    def native_method(
+        self, client: Any, session_id: str, method: Callable[..., Awaitable[Any]],
+    ) -> Callable[..., Awaitable[Any]]:
+        async def invoke(**kwargs: Any) -> Any:
             self.require_native(client, session_id)
             if (
                 self.native_rpc_started or kwargs.get("session_id") != session_id
@@ -164,11 +168,16 @@ class RetainedRecovery:
         return invoke
 
     def environment(self, writer: WorktreeWriterRequirement) -> str:
+        from .acquisition_worktree_writer import current
+
+        selected = current()
+        if selected is None or selected.request.worktree_writer != writer:
+            raise _refuse("Retained recovery lost its original Worktrees writer")
         target = self.session.target
         return json.dumps({
             "version": 1, "operation_id": self.request.operation_id,
             "writer": {
-                **writer.model_dump(), "worktree_id": target.worktree_id,
+                **selected.execution_requirement.model_dump(), "worktree_id": target.worktree_id,
                 "project": target.project, "worktree_path": target.cwd,
             },
             "head": {
@@ -181,7 +190,9 @@ _current: ContextVar[RetainedRecovery | None] = ContextVar("retained-session-rec
 
 
 @contextmanager
-def _preparing(db: Any, request: RetainedRecoveryRequest, previous: dict):
+def _preparing(
+    db: Any, request: RetainedRecoveryRequest, previous: dict[str, Any],
+) -> Iterator[None]:
     original = {"request": request.model_dump(), "state": "preparing"}
     previous[request.operation_id] = original
     with db._runtime_transaction(write=True, full_sync=True) as conn:
@@ -246,8 +257,8 @@ def require_resume(manager: Any, session: Any) -> None:
 
 async def resume(
     manager: Any, session_id: str, request: RetainedRecoveryRequest,
-    requirement: WorktreeWriterRequirement | None, ready,
-) -> tuple[Any, dict]:
+    requirement: WorktreeWriterRequirement | None, ready: Callable[[], bool],
+) -> tuple[Any, dict[str, Any]]:
     from .acquisition_authority import worktree_command
     from .acquisition_worktree_writer import select_writer
     from .creation_writer_inspection import inspect_writer

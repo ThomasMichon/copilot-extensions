@@ -16,7 +16,7 @@ CAPABILITY = "retained_acquisition_writer_inspection"
 SCHEMA = "copilot-extensions.acquisition-worktree-writer"
 
 
-def _instance() -> dict:
+def _instance() -> dict[str, Any]:
     root = config_dir()
     slot = slot_descriptor(root)
     active = slot.get("active")
@@ -36,7 +36,7 @@ def _instance() -> dict:
     }
 
 
-async def inspect_writer(db: Any, delivery_id: str, original: dict) -> dict:
+async def inspect_writer(db: Any, delivery_id: str, original: dict[str, Any]) -> dict[str, Any]:
     """Observe a compatible executor without changing the original journal."""
     from .acquisition_authority import read_worktree_record, worktree_command
 
