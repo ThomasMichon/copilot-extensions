@@ -29,6 +29,14 @@ activation; existing generations affect compatibility/state transfer, not a
 separate legacy construction route. This alignment changes no completed credit,
 source custody, operational hold or deployment authority.
 
+The [managed-Python amendment](managed-python.md) adds per-project interpreter
+declarations and `uv`-owned acquisition/environment construction, including the
+pre-Python bootstrap foundation. All application launchers use `uv` from PATH;
+none assumes an installed Python location or resolves Python from PATH.
+This supersedes that earlier setup assumption, not compiler-free execution,
+process safety or package admission. #12775 owns the bounded architecture/plan
+revision; existing implementation and deployment owners retain the open work.
+
 The [current lifetime clarification](update-service-lifetimes.md) is part of
 this Goal: ordinary updates are foreground-owned and cancellable, while accepted
 service setup/start and its retained process/runtime tree have independent
@@ -219,6 +227,12 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**Per-project Python (2026-11-16):** the
+[verbatim request and implementation plan](managed-python.md) require `uv` to
+manage each project's declared Python version, independent of system/user PATH.
+This is a plan amendment, not an installed migration or a takeover of existing
+implementation/native owners.
 
 **Incremental delivery, verbatim:**
 
@@ -664,6 +678,12 @@ adoption. Other completed source slices remain credited in the
 
 ### Phase 4b - Durable installation execution driver
 
+- [ ] P4bY: Through existing bootstrap, shared-engine and application owners,
+  implement the [managed-Python setup sequence](managed-python.md):
+  shell-native `uv` foundation, declared managed interpreter before helpers,
+  project-specific environments and every app launcher's PATH-`uv` dispatch
+  without guessed Python paths, PATH Python or ordinary-launch acquisition.
+  Preserve all independent holds.
 - [ ] P4bD: Complete the addressed installation's ordinary update, explicit
   repair and independent cold-foundation entry through #7758's one
   transaction owner: ordinary execution is foreground/cancellable, while
@@ -701,6 +721,12 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+The [managed-Python acceptance cases](managed-python.md#validation-and-completion)
+extend cold-foundation and addressed-application qualification below. They remain
+open: no-Python/old-Python PATH, differing project versions, offline reuse and
+missing-version failures, acquisition-free ordinary reads/launch, and native
+process/OS-policy evidence are not established by this plan revision.
 
 All rows below remain open until their complete stated scope is evidenced.
 Use prior source/native records at their actual revision, venue and effect
@@ -803,6 +829,16 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-11-16 - Managed-Python architecture and setup direction
+
+Captured the request and all-launcher refinement in
+[managed-python.md](managed-python.md), coordinated by #12775. The proposed
+vision/invariant and plan amendment replace PATH-Python dependence with
+project-declared Python selected/provisioned by PATH `uv`, without assumed
+interpreter locations. Existing source and native credit, implementation
+owners, holds and rollout boundaries remain unchanged; technical acceptance
+stays open.
 
 - [2026-11-15 - Fast construction and bounded service cutoff reviewed](fast-construction-and-outgoing-cutoff.md#journal)
 - [2026-11-15 - Bounded Manager/Worktrees consumer qualification accepted](manager-worktrees-native-consumer.md#journal)
