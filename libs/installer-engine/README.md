@@ -63,6 +63,28 @@ step. Raw developer copies can still be stale; do not make a failing copied
 consumer pass by substituting a canonical dependency. Qualify its real composed
 payload instead. Materialization does not install or update a running runtime.
 
+`bootstrap-uv.ps1` is a separately delivered provider for Worktrees' future
+pre-lifecycle adoption, not a change to the discovery-only
+`bootstrap-python.ps1` evaluator. `Resolve-UvBootstrapPython` reads the exact
+Invocation-produced `bootstrap-python-version.txt` request without Python or
+TOML, qualifies the first PATH `uv` application (0.8.0+), and asks uv for that
+managed-only version without project discovery or downloads. Missing uv or a
+not-yet-prepared interpreter is an explicit unavailable result. `Prepare` is a
+separate, explicit setup operation: it requests `uv python install --no-bin
+--no-registry` before the same acquisition-free lookup. No production caller
+opts in yet.
+
+The required `InvokeCaptured` callback accepts `FilePath` and `ArgList` and
+returns exactly one object with integer `ExitCode` and string `Stdout` and
+`Stderr`. The caller must supply its existing bounded, contained process owner;
+the provider introduces no launcher, Job escape or timeout implementation.
+Process-start/custody failures propagate. OS-policy refusal never selects
+another uv or system Python. Returned Python is a selection, not executable,
+profile, application or removal admission: the existing owner still validates
+the helper and any required outside-removable-root closure before execution.
+Explicit interpreter handoffs, guest policy-before-setup, uv prerequisite
+publication and service/command launcher adoption retain their existing owners.
+
 The retained-source constructor checks build-tool containment using resolved
 physical paths and the shared Windows extended-path normalization. Equivalent
 native spellings retain their original I/O paths; actual outside, sibling and
