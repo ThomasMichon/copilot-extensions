@@ -361,6 +361,11 @@ The same record separates #1176's delivered authoring definition from complete
 enforcement verification, and preserves #2350 after its proposed configuration
 source fails body admission. Neither an assignee field nor an unavailable
 source proves fulfillment, absence or permission to transfer custody.
+The later #12828 Host-inspection and #12855 closed-wheel Vault descriptions
+report distinct source increments, explicitly not whole #10765 or #8729
+completion, native adoption or independent reference-contract acceptance.
+The complete 2026-11-16 12:12:30 UTC census is 850 whole open, 121 above
+fixed 729; these partial-delivery observations add no closure credit.
 
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
