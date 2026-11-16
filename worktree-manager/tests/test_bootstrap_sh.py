@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from test_bootstrap_ps1 import _fake_tools, _retained_sparse, _source_repo
+from test_bootstrap_ps1 import _fake_tools, _retained_sparse, _source_repo, _without_uv
 
 BOOTSTRAP = Path(__file__).resolve().parents[1] / "bootstrap.sh"
 BASH = shutil.which("bash") or ""
@@ -130,12 +130,15 @@ def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(
         )
         curl.chmod(0o755)
     trace = tmp_path / "uv-trace.txt"
+    ambient_path = os.environ.get("PATH", "")
+    if uv_version == "0.7.0":
+        ambient_path = _without_uv(ambient_path)
     result = subprocess.run(
         [BASH, str(BOOTSTRAP), "--version"],
         env={
             **os.environ, "WORKTREE_MANAGER_ROOT": str(root),
             "HOME": str(home), "USERPROFILE": str(home),
-            "PATH": ("tools" if relative_uv else str(tools)) + os.pathsep + os.environ.get("PATH", ""),
+            "PATH": ("tools" if relative_uv else str(tools)) + os.pathsep + ambient_path,
             "VIRTUAL_ENV": str(tmp_path / "active-venv"),
             "UV_PYTHON": str(tmp_path / "ambient-python"),
             "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": "previous-selection",
@@ -168,6 +171,62 @@ def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_p
     assert result.returncode == 2
     assert "Windows WinGet bootstrap mode; unsupported on POSIX" in result.stderr
     assert not root.exists()
+
+
+@pytest.mark.parametrize("shadow_uv", ["old", "malformed", "failed"])
+@pytest.mark.parametrize("uv_contract", ["1", None, "2"])
+def test_bootstrap_reuses_supported_uv_later_on_path(
+    tmp_path: Path, shadow_uv: str, uv_contract: str | None,
+) -> None:
+    repo = _source_repo(tmp_path, uv_contract=uv_contract)
+    root = tmp_path / "manager-root"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        f'[source]\nrepo = "{repo.as_posix()}"\nref = "main"\n', encoding="utf-8",
+    )
+    tools = tmp_path / "supported-tools"
+    _fake_tools(tools, uv_exit=0, python_exit=0)
+    shadow = tmp_path / "shadow tools"
+    shadow.mkdir()
+    reports = {
+        "old": "printf '%s\\n' 'uv 0.7.0'\n",
+        "malformed": "printf '%s\\n' 'not uv'\n",
+        "failed": "exit 17\n",
+    }
+    uv = shadow / "uv"
+    uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$0" >> "$BOOTSTRAP_UV_VERSION_TRACE"\n' + reports[shadow_uv],
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    curl = shadow / "curl"
+    curl.write_text("#!/bin/sh\necho 'Unexpected UV acquisition' >&2\nexit 19\n", encoding="utf-8")
+    curl.chmod(0o755)
+    result = subprocess.run(
+        [BASH, str(BOOTSTRAP), "--version"],
+        env={
+            **os.environ, "WORKTREE_MANAGER_ROOT": str(root),
+            "HOME": str(tmp_path / "profile"), "USERPROFILE": str(tmp_path / "profile"),
+            "PATH": os.pathsep.join((str(shadow), str(tools), os.environ.get("PATH", ""))),
+            "BOOTSTRAP_PYTHON_HANDOFF": str(tmp_path / "python-handoff"),
+            "BOOTSTRAP_UV_VERSION_TRACE": str(tmp_path / "uv-versions"),
+            "BOOTSTRAP_ARGUMENT_HANDOFF": str(tmp_path / "argument-handoff"),
+        },
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+    )
+    if uv_contract != "1":
+        assert result.returncode != 0
+        assert "does not support qualified UV handoff" in result.stderr
+        assert not (tmp_path / "argument-handoff").exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "python-handoff").read_text(encoding="utf-8").strip() == str(tools / "fake-python")
+    assert "preparing it" not in result.stderr
+    assert (tmp_path / "uv-versions").read_text(encoding="utf-8").splitlines() == [
+        str(shadow / "uv"), str(tools / "uv"),
+    ]
+    arguments = (tmp_path / "argument-handoff").read_text(encoding="utf-8").splitlines()
+    assert arguments[arguments.index("--bootstrap-uv") + 1] == str(tools / "uv")
 
 
 def test_bootstrap_progress_frames_each_physical_message_line() -> None:

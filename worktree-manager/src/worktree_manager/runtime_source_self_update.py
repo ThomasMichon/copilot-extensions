@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 import shutil
 import subprocess
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 import uuid
 
 from agent_procutil import no_window_kwargs
@@ -51,7 +52,7 @@ def _update(
     previous = owner.current_version(installation)
     staging = installation / owner.STAGING_DIR
     payload = staging / "worktree-manager"
-    source_options = {}
+    source_options: dict[str, Any] = {}
     use_git = shutil.which("git") is not None
     try:
         repo = source_config.absolute_local_source(repo)
@@ -63,7 +64,7 @@ def _update(
         fetch_root = installation / "manager-source" if ref == "dev" else staging
         fetch_root.mkdir(parents=True, exist_ok=True)
         auth_env = update_auth.environment(repo, cwd=fetch_root) if use_git else None
-        environment = {"env": auth_env} if auth_env is not None else {}
+        environment: dict[str, Any] = {"env": auth_env} if auth_env is not None else {}
         if ref == "dev":
             payload, source_options = source_custody.enter_context(
                 prepared(repo, installation, environment=auth_env),
@@ -112,9 +113,10 @@ def _update(
 
     def after_activate(slot: Path) -> None:
         nonlocal cutover
+        installer_factory: Callable[[], Any] = owner._runtime_installer
         try:
-            cutover = owner._runtime_installer()._activate_after_bootstrap_update(installation, slot)
-        except owner._runtime_installer().ActivationStarted as committed:
+            cutover = installer_factory()._activate_after_bootstrap_update(installation, slot)
+        except installer_factory().ActivationStarted as committed:
             cutover = committed.outcome
             raise
 
@@ -136,7 +138,8 @@ def _update(
 @contextmanager
 def prepared(
     repo: str, root: Path, *, environment: dict[str, str] | None = None,
-):
+    uv: Path | None = None,
+) -> Iterator[tuple[Path, dict[str, Any]]]:
     """Hold Manager's independent selection and complete inputs through installation."""
     deadline = time.monotonic() + 600
     base = root / "manager-source"
@@ -145,11 +148,13 @@ def prepared(
     tool = preparer()
     scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
     installer = load_runtime_installer(scripts)
+    uv_options: dict[str, Any] = {"uv": uv} if uv is not None else {}
     try:
         with acquire(selection, root=base, environment=environment, deadline=deadline) as resolved:
             snapshots = prepare_applications(
                 tool, resolved, ("worktree-manager",), output,
                 deadline=deadline, environment=environment,
+                **uv_options,
             )
         with installer.prepared_manager_inputs(snapshots["worktree-manager"]) as (selected, options):
             composition = selected.composition
