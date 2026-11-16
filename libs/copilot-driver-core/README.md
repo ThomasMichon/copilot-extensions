@@ -221,6 +221,7 @@ the cleanup-bearing PSMux CLI. TMux retains its existing writer.
 The caller supplies the current native session incarnation. The operation
 rechecks that identity and unchanged port/key hints before each option write,
 reads each value back, and checks the target again before reporting success.
+Rendezvous hints must also remain unchanged after each identity response.
 All requests share a bounded deadline. Unsupported options, control characters,
 oversized values, changed targets, failed authentication and incomplete readback
 return false, including after partial publication. No process, pane, input,
@@ -235,6 +236,9 @@ the native pass actually observed. It does not enter legacy PSMux CLI writes,
 handoff or pruning paths. Legacy non-native mapping identities use the existing
 Manager discovery operation with fresh native observations; unknown observations
 do not manufacture an incarnation or authorize a publication.
+Ordinary rendering failures stay local to their session, allowing other sessions
+and later sweeps to proceed. Governance deferrals still propagate, and unsettled
+native cleanup remains with its existing cache owner rather than being discarded.
 
 Manager recognizes the legacy `@aw_updater`/`@aw_updater_prefix` bookkeeping
 fields without forwarding them as native ownership changes. An ownership-only

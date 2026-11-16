@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import os
 import sys
@@ -21,11 +23,11 @@ if TYPE_CHECKING:
     from single_instance_lease import SingleInstance
     from . import config_cache as cfg
 
-    def daemon_entrypoint(
-        service: str, *, source: str, purpose: str,
-    ) -> Callable[[Callable[[argparse.Namespace], int]], Callable[[argparse.Namespace], int]]: ...
+    _MonitorEntry = Callable[[argparse.Namespace], int]
+    daemon_entrypoint = cast(
+        Callable[..., Callable[[_MonitorEntry], _MonitorEntry]], daemon_entrypoint,
+    )
 else:
-    from agent_procutil.daemon_instances import daemon_entrypoint
     from . import config as cfg
 
 _DEFAULT_SWEEP_INTERVAL_S = 30

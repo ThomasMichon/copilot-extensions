@@ -92,6 +92,7 @@ def apply_psmux_status(
             return (
                 _read(port_path) == port_raw and _read(key_path) == key_raw
                 and _exchange(port, key, identity, deadline) == expected
+                and _read(port_path) == port_raw and _read(key_path) == key_raw
             )
 
         if not current():

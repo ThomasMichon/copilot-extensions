@@ -12,9 +12,7 @@ import pytest
 from agent_remote_driver.mux_status import apply_psmux_status
 from test_mux_observation import native_endpoint as _native_endpoint
 
-native_endpoint: Callable[
-    [Path, tuple[bytes, ...]], AbstractContextManager[list[bytes]],
-] = _native_endpoint
+native_endpoint: Callable[..., AbstractContextManager[list[bytes]]] = _native_endpoint
 
 
 def test_native_status_options_are_quoted_and_read_back_without_cli(
@@ -75,3 +73,15 @@ def test_native_status_rejects_nonpresentation_effects_before_connecting(
 ) -> None:
     monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("invalid request"))
     assert not apply_psmux_status("wt-fixture", "$7:100", values, data_dir=tmp_path)
+
+
+def test_native_status_refuses_rotation_during_final_identity_response(tmp_path: Path) -> None:
+    identity = b"OK\nwt-fixture\t$7:100\n"
+    with native_endpoint(tmp_path, (
+        identity, identity, b"OK\n", b"OK\ntitle\n", identity,
+    ), mutate=lambda: (tmp_path / "wt-fixture.key").write_text("replacement-key")) as captured:
+        assert not apply_psmux_status(
+            "wt-fixture", "$7:100", {"@aw_ctx": "title"}, data_dir=tmp_path,
+        )
+    assert len(captured) == 10
+    assert (tmp_path / "wt-fixture.key").read_text() == "replacement-key"

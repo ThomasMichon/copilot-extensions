@@ -68,20 +68,23 @@ def run_monitor_sweep(
     segments = options.get("segment_cache")
     if served < 0 or observed_names is None or cache is None or segments is None:
         return served
+    names = observed_names
     entries, _, _ = status_monitor_runtime._monitor_managed_session_union(cache, {})
     published = options.get("published")
     incarnations = options.get("incarnations")
     lock = options.get("project_lock")
     wait: Callable[[Any], None] = core._wait_for_lifecycle_priority
     recheck: Callable[[Any, str], object] = core._status_monitor_recheck
+    governance_deferred: type[Exception] = core._StatusMonitorGovernanceDeferred
     settings_scope: Callable[..., Any] = config_cache.project_scope
-    for session, original in entries.items():
-        if session not in observed_names:
-            continue
+
+    def publish_session(session: str, original: dict[str, Any]) -> None:
+        if session not in names:
+            return
         recheck(options.get("governance"), "pre-mutation:discover-connected-mux")
         entry = _native_entry(original, mux_bin, cache)
         if entry is None:
-            continue
+            return
         project, worktree_id, path = (
             entry.get("project"), entry.get("worktree_id"), entry.get("worktree_path"),
         )
@@ -90,7 +93,7 @@ def run_monitor_sweep(
             or not isinstance(worktree_id, str) or not worktree_id
             or not isinstance(path, str) or not path
         ):
-            continue
+            return
         if incarnations is not None:
             status_monitor_runtime._monitor_update_session_incarnations(
                 incarnations, {}, set(), {session: entry}, ctx_done, published,
@@ -100,17 +103,14 @@ def run_monitor_sweep(
             cfg.set_active_project(project)
             with settings_scope(options.get("config_cache_for_project"), project):
                 context = None
-                if session not in ctx_done and not segments.observation_blocked(project, path):
-                    context = status_bar_cli._render_status_context(path, plain=False)
                 try:
+                    if session not in ctx_done and not segments.observation_blocked(project, path):
+                        context = status_bar_cli._render_status_context(path, plain=False)
                     segment = segments.get(path)
-                except push_timeout.ObservationCleanupError as error:
-                    segments.retain_unclaimed_cleanup(project, path, error)
-                    segment = segments.pending_segment_for_path(path)
                 except push_timeout.ObservationCleanupPending:
                     segment = segments.pending_segment_for_path(path)
         if not isinstance(segment, str):
-            continue
+            return
         values = {"@aw_updater": token, "@aw_updater_prefix": prefix, "@aw_seg": segment}
         if context is not None:
             values["@aw_ctx"] = context
@@ -122,4 +122,17 @@ def run_monitor_sweep(
         )
         if result is not None and result.get("context_published"):
             ctx_done.add(session)
+
+    for session, original in entries.items():
+        try:
+            publish_session(session, original)
+        except governance_deferred:
+            raise
+        except push_timeout.ObservationCleanupError as error:
+            project, path = original.get("project"), original.get("worktree_path")
+            if not isinstance(project, str) or not isinstance(path, str):
+                raise
+            segments.retain_unclaimed_cleanup(project, path, error)
+        except Exception:
+            continue
     return served
