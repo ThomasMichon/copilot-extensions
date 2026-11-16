@@ -101,6 +101,11 @@ resource acquisition and identity bindings remain external adapters.
   existing tracked objective #6681. Broader publication/proof interoperability,
   provider/setup/lifecycle and live adoption remain in this active plan and
   #6030/#6240/#6424/#5861; no replacement writer or runtime authority is inferred.
+- The finite #4201 WSL provisioning intake below remains with the existing
+  provisioning-skill, repository-account and plugin-source owners. It is an
+  independently usable preparation contract, not mandatory Gateway enrollment
+  or a new source reservation. Integrating its result into selected fleet setup
+  does not take over ordinary standalone WSL provisioning.
 
 ## Context
 
@@ -481,6 +486,51 @@ an existing encrypted signer or logon/reconnect. No runtime change is included.
 
 ## Plan
 
+### WSL provisioning authentication and installer-source intake
+
+This **agent-recommended planning amendment** directly retains #4201's complete
+request:
+
+> Make WSL provisioning establish noninteractive GitHub authentication, support multiple accounts, and resolve the installer from its actual plugin source.
+
+The original and its two qualified refinements retain three distinct outcomes.
+They report a clone-first flow with authentication troubleshooting afterward
+and an assumed installer path inside the product checkout. Earlier downloader
+and registry-guidance delivery is credited; this intake does not claim a fresh
+implementation survey, a current runtime defect or technical completion.
+
+This is the bounded preparation seam for a selected WSL setup flow. Its
+ordinary standalone use must work without adopting Gateway, Fleet Manager or
+another controller. Gateway/SSH integration consumes that same owning
+provisioning result rather than creating a second authentication or installer
+path. Existing installation, account, credential and source authorities remain
+separate.
+
+- [ ] Establish the intended repository account's usable noninteractive GitHub
+  authentication in the selected WSL environment **before cloning**. Resolve
+  the existing approved identity/account route first; if a supported human
+  ceremony or unavailable prerequisite remains, report it before the clone
+  rather than silently using an ambient account.
+- [ ] Support multiple accounts through existing per-repository routing,
+  including explicit, derived and unconfigured selections. Preserve independent
+  Windows and WSL credential stores, deliberate account selection and truthful
+  failure; do not globally switch accounts, copy credentials, export durable
+  tokens or introduce a parallel credential/configuration registry.
+- [ ] Resolve the installer from its actual owning plugin through the supported
+  attributable invocation/source-discovery contract. Distinguish the adopted
+  product checkout, selected plugin payload and writable owning source; do not
+  assume the product contains `plugins/agent-worktrees/scripts/install.sh` or
+  substitute an unrelated installation. Unsupported discovery remains explicit.
+- [ ] Update the owning WSL provisioning guidance and any selected setup
+  integration together, preserving ordinary standalone use and existing
+  downloader/registry progress. Keep implementation and authorized provisioning
+  with their existing owners; this intake runs no clone, authentication,
+  installer or WSL operation.
+
+The validation rows below are future acceptance, not executed results. This
+intake may receive redundant source tracking after reviewed delivery and
+separate verification; all technical checkboxes remain unchecked.
+
 ### Phase 1 - Reviewed integration and ownership
 
 - [x] Review the [user-logon SSH/signing proposal](#user-logon-ssh-and-selected-signing-readiness)
@@ -600,6 +650,20 @@ not installation, credential or live-adoption authority.
 
 ## Validation Plan
 
+- [ ] WSL provisioning: prove intended-account noninteractive readiness precedes
+  clone, including multiple configured accounts, an unconfigured/empty context
+  and unavailable credentials. The selected route is correct or the supported
+  ceremony/unavailable outcome is explicit before effects; no global account
+  switch, credential copy, durable-token export or Windows-store assumption.
+- [ ] Installer discovery: exercise a product checkout without the plugin's
+  source layout, distinct selected payload/owning-source locations and missing
+  or unsupported discovery. Use the actual owning installer or refuse
+  explicitly, never a guessed product-relative path or unrelated installation.
+- [ ] Whole #4201 acceptance: cover all three outcomes together through the
+  owning provisioning flow, preserving standalone non-Gateway use and existing
+  setup/account/source ownership. Record guidance/source validation separately
+  from any separately authorized native provisioning or installed acceptance;
+  no all-host rollout or new credential ceremony is introduced by this plan.
 - [x] Qualify the existing Vault SSH preparation/materialization seam with an
   actual disposable KeePass backend and fresh CLI processes on Windows:
   three controls pass in26.61s, including locked refusal with existing local
@@ -727,6 +791,20 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-16 - Complete WSL provisioning intake proposed
+
+- Added direct Plan, Validation and Coordination coverage for #4201's complete
+  pre-clone noninteractive authentication, multiple-account routing and actual
+  owning-plugin installer discovery contract. The original and both refinements
+  are preserved; downloader and registry-guidance delivery remains partial
+  credit, not a claim that the three-outcome request is fulfilled.
+- Ordinary standalone provisioning remains independent of Gateway selection.
+  Existing provisioning, account, credential, source and setup owners retain
+  their scopes; no runtime path, reservation, identity or resource is changed.
+- This is review-first planned receiving. Source disposition requires actual
+  reviewed delivery, current readback and a separate eligibility/whole-contract
+  judgment. All seven new technical acceptance rows remain unchecked.
 
 ### 2026-11-07 - Encrypted disposable key through native Windows askpass
 

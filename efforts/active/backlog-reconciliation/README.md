@@ -342,6 +342,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
+proposes direct pre-clone noninteractive authentication, multiple-account
+routing and actual owning-plugin installer discovery in the existing onboarding
+effort. Ordinary standalone provisioning and all implementation owners remain
+independent. Review, merged receiving, readback and separate source judgment
+remain outstanding; #4201 is still OPEN and no reduction credit is claimed.
+
 The [cold-bootstrap source and keeper unit](journal/2026/11.16-cold-bootstrap-source-completion.md)
 verifies #12824's complete narrow source/regression fulfillment in merged
 #12832 and its separate acknowledged `COMPLETED` disposition. #5900 retains
