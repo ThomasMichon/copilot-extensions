@@ -123,38 +123,21 @@ _normalize_windows_extended_path = _leases.normalize_windows_extended_path
 CURRENT_LINK = "current"
 VERSIONS_DIR = "versions"
 RUNNING_VERSION_FILE = "running-version.json"
-# The active version is published as a plain-text marker file (no reparse point),
-# replacing the legacy `current`/`venv` directory junction. A marker file is
-# never blocked by RedirectionGuard (WinError 448 "untrusted mount point") the
-# way traversing a junction is, and the runtime is selected by version-pinned
-# binstubs the installer rewrites on cutover -- so no junction is needed at all.
+# A plain-text selector and version-pinned binstubs replace legacy junctions,
+# avoiding RedirectionGuard's WinError 448 without a mutable runtime link.
 CURRENT_VERSION_FILE = "current-version"
-# The last version `activate()` published, stamped atomically alongside the
-# marker. It is the fallback resolution target: if the `current-version` marker
-# is missing or malformed (or unreadable on POSIX), a resolver prefers the
-# last-known-good version -- whose slot, having been the active one, still exists
-# -- over guessing the newest installed slot. See `resolve_python`.
+# Atomic activation fallback: resolve_python prefers this prior selection over
+# guessing when current-version is missing, malformed or unreadable on POSIX.
 LAST_KNOWN_GOOD_FILE = "last-known-good"
 
-# The interpreter sub-paths inside a version slot, POSIX then Windows layout.
-# The single place the "where is the slot's python" answer lives, so every
-# resolver (this module, the shell resolvers, the binstubs) agrees.
+# Canonical slot interpreter paths for all resolvers: POSIX, then Windows.
 SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
 
-# The one well-known, mutable slot name (dotfiles / mutable-dev-slot pattern):
-# unlike every other version, `versions/dev/` is meant to be rebuilt in place
-# (e.g. an editable/`-e` install from a live worktree checkout) rather than
-# treated as an immutable, once-built artifact. It still uses the same
-# completion-marker / activate machinery as any other slot -- an installer
-# marks it complete after a healthy (re)build, same as always -- the only
-# structural differences are: (1) GC never reclaims it while a claim is live
-# (see `gc`'s `read_dev_claim` check), and (2) a claim (below) gates who may
-# rebuild/activate it, so two worktrees can't silently clobber each other's
-# mutable install.
+# The sole mutable slot supports in-place development rebuilds, but retains
+# ordinary completion and activation checks. GC preserves it while claimed;
+# the claim serializes rebuild/activation ownership across worktrees.
 DEV_VERSION = "dev"
-# The dev-slot claim record, a sibling of `current-version`/`last-known-good`.
-# Schema-versioned like the runtime-slot-ownership marker family so a future
-# reader can validate/evolve it without guessing.
+# Schema-versioned dev-slot claim beside the current/last-known-good selectors.
 DEV_CLAIM_FILE = "dev-claim.json"
 DEV_CLAIM_SCHEMA = "copilot-extensions.dev-slot-claim"
 
