@@ -3474,8 +3474,8 @@
       "sha256": "11f3b4b1f7efc72c95d5aaf085713e24b235a8585a3e39b1c6dfde3bc51ed833"
     },
     "plugins/agent-bridge/src/agent_bridge/retained_writer_transport.py": {
-      "blob": "726b20c263a84721a5035896f63d7044e4d114d9",
-      "sha256": "4f14bdc24cc8ce06766a892af6b9870455b94e0392ee69b732d03e5b4ddd53e2"
+      "blob": "5c4052770fe18b8bb638d0743f93f6dc4a6a3bce",
+      "sha256": "3b8861962823db0bc23509de7d9920b27c417c91412caea28440c83862527605"
     },
     "plugins/agent-bridge/src/agent_bridge/roster_runtime.py": {
       "blob": "a0d9a06e82820947d2d73520b0ff18a3f5a3db05",
@@ -4394,8 +4394,8 @@
       "sha256": "9515856750eddf5c5fbfffc8fd86c6a430e3c9f09ac75e426c64cee63d16e64e"
     },
     "plugins/agent-bridge/tests/test_retained_writer_transport.py": {
-      "blob": "7b6fca947d402e94b1cb3941cc18136c9acb8561",
-      "sha256": "d62eed811deb0a0acda50d5a11ad6f6406e3907ac44d1caffe4da16db0852e4a"
+      "blob": "162704d7b998bb1ab8a9022eca50b9c7b163312c",
+      "sha256": "460473724d8d03a0e24ea3b66f002fc0af0398fda91e656718a417b91183aca9"
     },
     "plugins/agent-bridge/tests/test_roster_runtime.py": {
       "blob": "8e01ca6f957a7ed67db443dd48bcf122dca8b3c3",
@@ -9846,7 +9846,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "9351473565f84ec78bf4cddc0aaa8194f9eaf197ad8a0d9fc1d07fb73f533fdd",
+  "execution_closure_sha256": "9d8f18f8a6a1a97c747bf2cc39c7c2a4b3126dfacc9e5692ad11b10298741761",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -10083,7 +10083,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; discovery consumes controlled source stdout with live reporter rename, withdrawal and malformed-envelope retention controls; native SDK receiving joins real Node/API/SQLite with controlled SDK events, without installation or process admission; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "550324a83834d7dd425239318d46f9cfe04d0491",
+    "commit": "447eaddf988a7d47ac039c25383fa2239cf8acb4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
