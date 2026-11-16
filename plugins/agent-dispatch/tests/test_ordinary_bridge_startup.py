@@ -48,10 +48,19 @@ def startup(tmp_path, monkeypatch, admission_owner):
             assert "--charter" in argv and snapshot.get("_expected_charter", "reviewer") in argv
             assert argv[3] == "example@local"
             assert argv[argv.index("--creation-key") + 1] == queue.get_reservation(snapshot["spawn_reservation_key"]).creation_key
+            replayed = sum(call[0] == "create" for call in calls) > 1
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-a", "ready": True,
                 "status": "awaiting_first_prompt",
-                "creation": {"worktree": {"creation_nonce": "original-allocation"}},
+                "creation": {
+                    "status": "complete",
+                    "replayed": replayed,
+                    "worktree": {
+                        "id": "worktree-a",
+                        "creation_nonce": "original-allocation",
+                        "execution_machine": "host-a",
+                    },
+                },
                 "connection": {
                     "worktree_id": "worktree-a", "repo": "example",
                     "native_session_id": "native-a",
@@ -362,7 +371,10 @@ def test_lost_create_response_replays_key_after_restart_and_routing_change(
     assert result["session"] == "local-body:bridge-a"
     creates = [call[1] for call in calls if call[0] == "create"]
     assert len(creates) == 2 and creates[0] == creates[1]
-    assert queue.get_reservation(retry.key).worktree_path == "synthetic-worktree-a"
+    stored = queue.get_reservation(retry.key)
+    assert stored.worktree_path == "synthetic-worktree-a"
+    assert stored.worktree_ownership == "created"
+    assert stored.creating_host == "host-a"
     assert [call[0] for call in calls].count("send") == 1
     queue.defer_spawn(retry.key, detail="later turn on the replayed allocation")
     third, admitted = restarted.reserve_spawn(task["id"], driver="ordinary-bridge")
@@ -697,7 +709,7 @@ def test_supervisor_poll_reserves_creates_stores_sends_and_records(startup, monk
     assert [call[0] for call in calls] == ["create", "store", "store", "send", "record"]
     res = queue.latest_reservation(task["id"])
     assert res.agent_info["last_send"]["outcome"] == "delivered"
-    assert res.worktree_ownership == "targeted" and res.driver == "ordinary-bridge"
+    assert res.worktree_ownership == "created" and res.driver == "ordinary-bridge"
 
 
 def test_retained_idle_agent_sends_without_invalid_strict_resume(startup, monkeypatch) -> None:
