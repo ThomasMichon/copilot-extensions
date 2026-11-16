@@ -129,7 +129,7 @@ def test_installed_health_refuses_bootstrap_drift(
     for name in construction._BOOTSTRAP.values():
         (bootstrap / name).write_bytes(value)
 
-    def refuse_effect(*args, **kwargs):
+    def refuse_effect(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("installed service validation must not enter hosting")
 
     modules = {}

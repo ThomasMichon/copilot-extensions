@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import hashlib
-import importlib
+import importlib as importlib
 import importlib.util
 import os
 from pathlib import Path
@@ -204,14 +204,18 @@ def client_candidate(
 def service_candidate(
     root: Path, version: str, *, project: Path, uv: Path, python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
-):
+) -> Iterator[ReadyCandidate]:
     """Retain a sealed service-role candidate without selecting or starting it.
 
     Validation imports the installed host and its dependencies; it never opens
     storage, acquires a live writer lease or publishes a serving endpoint.
     """
     engine = _engine()
-    with engine.numbered_candidate(
+    if TYPE_CHECKING:
+        from installer_engine import numbered_candidate
+    else:
+        numbered_candidate = engine.numbered_candidate
+    with numbered_candidate(
         root, version, plugin=project, uv=uv, base_python=python,
         extras=("service",), local_packages=_SERVICE_PACKAGES,
         health_module="agent_chat_service.construction", health_callable="validate_service",
