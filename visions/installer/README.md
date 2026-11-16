@@ -136,6 +136,10 @@ and fix how it is wired.
   plugin selections contribute tools, services and applications to the same
   installation system. The [supplementary-installables vision](supplementary-installables/README.md)
   defines that extension boundary without another builder or lifecycle owner.
+- **Promotion-produced app footprints** - the
+  [application installation vision](application-footprints/README.md) defines
+  Manager-owned orchestration of copyable apps, local Dev/WIP preparation,
+  isolated staging and separately installed IPC dependencies.
 - **Presets** — a shareable configuration bundle a `<repo>-harness` plugin
   carries **as part of its own payload** (related-repo declarations, venue/
   CodeSpace product defaults, and more), so adopting the plugin preconfigures
@@ -416,6 +420,12 @@ addressed registered-repository set. Complete per-application uv inputs and
 associated wheel closures are prepared with bounded parallelism, without
 inventing a second installer or using plugin payloads as runtime source.
 
+Generic installation management belongs to Manager, not Worktrees. Worktrees
+is an application consumer; its presence, repair or installer execution is not
+a prerequisite for installing or updating other apps. The same
+[application setup contract](application-footprints/README.md) serves the
+finite bootstrap and the installed Manager orchestrator.
+
 Setup owns completion and readiness; preparation can remain separate from
 activation. An operator-selected atomic local set admits every incoming member
 before coordinated selection, preserves the last good set and supports
@@ -605,8 +615,13 @@ runs, and it is never a second updater. See
 The installation flow can maintain its own source checkout independently of
 Copilot's installed plugin payloads, developer checkouts, and the app's own
 self-update source. A local opt-in selects current main, an explicitly stable
-or exact older release, or a clean merged development snapshot. A run resolves
-that choice once and realizes the same immutable source throughout.
+or exact older release, a pinned development commit, or an explicitly frozen
+WIP-on-Dev snapshot. Main supplies promoted app footprints; development and WIP
+inputs run the same promotion flow locally, including vendoring and local
+version assignment, before installation. A run resolves that choice once and
+realizes the same immutable footprint throughout. Explicit local preparation
+does not relax clean merged-source policy for unattended Dev deployment or
+claim official release approval.
 
 Source acquisition and materialization leave the source checkout unchanged.
 The selected runtime continues working when that checkout is unavailable.

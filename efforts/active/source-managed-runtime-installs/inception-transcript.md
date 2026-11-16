@@ -337,3 +337,99 @@ not restore V1's selector files. Unconfirmed startup remains an explicit
 incomplete outcome, not success. Publication failure after the commit point
 retains evidence for its owning installer rather than silently selecting the
 predecessor. This clarification changes no host permissions or rollout custody.
+
+## Manager-owned app footprints and local promotion
+
+Operator direction, 2026-11-16, successive turns preserved verbatim. These
+requests amend the target and its preparation model; they are not evidence of
+implemented conversion or authorization to deploy on a host.
+
+### Installation ownership and footprint
+
+````text
+Okay, we first need to move install management out of agent-worktrees and into worktree-manager.
+We need to do a heavy rewrite of the install flow across the board. We need one fully-onboarded component which installs and updates using only the ideal new flow.
+
+Help describe the "footprint" of a fully-converted app to the new flow.
+
+I imagine something like this:
+
+<repo>/
+  apps/
+    vault/
+      pyproject.toml
+      bin/
+        setup.ps1
+        setup.sh
+        setup.cmd
+      src/
+        ...
+
+becomes
+
+~/
+  .copilot-extensions/
+    apps/
+      vault/
+        versions/
+          <version>/
+            pyproject.toml
+            bin/
+              setup.ps1
+              setup.sh
+              setup.cmd
+            src/
+        version.yaml
+        bin/
+          setup.ps1
+          setup.sh
+          setup.cmd
+  .local/
+    bin/
+      agent-vault.ps1
+      agent-vault.sh
+      agent-vault.cmd
+
+The content of
+<repo>/apps/<app>
+should be wholesale copied to
+~/.copilot-extensions/apps/<app>/versions/<version>
+Then running the `setup --stage` from within the app-version's bin folder should internally handle the `uv run` with the target python version.
+If we have prebuilt wheels, we can copy them into some by-convention location for the target version, so the `setup` binstub will know to look for them.
+Running the setup binstub with `--stage` should avoid updatng `version.yaml` (or whatever we are using for the version marker). Running `setup` without it will update the version pointer, and ensure the downstream binstub redirects are all in place, matching the current version (version-neutral bin, and ~/.local/bin).
+
+Compare the actual best-path installer architecture to what I just outlines.
+````
+
+### Promotion and shared IPC components
+
+````text
+I expect dev-to-main promotion to take care of producing wholly-copyable directories. That's what our vendoring flow is supposed to do: main will carry copies of vendored libs across every apps/<app>/src which consumes it. Now, "shared dependencies", like "ssh-manager", etc, will be their own "apps" or "libraries" that have their own installers, and are intended to be referenced cross-process. If agent-vault needs ssh-manager for whatever reason, then our install orchestrator needs to install ssh-manager and run its setup --stage before agent-vault's full setup is allowed to run. We have several "shared libraries" in this manner. Importantly, their code is not *imported*; it's invoked using the version-neutral binstubs and communication is handled via IPC only.
+````
+
+### Pinned Dev and WIP installation
+
+````text
+For installing from a pinned commit of the dev branch, or a WIP on top of dev, the promotion flow needs to be run locally to produce an install-footprint folder, from which we run the install orhestration. That handles all vendoring, as well as assignment of local versions.
+````
+
+### Capture before refactoring
+
+````text
+Be sure to capture this in vision-doc updates, a verbatim effort snapshot, and perhaps also in a tracking issue, before we get started refactoring apps to use this new, proper model.
+````
+
+Settled scope: the existing promotion owner produces the installation input;
+Manager owns generic installation orchestration, not Worktrees. Main promotion
+materializes embedded library code in each consuming app. Shared runtime
+components have their own install/setup/version lifecycle and are invoked only
+through version-neutral binstubs and IPC, not imported implementation code.
+Local promotion of pinned Dev or frozen WIP assigns local output versions;
+this refines the earlier no-local-version-increment assumption without changing
+official release authority or mutating tracked source versions.
+
+The marker filename and precise wheel convention remain implementation choices.
+Vault and SSH Manager illustrate the dependency relationship; they are not an
+implementation assignment. The initial requested deliverable is this reviewed
+capture before refactoring. The [receiving plan](app-footprint-transition.md)
+marks agent-recommended sequencing and validation separately.
