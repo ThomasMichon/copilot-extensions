@@ -112,6 +112,18 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Promotion prepares app footprints; Manager owns installation management.**
+  Main and local pinned-Dev/frozen-WIP promotion use the same materialization
+  and version-composition owner to produce wholly-copyable app directories.
+  Manager orchestrates their copy, dependency staging and full setup without a
+  working Worktrees installer. Embedded code is vendored into its consumer;
+  shared IPC providers have separate setup/version lifecycles and are invoked
+  through neutral binstubs and IPC, never implementation imports. Staging
+  publishes no active selection or neutral redirects. See
+  [application footprints](../../visions/installer/application-footprints/README.md)
+  and the [receiving plan](../../efforts/active/source-managed-runtime-installs/app-footprint-transition.md).
+  Existing source mechanisms are adoption evidence, not exceptions to this target.
+
 - **Python belongs to the project installation, not ambient PATH.** Each
   independently installed Python project declares its interpreter requirement;
   its setup owner uses `uv`-managed Python to construct the environment.

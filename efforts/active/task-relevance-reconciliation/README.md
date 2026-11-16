@@ -132,11 +132,13 @@ merged plan does not establish running adoption.
       separates passive receipt observation from owner-proved, durably fenced
       non-admission; #12789 accepted the plan, while implementation
       qualification remains open.
-- [ ] Review and implement the
+- [x] Review and implement the
       [retained-writer compatibility repair](retained-writer-compatibility.md)
       before qualifying newer-code original-conversation continuation.
       Keep birth provenance separate from the executing serializer; adapt
       existing build-bound records without replaying unknown operations.
+      Source accepted in #12892; the distinct runtime, concurrent-adoption
+      and rollback qualifications below remain open.
 
 ### Phase 3 - Source and periodic evaluation integration
 

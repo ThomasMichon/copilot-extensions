@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-15
+- **Last revised:** 2026-11-16
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -65,6 +65,13 @@ dependency lock. First-party dependencies and non-package build resources are
 closed within that representation; no live dependency on a development checkout
 or replaceable Copilot plugin payload remains.
 
+These are promotion-produced application directories, copied wholesale by
+Manager. Imported first-party library code is materialized into each consuming
+app by promotion. A declared shared IPC provider is a separate installable app/
+library footprint, not another implementation package in the consumer's import
+closure. The [application-footprint vision](../../installer/application-footprints/README.md)
+owns dependency-ordered staging and activation.
+
 Associated prebuilt first-party wheels are the preferred construction path.
 They cover the complete selected first-party closure, not only the top-level
 application. Registry dependencies retain their selected approved-source policy,
@@ -92,6 +99,11 @@ library core, including required resources and notices. Shared process utilities
 are first-party application code; a library does not become an independent
 service merely because it supports daemon processes. Imported clients and
 protocol code remain in the application that uses them.
+
+This embedding applies only to declared in-process dependencies. Independently
+installed IPC components, including the shared SSH Manager implementation, are
+not embedded or imported into Manager or other consumers. Their neutral commands
+and IPC boundary remain distinct from any local client/contract code.
 
 The default keeps third-party packages as ordinary, exactly locked dependencies,
 with their normal distribution metadata and approved acquisition policy. A
@@ -251,22 +263,24 @@ an ordinary availability fallback. If no permitted dependency closure can
 be assembled, the outcome is explicit and the current generation survives.
 
 ### selected-development-source-assembly
-An authority-selected development snapshot can be assembled
-directly, without waiting for a generated release-branch payload or installing
-Copilot plugin content from that checkout. This explicit source mode is not
+An authority-selected development snapshot is locally promoted into a complete
+installation footprint, without waiting for a generated release-branch payload
+or installing Copilot plugin content from that checkout. This explicit source mode is not
 an artifact-availability fallback and does not claim promotion attestation.
 It retains the same source integrity, exact dependency admission, immutable
 completion, health, activation and rollback guarantees.
 
 Assembly materializes the complete declared first-party dependency closure
 from the selected snapshot, including development-only source indirections.
-Materialization and version composition use the canonical source
-representation rather than a second approximation of promotion. The
+Materialization, vendoring and local version assignment use the same canonical
+promotion flow rather than an installer-side approximation. The
 assembled runtime contains no live dependency on the source checkout.
 Default installation follows trusted upstream Main/release selection. Explicit
-local promotion and controlled source-change validation can use a committed
-development snapshot under their stated authority before public artifact
-publication, without claiming it is merged or promotion-attested. A selected
+local promotion and controlled source-change validation can use a pinned
+development commit or an explicitly frozen WIP-on-Dev snapshot under their
+stated authority before public artifact publication, without claiming it is
+merged or promotion-attested. Orchestration consumes the produced footprint,
+not the mutable checkout. A selected
 last-known-good Main ancestor keeps its own finalized version/lock identity
 rather than impersonating the latest Main.
 

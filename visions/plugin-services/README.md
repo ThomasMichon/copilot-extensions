@@ -387,15 +387,24 @@ private venv or turns an optimization into a mandatory global coordinator.
 Consolidated fronts retain independently owned endpoints, routing, drain and
 rollback even when execution resources are shared.
 
+Declared shared runtime components are not merely an optional reuse
+optimization. They have their own installation/setup/version lifecycle, and a
+consumer's selected capability may require them. Manager installs and stages
+that dependency closure before consumer full setup and ensures providers needed
+by setup are compatibly selected and ready. Consumers invoke version-neutral
+binstubs and IPC; they never import the provider implementation or its private
+environment. Promotion-vendored in-process libraries are a different edge.
+
 ### self-contained-runtime
 Every runtime's installation owner establishes a complete, standalone installation
 (runtime, invocation surface and any service), including all dependencies and
 their durable lifetime. A required helper may be a private runtime or an
 explicitly managed compatible helper reused over the process boundary described
 above; each consuming installer secures its own reference and can provision a
-compatible helper when none exists. A sibling's private venv, installation
-presence or continued operation is never a prerequisite. Updating or uninstalling
-one consumer cannot invalidate another's live dependency. Nothing depends on a
+compatible helper when none exists. A sibling's private venv is never borrowed
+or imported. Required provider installation and continued operation are explicit
+IPC dependencies rather than hidden prerequisites or implementation imports.
+Updating or uninstalling one consumer cannot invalidate another's live dependency. Nothing depends on a
 git checkout of this repo or an unowned ambient helper.
 
 ### immutable-versioned-runtime
@@ -449,6 +458,8 @@ its clients.
 
 ### a-la-carte-installability
 Any subset of connectors and independently installed components is supported.
+Selecting a component includes its declared IPC dependency closure, not every
+application in the suite.
 Each component can establish its own complete runtime without a mandatory
 Manager or central coordinator. Enabling a connector alone does not claim that
 its backend is installed; an absent backend has an honest readiness outcome.
