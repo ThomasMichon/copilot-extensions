@@ -358,6 +358,29 @@ qualification and transport discovery may still invoke their ordinary peer
 helpers; this is not a daemon-native batch or a claim of one total OS process.
 Callers may impose one deadline on the whole invocation and its descendants.
 
+Both `get` and `batch-get` accept `--require-running`. Cache hits remain usable
+without a service; a cache miss or explicit refresh checks the selected service
+without starting it, then uses strict selected-endpoint transport for the read.
+An unavailable or draining service fails without activation or another attempt.
+Strict direct TCP selection bypasses the legacy Unix socket, including when
+the configured port otherwise uses its default. Unsupported native transports
+refuse rather than dialing another daemon; configured before-builtin transport
+extensions retain their existing priority.
+A present but unreachable, invalid or foreign-installation advertisement is not absence.
+Preferred extensions retain their existing priority; if they decline, the
+strict discovery error is propagated without native or legacy fallback.
+Ordinary non-strict discovery retains its existing fallback behavior.
+Restricted native reads additionally require an advertised endpoint after
+preferred transports decline. If the daemon removes its advertisement between
+readiness and the read, the second call refuses instead of selecting the legacy
+socket. A legacy daemon without discovery metadata is unsupported for this new
+mode; ordinary callers retain their existing defaults.
+This option does not change cache reconciliation or authorize an unlock prompt:
+`get --prompt` remains an explicit separate choice and batch reads never prompt.
+It does not suppress existing noninteractive credential providers or make cache
+updates read-only. CLI/runtime provisioning remains the invocation owner's
+separate boundary; use an already prepared runtime when provisioning is forbidden.
+
 The selected runtime advertises `batch-get-v1` through the existing
 `agent-vault invocation-contract --json` contract. Check that runtime's
 capability before migrating a caller; a newer payload or package version
@@ -367,6 +390,13 @@ support blocks only the new operation: existing `get` syntax remains usable.
 Provider rollout precedes consumer migration; rollback must restore a
 supported baseline or report the unsupported batch requirement without
 guessing, silently issuing separate reads or retrying effectful calls.
+The same contract advertises `credential-read-require-running-v1` for the
+optional no-activation read mode. Check this capability on the selected runtime
+before emitting the flag. Older CLIs retain ordinary reads but cannot enforce
+this new requirement: report it as unsupported rather than dropping the flag
+after a parser error. The daemon uses its existing ping/get protocol unchanged;
+old callers keep the existing activation behavior on new runtimes, and a
+runtime rollback requires capability re-selection before another restricted read.
 
 ## SSH key preparation and protected installation
 

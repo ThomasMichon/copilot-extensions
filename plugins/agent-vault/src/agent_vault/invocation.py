@@ -9,6 +9,7 @@ from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 _ROOT: ContextVar[str | None] = ContextVar("vault_configuration_root", default=None)
 
@@ -55,13 +56,14 @@ def parse_invocation(argv: list[str]) -> tuple[str | None, list[str]]:
     return args.configuration_root, remaining
 
 
-def invocation_contract() -> dict:
+def invocation_contract() -> dict[str, Any]:
     return {
         "schema": "agent-vault.invocation",
         "version": 1,
         "capabilities": [
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
+            "credential-read-require-running-v1",
         ],
     }
 
