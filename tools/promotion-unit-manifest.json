@@ -5047,7 +5047,16 @@
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_output_does_not_claim_declared_input_ownership[gate-legacy]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_output_does_not_claim_declared_input_ownership[gate-selected]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_output_does_not_claim_declared_input_ownership[dispatcher-legacy]",
-        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_output_does_not_claim_declared_input_ownership[dispatcher-selected]"
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_bootstrap_output_does_not_claim_declared_input_ownership[dispatcher-selected]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_current_task_need_controls_cleanup[queued]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_current_task_need_controls_cleanup[submitted]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_current_task_need_controls_cleanup[completed]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_current_task_need_controls_cleanup[abandoned]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_current_task_need_controls_cleanup[unknown]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_unrelated_cleanup_does_not_acquire_task_evidence[retired]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_unrelated_cleanup_does_not_acquire_task_evidence[other-driver]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_unrelated_cleanup_does_not_acquire_task_evidence[no-local-handle]",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_terminal_observation_cannot_authorize_a_later_reopened_task"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/cli.py",
@@ -5367,7 +5376,8 @@
         "tools/typecheck_new_code.py",
         "libs/installer-engine/runtime_application_install.py",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py",
-        "libs/payload-invocation/bootstrap_python.py"
+        "libs/payload-invocation/bootstrap_python.py",
+        "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py"
     ],
     "sources": {
         "plugins/agent-vault/src/agent_vault/cli.py": "b716daa358dc4c1bc654693d47c1d5461ffe79d5befc074182dec48badc2c3ff",
@@ -6154,6 +6164,9 @@
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "680a3389cd1226effb5e29658ba61671db64d72a3cda41145e0769fa34c14eaa",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268",
-        "libs/payload-invocation/bootstrap_python.py": "92b949933b98e1419caf01e459ab61752c937aa81dcc3ac8878f62d45633d0f0"
+        "libs/payload-invocation/bootstrap_python.py": "92b949933b98e1419caf01e459ab61752c937aa81dcc3ac8878f62d45633d0f0",
+        "plugins/agent-dispatch/src/agent_dispatch/queue_records.py": "cdc7ba97d1b52a3460e00770afa728d5838b60829237ac35345ca0b064238e73",
+        "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py": "266dfef299089318b384dbebef622cdb1a99ef997483a2b95b55e00f68e64ac6",
+        "tools/promotion_unit_tests/test_retained_conversation_cleanup.py": "68de298c2f78faccb7767dad3bf5c7af15e18eb0a1a9fd374eb6cb93bfc0836b"
     }
 }
