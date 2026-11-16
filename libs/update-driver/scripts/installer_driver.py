@@ -241,7 +241,7 @@ def native_arguments(args: argparse.Namespace) -> list[str]:
         "-Action", args.action, "-InstallDir", str(args.root.resolve()),
         *("-" + option for option in sorted(options)),
     ]
-    install_source = getattr(args, "install_source", None)
+    install_source: Path | None = getattr(args, "install_source", None)
     wheel_values = [getattr(args, name, None) for name, _flag in WHEEL_FIELDS]
     if args.plugin == "agent-bridge" and "NoService" in options and (
         args.action not in {"install", "update"} or not all(wheel_values)
@@ -282,10 +282,10 @@ def native_arguments(args: argparse.Namespace) -> list[str]:
             or not install_source.is_absolute()
         ):
             raise ValueError("Unsupported native installation-source operation")
-        import install_source
+        import install_source as source_module
         from install_source import native_selection, project_inputs
 
-        sources = cast(ModuleType, getattr(install_source, "sources"))
+        sources = cast(ModuleType, getattr(source_module, "sources"))
         with project_inputs(install_source, args.plugin) as (selected, inputs):
             if selected.source_descriptor is None or sources.read_source_identity(
                 args.payload, selected.identity.package_version, plugin=args.plugin,

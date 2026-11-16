@@ -1,4 +1,4 @@
-"""Runtime-only intent survives the existing native execution-driver boundary."""
+"""Native runtime-only and source recipes preserve installation intent."""
 
 from __future__ import annotations
 
@@ -87,3 +87,43 @@ def test_runtime_only_reaches_journal_and_participant_unchanged(
     assert runner.argv[runner.argv.index("--option") + 1] == "NoService"
     assert dict(spec.context)[driver.WHEEL_SELECTION_ENV] == '{"selected":true}'
     assert runner.argv[runner.argv.index("--wheel-profile") + 1] == str(args.wheel_profile)
+
+
+@pytest.mark.parametrize(
+    ("component", "options"), [("agent-index", []), ("agent-vault", ["Repair"])],
+)
+def test_source_inputs_keep_the_selected_path_when_loading_helpers(
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    component: str, options: list[str],
+) -> None:
+    source_module = importlib.import_module("install_source")
+    source_path = tmp_path / "source-inputs"
+    payload = SCRIPTS.parent.with_name(component)
+    identity = SimpleNamespace(package_version="1.0")
+    selected = SimpleNamespace(source_descriptor={"kind": "fixture"}, identity=identity)
+    observed: list[Path] = []
+
+    @contextmanager
+    def project_inputs(path: Path, plugin: str) -> Iterator[tuple[SimpleNamespace, object]]:
+        assert path.is_absolute()
+        assert path == source_path and plugin == component
+        observed.append(path)
+        yield selected, object()
+
+    def read_identity(root: Path, version: str, *, plugin: str) -> SimpleNamespace:
+        assert root == payload and version == identity.package_version and plugin == component
+        return identity
+
+    monkeypatch.setattr(source_module, "project_inputs", project_inputs)
+    monkeypatch.setattr(getattr(source_module, "sources"), "read_source_identity", read_identity)
+    monkeypatch.setattr(source_module, "native_selection", lambda *_args: {
+        "source_descriptor": selected.source_descriptor,
+    })
+    args = _arguments(
+        tmp_path, plugin=component, payload=payload, options=options, install_source=source_path,
+        wheel_profile=None, wheel_directory=None, wheel_python=None, wheel_uv=None,
+    )
+    arguments = driver.native_arguments(args)
+    assert observed == [source_path]
+    assert args.install_source == source_path
+    assert arguments[-2:] == ["-InstallSource", str(source_path)]
