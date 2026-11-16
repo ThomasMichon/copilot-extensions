@@ -10,6 +10,7 @@ import posixpath
 import shutil
 import subprocess
 import sys
+from typing import Any, cast
 from types import SimpleNamespace
 
 import pytest
@@ -18,7 +19,7 @@ LIBRARY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LIBRARY))
 import versioned_runtime as runtime
 
-HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
 @pytest.fixture(params=["named", "packaged"])
@@ -47,6 +48,39 @@ def invoke(primitive: Path, root: Path, arguments: list[str]) -> subprocess.Comp
         [sys.executable, "-I", "-B", str(primitive), "--root", str(root), *arguments],
         cwd=primitive.parent, capture_output=True, text=True, timeout=10, creationflags=HEADLESS,
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows component-source I/O")
+@pytest.mark.parametrize("extended_entry", [False, True])
+def test_shipped_components_load_beyond_max_path(
+    primitive: Path, tmp_path: Path, extended_entry: bool,
+) -> None:
+    native = runtime._leases._native_path
+    directory = tmp_path / "installed-components"
+    while len(str(directory)) < 290:
+        directory /= "runtime-assets-" + "x" * 25
+    shutil.copytree(primitive.parent, native(directory))
+    entry = directory / primitive.name
+    logical_entry = native(entry) if extended_entry else entry
+    source = tmp_path / "input.py"
+    source.write_bytes(b"VALUE = 7\n")
+    expected = runtime.fingerprint_source([source])
+    code = (
+        "import importlib.util,sys; from pathlib import Path; "
+        "entry=Path(sys.argv[1]); "
+        "spec=importlib.util.spec_from_file_location('runtime_probe',entry); "
+        "module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; "
+        "exec(compile(Path(sys.argv[2]).read_bytes(),str(entry),'exec'),module.__dict__); "
+        "assert Path(module._leases.__file__)==entry.with_name('versioned_runtime_leases.py'); "
+        "print(module.fingerprint_source([Path(sys.argv[3])]))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(logical_entry), str(native(entry)), str(source)],
+        cwd=LIBRARY, capture_output=True, text=True, timeout=10, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == expected + "\n"
+    assert result.stderr == ""
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -107,7 +141,8 @@ def test_fingerprint_cli_preserves_deep_ordinary_source_paths(
         **({deep / "nested" / "other.py": b"OTHER = 9\n"} if directory else {}),
     }
     extended = native(deep_input)
-    extended_observed, file_hashes = {}, {}
+    extended_observed: dict[Path, bytes] = {}
+    file_hashes: dict[Path, str] = {}
     assert runtime.fingerprint_source(
         [extended], file_hashes=file_hashes,
         on_file=lambda path, content: extended_observed.update({path: content}),
@@ -175,7 +210,7 @@ def test_fingerprint_preserves_extended_unc_input_identity(
         if candidate.drive.startswith("\\\\"):
             # Keep all UNC I/O inside this owned fixture, never an actual SMB share.
             candidate = network / candidate.relative_to(unc)
-        return runtime._leases._native_path(candidate)
+        return cast(Path, runtime._leases._native_path(candidate))
 
     value = "\\\\?\\" + namespace + "\\server\\share\\payload.py"
     source = runtime._runtime_component("versioned_runtime_source")
@@ -199,13 +234,13 @@ def test_fingerprint_preserves_declared_input_outside_windows(
     def normalize(value: str) -> str:
         if value == str(declared):
             return str(other)
-        return runtime._normalize_windows_extended_path(value)
+        return cast(str, runtime._normalize_windows_extended_path(value))
 
     def fingerprint() -> str:
-        return source.fingerprint_source(
+        return cast(str, source.fingerprint_source(
             [declared], _normalize_windows_extended_path=normalize,
             _native_path=runtime._leases._native_path,
-        )
+        ))
 
     assert fingerprint() == expected
     declared.write_bytes(b"changed declared input\n")
@@ -224,8 +259,8 @@ def test_fingerprint_preserves_posix_link_target_identity(
     ))
     original = source.fingerprint_entries
 
-    def symlink_entries(entries, **kwargs):
-        return original(dict.fromkeys(entries, "symlink"), **kwargs)
+    def symlink_entries(entries: dict[Path, str], **kwargs: Any) -> str:
+        return cast(str, original(dict.fromkeys(entries, "symlink"), **kwargs))
 
     monkeypatch.setattr(source, "fingerprint_entries", symlink_entries)
     before = runtime.fingerprint_source([declared])

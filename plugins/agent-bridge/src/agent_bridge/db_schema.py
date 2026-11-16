@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import threading
 
 from .db_core import SCHEMA_VERSION, _SCHEMA_SQL, _SESSIONS_ENSURE_COLUMNS, log
 from .owner_membership_schema import ensure_schema as ensure_membership_indexes
@@ -12,6 +16,8 @@ from .status_schema import ensure_schema as ensure_status_schema
 from .status_schema import validate_schema as validate_status_schema
 from .dispatch_cli_origin import ensure_schema as ensure_cli_origin_schema
 from .dispatch_cli_origin import validate_schema as validate_cli_origin_schema
+from .native_send_settlement_schema import ensure_schema as ensure_send_settlement
+from .native_send_settlement_schema import validate_schema as validate_send_settlement
 
 
 def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
@@ -37,6 +43,11 @@ def validate_exact_live_schema(conn: sqlite3.Connection) -> None:
 
 class _SchemaMixin:
     """Schema initialization and migration helpers."""
+
+    if TYPE_CHECKING:
+        _write_lock: threading.Lock
+
+        def _get_conn(self) -> sqlite3.Connection: ...
 
     def _init_schema(self) -> None:
         """Create tables if they don't exist, run migrations."""
@@ -98,6 +109,8 @@ class _SchemaMixin:
                     validate_status_schema(conn)
                 if recorded is not None and recorded["version"] >= 46:
                     validate_cli_origin_schema(conn)
+                if recorded is not None and recorded["version"] >= 48:
+                    validate_send_settlement(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -114,6 +127,7 @@ class _SchemaMixin:
                 ensure_creation_writer_schema(conn)
                 ensure_mux_question_schema(conn)
                 ensure_status_schema(conn)
+                ensure_send_settlement(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
@@ -147,6 +161,7 @@ class _SchemaMixin:
             validate_mux_question_schema(conn)
             validate_exact_live_schema(conn)
             validate_cli_origin_schema(conn)
+            validate_send_settlement(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -772,10 +787,10 @@ class _SchemaMixin:
             log.info("Schema migrated to version 25: sessions.caller_session_id")
 
         if from_version < 26:
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(live_messages)")}
-            if "consumed_at" not in cols:
+            consumption_columns = {r[1] for r in conn.execute("PRAGMA table_info(live_messages)")}
+            if "consumed_at" not in consumption_columns:
                 conn.execute("ALTER TABLE live_messages ADD COLUMN consumed_at REAL")
-            if "consumption_tracked" not in cols:
+            if "consumption_tracked" not in consumption_columns:
                 conn.execute(
                     "ALTER TABLE live_messages ADD COLUMN consumption_tracked INTEGER NOT NULL DEFAULT 0"
                 )
@@ -808,10 +823,11 @@ class _SchemaMixin:
             log.info("Schema migrated to version 29: durable cold-recovery stop gate")
 
         if from_version < 30:
-            from .inbox_custody import ensure_schema, validate_schema
+            from .inbox_custody import ensure_schema as ensure_inbox_custody
+            from .inbox_custody import validate_schema as validate_inbox_custody
 
-            ensure_schema(conn, exact_native=False, compatible_messages=False)
-            validate_schema(conn, exact_native=False, compatible_messages=False)
+            ensure_inbox_custody(conn, exact_native=False, compatible_messages=False)
+            validate_inbox_custody(conn, exact_native=False, compatible_messages=False)
             conn.execute("UPDATE schema_version SET version=?", (30,))
             conn.commit()
             log.info("Schema migrated to version 30: retained inbox handoff storage")
@@ -962,3 +978,11 @@ class _SchemaMixin:
                 migrate_compatible_receivers(conn)
                 conn.execute("UPDATE schema_version SET version=?", (47,))
             log.info("Schema migrated to version 47: compatible ordinary message admission")
+
+        if from_version < 48:
+            conn.execute("BEGIN IMMEDIATE")
+            with conn:
+                ensure_send_settlement(conn)
+                validate_send_settlement(conn)
+                conn.execute("UPDATE schema_version SET version=?", (48,))
+            log.info("Schema migrated to version 48: original native-send exclusion")

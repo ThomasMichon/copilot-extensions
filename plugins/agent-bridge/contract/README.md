@@ -35,6 +35,20 @@ the independent HTTP-52 vector and genuine current execution evidence refresh;
 historical generations remain unchanged. These controls do not establish native
 Copilot or installed adoption.
 
+Twelve additional source controls cover the original selector-omitting ordinary
+SDK wire form against a genuinely unconfigured provider. They retain original
+one-shot handoffs and late receipts across process loss, while configured,
+failed or subsequently added governance and older portable consumers keep
+their original admission boundaries. The governance helper is an affected
+semantic owner for this expansion. HTTP generation, capability floors,
+independent input vector and historical evidence remain unchanged.
+The HTTP-52 collector re-exports the unchanged current portfolio and adds only
+these controls; the older collector and test bodies are not copied or rewritten.
+Ten further controls require the stored native registration inside every
+automatic receiving transaction, including venue changes before enrollment,
+poll and final admission, while preserving explicit native selection. A missing
+request-side portable observation cannot reclassify a registered remote venue.
+
 Declaration preparation can refresh a retired path's `current_path` fingerprint
 only through its already registered, affected semantic owner. The retired alias
 stays non-semantic; dirty backing bytes and missing/non-semantic owners refuse.

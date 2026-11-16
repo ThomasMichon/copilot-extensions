@@ -80,7 +80,17 @@ advertised `compatible_native_inbox: 1` capability from the actual serving
 daemon. It selects `receiving_api: "native-sdk-v1"` on the existing retained
 requests. Missing support refuses before enrollment or final admission; there
 is no automatic legacy or private-controller fallback. Older consumers omit the
-selector and retain their original installation-bound contract unchanged.
+selector. An older ordinary SDK consumer can use the same compatible inbox
+when the serving daemon has neither an installation-governance helper nor a
+configured installation context. Its original wire form still requires process
+observations and retains exact original-consumer outcome matching. Configured
+or failed governance and older portable consumers keep their original
+installation/reservation-bound adapter; missing owners are not an unconfigured
+provider. Automatic selection also requires the stored registration's venue to
+be absent inside each negotiation, enrollment, poll and final-admission
+transaction; omitting a portable launch observation cannot reclassify a remote
+target. Explicit native selection and late original outcomes are unchanged.
+Unknown selectors remain errors.
 Existing shared-token access, the admitted local endpoint, frontend readiness,
 writable prepared schema and fresh exact native registration remain required.
 Installation identity, epoch, process birth and PID are not ordinary message

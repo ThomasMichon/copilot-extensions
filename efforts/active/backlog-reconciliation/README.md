@@ -3634,6 +3634,20 @@ sources, transferring owners or turning partial/planning gains into completion.
   accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
+  The agent-recommended [accepted Manager bytecode-uninstall contract](manager-bytecode-uninstall-receiving.md)
+  directly retains #9375's narrow inventory/removal repair in planned #1886
+  acceptance, preserving the existing Manager repair, #8864 and #8669 owners
+  and independent gates. The [actual receiving and separate retirement](journal/2026/11.15-manager-bytecode-uninstall-receiving.md)
+  record #12797 delivery, complete direct readback and #9375 `NOT_PLANNED`,
+  with 837 whole open, 108 above fixed 729. All eight technical rows remain
+  unchecked; no implementation, live-removal proof or claim release follows.
+  The agent-recommended [accepted session-artifact contract](session-artifact-receiving.md)
+  directly retains #2165's structural write-time block OR flag and source/replica
+  data-handling acceptance in a sixth, independent #10968 track after #12791.
+  The [actual receiving and separate retirement](journal/2026/11.15-session-artifact-receiving.md)
+  preserve all incumbent tracks and owners, record #2165 `NOT_PLANNED`,
+  and reconcile 838 whole open, 109 above fixed 729. Every new technical row
+  remains unchecked; no cleanup, implementation or source/custody release follows.
   The [current receiving-contract unit](consolidation-current-unit.md)
   now has independently admitted current contracts for six conditional
   families/nineteen own identities and authored direct receiving amendments.
@@ -4138,10 +4152,19 @@ closure credit, resource release or parent checkbox change follows.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
+  The [2026-11-15 route refresh](roadmap-current-qualification.md#2026-11-15-routing-and-completed-nomination-correction)
+  adds #4220's accepted Index/#5768 route and qualifies #9377's completed
+  original agenda-companion source nomination, removing stale Phase 1 admission
+  from the continuing queue. It preserves all twelve unfinished selected routes,
+  exact alternatives, owners and the historical 145 relationships.
+  The [dated evidence and census](journal/2026/11.15-roadmap-route-refresh.md)
+  distinguish these corrections from new source findings, issue effects or
+  completion of this broader sequencing item.
   The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
   routes nine retired tracking identities to their audited receiving slices
-  and leaves #9377 explicitly unqualified. Historical relationship counts,
-  scoped alternatives, actual owners and all completion gates remain unchanged.
+  and left #9377 explicitly unqualified at that observation; the route refresh
+  above resolves that gap. Historical relationship counts, scoped alternatives,
+  actual owners and all completion gates remain unchanged.
 - [x] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.

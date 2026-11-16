@@ -5,10 +5,11 @@ from pathlib import Path
 
 import bridge_http51_evidence as retained
 import bridge_http_retained_evidence as common
+import bridge_http47_evidence as previous
+import bridge_http48_installation
 from launch_wrapper_assets_ref import load_manifest_groups
 
-previous = common.previous
-installation = common.installation
+installation = bridge_http48_installation
 GENERATION = 52
 VECTOR_SCHEMA = "http52-owner-membership-cases-v1"
 INPUT = common.CONTRACT + "inputs/http52/owner-membership.json"
@@ -26,6 +27,8 @@ SCOPE = (
     "and malformed-envelope retention controls; "
     "native SDK receiving joins real Node/API/SQLite with controlled SDK events, "
     "without installation or process admission; "
+    "original selector-omitting ordinary SDK consumers use the unconfigured provider "
+    "without replacing configured governance or portable admission; "
     "not native Copilot, mux, remote authentication or installed qualification"
 )
 POLICY = common.POLICY
@@ -51,6 +54,8 @@ _RETAINED_AFFECTED = (
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
+        "retained_writer_transport.py",
+        "native_send_history.py", "native_send_settlement.py", "native_send_settlement_schema.py",
         "acquisition_worktree_writer.py", "acquisition_writer_inspection.py", "acquisition_authority.py",
         "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
@@ -87,6 +92,7 @@ _RETAINED_AFFECTED = (
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py", "routes/worktree_reporting.py",
         "compatible_inbox.py", "runtime_custody.py", "inbox_consumer_schema.py",
+        "loop_governance.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -114,7 +120,11 @@ AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
+    "plugins/agent-bridge/tests/test_http52_capture_probes.py",
     "plugins/agent-bridge/tests/test_native_send_unavailable.py",
+    "plugins/agent-bridge/tests/test_native_send_settlement.py",
+    "plugins/agent-bridge/tests/test_native_send_settlement_process.py",
+    "plugins/agent-bridge/docs/native-send-settlement.md",
     "plugins/agent-bridge/tests/test_host_status.py",
     "plugins/agent-bridge/tests/test_host_status_remote.py",
     "plugins/agent-bridge/tests/test_host_status_clients.py",
@@ -133,6 +143,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
     "plugins/agent-bridge/tests/test_worktree_source_evidence.py",
     "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
+    "plugins/agent-bridge/tests/test_retained_writer_transport.py",
     "plugins/agent-bridge/tests/test_retained_host_recovery.py",
     "plugins/agent-bridge/tests/test_gc.py",
     "plugins/agent-bridge/tests/test_creation_writer_resume.py",
@@ -167,6 +178,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/tests/fixtures/worktree_list_source.py",
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
+    "plugins/agent-bridge/tests/test_unconfigured_sdk_receiving.py",
     "plugins/agent-bridge/tests/test_inbox_custody.py",
     "plugins/agent-bridge/tests/test_retained_sdk_recovery.py",
     "plugins/agent-bridge/tests/fixtures/retained-sdk-consumer.mjs",
@@ -313,6 +325,11 @@ PROBES = {
     "test_remote_enrollment_requires_the_original_portable_reservation": 7,
     "test_retained_startup_admission_requires_its_original_ready_input": 24,
     "test_legacy_request_serialization_does_not_send_a_new_selector": 1,
+    "test_original_sdk_wire_works_with_genuinely_unconfigured_governance": 2,
+    "test_original_sdk_compatibility_does_not_replace_configured_or_portable_admission": 8,
+    "test_original_sdk_process_recovery_preserves_original_receipts": 2,
+    "test_original_sdk_receiving_rechecks_the_registered_venue_before_effects": 8,
+    "test_explicit_native_receiving_keeps_its_registered_venue_support": 2,
     "test_native_sdk_receiving_needs_no_installation_or_process_custody": 2,
     "test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work": 2,
     "test_native_inbox_preserves_real_target_and_ingress_boundaries": 10,
@@ -384,7 +401,7 @@ PROBES = {
     "test_malformed_terminal_recovery_retains_original_and_successor": 8,
     "test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards": 1,
 }
-TEST = retained.TEST
+TEST = "plugins/agent-bridge/tests/test_http52_capture_probes.py"
 CAPABILITY_VERSIONS = {
     "dispatch_acp_session_origin": 1,
     "dispatch_cli_session_origin": 1,
