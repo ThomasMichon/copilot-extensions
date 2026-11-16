@@ -378,14 +378,20 @@ and source-target helpers; no checker suppression or admission level changed.
 
 Fresh Windows closed-wheel relay and combined SSH/relay construction passed,
 including explicit selection, unselected refusal, preserved update desire,
-actual installed dependency imports and readiness. A separately built wheel
-with a missing required Gateway module failed before completion/publication.
-The final relay positive/negative packet passed two cases in 203.89 seconds;
-the combined case previously passed in 157.18 seconds. The generic callback
+actual installed dependency imports and readiness. Both profiles' provision
+and update paths passed with no ambient Python commands: construction and its
+preflight use the supplied wheel interpreter. The new condition first
+reproduced a real preflight failure before its correction. A separately built
+wheel with a missing required Gateway module failed before completion/publication.
+The final relay positive/negative packet passed two cases in 261.72 seconds
+(294.48 including preparation); the separate combined case passed in 171.57
+seconds (178.95 including preparation). These are not one aggregate run, and
+neither item nor group deadlines were increased. The generic callback
 refusal and affected receiver controls passed 21 cases, and profile/snapshot
-regressions passed 47 with two platform skips. Sync/native recipe controls
-passed 140 with one skip. Strict checking passed 23 physical files across the
-18 selected projects and configured Linux/Windows targets.
+regressions passed 47 with two platform skips after the preflight correction.
+Before that correction, sync/native recipe controls passed 140 with one skip,
+and strict checking passed 23 physical files across the 18 selected projects
+and configured Linux/Windows targets.
 
 This is source qualification, not accepted publication or installed adoption.
 Required CI and review remain pending. R2-R4, independent deployment lifetime,

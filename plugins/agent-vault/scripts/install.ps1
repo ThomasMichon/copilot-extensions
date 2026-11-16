@@ -1025,7 +1025,7 @@ function Install-Runtime {
         exit 1
     }
 
-    $pythonCmd = Resolve-PythonCommand
+    $pythonCmd = if ($WheelProfile) { $WheelPython } else { Resolve-PythonCommand }
     if (-not $pythonCmd) {
         Write-Fail 'Python not found on PATH (need 3.10+)'
         exit 1

@@ -546,6 +546,9 @@ def test_native_closed_profile_preserves_desire_and_checks_installed_dependencie
         tmp_path_factory, crypto="ssh" in desired, relay=True,
     ) as (payload, home, env, pwsh):
         wheels = _closed_wheels(payload, env, home, desired)
+        env["PATH"] = str(home)
+        assert all(shutil.which(name, path=env["PATH"]) is None
+                   for name in ("python", "python3", "py"))
         installer = payload / "scripts" / "install.ps1"
         command = _no_service_provision_command(home, installer, pwsh, wheel_inputs=wheels)
         refused = subprocess.run(
