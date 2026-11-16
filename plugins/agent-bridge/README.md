@@ -99,6 +99,20 @@ periodic supervisor probes retain their existing transport-error health-hint
 semantics and a bounded execution budget. This is startup/readiness policy,
 not a turn execution timeout or a progress-renewed communication clock.
 
+Remote Bridge carriers have a separate, bounded 60-second initial HELLO
+allowance, including the remote management launcher's cold start. Bridge does
+not inherit the shared transport's shorter handshake default. Remote command
+HTTP observers include that startup allowance in addition to the selected
+operation/reply budget; startup does not extend an admitted operation's own
+deadline or authorize replay after an uncertain result. Explicit carrier
+handshake overrides remain effective. This initial-frame allowance is not
+progress-aware startup negotiation or a change to the shared SSH transport.
+
+The delegated writer-generation observation in `/health` remains read-only.
+Linked slots and failed slot-path inspection produce an unknown generation,
+not a certified build or an unhandled traversal error. Observation never
+starts or repairs the delegated writer.
+
 Windows installation captures unavailable optional Python-launcher versions as
 verbose diagnostics, not install failures. Signed-base discovery stops at the
 first accepted candidate and reuses it only within that installer process,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any
+from typing import Any, BinaryIO
 
 from ssh_manager import (
     CarrierLease,
@@ -15,6 +15,8 @@ from ssh_manager import (
     StdioCarrierServer,
     get_default_manager,
 )
+
+from .remote_timeouts import REMOTE_CARRIER_STARTUP_TIMEOUT
 
 
 def build_remote_carrier_command(remote_platform: str) -> str:
@@ -58,6 +60,7 @@ async def acquire_remote_carrier(
         port_forwards=port_forwards,
         preserve_existing_forwards=port_forwards is None,
     )
+    options.setdefault("handshake_timeout", REMOTE_CARRIER_STARTUP_TIMEOUT)
     return await owner.acquire_carrier(
         host,
         build_remote_carrier_command(remote_platform),
@@ -65,8 +68,8 @@ async def acquire_remote_carrier(
     )
 
 
-def _binary_stdio() -> tuple[object, object]:
-    if os.name == "nt":
+def _binary_stdio() -> tuple[BinaryIO, BinaryIO]:
+    if sys.platform == "win32":
         import msvcrt
 
         msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
