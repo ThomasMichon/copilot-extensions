@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve plugin activation uncertainty in Repositories Configuration inspection.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
