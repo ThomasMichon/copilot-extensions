@@ -109,7 +109,7 @@ def submit_native_bound_prompt(
                 or exc.status == 404 and code == "native_session_unavailable"
                 or exc.status == 409 and (busy or code in {
                     "native_invocation_conflict", "expected_native_mismatch",
-                    "native_session_stopped",
+                    "native_session_stopped", "native_send_settled",
                 })
             )
             if attempted and not proven_refusal:
