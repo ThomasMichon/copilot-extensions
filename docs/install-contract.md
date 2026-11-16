@@ -196,6 +196,11 @@ mistaking it for package-version drift. Package comparisons strip the generated
 profile suffix; recovery still requires an exact current/last-known-good
 selection instead of choosing a dependency profile by hash order.
 
+Native wheel construction may supply an optional ordinary Python health-callable
+name alongside its health module. The canonical candidate engine invokes it
+before completion, including reuse health; omission preserves module-only health.
+The adapter passes a name, not executable Python or an expression.
+
 Unchanged startup reads the existing selector, bounded constructor receipt,
 deployment manifest, completion marker and interpreter presence. The package
 identity, exact profile/closure, selected extras and manifest construction hash
@@ -3936,8 +3941,13 @@ helper hint independent of a retired Manager package environment; managed-base
 retention remains with the toolchain owner.
 Manager cold/passive resident launches remove the finite hint through their
 existing environment scrubber instead of retaining the updater's selection.
-The installation-context caller-owned adapter and the evaluator selector
-below consume it without rediscovering PATH Python. Their optional `-Python`
+The installation-context caller-owned adapter, PowerShell daemon-instance
+transport and the evaluator selector below consume it without rediscovering
+PATH Python. The process transport applies the hint only at its existing lazy
+helper startup: a live helper retains its original interpreter and custody,
+and a conflicting nonempty hint refuses before another request without
+breaking that owner.
+The installation-context and evaluator adapters' optional `-Python`
 argument overrides the inherited value. Invalid paths and interpreter execution
 failures are terminal, not permission to fall back. The original process,
 private-pipe, Job/group, startup/deadline and cleanup protocols are unchanged.
@@ -5898,13 +5908,15 @@ effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
 ### Python-owned construction foundation
 
-For the earlier, Python-free Windows admission boundary, the canonical
+For the earlier pre-runtime Windows admission boundary, the canonical
 `agent-procutil` package also carries native daemon/owned-child helpers, and
 `single-instance-lease` carries the native counterpart of `OperationLock`.
 They reuse WMI outside-Job admission and the exact existing kernel lock
 protocol; owned writers enter their strict Job atomically at creation.
 Their API and qualification boundary are in the
-[procutil bootstrap reference](../libs/agent-procutil/README.md#python-free-windows-bootstrap-admission).
+[procutil bootstrap reference](../libs/agent-procutil/README.md#windows-bootstrap-and-shell-admission).
+Those helpers still require setup-provided Python; they do not supply the
+Python-free first-toolchain stage required by the managed-Python target.
 They do not themselves construct a driver foundation or migrate any first-use
 publisher. Bootstrap source admission, durable interruption fencing and
 immutable publication remain consumer obligations.

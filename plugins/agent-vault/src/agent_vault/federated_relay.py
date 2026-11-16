@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import logging
 import math
 import time
@@ -17,6 +18,30 @@ from . import federated_relay_config as config
 from .config import home_dir
 
 LOG = logging.getLogger(__name__)
+
+
+def dependency_health() -> None:
+    from importlib import import_module
+
+    for module in (
+        "cryptography.hazmat.primitives.serialization",
+        "cryptography.hazmat.primitives.asymmetric.ec",
+        "joserfc.jwk",
+        "credential_relay.account_relay",
+        "fleet_manager.gateway_account_source",
+        "fleet_manager.gateway_controller_services",
+        "fleet_manager.gateway_service_channel",
+        "fleet_manager.gateway_service_connector",
+    ):
+        import_module(module)
+
+
+def ssh_dependency_health() -> None:
+    from .ssh_key import _crypto
+
+    dependency_health()
+    crypto: Callable[[], object] = _crypto
+    crypto()
 
 
 def selected_relay() -> RelayRuntime | None:

@@ -64,13 +64,20 @@ only imports from this source checkout:
   adoption are reported separately; unavailable authority or capability is
   an explicit open gate, never a substituted pass.
 
-- [ ] **G1045:** Accept the complete #1045 host inspection/progress contract
+- [x] **G1045:** Accept the complete #1045 host inspection/progress contract
   only when direct P1045 and paired V1045 pass through the built/copied core
   artifact and its actual session-status and terse inspect/status JSON
   receiving surfaces. Keep every incumbent artifact, caller-convergence,
   lifetime, ownership, skew/rollback, cleanup, review/CI and finalization gate
   conjunctive. This tracking intake adds no native, installed/live-deployment
   or whole-#1138-completion prerequisite and waives no existing gate.
+
+The inspection-only P1045/V1045/G1045 acceptance is recorded in the
+[merged source acceptance](journal/2026/11.12%20original-owner%20recovery%20store.md#host-inspection-acceptance).
+It closes the specialized Core/Bridge implementation and paired receiving
+validation, not the remaining caller, lifetime, recovery, installed or
+finalization gates. Existing #1045 source/resource ownership and any later
+source-specific disposition remain separate.
 
 Finalization requires this complete functional flow, every continuing Plan and
 Validation Plan item resolved or explicitly transferred to a named tracked
@@ -227,6 +234,14 @@ fix in #12687. Their exact source, runs and timings are recorded in the journal.
 This qualifies those fresh Manager decisions, not local shared-machine execution,
 every reuse/window mode, caller-Job loss or installed adoption.
 
+The detached public Worktrees caller-Job packet also passes after the
+original-owner fixture correction in #12804: fresh/resume, caller cleanup,
+generation replacement/restoration, retained-conversation reuse and exact
+retirement. The distinct attached packet stopped during fresh Manager wheel
+acquisition, before native caller execution, and remains unqualified. The
+six-request hosted allowance is exhausted; its larger underlying cap does not
+permit another submission. No complete mode/lifetime aggregate closes.
+
 The source-complete actor-free recovery-intent adapter supports original-owner
 persistence but does not prove this outcome. Its bounded source acceptance is
 recorded in the journal, not counted as root acceptance. Select the portable
@@ -278,7 +293,7 @@ remain with their existing owners.
   the [original-owner admission binding](implementation.md#original-owner-recovery-admission-binding).
 - [ ] Qualify ordinary/hoisted receiving, supported skew/rollback, endpoint and
   process identity, exact cleanup and measured cold/warm readiness.
-- [ ] **P1045:** Implement and integrate the entire host inspection/progress
+- [x] **P1045:** Implement and integrate the entire host inspection/progress
   contract in the standalone core and existing causal consumers, without a
   new observer poller. Deliver version-tolerant end-to-end PING/PONG with a
   nonce and RTT plus a fixed-size snapshot: Host PID/generation, child
@@ -322,7 +337,7 @@ remain with their existing owners.
   forbid legacy internal spawning and mux creation on the selected new path.
 - [ ] Both modes expose the broker and truthful stage distinctions: reservation,
   process/mux, native binding, input readiness, prompt acceptance and restoration.
-- [ ] **V1045:** Validate actual P1045 behavior on isolated fixtures and through
+- [x] **V1045:** Validate actual P1045 behavior on isolated fixtures and through
   the built/copied-artifact receiving surface. Prove nonce/RTT and every
   fixed-size field, per-layer state/age, bounded projection states and unknown
   reasons, cursor-neutral/unavailable references, both pull surfaces and

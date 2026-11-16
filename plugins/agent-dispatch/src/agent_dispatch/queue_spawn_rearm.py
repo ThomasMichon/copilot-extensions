@@ -55,7 +55,6 @@ class SpawnRearmMixin:
                 or latest_allocation is None or latest_allocation["key"] != reservation_key
                 or latest["state"] not in {SpawnState.DEFERRED, SpawnState.FAILED}
                 or latest["session_handle"] or latest["release_requested"]
-                or latest["conversation_retired"]
                 or latest["worktree_ownership"] not in {"created", "reused", "targeted"}
                 or latest["conclusion_state"] == "pending"
                 or any(row["state"] in SpawnState.ACTIVE or row["native_release_pending"] for row in rows)

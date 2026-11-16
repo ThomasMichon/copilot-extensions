@@ -130,7 +130,8 @@ def _bridge_created_host(
     created = creation.get("worktree") if isinstance(creation, dict) else None
     if (
         binding.get("origin_kind") != "created" or not isinstance(created, dict)
-        or creation.get("status") != "complete" or creation.get("replayed") is not False
+        or creation.get("status") != "complete"
+        or type(creation.get("replayed")) is not bool
         or created.get("id") != actual.worktree
         or not isinstance(created.get("creation_nonce"), str)
         or created["creation_nonce"] != binding.get("creation_nonce")

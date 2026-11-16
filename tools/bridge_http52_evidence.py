@@ -93,7 +93,7 @@ _RETAINED_AFFECTED = (
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py", "routes/worktree_reporting.py",
         "compatible_inbox.py", "runtime_custody.py", "inbox_consumer_schema.py",
-        "loop_governance.py",
+        "loop_governance.py", "session_inspection.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -132,6 +132,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_host_status_remote.py",
     "plugins/agent-bridge/tests/test_host_status_clients.py",
     "plugins/agent-bridge/docs/host-status-feed.md",
+    "plugins/agent-bridge/tests/test_session_inspection.py",
     "plugins/agent-bridge/tests/test_acp_current_requests.py",
     "plugins/agent-bridge/tests/test_inbox_consumer_enrollment.py",
     "plugins/agent-bridge/tests/test_live_inbox_producer.py",
@@ -204,6 +205,9 @@ EXTRA_PATHS = (
 EXTRA_PATHS = tuple(_current_source(path) for path in EXTRA_PATHS)
 PROBES = {
     **retained.PROBES,
+    "test_http_and_both_cli_aliases_use_copied_core_without_cursor_or_input_effects": 1,
+    "test_inspect_json_names_older_daemon_inspection_gap_without_retry": 1,
+    "test_semantic_projection_is_bounded_content_free_and_not_ping_progress": 1,
     "test_real_cli_settles_original_through_advertised_provider_without_sending": 2,
     "test_executing_cli_declares_settlement_without_contacting_a_daemon": 1,
     "test_ordinary_sender_preserves_proved_settled_key_refusal": 1,

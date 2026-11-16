@@ -58,7 +58,7 @@ def verify_installed_inputs(
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None,
     source_wheels: SourceWheelInputs | None = None,
     health_callable: str | None = None, require_frozen_origin: bool = True,
-    confirm_source_contents: bool = False, run: Callable,
+    confirm_source_contents: bool = False, run: Callable[[list[str]], object],
 ) -> None:
     """Verify installed construction facts without inventing a source project."""
     if python is None:
@@ -101,7 +101,7 @@ if nested:
 else:
     resolved = lambda path: pathlib.Path(path).resolve()
 if sys.platform == "win32":
-    # Metadata and imports need the same physical long-path spelling as construction.
+    # Metadata checks retain construction's physical long-path spelling.
     native_slot = pathlib.Path(sys.argv[11]).resolve()
     original_resolved = resolved
     def resolved(path):
@@ -248,6 +248,12 @@ for name in excluded_packages:
         print("Published runtime input evidence differs from installed inputs", file=sys.stderr)
         raise SystemExit(74)
     raise
+if sys.platform == "win32":
+    # Dependency imports may join ".." to __file__, which extended paths reject.
+    sys.path[:] = [
+        str(resolved(entry)) if entry and resolved(entry).is_relative_to(slot) else entry
+        for entry in sys.path
+    ]
 module = importlib.import_module(sys.argv[2])
 assert module.__file__ and resolved(module.__file__).is_relative_to(slot), \
     "health module is outside the candidate runtime"

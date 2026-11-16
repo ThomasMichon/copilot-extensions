@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-vault"
-version = "0.1.298-dev1"
+version = "0.1.299-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -50,6 +50,9 @@ agent-zdd = { path = "libs/zdd" }
 # Phase 1): `path` escapes this plugin's own root and resolves live to
 # `libs/single-instance-lease`, so every consumer shares one canonical copy.
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
+
+[tool.copilot-extensions.application-sources]
+fleet-manager = "standalone:fleet-manager"
 
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,

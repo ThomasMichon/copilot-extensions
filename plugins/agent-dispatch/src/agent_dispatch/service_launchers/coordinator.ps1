@@ -69,10 +69,22 @@ try {
 $ErrorActionPreference = 'Continue'
 & $_py -I -B -c "import sys; from pathlib import Path; from agent_dispatch.installation_policy import windows_policy; p=windows_policy(Path(sys.argv[1]), observe_supervisor=False); raise SystemExit(0 if p['start_coordinator'] else 3)" $InstallDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$_launch = & $_py -I -B -X utf8 -c "import json,sys; from agent_procutil import direct_python; p,e=direct_python(sys.argv[1]); print(json.dumps({'python':p,'env':e}))" $_py
+if ($LASTEXITCODE -ne 0 -or @($_launch).Count -ne 1) {
+    throw 'Coordinator interpreter identity is unavailable'
+}
+$_launch = ConvertFrom-Json -InputObject ([string]$_launch) -ErrorAction Stop
+if ($_launch.python -isnot [string] -or -not [IO.Path]::IsPathRooted($_launch.python) -or
+    $_launch.env -isnot [pscustomobject]) { throw 'Coordinator interpreter identity is invalid' }
+foreach ($_entry in $_launch.env.psobject.Properties) {
+    [Environment]::SetEnvironmentVariable($_entry.Name, [string]$_entry.Value, 'Process')
+}
+$_servePython = $_launch.python
+$_serveArguments = @('-X', ('agent_dispatch_install_dir=' + [IO.Path]::GetFullPath($InstallDir))) + $_cacheArguments
 try {
-    & $_py @_cacheArguments -m agent_dispatch serve 2>&1 | Out-File -FilePath $logFile -Append -Encoding utf8
+    & $_servePython @_serveArguments -m agent_dispatch serve 2>&1 | Out-File -FilePath $logFile -Append -Encoding utf8
 } catch {
     # Teeing to the log failed (e.g. it got locked after resolution) -- keep the
     # coordinator alive without the tee rather than let logging kill the service.
-    & $_py @_cacheArguments -m agent_dispatch serve *> $null
+    & $_servePython @_serveArguments -m agent_dispatch serve *> $null
 }

@@ -47,12 +47,14 @@ class MsgType(bytes, enum.Enum):
                        # GRACEFULLY (vs a hard drop, which surfaces only as EOF);
                        # lets the host reap a reapable child promptly instead of
                        # after the unexpected-disconnect grace window
+    PING = b"?"        # first-message-only, read-only inspection on a separate connection
 
     # Host -> Frontend
     HELLO = b"H"       # payload: u64 max_seq + u64 child_pid + optional versioned
                        # execution-preference JSON (legacy clients ignore tail)
     FRAME = b"F"       # payload: u64 seq + raw ACP frame bytes (verbatim)
     LIVENESS = b"L"    # payload: u8 alive(1/0) + u32 exit_code
+    PONG = b"!"        # bounded versioned snapshot + echoed inspection nonce
 
 
 def pack_u64(n: int) -> bytes:
@@ -60,7 +62,7 @@ def pack_u64(n: int) -> bytes:
 
 
 def unpack_u64(b: bytes) -> int:
-    return _U64.unpack(b[:8])[0]
+    return int(_U64.unpack(b[:8])[0])
 
 
 def pack_frame(seq: int, data: bytes) -> bytes:
@@ -125,6 +127,7 @@ async def write_message(
 
 async def read_message(
     reader: asyncio.StreamReader,
+    *, max_bytes: int = MAX_MESSAGE_BYTES,
 ) -> tuple[MsgType | None, bytes] | None:
     """Read one framed message. Returns ``None`` on clean EOF.
 
@@ -147,10 +150,13 @@ async def read_message(
     (length,) = _U32.unpack(header)
     if length == 0:
         return None
-    if length > MAX_MESSAGE_BYTES:
-        raise ProtocolError(f"message length {length} exceeds cap {MAX_MESSAGE_BYTES}")
+    if length > max_bytes:
+        raise ProtocolError(f"message length {length} exceeds cap {max_bytes}")
     try:
-        body = await reader.readexactly(length)
+        kind = await reader.readexactly(1)
+        if kind in (MsgType.PING.value, MsgType.PONG.value) and length > 4097:
+            raise ProtocolError("inspection message exceeds cap")
+        body = kind + await reader.readexactly(length - 1)
     except asyncio.IncompleteReadError:
         return None
     try:

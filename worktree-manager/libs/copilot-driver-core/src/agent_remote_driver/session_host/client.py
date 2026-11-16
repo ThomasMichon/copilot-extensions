@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,21 @@ class SessionHostClient:
         self._child_alive = True
         self._child_exit = 0
         self._closed = False
+        self._inspection_credential: str | None = None
+        self._inspection_child_pid = 0
+
+    async def inspect(self, *, timeout: float = 1.0) -> dict[str, Any]:
+        from .inspection import probe
+
+        if self._inspection_credential is None:
+            return {"state": "unsupported", "reason": "provider-has-no-read-only-inspection"}
+        peer = self._writer.get_extra_info("peername")
+        if not isinstance(peer, tuple) or len(peer) < 2:
+            return {"state": "unavailable", "reason": "inspection-route-unavailable"}
+        return await probe(
+            peer[0], peer[1], self._inspection_credential,
+            child_pid=self._inspection_child_pid, timeout=timeout,
+        )
 
     @classmethod
     async def connect(cls, host: str = "127.0.0.1", *, port: int) -> SessionHostClient:
@@ -72,6 +88,8 @@ class SessionHostClient:
         if len(payload) < 16:
             raise ConnectionError("session host HELLO has a truncated cursor/PID prefix")
         child_pid = proto.unpack_u64(payload[8:16])
+        self._inspection_credential = nonce.decode("utf-8", "replace")
+        self._inspection_child_pid = child_pid
         receipt = None
         if 16 < len(payload) <= 16 + MAX_RECEIPT_BYTES:
             try:
@@ -81,7 +99,7 @@ class SessionHostClient:
         return Hello(max_seq=proto.unpack_u64(payload[:8]),
                      child_pid=child_pid, preference_receipt=receipt)
 
-    async def frames(self):
+    async def frames(self) -> AsyncIterator[tuple[int, bytes]]:
         """Async-iterate ``(seq, frame_bytes)`` until the connection ends.
 
         A ``LIVENESS(dead)`` control message updates ``child_alive`` and ends

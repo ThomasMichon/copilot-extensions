@@ -38,6 +38,8 @@ _DRIVER_MODULES = (
     "session_host/__main__.py",
     "session_host/protocol.py",
     "session_host/client.py",
+    "session_host/inspection.py",
+    "session_host/support.py",
     "session_host/host.py",
     "session_host/osutil.py",
     "session_host/preference_spawn.py",

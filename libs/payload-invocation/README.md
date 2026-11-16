@@ -51,7 +51,39 @@ may select `direct`; the payload shim then invokes that same installer with
 `provision` and never consults a shared snapshot pointer.
 
 Manifest version 1 keeps the legacy runtime-root contract.
-Manifest version 2 renames that field to `legacyRuntimeRoot` and may set
+Both manifest versions may opt into `"bootstrapPython": "3.11.11"` to declare
+an exact stable CPython bootstrap-helper version. The stdlib-only generator
+validates that exact version's syntax and emits
+`scripts/bootstrap-python-version.txt`: one ASCII `cpython@<version>` request
+followed by a newline. Shell ingress needs no Python or TOML parser to read it;
+generation also needs no third-party packages or application metadata.
+Malformed helper requests refuse generation before output writes. Absent opt-in
+emits no scalar and leaves command/catalog bytes unchanged. The packaged
+generator and toolkit carry the new helper independently of scalar opt-in.
+After withdrawing opt-in, remove its old scalar explicitly: direct generation,
+checks and candidate materialization reject that obsolete output before writes.
+An existing catalog gate or dispatcher input retains ownership without opt-in;
+opting in with that conflicting destination is rejected before writes.
+An existing directory is not mistaken for an obsolete scalar file.
+Both producer helper loads and bootstrap validation suppress bytecode writes
+and restore the caller's prior setting on success or refusal.
+
+This is declaration delivery, not launcher adoption or acquisition authority.
+No production manifest currently opts in. A setup owner must qualify the
+shell-native PATH-UV provider before using the declaration; ordinary launch
+remains acquisition-free. Older generators ignore this optional field and do
+not emit the scalar. A future consumer must report a missing declaration as
+unsupported or unprepared setup, never use ambient Python as a fallback.
+Provider delivery precedes any caller migration. It is not the application's `.python-version`,
+completed-generation selector, wheel ABI target or lock. Those remain owned by
+the application-project and runtime-selection producers. A helper may require
+a different Python version from its addressed application. Application
+`requires-python`, wheel ABI and lock compatibility remain enforced by the
+existing application/profile admission owners (`runtime_profile.py` and
+`runtime_source_lock.py`); publishing this scalar does not admit an application
+or bypass those checks.
+
+Manifest version 2 renames `runtimeRoot` to `legacyRuntimeRoot` and may set
 `installationContext: "required"`. Required-context adoption is accepted only
 for runtime-bearing core `agent-*` identities defined by this suite; an
 independent marketplace may carry the same identity, but an unrelated or

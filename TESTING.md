@@ -2037,7 +2037,10 @@ retained controller. The permissions control reads actual POSIX modes under
 umask `022` or protected Windows DACL flags. Old UUID-named snapshots are not
 deleted or migrated, and storage is not claimed bounded across distinct inputs.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
-is unchanged. Local workers may use smaller serial selections when the complete
+is unchanged. Behavioral jobs emit verbose per-test progress and the ten slowest
+completed cases to distinguish preparation or case delays from outer cancellation;
+those diagnostics do not turn an interrupted packet into passing acceptance.
+Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
 Manual dispatch with `qualify_promotion_copies=true` additionally runs an
 opt-in Linux job against the exact selected source revision. It composes the
@@ -4336,6 +4339,24 @@ also tests bounded Windows transient-lock retries without retrying permanent
 errors or extending the original deadline.
 Expired source-lock consumption retains an active typed subprocess timeout
 and its diagnostics; successful consumption still checks the outer deadline.
+
+## Optional shell-native UV bootstrap provider
+
+`python -m pytest -q tools/test_uv_bootstrap_provider.py` exercises the separately
+delivered Worktrees provider in Windows PowerShell and PowerShell Core when
+available. Captured-boundary cases cover exact helper declarations, managed-only
+UV arguments, explicit preparation versus read-only lookup, missing prerequisites,
+confirmed exit/stream results and OS-policy refusal without fallback. The real
+materializer covers candidate delivery and refusal of a foreign replacement.
+
+The native lookup witness copies an already installed UV executable into an
+otherwise empty PATH and uses production `Invoke-Hidden` with private empty
+managed-Python/cache roots and downloads disabled. It proves an acquisition-free
+missing-toolchain result without PATH Python. It does not acquire an interpreter,
+qualify a fresh installation, prove managed-Python execution under Smart App
+Control, or migrate an installer/launcher. Missing UV/PowerShell is an explicit
+skip, not a pass. These subprocess packets remain on-demand, outside required
+unit-only PR testing.
 
 ## Optional stock Windows bootstrap building blocks
 
@@ -12240,6 +12261,16 @@ Manager's existing `tests/test_manager_engine_adapter.py` packet checks that
 source-qualified preparation copies the original pinned payload, not the
 dependency resolver's rewritten build manifests. Fresh runtime acceptance
 continues to verify the installed payload's original source identity.
+
+`worktree-manager/tests/test_runtime_candidate_identity.py` checks equivalent
+Windows native/ordinary path spellings in both candidate layouts, while retaining
+outside-package, outside-distribution and editable-install refusal.
+The guards reuse the existing installation-context containment owner.
+The explicit `tests/native/test_runtime_candidate_identity_native.py` selection
+replays the existing SDK metadata-health callback through a real interpreter and
+packaged Manager. It borrows test dependencies and does not fabricate frozen
+origin or completion evidence: full fresh construction, closed-wheel inputs,
+terminal exercise and installed rollout remain separate qualification.
 
 The existing `installation-context-full.yml` `vault-activation` portfolio runs
 the focused Vault launcher and cold configuration-capture regressions on both

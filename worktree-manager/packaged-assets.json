@@ -44,7 +44,7 @@
     {
       "canonicalDir": "libs/payload-invocation",
       "payloadDir": "scripts/runtime-input-provider/libs/payload-invocation",
-      "files": ["generate.py", "runtime_admission.py"]
+      "files": ["generate.py", "bootstrap_python.py", "runtime_admission.py"]
     },
     {
       "canonicalDir": "libs/installer-engine",

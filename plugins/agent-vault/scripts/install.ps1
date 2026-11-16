@@ -42,7 +42,7 @@ param(
     [switch]$Purge,
     [switch]$Force,
 
-    [ValidateSet('base', 'ssh')]
+    [ValidateSet('base', 'ssh', 'federated-relay', 'ssh-federated-relay')]
     [string]$Profile,
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
@@ -74,13 +74,13 @@ $NativeWheelSelection = $null
 
 
 if (-not $Profile -and $env:AGENT_VAULT_INSTALL_PROFILE) {
-    if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh')) {
+    if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh', 'federated-relay', 'ssh-federated-relay')) {
         throw 'Unsupported Vault installation profile'
     }
     $Profile = $env:AGENT_VAULT_INSTALL_PROFILE
 }
 if ($Profile) {
-    if ($Profile -cnotin @('base', 'ssh')) { throw 'Unsupported Vault installation profile' }
+    if ($Profile -cnotin @('base', 'ssh', 'federated-relay', 'ssh-federated-relay')) { throw 'Unsupported Vault installation profile' }
     if ($Action -notin @('install', 'update', 'stamp', 'provision')) {
         throw 'Vault dependency selection requires install, update, stamp or provision'
     }
@@ -658,8 +658,24 @@ function Get-BootstrapPython {
     return $null
 }
 
+function Get-VaultWheelProfile {
+    param([string]$RequestedProfile = '', [switch]$Persist)
+    $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
+        '--root', $InstallDir, 'select-wheels', '--selection',
+        ($NativeWheelSelection | ConvertTo-Json -Compress -Depth 10))
+    if ($RequestedProfile) { $arguments += @('--profile', $RequestedProfile) }
+    if ($Persist) { $arguments += '--persist' }
+    $result = Invoke-Hidden -FilePath $WheelPython -ArgList $arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Closed wheels differ from the selected Vault dependency profile' }
+    return ($result | ConvertFrom-Json)
+}
+
 function Get-PayloadHash {
     if ($NativeWheelSelection) {
+        if ($script:VaultWheelProfileSelection -and
+            (Get-VaultWheelProfile).profile -cne $script:VaultWheelProfileSelection.profile) {
+            throw 'Vault dependency profile changed after closed-wheel selection'
+        }
         return (Get-NativeWheelSelection -Python $WheelPython `
             -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
             -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' `
@@ -705,10 +721,10 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
-    if ($script:RuntimeProfile) { $vr = Get-RuntimeProfileHelper }
+    if ($script:RuntimeProfile -and -not $WheelProfile) { $vr = Get-RuntimeProfileHelper }
     $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
         -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' `
-        -Uv $WheelUv -HealthModule 'agent_vault' -Repair:$Force
+        -Uv $WheelUv -HealthModule $WheelHealthModule -HealthCallable $WheelHealthCallable -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
@@ -888,7 +904,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
+    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease', 'update-driver', 'credential-relay')) {
         $source = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"
@@ -1009,7 +1025,7 @@ function Install-Runtime {
         exit 1
     }
 
-    $pythonCmd = Resolve-PythonCommand
+    $pythonCmd = if ($WheelProfile) { $WheelPython } else { Resolve-PythonCommand }
     if (-not $pythonCmd) {
         Write-Fail 'Python not found on PATH (need 3.10+)'
         exit 1
@@ -1969,12 +1985,15 @@ $RuntimeProfile = ''
 $RuntimeProfilePython = ''
 $RuntimeProfileHelper = ''
 $RuntimeProfileInputs = $null
+$WheelHealthModule = 'agent_vault'
+$WheelHealthCallable = ''
+$VaultWheelProfileSelection = $null
 $installFailure = $null
 $profilePresent = $false
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     $profilePresent = Test-VaultRuntimeProfilePresent
 }
-if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
+if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
     $RuntimeProfilePython = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $Action -Root $InstallDir
     if (-not $RuntimeProfilePython) { throw 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' }
 }
@@ -1982,15 +2001,7 @@ if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-Sourc
 if ($WheelProfile) {
     Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
         -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' -Root $InstallDir
-    if ($Profile -or $profilePresent) {
-        $profileArguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
-            '--root', $InstallDir, 'select')
-        if ($Profile) { $profileArguments += @('--profile', $Profile) }
-        $selectedProfile = Invoke-Hidden -FilePath $WheelPython -ArgList $profileArguments
-        if ($LASTEXITCODE -ne 0 -or ($selectedProfile | ConvertFrom-Json).profile -cne 'base') {
-            throw 'This closed-wheel input does not replace the selected Vault dependency profile'
-        }
-    }
+    [void](Get-VaultWheelProfile -RequestedProfile $Profile)
 }
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision', 'schedule')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
@@ -2009,6 +2020,17 @@ try {
     }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) {
         $profilePresent = Test-VaultRuntimeProfilePresent
+    }
+    if ($WheelProfile) {
+        [void](Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $ScriptDir 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' `
+            -Expected $NativeWheelSelection)
+        $selected = Get-VaultWheelProfile -RequestedProfile $Profile -Persist:(-not $DryRun)
+        if (-not $DryRun) { $VaultWheelProfileSelection = $selected }
+        if ($Profile -or $profilePresent) { $RuntimeProfile = $selected.profile }
+        $WheelHealthModule = $selected.health_module
+        $WheelHealthCallable = [string]$selected.health_callable
     }
     if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
         if (-not $RuntimeProfilePython) {
