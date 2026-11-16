@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Cold bootstrap source completion and retained keepers](journal/2026/11.16-cold-bootstrap-source-completion.md)
+
 - [2026-11-15 - Title-bound ready frontier](journal/2026/11.15-title-bound-ready-frontier.md)
 
 - [2026-11-14 - Accepted receivers and the next owner frontier](journal/2026/11.14-accepted-receivers-and-owner-frontier.md)
