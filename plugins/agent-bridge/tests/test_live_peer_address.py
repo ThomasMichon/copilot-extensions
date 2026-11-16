@@ -6,39 +6,52 @@ import argparse
 import asyncio
 import time
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from ssh_manager import CarrierRemoteError, Envelope, EnvelopeType
 
-from agent_bridge import __main__ as cli
+from agent_bridge import __main__ as cli_module
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.db import Database
+from agent_bridge.events import EventLog
 from agent_bridge.live_peer_address import LivePeerAddress
-from agent_bridge.live_representation import LiveEventStore
+from agent_bridge.live_representation import LiveEventStore, TurnReply
 from agent_bridge.remote_operations import CarrierRequestRouter, RemoteOperationService
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION, HTTP_PROTOCOL_MIN_SUPPORTED
 from agent_bridge.routes import live_sessions, remote
 
 
+# The CLI facade forwards private entrypoints and monkeypatches to their owners.
+cli: Any = cli_module
+
+
 class _HttpClient(BridgeClient):
-    def __init__(self, app):
+    def __init__(self, app: FastAPI) -> None:
         super().__init__("http://testserver", "fixture-token", connect_grace=0)
         self.http = TestClient(app)
 
-    def _request(self, method, path, data=None, *, params=None, request_timeout=None,
-                 allow_retry=True, _endpoint=None):
+    def _request(
+        self, method: str, path: str, data: dict[str, Any] | None = None, *,
+        params: dict[str, Any] | list[tuple[str, Any]] | None = None,
+        request_timeout: float | None = None, allow_retry: bool = True,
+        _endpoint: str | None = None,
+    ) -> dict[str, Any]:
         assert _endpoint in (None, self._base)
         response = self.http.request(method, path, json=data, params=params)
         if response.status_code >= 400:
             raise BridgeClientError(response.status_code, response.json().get("detail"))
-        return response.json()
+        return cast(dict[str, Any], response.json())
 
 
-def _bridge(db, *, protocol_version=HTTP_PROTOCOL_VERSION):
+def _bridge(
+    db: Database, *, protocol_version: int = HTTP_PROTOCOL_VERSION,
+) -> tuple[FastAPI, _HttpClient]:
     app = FastAPI()
     app.state.db = db
     app.state.live_event_store = LiveEventStore()
@@ -47,14 +60,17 @@ def _bridge(db, *, protocol_version=HTTP_PROTOCOL_VERSION):
     app.include_router(remote.router)
 
     @app.get("/health")
-    def health():
+    def health() -> dict[str, int]:
         return {"protocol_version": app.state.protocol_version,
                 "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED}
 
     return app, _HttpClient(app)
 
 
-def _register(db, sid, machine, project="project-a", worktree="wt-a", *, now=None):
+def _register(
+    db: Database, sid: str, machine: str | None, project: str | None = "project-a",
+    worktree: str | None = "wt-a", *, now: float | None = None,
+) -> None:
     assert db.register_live_session(
         sid, machine=machine, cwd=None, worktree_id=worktree, repo=project,
         branch=None, pid=None, role=None, now=now if now is not None else time.time(),
@@ -62,7 +78,9 @@ def _register(db, sid, machine, project="project-a", worktree="wt-a", *, now=Non
 
 
 @pytest.mark.parametrize("project", ["project-a", "owner/repo"])
-def test_qualified_handle_survives_turnover_and_database_reopen(tmp_path, project):
+def test_qualified_handle_survives_turnover_and_database_reopen(
+    tmp_path: Path, project: str,
+) -> None:
     path = tmp_path / "bridge.db"
     db = Database(path)
     try:
@@ -70,12 +88,16 @@ def test_qualified_handle_survives_turnover_and_database_reopen(tmp_path, projec
         _register(db, "new", "host-a", project=project, now=time.time() + 1)
         _register(db, "other-project", "host-a", project="project-b", now=time.time() + 2)
         _register(db, "other-machine", "host-b", project=project, now=time.time() + 3)
-        assert db.resolve_live_session(f"live:host-a:{project}:wt-a", now=time.time())["session_id"] == "new"
+        assert cast(dict[str, Any], db.resolve_live_session(
+            f"live:host-a:{project}:wt-a", now=time.time(),
+        ))["session_id"] == "new"
     finally:
         db.close()
     db = Database(path)
     try:
-        assert db.resolve_live_session(f"live:host-a:{project}:wt-a", now=time.time())["session_id"] == "new"
+        assert cast(dict[str, Any], db.resolve_live_session(
+            f"live:host-a:{project}:wt-a", now=time.time(),
+        ))["session_id"] == "new"
         assert db.resolve_live_session("live:host-a:missing:wt-a", now=time.time()) is None
         assert db.resolve_live_session(f"live:host-a:{project}:wt-a", now=time.time() + 3600) is None
     finally:
@@ -86,11 +108,14 @@ def test_qualified_handle_survives_turnover_and_database_reopen(tmp_path, projec
     "live:host:project:wt", "live:host", "live:host:project:wt:extra",
 ])
 def test_exact_live_namespace_session_ids_keep_precedence_through_http_and_cli(
-    tmp_db, monkeypatch, capsys, handle,
-):
+    tmp_db: Database, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    handle: str,
+) -> None:
     _register(tmp_db, handle, "other-host", project="other-project", worktree="exact-wt")
     _register(tmp_db, "qualified-peer", "host", project="project", worktree="wt")
-    assert tmp_db.resolve_live_session(handle, now=time.time())["session_id"] == handle
+    assert cast(dict[str, Any], tmp_db.resolve_live_session(
+        handle, now=time.time(),
+    ))["session_id"] == handle
     _app, client = _bridge(tmp_db)
     assert client.resolve_live_session(handle)["session_id"] == handle
     monkeypatch.setattr(cli, "_get_client", lambda: client)
@@ -107,7 +132,9 @@ def test_exact_live_namespace_session_ids_keep_precedence_through_http_and_cli(
     "live:", "live:a:b", "live:a:b:c:d", "live:a:b:../c", "live:a/b:c:d",
     "live:a:b:c/d", "live:a:/b:c", "live:a:b/:c", "live:a:b//c:d", "live:a:b/../c:d",
 ])
-def test_invalid_explicit_address_never_spawns(monkeypatch, capsys, handle):
+def test_invalid_explicit_address_never_spawns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], handle: str,
+) -> None:
     monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: None))
     monkeypatch.setattr(cli, "_resolve_target", lambda *_a, **_k: pytest.fail("agent fallback"))
     with pytest.raises(SystemExit) as refused:
@@ -117,8 +144,8 @@ def test_invalid_explicit_address_never_spawns(monkeypatch, capsys, handle):
 
 
 @pytest.mark.guard
-def test_unavailable_explicit_address_never_spawns(monkeypatch):
-    def unavailable(*_a, **_k):
+def test_unavailable_explicit_address_never_spawns(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(*_a: Any, **_k: Any) -> Any:
         raise BridgeClientError(404, "no live session for handle")
 
     client = SimpleNamespace(resolve_live_session=lambda _: {}, send_remote_live_message=unavailable)
@@ -137,9 +164,10 @@ def test_unavailable_explicit_address_never_spawns(monkeypatch):
 @pytest.mark.parametrize("caller_qualified", [True, False])
 @pytest.mark.parametrize("reply_timeout", [0.0, 0.25, 2.0, 600.0])
 def test_two_bridge_call_and_reverse_reply_preserve_addresses(
-    tmp_path, monkeypatch, capsys, idempotency_key, project, logical_siblings, caller_qualified,
-    reply_timeout,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    idempotency_key: str | None, project: str, logical_siblings: bool, caller_qualified: bool,
+    reply_timeout: float,
+) -> None:
     machine_a, machine_b = "host-a", "host-b"
     if logical_siblings:
         from agent_bridge.topology import parse_machines_yaml
@@ -167,11 +195,13 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
                   worktree="wt-a", now=time.time() + 3)
 
         class Carrier:
-            def __init__(self, client):
+            def __init__(self, client: BridgeClient) -> None:
                 self.router = CarrierRequestRouter(lambda: client)
 
-            async def request(self, payload, **_kwargs):
-                result = await self.router(Envelope(EnvelopeType.REQUEST, payload=payload))
+            async def request(self, payload: dict[str, Any], **_kwargs: Any) -> Envelope:
+                result = cast(Envelope, await self.router(
+                    Envelope(EnvelopeType.REQUEST, payload=payload),
+                ))
                 if result.type is EnvelopeType.ERROR:
                     raise CarrierRemoteError(result.payload)
                 assert result.type is EnvelopeType.RESPONSE, result.payload
@@ -180,19 +210,25 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         for app, client, host, target_client in (
             (a_app, a_client, machine_b, b_client), (b_app, b_client, machine_a, a_client),
         ):
-            service = RemoteOperationService(SimpleNamespace())
+            service = RemoteOperationService(cast(Any, SimpleNamespace()))
             carrier = Carrier(target_client)
 
-            async def lease(requested_host, *, expected_host=host, carrier=carrier):
+            async def lease(
+                requested_host: str, *, expected_host: str = host, carrier: Carrier = carrier,
+            ) -> SimpleNamespace:
                 assert requested_host == expected_host
                 return SimpleNamespace(carrier=carrier, release=_release)
 
-            service._lease = lease
+            monkeypatch.setattr(service, "_lease", lease)
             app.state.remote_operations = service
 
-        original_wait = live_sessions.await_turn_reply
+        original_wait = cast(
+            Callable[..., Awaitable[TurnReply]], getattr(live_sessions, "await_turn_reply"),
+        )
 
-        async def reply(log, *, after, timeout, message_id):
+        async def reply(
+            log: EventLog, *, after: int, timeout: float, message_id: int,
+        ) -> TurnReply:
             for app, db, client in ((a_app, a_db, a_client), (b_app, b_db, b_client)):
                 for sid in ("a-old", "a-new", "b-current"):
                     if app.state.live_event_store.get(sid) is not log:
@@ -207,7 +243,9 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
                         }]},
                     )
                     assert consumed.status_code == 200, consumed.text
-                    assert db.live_message_receipt(sid, message_id)["stage"] == "consumed"
+                    assert cast(dict[str, Any], db.live_message_receipt(
+                        sid, message_id,
+                    ))["stage"] == "consumed"
                     break
                 else:
                     continue
@@ -292,19 +330,24 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         b_db.close()
 
 
-async def _release():
+async def _release() -> None:
     pass
 
 
 @pytest.mark.guard
-def test_qualified_peer_default_does_not_wait_for_a_reply():
+def test_qualified_peer_default_does_not_wait_for_a_reply() -> None:
     from agent_bridge.live_peer_address import send_remote_peer
 
-    calls = []
-    client = SimpleNamespace(send_remote_live_message=lambda *_a, **kwargs:
-                             calls.append(kwargs) or {"message_id": 1})
+    calls: list[dict[str, Any]] = []
+
+    def send(*_a: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"message_id": 1}
+
+    client = cast(BridgeClient, SimpleNamespace(send_remote_live_message=send))
     result = send_remote_peer(
-        client, argparse.Namespace(no_wait=False), LivePeerAddress.parse("live:host-b:project-a:wt-b"),
+        client, argparse.Namespace(no_wait=False),
+        cast(LivePeerAddress, LivePeerAddress.parse("live:host-b:project-a:wt-b")),
         sender="peer", reply_to=None, kind="prompt", delivery="steer", prompt="hello",
     )
     assert result["message_id"] == 1
@@ -314,8 +357,9 @@ def test_qualified_peer_default_does_not_wait_for_a_reply():
 @pytest.mark.guard
 @pytest.mark.parametrize("reply_timeout", [0.0, 0.05])
 def test_remote_cli_zero_and_fractional_waits_return_admission(
-    tmp_path, monkeypatch, capsys, reply_timeout,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    reply_timeout: float,
+) -> None:
     source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
     try:
         _register(hosting, "recipient", "host-b", worktree="wt-b")
@@ -347,7 +391,9 @@ def test_remote_cli_zero_and_fractional_waits_return_admission(
 
 @pytest.mark.guard
 @pytest.mark.parametrize("timeout", [-0.1, -1.0, 601.0, float("nan"), float("inf")])
-def test_remote_client_invalid_reply_timeout_never_submits(monkeypatch, timeout):
+def test_remote_client_invalid_reply_timeout_never_submits(
+    monkeypatch: pytest.MonkeyPatch, timeout: float,
+) -> None:
     client = BridgeClient("http://testserver", "fixture-token", connect_grace=0)
     monkeypatch.setattr(client, "_request", lambda *_a, **_k: pytest.fail("invalid input reached HTTP"))
     with pytest.raises(BridgeClientError) as refused:
@@ -360,7 +406,7 @@ def test_remote_client_invalid_reply_timeout_never_submits(monkeypatch, timeout)
 
 @pytest.mark.guard
 @pytest.mark.parametrize("timeout", [0.0, 0.25, 600.0])
-def test_remote_wait_validator_matches_local_numeric_bounds(timeout):
+def test_remote_wait_validator_matches_local_numeric_bounds(timeout: float) -> None:
     from agent_bridge.live_peer_address import peer_wait_timeout
     from agent_bridge.live_message_models import validate_live_reply_timeout
 
@@ -369,17 +415,17 @@ def test_remote_wait_validator_matches_local_numeric_bounds(timeout):
 
 @pytest.mark.guard
 @pytest.mark.parametrize("timeout", [-0.1, 601.0, float("nan"), float("inf"), None, True])
-def test_remote_carrier_invalid_reply_timeout_never_resolves(timeout):
-    client = SimpleNamespace(
+def test_remote_carrier_invalid_reply_timeout_never_resolves(timeout: float | None) -> None:
+    client = cast(BridgeClient, SimpleNamespace(
         daemon_supports=lambda _: True,
         resolve_live_session=lambda *_a, **_k: pytest.fail("invalid wait reached recipient resolution"),
-    )
+    ))
     router = CarrierRequestRouter(lambda: client)
-    response = asyncio.run(router(Envelope(EnvelopeType.REQUEST, payload={
+    response = cast(Envelope, asyncio.run(router(Envelope(EnvelopeType.REQUEST, payload={
         "version": 5, "operation": "live_session.send",
         "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
         "wait": True, "wait_timeout": timeout, "qualified_peer": True,
-    })))
+    }))))
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "invalid_request"
 
@@ -387,20 +433,20 @@ def test_remote_carrier_invalid_reply_timeout_never_resolves(timeout):
 @pytest.mark.parametrize(("wait", "version"), [(False, 4), (True, 5)])
 @pytest.mark.guard
 @pytest.mark.asyncio
-async def test_remote_receipt_wait_selects_its_carrier_version(wait, version):
-    requests = []
+async def test_remote_receipt_wait_selects_its_carrier_version(wait: bool, version: int) -> None:
+    requests: list[dict[str, Any]] = []
 
     class Carrier:
-        async def request(self, payload, **_kwargs):
+        async def request(self, payload: dict[str, Any], **_kwargs: Any) -> Envelope:
             requests.append(payload)
             return Envelope(EnvelopeType.RESPONSE, payload={"result": {"message_id": 1}})
 
-    service = RemoteOperationService(SimpleNamespace())
+    service = RemoteOperationService(cast(Any, SimpleNamespace()))
 
-    async def lease(_host):
+    async def lease(_host: str) -> SimpleNamespace:
         return SimpleNamespace(carrier=Carrier(), release=_release)
 
-    service._lease = lease
+    cast(Any, service)._lease = lease
     await service.send_live_message(
         "host-b", "live:host-b:project-a:wt-b", sender="peer", message="hello",
         kind="prompt", wait=wait, qualified_peer=True,
@@ -415,51 +461,53 @@ async def test_remote_receipt_wait_selects_its_carrier_version(wait, version):
 
 @pytest.mark.asyncio
 @pytest.mark.guard
-async def test_old_carrier_refuses_receipt_wait_before_delivery(monkeypatch):
+async def test_old_carrier_refuses_receipt_wait_before_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("agent_bridge.remote_operations._REMOTE_OPERATION_VERSIONS", {1, 2, 3, 4})
     router = CarrierRequestRouter(lambda: pytest.fail("legacy carrier must not deliver"))
-    response = await router(Envelope(EnvelopeType.REQUEST, payload={
+    response = cast(Envelope, await router(Envelope(EnvelopeType.REQUEST, payload={
         "version": 5, "operation": "live_session.send",
         "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
         "qualified_peer": True, "wait": True,
-    }))
-    assert response.type is EnvelopeType.ERROR
-    assert response.payload["code"] == "unsupported_version"
-
-
-@pytest.mark.guard
-def test_old_carrier_rejects_new_contract_before_delivery():
-    router = CarrierRequestRouter(lambda: pytest.fail("client must not be reached"))
-    response = asyncio.run(router(Envelope(EnvelopeType.REQUEST, payload={
-        "version": 3, "operation": "live_session.send",
-        "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
-        "qualified_peer": True,
     })))
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "unsupported_version"
 
 
-def test_old_hosting_bridge_rejects_reply_contract_before_delivery():
-    client = SimpleNamespace(
+@pytest.mark.guard
+def test_old_carrier_rejects_new_contract_before_delivery() -> None:
+    router = CarrierRequestRouter(lambda: pytest.fail("client must not be reached"))
+    response = cast(Envelope, asyncio.run(router(Envelope(EnvelopeType.REQUEST, payload={
+        "version": 3, "operation": "live_session.send",
+        "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
+        "qualified_peer": True,
+    }))))
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "unsupported_version"
+
+
+def test_old_hosting_bridge_rejects_reply_contract_before_delivery() -> None:
+    client = cast(BridgeClient, SimpleNamespace(
         daemon_supports=lambda _: False,
         resolve_live_session=lambda _: pytest.fail("must not resolve on unsupported daemon"),
-    )
-    response = asyncio.run(CarrierRequestRouter(lambda: client)(
+    ))
+    response = cast(Envelope, asyncio.run(CarrierRequestRouter(lambda: client)(
         Envelope(EnvelopeType.REQUEST, payload={
             "version": 4, "operation": "live_session.send", "target": "live:host-b:project-a:wt-b",
             "sender": "peer", "message": "hello",
             "qualified_peer": True,
         }),
-    ))
+    )))
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "unsupported_version"
     assert "HTTP protocol 35" in response.payload["message"]
 
 
-def test_old_local_bridge_refuses_qualified_lookup_before_http():
+def test_old_local_bridge_refuses_qualified_lookup_before_http() -> None:
     client = BridgeClient.__new__(BridgeClient)
-    client.daemon_supports = lambda _: False
-    client._request = lambda *_a, **_k: pytest.fail("HTTP must not be reached")
+    cast(Any, client).daemon_supports = lambda _: False
+    cast(Any, client)._request = lambda *_a, **_k: pytest.fail("HTTP must not be reached")
     with pytest.raises(BridgeClientError) as refused:
         client.resolve_live_session("live:host-a:project-a:wt-a", qualified_peer=True)
     assert refused.value.status == 426
@@ -467,23 +515,23 @@ def test_old_local_bridge_refuses_qualified_lookup_before_http():
 
 
 @pytest.mark.parametrize("handle", ["live:host", "live:host:project:wt", "live:host:project:wt:extra"])
-def test_old_http_bridge_exact_lookup_precedes_capability_check(handle):
+def test_old_http_bridge_exact_lookup_precedes_capability_check(handle: str) -> None:
     client = BridgeClient.__new__(BridgeClient)
-    client.daemon_supports = lambda _: pytest.fail("an exact lookup needs no new capability")
-    client._request = lambda *_a, **_k: {"session_id": handle}
+    cast(Any, client).daemon_supports = lambda _: pytest.fail("an exact lookup needs no new capability")
+    cast(Any, client)._request = lambda *_a, **_k: {"session_id": handle}
     assert client.resolve_live_session(handle)["session_id"] == handle
 
 
-def test_missing_live_handle_checks_old_http_capability_only_after_404():
+def test_missing_live_handle_checks_old_http_capability_only_after_404() -> None:
     client = BridgeClient.__new__(BridgeClient)
-    queried = []
+    queried: list[bool] = []
 
-    def request(*_a, **_k):
+    def request(*_a: Any, **_k: Any) -> Any:
         queried.append(True)
         raise BridgeClientError(404, "not found")
 
-    client._request = request
-    client.daemon_supports = lambda _: False if queried else pytest.fail("must query first")
+    cast(Any, client)._request = request
+    cast(Any, client).daemon_supports = lambda _: False if queried else pytest.fail("must query first")
     with pytest.raises(BridgeClientError) as refused:
         client.resolve_live_session("live:host:project:wt")
     assert refused.value.status == 426 and queried == [True]
@@ -491,12 +539,12 @@ def test_missing_live_handle_checks_old_http_capability_only_after_404():
 
 
 @pytest.mark.parametrize("operation", ["resolve", "send"])
-def test_remote_peer_capability_diagnostic_matches_current_floor(operation):
+def test_remote_peer_capability_diagnostic_matches_current_floor(operation: str) -> None:
     client = BridgeClient.__new__(BridgeClient)
-    client._require_remote_operations = lambda: None
-    client._require_remote_commands = lambda: None
-    client.daemon_supports = lambda _: False
-    client._request = lambda *_a, **_k: pytest.fail("HTTP must not be reached")
+    cast(Any, client)._require_remote_operations = lambda: None
+    cast(Any, client)._require_remote_commands = lambda: None
+    cast(Any, client).daemon_supports = lambda _: False
+    cast(Any, client)._request = lambda *_a, **_k: pytest.fail("HTTP must not be reached")
     with pytest.raises(BridgeClientError) as refused:
         if operation == "resolve":
             client.resolve_remote_live_session(
@@ -511,29 +559,31 @@ def test_remote_peer_capability_diagnostic_matches_current_floor(operation):
     assert "HTTP protocol 35" in str(refused.value)
 
 
-def _route_through_versioned_carrier(app, hosting_client, carrier_version):
-    packets = []
+def _route_through_versioned_carrier(
+    app: FastAPI, hosting_client: BridgeClient, carrier_version: int,
+) -> list[dict[str, Any]]:
+    packets: list[dict[str, Any]] = []
 
     class Carrier:
-        async def request(self, payload, **_kwargs):
+        async def request(self, payload: dict[str, Any], **_kwargs: Any) -> Envelope:
             packets.append(dict(payload))
             if payload["version"] > carrier_version:
                 raise CarrierRemoteError({
                     "code": "unsupported_version", "message": "carrier version unsupported",
                 })
-            result = await CarrierRequestRouter(lambda: hosting_client)(
+            result = cast(Envelope, await CarrierRequestRouter(lambda: hosting_client)(
                 Envelope(EnvelopeType.REQUEST, payload=payload),
-            )
+            ))
             if result.type is EnvelopeType.ERROR:
                 raise CarrierRemoteError(result.payload)
             return result
 
-    service = RemoteOperationService(SimpleNamespace())
+    service = RemoteOperationService(cast(Any, SimpleNamespace()))
 
-    async def lease(_host):
+    async def lease(_host: str) -> SimpleNamespace:
         return SimpleNamespace(carrier=Carrier(), release=_release)
 
-    service._lease = lease
+    cast(Any, service)._lease = lease
     app.state.remote_operations = service
     return packets
 
@@ -544,8 +594,8 @@ def _route_through_versioned_carrier(app, hosting_client, carrier_version):
 @pytest.mark.parametrize("carrier_version", [4, 5])
 @pytest.mark.guard
 def test_receipt_wait_skew_refuses_before_remote_admission(
-    tmp_path, wait, source_version, hosting_version, carrier_version,
-):
+    tmp_path: Path, wait: bool, source_version: int, hosting_version: int, carrier_version: int,
+) -> None:
     source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
     try:
         _register(hosting, "recipient", "host-b", worktree="wt-b")
@@ -557,7 +607,7 @@ def test_receipt_wait_skew_refuses_before_remote_admission(
             and hosting_version >= HTTP_PROTOCOL_VERSION and carrier_version >= 5
         )
 
-        def send():
+        def send() -> dict[str, Any]:
             return source_client.send_remote_live_message(
                 "host-b", "live:host-b:project-a:wt-b", sender="peer", message="hello",
                 wait=wait, wait_timeout=1.0, qualified_peer=True,
@@ -586,15 +636,15 @@ def test_receipt_wait_skew_refuses_before_remote_admission(
 @pytest.mark.parametrize("carrier_version", [3, 4])
 @pytest.mark.parametrize("hosting_version", [32, 35])
 def test_remote_exact_ids_keep_legacy_carrier_and_http_compatibility(
-    tmp_path, handle, carrier_version, hosting_version,
-):
+    tmp_path: Path, handle: str, carrier_version: int, hosting_version: int,
+) -> None:
     source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
     try:
         _register(hosting, handle, "host", project="other-project", worktree="exact-wt")
         _register(hosting, "qualified-peer", "host", project="project", worktree="wt")
         source_app, source_client = _bridge(source)
         _hosting_app, hosting_client = _bridge(hosting)
-        hosting_client.daemon_supports = lambda version: version <= hosting_version
+        cast(Any, hosting_client).daemon_supports = lambda version: version <= hosting_version
         packets = _route_through_versioned_carrier(source_app, hosting_client, carrier_version)
         assert source_client.resolve_remote_live_session("host", handle)["session_id"] == handle
         result = source_client.send_remote_live_message(
@@ -611,8 +661,8 @@ def test_remote_exact_ids_keep_legacy_carrier_and_http_compatibility(
 
 @pytest.mark.parametrize("carrier_version,hosting_version", [(3, 35), (4, 32), (4, 35)])
 def test_explicit_remote_qualified_mode_is_fenced_and_cannot_hit_a_colliding_exact_id(
-    tmp_path, carrier_version, hosting_version,
-):
+    tmp_path: Path, carrier_version: int, hosting_version: int,
+) -> None:
     source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
     address = "live:host:project:wt"
     try:
@@ -620,7 +670,7 @@ def test_explicit_remote_qualified_mode_is_fenced_and_cannot_hit_a_colliding_exa
         _register(hosting, "qualified-peer", "host", project="project", worktree="wt")
         source_app, source_client = _bridge(source)
         _hosting_app, hosting_client = _bridge(hosting)
-        hosting_client.daemon_supports = lambda version: version <= hosting_version
+        cast(Any, hosting_client).daemon_supports = lambda version: version <= hosting_version
         packets = _route_through_versioned_carrier(source_app, hosting_client, carrier_version)
         if carrier_version == 4 and hosting_version == 35:
             result = source_client.send_remote_live_message(
@@ -642,13 +692,15 @@ def test_explicit_remote_qualified_mode_is_fenced_and_cannot_hit_a_colliding_exa
         hosting.close()
 
 
-def test_address_metadata_is_not_a_session_id():
+def test_address_metadata_is_not_a_session_id() -> None:
     assert str(LivePeerAddress.from_registration({
         "machine": "host-a", "repo": "project-a", "worktree_id": "wt-a", "session_id": "temporary",
     })) == "live:host-a:project-a:wt-a"
 
 
-def test_registered_caller_address_does_not_require_worktrees_sibling(monkeypatch):
+def test_registered_caller_address_does_not_require_worktrees_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cli, "_worktrees_get", lambda _: None)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller")
     client = SimpleNamespace(resolve_live_session=lambda _: {
@@ -658,7 +710,9 @@ def test_registered_caller_address_does_not_require_worktrees_sibling(monkeypatc
     assert cli._live_reply_to(argparse.Namespace()) == "live:host-a:project-a:wt-a"
 
 
-def test_unrepresented_hosted_caller_keeps_legacy_bridge_handle(monkeypatch):
+def test_unrepresented_hosted_caller_keeps_legacy_bridge_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cli, "_worktrees_get", lambda _: None)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "conversation")
     monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "bridge-session")
@@ -673,7 +727,9 @@ def test_unrepresented_hosted_caller_keeps_legacy_bridge_handle(monkeypatch):
     {"machine": "host-a", "repo": "project name", "worktree_id": "wt-a"},
     {"machine": "host-a", "repo": "project-a", "worktree_id": "work tree"},
 ])
-def test_unencodable_registration_keeps_legacy_reply_with_warning(monkeypatch, capsys, metadata):
+def test_unencodable_registration_keeps_legacy_reply_with_warning(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], metadata: dict[str, str],
+) -> None:
     monkeypatch.setattr(cli, "_worktrees_get", lambda _: None)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller")
     monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "legacy-bridge-session")
@@ -688,14 +744,15 @@ def test_unencodable_registration_keeps_legacy_reply_with_warning(monkeypatch, c
 @pytest.mark.parametrize("version", [32, 34])
 @pytest.mark.parametrize("worktree", [None, "wt-caller"])
 def test_new_payload_old_daemon_cli_call_and_reverse_reply_use_legacy_handle(
-    tmp_db, monkeypatch, capsys, version, worktree,
-):
+    tmp_db: Database, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    version: int, worktree: str | None,
+) -> None:
     _register(tmp_db, "caller-session", "host-a", worktree="wt-caller")
     _register(tmp_db, "recipient", "host-a", worktree="wt-recipient")
     collision = "live:host-a:project-a:wt-caller"
     _register(tmp_db, collision, "other-host", worktree="wt-collision")
     _app, client = _bridge(tmp_db)
-    client.daemon_supports = lambda floor: version >= floor
+    cast(Any, client).daemon_supports = lambda floor: version >= floor
     monkeypatch.setattr(cli, "_get_client", lambda: client)
     monkeypatch.setattr(cli, "_live_sender_label", lambda _: "caller")
     monkeypatch.setattr(
@@ -721,17 +778,18 @@ def test_new_payload_old_daemon_cli_call_and_reverse_reply_use_legacy_handle(
 @pytest.mark.parametrize("version", [32, 34])
 @pytest.mark.parametrize("worktree", [None, "wt-caller"])
 def test_new_payload_old_daemon_keeps_legacy_automatic_reply(
-    monkeypatch, capsys, version, worktree,
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    version: int, worktree: str | None,
+) -> None:
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller-conversation")
     monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "caller-session")
     monkeypatch.setattr(
         cli, "_worktrees_get",
         lambda key: f"C:/worktrees/{worktree}" if key == "worktree-dir" and worktree else None,
     )
-    checked = []
+    checked: list[int] = []
 
-    def supports(floor):
+    def supports(floor: int) -> bool:
         checked.append(floor)
         return version >= floor
 
@@ -747,11 +805,19 @@ def test_new_payload_old_daemon_keeps_legacy_automatic_reply(
 @pytest.mark.parametrize("wait_timeout,timeout", [
     (120.0, 135.0), (600.0, 615.0), (1.0, 20.0), (0.0, 20.0), (0.25, 20.0),
 ])
-def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, wait_timeout, timeout):
-    captured = {}
+def test_waited_client_defaults_cover_operation_and_read_deadlines(
+    monkeypatch: pytest.MonkeyPatch, wait_timeout: float, timeout: float,
+) -> None:
+    from agent_bridge.remote_timeouts import REMOTE_CARRIER_STARTUP_TIMEOUT
+
+    captured: dict[str, Any] = {}
     client = BridgeClient("http://testserver", "fixture-token", connect_grace=0)
 
-    def request(method, path, data=None, *, request_timeout=None, allow_retry=True, _endpoint=None):
+    def request(
+        method: str, path: str, data: dict[str, Any] | None = None, *,
+        request_timeout: float | None = None, allow_retry: bool = True,
+        _endpoint: str | None = None,
+    ) -> dict[str, Any]:
         if path == "/health":
             assert _endpoint in (None, client._base)
             return {"protocol_version": HTTP_PROTOCOL_VERSION,
@@ -767,26 +833,30 @@ def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, 
         message="call", wait=True, wait_timeout=wait_timeout,
     )
     assert captured["data"]["timeout"] == timeout
-    assert captured["read_timeout"] == timeout + 15.0
+    assert captured["read_timeout"] == REMOTE_CARRIER_STARTUP_TIMEOUT + timeout + 15.0
 
 
 @pytest.mark.parametrize("wait_timeout,timeout", [
     (None, 135.0), (600.0, 615.0), (1.0, 20.0), (0.0, 20.0), (0.25, 20.0),
 ])
-def test_waited_http_defaults_cover_carrier_deadline(tmp_path, wait_timeout, timeout):
+def test_waited_http_defaults_cover_carrier_deadline(
+    tmp_path: Path, wait_timeout: float | None, timeout: float,
+) -> None:
     db = Database(tmp_path / "http.db")
     try:
         app, client = _bridge(db)
-        service = RemoteOperationService(SimpleNamespace())
+        service = RemoteOperationService(cast(Any, SimpleNamespace()))
         app.state.remote_operations = service
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        async def request(host, payload, *, timeout):
+        async def request(
+            host: str, payload: dict[str, Any], *, timeout: float | None,
+        ) -> dict[str, Any]:
             captured.update(timeout=timeout, payload=payload)
             return {"result": {"message_id": 1}}
 
-        service._request = request
-        body = {"sender": "peer", "message": "call", "wait": True}
+        cast(Any, service)._request = request
+        body: dict[str, Any] = {"sender": "peer", "message": "call", "wait": True}
         if wait_timeout is not None:
             body["wait_timeout"] = wait_timeout
         response = client.http.post(

@@ -922,7 +922,7 @@ def test_http51_observer_payload_abbreviations(tmp_path, mode):
     from test_payload_invocation import test_passive_observer_attributed_payload_never_provisions
 
     shell = (
-        "powershell" if shutil.which("powershell") else "pwsh"
+        "pwsh" if shutil.which("pwsh") else "powershell"
     ) if os.name == "nt" else "bash"
     assert shutil.which(shell), "the capture requires its native fixture shell"
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())

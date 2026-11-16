@@ -11,7 +11,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import yaml
 
@@ -25,6 +25,7 @@ from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
 from .client_worktrees import InventoryClientMixin
 from .client_status import StatusClientMixin
+from .remote_timeouts import REMOTE_CARRIER_STARTUP_TIMEOUT
 if TYPE_CHECKING:
     from collections.abc import Callable
 DEFAULT_RESTART_GRACE = 30.0
@@ -328,14 +329,14 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         observation = current()
         if method == "GET" and observation is not None and not observation.clock.ready:
             observation.check()
-            return observation.preflight(lambda: self._request(
+            return cast(dict[str, Any] | None, observation.preflight(lambda: self._request(
                 method, path, body, params=params, allow_retry=allow_retry,
                 _endpoint=_endpoint,
                 request_timeout=min(
                     self._timeout if request_timeout is None else request_timeout,
                     observation.clock.remaining() or .001,
                 ),
-            ))
+            )))
         data = json.dumps(body).encode() if body else None
 
         def _build_request() -> urllib.request.Request:
@@ -357,6 +358,8 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             if data:
                 request.add_header("Content-Type", "application/json")
             return request
+
+        req: urllib.request.Request
 
         def _follow_active_endpoint() -> bool:
             """Rebuild the request if endpoint discovery reports a new daemon."""
@@ -388,7 +391,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                     self._mark_connected()
                     if resp.status == 204:
                         return None
-                    return json.loads(resp.read().decode())
+                    return cast(dict[str, Any], json.loads(resp.read().decode()))
             except urllib.error.HTTPError as exc:
                 # The daemon answered, so any continuous connection outage has
                 # ended even when this particular resource is unavailable.
@@ -650,8 +653,9 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         self, *, project: str | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """GET /api/v1/agents, including invalid-topology diagnostics."""
+        options: dict[str, Any] = {"project": project} if project is not None else {}
         agents, errors, _incomplete, _known = self.list_agents_with_incomplete(
-            **({"project": project} if project is not None else {}),
+            **options,
         )
         return agents, errors
 
@@ -1188,10 +1192,13 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             params["continuity_id"] = continuity_id
         if transient:
             params["transient"] = "true"
+        options: dict[str, Any] = (
+            {"request_timeout": request_timeout} if request_timeout is not None else {}
+        )
         return self._stream_sse(
             f"/api/v1/sessions/{session_id}/events",
             params=params or None,
-            **({"request_timeout": request_timeout} if request_timeout is not None else {}),
+            **options,
         )
 
     def get_cursor(
@@ -1309,7 +1316,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 "caller_id": caller_id,
                 "timeout": timeout,
             },
-            request_timeout=timeout + 15.0,
+            request_timeout=REMOTE_CARRIER_STARTUP_TIMEOUT + timeout + 15.0,
         ) or {}
 
     def stop_remote_session(
@@ -1336,7 +1343,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 "reap_host": reap_host,
                 "timeout": timeout,
             },
-            request_timeout=timeout + 15.0,
+            request_timeout=REMOTE_CARRIER_STARTUP_TIMEOUT + timeout + 15.0,
         )
 
     def end_remote_session(
@@ -1363,7 +1370,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 "if_idle": if_idle,
                 "timeout": timeout,
             },
-            request_timeout=timeout + 15.0,
+            request_timeout=REMOTE_CARRIER_STARTUP_TIMEOUT + timeout + 15.0,
         )
 
     def send_remote_live_message(
@@ -1426,7 +1433,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 "wait_timeout": wait_timeout if wait else 120.0,
                 **({"qualified_peer": True} if qualified_peer else {}),
             },
-            request_timeout=timeout + 15.0,
+            request_timeout=REMOTE_CARRIER_STARTUP_TIMEOUT + timeout + 15.0,
         ) or {}
 
     def stream_remote_events(
