@@ -9,7 +9,7 @@ from typing import Any
 from .bridge_command_delivery import native_prompt_receipt, steering_prompt
 from .bridge_native_settlement import native_prompt_settlement, valid_settlement
 from .queue_records import TaskError
-from .queue_task_recovery import _captured, _revision
+from .queue_task_recovery import _captured, _revision, reconciliation_revision
 from .wake_recovery_target import reconciliation_plan, retained_wake
 
 
@@ -28,7 +28,10 @@ def reconcile_wake(
     with queue._connect() as conn:
         conn.execute("BEGIN")
         captured = _captured(queue, conn, task_id)
-        if _revision(captured) != expected_revision:
+        revision_for = _revision
+        if revision_for(captured) != expected_revision:
+            revision_for = reconciliation_revision
+        if revision_for(captured) != expected_revision:
             raise TaskError("task or retained execution changed; refresh diagnostics")
         wake, target = reconciliation_plan(
             captured, outbox, wake_id, settlement=settle_native_send,
@@ -59,7 +62,7 @@ def reconcile_wake(
     with queue._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         current_snapshot = _captured(queue, conn, task_id)
-        if _revision(current_snapshot) != expected_revision:
+        if revision_for(current_snapshot) != expected_revision:
             raise TaskError("task or original send changed during transport observation")
         current = retained_wake(current_snapshot, outbox, wake_id, settlement=settle_native_send)
         if (
