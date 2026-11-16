@@ -44,6 +44,10 @@ def dispatch(argv: list[str]) -> int:
                     "version": 1, "option": "--max-credential-requests",
                     "maximum": MAX_SNAPSHOT_REQUESTS,
                 },
+                "snapshot_explicit_binding": {
+                    "version": 1, "scope": "selected-file", "local_checkout": "not-required",
+                    "providers": ["github", "gitea", "azure-devops"],
+                },
                 "observation_http_profiles": contract(),
                 "observation_account_guard": {
                     "version": 1, "option": "--expected-account", "providers": ["gitea"],
