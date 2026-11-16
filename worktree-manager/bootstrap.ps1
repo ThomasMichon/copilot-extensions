@@ -230,6 +230,7 @@ function Test-BootstrapUvVersion([string]$Uv) {
     if ($LASTEXITCODE -ne 0) {
         throw ('uv version qualification failed: ' + ($output -join "`n"))
     }
+    $output = @($output | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
     $match = [regex]::Match(($output -join "`n"), '\Auv[ \t]+([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t(+]|$)')
     if (-not $match.Success) { throw 'uv returned an invalid version report.' }
     return [version]$match.Groups[1].Value -ge [version]'0.8.0'
@@ -255,6 +256,7 @@ function Find-BootstrapPython([string]$Uv) {
     if ($LASTEXITCODE -ne 0) {
         throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
     }
+    $python = @($python | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
     if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
         throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
     }

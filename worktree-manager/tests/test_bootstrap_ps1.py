@@ -638,6 +638,49 @@ def test_managed_python_lookup_preserves_post_install_failure(tmp_path: Path) ->
     assert not result.stdout.strip()
 
 
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("operation", ["version", "post-install"])
+def test_managed_python_native_diagnostics_are_not_result_records(
+    tmp_path: Path, host_name: str, operation: str,
+) -> None:
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    selected = str(Path(sys.executable))
+    marker = tmp_path / "lookup"
+    program = tmp_path / "uv.py"
+    program.write_text(
+        "import pathlib,sys\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('uv 0.13.7')\n"
+        "elif sys.argv[2] == 'install':\n"
+        "    sys.exit(0)\n"
+        f"elif not pathlib.Path({str(marker)!r}).exists():\n"
+        f"    pathlib.Path({str(marker)!r}).touch(); sys.exit(2)\n"
+        f"else: print({selected!r})\n"
+        "sys.stderr.write('uv debug diagnostic\\n')\n",
+        encoding="utf-8",
+    )
+    uv = tmp_path / ("uv.cmd" if os.name == "nt" else "uv")
+    uv.write_text(
+        f'@"{sys.executable}" -I -S -B "{program}" %*\n'
+        if os.name == "nt" else
+        f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -S -B {shlex.quote(str(program))} \"$@\"\n",
+        encoding="utf-8",
+    )
+    if os.name != "nt":
+        uv.chmod(0o755)
+    action = "Test-BootstrapUvVersion" if operation == "version" else "Find-BootstrapPython"
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command",
+         _python_resolvers() + f"\n{action} {_quote(uv)}\n"],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == ("True" if operation == "version" else selected)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
 def test_unprivileged_link_creator_restores_thread_identity_after_failure(tmp_path: Path) -> None:
     import ctypes
