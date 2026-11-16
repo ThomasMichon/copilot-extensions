@@ -3,7 +3,8 @@
 Part of [Task Relevance Reconciliation](README.md), continuing
 [#12696](https://github.com/ThomasMichon/copilot-extensions/issues/12696)
 and [#9532](https://github.com/ThomasMichon/copilot-extensions/issues/9532).
-**Status: plan reviewed in #12884; implementation qualification remains open.** This slice repairs retained writer
+**Status: plan reviewed in #12884; source implementation accepted in #12892;
+runtime qualification remains open.** This slice repairs retained writer
 compatibility, not task policy, production activation or unknown-send recovery.
 
 ## Intent and existing gap
@@ -104,3 +105,17 @@ Put real process/IPC and native lifecycle qualification in the existing selected
 integration portfolio, not an exhaustive new required-CI matrix. No passing
 control is permission to replay an unresolved original send or mutate an
 unrelated retained conversation.
+
+## Current qualification boundary
+
+The [implementation journal](journal/2026/11.16-retained-writer-contract.md#original-binding-reader-qualification-and-handle-loss-prerequisite)
+records successful newer-executor reading of an actual original keyed binding,
+with unchanged birth provenance, incarnation and journal bytes. It also records
+a distinct absent managed-handle prerequisite: the native/workspace history and
+keyed journal survive after the Bridge session and turn rows disappear.
+
+The existing #9532 preservation and #6934 exact-head recovery boundaries must
+cover this retained task case without dropping its writer requirement,
+operation/exclusion state or turn-history fences. This observation closes no
+native lifecycle checkbox and grants no generic-resume fallback, metadata
+reconstruction, prompt replay, policy reset or rollout authority.
