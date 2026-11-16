@@ -201,6 +201,7 @@
     {
       "name": "lib-payload-invocation",
       "include": [
+        "libs/payload-invocation/bootstrap_python.py",
         "libs/payload-invocation/command_binding.py",
         "libs/payload-invocation/command_lifecycle.py",
         "libs/payload-invocation/generate.py",
@@ -405,7 +406,8 @@
       ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-service-index-requirements.txt"
+      "requirements": "tools/typecheck-service-index-requirements.txt",
+      "import_roots": ["tools"]
     },
     {
       "name": "agent-codespaces",

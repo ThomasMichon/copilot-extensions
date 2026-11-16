@@ -59,6 +59,13 @@ progress must not corrupt an existing JSON result or dump credentials.
 Observing an unfamiliar event must not require implementing its business
 meaning, dropping its liveness value or inventing a second launch path.
 
+Bound high-frequency producer output rather than writing one line per file.
+The source-runtime CLI reports the first completed work immediately, then
+coalesces further completions to at most two stderr updates per second per
+invocation. It never manufactures progress during silent work; stdout remains
+the selected identity or snapshot result. This bounds native receiver work
+without changing source checks, quiet-window ownership or the process deadline.
+
 An outer wrapper must not impose a short fixed process deadline that preempts
 an inner operation still streaming updates. Its communication observation and
 process-lifetime policy compose with the target's rather than defeating it.

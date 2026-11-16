@@ -7,10 +7,12 @@ Local-only Vault defaults and KeePassXC activation remain unchanged.
 
 This is the first functional source slice of the
 [federated-relay plan](../../../efforts/active/vault-service/federated-relay.md).
-The `federated-relay` Python extra supplies the SDK and credential custodian.
-Native installer profile selection and installed-runtime qualification remain
-separate plan gates; the existing native `base` and `ssh` profiles do not yet
-select this extra. Do not copy source into a deployed runtime to enable it.
+The native `federated-relay` dependency profile supplies the SDK and credential
+custodian; `ssh-federated-relay` also preserves SSH/cache/envelope crypto.
+Select it through the [native installer](../README.md#dependency-profiles),
+not by adding packages to a completed runtime. Selection installs dependencies
+only: service configuration, current deployment authority and installed service
+adoption remain separate gates. Do not copy source into a deployed runtime.
 
 ## Installation-local selection
 

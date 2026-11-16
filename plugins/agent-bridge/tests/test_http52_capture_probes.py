@@ -36,3 +36,11 @@ from test_unconfigured_sdk_receiving import (
     test_explicit_native_receiving_keeps_its_registered_venue_support
     as test_explicit_native_receiving_keeps_its_registered_venue_support,
 )
+from test_session_inspection import (
+    test_http_and_both_cli_aliases_use_copied_core_without_cursor_or_input_effects
+    as test_http_and_both_cli_aliases_use_copied_core_without_cursor_or_input_effects,
+    test_inspect_json_names_older_daemon_inspection_gap_without_retry
+    as test_inspect_json_names_older_daemon_inspection_gap_without_retry,
+    test_semantic_projection_is_bounded_content_free_and_not_ping_progress
+    as test_semantic_projection_is_bounded_content_free_and_not_ping_progress,
+)

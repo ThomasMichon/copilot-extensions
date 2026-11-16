@@ -83,15 +83,28 @@ function Start-DaemonInstanceWorker {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'The PowerShell daemon instance adapter requires native Windows.'
     }
-    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    $pythons = @(
-        $ExecutionContext.InvokeCommand.GetCommands(
-            'python', [Management.Automation.CommandTypes]::Application, $false
-        ) |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' -and $seen.Add($_.Source) } |
-            ForEach-Object { $_.Source }
-    )
-    $prerequisiteError = 'Python 3.10+ must be available as python on PATH (unsupported interpreters and the Microsoft Store alias stub do not count). Run the harness Python prerequisite setup, or install the standalone prerequisite.'
+    $bootstrapPython = [Environment]::GetEnvironmentVariable('COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON', 'Process')
+    if ($bootstrapPython) {
+        $root = [IO.Path]::GetPathRoot($bootstrapPython)
+        if (-not [IO.Path]::IsPathRooted($bootstrapPython) -or -not $root -or
+            $root -in @('\', '/') -or $root -match '^[A-Za-z]:$' -or
+            -not [IO.File]::Exists($bootstrapPython) -or
+            $bootstrapPython -match '[\\/]WindowsApps[\\/]') {
+            throw 'The supplied bootstrap Python must be an existing absolute executable, not an execution alias.'
+        }
+        $pythons = @($bootstrapPython)
+        $prerequisiteError = 'The supplied bootstrap Python must be a working Python 3.10+ executable. No PATH fallback was attempted.'
+    } else {
+        $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        $pythons = @(
+            $ExecutionContext.InvokeCommand.GetCommands(
+                'python', [Management.Automation.CommandTypes]::Application, $false
+            ) |
+                Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' -and $seen.Add($_.Source) } |
+                ForEach-Object { $_.Source }
+        )
+        $prerequisiteError = 'Python 3.10+ must be available as python on PATH (unsupported interpreters and the Microsoft Store alias stub do not count). Run the harness Python prerequisite setup, or install the standalone prerequisite.'
+    }
     if (-not $pythons.Count) { throw $prerequisiteError }
     if (-not [IO.File]::Exists($script:DaemonInstanceRuntime)) {
         throw 'The owning payload daemon instance source archive is unavailable.'
@@ -110,7 +123,7 @@ function Start-DaemonInstanceWorker {
 import base64,json,sys
 if sys.version_info < (3,10):
     print('daemon-python-unsupported',flush=True)
-    sys.stderr.write('daemon-instance: Python 3.10+ is required on PATH; run the harness prerequisite setup or install the standalone prerequisite.\n')
+    sys.stderr.write('daemon-instance: Python 3.10+ is required; run the owning setup prerequisite flow.\n')
     sys.exit(1)
 print('daemon-python-compatible',flush=True)
 packet=json.loads(base64.b64decode(sys.stdin.buffer.raw.readline()).decode('utf-8'))
@@ -133,7 +146,10 @@ sys.exit(main(packet))
     for ($index = 0; $index -lt $pythons.Count; $index++) {
         $start.FileName = $pythons[$index]
         try { $State.process = [Diagnostics.Process]::Start($start) }
-        catch [ComponentModel.Win32Exception] { continue }
+        catch [ComponentModel.Win32Exception] {
+            if ($bootstrapPython) { throw }
+            continue
+        }
         $State.input = $State.process.StandardInput
         $State.input.NewLine = "`n"
         $State.input.AutoFlush = $true
@@ -247,6 +263,11 @@ function Invoke-DaemonInstanceRequest {
         }
         if ($state.broken) {
             throw 'Daemon instance helper custody is unavailable. The prior outcome remains unconfirmed; automatic replay is refused.'
+        }
+        $bootstrapPython = [Environment]::GetEnvironmentVariable('COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON', 'Process')
+        if ($bootstrapPython -and ($null -eq $state.process -or
+            $state.process.StartInfo.FileName -ine $bootstrapPython)) {
+            throw 'The existing daemon instance helper uses another interpreter. Use a fresh PowerShell process for the supplied bootstrap Python; existing custody was not changed.'
         }
         $pendingState = $state
         $environment = @{}

@@ -87,6 +87,8 @@ def execute(args: argparse.Namespace, driver: ModuleType, *, source_digest: str)
         arguments.append("--repair-update")
     if args.install_source is not None:
         arguments.extend(["--install-source", str(args.install_source)])
+    if getattr(args, "bootstrap_uv", None) is not None:
+        arguments.extend(["--bootstrap-uv", str(args.bootstrap_uv)])
     arguments.extend(["--", *command])
     spec = driver.RequestSpec(
         "manager", tuple(command[1:]),

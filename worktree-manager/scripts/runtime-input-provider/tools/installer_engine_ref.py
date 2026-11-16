@@ -12,6 +12,7 @@ restoring the shipped self-contained payload.
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterable
 from dataclasses import dataclass
 import hashlib
 import json
@@ -63,6 +64,7 @@ STANDALONE_NATIVE_ADOPTERS = (
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-machines": ("runtime_launcher.py",),
+    "plugins/agent-worktrees": ("bootstrap-uv.ps1",),
 }
 
 
@@ -124,7 +126,7 @@ def human_output_enabled(canonical_dir: Path) -> bool:
     )
 
 
-def human_output_adopters(repo: Path, adopters) -> tuple[str, ...]:
+def human_output_adopters(repo: Path, adopters: Iterable[str]) -> tuple[str, ...]:
     # Standalone installers share only the output initializer, not the engine.
     return (
         *adopters,
@@ -139,7 +141,7 @@ def human_output_entrypoint(consumer: Path) -> Path:
     )
 
 
-def human_output_declaration(script: Path, *, initializer_sha256: str | None = None) -> dict:
+def human_output_declaration(script: Path, *, initializer_sha256: str | None = None) -> dict[str, str | int]:
     helper = script.parent / HUMAN_HELPER
     text = script.read_text(encoding="utf-8")
     if text.count(HUMAN_SOURCE_LINE) != 1:
@@ -212,7 +214,7 @@ def support_files(canonical_dir: Path) -> tuple[str, ...]:
         (canonical_dir / name).read_text(encoding="utf-8")
         for name in FILES if (canonical_dir / name).is_file()
     ]
-    files = SUPPORT_FILES if any(SUPPORT_FILES[0] in body for body in bodies) else ()
+    files: tuple[str, ...] = SUPPORT_FILES if any(SUPPORT_FILES[0] in body for body in bodies) else ()
     if human_output_enabled(canonical_dir):
         files += (HUMAN_HELPER,)
     return files

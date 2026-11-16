@@ -606,6 +606,7 @@ def native_session(
     snapshot: Path, component: str, payload: Path, root: Path, *,
     uv: Path, base_python: Path, health_module: str,
     expected_version: str, expected_hash: str, repair: bool = False,
+    health_callable: str | None = None,
 ) -> int:
     """Retain a completed wheel candidate while its native owner settles setup."""
     with project_inputs(snapshot, component) as (selected, inputs):
@@ -616,6 +617,7 @@ def native_session(
         return _native_candidate_session(
             selected.payload, root, inputs, native_selection(selected, inputs),
             uv=uv, base_python=base_python, health_module=health_module,
+            health_callable=health_callable,
             expected_version=expected_version, expected_hash=expected_hash, repair=repair,
             application=_member(snapshot, selected.project["application"])
             if "application" in selected.project else None,
@@ -627,17 +629,21 @@ def _native_candidate_session(
     uv: Path, base_python: Path, health_module: str, expected_version: str, expected_hash: str,
     repair: bool = False, application: Path | None = None,
     nested_environment: bool = False,
+    health_callable: str | None = None,
 ) -> int:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True):
         raise ValueError("native construction must use its selected base interpreter")
     if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", health_module):
         raise ValueError("native construction requires an ordinary application module")
+    if health_callable is not None and not re.fullmatch(r"[A-Za-z_]\w*", health_callable):
+        raise ValueError("native construction requires an ordinary health callable")
     if selection["payload_hash"] != expected_hash or selection["runtime_version"] != expected_version:
         raise ValueError("native source/profile selection changed before construction")
     version = expected_version + (".repair." + uuid.uuid4().hex if repair else "")
     with engine.numbered_candidate(
         root, version, plugin=payload, uv=uv, base_python=base_python,
-        health_module=health_module, extras=tuple(selection["extras"]),
+        health_module=health_module, health_callable=health_callable,
+        extras=tuple(selection["extras"]),
         local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
         application=application, process_retention=True, reuse_generations=False,
         nested_environment=nested_environment,
@@ -691,12 +697,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--uv", type=Path)
     parser.add_argument("--base-python", type=Path)
     parser.add_argument("--health-module")
+    parser.add_argument("--health-callable")
     parser.add_argument("--expected-runtime-version")
     parser.add_argument("--expected-payload-hash")
     parser.add_argument("--repair", action="store_true")
     parser.add_argument("--nested-environment", action="store_true")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.health_callable is not None and not args.native_session:
+        parser.error("--health-callable requires --native-session")
     if args.arguments and (
         not args.install_application or args.arguments[0] != "--"
     ):
@@ -736,6 +745,7 @@ def main(argv: list[str] | None = None) -> int:
             return _native_candidate_session(
                 args.payload, args.root, inputs, selection,
                 uv=args.uv, base_python=args.base_python, health_module=args.health_module,
+                health_callable=args.health_callable,
                 expected_version=args.expected_runtime_version, expected_hash=args.expected_payload_hash,
                 repair=args.repair,
                 nested_environment=args.nested_environment,
@@ -771,6 +781,7 @@ def main(argv: list[str] | None = None) -> int:
             uv=args.uv, base_python=args.base_python, health_module=args.health_module,
             expected_version=args.expected_runtime_version, expected_hash=args.expected_payload_hash,
             repair=args.repair,
+            health_callable=args.health_callable,
         )
     if args.native_inputs:
         with project_inputs(args.install_source, args.component) as (selected, inputs):

@@ -985,6 +985,7 @@ def test_native_admission_binds_one_selection_without_peer_queue_work(tmp_path: 
         wait=lambda *args, **kw: result,
     )
     monkeypatch.setattr(runtime_install, "_execution_driver", lambda *args: driver)
+    monkeypatch.setattr(recovery, "prepare_tool_dependencies", lambda *_args: tmp_path / "tools")
     resolved = SimpleNamespace(
         commit="a" * 40, tree="b" * 40, document=lambda: {"commit": "a" * 40},
     )

@@ -506,9 +506,16 @@ whole-desktop SDK self-profile, literal cases and verifier remain separate.
 compiled `native_daemon.ps1` launcher below remains a separate migration
 boundary. `native_owned.ps1` delegates finite process execution to the same
 original-shell-owned Python transport.
-Python is an existing harness prerequisite owned by machine provisioning;
+Setup may supply its existing absolute
+`COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON` handoff when the helper starts. The
+adapter uses only that executable, with terminal validation/startup failures
+and no PATH fallback. The selected interpreter and original helper remain
+bound for that helper's lifetime; a different nonempty hint refuses before
+sending another request and does not replace or break live custody.
+Acquisition stays with setup, not this transport.
+Without that handoff, Python remains a legacy harness prerequisite:
 a cold plugin runtime does not authorize another Python download or a
-helper-owned interpreter installation. The PowerShell adapter checks PATH's
+helper-owned interpreter installation. The compatibility adapter checks PATH's
 `python` applications headlessly and selects the first compatible Python 3.10+.
 An unsupported earlier interpreter or WindowsApps alias does not hide a later
 compatible interpreter. A confirmed version refusal exits before receiving any

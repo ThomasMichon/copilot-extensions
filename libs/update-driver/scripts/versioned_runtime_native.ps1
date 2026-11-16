@@ -51,12 +51,14 @@ function Set-NativeWheelRuntimeVersion {
 function Get-NativeWheelConstructionOptions {
     param(
         [string]$Profile, [string]$Directory, [string]$Payload,
-        [string]$Plugin, [string]$Uv, [string]$HealthModule, [switch]$Repair
+        [string]$Plugin, [string]$Uv, [string]$HealthModule, [switch]$Repair,
+        [string]$HealthCallable = ''
     )
     if (-not $Profile) { return @{} }
     return @{
         WheelProfile = $Profile; WheelDirectory = $Directory; Payload = $Payload
         Plugin = $Plugin; UvCommand = $Uv; HealthModule = $HealthModule; Repair = $Repair
+        HealthCallable = $HealthCallable
     }
 }
 

@@ -832,8 +832,27 @@ automatic downloads; when preparation is needed, the explicit bootstrap uses
 `uv python install --no-bin --no-registry 3.11`, then repeats the same lookup.
 It does not publish Python command aliases or register Python with the Windows
 launcher. These controls are supported by uv 0.8.0 and newer.
-Bootstrap qualifies the selected uv version first and uses its existing
-user-local prerequisite installation path for an absent or older uv.
+Bootstrap checks external uv commands in PATH order and retains the first
+supported executable; an older, malformed or failing earlier copy does not
+hide a supported later copy. Windows selection excludes PowerShell-only
+scripts: the same tool must also execute from the Python constructor.
+On Windows, an explicit OS-policy refusal
+(`WinError 448` / `os error 448`) remains fatal rather than selecting another
+copy. Only when no supported candidate is found does bootstrap use its existing
+user-local prerequisite installation path, then repeat qualification.
+The same qualified UV path reaches runtime construction through the explicit
+`--bootstrap-uv` installation input, including queued installation and update
+participants. It is not a worker-environment hint or a second PATH lookup.
+Manager Dev source preparation carries it into the canonical application
+preparer before construction too; it does not reselect an ambient UV.
+The selected source's `scripts/runtime_install.py` declares this receiver
+contract with the exact line `# copilot-extensions:bootstrap-uv=1`. Bootstrap
+reads that declaration before sending the new argument; a missing or unknown
+generation refuses installation with an instruction to select a newer source.
+It never probes an effectful legacy invocation or retries installation with
+weaker tool selection. Older callers retain the existing default discovery
+behavior on the new provider. Repair-recovery does not take this installation
+input, and independent native-wheel inputs keep their own UV selection.
 The selected explicit interpreter is passed into construction, where the engine
 retains the source/dependency/configuration inputs and constructs a non-editable
 runtime. Governed `uv pip install` selects runtime dependencies for this platform,

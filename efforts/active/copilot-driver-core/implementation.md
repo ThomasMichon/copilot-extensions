@@ -449,6 +449,30 @@ binding or monotonic execution-authority revision. `acquire_source_lease`,
 source or credential effects; admission inspection must not invoke them as a
 read-only fallback.
 
+The merged source in #12818 adds the finite `GatewaySourceLeaseClient` through
+the same `SourceLeaseClient.acquire` port, and `CopilotAccountFile.renew` accepts
+that port. Custodian source authorization remains separate from actual token
+expiry and native execution permission. This supplies the credential adapter,
+not a normal native-profile constructor or Core CLI/config selection.
+
+**Optional profile composition gap (source coordination).** The existing
+Gateway/embedding/profile owner may compose an explicit default-off client,
+account binding and optional artifact/dependency membership without a competing
+Core or a mandatory Bridge service/Gateway dependency. The native invocation
+and lifetime boundary stays with the original Driver/receiver owner. A proposed
+handoff supplies the selected `SourceLeaseClient`, exact source/account/
+recipient/route binding and an already-owned native file writer to that owner;
+it is not an implemented or reviewed native callable yet. Construction itself
+does not acquire credentials, confer plaintext/config custody, start renewal,
+or create an execution permit. File renewal remains POSIX-only; no Windows
+plaintext fallback follows.
+
+Source-only factory/consumer work need not wait for an ACK-only or perfect
+no-refresh gate. Ordinary already-approved provider retrieval/silent refresh
+retains its own authority. Native reload, expiry, in-flight work, hard cleanup,
+unknown sends and actual rollout keep their independent gates. This optional
+composition is not a new Gateway prerequisite for the ordinary Driver root.
+
 `AsyncForegroundProcess` and Windows `AuthPaneChild` settle through the same
 retained live owner and their public asynchronous lifetime methods. Neither
 currently accepts a durable recovery descriptor for post-coordinator-loss
@@ -588,12 +612,26 @@ meanings; no conversion, automatic rewriting or resealing is provided.
 
 Current Core and receiver ownership/contract constraints were aligned before
 that expansion. Its declaration is data-only: owner-store and native support
-remain unqualified. The Worktrees recovery store and passive permit inspector
-remain unchanged, and no caller emits the new form. Next expand that original
-owner's durable intent adapter and actual executing-provider support/refusal
-declaration before consumer use. Complete historical identity publication,
-current-source and decision verification, final execution admission, provider
-reacquisition and native qualification remain independently open.
+are separate capabilities, not consequences of the Core declaration.
+
+The original owner's durable intent adapter subsequently landed in #12551 as
+`launch_permit_recovery_intent.WorktreePermitRecoveryIntents`. Its guarded
+writer binds the retained execution, original v1 recovery operation/revision
+and exact start/current action-specific permit decisions. Duplicate and lost
+acknowledgement reconciliation preserve the same intent; v1 state remains the
+source of unknown work and holds. The expanded source packet passed 260 cases.
+Do not implement this already-accepted adapter again.
+
+The executing writer's `writer_contract()` explicitly advertises
+`durable-intent-only`, `effects_wired: false`, `native_recovery: unqualified`
+and `replay: never`. This is source-qualified persistence/discovery, not
+current-source or private-approval verification, native admission or an ordinary
+caller emitting recovery effects. The passive permit inspector remains
+separate. Complete historical identity publication, current-source and decision
+verification, final execution admission, provider reacquisition and native
+qualification remain independently open. Continue the remaining real-caller
+and lifetime acceptance under their existing admission; do not substitute a
+duplicate recovery-data milestone for that outcome.
 
 ## Evidence before each functional promotion
 

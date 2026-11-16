@@ -31,6 +31,33 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+### Read-only Host inspection
+
+The executing Host's `--support-json` declares
+`copilot-driver.host-inspection` version 1. H1 remains version 1: a separate
+connection may send a first-message PING (`?`) containing the contract/version,
+a 32-hex challenge and the existing connect credential. Its PONG (`!`) echoes
+the challenge and returns at most 4 KiB of content-free metadata: Host
+PID/incarnation, child PID/alive, observed prompt-in-flight state, maximum
+buffered sequence, frontend ACK, last child-frame age and buffer depth.
+Unknown additive response fields are ignored; malformed, mismatched and
+unsupported responses are not liveness successes.
+
+`SessionHostClient.inspect()` uses the already-selected route and a default
+one-second deadline, without re-forwarding, attaching or retrying. It never uses the active
+frontend's bulk send lock, ACKs or writes ACP, renews custody, changes reapability,
+or displaces the controller. A successful round trip proves only the observed
+Host event loop and route, not child health, semantic progress or task completion.
+If ACP bulk delivery blocks the child reader, the last-frame age and sequence
+describe only what the Host has observed, not unread child output.
+
+Older H1 Hosts reject the unknown first message without changing their frontend;
+inspection reports unsupported. Ordinary H1 attachment and legacy receiving
+remain supported with unchanged lifetime semantics. Private native-authorized
+attachments do not expose this channel: their grants/tickets are not consumed
+and no legacy inspection fallback is attempted. This is source/artifact support,
+not native, installed or external-venue qualification.
+
 Capability-selected ordinary Bridge receiving uses that already-joined public
 SDK session. It does not construct or reacquire a private headed/remote controller
 to deliver queue/steer input. Native target/loadout checks and original one-shot

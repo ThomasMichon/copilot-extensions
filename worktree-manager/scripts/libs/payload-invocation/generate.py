@@ -5,6 +5,7 @@ import ast
 import sys
 import argparse
 import hashlib
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 import re
@@ -781,7 +782,16 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
         protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    generated: dict[Path, str | bytes] = {}
+    spec = spec_from_file_location("_payload_runtime_admission", Path(__file__).with_name("runtime_admission.py"))
+    assert spec and spec.loader
+    toolkit = module_from_spec(spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(toolkit)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    generated: dict[Path, str | bytes] = toolkit.bootstrap_files(manifest, data)
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:
@@ -848,19 +858,6 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
                     raise ValueError(f"{manifest}: generated path collision: {asset}")
                 generated[asset] = source.read_text(encoding="utf-8")
     if data["runtimeAdmissionToolkit"]:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "_payload_runtime_admission", Path(__file__).resolve().parent / "runtime_admission.py",
-        )
-        assert spec and spec.loader
-        toolkit = importlib.util.module_from_spec(spec)
-        previous_bytecode = sys.dont_write_bytecode
-        try:
-            sys.dont_write_bytecode = True
-            spec.loader.exec_module(toolkit)
-        finally:
-            sys.dont_write_bytecode = previous_bytecode
         for relative, content in toolkit.expected_files(root).items():
             path = manifest.parent / "scripts" / "_runtime_admission" / relative
             if path in generated or path in protected_paths:

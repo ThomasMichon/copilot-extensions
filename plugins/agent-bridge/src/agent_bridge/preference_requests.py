@@ -1,13 +1,14 @@
 """Request/reuse policy selection without changing the session lifecycle."""
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
 
-from .session_preferences import CONTEXT_ENV, SOURCE_ENV, SOURCES, launch_preferences
+from agent_remote_driver.session_preferences import CONTEXT_ENV, SOURCE_ENV, SOURCES, launch_preferences
+from .preference_models import PreferenceSource
 
 
-def reused_preference_source(req: Any, existing: Any) -> str:
+def reused_preference_source(req: Any, existing: Any) -> PreferenceSource:
     env = getattr(getattr(existing, "target", None), "env", {})
     source = env.get(SOURCE_ENV, "caller-settings") if isinstance(env, dict) else "caller-settings"
     requested = (
@@ -45,12 +46,12 @@ def reused_preference_source(req: Any, existing: Any) -> str:
                 status_code=409,
                 detail="reused session cannot apply changed/unverified preferences; use force_new",
             )
-    return source
+    return cast(PreferenceSource, source)
 
 
 def apply_request_preferences(
     req: Any, state: Any, target: Any,
-) -> tuple[dict[str, str], str]:
+) -> tuple[dict[str, str], PreferenceSource]:
     config = getattr(state, "config", None)
     target_env = target.env
     request_env = dict(req.env or {})
@@ -72,4 +73,4 @@ def apply_request_preferences(
         request_env[CONTEXT_ENV] = req.context
     if request_env:
         target.env = {**target_env, **request_env}
-    return request_env, source
+    return request_env, cast(PreferenceSource, source)

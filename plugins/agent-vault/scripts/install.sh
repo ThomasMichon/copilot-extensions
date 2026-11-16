@@ -36,14 +36,14 @@ _parse_arguments() {
             --force) FORCE=1; shift ;;
             --dry-run) DRY_RUN=1; shift ;;
             --install-dir) INSTALL_DIR="${2:?--install-dir requires a directory}"; shift 2 ;;
-            --profile) PROFILE="${2:?--profile requires base or ssh}"; shift 2 ;;
+            --profile) PROFILE="${2:?--profile requires a Vault dependency profile}"; shift 2 ;;
             *) _fail "Unknown option: $1"; exit 2 ;;
         esac
     done
 }
 _parse_arguments "$@"
 if [[ -n "$PROFILE" ]]; then
-    case "$PROFILE" in base|ssh) ;; *) _fail 'Unsupported Vault installation profile'; exit 2 ;; esac
+    case "$PROFILE" in base|ssh|federated-relay|ssh-federated-relay) ;; *) _fail 'Unsupported Vault installation profile'; exit 2 ;; esac
     case "$ACTION" in
         install|update|stamp|provision) ;;
         *) _fail 'Vault dependency selection requires install, update, stamp or provision'; exit 2 ;;

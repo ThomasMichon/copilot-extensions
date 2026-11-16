@@ -44,6 +44,9 @@ def _fixture_install(args):
     from update_driver import core, participant_environment
     from single_instance_lease.operation import OperationLock, OperationLockedError
 
+    if getattr(args, "bootstrap_uv", None) is not None:
+        expected_uv = args.root.parent / "tools" / ("uv.cmd" if os.name == "nt" else "uv")
+        assert args.bootstrap_uv.resolve() == expected_uv.resolve(), "bootstrap escaped fixture UV"
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     identifier = None
     if command[:1] == ["update"]:
@@ -377,14 +380,23 @@ def bootstrap(tmp_path: Path, bootstrap_source: Path) -> Iterator[BootstrapFixtu
     tools.mkdir()
     python = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     if os.name == "nt":
-        (tools / "uv.ps1").write_text(
-            "if ($args[0] -eq '--version') { 'uv 0.13.7'; exit 0 }\n"
-            f"'{python.replace(chr(39), chr(39) * 2)}'\n$global:LASTEXITCODE = 0\n",
+        (tools / "uv.cmd").write_text(
+            "@echo off\n"
+            'if "%~1"=="--version" (\n  echo uv 0.13.7\n  exit /b 0\n)\n'
+            'if "%~1 %~2"=="python find" (\n'
+            f"  echo {python}\n  exit /b 0\n)\n"
+            "echo Unexpected native fixture UV acquisition or command 1>&2\nexit /b 71\n",
             encoding="utf-8",
+        )
+        controller = tools / "bootstrap-controller.ps1"
+        script = str(source / "worktree-manager" / "bootstrap.ps1").replace("'", "''")
+        controller.write_text(
+            "function Invoke-RestMethod { throw 'Unexpected native fixture prerequisite acquisition' }\n"
+            f"& '{script}' @args\nexit $LASTEXITCODE\n", encoding="utf-8",
         )
         command = [
             host, "-NoProfile", "-NonInteractive", "-File",
-            str(source / "worktree-manager" / "bootstrap.ps1"),
+            str(controller),
         ]
     else:
         uv = tools / "uv"

@@ -77,6 +77,45 @@ def test_factories_use_bridge_acquisition_and_stable_delivery(transport, mode):
     assert spawn.allocation_interface == mode
 
 
+def test_headless_factory_acquires_fresh_session_for_retired_conversation(
+    transport, monkeypatch,
+):
+    class Client:
+        def get_reservation(self, _key):
+            return {
+                "key": "reservation-a",
+                "worktree": "worktree-a",
+                "worktree_path": "workspace-path",
+                "worktree_ownership": "reused",
+                "allocation_project": "example",
+                "conversation_retired": True,
+                "session_handle": None,
+                "startup_revision": 1,
+            }
+
+    sample = task(
+        spawn_conversation_retired=True,
+        spawn_session_handle=None,
+        _spawn_client=Client(),
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.ordinary_invocation.startup_seed",
+        lambda *_args, **_kwargs: "assigned task",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.ordinary_bridge.start",
+        lambda *_args, **_kwargs: pytest.fail("retired conversation must use acquisition"),
+    )
+
+    ok, handle = spawn_factories.make_headless_spawn()(sample)
+
+    assert ok and handle["session"] == "local-body:bridge-a"
+    _, payload = transport[0]
+    assert payload["worktree_id"] == "worktree-a"
+    assert payload["conversation_retired"] is True
+    assert payload["prior_session_id"] is None
+
+
 def test_retained_cli_acquisition_keeps_the_released_full_request(transport):
     from agent_dispatch.embody_prompts import pool_worker_prompt
     from tests.test_ordinary_pool_startup import released_pool_seed
