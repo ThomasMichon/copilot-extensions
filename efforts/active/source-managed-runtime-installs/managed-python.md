@@ -38,6 +38,34 @@ and native-qualification owners retain their scope, delivered credit and holds.
 The [compiler-free plan](../lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
 consumes this same interpreter boundary rather than creating a second provider.
 
+## Native seed and finite installation management
+
+The [installer vision](../../../visions/installer/README.md#finite-installation-controller)
+requires a native bootstrap seed followed by a daemon-independent installation
+controller. Windows uses PowerShell for package-manager uv preparation, core
+Git acquisition/copies and dispatch to each application's real setup entry.
+The seed establishes the declared managed interpreter before any Python-backed
+SDK that needs it. It does not import the later process/installation framework
+as a prerequisite for obtaining that framework's interpreter.
+
+Installation management is a finite CLI/library, not an always-running daemon
+or an exclusive API inside Manager's daemon. The preferred Manager journey
+installs Manager first, then uses setup helpers to resolve the selected
+repository's expected apps/plugins through their existing installation owners.
+Standalone component setup still works without Manager.
+
+_(Agent-recommended implementation choice: reuse the existing Installer
+Engine and Update Driver execution seams, the standalone Manager bootstrap and
+the in-process Manager setup CLI before extracting a separate helper project.
+A separately installed finite helper remains an option only if independent
+packaging needs it; it does not introduce another installer algorithm.)_
+
+Native foreground work, source/feed/OS policy, guest policy-before-acquisition
+and later helper process/Job/custody protocols keep their own boundaries.
+This does not waive containment or make an application daemon responsible for
+its own first installation. Existing optional background-request and accepted
+service-start contracts remain separate from finite controller availability.
+
 ## Existing source delta
 
 The shared Windows evaluator selector uses PATH Python; the Worktrees
@@ -70,6 +98,12 @@ direction. It extends existing owners, not another installer or broker.
    version when compatible; permit downloads only inside the authorized setup
    operation. Do not repair PATH or require `python`, `python3`, `py`, an old
    Manager or a sibling plugin to reach this step.
+   Keep this native seed ahead of Python-backed context, process and installer
+   admission. On Windows, compose PowerShell source staging and the existing
+   package-manager prerequisite owners, then invoke the application's setup
+   entry with its prepared execution base. The controller must be usable
+   without an installation or Manager daemon; do not introduce a mandatory
+   service to break a bootstrap dependency cycle.
    Existing private-root `ensure_uv` helpers and a temporary setup-process PATH
    change alone are insufficient: publish `uv` through the existing
    prerequisite owner's durable command exposure and provision the PATH used
@@ -140,6 +174,13 @@ acceptance cases; this plan records no technical passes.
   builds the addressed environment and runs the actual installed command.
 - [ ] The standalone first entry also works with neither Python nor `uv`
   preinstalled, using its supported shell-native prerequisite acquisition.
+- [ ] Native Windows seed ordering reaches the managed interpreter and then
+  the finite controller without preinstalled Manager or a running suite
+  application/installation daemon. Manager installation/update succeeds with
+  its daemon unavailable; repository setup uses the same finite owners after
+  Manager installation. Independent component setup still works without it.
+  Prove command failure, cancellation/deadline, cleanup and repeat entry,
+  preserving source/feed/hosting policy and later process/service protocols.
 - [ ] After setup exits, fresh terminal, hook and service/task consumers resolve
   `uv` without setup's inherited PATH or an interactive profile. Include the
   first invocation after restart/logon and missing-`uv` diagnostics.
