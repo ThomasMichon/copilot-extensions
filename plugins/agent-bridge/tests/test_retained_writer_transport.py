@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from agent_procutil import no_window_kwargs
 
+from agent_bridge import _peer_launch
 from agent_bridge import acquisition_authority as authority
 from agent_bridge import acquisition_worktree_writer as writers
 from agent_bridge.acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
@@ -30,7 +31,10 @@ from test_worktree_owner_launch import deploy_installed_layout
 def retained_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
 ) -> tuple[str, ...]:
-    root = tmp_path / "bridge"
+    root = (
+        tmp_path / "bridge" if request.param == "legacy"
+        else tmp_path / "marketplaces" / "sample" / "plugins" / "agent-bridge"
+    )
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: root)
     pinned = ["--pinned-runtime", str(tmp_path / "worktrees" / "python"),
               "--runtime-identity", "original-build:fingerprint"]
@@ -103,6 +107,12 @@ def test_equivalent_bridge_root_keeps_original_writer(
     pinned_index = prefix.index("--pinned-runtime")
     actual_pinned = actual.index("--pinned-runtime")
     assert actual[actual_pinned:actual_pinned + 4] == prefix[pinned_index:pinned_index + 4]
+    if root_index == 11:
+        monkeypatch.setattr(_peer_launch, "_active_context", Mock(return_value={"pluginRoot": str(root)}))
+        monkeypatch.setattr(_peer_launch, "_governance", Mock(return_value={}))
+        owner = _peer_launch.validate_owner(actual[10], Path(actual[11]), actual[12])
+        assert owner["pluginRoot"] == str(root)
+    assert actual[root_index] == str(root)
     assert tuple(prefix) == saved
 
 

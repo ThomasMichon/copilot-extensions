@@ -5645,7 +5645,7 @@
         "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py": "9e2ff36e303541c3161df638c01ce8fbc764f263716af53a7a015628ce7b6cad",
         "plugins/agent-bridge/src/agent_bridge/service_start_cli.py": "e30852d7fee3f0c0705121097b19c39c05a5658080b63843844ba983f3d4b05b",
         "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "fbd359cd4b5fe8e37867404564271626f5aef7fb3661eea5b0c0fa426e102104",
-        "plugins/agent-bridge/src/agent_bridge/retained_writer_transport.py": "3b8861962823db0bc23509de7d9920b27c417c91412caea28440c83862527605",
+        "plugins/agent-bridge/src/agent_bridge/retained_writer_transport.py": "9f9650498eb7e1c8a76b05fa0ada7fecdb0aaccb9a8e783606b2223fa2583208",
         "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "1e90bc1a25f4fc6c01d664ea76ef8204aedebce50419463ef8822f5a1cf4dba0",
         "plugins/agent-bridge/src/agent_bridge/creation_worktree_writer.py": "d20a75c52dbd42e2b0a59a7258e27346e0394d53430239fb46d4b45578acc7fe",
         "plugins/agent-bridge/src/agent_bridge/creation_writer_inspection.py": "60646f511395badc56b7e42c69323008998c8a5798d8675b4268938a4ba0350e",

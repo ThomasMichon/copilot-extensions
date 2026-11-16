@@ -23,9 +23,10 @@ def execution_prefix(prefix: Sequence[str]) -> list[str]:
             or args[9] != "--runtime-identity"
         ):
             raise _peer_launch.ContextRefused("retained legacy writer wrapper is incomplete")
-        root = Path(args[6])
-        if install_paths.normalized_path(root) != install_paths.normalized_path(_agent_bridge_owner_root()):
+        root = Path(install_paths.normalized_path(Path(args[6])))
+        if str(root) != install_paths.normalized_path(_agent_bridge_owner_root()):
             raise _peer_launch.ContextRefused("retained writer belongs to another Bridge installation")
+        args[6] = str(root)
         python = Path(sys.executable)
         if python.name.lower() == "pythonw.exe":
             python = python.with_name("python.exe")
@@ -41,8 +42,8 @@ def execution_prefix(prefix: Sequence[str]) -> list[str]:
             or args[13] != "agent-worktrees"
         ):
             raise _peer_launch.ContextRefused("retained same-cell writer wrapper is incomplete")
-        root = Path(args[11])
-        if install_paths.normalized_path(root) != install_paths.normalized_path(_agent_bridge_owner_root()):
+        root = Path(install_paths.normalized_path(Path(args[11])))
+        if str(root) != install_paths.normalized_path(_agent_bridge_owner_root()):
             raise _peer_launch.ContextRefused("retained writer belongs to another Bridge installation")
         command = _peer_launch.launch_prefix("agent-bridge", root, args[12], "agent-worktrees")
         command[6:6] = args[6:10]
