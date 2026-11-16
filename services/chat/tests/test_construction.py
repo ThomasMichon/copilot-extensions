@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import hashlib
+import os
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
@@ -110,11 +111,25 @@ def test_completed_slot_cannot_prepare_bootstrap(tmp_path: Path, monkeypatch: py
     slot, _ = installed_slot(tmp_path, monkeypatch)
     marker = slot / "completion"
     marker.touch()
+    claimed_slot = slot / ".." / slot.name
+    if os.name == "nt":
+        native_slot = Path("\\\\?\\" + str(slot))
+        monkeypatch.setattr(construction.sys, "prefix", str(native_slot))
+        monkeypatch.setattr(
+            construction, "__file__", str(native_slot / "site" / "agent_chat_service" / "construction.py"),
+        )
+        claimed_slot = slot
     runtime: Any = ModuleType("agent_chat_service._versioned_runtime")
     runtime.marker_path = lambda root, version: marker
     monkeypatch.setitem(sys.modules, runtime.__name__, runtime)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    for rejected_slot in (str(foreign), "relative", None):
+        with pytest.raises(ClientError) as caught:
+            construction._prepare_client({"slot": rejected_slot, "frozen_plugin": "absent"})
+        assert caught.value.code == "construction_slot_invalid"
     with pytest.raises(ClientError) as caught:
-        construction._prepare_client({"slot": str(slot), "frozen_plugin": "absent"})
+        construction._prepare_client({"slot": str(claimed_slot), "frozen_plugin": "absent"})
     assert caught.value.code == "construction_slot_complete"
     assert not (slot / ".runtime-bootstrap").exists()
 

@@ -107,7 +107,17 @@ def _client_slot() -> Path:
 
 def _prepare_client(data: dict[str, Any]) -> None:
     """Called by canonical construction only, before immutable completion."""
-    if set(data) != {"slot", "frozen_plugin"} or data["slot"] != str(_client_slot()):
+    try:
+        # Retained Windows interpreters can report the same slot with a verbatim prefix.
+        same_slot = (
+            set(data) == {"slot", "frozen_plugin"}
+            and isinstance(data["slot"], str)
+            and Path(data["slot"]).is_absolute()
+            and Path(data["slot"]).samefile(_client_slot())
+        )
+    except (OSError, ValueError):
+        same_slot = False
+    if not same_slot:
         raise ClientError("construction_slot_invalid", "Chat construction has inconsistent inputs.")
     catalog = installed_catalog()
     slot = _client_slot()
