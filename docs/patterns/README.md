@@ -125,7 +125,7 @@ core of the principles above; a reviewer checks a change against these.
   upgrade or mandatory sibling service is implied. Preserve OS execution policy,
   package admission and process custody. See the
   [managed-Python install contract](../install-contract.md#project-owned-managed-python).
-  (Serves *Vision installer* `package-managed-python` and *Vision
+  (Serves *Vision installer* `uv-managed-python` and *Vision
   plugin-services* `setup-owned-python-prerequisite`.)
 
 - **Explicit runtime replacement is independent of the incumbent.** Apply

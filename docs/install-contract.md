@@ -12,6 +12,14 @@ it needs. This document is the reference, and
 explicitly while developing; publication validation belongs in CI, not a
 git `pre-push` hook).
 
+For Python acquisition and application-launcher dispatch, the
+[project-owned managed-Python contract](#project-owned-managed-python) is the
+normative target. Later descriptions of PATH/launcher Python discovery,
+signed-system-base selection or direct-interpreter application launch record
+legacy adoption, not exceptions for new/migrated launchers. Their independent
+generation selection, isolated argv, OS-policy and process/removal-custody
+requirements remain binding.
+
 ## Authoritative replacement and completion
 
 The canonical intent is
@@ -3262,11 +3270,24 @@ Proven inactive, unloaded legacy registrations may be removed without issuing
 service stop/disable against an unverified loaded registration. Effective
 command values are passed through stdin and are not printed in diagnostics.
 
-CodeSpaces, SSH and Pull Requests removal select only an already available
+**Managed-Python removal target:** uninstall and dry-run work without PATH or
+Windows-launcher Python. Their launchers resolve PATH `uv` and use an
+already-prepared managed environment under the
+[project-owned contract](#project-owned-managed-python), with downloads,
+dependency resolution and repair disabled. Before removal, retain the existing
+proof that uv and the selected interpreter's executable, prefix, base prefix
+and base interpreter are outside every removable root. No guessed Python
+location, target-owned environment or creation of another interpreter is a
+fallback. Missing eligible tooling gives an actionable explicit result, not a
+partial removal. The [setup plan](../efforts/active/source-managed-runtime-installs/managed-python.md#validation-and-completion)
+keeps actual no-Python-PATH uninstall/dry-run and retained-root qualification open.
+
+**Current legacy removal adoption:** CodeSpaces, SSH and Pull Requests select only an already available
 interpreter whose executable, prefix, base prefix and base interpreter remain
 outside the removable root. Admission-only and dry-run paths use that same
 non-provisioning selector; absence refuses without invoking `uv` or downloading
-Python. Construction's bootstrap resolver retains its separate behavior.
+Python. This existing PATH/launcher-only selector is not an exception to the
+managed-Python removal target. Construction's bootstrap resolver retains its separate behavior.
 Other finite native adapters use the same executable/prefix/base closure
 checks and enumerate all available PATH candidates. An activated removable
 venv, broken first executable or physical alias cannot hide a later eligible
@@ -3836,7 +3857,7 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 ### Project-owned managed Python
 
 **Required target; not a claim that existing launchers have migrated.** The
-[installer vision](../visions/installer/README.md#package-managed-python) and
+[installer vision](../visions/installer/README.md#uv-managed-python) and
 [binding invariant](patterns/README.md#design-invariants-binding-contracts)
 replace the ambient-Python prerequisite with per-project `uv` management.
 The [implementation and qualification plan](../efforts/active/source-managed-runtime-installs/managed-python.md)

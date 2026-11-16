@@ -4,7 +4,7 @@
 
 ## Current direction and scope
 
-This amendment extends the [installer intent](../../../visions/installer/README.md#package-managed-python)
+This amendment extends the existing [installer intent](../../../visions/installer/README.md#uv-managed-python)
 and [binding install contract](../../../docs/install-contract.md#project-owned-managed-python).
 It replaces the earlier setup-owned PATH-Python requirement, not the
 compiler-free requirement or the decision against interpreter attestation.
@@ -17,6 +17,10 @@ from PATH and delegate Python version installation/selection to it. Scripts
 must not assume a system, user, registry or `uv`-storage Python location.
 Application-generation selection remains owned by the existing runtime
 resolver; interpreter-location selection belongs to `uv`.
+
+This refines the existing contract reviewed in #12778 rather than adding a
+second Python-management vision. The operator confirmed amendment of that
+contract to require every app launcher to use PATH `uv`.
 
 Operator request, verbatim:
 
@@ -101,6 +105,10 @@ direction. It extends existing owners, not another installer or broker.
    cold/warm command, service-start and composed-hook measurements. Avoid
    repeated installation/dependency work; fewer Python-discovery branches alone
    do not establish lower latency.
+   Include handoff's marketplace-qualified sibling boundary and removal
+   launchers: handoff retains exact isolated argv and explicit setup, while
+   uninstall/dry-run use already-prepared managed tooling outside the removable
+   roots without downloads, dependency resolution or repair.
 5. **Qualify then adopt.** Expand preparation/provider support before migrating
    independently updated callers. Preserve required skew/recovery behavior and
    explicit incoming replacement through the existing fresh entry, not an
@@ -122,6 +130,12 @@ acceptance cases; this plan records no technical passes.
 - [ ] After setup exits, fresh terminal, hook and service/task consumers resolve
   `uv` without setup's inherited PATH or an interactive profile. Include the
   first invocation after restart/logon and missing-`uv` diagnostics.
+- [ ] With no PATH/launcher Python, uninstall and dry-run use PATH uv plus
+  already-prepared managed tooling outside every removable root. Preserve
+  executable/prefix/base closure and no-download/no-repair controls; unavailable
+  external tooling must not partially remove an installation. Exercise
+  handoff's exact-argv, isolated execution and marketplace ownership without
+  ordinary-launch provisioning.
 - [ ] An old/incompatible or otherwise usable system Python first on PATH does
   not affect selection. Two projects requiring different Python versions
   install and run correctly; installing/updating one does not change the other.
