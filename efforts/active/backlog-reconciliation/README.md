@@ -347,6 +347,11 @@ verify #12831's actual merge while retaining #9532's explicit original-history,
 adoption, rollback and lifetime gates. #4303's whole generic branch-resume
 contract exceeds Venue parity; #5799 already owns its unfinished materials
 families. Stopped or unqualified comparisons support no disposition.
+The same record now distinguishes merged #12835/#12767 from verification of
+their whole #12834/#12763 requests, and retains #4183's already canonical
+duplex, input and progress acceptance. The complete 2026-11-16 11:01:22 UTC
+census is 845 whole open, 116 above fixed 729; these keepers add no closure
+credit or transfer of custody.
 
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
