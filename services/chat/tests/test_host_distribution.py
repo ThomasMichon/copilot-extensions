@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 import subprocess
 import time
+from types import SimpleNamespace
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_procutil import JobHandle
 
 from endpoint_rendezvous import read_endpoint
 from agent_procutil import spawn_sync_in_kill_on_close_job
@@ -12,8 +19,8 @@ from test_hosting import configuration
 
 
 def test_fresh_installed_host_source_removed_independent_participants_and_crash_restart(
-    tmp_path, installed_chat,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace,
+) -> None:
     run = installed_chat.run
     target = installed_chat.service_target
     interpreter = installed_chat.service_python
@@ -24,7 +31,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
         str(installed_chat.core_python), "-I", "-m", "agent_chat_service.hosting",
         "--config", str(config_file),
     ], cwd=tmp_path, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0)
     assert core_refusal.returncode == 1 and core_refusal.stdout == ""
     assert json.loads(core_refusal.stderr) == {"error": "host_service_dependencies_missing"}
     assert json.loads(run([
@@ -65,7 +72,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
     absent = subprocess.run([
         str(interpreter), "-I", "-m", "agent_chat_service.hosting", *host_args,
     ], cwd=tmp_path, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0)
     assert absent.returncode == 1 and not Path(config["data_dir"]).exists()
     Path(config["data_dir"]).mkdir(mode=0o700)
     initialized = json.loads(run([
@@ -74,13 +81,14 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
     ], cwd=tmp_path))
     assert initialized["installation_id"] == config["installation_id"]
     environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
 
-    def start():
+    def start() -> tuple[subprocess.Popen[bytes], JobHandle | None, dict[str, str]]:
         previous = read_endpoint(run_dir)
         stdout = (tmp_path / "host-stdout").open("wb")
         stderr = (tmp_path / "host-stderr").open("wb")
         try:
+            process: subprocess.Popen[bytes]
             process, job = spawn_sync_in_kill_on_close_job([
                 str(interpreter), "-I", "-m", "agent_chat_service.hosting",
                 *host_args,
@@ -104,7 +112,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
             stop(process, job)
             raise
 
-    def stop(process, job):
+    def stop(process: subprocess.Popen[bytes], job: JobHandle | None) -> None:
         try:
             if job is not None:
                 job.terminate_and_wait(5)
@@ -146,7 +154,7 @@ for payload in json.loads(sys.stdin.buffer.read(65537)):
 print(json.dumps(results),flush=True)
 """
 
-    def requests(endpoint, values):
+    def requests(endpoint: dict[str, str], values: list[dict[str, Any]]) -> Any:
         result = run_owned([
             str(interpreter), "-I", "-c", probe,
             json.dumps(endpoint), config["token_file"],
@@ -169,7 +177,7 @@ print(json.dumps(results),flush=True)
         }), encoding="utf-8")
         clients[name] = [str(installed_chat.console), "--config", str(path)]
 
-    def client(name, *args):
+    def client(name: str, *args: str) -> Any:
         return json.loads(run([*clients[name], *args], cwd=tmp_path))
 
     post = {"op": "post", "channel": "room", "codename": "agent-a",

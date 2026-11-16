@@ -1,5 +1,7 @@
 """Explicit foreground host; installation, supervision and cutover stay external."""
 
+from __future__ import annotations
+
 import argparse
 import hmac
 import http.server
@@ -10,11 +12,16 @@ from pathlib import Path
 import signal
 import socket
 import socketserver
-import sqlite3
+import sqlite3 as sqlite3
 import stat
 import sys
 import threading
 import uuid
+from io import BufferedIOBase
+from typing import Any, Callable, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from single_instance_lease import SingleInstance
 
 from .store import ChatError, ChatStore, json_bytes, strict_json
 
@@ -30,7 +37,7 @@ class HostError(Exception):
     pass
 
 
-def _absolute(value):
+def _absolute(value: object) -> Path:
     if (
         not isinstance(value, str) or not value or not value.isprintable()
         or not Path(value).is_absolute()
@@ -39,7 +46,7 @@ def _absolute(value):
     return Path(value)
 
 
-def _read_regular(path, limit):
+def _read_regular(path: Path, limit: int) -> tuple[bytes, os.stat_result]:
     if not stat.S_ISREG(path.lstat().st_mode):
         raise HostError("host_configuration_invalid")
     with path.open("rb") as stream:
@@ -52,7 +59,7 @@ def _read_regular(path, limit):
     return value, info
 
 
-def load_config(path):
+def load_config(path: object) -> dict[str, Any]:
     value, _ = _read_regular(_absolute(path), MAX_REQUEST_BYTES)
     try:
         config = strict_json(value)
@@ -61,7 +68,7 @@ def load_config(path):
     return _validate_config(config)
 
 
-def _validate_config(config):
+def _validate_config(config: object) -> dict[str, Any]:
     if (
         not isinstance(config, dict)
         or set(config) != {"schema", "version", "data_dir", "installation_id", "token_file"}
@@ -81,11 +88,11 @@ def _validate_config(config):
 
 
 class _BoundedReader:
-    def __init__(self, stream):
+    def __init__(self, stream: BufferedIOBase) -> None:
         self.stream = stream
         self.remaining = MAX_HEADER_BYTES
 
-    def readline(self, limit=-1):
+    def readline(self, limit: int = -1) -> bytes:
         if self.remaining <= 0:
             raise http.client.LineTooLong("request headers")
         value = self.stream.readline(min(self.remaining + 1, limit) if limit >= 0
@@ -95,43 +102,45 @@ class _BoundedReader:
             raise http.client.LineTooLong("request headers")
         return value
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.stream, name)
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
+    server: _Server
     protocol_version = "HTTP/1.0"
     server_version = "agent-chat"
     sys_version = ""
 
-    def setup(self):
+    def setup(self) -> None:
         super().setup()
-        self.rfile = _BoundedReader(self.rfile)
-        self._timer = None
+        # Stdlib's nominal annotation exceeds this handler's read/readline/close contract.
+        self.rfile = _BoundedReader(self.rfile)  # type: ignore[assignment]
+        self._timer: threading.Timer | None = None
 
-    def log_message(self, *_):
+    def log_message(self, *_: object) -> None:
         return
 
-    def _cancel_deadline(self):
+    def _cancel_deadline(self) -> None:
         if self._timer is not None:
             self._timer.cancel()
             self._timer.join()
             self._timer = None
 
-    def _deadline(self):
+    def _deadline(self) -> None:
         self._cancel_deadline()
         self.connection.settimeout(IO_SECONDS)
         self._timer = threading.Timer(IO_SECONDS, self._expire)
         self._timer.start()
 
-    def _expire(self):
+    def _expire(self) -> None:
         try:
             self.connection.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
         self.connection.close()
 
-    def handle_one_request(self):
+    def handle_one_request(self) -> None:
         self._deadline()
         try:
             super().handle_one_request()
@@ -140,10 +149,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         finally:
             self._cancel_deadline()
 
-    def send_error(self, code, message=None, explain=None):
+    def send_error(
+        self, code: int, message: str | None = None, explain: str | None = None,
+    ) -> None:
         self._json(code, {"error": "http_request_invalid"})
 
-    def _json(self, status, value):
+    def _json(self, status: int, value: dict[str, Any]) -> None:
         data = json_bytes(value)
         if len(data) > MAX_RESPONSE_BYTES:
             logging.error("chat_host_response_limit")
@@ -157,7 +168,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
         self.close_connection = True
 
-    def _authorized(self):
+    def _authorized(self) -> bool:
         values = self.headers.get_all("Authorization", [])
         if len(values) != 1:
             return False
@@ -167,7 +178,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return False
         return hmac.compare_digest(supplied, self.server.authorization)
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         if not self._authorized():
             self._json(401, {"error": "unauthorized"})
         elif self.path != "/health":
@@ -181,7 +192,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 value["accepting"] = not self.server.draining
                 self._json(503 if self.server.draining else 200, value)
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         if not self._authorized():
             self._json(401, {"error": "unauthorized"})
             return
@@ -222,18 +233,25 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     block_on_close = True
     request_queue_size = MAX_CONNECTIONS
 
-    def __init__(self, address, store, authorization):
+    def __init__(
+        self, address: tuple[str, int] | str, store: ChatStore, authorization: bytes,
+    ) -> None:
         self.store = store
         self.draining = False
         self.authorization = authorization
         self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
-        super().__init__(address, _Handler)
+        initialize: Callable[[tuple[str, int] | str, type[_Handler]], None] = getattr(
+            super(), "__init__",
+        )
+        initialize(address, _Handler)
         self.timeout = .2
 
-    def server_bind(self):
+    def server_bind(self) -> None:
         socketserver.TCPServer.server_bind(self)
 
-    def process_request(self, request, client_address):
+    def process_request(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object,
+    ) -> None:
         if not self.slots.acquire(blocking=False):
             self.shutdown_request(request)
             return
@@ -243,13 +261,17 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
             self.slots.release()
             raise
 
-    def process_request_thread(self, request, client_address):
+    def process_request_thread(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object,
+    ) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
             self.slots.release()
 
-    def handle_error(self, request, client_address):
+    def handle_error(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object,
+    ) -> None:
         logging.error("chat_host_request_failed exception=%s", type(sys.exc_info()[1]).__name__)
 
 
@@ -257,7 +279,7 @@ class _UnixServer(_Server):
     address_family = getattr(socket, "AF_UNIX", socket.AF_INET)
 
 
-def _private_directory(path):
+def _private_directory(path: Path) -> None:
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or (
         getattr(info, "st_file_attributes", 0) & 0x400
@@ -265,7 +287,7 @@ def _private_directory(path):
         raise HostError("host_data_directory_invalid")
 
 
-def _authorization(config):
+def _authorization(config: dict[str, Any]) -> bytes:
     token, info = _read_regular(_absolute(config["token_file"]), 1026)
     token = token.strip(b"\r\n")
     if (
@@ -278,7 +300,7 @@ def _authorization(config):
     return prefix + token
 
 
-def initialize_storage(config):
+def initialize_storage(config: object) -> dict[str, Any]:
     """Explicit first creation only; a failed/partial or existing volume is not adopted."""
     try:
         from single_instance_lease import AlreadyRunningError, SingleInstance
@@ -305,7 +327,7 @@ def initialize_storage(config):
         lease.release()
 
 
-def probe_health(config, run_dir):
+def probe_health(config: object, run_dir: object) -> dict[str, Any]:
     """Query the authenticated application, never opening its live database."""
     from .client import ClientError
     from .transport import _local_connection
@@ -319,7 +341,7 @@ def probe_health(config, run_dir):
         connection.connect()
         sock = connection.sock
 
-        def expire():
+        def expire() -> None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -353,7 +375,10 @@ def probe_health(config, run_dir):
 class HostedChat:
     """One explicitly owned store and local endpoint, with caller-controlled lifetime."""
 
-    def __init__(self, config, *, run_dir=None, require_existing_storage=False):
+    def __init__(
+        self, config: object, *, run_dir: object = None,
+        require_existing_storage: bool = False,
+    ) -> None:
         try:
             from agent_procutil.daemon_instances import admit_daemon_instance
         except ImportError:
@@ -369,7 +394,9 @@ class HostedChat:
             self._instance_guard.close()
             raise
 
-    def _initialize(self, config, *, run_dir, require_existing_storage):
+    def _initialize(
+        self, config: object, *, run_dir: object, require_existing_storage: bool,
+    ) -> None:
         config = _validate_config(config)
         try:
             from endpoint_rendezvous import clear_endpoint, write_endpoint
@@ -378,10 +405,13 @@ class HostedChat:
             raise HostError("host_service_dependencies_missing") from None
         self._clear_endpoint = clear_endpoint
         self._write_endpoint = write_endpoint
+        self.store: ChatStore | None
+        self.server: _Server | None
+        self.lease: SingleInstance | None
         self.store = self.server = self.lease = None
         self._advertised = False
-        self._socket_path = None
-        self._socket_identity = None
+        self._socket_path: Path | None = None
+        self._socket_identity: tuple[int, int] | None = None
         self.data_dir = _absolute(config["data_dir"])
         authorization = _authorization(config)
         if not require_existing_storage:
@@ -420,15 +450,15 @@ class HostedChat:
             self.close()
             raise
 
-    def serve(self, stop):
+    def serve(self, stop: threading.Event) -> None:
         while not stop.is_set():
-            self.server.handle_request()
+            cast(_Server, self.server).handle_request()
 
-    def drain(self):
-        self.server.draining = True
-        return self.store.drain()
+    def drain(self) -> dict[str, Any]:
+        cast(_Server, self.server).draining = True
+        return cast(ChatStore, self.store).drain()
 
-    def close(self):
+    def close(self) -> None:
         drain_error = None
         if self.server is not None:
             self.server.draining = True
@@ -447,9 +477,9 @@ class HostedChat:
             self._clear_endpoint(self.run_dir)
             self._advertised = False
         if self._socket_identity is not None:
-            info = self._socket_path.lstat()
+            info = cast(Path, self._socket_path).lstat()
             if (info.st_dev, info.st_ino) == self._socket_identity and stat.S_ISSOCK(info.st_mode):
-                self._socket_path.unlink()
+                cast(Path, self._socket_path).unlink()
             else:
                 raise HostError("host_socket_ownership_changed")
             self._socket_identity = None
@@ -460,14 +490,14 @@ class HostedChat:
         if drain_error is not None:
             raise drain_error
 
-    def __enter__(self):
+    def __enter__(self) -> HostedChat:
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, *_: object) -> None:
         self.close()
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--run-dir", help="Explicit disposable endpoint directory.")
@@ -485,7 +515,7 @@ def main(argv=None):
         return 1
 
 
-def _run(args):
+def _run(args: argparse.Namespace) -> int:
     try:
         from agent_procutil.daemon_instances import admit_daemon_instance
     except ImportError:
@@ -494,7 +524,7 @@ def _run(args):
         return _serve(args)
 
 
-def _serve(args):
+def _serve(args: argparse.Namespace) -> int:
     stop = threading.Event()
     previous = {}
     try:
@@ -516,11 +546,12 @@ def _serve(args):
             print(json.dumps({
                 "schema": "agent-chat.host-ready", "version": 1,
                 "transport": host.transport, "endpoint": host.endpoint,
-                "installation_id": host.store.installation_id,
+                "installation_id": cast(ChatStore, host.store).installation_id,
             }), flush=True)
             host.serve(stop)
         return 0
     except (HostError, ChatError, OSError, sqlite3.Error) as error:
+        value: dict[str, Any]
         if isinstance(error, HostError):
             value = {"error": str(error)}
         elif isinstance(error, ChatError):
