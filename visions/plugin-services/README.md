@@ -621,6 +621,14 @@ rather than demanding a matched peer. Convergence (reconcile, drain-and-cutover)
 merely *reduces* skew when convenient; it is never a **precondition for
 correctness**. The suite is correct **while** skewed.
 
+Durable conversations and ownership records likewise outlive the executable
+that created them. Compatible newer code can adopt their versioned contracts
+without requiring that original build indefinitely or rewriting their history.
+Exact-build pins serve invocation-time startup of a contract-compatible daemon,
+not durable compatibility. Any necessary build-specific contract data is
+ephemeral or has an adapter for newer code; neither choice loses unresolved
+effects or weakens resource ownership.
+
 ### uniform-deploy-contract
 Independently installed services share one deploy/update/version footprint (the
 install contract), so a user — or an automated fleet — reasons about, audits, and
