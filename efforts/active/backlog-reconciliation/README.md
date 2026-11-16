@@ -3634,6 +3634,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
+  The agent-recommended [Manager bytecode-uninstall proposal](manager-bytecode-uninstall-receiving.md)
+  directly maps #9375's narrow inventory/removal repair to planned #1886
+  acceptance, preserving the existing Manager repair, #8864 and #8669 owners
+  and independent gates. Reviewed receiving and live readback must precede
+  any separate tracking judgment; no implementation or live-removal proof
+  is claimed.
   The agent-recommended [accepted session-artifact contract](session-artifact-receiving.md)
   directly retains #2165's structural write-time block OR flag and source/replica
   data-handling acceptance in a sixth, independent #10968 track after #12791.
