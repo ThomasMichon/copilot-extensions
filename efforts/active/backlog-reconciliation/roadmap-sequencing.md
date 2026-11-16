@@ -133,8 +133,17 @@ Selected entry decisions already supported by the registers are listed below.
 The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
 reuses nine audited tracking dispositions to name their actual receiving
 routes. It does not refresh the registers' source findings or turn a tracking
-transfer into implementation credit. #9377's disposition and next receiving
-route remain unqualified; its historical nomination is not a current assignment.
+transfer into implementation credit. The [2026-11-15 correction](roadmap-current-qualification.md#2026-11-15-routing-and-completed-nomination-correction)
+adds #4220's audited route through #5768 and the existing Index effort, retaining
+the exact alias/cursor/GC acceptance without adding a hard edge.
+
+That correction also qualifies #9377's actual completed source closeout:
+the optional agenda companion is archived Done, its six causal PRs are merged,
+and its original implementation claimant reports the source assignment
+concluded. The old Phase 1 admission nomination is therefore historical, not
+ready work to schedule again. Release/installed evidence and later helper
+evolution remain separate; this research adopts no agenda or new execution
+assignment.
 
 | Selected contribution | What actually precedes it | What does not have to finish first |
 |---|---|---|
@@ -155,7 +164,6 @@ route remain unqualified; its historical nomination is not a current assignment.
 | #9375 selected removal witness | Exact applicable connectivity-retention/refusal and live-custody preflight | Duplicate bytecode repair, every-host rollout or a blanket credential-relay exemption |
 | #8924 revised local hook activation | Required trusted-main identifier replacement coverage | Every historical audit or a new runtime publication authority |
 | #7943 first-prompt qualification / #9097 residual compatibility | Current reviewed direct-copy source contract and exact safe declaration/path selection | Reviving old canonical-body authentication, receipt or prepared-generation mechanisms |
-| Historical #9377 bounded manual-aide nomination; current route unqualified | Original explicit Phase 1 admission after the reviewed inception remains the historical condition; verify actual disposition/receiving evidence before selecting this nomination | Mandatory helper code, Dispatch integration or a second completion ledger; this unresolved route does not block unrelated work |
 
 The union does not introduce unrecorded hard prerequisites between the four
 waves. A shared implementation seam is an interface to reconcile, not evidence
