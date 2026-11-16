@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -17,8 +17,8 @@ class _UniqueLoader(yaml.SafeLoader):
     pass
 
 
-def _mapping(loader, node):
-    result = {}
+def _mapping(loader: Any, node: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in node.value:
         name = loader.construct_object(key)
         if not isinstance(name, str) or name in result:

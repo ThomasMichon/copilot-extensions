@@ -209,11 +209,13 @@ policy evidence. Native required policies are never disabled by this block.
 
 ### Renewable observation credentials
 
-An explicitly selected `snapshot <repo> <number> --config <absolute-file>
+An explicitly selected `snapshot <repo> <number> --config <file>
 --credential-command <JSON-argv>` resolves its target through the same bounded
 selected-file binding owner as repository inventory. No local anchor, project,
 registry or layered configuration is needed for this form. The file must contain
-one matching `repos.<name>.pr` provider/repository binding; Gitea and Azure DevOps
+one matching `repos.<name>.pr` provider/repository binding; relative paths retain
+their caller-directory meaning. Unavailable paths return a sanitized selection
+error, not a traceback. Gitea and Azure DevOps
 also require their explicit endpoint. GitHub retains its supported public
 default when the endpoint is omitted. Invalid or ambiguous selection refuses
 before credential acquisition. Ordinary reads without this explicit typed-source

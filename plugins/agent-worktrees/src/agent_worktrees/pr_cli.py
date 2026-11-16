@@ -6,6 +6,8 @@ import argparse
 import math
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any, Callable
 
 from . import config as cfg
 from . import git_ops, output, providers, tracking, worktree_identity
@@ -13,28 +15,18 @@ from .pr_checks import print_check_failures
 from .pr_read_context import scoped_read_dispatch
 
 
-def _core():
-    """Lazily resolve ``agent_worktrees.__main__`` -- **never** at module load.
+def _core() -> ModuleType:
+    """Resolve call-time CLI exports, preserving their monkeypatch seam.
 
-    Cross-module CLI helpers (``_json_output``, ``_resolve_repo_remote``,
-    ...) are defined in sibling modules but
-    re-exported onto ``__main__`` so the test suite's ``monkeypatch.setattr(m,
-    "_name", ...)`` convention keeps working uniformly regardless of where a
-    name's real implementation lives. Routing every cross-module call through
-    this accessor (instead of importing the sibling module directly) preserves
-    that convention. It must stay a **deferred**, call-time import: a
-    module-level ``from . import __main__ as core`` here would force a second,
-    independent execution of ``__main__.py`` (under the distinct module name
-    ``agent_worktrees.__main__``, since ``-m agent_worktrees`` already runs it
-    once as ``__main__``) that observes this module's own not-yet-defined late
-    bindings and crashes -- exactly copilot-extensions#2614's regression.
+    A module-level import would re-enter partially initialized ``__main__``
+    under its package name during ``python -m`` startup (the #2614 regression).
     """
     from . import __main__ as core
 
     return core
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register help-surface parser stubs for the manual PR command family."""
     # pr-watch / pr -- dispatched pre-argparse (see cmd_pr_watch_dispatch /
     # cmd_pr_dispatch). Registered here only so they surface in --help.
@@ -287,7 +279,7 @@ def _adopt_pushed_head(
     commit (someone else pushed): the stale expectation stands and the merge
     refuses, as it should.
     """
-    def matching(record: tracking.WorktreeRecord):
+    def matching(record: tracking.WorktreeRecord) -> list[Any]:
         return [pr for pr in record.prs
                 if pr.number == number and (pr.repo or record.repo).lower() == repo.lower()
                 and (pr.provider or provider) == provider]
@@ -416,7 +408,9 @@ def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
     return repo, pr
 
 
-def _pr_watch_review_blocking(config, args, *, actor_flow=None) -> bool:
+def _pr_watch_review_blocking(
+    config: cfg.Config, args: argparse.Namespace, *, actor_flow: Any = None,
+) -> bool:
     """Effective review-blocking posture for a ``pr-watch wait``.
 
     A ``pr-self-merge`` repo whose review is marked non-blocking (e.g. GitHub
@@ -582,6 +576,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             )
             return 2
         repo_cfg = resolution.repo_config
+        assert repo_cfg is not None
         base_prcfg = repo_cfg.pr
         prcfg = base_prcfg
         resolved_token = args.token
@@ -715,7 +710,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                         args.token if args.token is not None
                         else providers.account_token_for_slug(args.repo, prcfg)
                     )
-                    self_merge_note = pr_ops.self_merge_bypass_note(
+                    bypass_note: Callable[..., str | None] = getattr(pr_ops, "self_merge_bypass_note")
+                    self_merge_note = bypass_note(
                         actor_flow.flow, watch_provider, args.repo, args.pr,
                         api_base=args.host or prcfg.api_base or "",
                         token=watch_token,
@@ -992,7 +988,7 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
         args = parser.parse_args([canonical, *argv[1:]])
     except SystemExit as exc:
         return int(exc.code or 0)
-    handler = _core().COMMAND_MAP.get(args.command)
+    handler: Callable[[argparse.Namespace], int] | None = _core().COMMAND_MAP.get(args.command)
     if not handler:
         _pr_usage()
         return 1
