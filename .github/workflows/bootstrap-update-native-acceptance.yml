@@ -12,12 +12,17 @@ on:
     paths:
       - .github/workflows/bootstrap-update-native-acceptance.yml
       - libs/installer-engine/installer_engine.py
+      - libs/installer-engine/bootstrap-python.ps1
+      - libs/installation-context/shell-caller-owned.ps1
+      - libs/installation-context/tests/test_powershell_bootstrap.py
+      - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - worktree-manager/bootstrap.ps1
       - worktree-manager/bootstrap.sh
       - worktree-manager/scripts/bootstrap_inputs.py
       - worktree-manager/scripts/bootstrap_update.py
       - worktree-manager/scripts/runtime_install.py
       - worktree-manager/src/worktree_manager/update_driver_cli.py
+      - worktree-manager/src/worktree_manager/mux_daemon_process.py
       - worktree-manager/src/worktree_manager/runtime_application_inputs.py
       - worktree-manager/src/worktree_manager/update_bootstrap.py
       - worktree-manager/src/worktree_manager/runtime_source_repair.py
@@ -30,6 +35,7 @@ on:
       - worktree-manager/tests/test_bootstrap_update.py
       - worktree-manager/tests/test_bootstrap_ps1.py
       - worktree-manager/tests/test_bootstrap_sh.py
+      - worktree-manager/tests/test_update_python_context.py
       - worktree-manager/tests/test_application_input_provider.py
       - worktree-manager/tests/test_update_bootstrap.py
       - worktree-manager/tests/test_recovery_source.py
@@ -77,10 +83,11 @@ jobs:
           --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
           --test-file tests/test_bootstrap_ps1.py
           --test-file tests/test_bootstrap_sh.py
+          --test-file tests/test_update_python_context.py
           -k "not full_declared_repository_inputs_reach_immutable_retention and
           (not test_bootstrap_ps1.py or managed_python or
           python_lookup_rejects_empty_success or bootstrap_retains_physical_uv or
-          bootstrap_prepares_compatible_uv) and
+          bootstrap_prepares_compatible_uv or hands_selected_python) and
           (not test_bootstrap_sh.py or bootstrap_uses_managed_python) and
           (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
           (not test_install_source or standalone_prepared_updates) and
@@ -90,6 +97,12 @@ jobs:
           (not test_update_bootstrap.py or prepared_repair_uses_declared_installer_entry) and
           (not test_recovery_source.py or unattributable_engine_uses_native_fresh_installation) and
           (not test_bootstrap_update.py or observer_modes_share)"
+      - name: Qualify prepared Python handoff through the native SDK
+        run: >-
+          python tools/run-plugin-tests.py installation-context --test-file tests/test_powershell_bootstrap.py -k "uses_prepared_python or positional_arguments" --allow-explicit-tiers
+      - name: Qualify prepared Python evaluator selection
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_bootstrap_python.py -k prepared_python --allow-explicit-tiers
 
   bootstrap-update-windows:
     name: Whole bootstrap update (Windows)

@@ -57,9 +57,15 @@ its whole working set rolled back.
   selected source fields; duplicate/ambiguous entries and containment violations
   remain refusals. No source identity or readiness result is cached.
 - `installation-context.ps1` is a thin PowerShell 5.1+/pwsh adapter to the
-  same stdlib-only Python SDK. Python 3.10+ must be available as the first
-  `python` application on PATH, prepared by the harness's existing prerequisite
-  setup or supplied as a standalone prerequisite. The adapter does not acquire
+  same stdlib-only Python SDK. Setup can pass its prepared interpreter through
+  `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`, an absolute executable path inherited
+  only by its child processes. The shared `shell-caller-owned.ps1` also accepts
+  an explicit `-Python` argument, which takes precedence. An invalid, missing or
+  unsupported explicit selection fails without trying ambient Python. The
+  compatibility path, when no selection is supplied, still requires Python
+  3.10+ as the first `python` application on PATH; migrating remaining standalone
+  and fresh-terminal callers is not implied by this setup handoff.
+  The adapter does not acquire
   an interpreter, verify its publisher or compile native types. It runs Python
   with isolated startup and no site initialization, using an encoded request
   over its private input pipe rather than putting data in native argv. This

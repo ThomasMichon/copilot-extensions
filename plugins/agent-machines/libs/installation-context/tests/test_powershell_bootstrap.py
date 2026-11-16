@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -419,8 +420,103 @@ exit $LASTEXITCODE
     )
     assert result.returncode == 1
     assert not result.stdout.strip()
-    assert "Python 3.10+ is required on PATH" in result.stderr
+    assert "Python 3.10+ is required for helpers" in result.stderr
     assert "unsupported Python reached application work" not in result.stderr
+    assert not (tmp_path / "copilot").exists()
+    assert not (tmp_path / "durable").exists()
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+def test_transport_preserves_positional_arguments_and_explicit_python_precedence(
+    tmp_path: Path, host: str | None,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import json,os,sys\n"
+        "def main(request):\n"
+        "    sys.path.insert(0,os.environ['PREPARED_ARCHIVE'])\n"
+        "    from agent_procutil._shell_caller_owned import serve\n"
+        "    def callback():\n"
+        "        print(json.dumps(request['payload']))\n"
+        "        return 0\n"
+        "    return serve(callback, **request['lifetime'])\n",
+        encoding="utf-8",
+    )
+    harness = tmp_path / "positional.ps1"
+    harness.write_text(
+        r"""
+param([string]$Transport, [string]$Worker)
+& $Transport $Worker @{payload='positional'} 0 'caller-owned' $env:PREPARED_PYTHON
+exit $LASTEXITCODE
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+         "-Transport", str(SCRIPT.with_name("shell-caller-owned.ps1")), "-Worker", str(worker)],
+        capture_output=True, text=True, timeout=20,
+        env={
+            **os.environ,
+            "PREPARED_ARCHIVE": str(SCRIPT.with_name("daemon_instance_runtime.pyz")),
+            "PREPARED_PYTHON": str(Path(sys.executable).resolve()),
+            "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": "must-not-be-selected",
+            "PATH": str(tmp_path),
+        },
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == "positional"
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+@pytest.mark.parametrize("selection", ["prepared", "relative", "missing"])
+def test_sdk_uses_prepared_python_without_ambient_fallback(
+    tmp_path: Path, host: str | None, selection: str,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    poison = tmp_path / "ambient"
+    poison.mkdir()
+    application = poison / ("python.exe" if os.name == "nt" else "python")
+    application.write_bytes(b"not a Python interpreter\n")
+    application.chmod(0o755)
+    python = {
+        "prepared": str(Path(sys.executable).resolve()),
+        "relative": "python",
+        "missing": str(tmp_path / "missing-python"),
+    }[selection]
+    harness = tmp_path / "prepared.ps1"
+    harness.write_text(
+        r"""
+param([string]$Source, [string]$Root)
+$env:PATH = Join-Path $Root 'ambient'
+function Get-Command { throw 'Ambient Python discovery must not run' }
+& $Source source-id -SourceJson '{"source":"opaque","id":"prepared"}' `
+    -CopilotHome (Join-Path $Root 'copilot') -DurableHome (Join-Path $Root 'durable')
+exit $LASTEXITCODE
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+         "-Source", str(SCRIPT), "-Root", str(tmp_path)],
+        capture_output=True, text=True, timeout=20,
+        env={**os.environ, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": python},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+    )
+    assert "Ambient Python discovery" not in result.stderr
+    if selection == "prepared":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stderr == ""
+        assert json.loads(result.stdout)["canonical"] == "opaque:prepared"
+    else:
+        assert result.returncode == 1
+        assert not result.stdout.strip()
+        if selection == "relative":
+            assert "absolute executable path" in result.stderr
     assert not (tmp_path / "copilot").exists()
     assert not (tmp_path / "durable").exists()
 

@@ -298,6 +298,7 @@ if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-pyt
     "$UV" python install --no-bin --no-registry 3.11
     PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11)"
 fi
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$PYTHON"
 
 case ":$PATH:" in
     *":$LOCAL_BIN:"*) : ;;

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from typing import Any, Literal, overload
 
 import pytest
 
@@ -16,14 +17,31 @@ HELPER = ROOT / "libs/installer-engine/bootstrap-python.ps1"
 
 
 @pytest.fixture(params=("pwsh", "powershell"))
-def host(request):
-    executable = shutil.which(request.param)
+def host(request: pytest.FixtureRequest) -> str:
+    executable = shutil.which(str(request.param))
     if not executable:
         pytest.skip(f"{request.param} is unavailable")
     return executable
 
 
-def _run(host, tmp_path, body, *, environment=None, success=True):
+@overload
+def _run(
+    host: str, tmp_path: Path, body: str, *,
+    environment: dict[str, str] | None = None, success: Literal[True] = True,
+) -> dict[str, Any]: ...
+
+
+@overload
+def _run(
+    host: str, tmp_path: Path, body: str, *,
+    environment: dict[str, str] | None = None, success: Literal[False],
+) -> subprocess.CompletedProcess[str]: ...
+
+
+def _run(
+    host: str, tmp_path: Path, body: str, *,
+    environment: dict[str, str] | None = None, success: bool = True,
+) -> dict[str, Any] | subprocess.CompletedProcess[str]:
     child_env = dict(environment or {})
     test_path = child_env.pop("PATH", "")
     script = tmp_path / "probe.ps1"
@@ -42,16 +60,17 @@ def _run(host, tmp_path, body, *, environment=None, success=True):
             **child_env, "BOOTSTRAP_TEST_PATH": test_path,
         },
         timeout=20,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
     if success:
         assert result.returncode == 0, result.stderr
         assert result.stderr == ""
-        return json.loads(result.stdout)
+        value: dict[str, Any] = json.loads(result.stdout)
+        return value
     return result
 
 
-def _application(directory):
+def _application(directory: Path) -> Path:
     directory.mkdir()
     application = directory / ("python.exe" if os.name == "nt" else "python")
     # Discovery must not execute or inspect these intentionally non-Python bytes.
@@ -60,7 +79,7 @@ def _application(directory):
     return application
 
 
-def test_discovery_uses_path_order_without_executing_candidates(host, tmp_path):
+def test_discovery_uses_path_order_without_executing_candidates(host: str, tmp_path: Path) -> None:
     first = _application(tmp_path / "first's \u00e9")
     second = _application(tmp_path / "second")
     result = _run(
@@ -73,7 +92,7 @@ def test_discovery_uses_path_order_without_executing_candidates(host, tmp_path):
 
 
 @pytest.mark.parametrize("kind", ("venv", "embedded", "excluded"))
-def test_setup_owns_path_hygiene_not_a_runtime_allowlist(host, tmp_path, kind):
+def test_setup_owns_path_hygiene_not_a_runtime_allowlist(host: str, tmp_path: Path, kind: str) -> None:
     python = _application(tmp_path / kind)
     if kind == "venv":
         (python.parent / "pyvenv.cfg").write_text("home = elsewhere\n", encoding="utf-8")
@@ -89,7 +108,7 @@ def test_setup_owns_path_hygiene_not_a_runtime_allowlist(host, tmp_path, kind):
     assert result["Guard"] is None
 
 
-def test_alias_and_function_do_not_shadow_path_application(host, tmp_path):
+def test_alias_and_function_do_not_shadow_path_application(host: str, tmp_path: Path) -> None:
     python = _application(tmp_path / "bin")
     result = _run(
         host, tmp_path, """
@@ -102,7 +121,7 @@ Resolve-EvaluatorBootstrapPython | ConvertTo-Json -Compress
     assert result["Python"] == str(python)
 
 
-def test_missing_python_is_an_explicit_prerequisite_outcome(host, tmp_path):
+def test_missing_python_is_an_explicit_prerequisite_outcome(host: str, tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
     result = _run(
@@ -114,7 +133,42 @@ def test_missing_python_is_an_explicit_prerequisite_outcome(host, tmp_path):
     }
 
 
-def test_discovery_errors_are_not_reported_as_missing_python(host, tmp_path):
+@pytest.mark.parametrize("source", ["argument", "environment"])
+def test_prepared_python_bypasses_ambient_discovery(host: str, tmp_path: Path, source: str) -> None:
+    python = _application(tmp_path / "prepared")
+    argument = "-Python $env:PREPARED_PYTHON" if source == "argument" else ""
+    result = _run(
+        host, tmp_path,
+        "function Get-Command { throw 'Ambient discovery must not run' }\n"
+        f"Resolve-EvaluatorBootstrapPython {argument} | ConvertTo-Json -Compress",
+        environment={
+            "PREPARED_PYTHON": str(python),
+            "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": (
+                str(python) if source == "environment" else "ignored-relative-path"
+            ),
+        },
+    )
+    assert result == {
+        "Status": "selected", "Reason": "explicit-python", "Python": str(python), "Guard": None,
+    }
+
+
+@pytest.mark.parametrize("python", ["python", "", "relative/python"])
+def test_invalid_prepared_python_is_not_an_ambient_fallback(
+    host: str, tmp_path: Path, python: str,
+) -> None:
+    result = _run(
+        host, tmp_path,
+        "function Get-Command { throw 'Ambient discovery must not run' }\n"
+        "Resolve-EvaluatorBootstrapPython -Python $env:PREPARED_PYTHON",
+        environment={"PREPARED_PYTHON": python}, success=False,
+    )
+    assert result.returncode != 0
+    assert "absolute executable path" in result.stderr
+    assert "Ambient discovery" not in result.stderr
+
+
+def test_discovery_errors_are_not_reported_as_missing_python(host: str, tmp_path: Path) -> None:
     result = _run(host, tmp_path, """
 function Get-Command { throw [IO.IOException]::new('discovery fixture failure') }
 Resolve-EvaluatorBootstrapPython
@@ -123,7 +177,7 @@ Resolve-EvaluatorBootstrapPython
     assert "discovery fixture failure" in result.stderr
 
 
-def test_discovery_does_not_compile_attest_or_launch(host, tmp_path):
+def test_discovery_does_not_compile_attest_or_launch(host: str, tmp_path: Path) -> None:
     result = _run(host, tmp_path, r"""
 $errors=$null
 $tokens=$null
@@ -151,8 +205,8 @@ $forbidden=@($commands | Where-Object {
 @pytest.mark.parametrize("plugin", ("agent-codespaces", "agent-containers"))
 @pytest.mark.parametrize("condition", ("missing", "startup-fails"))
 def test_runtime_gate_does_not_fall_back_after_prerequisite_failure(
-    host, tmp_path, plugin, condition,
-):
+    host: str, tmp_path: Path, plugin: str, condition: str,
+) -> None:
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     sdk = scripts / "installation-context"
