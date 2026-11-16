@@ -4,25 +4,38 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sqlite3
+from typing import Any, Protocol
 
+from .queue_common import Task
 from .queue_records import SpawnState, Status, TaskError
 
 
-def _json(value):
+class CleanupOwner(Protocol):
+    def _connect(self) -> sqlite3.Connection: ...
+    def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
+    def _now(self, now: float | None) -> float: ...
+    def _audit(
+        self, conn: sqlite3.Connection, task_id: str, *, ts: float,
+        from_status: str, to_status: str, worker: str | None, note: str,
+    ) -> None: ...
+
+
+def _json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def _digest(value):
+def _digest(value: object) -> str:
     return hashlib.sha256(_json(value).encode()).hexdigest()
 
 
-def _has_history(conn):
+def _has_history(conn: sqlite3.Connection) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cleanup_recoveries'",
     ).fetchone() is not None
 
 
-def _allocation_guard(conn, row):
+def _allocation_guard(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
     blocker = conn.execute(
         "SELECT key FROM spawn_reservations WHERE key != ? AND "
         "((task_id=? AND attempt >= ?) OR "
@@ -43,7 +56,10 @@ def _allocation_guard(conn, row):
             raise TaskError("cleanup exclusive allocation remains active")
 
 
-def validate_recovery(queue, conn, row, *, check_allocation=True, claimant_machine=None):
+def validate_recovery(
+    queue: CleanupOwner, conn: sqlite3.Connection, row: sqlite3.Row, *,
+    check_allocation: bool = True, claimant_machine: str | None = None,
+) -> None:
     """Apply the recovery generation fence again under the cleanup lease."""
     if row["native_release_pending"]:
         raise TaskError("historical native retirement is still pending; workspace cleanup is excluded")
@@ -77,7 +93,7 @@ def validate_recovery(queue, conn, row, *, check_allocation=True, claimant_machi
         _allocation_guard(conn, row)
 
 
-def _identity(row):
+def _identity(row: sqlite3.Row) -> dict[str, Any]:
     return {name: row[name] for name in (
         "key", "task_id", "attempt", "reserved_at", "worktree",
         "worktree_ownership", "creating_host", "driver", "state", "session_handle",
@@ -87,8 +103,10 @@ def _identity(row):
     )}
 
 
-def _reset_payload(raw):
+def _reset_payload(raw: object) -> dict[str, Any]:
     try:
+        if not isinstance(raw, (str, bytes, bytearray)):
+            raise TypeError("cleanup detail is not JSON text")
         payload = json.loads(raw)
     except (ValueError, TypeError) as exc:
         raise TaskError("cleanup detail is unknown; recovery requires a valid envelope") from exc
@@ -130,8 +148,11 @@ def _reset_payload(raw):
     return updated
 
 
-def recover(queue, key, *, expected_generation, current_host, apply=False,
-            expected_preview=None, reason=None, request_id=None, now=None):
+def recover(
+    queue: CleanupOwner, key: str, *, expected_generation: int, current_host: str,
+    apply: bool = False, expected_preview: str | None = None, reason: str | None = None,
+    request_id: str | None = None, now: float | None = None,
+) -> dict[str, Any]:
     """Schedule one leased retry through the existing supervisor authority."""
     if (type(expected_generation) is not int or expected_generation < 0
             or not isinstance(current_host, str) or not current_host.strip()):
@@ -155,7 +176,8 @@ def recover(queue, key, *, expected_generation, current_host, apply=False,
             if prior:
                 if prior["request"] != request:
                     raise TaskError("cleanup recovery request id reused with different parameters")
-                return json.loads(prior["response"])
+                response: dict[str, Any] = json.loads(prior["response"])
+                return response
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         if row is None:
             raise TaskError(f"no such reservation: {key}")
@@ -217,7 +239,7 @@ def recover(queue, key, *, expected_generation, current_host, apply=False,
         return result
 
 
-def history(queue, key):
+def history(queue: CleanupOwner, key: str) -> list[dict[str, Any]]:
     """Read retained failure envelopes even after cleanup subsequently completes."""
     with queue._connect() as conn:
         if conn.execute("SELECT 1 FROM spawn_reservations WHERE key=?", (key,)).fetchone() is None:

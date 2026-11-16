@@ -308,6 +308,9 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Retained conversation versus failed-attempt cleanup](journal/2026/11.16-retained-conversation-cleanup.md)
+  records the queue-owned preservation correction and bounded controls;
+  missing-metadata recovery and native acceptance remain open.
 - [Retained-writer contract adaptation](journal/2026/11.16-retained-writer-contract.md)
   records the reviewed compatibility plan and bounded source controls;
   native/runtime adoption remains open.
