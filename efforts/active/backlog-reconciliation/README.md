@@ -3438,6 +3438,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   in-process context-core program. The same journal preserves #3677's two
   parser/publication contracts and #3698's complete leased-native/owner-admission
   acceptance without another implementation study or operational effect.
+  The [complete supported-UV receiving proposal](journal/2026/11.16-complete-supported-uv-receiving.md)
+  directly preserves #3946's real WinGet-alias/headless-Windows contract AND inherited
+  #7313 scalar child-handoff acceptance in the existing Installer Engine
+  Plan/local/global Validation and Coordination. Every technical row stays unchecked;
+  actual normal reviewed receiving delivery, complete current readback and a separate
+  source judgment precede tracking retirement. Worktrees' permanent service-engine
+  exception and actual prerequisite/adopter/native/source custodians remain unchanged.
   The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
   preserves #2729's five-package AND inherited #2726 contract in the existing
   Active Installer Engine Plan/local/global Validation and Coordination.
