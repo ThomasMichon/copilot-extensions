@@ -3142,6 +3142,69 @@ Caller fresh/prior-state policy preservation and whole-flow recovery remain
 under #11178, #5852 and the active #10377 acceptance matrix. No shared runtime,
 service, credentials, registration or installation is changed.
 
+### 2026-11-07 - Runtime-only provider source merged
+
+#11193 receives current-head Copilot approval `5809222672` with no open
+findings on `7d089d63f4f610f061fb6f185b9edbd3a1c83a9a`. Required CI
+`42324374393` passes, and the later same-head `42324563417` also passes,
+reusing its exact admitted unit evidence rather than inventing another result.
+The first managed merge is refused while GitHub reports the required PR check
+as expected. Its exact publisher and branch requirement agree; the later
+run's real gate completes successfully before a bounded managed retry.
+No status, branch rule or safety boundary is changed.
+
+The PR merges at 01:43:28 UTC as
+`4f3c7aca546355c7341fff35b3d69d261b9df6b8`. Empty closing references and
+the still-open #10377 preserve the parent gate. The Plan and Validation Plan
+are reread and remain Active. All owned implementation, contract, workflow,
+tests, changefile and journal bodies match the squash merge; TESTING also
+contains independent upstream additions. Ordinary pull-forward aborts safely
+on the already-squashed commits, then native squash-aware completion preserves
+its backup and reconciles the continuing worktree without finalizing it.
+
+The containing source release remains pending, beginning with Dev CI
+`42325587171`. Only after qualified release observation may separately deployed
+callers consume the capability and qualify the real fresh/prior-state path.
+The fixed native participant is not an installer success, no shared host is
+updated, and #11178, #5852 and the parent acceptance remain open.
+
+Dev CI `42325587171` subsequently passes. Containing attempt `42325551793`
+fails only its Promote job, after successful source admission, candidate freeze,
+units, native Resume, Python artifact build and attestation generation. The
+literal failure is `gh attestation verify` reporting that no valid Sigstore
+verifiers could be initialized after the existing single bounded retry.
+The watchdog deduplicates this occurrence under #10651. Internal initialization
+cause and same-source transient classification remain unconfirmed; prior
+successful releases do not classify this result. Normal successor
+`42326592274` is already running, with no extra forced run or verification-policy
+change. Containing release and caller adoption remain open.
+
+### 2026-11-07 - Runtime-only containing release verified
+
+The already-running normal successor `42326592274` passes every release stage,
+including the previously failing hosted signer verification, immutable candidate
+unit reuse, complete source publication/readback and non-administrative merge.
+Its immutable admission selects Dev
+`9a511795d8c138493bf71b1e29df9c1a448074ce`, which contains #11193, and
+Main base `51cbb3ea7abb4b4cc6723140f5efe2c67b821895`. Release #11205
+merges at 02:12:23 UTC as Main
+`7e4f306d32c4ae2ed53d4ee846dc0e32ec9c0c5d`, with Worktrees
+`1.24.514-dev1`.
+
+Nine defining installer, driver, declaration, generated installer output,
+native-test and qualification-workflow bodies are identical in the source
+merge, admitted Dev and actual published Main. This is the containing release,
+not a local installation. No forced release retry or verification-policy change
+occurred. The earlier verifier initialization failure remains tracked under
+#10651; success on a different admitted source is not same-source transient
+proof and does not close its diagnosis.
+
+Separately deployed callers can now select the released capability before
+effects and qualify their actual fresh/prior-state, rollback and preservation
+contracts. #11178 retains those native qualification limits; #5852 and the
+parent acceptance remain open. No rollout, shared-host or service effect is
+performed.
+
 ### 2026-11-14 UTC - Proposed complete #7743 existing-entry receiving
 
 P7743-U1, the local U1-7743 matrix and actual global V7743-U1 retain the
