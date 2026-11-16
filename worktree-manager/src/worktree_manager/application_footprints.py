@@ -24,6 +24,7 @@ import agent_procutil
 _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _VERSION = re.compile(r"[0-9][A-Za-z0-9._+-]*")
 _BACKEND = "manager-application-footprints"
+_MODULE = "worktree_manager.application_footprints"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ def plan(
         raise ValueError("unsupported application footprint declaration")
     applications: dict[str, Application] = {}
     commands: dict[str, str] = {}
+    environments: set[str] = set()
     for row in record["apps"]:
         if (
             not isinstance(row, dict) or set(row) != {"name", "version", "dependencies"}
@@ -125,6 +127,9 @@ def plan(
             or len(set(app["commands"])) != len(app["commands"])
         ):
             raise ValueError(f"application differs from its footprint entry: {name}")
+        if app["root_environment"] in environments:
+            raise ValueError("application root-environment declarations conflict")
+        environments.add(app["root_environment"])
         for command in app["commands"]:
             if command in commands:
                 raise ValueError(f"application command has multiple owners: {command}")
@@ -157,12 +162,13 @@ def _verify_copy(path: Path, application: Application) -> None:
     if _read(path / "application.json") != application.declaration:
         raise ValueError(f"application declaration changed before setup: {application.name}")
     for directory, children, files in os.walk(path, followlinks=False):
-        children[:] = [name for name in children if name not in {".venv", "state"}]
         for name in (*children, *files):
             member = _ordinary(Path(directory) / name)
             mode = member.lstat().st_mode
             if not (stat.S_ISDIR(mode) if name in children else stat.S_ISREG(mode)):
                 raise ValueError(f"application input is not an ordinary file or directory: {member}")
+        if Path(directory) == path and path == application.slot:
+            children[:] = [name for name in children if name not in {".venv", "state"}]
 
 
 def _selection_key(footprint: Path, applications: tuple[Application, ...]) -> str:
@@ -186,6 +192,9 @@ def install(
     shell = shutil.which("pwsh" if os.name == "nt" else "sh")
     if shell is None:
         raise ValueError("application setup requires PowerShell 7 or a POSIX shell")
+    roots = {app.environment: str(app.root) for app in applications}
+    if len(roots) != len(applications):
+        raise ValueError("application root-environment declarations conflict")
 
     def remaining() -> float:
         value = deadline - time.monotonic()
@@ -218,11 +227,11 @@ def install(
             environment = {
                 key: value for key, value in os.environ.items()
                 if key.upper() not in {
-                    application.environment, "PYTHONPATH", "PYTHONHOME",
+                    *roots, "PYTHONPATH", "PYTHONHOME",
                     "VIRTUAL_ENV", "__PYVENV_LAUNCHER__",
                 }
             }
-            environment[application.environment] = str(application.root)
+            environment.update(roots)
             result = process.run_owned(
                 command, cwd=application.slot, env=environment, timeout=remaining(),
                 deadline=deadline, procutil=agent_procutil, construction_fd=None,
@@ -278,10 +287,18 @@ def main(argv: list[str] | None = None) -> int:
                 ):
                     raise driver.StateError("Manager does not own this application installation request")
                 custody.assert_owned()
-                install(applications, stage=args.stage, deadline=time.monotonic() + args.timeout)
+                failure = None
+                with custody.execution_scope():
+                    try:
+                        install(applications, stage=args.stage, deadline=time.monotonic() + args.timeout)
+                    except subprocess.CalledProcessError as error:
+                        # The canonical child owner confirmed exit and descendant settlement.
+                        failure = error
+                if failure is not None:
+                    raise failure
                 print(json.dumps({"state": "staged" if args.stage else "installed"}))
                 return 0
-        command, environment = driver.runtime_command(__name__, normalized)
+        command, environment = driver.runtime_command(_MODULE, normalized)
         result = driver.run_explicit(
             driver.RequestSpec(
                 _BACKEND, tuple(normalized), project=str(apps_root),

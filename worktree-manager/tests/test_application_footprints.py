@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -99,6 +100,43 @@ def test_footprint_cannot_copy_runtime_state(tmp_path: Path, member: str) -> Non
         footprints.plan(source, tmp_path / "installed")
 
 
+def test_root_environment_conflict_refuses_before_copy(tmp_path: Path) -> None:
+    source = application_set(tmp_path, [("consumer", "1.0", ["provider"]), ("provider", "1.0", [])])
+    declaration = source / "apps" / "consumer" / "application.json"
+    record = json.loads(declaration.read_text(encoding="utf-8"))
+    record["root_environment"] = "PROVIDER_ROOT"
+    declaration.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="root-environment declarations conflict"):
+        footprints.plan(source, tmp_path / "installed")
+    assert not (tmp_path / "installed").exists()
+
+
+@pytest.mark.parametrize("relative", ["src/example/state/link", "src/example/.venv/link", "state"])
+def test_copy_verifies_entries_before_pruning_only_installed_runtime_contents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str,
+) -> None:
+    source = application_set(tmp_path, [("example", "1.0", [])])
+    application = footprints.plan(source, tmp_path / "installed")[0]
+    copied = application.source
+    if relative == "state":
+        shutil.copytree(application.source, application.slot)
+        copied = application.slot
+    target = copied / relative
+    target.mkdir(parents=True)
+    original = Path.lstat
+    def indirect(path: Path, *args: object, **kwargs: object) -> object:
+        info = original(path)
+        if path == target:
+            return SimpleNamespace(
+                st_mode=info.st_mode,
+                st_file_attributes=getattr(info, "st_file_attributes", 0) | 0x400,
+            )
+        return info
+    monkeypatch.setattr(Path, "lstat", indirect)
+    with pytest.raises(ValueError, match="must not be indirect"):
+        footprints._verify_copy(copied, application)
+
+
 def test_real_setup_stages_entire_closure_before_dependency_ordered_activation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -112,13 +150,25 @@ def test_real_setup_stages_entire_closure_before_dependency_ordered_activation(
     incumbent.mkdir()
     (incumbent / "current-version").write_text("old\n", encoding="utf-8")
     monkeypatch.setenv("CONSUMER_ROOT", str(incumbent))
+    monkeypatch.setenv("PROVIDER_ROOT", str(incumbent))
     planned = footprints.plan(source, tmp_path / "installed")
+    consumer = planned[1].source / "bin"
+    with (consumer / "setup.ps1").open("a", encoding="utf-8") as script:
+        script.write(
+            "if (-not $staging) { Set-Content -LiteralPath (Join-Path $root 'provider-root') "
+            "-Value $env:PROVIDER_ROOT }\n",
+        )
+    with (consumer / "setup.sh").open("a", encoding="utf-8") as script:
+        script.write(
+            'if [ "$phase" = activate ]; then printf "%s\\n" "$PROVIDER_ROOT" > "$root/provider-root"; fi\n',
+        )
     footprints.install(planned, stage=False, deadline=time.monotonic() + 60)
     assert log.read_text(encoding="utf-8").splitlines() == [
         "provider:stage", "consumer:stage", "provider:activate", "consumer:activate",
     ]
     assert (planned[1].root / "current-version").read_text(encoding="utf-8").strip() == "2.0"
     assert (incumbent / "current-version").read_text(encoding="utf-8") == "old\n"
+    assert (planned[1].root / "provider-root").read_text(encoding="utf-8").strip() == str(planned[0].root)
     assert not (planned[0].root / "state").exists()
 
 
@@ -207,9 +257,9 @@ def test_apply_uses_existing_finite_driver_not_a_worktrees_installer(
     assert not (tmp_path / "installed").exists()
 
 
-@pytest.mark.parametrize("fail_stage", [False, True])
+@pytest.mark.parametrize("entry,fail_stage", [("console", False), ("console", True), ("module", False)])
 def test_real_cli_driver_and_slot_setup_complete_without_worktrees(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_stage: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str, fail_stage: bool,
 ) -> None:
     import update_driver
     from agent_procutil.owned_process import run_installation_owned
@@ -224,8 +274,11 @@ def test_real_cli_driver_and_slot_setup_complete_without_worktrees(
     command = Path(sys.executable).parent / (
         "worktree-manager-install.exe" if os.name == "nt" else "worktree-manager-install"
     )
+    invocation = [str(command)] if entry == "console" else [
+        sys.executable, "-I", "-B", "-m", "worktree_manager.application_footprints",
+    ]
     result = run_installation_owned([
-        str(command), str(source), "--apps-root", str(target),
+        *invocation, str(source), "--apps-root", str(target),
         "--apply", "--stage", "--timeout", "45",
     ], timeout=50, max_stdout_bytes=65536, max_stderr_bytes=65536)
     expected = 7 if fail_stage else 0

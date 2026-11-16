@@ -72,6 +72,9 @@ any activates; dependencies activate before consumers. Stage failure prevents
 all activation. Failure after activation starts remains partial, not automatic
 rollback or permission to replay unrelated work. Existing busy/unsettled driver
 outcomes remain explicit.
+Installation executes inside the Driver's registered execution scope. Confirmed
+nonzero setup exits retain their native status after normal cleanup settlement;
+timeouts and unknown cleanup retain the Driver's interruption/recovery boundary.
 
 The default destination is `~/.copilot-extensions/apps/<app>/versions/<version>`;
 `--apps-root ABSOLUTE_PATH` selects an isolated installation root. Legacy roots
@@ -98,7 +101,10 @@ The prepared folder contains `footprint.json` and `apps/<app>/` directories:
 Each app carries its matching `application.json` construction/version and
 root-environment binding, declared commands, `pyproject.toml`, `uv.lock`, and
 `bin/setup.ps1` / `bin/setup.sh`. No preexisting `.venv` or runtime `state/`
-is copied from the footprint. Setup receives its explicit new app root and
+is copied from the footprint. Every setup receives the explicit roots of the
+complete selected set, so neutral dependency commands cannot follow ambient
+legacy-root overrides. Conflicting root-environment declarations refuse.
+Setup receives
 `--stage` for preparation; it supplies the PATH-uv/declared-Python behavior.
 Missing or cyclic IPC dependencies, duplicate commands, changed declarations
 and invalid layouts refuse before setup rather than falling back to an old
