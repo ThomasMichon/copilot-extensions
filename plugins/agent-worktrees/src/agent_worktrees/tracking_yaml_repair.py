@@ -1,4 +1,4 @@
-"""Explicit, record-scoped recovery of legacy unquoted agent text."""
+"""Record-scoped recovery of malformed YAML and numeric creation nonces."""
 
 from __future__ import annotations
 
@@ -64,6 +64,21 @@ def without_legacy_naming(fixed: str) -> str:
         {key: value for key, value in data.items() if key not in _LEGACY_NAMING_FIELDS},
         allow_unicode=True, sort_keys=False,
     )
+
+
+def repair_creation_nonce(raw: str) -> str | None:
+    """Recover a numeric nonce from its original token, never its coerced value."""
+    data = strict_mapping(raw)
+    if type(data.get("creation_nonce")) is not int:
+        return None
+    match = re.search(r"(?m)^creation_nonce: ([0-9]{16})(?=\r?$)", raw)
+    if match is None:
+        return None
+    nonce = match.group(1)
+    fixed = raw[:match.start(1)] + json.dumps(nonce) + raw[match.end(1):]
+    if strict_mapping(fixed) != {**data, "creation_nonce": nonce}:
+        return None
+    return fixed
 
 
 def repair_bound_agent(raw: str, end_field: str) -> str | None:
@@ -170,7 +185,7 @@ def targeted_doctor(args) -> int:
             parsed = None
         fixed = (
             repair_bound_agent(raw, end_field) if end_field else
-            health.repair_yaml_text(raw) if parsed is None else None
+            health.repair_yaml_text(raw) if parsed is None else repair_creation_nonce(raw)
         )
         if fixed is not None:
             parsed = strict_mapping(fixed)
