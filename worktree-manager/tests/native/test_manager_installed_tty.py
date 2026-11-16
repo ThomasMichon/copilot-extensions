@@ -22,6 +22,8 @@ sys.path.insert(0, str(REPO / "tools"))
 sys.path.insert(0, str(REPO / "libs" / "agent-procutil" / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from native_test_paths import native_test_path
+
 
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
@@ -329,16 +331,17 @@ def _candidate_snapshot(root, identity, env, diagnostics):
     if result.returncode:
         raise RuntimeError("Could not retain the exact candidate consumer bytes")
     snapshot = root / "candidate"
-    snapshot.mkdir()
-    with tarfile.open(archive) as source:
+    native_snapshot = native_test_path(snapshot)
+    native_snapshot.mkdir()
+    with tarfile.open(native_test_path(archive)) as source:
         for member in source.getmembers():
-            path = snapshot / member.name
-            if not path.resolve().is_relative_to(snapshot.resolve()) or not (
+            path = native_snapshot / member.name
+            if not path.resolve().is_relative_to(native_snapshot.resolve()) or not (
                 member.isfile() or member.isdir()
             ):
                 raise RuntimeError("Candidate archive contains a non-file or unsafe path")
-        source.extractall(snapshot, filter="data")
-    archive.unlink()
+        source.extractall(native_snapshot, filter="data")
+    native_test_path(archive).unlink()
     return snapshot
 
 
@@ -347,9 +350,9 @@ def _payloads(root, identity, env, diagnostics):
 
     snapshot = _candidate_snapshot(root, identity, env, diagnostics)
     marketplace = root / "payloads" / ".github" / "plugin"
-    marketplace.mkdir(parents=True)
-    shutil.copy2(snapshot / ".github" / "plugin" / "marketplace.json",
-                 marketplace / "marketplace.json")
+    native_test_path(marketplace).mkdir(parents=True)
+    shutil.copy2(native_test_path(snapshot / ".github" / "plugin" / "marketplace.json"),
+                 native_test_path(marketplace / "marketplace.json"))
     payloads = {}
     for component in ("worktree-manager", "agent-worktrees"):
         source = snapshot / ("worktree-manager" if component == "worktree-manager"
@@ -357,10 +360,12 @@ def _payloads(root, identity, env, diagnostics):
         destination = root / "payloads" / (
             component if component == "worktree-manager" else "plugins/" + component
         )
-        if (source / "runtime-source.json").is_file():
-            shutil.copytree(source, destination)
+        if native_test_path(source / "runtime-source.json").is_file():
+            shutil.copytree(native_test_path(source), native_test_path(destination))
         else:
-            prepare_runtime_source._materialize(snapshot, component, destination)
+            prepare_runtime_source._materialize(
+                native_test_path(snapshot), component, native_test_path(destination),
+            )
             sys.path.insert(0, str(REPO / "libs" / "versioned-runtime"))
             import versioned_runtime_source as provenance
 
@@ -376,10 +381,12 @@ def _payloads(root, identity, env, diagnostics):
                 component, version, identity["source_commit"], source_tree, assembly,
                 provenance.runtime_version(version, identity["source_commit"], assembly),
             )
-            (destination / provenance.SOURCE_FILE).write_text(
+            native_test_path(destination / provenance.SOURCE_FILE).write_text(
                 json.dumps(receipt.document()), encoding="utf-8",
             )
-        receipt = json.loads((destination / "runtime-source.json").read_text(encoding="utf-8"))
+        receipt = json.loads(native_test_path(destination / "runtime-source.json").read_text(
+            encoding="utf-8",
+        ))
         if receipt["source_commit"] != identity["source_commit"]:
             raise RuntimeError(f"{component} has different release-source provenance")
         payloads[component] = destination
@@ -558,6 +565,7 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
     argv = _project_entry_command(shell, stub)
     captured = b""
     started = time.monotonic()
+    wall_started = time.time()
     input_sent = False
     with _owned_console(argv, env=env, cwd=project) as console:
         pinned = {}
@@ -630,10 +638,15 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
                 "native_terminal_offer_hosts": [offer["host_pid"] for offer in offers],
             }
         except _ConsumerExited as error:
+            from _installed_tty_windows_events import capture_fault_events
+
             label = shell + ("-negative" if control else "")
             (diagnostics / (label + ".exit.json")).write_text(json.dumps(
                 _consumer_exit_evidence(console, error, descendants, started, input_sent),
             ), encoding="utf-8")
+            capture_fault_events(
+                fault_directory, diagnostics, env, project, label, wall_started, _run,
+            )
             raise
         finally:
             captured = bytes(console.output)
@@ -998,6 +1011,34 @@ def test_actual_installed_project_binstubs_reach_input_ready_windows_tty(record_
             record_testsuite_property("installed-tty-native-diagnostics", json.dumps(diagnostics))
         assert result == 0, document + "\n" + json.dumps(diagnostics, indent=2)
         assert namespace["_installed_tty_complete"](report, identity)
+
+
+def test_native_payload_preparation_preserves_deep_files_under_ordinary_root(tmp_path, monkeypatch):
+    import pytest
+
+    if os.name != "nt":
+        pytest.skip("Windows extended-length filesystem boundary")
+    snapshot = tmp_path / "source"
+    marketplace = snapshot / ".github" / "plugin" / "marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text("{}", encoding="utf-8")
+    identity = {"source_commit": "a" * 40}
+    filename = "payload-" + "x" * 100 + ".py"
+    for relative in ("worktree-manager", "plugins/agent-worktrees"):
+        source = snapshot / relative
+        native_test_path(source).mkdir(parents=True)
+        native_test_path(source / "runtime-source.json").write_text(
+            json.dumps(identity), encoding="utf-8",
+        )
+        native_test_path(source / filename).write_bytes(b"actual retained payload bytes\n")
+    root = tmp_path / ("ordinary-owner-" * 6)
+    native_test_path(root).mkdir()
+    monkeypatch.setitem(_payloads.__globals__, "_candidate_snapshot", lambda *_args: snapshot)
+    payloads = _payloads(root, identity, {}, tmp_path)
+    for payload in payloads.values():
+        file = payload / filename
+        assert len(str(file)) > 260
+        assert native_test_path(file).read_bytes() == b"actual retained payload bytes\n"
 
 
 def test_failure_evidence_preserves_inner_refusal_before_giant_outer_argv(tmp_path):

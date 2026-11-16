@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve native installed Manager TTY preparation and scoped Windows fault metadata",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
