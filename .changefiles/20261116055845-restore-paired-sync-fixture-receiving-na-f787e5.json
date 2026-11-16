@@ -1,0 +1,9 @@
+{
+  "comment": "Restore paired-Sync fixture receiving namespaces and current config-loader calls without relaxing authority checks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
