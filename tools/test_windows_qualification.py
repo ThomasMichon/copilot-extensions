@@ -9,6 +9,7 @@ from email.utils import formatdate
 import importlib.util
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -16,9 +17,11 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable, ContextManager, NoReturn, cast
 
 import pytest
 import yaml
@@ -29,25 +32,26 @@ import windows_qualification_worker as worker
 SPEC = importlib.util.spec_from_file_location(
     "windows_qualification_client", Path(__file__).with_name("windows-qualification.py"),
 )
+assert SPEC is not None and SPEC.loader is not None
 client_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(client_module)
 
 
-def focused():
+def focused() -> dict[str, Any]:
     return {
         "kind": "plugin", "plugin": "sample", "files": ["tests/test_sample.py"],
         "k": "", "full": False, "explicit_tiers": False,
     }
 
 
-def request():
+def request() -> dict[str, Any]:
     return {
         "version": 1, "request_id": "a" * 32, "source_sha": "b" * 40,
         "selection": focused(), "envelope_sha": None,
     }
 
 
-def event():
+def event() -> dict[str, Any]:
     return {
         "repository": {"owner": {"type": "User", "login": "owner"}, "default_branch": "main"},
         "inputs": {"request_id": "a" * 32, "request": contract.canonical(request())},
@@ -60,12 +64,14 @@ def event():
     ("owner", "owner", "refs/heads/dev"),
     ("", "owner", "refs/heads/main"),
 ])
-def test_original_rerun_and_protected_ref_are_independent_gates(actor, rerun, ref):
+def test_original_rerun_and_protected_ref_are_independent_gates(
+    actor: str, rerun: str, ref: str,
+) -> None:
     with pytest.raises(ValueError, match="admission denied"):
         contract.admit(event(), actor=actor, triggering_actor=rerun, ref=ref, ref_protected=True)
 
 
-def test_individual_owner_only_and_request_title_binding():
+def test_individual_owner_only_and_request_title_binding() -> None:
     value = event()
     assert contract.admit(
         value, actor="OWNER", triggering_actor="owner", ref="refs/heads/main", ref_protected=True,
@@ -89,14 +95,14 @@ def test_individual_owner_only_and_request_title_binding():
     "tests\\test_file.py", "tests/test_file.py::test_case",
     "tests/test_file.py\n--full", "tests/test_file.py;echo", "tests//test_file.py",
 ])
-def test_typed_files_reject_escape_shell_and_pytest_option_inputs(file):
+def test_typed_files_reject_escape_shell_and_pytest_option_inputs(file: str) -> None:
     value = focused()
     value["files"] = [file]
     with pytest.raises(ValueError):
         contract.selection(value)
 
 
-def test_focused_is_default_and_full_is_an_explicit_distinct_choice():
+def test_focused_is_default_and_full_is_an_explicit_distinct_choice() -> None:
     value = focused()
     assert contract.selection(value) == value
     value["files"] = []
@@ -114,14 +120,14 @@ def test_focused_is_default_and_full_is_an_explicit_distinct_choice():
     {"envelope_sha": "dev"}, {"request_id": "name"},
     {"command": "python anything.py"},
 ])
-def test_request_contract_is_strict(mutation):
+def test_request_contract_is_strict(mutation: dict[str, Any]) -> None:
     value = request()
     value.update(mutation)
     with pytest.raises(ValueError):
         contract.request(value)
 
 
-def test_plugin_adapter_preserves_typed_argv_and_default_budget(tmp_path):
+def test_plugin_adapter_preserves_typed_argv_and_default_budget(tmp_path: Path) -> None:
     value = focused()
     value["k"] = "first or second"
     value["explicit_tiers"] = True
@@ -133,7 +139,9 @@ def test_plugin_adapter_preserves_typed_argv_and_default_budget(tmp_path):
 
 
 @pytest.mark.parametrize("caller", ["embody", "copilot"])
-def test_native_packet_preserves_public_caller_selection_and_functional_bounds(tmp_path, caller):
+def test_native_packet_preserves_public_caller_selection_and_functional_bounds(
+    tmp_path: Path, caller: str,
+) -> None:
     argv = worker.native_command(tmp_path, tmp_path / "out", "native-worktrees-" + caller)
     assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_seed_application.py"
     assert argv[argv.index("-k") + 1] == "public_" + caller
@@ -144,7 +152,9 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
 
 
 @pytest.mark.parametrize("mode,case", [("no-mux", "manager_no_mux_decision"), ("mux", "manager_mux_decision")])
-def test_manager_packet_uses_its_own_case_and_original_manager_bounds(tmp_path, mode, case):
+def test_manager_packet_uses_its_own_case_and_original_manager_bounds(
+    tmp_path: Path, mode: str, case: str,
+) -> None:
     argv = worker.native_command(tmp_path, tmp_path / "out", "native-worktrees-manager-" + mode)
     assert argv[2] == "agent-worktrees"
     assert argv[argv.index("--test-file") + 1] == "tests/native/test_manager_application_launch.py"
@@ -163,7 +173,9 @@ def test_manager_packet_uses_its_own_case_and_original_manager_bounds(tmp_path, 
     ("native-driver-startup-no-seed", "test_headed_extension", "native_headed_startup_no_seed_is_not_an_idle_claim"),
     ("native-driver-startup-cold-resume", "test_headed_extension", "native_headed_startup_cold_resume_preserves_history"),
 ])
-def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path, packet, module, case):
+def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
+    tmp_path: Path, packet: str, module: str, case: str,
+) -> None:
     argv = worker.native_command(tmp_path, tmp_path / "out", packet)
     assert argv[2] == "agent-remote-driver"
     assert argv[argv.index("--test-file") + 1] == f"tests/native/{module}.py"
@@ -189,8 +201,8 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
     ("native-unrecognized", None),
 ])
 def test_admission_reports_native_preparation_only_for_known_packets(
-    tmp_path, monkeypatch, packet, native,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packet: str | None, native: bool | None,
+) -> None:
     value = request()
     if packet:
         value["selection"] = {"kind": "packet", "name": packet}
@@ -226,8 +238,9 @@ def test_admission_reports_native_preparation_only_for_known_packets(
     (False, "psmux 3.3.8-1", "psmux"),
 ])
 def test_native_prerequisites_check_disposable_binaries_and_actual_version(
-    tmp_path, monkeypatch, mismatch, mux_output, failure, require_feed,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mismatch: bool,
+    mux_output: str, failure: str | None, require_feed: bool,
+) -> None:
     runner = tmp_path / "runner"
     runner.mkdir()
     copilot, mux = runner / "copilot.exe", runner / "psmux.exe"
@@ -243,15 +256,15 @@ def test_native_prerequisites_check_disposable_binaries_and_actual_version(
     monkeypatch.setattr(worker, "os", SimpleNamespace(name="nt", environ=environment))
     probes = []
 
-    def probe(*args, **kwargs):
+    def probe(*args: Any, **kwargs: Any) -> ContextManager[SimpleNamespace]:
         probes.append(args)
         assert require_feed, "Driver must not probe the private feed"
         return nullcontext(SimpleNamespace(status=200, read=lambda count: b"package index"))
 
-    monkeypatch.setattr(worker.urllib.request, "urlopen", probe)
+    monkeypatch.setattr(urllib.request, "urlopen", probe)
     calls = []
 
-    def owned(argv, timeout):
+    def owned(argv: list[str], timeout: float) -> SimpleNamespace:
         calls.append((argv, timeout))
         return SimpleNamespace(stdout=(
             "GitHub Copilot CLI 1.0.105-1." if mismatch else "GitHub Copilot CLI 1.0.105."
@@ -271,7 +284,7 @@ def test_native_prerequisites_check_disposable_binaries_and_actual_version(
         worker.native_prerequisites(owned, require_feed=require_feed)
 
 
-def test_junit_retains_skips_failures_and_exact_case_identities(tmp_path):
+def test_junit_retains_skips_failures_and_exact_case_identities(tmp_path: Path) -> None:
     (tmp_path / "result.xml").write_text(
         '<testsuite><testcase classname="mod" name="pass[a]" time="1"/>'
         '<testcase classname="mod" name="skip"><skipped message="missing native prerequisite"/></testcase>'
@@ -296,15 +309,15 @@ def test_junit_retains_skips_failures_and_exact_case_identities(tmp_path):
     (5, '<testsuite><testcase name="real"><failure/></testcase></testsuite>', "failed"),
 ])
 def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
-    tmp_path, monkeypatch, code, junit, outcome,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, junit: str, outcome: str,
+) -> None:
     root = tmp_path / "candidate"
     test = root / "plugins/sample/tests/test_sample.py"
     test.parent.mkdir(parents=True)
     test.write_text("test fixture", encoding="utf-8")
     output = tmp_path / "evidence"
 
-    def run(*args, **kwargs):
+    def run(*args: Any, **kwargs: Any) -> SimpleNamespace:
         if code == -1:
             raise subprocess.TimeoutExpired(args[0], 600, output="partial native log", stderr="deadline")
         if "-c" in args[0]:
@@ -340,7 +353,9 @@ def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
         assert actual["incomplete_reason"] == "empty-selection"
 
 
-def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_path, monkeypatch):
+def test_execution_preserves_real_unicode_console_output_and_failed_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import io
 
     import agent_procutil.owned_process as owned_process
@@ -356,7 +371,7 @@ def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_
     monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(stdout, encoding="cp1252"))
     monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(stderr, encoding="cp1252"))
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         (output / "junit").mkdir()
         (output / "junit/actual.xml").write_text(
             '<testsuite><testcase name="real"><failure/></testcase></testsuite>',
@@ -382,7 +397,7 @@ def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_
     assert "\u65e5" in stderr.getvalue().decode("utf-8").splitlines()
 
 
-def result():
+def result() -> dict[str, Any]:
     return {
         "version": 1, "request": request(), "run_id": 42, "run_attempt": 1,
         "control_sha": "c" * 40, "actual_source_sha": "b" * 40,
@@ -401,7 +416,7 @@ def result():
     {"actual_source_sha": "e" * 40}, {"platform": {"system": "Linux"}},
     {"tests": []}, {"tests": [{"outcome": "skipped"}]}, {"phases": []},
 ])
-def test_foreign_partial_empty_and_skipped_results_never_qualify(mutation):
+def test_foreign_partial_empty_and_skipped_results_never_qualify(mutation: dict[str, Any]) -> None:
     value = result()
     contract.validate_result(value, request(), run_id=42, control_sha="c" * 40, run_attempt=1)
     value.update(mutation)
@@ -420,7 +435,9 @@ def test_foreign_partial_empty_and_skipped_results_never_qualify(mutation):
     {"native_prerequisites": {"copilot": "1.0.106", "psmux": "3.3.8"}},
     {"phases": []},
 ])
-def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation, packet):
+def test_native_result_requires_actual_caller_and_pinned_prerequisites(
+    mutation: dict[str, Any], packet: str,
+) -> None:
     value = result()
     expected = request()
     expected["selection"] = {"kind": "packet", "name": packet}
@@ -442,7 +459,7 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation,
 
 
 @pytest.mark.parametrize("caller,other", [("copilot", "embody"), ("embody", "copilot")])
-def test_worktrees_packets_cannot_qualify_the_other_public_caller(caller, other):
+def test_worktrees_packets_cannot_qualify_the_other_public_caller(caller: str, other: str) -> None:
     value, expected = result(), request()
     expected["selection"] = {"kind": "packet", "name": "native-worktrees-" + caller}
     _, module, _, phase = contract.NATIVE_PACKETS[expected["selection"]["name"]]
@@ -462,7 +479,9 @@ def test_worktrees_packets_cannot_qualify_the_other_public_caller(caller, other)
     {"tests": [{"class": "other", "name": contract.MCP_LIFETIME_CASE, "outcome": "passed"}]},
     {"tests": [{"class": "test_custody_native_lifetime", "name": "other", "outcome": "passed"}]},
 ])
-def test_mcp_lifetime_result_requires_exact_functional_case_and_all_owner_phases(mutation):
+def test_mcp_lifetime_result_requires_exact_functional_case_and_all_owner_phases(
+    mutation: dict[str, Any],
+) -> None:
     value, expected = result(), request()
     expected["selection"] = {"kind": "packet", "name": contract.MCP_LIFETIME_PACKET}
     value.update(
@@ -484,24 +503,24 @@ def test_mcp_lifetime_result_requires_exact_functional_case_and_all_owner_phases
 
 @pytest.mark.parametrize("native_exit", [0, 1])
 def test_mcp_lifetime_execution_uses_owned_native_lane_without_cli_or_desktop_prerequisites(
-    tmp_path, monkeypatch, native_exit,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_exit: int,
+) -> None:
     root, output = tmp_path / "candidate", tmp_path / "evidence"
     root.mkdir()
-    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(worker, "Transport", lambda *_: SimpleNamespace(
         git=lambda *_: SimpleNamespace(stdout="b" * 40),
     ))
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         if "-c" in argv:
             return SimpleNamespace(returncode=0, stdout='{"system":"Windows"}', stderr="")
         assert argv[2:] == ["agent-mcp", "--prepare-only"]
         return SimpleNamespace(returncode=0, stdout="prepared", stderr="")
 
-    def lifetime(candidate, evidence):
+    def lifetime(candidate: Path, evidence: Path) -> None:
         assert candidate == root and evidence == output
         if native_exit:
             raise ValueError("native owner cleanup unconfirmed")
@@ -525,19 +544,19 @@ def test_mcp_lifetime_execution_uses_owned_native_lane_without_cli_or_desktop_pr
 
 @pytest.mark.parametrize("outcome", ["passed", "skipped", "empty", "missing-evidence", "foreign"])
 def test_desktop_packet_requires_exact_case_and_independent_calibration(
-    tmp_path, monkeypatch, outcome,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     from test_windows_qualification_desktop import evidence
 
     root, output = tmp_path / "candidate", tmp_path / "evidence"
     root.mkdir()
-    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(worker, "Transport", lambda *_: SimpleNamespace(
         git=lambda *_: SimpleNamespace(stdout="b" * 40),
     ))
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         if "-c" in argv:
             assert argv[0] == sys.executable
@@ -556,7 +575,7 @@ def test_desktop_packet_requires_exact_case_and_independent_calibration(
         )
         if outcome != "missing-evidence":
             (output / "packet").mkdir()
-            report = evidence()
+            report = cast(Callable[[], dict[str, Any]], evidence)()
             if outcome == "foreign":
                 report["nonce"] = "d" * 32
             (output / "packet/desktop-capability.json").write_text(json.dumps(report), encoding="utf-8")
@@ -577,7 +596,9 @@ def test_desktop_packet_requires_exact_case_and_independent_calibration(
     assert len(calls) == 2 and "native_prerequisites" not in actual
 
 
-def test_desktop_packet_preserves_normal_caller_containment_and_budgets(tmp_path, monkeypatch):
+def test_desktop_packet_preserves_normal_caller_containment_and_budgets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import plugin_test_containment as containment
 
     root, output, sandbox = tmp_path / "candidate", tmp_path / "evidence", tmp_path / "sandbox"
@@ -588,11 +609,11 @@ def test_desktop_packet_preserves_normal_caller_containment_and_budgets(tmp_path
     }.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(containment, "TestSandbox", lambda **_: nullcontext(str(sandbox)))
     calls = []
 
-    def contained(argv, **kwargs):
+    def contained(argv: list[str], **kwargs: Any) -> int:
         calls.append((argv, kwargs))
         assert kwargs["limits"] == containment.Limits(wall_seconds=60)
         assert "native_application" not in kwargs and "qualification" not in kwargs
@@ -618,7 +639,9 @@ def test_desktop_packet_preserves_normal_caller_containment_and_budgets(tmp_path
     ({"kind": "packet", "name": contract.DESKTOP_PACKET},
      "desktop capability requires its explicit disposable hosted owner"),
 ])
-def test_actual_desktop_controller_refuses_before_output_or_native_access(tmp_path, selected, message):
+def test_actual_desktop_controller_refuses_before_output_or_native_access(
+    tmp_path: Path, selected: dict[str, Any], message: str,
+) -> None:
     value, payload = request(), event()
     value["selection"] = selected
     payload["inputs"]["request"] = contract.canonical(value)
@@ -635,13 +658,15 @@ def test_actual_desktop_controller_refuses_before_output_or_native_access(tmp_pa
         [sys.executable, "-B", str(Path(worker.__file__)), "desktop",
          "--candidate", str(tmp_path), "--output", str(output)],
         env=environment, capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
     )
     assert completed.returncode != 0 and message in completed.stderr
     assert not output.exists()
 
 
-def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(tmp_path, monkeypatch):
+def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import _admission_protocol
     import plugin_test_cache
     import plugin_test_containment
@@ -663,7 +688,7 @@ def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(tmp_p
     ))
     monkeypatch.setattr(plugin_test_containment, "TestSandbox", lambda **_: nullcontext(str(sandbox)))
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> NoReturn:
         assert kwargs["native_application"] is True
         assert kwargs["limits"] == plugin_test_containment.Limits(wall_seconds=900)
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
@@ -683,20 +708,21 @@ def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(tmp_p
 @pytest.mark.parametrize("preparation", ["success", "failure", "cancelled", "skipped", "unrecognized"])
 @pytest.mark.parametrize("packet", list(contract.NATIVE_PACKETS))
 def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
-    tmp_path, monkeypatch, prerequisites, preparation, packet,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prerequisites: bool,
+    preparation: str, packet: str,
+) -> None:
     root, output = tmp_path / "candidate", tmp_path / "evidence"
     root.mkdir()
     monkeypatch.setenv("UV_DEFAULT_INDEX", "https://feed.example.invalid/pypi/simple/")
     monkeypatch.setenv("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", preparation)
-    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
         git=lambda *args: SimpleNamespace(stdout="b" * 40),
     ))
     calls = []
     plugin, module, case, phase = contract.NATIVE_PACKETS[packet]
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         if "-c" in argv:
             return SimpleNamespace(returncode=0, stdout='{"python":"3.12","system":"Windows"}', stderr="")
@@ -709,7 +735,7 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         )
         return SimpleNamespace(returncode=0, stdout="selected feed.example.invalid", stderr="")
 
-    def prepare(owned, *, require_feed):
+    def prepare(owned: worker.NativeProbe, *, require_feed: bool) -> dict[str, str]:
         assert require_feed is (plugin == "agent-worktrees")
         if not prerequisites:
             raise ValueError("unavailable feed.example.invalid")
@@ -751,7 +777,9 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
             assert "download.example.invalid" not in path.read_text("utf-8")
 
 
-def test_native_sanitization_handles_interrupted_workers_and_oversized_evidence(tmp_path, monkeypatch):
+def test_native_sanitization_handles_interrupted_workers_and_oversized_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("UV_DEFAULT_INDEX", "https://feed.example.invalid/simple/")
     log = tmp_path / "phase-3.stderr.log"
     log.write_bytes(b"feed.example.invalid https://download.example.invalid/wheel \xc3")
@@ -763,14 +791,16 @@ def test_native_sanitization_handles_interrupted_workers_and_oversized_evidence(
     assert worker.sanitize_native_files(tmp_path) is False
 
 
-def fake_client(tmp_path, monkeypatch):
+def fake_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Any, Path, dict[str, Any]]:
     client = object.__new__(client_module.Client)
     client.root = tmp_path
     client.repository = "owner/repository"
     client.state_root = tmp_path
     directory = tmp_path / request()["request_id"]
     directory.mkdir()
-    state = {
+    state: dict[str, Any] = {
         "repository": client.repository, "request": request(), "phase": "prepared",
         "provider": {"branch": "main", "owner": "owner", "control_sha": "c" * 40},
         "created_at": 1,
@@ -779,11 +809,13 @@ def fake_client(tmp_path, monkeypatch):
     return client, directory, state
 
 
-def test_lost_dispatch_response_is_durable_and_resume_does_not_dispatch(tmp_path, monkeypatch):
+def test_lost_dispatch_response_is_durable_and_resume_does_not_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     calls = []
 
-    def failed(*args):
+    def failed(*args: str) -> NoReturn:
         calls.append(args)
         raise TimeoutError("lost response")
     monkeypatch.setattr(client, "gh", failed)
@@ -797,7 +829,9 @@ def test_lost_dispatch_response_is_durable_and_resume_does_not_dispatch(tmp_path
     assert json.loads((directory / "dispatch.json").read_text("utf-8"))["inputs"]["request_id"] == "a" * 32
 
 
-def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
+def test_status_correlates_request_not_latest_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     run = {
         "display_title": "winqual " + "a" * 32, "actor": {"login": "owner"},
@@ -823,8 +857,8 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
     "workflow", "unprotected", "desktop",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
-    tmp_path, monkeypatch, unsupported,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsupported: str,
+) -> None:
     client = object.__new__(client_module.Client)
     client.root, client.state_root, client.repository = tmp_path, tmp_path, "owner/repository"
     effects = []
@@ -873,7 +907,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "packets": ["bridge-http52", "native-worktrees-embody"],
     }
 
-    def api(endpoint):
+    def api(endpoint: str) -> dict[str, Any]:
         if endpoint == "user":
             return {"login": "owner"}
         if endpoint == "repos/owner/repository":
@@ -904,8 +938,8 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
 ])
 @pytest.mark.parametrize("missing", [True, False])
 def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_transport(
-    tmp_path, monkeypatch, missing, packet,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: bool, packet: str,
+) -> None:
     client = object.__new__(client_module.Client)
     client.root = tmp_path
     files = list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
@@ -913,7 +947,7 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ]
 
-    def git(*args):
+    def git(*args: str) -> SimpleNamespace:
         if args[0] == "rev-parse":
             return SimpleNamespace(stdout="b" * 40)
         assert args == ("ls-tree", "b" * 40, "--", *files)
@@ -923,7 +957,7 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
 
     client.transport = SimpleNamespace(git=git)
 
-    def preflight(selected):
+    def preflight(selected: dict[str, Any]) -> NoReturn:
         assert selected == {"kind": "packet", "name": packet}
         raise ValueError("provider preflight reached")
 
@@ -934,7 +968,9 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
 
 
 @pytest.mark.parametrize("visible", [True, False])
-def test_interrupted_transport_resumes_only_original_confirmed_envelope(tmp_path, monkeypatch, visible):
+def test_interrupted_transport_resumes_only_original_confirmed_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, visible: bool,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     state.update(phase="transport-unknown", envelope_sha="e" * 40)
     client.save(directory, state)
@@ -946,7 +982,12 @@ def test_interrupted_transport_resumes_only_original_confirmed_envelope(tmp_path
         git=lambda *args, **kwargs: SimpleNamespace(returncode=0),
     )
     dispatches = []
-    monkeypatch.setattr(client, "dispatch", lambda directory, value: dispatches.append(value) or value)
+
+    def dispatch(directory: Path, value: dict[str, Any]) -> dict[str, Any]:
+        dispatches.append(value)
+        return value
+
+    monkeypatch.setattr(client, "dispatch", dispatch)
     if visible:
         actual = client.resume(state["request"]["request_id"])
         assert actual["request"]["envelope_sha"] == "e" * 40
@@ -958,7 +999,9 @@ def test_interrupted_transport_resumes_only_original_confirmed_envelope(tmp_path
         assert dispatches == []
 
 
-def test_new_transport_attempt_cannot_inherit_old_rejection(tmp_path, monkeypatch):
+def test_new_transport_attempt_cannot_inherit_old_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     state.update(
         phase="transport-attempt", envelope_sha="e" * 40, previous_tip="d" * 40,
@@ -966,7 +1009,7 @@ def test_new_transport_attempt_cannot_inherit_old_rejection(tmp_path, monkeypatc
     )
     original = copy.deepcopy(state)
 
-    def interrupted(candidate, persist):
+    def interrupted(candidate: str, persist: Callable[[dict[str, Any]], None]) -> NoReturn:
         persist({
             "phase": "transport-attempt", "envelope_sha": "f" * 40,
             "previous_tip": "e" * 40, "transport_failure": None,
@@ -986,7 +1029,9 @@ def test_new_transport_attempt_cannot_inherit_old_rejection(tmp_path, monkeypatc
     assert saved["request"] == original["request"]
 
 
-def test_confirmed_envelope_cannot_bypass_a_retained_history_anchor(tmp_path, monkeypatch):
+def test_confirmed_envelope_cannot_bypass_a_retained_history_anchor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     state.update(
         phase="transport-unknown", envelope_sha="e" * 40, transport_history_anchor="d" * 40,
@@ -1007,8 +1052,8 @@ def test_confirmed_envelope_cannot_bypass_a_retained_history_anchor(tmp_path, mo
     "candidate", "missing-history", "missing-first-history", "rewritten-history",
 ])
 def test_known_rejection_does_not_replace_mismatched_original_or_shared_history(
-    tmp_path, monkeypatch, changed,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     envelope = "e" * 40
     previous = None if changed == "missing-first-history" else "d" * 40
@@ -1046,7 +1091,9 @@ def test_known_rejection_does_not_replace_mismatched_original_or_shared_history(
 
 
 @pytest.mark.parametrize("foreign", [False, True])
-def test_result_download_uses_original_run_attempt_and_checks_manifest(tmp_path, monkeypatch, foreign):
+def test_result_download_uses_original_run_attempt_and_checks_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: bool,
+) -> None:
     client, _, state = fake_client(tmp_path, monkeypatch)
     state["run"] = {
         "id": 42, "status": "completed", "conclusion": "success",
@@ -1059,7 +1106,7 @@ def test_result_download_uses_original_run_attempt_and_checks_manifest(tmp_path,
     }]})
     downloads = []
 
-    def download(*args):
+    def download(*args: str) -> str:
         downloads.append(args)
         value = result()
         if foreign:
@@ -1081,8 +1128,9 @@ def test_result_download_uses_original_run_attempt_and_checks_manifest(tmp_path,
 
 @pytest.mark.parametrize("outcome,exit_code", [("qualified", 0), ("failed", 1), ("incomplete", 1)])
 def test_result_cli_does_not_return_success_for_unqualified_evidence(
-    tmp_path, monkeypatch, capsys, outcome, exit_code,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    outcome: str, exit_code: int,
+) -> None:
     monkeypatch.setattr(client_module, "Client", lambda *args: SimpleNamespace(
         result=lambda identifier: {"outcome": outcome},
         lock=lambda identifier: nullcontext(),
@@ -1095,8 +1143,10 @@ def test_result_cli_does_not_return_success_for_unqualified_evidence(
     assert json.loads(capsys.readouterr().out)["outcome"] == outcome
 
 
-def test_invalid_candidate_workspace_is_a_clean_cli_refusal(tmp_path, monkeypatch, capsys):
-    def reject(*args):
+def test_invalid_candidate_workspace_is_a_clean_cli_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    def reject(*args: Any) -> NoReturn:
         raise ValueError("candidate origin differs from the requested public repository")
     monkeypatch.setattr(client_module, "Client", reject)
     assert client_module.main([
@@ -1108,7 +1158,9 @@ def test_invalid_candidate_workspace_is_a_clean_cli_refusal(tmp_path, monkeypatc
     assert "Traceback" not in captured.err
 
 
-def test_same_request_operations_exclude_duplicate_resume_but_other_requests_remain_free(tmp_path, monkeypatch):
+def test_same_request_operations_exclude_duplicate_resume_but_other_requests_remain_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, directory, state = fake_client(tmp_path, monkeypatch)
     other = tmp_path / "other-request"
     other.mkdir()
@@ -1121,7 +1173,9 @@ def test_same_request_operations_exclude_duplicate_resume_but_other_requests_rem
             assert (directory / "state.json").is_file()
 
 
-def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(tmp_path, monkeypatch):
+def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "candidate"
     tools = root / "tools"
     tools.mkdir(parents=True)
@@ -1154,7 +1208,7 @@ def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(tmp_
         str(worker.__file__), "tools", "--candidate", str(root), "--output", str(tmp_path / "out"),
     ])
 
-    def candidate_tests(candidate, selected, output):
+    def candidate_tests(candidate: Path, selected: dict[str, Any], output: Path) -> int:
         from plugin_test_environment import isolated_environment
         sandbox = tmp_path / "sandbox"
         environment = isolated_environment(os.environ, sandbox)
@@ -1167,7 +1221,9 @@ def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(tmp_
 
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.parametrize("explicit", [False, True])
-def test_actual_tool_consumer_enforces_explicit_tiers(tmp_path, monkeypatch, explicit):
+def test_actual_tool_consumer_enforces_explicit_tiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, explicit: bool,
+) -> None:
     import plugin_test_containment as containment
     root = tmp_path / "candidate"
     tools = root / "tools"
@@ -1185,7 +1241,7 @@ def test_actual_tool_consumer_enforces_explicit_tiers(tmp_path, monkeypatch, exp
     )
     run = containment.run_contained
 
-    def fixture_dependencies(argv, **kwargs):
+    def fixture_dependencies(argv: list[str], **kwargs: Any) -> int:
         # Supply the real policy module to a tiny candidate fixture, without
         # changing the worker's argv or bypassing pytest's plugin loading.
         kwargs["env"]["PYTHONPATH"] = os.pathsep.join((str(tools), str(worker.ROOT / "tools")))
@@ -1204,7 +1260,7 @@ def test_actual_tool_consumer_enforces_explicit_tiers(tmp_path, monkeypatch, exp
     assert (tools / "t4-ran").exists() is explicit
 
 
-def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials():
+def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials() -> None:
     value = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/windows-qualification.yml").read_text("utf-8"),
     )
@@ -1214,7 +1270,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
     assert value["jobs"]["admit"]["outputs"]["native"] == "${{ steps.admit.outputs.native }}"
     upload = value["jobs"]["windows"]["steps"][-1]
     assert upload["if"] == (
-        "${{ always() && (needs.admit.outputs.native != 'true' || "
+        "${{ always() && ((needs.admit.outputs.native != 'true' && "
+        "needs.admit.outputs.packet != 'manager-worktrees-source') || "
         "steps.sanitize.outcome == 'success') }}"
     )
     for job in value["jobs"].values():
@@ -1233,7 +1290,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     {"UV_DEFAULT_INDEX", "WINDOWS_QUALIFICATION_NATIVE_PREPARATION"}
                 )
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
-                    "${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || "
+                    "${{ (needs.admit.outputs.packet == 'manager-worktrees-source' || "
+                    "needs.admit.outputs.packet == 'native-worktrees-embody' || "
                     "needs.admit.outputs.packet == 'native-worktrees-copilot' || "
                     "needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || "
                     "needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || "
@@ -1243,7 +1301,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                 )
                 if step["name"].startswith("Sanitize"):
                     assert step["if"] == (
-                        "always() && needs.admit.outputs.native == 'true'"
+                        "always() && (needs.admit.outputs.native == 'true' || "
+                        "needs.admit.outputs.packet == 'manager-worktrees-source')"
                     )
             if step.get("id") == "native":
                 assert step["if"] == (
@@ -1271,8 +1330,9 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
 ])
 @pytest.mark.portfolio_tier("T2")
 def test_pinned_native_download_retries_only_transient_failures(
-    tmp_path, workflow, responses, body_delay, budget, retry_after, expected_attempts,
-):
+    tmp_path: Path, workflow: str, responses: tuple[int, ...], body_delay: float,
+    budget: int, retry_after: str | None, expected_attempts: int,
+) -> None:
     from windows_qualification_transport import command
     pwsh = shutil.which("pwsh")
     if pwsh is None:
@@ -1289,10 +1349,10 @@ def test_pinned_native_download_retries_only_transient_failures(
     helper = source.parents[2] / "tools/download_pinned_native.ps1"
     argv[argv.index("-OutFile") + 1] = str(tmp_path / "native archive.zip")
     argv[argv.index("-TimeoutSeconds") + 1] = str(budget)
-    attempts = []
+    attempts: list[int] = []
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self) -> None:
             status = responses[min(len(attempts), len(responses) - 1)]
             attempts.append(status)
             body = b"pinned archive" if status == 200 else b"download unavailable"
@@ -1310,7 +1370,7 @@ def test_pinned_native_download_retries_only_transient_failures(
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-        def log_message(self, *args):
+        def log_message(self, *args: Any) -> None:
             pass
 
     class Server(ThreadingHTTPServer):

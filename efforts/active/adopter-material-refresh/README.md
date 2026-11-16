@@ -160,6 +160,25 @@ examples are leads, not an exhaustive inventory or an implemented correction.
       slices with required changefiles. This plan edits no output/source and
       does not appoint an execution lead.
 
+### Public product-name prose inventory (agent-recommended)
+
+This #4215 family belongs to the remaining material inventory, independently
+of #433's Dispatch prose and #3941's runtime-advice policy. Its
+[direct case](../backlog-reconciliation/public-prose-casing-receiving.md)
+retains the complete wording-only scope and exclusions; historical example
+locations are not an exhaustive current inventory or implementation proof.
+
+- [ ] Inventory and correct noncanonical GitHub Codespaces product casing in
+      agent-codespaces and related public plugin prose, including descriptive
+      README text and human-facing cleaning-skill descriptions/titles.
+      Preserve code/skill identifiers, commands, paths, configuration keys
+      and fixtures; no behavior, API or identifier migration follows.
+- [ ] Deliver the finite correction in a separately claimed, normally reviewed
+      documentation/plugin slice with its applicable changefile and owning
+      checks. Do not stop at an already-correct overview heading or reclaim
+      the released primary-documentation participant. This planning intake
+      appoints no execution lead and changes no product documentation.
+
 ### Phase 3 — Refresh preview assets (agent-recommended)
 - [ ] Reuse the owning public-safe asset/capture tooling, or establish the
       smallest justified reproducible fixture when none exists.
@@ -204,6 +223,12 @@ examples are leads, not an exhaustive inventory or an implemented correction.
       unknown-liveness safeguards and useful recovery choices. Reconcile all
       plugin inventory; no override/destructive action, native/installed/
       every-platform or all-materials gate is added to this finite wording work.
+- [ ] For #4215, reconcile the related-public-documentation inventory and
+      actual final prose diff against the complete PC4215 case. Verify
+      canonical product spelling across the requested scope and unchanged
+      code/skill identifiers, commands, paths, configuration and fixtures.
+      Use appropriate owning documentation checks, without a native,
+      installed-runtime, fleet-rollout or whole-materials completion gate.
 
 ## Proposal
 
@@ -213,6 +238,23 @@ normal review gate in `#5807`. No runtime implementation, service repair,
 repository creation, or private-environment capture was part of that proposal.
 
 ## Journal
+
+### 2026-11-15 - Public product-name prose planning intake
+
+- Retain #4215's complete casing scope and token exclusions in this canonical
+  Plan and global Validation Plan, alongside the linked direct case. A future
+  material participant must see this work in the shared completion checklist,
+  not only in the umbrella issue or another campaign's journal.
+- Existing #433, #3941, preview and reference work remains independent.
+  The primary-documentation participant stays released and execution unassigned.
+  No product prose, behavior, runtime state, ownership or resource changes here.
+- Reviewed canonical amendment and complete actual #5799 receiving readback
+  precede any separate source tracking retirement; the technical wording
+  correction and its validation remain unchecked.
+- The canonical amendment merged in #12815. Complete actual #5799 receiving
+  readback preceded the separate #4215 `NOT_PLANNED` tracking retirement.
+  This case's six direct rows and three canonical items remain unchecked;
+  no product prose or runtime behavior was changed and no custody released.
 
 ### 2026-11-06 - Independent runtime-advice wording planning intake
 

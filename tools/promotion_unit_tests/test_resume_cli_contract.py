@@ -7,11 +7,13 @@ import http.client
 import importlib.util
 import io
 import json
+import socket
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any
+from types import CodeType, ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -48,10 +50,10 @@ class ResumeBoundary:
 
 
 @pytest.fixture(scope="session")
-def source_code():
-    compiled = {}
+def source_code() -> Callable[[Path], CodeType]:
+    compiled: dict[Path, CodeType] = {}
 
-    def load(path: Path):
+    def load(path: Path) -> CodeType:
         if path not in compiled:
             compiled[path] = compile(path.read_bytes(), str(path), "exec")
         return compiled[path]
@@ -60,7 +62,9 @@ def source_code():
 
 
 @pytest.fixture
-def boundary(monkeypatch: pytest.MonkeyPatch, source_code) -> ResumeBoundary:
+def boundary(
+    monkeypatch: pytest.MonkeyPatch, source_code: Callable[[Path], CodeType],
+) -> ResumeBoundary:
     def module(name: str, **attributes: Any) -> ModuleType:
         value = ModuleType(name)
         value.__dict__.update(attributes)
@@ -420,6 +424,9 @@ def test_executing_cli_disclosure_matches_actual_parser(
     assert json.loads(capsys.readouterr().out) == {
         "schema": "agent-bridge.cli-contracts", "version": 1,
         "contracts": {
+            "agent-bridge.send": {
+                "version": 1, "capabilities": ["native-send-settlement"],
+            },
             "agent-bridge.create": {
                 "version": 1, "capabilities": ["keyed-worktree-writer", "keyed-dispatch-origin"],
             },
@@ -525,7 +532,7 @@ def test_required_writer_status_forwards_exact_optional_read(
     reads = []
     result = {**boundary.response, "worktree_writer_observation": {"original": True}}
 
-    def get_session(session_id: str, *, worktree_writer: bool = False) -> dict:
+    def get_session(session_id: str, *, worktree_writer: bool = False) -> dict[str, Any]:
         reads.append((session_id, worktree_writer))
         return result
 
@@ -637,7 +644,7 @@ def test_truncated_http_body_is_unconfirmed_without_replay(
                 + b"\r\n\r\n" + body
             )
         response = http.client.HTTPResponse(
-            SimpleNamespace(makefile=lambda mode: io.BytesIO(wire)),
+            cast(socket.socket, SimpleNamespace(makefile=lambda mode: io.BytesIO(wire))),
         )
         response.begin()
         return response

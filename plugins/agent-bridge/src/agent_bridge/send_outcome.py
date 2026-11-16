@@ -1,6 +1,6 @@
 """Typed ``agent-bridge send`` outcomes and their refusal exit codes.
 
-Every ``send --json`` result carries one ``outcome``. Accepted outcomes keep the
+Every ``send --json`` result carries one ``outcome``. Successful operations keep the
 path's existing keys and exit 0:
 
 - ``delivered``: a prompt started a turn on a bridge-managed session.
@@ -12,7 +12,10 @@ path's existing keys and exit 0:
 - ``accepted``: a keyed live message taken by an older daemon whose response
   has no ``duplicate`` field, so it can't say whether it matched an earlier
   request (``duplicate: null``); or an ordinary native ``--receipt-only`` read
-  proving historical admission only, without new delivery or completion.
+  or explicit settlement proving historical admission only, without new delivery
+  or completion.
+- ``not_admitted``: explicit native-send settlement proved non-admission and
+  durably excluded that original key. This is not a new prompt or retry permit.
 - ``admitted`` / ``sdk_accepted`` / ``consumed``: current live receipt evidence,
   independent of requested urgency or whether a bounded reply wait settled.
 
@@ -24,8 +27,8 @@ exit with a distinct code, so a caller never parses text:
   (``not_found``, ``stale``, ``superseded``, ``expected_mismatch``), or its daemon
   lacks the requested capability (``unsupported_protocol``).
 - ``refused_conflict`` (65): the idempotency key is bound to a different request.
-- ``refused_invalid`` (2): an active reply wait has an invalid timeout; no
-  message is submitted.
+- ``refused_invalid`` (2): invalid input or an incompatible requested mode; no
+  message is submitted by that invocation.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 SEND_BUSY_EXIT = 75
 SEND_UNAVAILABLE_EXIT = 69
@@ -81,7 +84,7 @@ def live_outcome(result: dict[str, Any], delivery: str, *, duplicate_known: bool
         return "accepted"
     receipt = result.get("receipt") or {}
     if receipt.get("stage") in {"admitted", "sdk_accepted", "consumed"}:
-        return receipt["stage"]
+        return cast(str, receipt["stage"])
     return _LIVE_DELIVERY_OUTCOMES.get(delivery, "queued")
 
 

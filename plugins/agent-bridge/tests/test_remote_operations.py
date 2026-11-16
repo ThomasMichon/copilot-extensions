@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import threading
+from collections.abc import AsyncGenerator, Iterable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from ssh_manager import (
     CarrierBackpressure,
@@ -19,44 +23,47 @@ from ssh_manager import (
 )
 
 from agent_bridge.app import create_app
+from agent_bridge.agent_registry import AgentResolver
 from agent_bridge import __main__ as main_module
 from agent_bridge.client import BridgeClientError
+from agent_bridge.client import BridgeClient
 from agent_bridge.models import ServiceConfig
+from agent_bridge.remote_errors import RemoteBridgeError
 from agent_bridge.remote_operations import (
     CarrierRequestRouter,
-    RemoteBridgeError,
     RemoteOperationService,
     validate_caller_id,
     validate_continuity_id,
 )
+from agent_bridge.service_start_cli import _cmd_remote
 
 
 class _FakeStream:
-    def __init__(self, events):
+    def __init__(self, events: Iterable[dict[str, Any]]) -> None:
         self._events = iter(events)
         self.closed = False
 
-    def __iter__(self):
+    def __iter__(self) -> _FakeStream:
         return self
 
-    def __next__(self):
+    def __next__(self) -> dict[str, Any]:
         return next(self._events)
 
-    def close(self):
+    def close(self) -> None:
         self.closed = True
 
 
 class _RemoteClient:
     def __init__(self) -> None:
-        self.status_calls = []
-        self.resolve_calls = []
-        self.create_calls = []
-        self.stop_calls = []
-        self.end_calls = []
-        self.message_calls = []
-        self.ack_calls = []
-        self.streams = []
-        self.cursor_info = {
+        self.status_calls: list[tuple[str, str]] = []
+        self.resolve_calls: list[str] = []
+        self.create_calls: list[dict[str, Any] | tuple[str, str, dict[str, Any]]] = []
+        self.stop_calls: list[tuple[str, dict[str, Any]]] = []
+        self.end_calls: list[tuple[str, dict[str, Any]]] = []
+        self.message_calls: list[tuple[str, dict[str, Any]]] = []
+        self.ack_calls: list[tuple[str, int, str, str | None]] = []
+        self.streams: list[_FakeStream] = []
+        self.cursor_info: dict[str, Any] = {
             "last_acked_id": 4,
             "head_id": 5,
             "continuity_id": "epoch-a",
@@ -64,44 +71,45 @@ class _RemoteClient:
             "invalidation": None,
         }
 
-    def get_session_status(self, session_id, *, caller_id):
+    def get_session_status(self, session_id: str, *, caller_id: str) -> dict[str, Any]:
         self.status_calls.append((session_id, caller_id))
         return {"session_id": session_id, "status": "idle", "head_id": 5}
 
-    def daemon_supports(self, _version):
+    def daemon_supports(self, _version: int) -> bool:
         return True
 
-    def daemon_protocol(self):
+    def daemon_protocol(self) -> tuple[int, int]:
         return (10, 1)
 
-    def resolve_live_session(self, target):
+    def resolve_live_session(self, target: str) -> dict[str, Any] | None:
         self.resolve_calls.append(target)
         return {"session_id": "live-a", "worktree_id": target, "status": "live"}
 
-    def start_session(self, **kwargs):
+    def start_session(self, **kwargs: Any) -> dict[str, Any]:
         self.create_calls.append(kwargs)
         return {"session_id": "created-a"}
 
-    def submit_prompt(self, session_id, prompt, **kwargs):
+    def submit_prompt(self, session_id: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
         self.create_calls.append((session_id, prompt, kwargs))
         return {"accepted": True}
 
-    def stop_session(self, session_id, **kwargs):
+    def stop_session(self, session_id: str, **kwargs: Any) -> None:
         self.stop_calls.append((session_id, kwargs))
 
-    def end_session(self, session_id, **kwargs):
+    def end_session(self, session_id: str, **kwargs: Any) -> None:
         self.end_calls.append((session_id, kwargs))
 
-    def send_live_message(self, session_id, **kwargs):
+    def send_live_message(self, session_id: str, **kwargs: Any) -> dict[str, Any]:
         self.message_calls.append((session_id, kwargs))
         return {"message_id": "message-a"}
 
-    def get_cursor_info(self, session_id, *, caller_id):
+    def get_cursor_info(self, session_id: str, *, caller_id: str) -> dict[str, Any]:
         return dict(self.cursor_info)
 
     def ack_cursor(
-        self, session_id, last_id, *, caller_id, continuity_id=None
-    ):
+        self, session_id: str, last_id: int, *, caller_id: str,
+        continuity_id: str | None = None,
+    ) -> int:
         self.ack_calls.append(
             (session_id, last_id, caller_id, continuity_id)
         )
@@ -109,14 +117,14 @@ class _RemoteClient:
 
     def stream_events(
         self,
-        session_id,
+        session_id: str,
         *,
-        caller_id,
-        controlled,
-        continuity_id,
-        after=None,
-        transient=False,
-    ):
+        caller_id: str,
+        controlled: bool,
+        continuity_id: str | None,
+        after: int | None = None,
+        transient: bool = False,
+    ) -> _FakeStream:
         stream = _FakeStream(
             [
                 {
@@ -131,7 +139,7 @@ class _RemoteClient:
         self.streams.append(stream)
         return stream
 
-    def refresh_endpoint(self):
+    def refresh_endpoint(self) -> bool:
         return False
 
 
@@ -141,6 +149,42 @@ def test_caller_id_is_required_distinct_from_legacy_default() -> None:
         validate_caller_id("__default__")
     with pytest.raises(RemoteBridgeError, match="safe ASCII"):
         validate_caller_id("consumer with spaces")
+
+
+@pytest.mark.parametrize("operation", ["create", "stop", "end", "message"])
+def test_remote_http_observer_covers_startup_without_extending_operation(
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from agent_bridge.remote_timeouts import REMOTE_CARRIER_STARTUP_TIMEOUT
+
+    client = BridgeClient("http://testserver", "fixture-token")
+    monkeypatch.setattr(client, "_require_remote_commands", lambda: None)
+    calls: list[tuple[dict[str, Any], float]] = []
+
+    def request(
+        method: str, path: str, body: dict[str, Any], **kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append((body, kwargs["request_timeout"]))
+        return {}
+
+    monkeypatch.setattr(client, "_request", request)
+    if operation == "create":
+        client.create_remote_session(
+            "example-host", agent="worker", prompt="hello",
+            caller_id="consumer-a", timeout=7,
+        )
+    elif operation == "stop":
+        client.stop_remote_session("example-host", "session-a", timeout=7)
+    elif operation == "end":
+        client.end_remote_session("example-host", "session-a", timeout=7)
+    else:
+        client.send_remote_live_message(
+            "example-host", "session-a", sender="peer", message="hello", timeout=7,
+        )
+
+    body, observer_timeout = calls[0]
+    assert body["timeout"] == 7
+    assert observer_timeout >= REMOTE_CARRIER_STARTUP_TIMEOUT + body["timeout"]
 
 
 def test_continuity_id_is_normalized_and_safe() -> None:
@@ -155,10 +199,10 @@ def test_continuity_id_is_normalized_and_safe() -> None:
 async def test_unsupported_version_fails_before_client_resolution() -> None:
     calls = 0
 
-    def factory():
+    def factory() -> BridgeClient:
         nonlocal calls
         calls += 1
-        return _RemoteClient()
+        return cast(BridgeClient, _RemoteClient())
 
     response = await CarrierRequestRouter(factory)(
         Envelope(
@@ -182,7 +226,7 @@ async def test_unsupported_version_fails_before_client_resolution() -> None:
 @pytest.mark.asyncio
 async def test_status_and_live_resolution_proxy_exact_authority() -> None:
     client = _RemoteClient()
-    router = CarrierRequestRouter(lambda: client)
+    router = CarrierRequestRouter(lambda: cast(BridgeClient, client))
 
     status = await router(
         Envelope(
@@ -208,6 +252,8 @@ async def test_status_and_live_resolution_proxy_exact_authority() -> None:
         )
     )
 
+    status = cast(Envelope, status)
+    live = cast(Envelope, live)
     assert status.payload["result"]["session_id"] == "session-a"
     assert live.payload["result"] == {
         "session_id": "live-a",
@@ -221,7 +267,7 @@ async def test_status_and_live_resolution_proxy_exact_authority() -> None:
 @pytest.mark.asyncio
 async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
     client = _RemoteClient()
-    router = CarrierRequestRouter(lambda: client)
+    router = CarrierRequestRouter(lambda: cast(BridgeClient, client))
 
     create = await router(
         Envelope(
@@ -278,6 +324,10 @@ async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
         )
     )
 
+    create = cast(Envelope, create)
+    stop = cast(Envelope, stop)
+    end = cast(Envelope, end)
+    sent = cast(Envelope, sent)
     assert create.payload["result"] == {"session_id": "created-a"}
     assert stop.payload["result"] == {"stopped": True}
     assert end.payload["result"] == {"ended": True}
@@ -319,7 +369,7 @@ async def test_session_create_threads_copilot_args_charter_overlay() -> None:
     """A charter overlay (rendered client-side as copilot_args) must reach the
     remote host's own client.start_session call unchanged."""
     client = _RemoteClient()
-    router = CarrierRequestRouter(lambda: client)
+    router = CarrierRequestRouter(lambda: cast(BridgeClient, client))
 
     await router(
         Envelope(
@@ -348,7 +398,7 @@ async def test_session_create_threads_copilot_args_charter_overlay() -> None:
 async def test_session_create_rejects_copilot_args_below_min_version() -> None:
     """An older carrier (version 2) must refuse rather than silently drop
     copilot_args -- a rolling upgrade must never lose a requested charter."""
-    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _RemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id="create",
@@ -363,13 +413,14 @@ async def test_session_create_rejects_copilot_args_below_min_version() -> None:
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "unsupported_version"
 
 
 @pytest.mark.asyncio
 async def test_session_create_rejects_malformed_copilot_args() -> None:
-    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _RemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id="create",
@@ -384,20 +435,23 @@ async def test_session_create_rejects_malformed_copilot_args() -> None:
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "invalid_request"
 
 
 @pytest.mark.asyncio
 async def test_remote_operation_service_forwards_copilot_args_in_envelope() -> None:
-    requests: list[dict] = []
+    requests: list[dict[str, Any]] = []
 
-    async def fake_request(host, payload, *, timeout):
+    async def fake_request(
+        host: str, payload: dict[str, Any], *, timeout: float | None = None,
+    ) -> dict[str, Any]:
         requests.append(payload)
         return {"result": {"session_id": "created-a"}}
 
     service = RemoteOperationService.__new__(RemoteOperationService)
-    service._request = fake_request  # type: ignore[attr-defined]
+    cast(Any, service)._request = fake_request
 
     await service.create_session(
         "ember",
@@ -412,7 +466,7 @@ async def test_remote_operation_service_forwards_copilot_args_in_envelope() -> N
 
 @pytest.mark.asyncio
 async def test_mutating_operations_require_protocol_version_two() -> None:
-    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _RemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id="create",
@@ -426,6 +480,7 @@ async def test_mutating_operations_require_protocol_version_two() -> None:
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "unsupported_version"
 
@@ -460,7 +515,7 @@ async def test_mutating_operations_reject_malformed_options(
             }
         )
 
-    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _RemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id=f"{operation}-{field}",
@@ -468,6 +523,7 @@ async def test_mutating_operations_reject_malformed_options(
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "invalid_request"
 
@@ -493,7 +549,7 @@ async def test_live_message_validation_names_request_field(
         field: value,
     }
 
-    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _RemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id=f"live-message-{field}",
@@ -501,6 +557,7 @@ async def test_live_message_validation_names_request_field(
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "invalid_request"
     assert field in response.payload["message"]
@@ -508,7 +565,7 @@ async def test_live_message_validation_names_request_field(
 
 @pytest.mark.asyncio
 async def test_carrier_resolve_validation_names_target() -> None:
-    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _RemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id="resolve-target",
@@ -520,6 +577,7 @@ async def test_carrier_resolve_validation_names_target() -> None:
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "invalid_request"
     assert "target must" in response.payload["message"]
@@ -528,11 +586,11 @@ async def test_carrier_resolve_validation_names_target() -> None:
 @pytest.mark.asyncio
 async def test_carrier_resolve_not_found_names_target() -> None:
     class _MissingRemoteClient(_RemoteClient):
-        def resolve_live_session(self, target):
+        def resolve_live_session(self, target: str) -> None:
             self.resolve_calls.append(target)
             return None
 
-    response = await CarrierRequestRouter(lambda: _MissingRemoteClient())(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, _MissingRemoteClient()))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id="resolve-missing",
@@ -544,6 +602,7 @@ async def test_carrier_resolve_not_found_names_target() -> None:
         )
     )
 
+    response = cast(Envelope, response)
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "session_not_found"
     assert "target worktree-a" in response.payload["message"]
@@ -555,14 +614,14 @@ async def test_cancelled_create_reclaims_late_session() -> None:
     release = threading.Event()
 
     class _SlowCreateClient(_RemoteClient):
-        def start_session(self, **kwargs):
+        def start_session(self, **kwargs: Any) -> dict[str, Any]:
             started.set()
             release.wait(timeout=5)
             return {"session_id": "late-session"}
 
     client = _SlowCreateClient()
     task = asyncio.create_task(
-        CarrierRequestRouter(lambda: client)(
+        CarrierRequestRouter(lambda: cast(BridgeClient, client))(
             Envelope(
                 EnvelopeType.REQUEST,
                 request_id="create",
@@ -593,16 +652,16 @@ async def test_cancelled_create_preserves_cancellation_when_cleanup_fails() -> N
     release = threading.Event()
 
     class _CleanupFailureClient(_RemoteClient):
-        def start_session(self, **kwargs):
+        def start_session(self, **kwargs: Any) -> dict[str, Any]:
             started.set()
             release.wait(timeout=5)
             return {"session_id": "late-session"}
 
-        def end_session(self, session_id, **kwargs):
+        def end_session(self, session_id: str, **kwargs: Any) -> NoReturn:
             raise TimeoutError("cleanup timed out")
 
     task = asyncio.create_task(
-        CarrierRequestRouter(lambda: _CleanupFailureClient())(
+        CarrierRequestRouter(lambda: cast(BridgeClient, _CleanupFailureClient()))(
             Envelope(
                 EnvelopeType.REQUEST,
                 request_id="create",
@@ -632,19 +691,19 @@ async def test_cancelled_create_tolerates_repeated_cancellation_during_cleanup()
     cleanup_release = threading.Event()
 
     class _SlowCleanupClient(_RemoteClient):
-        def start_session(self, **kwargs):
+        def start_session(self, **kwargs: Any) -> dict[str, Any]:
             create_started.set()
             create_release.wait(timeout=5)
             return {"session_id": "late-session"}
 
-        def end_session(self, session_id, **kwargs):
+        def end_session(self, session_id: str, **kwargs: Any) -> None:
             cleanup_started.set()
             cleanup_release.wait(timeout=5)
             super().end_session(session_id, **kwargs)
 
     client = _SlowCleanupClient()
     task = asyncio.create_task(
-        CarrierRequestRouter(lambda: client)(
+        CarrierRequestRouter(lambda: cast(BridgeClient, client))(
             Envelope(
                 EnvelopeType.REQUEST,
                 request_id="create",
@@ -672,7 +731,7 @@ async def test_cancelled_create_tolerates_repeated_cancellation_during_cleanup()
 
 @pytest.mark.asyncio
 async def test_remote_client_validates_live_message_guards() -> None:
-    client = RemoteOperationService(SimpleNamespace())
+    client = RemoteOperationService(cast(AgentResolver, SimpleNamespace()))
 
     with pytest.raises(RemoteBridgeError, match="target must"):
         await client.send_live_message(
@@ -712,7 +771,7 @@ async def test_remote_client_validates_live_message_guards() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_live_session_validation_names_target() -> None:
-    client = RemoteOperationService(SimpleNamespace())
+    client = RemoteOperationService(cast(AgentResolver, SimpleNamespace()))
 
     with pytest.raises(RemoteBridgeError, match="target must"):
         await client.resolve_live_session("host-a", "")
@@ -721,7 +780,7 @@ async def test_resolve_live_session_validation_names_target() -> None:
 @pytest.mark.asyncio
 async def test_event_subscription_preserves_ids_names_and_payloads() -> None:
     client = _RemoteClient()
-    result = await CarrierRequestRouter(lambda: client)(
+    result = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -736,6 +795,7 @@ async def test_event_subscription_preserves_ids_names_and_payloads() -> None:
         )
     )
 
+    result = cast(AsyncGenerator[Envelope, None], result)
     accepted = await anext(result)
     event = await anext(result)
     await result.aclose()
@@ -758,10 +818,10 @@ async def test_event_subscription_preserves_ids_names_and_payloads() -> None:
 @pytest.mark.asyncio
 async def test_event_subscription_rejects_legacy_hosting_daemon() -> None:
     client = _RemoteClient()
-    client.daemon_supports = lambda _version: False
-    client.daemon_protocol = lambda: (9, 1)
+    cast(Any, client).daemon_supports = lambda _version: False
+    cast(Any, client).daemon_protocol = lambda: (9, 1)
 
-    response = await CarrierRequestRouter(lambda: client)(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -787,11 +847,11 @@ async def test_event_subscription_rejects_legacy_hosting_daemon() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("continuity_id", ["", " ", "epoch a", "x" * 129])
 async def test_event_subscription_rejects_invalid_continuity(
-    continuity_id,
+    continuity_id: str,
 ) -> None:
     client = _RemoteClient()
 
-    response = await CarrierRequestRouter(lambda: client)(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -816,7 +876,7 @@ async def test_event_subscription_rejects_invalid_continuity(
 async def test_event_ack_requires_continuity_for_non_empty_log() -> None:
     client = _RemoteClient()
 
-    response = await CarrierRequestRouter(lambda: client)(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             request_id="ack",
@@ -840,7 +900,7 @@ async def test_event_ack_requires_continuity_for_non_empty_log() -> None:
 
 @pytest.mark.asyncio
 async def test_event_subscription_survives_hosting_bridge_cutover(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _CutoverClient(_RemoteClient):
         def __init__(self) -> None:
@@ -848,7 +908,7 @@ async def test_event_subscription_survives_hosting_bridge_cutover(
             self.stream_calls = 0
             self.refreshes = 0
 
-        def stream_events(self, *args, **kwargs):
+        def stream_events(self, *args: Any, **kwargs: Any) -> _FakeStream:
             self.stream_calls += 1
             if self.stream_calls == 1:
                 return _FakeStream([])
@@ -856,18 +916,18 @@ async def test_event_subscription_survives_hosting_bridge_cutover(
                 raise BridgeClientError(404, {"detail": "not registered yet"})
             return super().stream_events(*args, **kwargs)
 
-        def refresh_endpoint(self):
+        def refresh_endpoint(self) -> bool:
             self.refreshes += 1
             return True
 
-    async def no_sleep(_delay):
+    async def no_sleep(_delay: float) -> None:
         return None
 
     monkeypatch.setattr(
         "agent_bridge.remote_operations.asyncio.sleep", no_sleep
     )
     client = _CutoverClient()
-    result = await CarrierRequestRouter(lambda: client)(
+    result = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -882,6 +942,7 @@ async def test_event_subscription_survives_hosting_bridge_cutover(
         )
     )
 
+    result = cast(AsyncGenerator[Envelope, None], result)
     await anext(result)
     event = await anext(result)
     await result.aclose()
@@ -894,14 +955,14 @@ async def test_event_subscription_survives_hosting_bridge_cutover(
 
 @pytest.mark.asyncio
 async def test_hosting_stream_reconnect_resumes_after_forwarded_event(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _ResumeClient(_RemoteClient):
         def __init__(self) -> None:
             super().__init__()
-            self.calls = []
+            self.calls: list[dict[str, Any]] = []
 
-        def stream_events(self, *args, **kwargs):
+        def stream_events(self, *args: Any, **kwargs: Any) -> _FakeStream:
             self.calls.append(kwargs)
             event_id = 5 if len(self.calls) == 1 else 6
             return _FakeStream(
@@ -916,14 +977,14 @@ async def test_hosting_stream_reconnect_resumes_after_forwarded_event(
                 ]
             )
 
-    async def no_sleep(_delay):
+    async def no_sleep(_delay: float) -> None:
         return None
 
     monkeypatch.setattr(
         "agent_bridge.remote_operations.asyncio.sleep", no_sleep
     )
     client = _ResumeClient()
-    result = await CarrierRequestRouter(lambda: client)(
+    result = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -938,6 +999,7 @@ async def test_hosting_stream_reconnect_resumes_after_forwarded_event(
         )
     )
 
+    result = cast(AsyncGenerator[Envelope, None], result)
     await anext(result)
     first = await anext(result)
     second = await anext(result)
@@ -951,35 +1013,37 @@ async def test_hosting_stream_reconnect_resumes_after_forwarded_event(
 
 
 @pytest.mark.asyncio
-async def test_clean_cutover_rechecks_hosting_protocol(monkeypatch) -> None:
+async def test_clean_cutover_rechecks_hosting_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _RollbackClient(_RemoteClient):
         def __init__(self) -> None:
             super().__init__()
             self.current_version = 11
             self.refreshes = 0
 
-        def daemon_supports(self, version):
+        def daemon_supports(self, version: int) -> bool:
             return self.current_version >= version
 
-        def daemon_protocol(self):
+        def daemon_protocol(self) -> tuple[int, int]:
             return (self.current_version, 1)
 
-        def stream_events(self, *args, **kwargs):
+        def stream_events(self, *args: Any, **kwargs: Any) -> _FakeStream:
             return _FakeStream([])
 
-        def refresh_endpoint(self):
+        def refresh_endpoint(self) -> bool:
             self.refreshes += 1
             self.current_version = 10
             return False
 
-    async def no_sleep(_delay):
+    async def no_sleep(_delay: float) -> None:
         return None
 
     monkeypatch.setattr(
         "agent_bridge.remote_operations.asyncio.sleep", no_sleep
     )
     client = _RollbackClient()
-    result = await CarrierRequestRouter(lambda: client)(
+    result = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -994,6 +1058,7 @@ async def test_clean_cutover_rechecks_hosting_protocol(monkeypatch) -> None:
         )
     )
 
+    result = cast(AsyncGenerator[Envelope, None], result)
     await anext(result)
     error = await anext(result)
     await result.aclose()
@@ -1013,7 +1078,7 @@ async def test_cursor_invalidation_is_explicit_before_stream_open() -> None:
         "current_continuity_id": "new",
     }
 
-    response = await CarrierRequestRouter(lambda: client)(
+    response = await CarrierRequestRouter(lambda: cast(BridgeClient, client))(
         Envelope(
             EnvelopeType.REQUEST,
             subscription_id="sub-a",
@@ -1038,13 +1103,13 @@ async def test_cursor_invalidation_is_explicit_before_stream_open() -> None:
 
 @pytest.mark.asyncio
 async def test_local_subscription_uses_initial_position_only(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Subscription:
         def __init__(self) -> None:
             self.position = 4
 
-        async def get(self):
+        async def get(self) -> Envelope:
             return Envelope(
                 EnvelopeType.RESPONSE,
                 payload={
@@ -1053,15 +1118,15 @@ async def test_local_subscription_uses_initial_position_only(
                 },
             )
 
-        async def close(self):
+        async def close(self) -> None:
             pass
 
     class _Carrier:
         def __init__(self) -> None:
-            self.calls = []
+            self.calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
             self.subscription = _Subscription()
 
-        async def subscribe(self, payload, **kwargs):
+        async def subscribe(self, payload: dict[str, Any], **kwargs: Any) -> _Subscription:
             self.calls.append((payload, kwargs))
             return self.subscription
 
@@ -1070,11 +1135,11 @@ async def test_local_subscription_uses_initial_position_only(
             self.carrier = _Carrier()
             self.released = False
 
-        async def release(self):
+        async def release(self) -> None:
             self.released = True
 
     class _Resolver:
-        def resolve_ssh_environment(self, host):
+        def resolve_ssh_environment(self, host: str) -> tuple[object, SimpleNamespace]:
             return object(), SimpleNamespace(
                 alias="example-host",
                 user=None,
@@ -1085,13 +1150,13 @@ async def test_local_subscription_uses_initial_position_only(
 
     lease = _Lease()
 
-    async def acquire(*args, **kwargs):
+    async def acquire(*args: Any, **kwargs: Any) -> _Lease:
         return lease
 
     monkeypatch.setattr(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
-    service = RemoteOperationService(_Resolver())
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()))
 
     subscription = await service.subscribe_events(
         "example-host",
@@ -1111,17 +1176,17 @@ async def test_local_subscription_uses_initial_position_only(
 
 @pytest.mark.asyncio
 async def test_service_preserves_v1_for_reads_and_uses_v2_for_mutations(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Carrier:
         def __init__(self) -> None:
-            self.calls = []
+            self.calls: list[dict[str, Any]] = []
 
-        async def request(self, payload, **_kwargs):
+        async def request(self, payload: dict[str, Any], **_kwargs: Any) -> Envelope:
             self.calls.append(payload)
             operation = payload["operation"]
             if operation == "session.status":
-                result = {"status": "idle"}
+                result: dict[str, Any] = {"status": "idle"}
             else:
                 result = {"ended": True}
             return Envelope(
@@ -1133,11 +1198,11 @@ async def test_service_preserves_v1_for_reads_and_uses_v2_for_mutations(
         def __init__(self) -> None:
             self.carrier = _Carrier()
 
-        async def release(self):
+        async def release(self) -> None:
             pass
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[object, SimpleNamespace]:
             return object(), SimpleNamespace(
                 alias="example-host",
                 user=None,
@@ -1148,13 +1213,13 @@ async def test_service_preserves_v1_for_reads_and_uses_v2_for_mutations(
 
     lease = _Lease()
 
-    async def acquire(*_args, **_kwargs):
+    async def acquire(*_args: Any, **_kwargs: Any) -> _Lease:
         return lease
 
     monkeypatch.setattr(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
-    service = RemoteOperationService(_Resolver())
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()))
 
     await service.session_status(
         "example-host", "session-a", "consumer-a"
@@ -1178,11 +1243,13 @@ async def test_service_preserves_v1_for_reads_and_uses_v2_for_mutations(
 
 
 @pytest.mark.asyncio
-async def test_cancelled_subscription_setup_releases_lease(monkeypatch) -> None:
+async def test_cancelled_subscription_setup_releases_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     started = asyncio.Event()
 
     class _Carrier:
-        async def subscribe(self, *_args, **_kwargs):
+        async def subscribe(self, *_args: Any, **_kwargs: Any) -> None:
             started.set()
             await asyncio.Future()
 
@@ -1191,11 +1258,11 @@ async def test_cancelled_subscription_setup_releases_lease(monkeypatch) -> None:
             self.carrier = _Carrier()
             self.released = False
 
-        async def release(self):
+        async def release(self) -> None:
             self.released = True
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[object, SimpleNamespace]:
             return object(), SimpleNamespace(
                 alias="example-host",
                 user=None,
@@ -1206,13 +1273,13 @@ async def test_cancelled_subscription_setup_releases_lease(monkeypatch) -> None:
 
     lease = _Lease()
 
-    async def acquire(*_args, **_kwargs):
+    async def acquire(*_args: Any, **_kwargs: Any) -> _Lease:
         return lease
 
     monkeypatch.setattr(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
-    service = RemoteOperationService(_Resolver())
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()))
     task = asyncio.create_task(
         service.subscribe_events(
             "example-host",
@@ -1229,13 +1296,13 @@ async def test_cancelled_subscription_setup_releases_lease(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_failed_carrier_restart_returns_structured_503(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Carrier:
-        async def request(self, *_args, **_kwargs):
+        async def request(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise CarrierUnavailable("transport lost", reconnectable=True)
 
-        async def ensure_started(self):
+        async def ensure_started(self) -> NoReturn:
             raise CarrierUnavailable("restart failed", reconnectable=True)
 
     class _Lease:
@@ -1243,11 +1310,11 @@ async def test_failed_carrier_restart_returns_structured_503(
             self.carrier = _Carrier()
             self.released = False
 
-        async def release(self):
+        async def release(self) -> None:
             self.released = True
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[object, SimpleNamespace]:
             return object(), SimpleNamespace(
                 alias="example-host",
                 user=None,
@@ -1258,13 +1325,13 @@ async def test_failed_carrier_restart_returns_structured_503(
 
     lease = _Lease()
 
-    async def acquire(*_args, **_kwargs):
+    async def acquire(*_args: Any, **_kwargs: Any) -> _Lease:
         return lease
 
     monkeypatch.setattr(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
-    service = RemoteOperationService(_Resolver(), request_timeout=0.01)
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()), request_timeout=0.01)
 
     with pytest.raises(RemoteBridgeError) as exc:
         await service.session_status(
@@ -1279,13 +1346,13 @@ async def test_failed_carrier_restart_returns_structured_503(
 
 @pytest.mark.asyncio
 async def test_stalled_carrier_restart_returns_structured_504(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Carrier:
-        async def request(self, *_args, **_kwargs):
+        async def request(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise CarrierUnavailable("transport lost", reconnectable=True)
 
-        async def ensure_started(self):
+        async def ensure_started(self) -> None:
             await asyncio.Future()
 
     class _Lease:
@@ -1293,11 +1360,11 @@ async def test_stalled_carrier_restart_returns_structured_504(
             self.carrier = _Carrier()
             self.released = False
 
-        async def release(self):
+        async def release(self) -> None:
             self.released = True
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[object, SimpleNamespace]:
             return object(), SimpleNamespace(
                 alias="example-host",
                 user=None,
@@ -1308,13 +1375,13 @@ async def test_stalled_carrier_restart_returns_structured_504(
 
     lease = _Lease()
 
-    async def acquire(*_args, **_kwargs):
+    async def acquire(*_args: Any, **_kwargs: Any) -> _Lease:
         return lease
 
     monkeypatch.setattr(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
-    service = RemoteOperationService(_Resolver(), request_timeout=0.01)
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()), request_timeout=0.01)
 
     with pytest.raises(RemoteBridgeError) as exc:
         await service.session_status(
@@ -1329,10 +1396,10 @@ async def test_stalled_carrier_restart_returns_structured_504(
 
 @pytest.mark.asyncio
 async def test_carrier_request_timeout_returns_structured_504(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Carrier:
-        async def request(self, *_args, **_kwargs):
+        async def request(self, *_args: Any, **_kwargs: Any) -> NoReturn:
             raise TimeoutError("request timed out")
 
     class _Lease:
@@ -1340,11 +1407,11 @@ async def test_carrier_request_timeout_returns_structured_504(
             self.carrier = _Carrier()
             self.released = False
 
-        async def release(self):
+        async def release(self) -> None:
             self.released = True
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[object, SimpleNamespace]:
             return object(), SimpleNamespace(
                 alias="example-host",
                 user=None,
@@ -1355,13 +1422,13 @@ async def test_carrier_request_timeout_returns_structured_504(
 
     lease = _Lease()
 
-    async def acquire(*_args, **_kwargs):
+    async def acquire(*_args: Any, **_kwargs: Any) -> _Lease:
         return lease
 
     monkeypatch.setattr(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
-    service = RemoteOperationService(_Resolver(), request_timeout=1.0)
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()), request_timeout=1.0)
 
     with pytest.raises(RemoteBridgeError) as exc:
         await service.session_status(
@@ -1396,10 +1463,10 @@ async def test_multi_environment_machine_key_requires_exact_alias() -> None:
     )
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[SimpleNamespace, SimpleNamespace]:
             return machine, wsl
 
-    service = RemoteOperationService(_Resolver())
+    service = RemoteOperationService(cast(AgentResolver, _Resolver()))
 
     with pytest.raises(RemoteBridgeError) as exc:
         await service.session_status(
@@ -1414,8 +1481,8 @@ async def test_multi_environment_machine_key_requires_exact_alias() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("host", ["host", "HOST"])
 async def test_machine_key_that_is_exact_alias_selects_that_environment(
-    monkeypatch,
-    host,
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
 ) -> None:
     windows = SimpleNamespace(
         alias="host",
@@ -1435,13 +1502,13 @@ async def test_machine_key_that_is_exact_alias_selects_that_environment(
         key="host",
         ssh_environments=[windows, wsl],
     )
-    captured = {}
+    captured: dict[str, Any] = {}
 
     class _Resolver:
-        def resolve_ssh_environment(self, _host):
+        def resolve_ssh_environment(self, _host: str) -> tuple[SimpleNamespace, SimpleNamespace]:
             return machine, wsl
 
-    async def acquire(alias, remote_platform, **kwargs):
+    async def acquire(alias: str, remote_platform: str, **kwargs: Any) -> object:
         captured["alias"] = alias
         captured["remote_platform"] = remote_platform
         return object()
@@ -1450,7 +1517,7 @@ async def test_machine_key_that_is_exact_alias_selects_that_environment(
         "agent_bridge.carrier.acquire_remote_carrier", acquire
     )
 
-    lease = await RemoteOperationService(_Resolver())._lease(host)
+    lease = await RemoteOperationService(cast(AgentResolver, _Resolver()))._lease(host)
 
     assert lease is not None
     assert captured == {
@@ -1480,7 +1547,7 @@ class _ApiSubscription:
             ]
         )
 
-    async def get(self):
+    async def get(self) -> Envelope:
         try:
             return next(self._items)
         except StopIteration as exc:
@@ -1493,46 +1560,49 @@ class _ApiSubscription:
                 }
             ) from exc
 
-    async def close(self):
+    async def close(self) -> None:
         self.closed = True
 
 
 class _ApiService:
     def __init__(self) -> None:
         self.subscription = _ApiSubscription()
-        self.acks = []
-        self.commands = []
+        self.acks: list[tuple[str, str, str, int, str]] = []
+        self.commands: list[tuple[Any, ...]] = []
 
-    async def session_status(self, host, session_id, caller_id):
+    async def session_status(
+        self, host: str, session_id: str, caller_id: str,
+    ) -> dict[str, Any]:
         return {
             "session_id": session_id,
             "status": "idle",
             "caller_id": caller_id,
         }
 
-    async def resolve_live_session(self, host, session_id):
+    async def resolve_live_session(self, host: str, session_id: str) -> dict[str, Any]:
         return {"session_id": session_id, "status": "live"}
 
-    async def create_session(self, host, **kwargs):
+    async def create_session(self, host: str, **kwargs: Any) -> dict[str, Any]:
         self.commands.append(("create", host, kwargs))
         return {"session_id": "created-a"}
 
-    async def stop_session(self, host, session_id, **kwargs):
+    async def stop_session(self, host: str, session_id: str, **kwargs: Any) -> None:
         self.commands.append(("stop", host, session_id, kwargs))
 
-    async def end_session(self, host, session_id, **kwargs):
+    async def end_session(self, host: str, session_id: str, **kwargs: Any) -> None:
         self.commands.append(("end", host, session_id, kwargs))
 
-    async def send_live_message(self, host, target, **kwargs):
+    async def send_live_message(self, host: str, target: str, **kwargs: Any) -> dict[str, Any]:
         self.commands.append(("send", host, target, kwargs))
         return {"message_id": "message-a"}
 
-    async def subscribe_events(self, *args, **kwargs):
+    async def subscribe_events(self, *args: Any, **kwargs: Any) -> _ApiSubscription:
         return self.subscription
 
     async def acknowledge(
-        self, host, session_id, *, caller_id, last_id, continuity_id
-    ):
+        self, host: str, session_id: str, *, caller_id: str,
+        last_id: int, continuity_id: str,
+    ) -> int:
         self.acks.append(
             (host, session_id, caller_id, last_id, continuity_id)
         )
@@ -1540,8 +1610,12 @@ class _ApiService:
 
 
 @pytest.fixture
-def remote_app(tmp_path):
-    app = create_app(
+def remote_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    monkeypatch.setattr(
+        "agent_bridge.agent_registry_relay._relay_profile_via_cli",
+        lambda *_args, **_kwargs: None,
+    )
+    app: FastAPI = create_app(
         config=ServiceConfig(
             port=0,
             bind="127.0.0.1",
@@ -1554,7 +1628,7 @@ def remote_app(tmp_path):
 
 
 def test_remote_api_is_authenticated_and_streams_control(
-    remote_app,
+    remote_app: FastAPI,
 ) -> None:
     with TestClient(remote_app) as client:
         missing = client.get(
@@ -1586,7 +1660,7 @@ def test_remote_api_is_authenticated_and_streams_control(
         assert remote_app.state.remote_operations.subscription.closed is True
 
 
-def test_remote_api_exposes_mutating_command_contract(remote_app) -> None:
+def test_remote_api_exposes_mutating_command_contract(remote_app: FastAPI) -> None:
     headers = {"Authorization": "Bearer " + "test-" + "token"}
     with TestClient(remote_app) as client:
         created = client.post(
@@ -1632,7 +1706,7 @@ def test_remote_api_exposes_mutating_command_contract(remote_app) -> None:
 
 
 def test_remote_api_multiplexes_subscriptions_over_one_stream(
-        remote_app,
+        remote_app: FastAPI,
 ) -> None:
         first = _ApiSubscription()
         second = _ApiSubscription()
@@ -1689,7 +1763,7 @@ def test_remote_api_multiplexes_subscriptions_over_one_stream(
 
 
 def test_remote_api_multiplex_forwards_tool_progress_as_keepalive(
-    remote_app,
+    remote_app: FastAPI,
 ) -> None:
     subscription = _ApiSubscription()
     subscription._items = iter(
@@ -1741,7 +1815,7 @@ def test_remote_api_multiplex_forwards_tool_progress_as_keepalive(
     assert subscription.closed is True
 
 
-def test_remote_api_multiplex_rejects_duplicate_identity(remote_app) -> None:
+def test_remote_api_multiplex_rejects_duplicate_identity(remote_app: FastAPI) -> None:
         subscription = {
             "host": "host-a",
             "session_id": "session-a",
@@ -1758,7 +1832,7 @@ def test_remote_api_multiplex_rejects_duplicate_identity(remote_app) -> None:
 
 
 def test_remote_api_multiplex_returns_identified_initial_control(
-    remote_app,
+    remote_app: FastAPI,
 ) -> None:
     remote_app.state.remote_operations.subscribe_events = AsyncMock(
         side_effect=RemoteBridgeError(
@@ -1796,7 +1870,7 @@ def test_remote_api_multiplex_returns_identified_initial_control(
     assert '"caller_id":"lane-a"' in text
 
 
-def test_remote_api_stream_closes_on_daemon_shutdown(remote_app) -> None:
+def test_remote_api_stream_closes_on_daemon_shutdown(remote_app: FastAPI) -> None:
     remote_app.state.uvicorn_server = SimpleNamespace(should_exit=True)
 
     with TestClient(remote_app) as client:
@@ -1812,7 +1886,7 @@ def test_remote_api_stream_closes_on_daemon_shutdown(remote_app) -> None:
     assert remote_app.state.remote_operations.subscription.closed is True
 
 
-def test_remote_api_stream_rejects_empty_continuity(remote_app) -> None:
+def test_remote_api_stream_rejects_empty_continuity(remote_app: FastAPI) -> None:
     with TestClient(remote_app) as client:
         response = client.get(
             "/api/v1/remote/example-host/sessions/session-a/events",
@@ -1827,7 +1901,7 @@ def test_remote_api_stream_rejects_empty_continuity(remote_app) -> None:
 
 
 def test_remote_api_returns_retryable_status_while_initializing(
-    remote_app,
+    remote_app: FastAPI,
 ) -> None:
     with TestClient(remote_app) as client:
         remote_app.state.ready = False
@@ -1841,7 +1915,7 @@ def test_remote_api_returns_retryable_status_while_initializing(
     assert "initializing" in response.json()["detail"]
 
 
-def test_remote_api_preserves_retryability_in_http_errors(remote_app) -> None:
+def test_remote_api_preserves_retryability_in_http_errors(remote_app: FastAPI) -> None:
     remote_app.state.remote_operations.session_status = AsyncMock(
         side_effect=RemoteBridgeError(
             503,
@@ -1862,9 +1936,9 @@ def test_remote_api_preserves_retryability_in_http_errors(remote_app) -> None:
     assert response.json()["detail"]["reconnectable"] is True
 
 
-def test_remote_api_maps_backpressure_to_control(remote_app) -> None:
+def test_remote_api_maps_backpressure_to_control(remote_app: FastAPI) -> None:
     class _BackpressureSubscription(_ApiSubscription):
-        async def get(self):
+        async def get(self) -> NoReturn:
             raise CarrierBackpressure("event queue full")
 
     remote_app.state.remote_operations.subscription = (
@@ -1886,10 +1960,10 @@ def test_remote_api_maps_backpressure_to_control(remote_app) -> None:
 
 
 def test_remote_api_preserves_retryability_in_stream_control(
-    remote_app,
+    remote_app: FastAPI,
 ) -> None:
     class _UnavailableSubscription(_ApiSubscription):
-        async def get(self):
+        async def get(self) -> NoReturn:
             raise CarrierUnavailable("transport lost", reconnectable=True)
 
     remote_app.state.remote_operations.subscription = (
@@ -1912,7 +1986,7 @@ def test_remote_api_preserves_retryability_in_stream_control(
 
 
 def test_remote_api_maps_subscription_setup_backpressure_to_control(
-    remote_app,
+    remote_app: FastAPI,
 ) -> None:
     remote_app.state.remote_operations.subscribe_events = AsyncMock(
         side_effect=CarrierBackpressure("event queue full")
@@ -1933,7 +2007,7 @@ def test_remote_api_maps_subscription_setup_backpressure_to_control(
     assert '"action":"full_reconcile"' in text
 
 
-def test_remote_cursor_ack_stays_caller_scoped(remote_app) -> None:
+def test_remote_cursor_ack_stays_caller_scoped(remote_app: FastAPI) -> None:
     with TestClient(remote_app) as client:
         response = client.post(
             "/api/v1/remote/example-host/sessions/session-a/cursor",
@@ -1951,9 +2025,13 @@ def test_remote_cursor_ack_stays_caller_scoped(remote_app) -> None:
     ]
 
 
-def test_remote_cli_status_defaults_to_text_output(monkeypatch, capsys) -> None:
+def test_remote_cli_status_defaults_to_text_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     class _CliClient:
-        def get_remote_session_status(self, *_args, **_kwargs):
+        def get_remote_session_status(
+            self, *_args: Any, **_kwargs: Any,
+        ) -> dict[str, Any]:
             return {
                 "session_id": "session-a",
                 "status": "idle",
@@ -1971,24 +2049,26 @@ def test_remote_cli_status_defaults_to_text_output(monkeypatch, capsys) -> None:
         caller_id="consumer-a",
     )
 
-    main_module._cmd_remote(args)
+    _cmd_remote(args)
 
     assert capsys.readouterr().out.strip() == (
         "session-a [idle] cursor=4/5"
     )
 
 
-def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
+def test_remote_cli_events_ack_after_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     class _CliStream(_FakeStream):
         headers = {"X-Agent-Bridge-Continuity": "epoch-a"}
 
     class _CliClient:
         def __init__(self) -> None:
-            self.acks = []
-            self.calls = []
+            self.acks: list[tuple[str, str, int, str, str]] = []
+            self.calls: list[dict[str, Any]] = []
             self.refreshes = 0
 
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(self, *args: Any, **kwargs: Any) -> _CliStream:
             self.calls.append(kwargs)
             if len(self.calls) == 1:
                 return _CliStream(
@@ -2016,19 +2096,19 @@ def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
 
         def ack_remote_cursor(
             self,
-            host,
-            session_id,
-            last_id,
+            host: str,
+            session_id: str,
+            last_id: int,
             *,
-            caller_id,
-            continuity_id,
-        ):
+            caller_id: str,
+            continuity_id: str,
+        ) -> int:
             self.acks.append(
                 (host, session_id, last_id, caller_id, continuity_id)
             )
             return last_id
 
-        def refresh_endpoint(self):
+        def refresh_endpoint(self) -> bool:
             self.refreshes += 1
             return True
 
@@ -2045,7 +2125,7 @@ def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr("time.sleep", lambda _delay: None)
     with pytest.raises(SystemExit) as exc:
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     output = capsys.readouterr().out
     assert exc.value.code == 2
@@ -2059,15 +2139,15 @@ def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
 
 
 def test_remote_cli_events_reconnects_after_active_stream_reset(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     class _ResetStream:
         headers = {"X-Agent-Bridge-Continuity": "epoch-a"}
 
-        def __iter__(self):
+        def __iter__(self) -> Iterator[dict[str, Any]]:
             raise OSError("connection reset")
 
-        def close(self):
+        def close(self) -> None:
             pass
 
     class _CliClient:
@@ -2075,7 +2155,9 @@ def test_remote_cli_events_reconnects_after_active_stream_reset(
             self.calls = 0
             self.refreshes = 0
 
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(
+            self, *args: Any, **kwargs: Any,
+        ) -> _ResetStream | _FakeStream:
             self.calls += 1
             if self.calls == 1:
                 return _ResetStream()
@@ -2083,7 +2165,7 @@ def test_remote_cli_events_reconnects_after_active_stream_reset(
                 [{"event": "bridge_control", "data": {"code": "gap"}}]
             )
 
-        def refresh_endpoint(self):
+        def refresh_endpoint(self) -> None:
             self.refreshes += 1
 
     client = _CliClient()
@@ -2100,7 +2182,7 @@ def test_remote_cli_events_reconnects_after_active_stream_reset(
     )
 
     with pytest.raises(SystemExit) as exc:
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     assert exc.value.code == 2
     assert client.calls == 2
@@ -2109,17 +2191,17 @@ def test_remote_cli_events_reconnects_after_active_stream_reset(
 
 
 def test_remote_cli_events_defers_to_durable_cursor_after_ambiguous_ack(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _CliStream(_FakeStream):
         headers = {"X-Agent-Bridge-Continuity": "epoch-a"}
 
     class _CliClient:
         def __init__(self) -> None:
-            self.stream_calls = []
+            self.stream_calls: list[dict[str, Any]] = []
             self.ack_calls = 0
 
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(self, *args: Any, **kwargs: Any) -> _CliStream:
             self.stream_calls.append(kwargs)
             if len(self.stream_calls) == 1:
                 return _CliStream(
@@ -2136,7 +2218,7 @@ def test_remote_cli_events_defers_to_durable_cursor_after_ambiguous_ack(
                 [{"event": "bridge_control", "data": {"code": "gap"}}]
             )
 
-        def ack_remote_cursor(self, *args, **kwargs):
+        def ack_remote_cursor(self, *args: Any, **kwargs: Any) -> NoReturn:
             self.ack_calls += 1
             raise BridgeClientError(
                 503,
@@ -2146,7 +2228,7 @@ def test_remote_cli_events_defers_to_durable_cursor_after_ambiguous_ack(
                 },
             )
 
-        def refresh_endpoint(self):
+        def refresh_endpoint(self) -> bool:
             return True
 
     client = _CliClient()
@@ -2163,7 +2245,7 @@ def test_remote_cli_events_defers_to_durable_cursor_after_ambiguous_ack(
     )
 
     with pytest.raises(SystemExit) as exc:
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     assert exc.value.code == 2
     assert client.ack_calls == 1
@@ -2172,13 +2254,13 @@ def test_remote_cli_events_defers_to_durable_cursor_after_ambiguous_ack(
 
 
 def test_remote_cli_events_maps_ack_invalidation_to_control(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     class _CliStream(_FakeStream):
         headers = {"X-Agent-Bridge-Continuity": "epoch-a"}
 
     class _CliClient:
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(self, *args: Any, **kwargs: Any) -> _CliStream:
             return _CliStream(
                 [
                     {
@@ -2190,7 +2272,7 @@ def test_remote_cli_events_maps_ack_invalidation_to_control(
                 ]
             )
 
-        def ack_remote_cursor(self, *args, **kwargs):
+        def ack_remote_cursor(self, *args: Any, **kwargs: Any) -> NoReturn:
             raise BridgeClientError(
                 409,
                 {
@@ -2213,17 +2295,17 @@ def test_remote_cli_events_maps_ack_invalidation_to_control(
     )
 
     with pytest.raises(SystemExit) as exc:
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     assert exc.value.code == 2
     assert '"control": {' in capsys.readouterr().out
 
 
 def test_remote_cli_events_maps_setup_invalidation_to_control(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     class _CliClient:
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(self, *args: Any, **kwargs: Any) -> NoReturn:
             raise BridgeClientError(
                 409,
                 {
@@ -2246,19 +2328,21 @@ def test_remote_cli_events_maps_setup_invalidation_to_control(
     )
 
     with pytest.raises(SystemExit) as exc:
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     assert exc.value.code == 2
     assert '"control": {' in capsys.readouterr().out
 
 
-def test_remote_cli_events_retries_transient_setup_error(monkeypatch) -> None:
+def test_remote_cli_events_retries_transient_setup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _CliClient:
         def __init__(self) -> None:
             self.calls = 0
             self.refreshes = 0
 
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(self, *args: Any, **kwargs: Any) -> _FakeStream:
             self.calls += 1
             if self.calls == 1:
                 raise BridgeClientError(
@@ -2268,7 +2352,7 @@ def test_remote_cli_events_retries_transient_setup_error(monkeypatch) -> None:
                 [{"event": "bridge_control", "data": {"code": "gap"}}]
             )
 
-        def refresh_endpoint(self):
+        def refresh_endpoint(self) -> None:
             self.refreshes += 1
 
     client = _CliClient()
@@ -2285,19 +2369,21 @@ def test_remote_cli_events_retries_transient_setup_error(monkeypatch) -> None:
     )
 
     with pytest.raises(SystemExit) as exc:
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     assert exc.value.code == 2
     assert client.calls == 2
     assert client.refreshes == 1
 
 
-def test_remote_cli_events_does_not_retry_broken_stdout(monkeypatch) -> None:
+def test_remote_cli_events_does_not_retry_broken_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _CliClient:
         def __init__(self) -> None:
             self.calls = 0
 
-        def stream_remote_events(self, *args, **kwargs):
+        def stream_remote_events(self, *args: Any, **kwargs: Any) -> _FakeStream:
             self.calls += 1
             return _FakeStream(
                 [
@@ -2328,7 +2414,7 @@ def test_remote_cli_events_does_not_retry_broken_stdout(monkeypatch) -> None:
     )
 
     with pytest.raises(BrokenPipeError):
-        main_module._cmd_remote(args)
+        _cmd_remote(args)
 
     assert client.calls == 1
 
@@ -2357,5 +2443,5 @@ def test_remote_cli_events_does_not_retry_broken_stdout(monkeypatch) -> None:
         ],
     ],
 )
-def test_remote_leaf_commands_accept_json(argv) -> None:
+def test_remote_leaf_commands_accept_json(argv: list[str]) -> None:
     assert main_module.build_parser().parse_args(argv).json is True

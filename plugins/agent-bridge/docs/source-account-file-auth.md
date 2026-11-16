@@ -44,6 +44,41 @@ lease semantics refuses this new operation before capability disclosure.
 Existing token-only clients remain unchanged. No token-only fallback is
 equivalent to source authorization, and no legacy path is retired here.
 
+## Gateway-selected acquisition
+
+`GatewaySourceLeaseClient` implements the same finite `acquire` port for an
+explicit Gateway normal-fetch owner. It receives the approved HTTPS/auth/
+discovery contexts above, an expected **Gateway** installation ID, logical
+binding, account, host and a mapping of Controller slots to absolute
+consumer-owned capability-file references. Construction approves none of them.
+It does not need a credential-controller enrollment or a direct Controller
+connection.
+
+The client requires the matching `installationId` and
+`normal_source_lease_contract` declaration from the local slot's `/health`
+before reading any capability file. It POSTs once to that slot's `/token-fetch`
+with `fetch_contract`, `lease_contract`, `binding`, `installationId` and
+`sources`. The body pin selects the Gateway, not an Index/source installation
+header. Exact source installations and recipient grants remain the selected
+Gateway owner's independently authorized mappings. No capability is loaded
+from the Gateway's own filesystem or inferred from its service identity.
+
+The response must contain the same binding, account, host, Gateway installation,
+normal-fetch state/contract and a custodian-issued source lease. Missing lease
+support, provider rollback, malformed results, expiry and uncertain POSTs fail
+without token-only, fixed-source or Controller retry fallback. The existing
+whole-exchange budget and conservative clocks apply. Actual reported token
+expiry is exposed separately as `token_expires_at`; `None` stays unknown and
+is never replaced by the source lease. A known expired credential also refuses
+use, without changing the source lease's independently reported expiry.
+
+`CopilotAccountFile.renew(client)` accepts either explicit client through the
+same source-lease port. This does not select or enable a new client in native
+configuration, start renewal, confer plaintext/config custody, or admit any
+native execution. Provider-first rollout and rollback details are in
+[the Gateway source contract](../../../fleet-manager/docs/gateway-account-source.md#normal-retrieval-with-source-authorization).
+Old fixed-source clients and unleased normal-fetch callers are unchanged.
+
 ## Native account-file scope
 
 `CopilotAccountFile` is explicitly **POSIX-only**. Other platforms refuse before

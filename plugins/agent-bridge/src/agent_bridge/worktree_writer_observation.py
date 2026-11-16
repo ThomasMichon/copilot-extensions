@@ -14,16 +14,20 @@ def _slot_generation(root: Path, python: Path | None) -> str | None:
         return None
     environment = python.parent.parent
     slot = environment.parent if environment.name == ".venv" else environment
-    expected = root.resolve() / "versions" / slot.name
-    if environment.name == ".venv":
-        expected /= ".venv"
-    if (
-        slot.parent != root / "versions" or slot.name == "dev"
-        or python.parent.name not in {"bin", "Scripts"}
-        or python.name not in {"python", "python.exe"}
-        or python.parent.resolve() != expected / python.parent.name
-        or not python.is_file()
-    ):
+    try:
+        expected = root.resolve() / "versions" / slot.name
+        if environment.name == ".venv":
+            expected /= ".venv"
+        if (
+            slot.parent != root / "versions" or slot.name == "dev"
+            or slot.is_symlink()
+            or python.parent.name not in {"bin", "Scripts"}
+            or python.name not in {"python", "python.exe"}
+            or python.parent.resolve() != expected / python.parent.name
+            or not python.is_file()
+        ):
+            return None
+    except OSError:
         return None
     bootstrap = slot / ".runtime-bootstrap"
     path = bootstrap / "runtime-generation"
@@ -43,17 +47,21 @@ def _slot_generation(root: Path, python: Path | None) -> str | None:
     return value if re.fullmatch(r"[0-9a-f]{32}", value) else None
 
 
-def observe() -> dict:
+def observe() -> dict[str, str | None]:
     """Recheck the same owner selection around its immutable-slot metadata."""
-    unknown = {"installation_root": None, "runtime_generation": None}
+    unknown: dict[str, str | None] = {
+        "installation_root": None, "runtime_generation": None,
+    }
     selection = lifecycle._agent_worktrees_runtime_selection(allow_path_fallback=False)
-    if selection is None or selection[1] is None:
+    if selection is None:
         return unknown
     _prefix, root, python = selection
+    if root is None:
+        return unknown
     context = lifecycle._agent_bridge_installation_context()
     if python is None and context:
         try:
-            python = lifecycle._peer_launch.observe_peer_python(
+            python = getattr(lifecycle, "_peer_launch").observe_peer_python(
                 "agent-bridge", lifecycle._agent_bridge_owner_root(),
                 context, "agent-worktrees",
             )
@@ -67,7 +75,7 @@ def observe() -> dict:
         return unknown
     if context and python is not None:
         try:
-            if lifecycle._peer_launch.observe_peer_python(
+            if getattr(lifecycle, "_peer_launch").observe_peer_python(
                 "agent-bridge", lifecycle._agent_bridge_owner_root(),
                 context, "agent-worktrees",
             ) != python:

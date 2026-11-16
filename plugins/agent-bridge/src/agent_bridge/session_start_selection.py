@@ -1,6 +1,13 @@
 """Caller-affinity selection for the legacy session-start HTTP boundary."""
 
-from .models import SessionStatus
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .session_status import SessionStatus
+
+if TYPE_CHECKING:
+    from .session_manager import Session, SessionManager
 
 _REUSABLE_STATES = frozenset({
     SessionStatus.CREATED,
@@ -10,7 +17,9 @@ _REUSABLE_STATES = frozenset({
 })
 
 
-def find_reusable_caller_session(manager, agent_name, caller_id):
+def find_reusable_caller_session(
+    manager: SessionManager, agent_name: str | None, caller_id: str,
+) -> Session | None:
     """Return the newest alive session matching the caller and agent."""
     for session in manager.list_sessions():
         if (

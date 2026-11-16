@@ -35,6 +35,11 @@ the remaining durable-transaction obligations rather than declaring them done.
   of Gateway admission. Preserve source-lease meanings separately from actual
   credential expiry and native execution authority. Unsupported provider
   semantics remain explicit; do not relabel an opaque acquisition as silent.
+  The first implementation uses normal bounded provider retrieval, including
+  its ordinary refresh, rather than blocking on perfect cache-only support.
+  Credential expiry may be explicitly unknown; it must not be synthesized from
+  a source lease. Preserve the stricter cache-only availability contract as a
+  separately qualified capability.
 - [ ] **R3 - User action and retained work.** Integrate auth-needed outcomes
   with Vault-owned durable transaction/interaction authority from the parent
   plan. Cache discovery and silent renewal never start a browser/native flow.
@@ -148,6 +153,79 @@ This accepts R1's isolated service/provider/consumer source flow only. It does
 not qualify installed optional profiles, every mixed-version platform lane,
 live credentials, release/adoption, R2/R3, or the full Vault parent. The remaining
 validation items and R2-R4 stay open; publication is not runtime readiness.
+
+## Selected cache and provider direction
+
+Extend the existing [Vault vision](../../../visions/vault/README.md#independent-cache-and-standard-auth-providers)
+in place: Vault owns an independent protected cache and may act as a centralized
+broker; KeePassXC is one backing store, with code-registered `gh`, `az`, GCM and
+other standard-source drivers. This is source architecture acceptance, not an
+installation, credential-export, enrollment or interactive-login grant. Reuse
+the existing Vault and Gateway owners rather than introducing a parallel
+service for the initial flow.
+
+## R4 optional-profile construction
+
+The native installer now exposes explicit `federated-relay` and
+`ssh-federated-relay` dependency selections through its existing profile owner.
+They retain desired state across updates and construct separate immutable slots;
+the combined selection retains the existing SSH/cache/envelope dependency.
+Dependency health imports the selected closure without selecting relay policy,
+reading keys, acquiring credentials or starting a channel/service.
+
+Fleet Manager remains a standalone application artifact selected by the
+canonical `standalone:fleet-manager` association, not a vendored library or a
+Bridge-service installation. Configured-feed native construction and prepared
+application extras remain the existing construction paths. The native
+closed-wheel adapter associates admitted wheel extras with an explicit or
+persisted desired profile, without enabling a profile from wheel availability
+alone. It rechecks that association under the installer lock and runs the
+selected dependency health before candidate completion or reuse. Readiness
+joins the selected generation, frozen extras and desired profile; it does not
+silently select base when an optional closure is missing. This is source
+construction, not installed service/adopter acceptance.
+
+This closes part of the installer's
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+intent through the existing
+[application installation contract](../../../docs/patterns/fast-application-install-and-cutover.md).
+It does not replace the incumbent/cutover owner or claim portfolio-wide incoming
+readiness and current-selection convergence. State, sessions, credential custody,
+automatic-only inhibition and central-only retirement boundaries are unchanged.
+R4 stays open for installed service/adopter lifetime, deployment qualification
+and the remaining distribution lanes; a contained installed SDK consumer is not
+an installed service rollout.
+
+Closed-wheel qualification and its exact-source limits are recorded in the
+[parent journal](README.md#journal). The preceding native UV/source-profile
+increment was qualified as follows:
+
+- The contained Vault profile/snapshot/relay packet passed 71 tests; two POSIX
+  installer cases were skipped on Windows.
+- Separate native selections passed both installed relay profiles, the existing
+  base-to-SSH/update sequence, failed-candidate preservation, and both retained
+  source-profile sequences. Each stateful sequence kept one fixture and its
+  original ordering; these are not a claimed monolithic aggregate-budget pass.
+- The installed relay consumers used real TLS and enrolled proof identities
+  with synthetic credentials, renewed distinct source leases and withdrew their
+  offers on shutdown. The combined profile also exercised the existing protected
+  SSH/cache/envelope consumer.
+- Source identity/progress controls passed 180 tests. Eight actual native
+  wrapper controls preserved progress renewal and silent-work timeout behavior.
+  The closed-wheel regression suite passed 63 tests with one skip; the separate
+  Windows long-path content-integrity check passed.
+
+The retained-source test exposed per-file stderr flooding during native
+publication. The source CLI now reports completed work immediately and coalesces
+subsequent updates, without manufacturing progress or changing its deadline.
+The SSH source sequence then passed its unchanged 120-second per-item limit:
+92 seconds for stamp/provision and 64 seconds for source-loss reuse/refusal.
+The equivalent base sequence passed at 79 and 42 seconds.
+
+First-touch evidence uses actual native installers, fresh isolated homes and
+local artifact fixtures, not a factory-image or live deployment. Linux/macOS,
+installed service supervision and external credential/adopter qualification
+remain open under the existing deployment and custody owners.
 
 ## Documentation and performance impact
 

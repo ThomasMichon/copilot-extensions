@@ -119,8 +119,12 @@ These are implementation obligations, not claimed passes. In particular,
 shipping the new path does not retroactively qualify an original operation
 whose history cannot satisfy its proof requirements.
 
-The first [internal owner foundation](../../../plugins/agent-bridge/docs/native-send-settlement.md)
-keeps public front doors and Dispatch consumption unwired. Its selected
+The first [owner foundation](../../../plugins/agent-bridge/docs/native-send-settlement.md)
+merged in #12793. Its selected
 private-container controls exercise the persistent turn-write boundary with
 independent processes; they do not establish native-runtime or installed
 qualification and do not close this slice's aggregate acceptance.
+The negotiated Bridge CLI/HTTP front door merged in #12802, preserving passive
+receipt semantics. The next slice adds explicitly selected Dispatch consumption
+through its existing control-authorized reconciliation owner; it does not
+enable automatic settlement or qualify an actual original-flow outcome.

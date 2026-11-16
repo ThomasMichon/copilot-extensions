@@ -49,6 +49,21 @@ _bootstrap_uv_supported() {
     [ "${BASH_REMATCH[1]}" -gt 0 ] || [ "${BASH_REMATCH[2]}" -ge 8 ]
 }
 
+_bootstrap_find_uv() {
+    local candidate
+    while IFS= read -r candidate; do
+        if _bootstrap_uv_supported "$candidate"; then
+            case "$candidate" in
+                /*) ;;
+                *) candidate="$(pwd -P)/$candidate" ;;
+            esac
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done < <(type -ap uv)
+    return 1
+}
+
 if [ "${1-}" = --system-python ]; then
     _bootstrap_progress '--system-python is a Windows WinGet bootstrap mode; unsupported on POSIX.' failed
     exit 2
@@ -193,30 +208,18 @@ _bootstrap_progress 'Worktree Manager bootstrap'
 
 LOCAL_BIN="$HOME/.local/bin"
 
-uv_prepared=0
-if ! command -v uv >/dev/null 2>&1 || ! _bootstrap_uv_supported "$(command -v uv)"; then
+if ! UV="$(_bootstrap_find_uv)"; then
     _bootstrap_progress 'uv 0.8.0+ required - preparing it (user-local, no admin)...'
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    uv_prepared=1
     # uv installs into ~/.local/bin (or its env file); amend THIS session's PATH
     # so we can continue without a restart (the installer persists it for future
     # shells).
     [ -f "$LOCAL_BIN/env" ] && . "$LOCAL_BIN/env" || true
     export PATH="$LOCAL_BIN:$PATH"
-    if ! command -v uv >/dev/null 2>&1; then
-        _bootstrap_progress 'uv was installed but is not on PATH yet. Restart your shell and re-run.' failed
+    if ! UV="$(_bootstrap_find_uv)"; then
+        _bootstrap_progress 'uv 0.8.0 or newer is required after prerequisite preparation.' failed
         exit 1
     fi
-fi
-
-UV="$(command -v uv)"
-case "$UV" in
-    /*) ;;
-    *) UV="$(pwd -P)/$UV" ;;
-esac
-if [ "$uv_prepared" -eq 1 ] && ! _bootstrap_uv_supported "$UV"; then
-    _bootstrap_progress 'uv 0.8.0 or newer is required after prerequisite preparation.' failed
-    exit 1
 fi
 
 have_git=0
@@ -294,10 +297,18 @@ cd "$payload_parent/worktree-manager"
 export WORKTREE_MANAGER_SOURCE_ANCHOR="$source_anchor"
 # Version-install the fetched payload (idempotent, version-gated): publishes the
 # versions/<ver> slot + current-version marker + ~/.local/bin binstub.
+if [ "$recovery_only" -eq 0 ]; then
+    if ! grep -qx '# copilot-extensions:bootstrap-uv=1' scripts/runtime_install.py; then
+        _bootstrap_progress 'Selected Manager source does not support qualified UV handoff. Select a newer source; installation was not started.' failed
+        exit 2
+    fi
+    installer_args+=(--bootstrap-uv "$UV")
+fi
 if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
     "$UV" python install --no-bin --no-registry 3.11
     PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11)"
 fi
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$PYTHON"
 
 case ":$PATH:" in
     *":$LOCAL_BIN:"*) : ;;

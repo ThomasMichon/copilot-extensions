@@ -7,17 +7,27 @@ from agent_procutil.daemon_instances import daemon_entrypoint
 import argparse
 import asyncio
 import json
+import importlib
 import logging
 import os
 import socket
 import sys
 import urllib.error
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar, cast
 
-import uvicorn
+uvicorn = importlib.import_module("uvicorn")
+
+_CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
 
 
-def _core():
+class _DaemonDecorator(Protocol):
+    def __call__(self, function: _CallableT, /) -> _CallableT: ...
+
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(Callable[..., _DaemonDecorator], daemon_entrypoint)
+
+
+def _core() -> Any:
     from . import __main__ as core
 
     return core
@@ -114,7 +124,7 @@ def _cmd_start(
 
     handler = None
 
-    def initialize_logging():
+    def initialize_logging() -> None:
         nonlocal handler
         try:
             handler = configure_file_logging()
@@ -142,7 +152,7 @@ def _cmd_start(
 def _run_start(
     args: argparse.Namespace, *,
     required_runtime_environment: tuple[str, ...] | None = None,
-    logging_initializer=None,
+    logging_initializer: Callable[[], None] | None = None,
 ) -> None:
     from .app import create_app
     from .config import (
@@ -159,7 +169,7 @@ def _run_start(
         _WINDOWS_SERVING_GRACE,
         arm_serving_watchdog,
     )
-    from .winjob import setup_kill_on_close_job
+    from agent_remote_driver.winjob import setup_kill_on_close_job
 
     core = _core()
     launch_id = getattr(args, "serving_launch_id", None)
@@ -406,6 +416,11 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
             print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(1)
 
+    if getattr(args, "command", None) == "inspect" and "inspection" not in st:
+        st = {**st, "inspection": {
+            "contract": "agent-bridge.session-inspection", "version": 1,
+            "state": "unsupported", "reason": "serving-daemon-has-no-inspection",
+        }}
     if getattr(args, "json", False):
         core._json_out(st)
         return
@@ -707,7 +722,7 @@ def _cmd_ui(args: argparse.Namespace) -> None:
         print(f"Could not open a browser; visit {url}{hint}")
 
 
-def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
+def register_service_start_commands(sub: argparse._SubParsersAction[Any]) -> None:
     from .diagnostic_logs import register_log_commands
     register_log_commands(sub)
     core = _core()
@@ -768,13 +783,15 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
     elev_p.set_defaults(func=_cmd_elevated)
 
     status_p = sub.add_parser(
-        "status", help="Check if agent-bridge is running, or show a session's status"
+        "status", aliases=["inspect"],
+        help="Check if agent-bridge is running, or show a session's read-only status"
     )
     status_p.add_argument(
         "session_id",
         nargs="?",
         help="Session ID -- show that dispatch's compact status (state, in-flight tool + elapsed, cursor lag) instead of service health",
     )
+    status_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     status_p.add_argument(
         "--full",
         action="store_true",

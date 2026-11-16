@@ -342,6 +342,68 @@ the non-public approval conversation.
 
 ## Plan
 
+The [changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
+verify #12831's actual merge while retaining #9532's explicit original-history,
+adoption, rollback and lifetime gates. #4303's whole generic branch-resume
+contract exceeds Venue parity; #5799 already owns its unfinished materials
+families. Stopped or unqualified comparisons support no disposition.
+The same record now distinguishes merged #12835/#12767 from verification of
+their whole #12834/#12763 requests, and retains #4183's already canonical
+duplex, input and progress acceptance. The complete 2026-11-16 11:01:22 UTC
+census is 845 whole open, 116 above fixed 729; these keepers add no closure
+credit or transfer of custody.
+Its subsequent partial-delivery reconciliation verifies #12853's publication
+and #12840's bounded Vault milestone without closing #8729 or its existing
+owner's reservation. #12852 retains its distinct native-path constructor
+request. The complete 2026-11-16 11:36:45 UTC census is 849 whole open,
+120 above fixed 729; no additional closure credit is claimed.
+The same record separates #1176's delivered authoring definition from complete
+enforcement verification, and preserves #2350 after its proposed configuration
+source fails body admission. Neither an assignee field nor an unavailable
+source proves fulfillment, absence or permission to transfer custody.
+The later #12828 Host-inspection and #12855 closed-wheel Vault descriptions
+report distinct source increments, explicitly not whole #10765 or #8729
+completion, native adoption or independent reference-contract acceptance.
+The complete 2026-11-16 12:12:30 UTC census is 850 whole open, 121 above
+fixed 729; these partial-delivery observations add no closure credit.
+The subsequent #12857 whole finite source-repair comparison supports #12841's
+audited `COMPLETED` disposition without settling its earlier live request or
+broader convergence owners. At 2026-11-16 12:36:14 UTC, two excluded arrivals
+since the preceding published 850-open census exceed that verified inflow
+departure by one: 851 whole open, 122 above fixed 729.
+The subsequent distinct #1176 enforcement-source admission stops before body
+access after its complete primary-author history exposes unresolved identities;
+this is not evidence that enforcement is absent. #12866's reviewed documentary
+publication is verified separately. At 2026-11-16 12:49:23 UTC, another excluded
+arrival yields 852 whole open, 123 above fixed 729, with no additional closure
+credit or change to the earlier #12841 completion.
+
+The same record now reconciles #3002's already-audited retirement into #2879
+without replaying it, and retains the distinct #688/#870 contracts and
+#912/#1088 source reservations. Proposed receiving comparisons that stop at
+source admission establish neither a whole transfer nor technical absence.
+New #12872 retains its bounded paired-Sync fixture-repair owner; its reported
+native failure and skipped constructor steps are not independent qualification.
+The complete 2026-11-16 13:56:09 UTC census is 855 whole open, 126 above fixed
+729; three arrivals since the dated 852-open observation add no closure credit.
+
+The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
+verifies #12842's reviewed delivery of direct pre-clone noninteractive
+authentication, multiple-account routing and actual owning-plugin installer
+discovery in the existing onboarding effort. Complete receiving readback and
+the separate source judgment support #4201's `NOT_PLANNED` tracking retirement;
+all seven technical rows, standalone provisioning and existing owners remain.
+One new arrival, claimed cold-recovery follow-up #12841, offsets that departure:
+the complete 09:57:33 UTC census remains 841 whole open, 112 above fixed 729.
+
+The [cold-bootstrap source and keeper unit](journal/2026/11.16-cold-bootstrap-source-completion.md)
+verifies #12824's complete narrow source/regression fulfillment in merged
+#12832 and its separate acknowledged `COMPLETED` disposition. #5900 retains
+its owning-token condition despite already accepted telemetry planning;
+#12819 and #12834 retain unmerged-provider and owner boundaries. The complete
+09:08:02 UTC census is 841 whole open, 112 above fixed 729. No installation,
+interrupted-recovery replay or source/resource release follows.
+
 The [reviewed planned-intake and Manager-source unit](journal/2026/11.14-planned-intake-and-manager-source.md)
 verifies existing receiving delivery and retires #3323 and #3372 as redundant
 planned tracking, not technical completion. It proposes eighteen unchecked
@@ -3634,6 +3696,21 @@ sources, transferring owners or turning partial/planning gains into completion.
   accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
+  The agent-recommended [accepted public-prose casing contract](public-prose-casing-receiving.md)
+  directly retains #4215's complete wording-only scope and token
+  exclusions in existing #5799 acceptance. Its
+  [dated journal](journal/2026/11.15-public-prose-casing-receiving.md)
+  records #12815, canonical Plan/global Validation delivery, complete actual
+  issue readback and separate #4215 `NOT_PLANNED` tracking retirement.
+  #5799 remains OPEN/Active; all technical rows and independent owners remain.
+  The verified queue is 839 whole open, 110 above fixed 729.
+  The agent-recommended [accepted first-use CodeSpace doctor contract](venue-doctor-first-use-receiving.md)
+  directly retains #9281's three remediation-OR-command cases and
+  failing-command stderr in existing #954 acceptance. Its
+  [dated journal](journal/2026/11.15-venue-doctor-first-use-receiving.md)
+  records #12810, complete actual readback and a separate keep-open judgment
+  for the other contributor's unfulfilled request. Both issues remain OPEN,
+  all seven rows unchecked, with 837 whole open and 108 above fixed 729.
   The agent-recommended [accepted Manager bytecode-uninstall contract](manager-bytecode-uninstall-receiving.md)
   directly retains #9375's narrow inventory/removal repair in planned #1886
   acceptance, preserving the existing Manager repair, #8864 and #8669 owners
@@ -4194,6 +4271,15 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [cold-bootstrap completion audit](journal/2026/11.16-cold-bootstrap-source-completion.md#12824---completed-narrow-recovery-bootstrap-correction)
+retains the complete original-to-delivery crosswalk, qualified description
+and source histories, isolated published-layout success/failure and utility
+origin controls, actual current-head approval/check metadata, final completion
+qualification and exact acknowledgment/terminal readback. Source fixtures
+do not establish Main publication, live installation or custody release.
+The complete census counts new inflow and excluded authors without assigning
+unrelated reductions to the campaign; all incumbent checklist states remain.
 
 The [eighteen-row intake](journal/2026/11.13-inherited-allocator-and-parked-review-intake.md#evidence-and-preservation)
 adds only direct Plan/local/global Validation, Coordination and dated-Journal

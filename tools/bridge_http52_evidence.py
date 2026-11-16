@@ -56,6 +56,7 @@ _RETAINED_AFFECTED = (
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
         "retained_writer_transport.py",
         "native_send_history.py", "native_send_settlement.py", "native_send_settlement_schema.py",
+        "native_send_settlement_cli.py", "startup_observation.py",
         "acquisition_worktree_writer.py", "acquisition_writer_inspection.py", "acquisition_authority.py",
         "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
@@ -92,7 +93,7 @@ _RETAINED_AFFECTED = (
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py", "routes/worktree_reporting.py",
         "compatible_inbox.py", "runtime_custody.py", "inbox_consumer_schema.py",
-        "loop_governance.py",
+        "loop_governance.py", "session_inspection.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -120,15 +121,18 @@ AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
+    "plugins/agent-bridge/contract/inputs/http52/native-send-settlement.json",
     "plugins/agent-bridge/tests/test_http52_capture_probes.py",
     "plugins/agent-bridge/tests/test_native_send_unavailable.py",
     "plugins/agent-bridge/tests/test_native_send_settlement.py",
     "plugins/agent-bridge/tests/test_native_send_settlement_process.py",
+    "plugins/agent-bridge/tests/test_native_send_settlement_frontend.py",
     "plugins/agent-bridge/docs/native-send-settlement.md",
     "plugins/agent-bridge/tests/test_host_status.py",
     "plugins/agent-bridge/tests/test_host_status_remote.py",
     "plugins/agent-bridge/tests/test_host_status_clients.py",
     "plugins/agent-bridge/docs/host-status-feed.md",
+    "plugins/agent-bridge/tests/test_session_inspection.py",
     "plugins/agent-bridge/tests/test_acp_current_requests.py",
     "plugins/agent-bridge/tests/test_inbox_consumer_enrollment.py",
     "plugins/agent-bridge/tests/test_live_inbox_producer.py",
@@ -201,6 +205,19 @@ EXTRA_PATHS = (
 EXTRA_PATHS = tuple(_current_source(path) for path in EXTRA_PATHS)
 PROBES = {
     **retained.PROBES,
+    "test_http_and_both_cli_aliases_use_copied_core_without_cursor_or_input_effects": 1,
+    "test_inspect_json_names_older_daemon_inspection_gap_without_retry": 1,
+    "test_semantic_projection_is_bounded_content_free_and_not_ping_progress": 1,
+    "test_real_cli_settles_original_through_advertised_provider_without_sending": 2,
+    "test_executing_cli_declares_settlement_without_contacting_a_daemon": 1,
+    "test_ordinary_sender_preserves_proved_settled_key_refusal": 1,
+    "test_explicit_reobservation_recovers_lost_settlement_without_another_turn": 1,
+    "test_mixed_settlement_modes_refuse_before_input_or_client": 7,
+    "test_unsupported_running_provider_refuses_before_mutation": 4,
+    "test_unavailable_existing_client_refuses_without_ensure_or_settlement": 1,
+    "test_post_commit_unknown_response_never_retries_or_replays_prompt": 6,
+    "test_drain_winning_the_turn_lock_refuses_settlement": 1,
+    "test_missing_authentication_cannot_reach_settlement_owner": 1,
     "test_reporter_naming_overrides_stored_names_without_retargeting_agent": 3,
     "test_invalid_reporting_context_does_not_replace_last_good_inventory": 11,
     "test_real_source_stdout_refresh_renames_and_withdraws_without_row_changes": 1,
@@ -403,6 +420,7 @@ PROBES = {
 }
 TEST = "plugins/agent-bridge/tests/test_http52_capture_probes.py"
 CAPABILITY_VERSIONS = {
+    "native_send_settlement": 1,
     "dispatch_acp_session_origin": 1,
     "dispatch_cli_session_origin": 1,
     "host_status_feed": 1,

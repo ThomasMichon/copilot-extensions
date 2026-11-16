@@ -58,6 +58,10 @@ direction. It extends existing owners, not another installer or broker.
    native targets and lock markers before construction. Helpers needed before
    TOML parsing have a small static declaration distributed by the existing
    bootstrap generator; they must not need Python to discover their requirement.
+   The declaration producer is stdlib-only and validates the helper's exact
+   version without parsing application TOML. Helper and application versions
+   can differ; existing project/profile admission still enforces application
+   `requires-python`, wheel ABI and lock compatibility before construction.
    Shared libraries remain in their consumers' environments.
 2. **Establish the foundation without Python.** Existing explicit shell/setup
    entrypoints resolve `uv` from PATH (or establish it through the existing

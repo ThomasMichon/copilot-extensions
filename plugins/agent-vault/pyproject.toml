@@ -51,6 +51,9 @@ agent-zdd = { path = "../../libs/zdd", editable = true }
 # `libs/single-instance-lease`, so every consumer shares one canonical copy.
 agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 
+[tool.copilot-extensions.application-sources]
+fleet-manager = "standalone:fleet-manager"
+
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,
 # and the seal/unseal envelope-KEK multi-machine system encrypts with AES-256-GCM -- both need
