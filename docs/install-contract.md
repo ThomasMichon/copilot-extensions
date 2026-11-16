@@ -3971,6 +3971,27 @@ accept it. Self-install uses the same finite interpreter scope.
 The standalone Windows install-only participant also establishes its own finite
 base-interpreter scope. Its queue and the bootstrap-update queue clear the
 worker's hint without requiring newer private APIs from a prepared Manager.
+Manager's in-process `setup`/`register` CLI also qualifies its own prepared base
+interpreter against the Python 3.11 helper floor rather than scanning PATH for
+another Python. Its core install child receives that executable through
+Windows `-BootstrapPython` and the finite bootstrap environment. The POSIX
+Worktrees receiver consumes the explicit environment input at initial
+admission and subsequent bootstrap-helper selection; an invalid, unsupported or
+excluded selection never falls back to a current runtime or PATH interpreter.
+POSIX qualification checks the resolved executable and interpreter prefixes,
+including an executable directly at the excluded root, within the existing
+version probe rather than relying only on the candidate's parent directory.
+Legacy POSIX callers without an explicit input retain their existing discovery.
+Windows also honors the explicit evaluator in versioned helpers and deployment,
+before discovery of a signed base. Its qualification preserves target/runtime
+exclusions and fails without another discovery attempt. Signed-base discovery
+for legacy construction remains separate.
+This evaluator handoff does not waive application/project, lock or ABI
+compatibility admission, bypass source/feed policy or require a
+Manager/application daemon.
+The finite core child explicitly forwards the caller's stdout/stderr alongside
+Windows no-window flags; it does not depend on implicit console handles for
+installer progress or failure diagnostics.
 These helpers are stdlib-only. Using the base interpreter keeps an inherited
 helper hint independent of a retired Manager package environment; managed-base
 retention remains with the toolchain owner.

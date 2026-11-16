@@ -3445,6 +3445,20 @@ sources, transferring owners or turning partial/planning gains into completion.
   actual normal reviewed receiving delivery, complete current readback and a separate
   source judgment precede tracking retirement. Worktrees' permanent service-engine
   exception and actual prerequisite/adopter/native/source custodians remain unchanged.
+  Reviewed #12925 subsequently delivered complete U3946 planned receiving;
+  verified #3946 tracking retirement is `NOT_PLANNED`, not a Windows/child
+  qualification pass. The complete 22:53:07 UTC census is 856 whole open,
+  127 above fixed 729: one campaign departure and one unrelated departure,
+  with no new inflow. Whole #3972 session-sync and #3977 materialization
+  contracts remain separate OPEN canonicals for their explicit residuals.
+  The [complete machine-state receiving reconciliation](journal/2026/11.16-complete-machine-state-receiving.md)
+  directly retains #3983's four-workstream Windows/Linux/WSL programme, all
+  inherited #3984 migration acceptance and exact #6342 opt-in pack in the
+  existing declarative-control-plane effort. Actual capability inventory,
+  parity and owner acceptance still gate legacy retirement; #3115's separate
+  live umbrella remains unsatisfied. #3983's literal whole-original/validation
+  OPEN condition remains: reviewed planned receiving does not waive it or
+  authorize source retirement, restore or machine operations.
   The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
   preserves #2729's five-package AND inherited #2726 contract in the existing
   Active Installer Engine Plan/local/global Validation and Coordination.
