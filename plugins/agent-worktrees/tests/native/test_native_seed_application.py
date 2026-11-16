@@ -6,6 +6,7 @@ import base64
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import replace
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -1029,6 +1030,100 @@ def _prepare_native_application(
     return Path(prepared["snapshot"]) / "applications" / "agent-worktrees"
 
 
+def _owned_application_command(
+    home: Path, caller: Path, root: Path, environment: dict[str, str],
+    command: Sequence[str | Path | None], *, interpreter: str, deadline: float,
+) -> list[str]:
+    if TYPE_CHECKING:
+        from tools import prepare_runtime_source as preparation
+    else:
+        import prepare_runtime_source as preparation
+    isolate_account_profile = cast(
+        Callable[[Path, Path], None], import_module("runtime_install_fixture").isolate_account_profile,
+    )
+
+    owner = home / ".copilot" / "installed-plugins" / "example" / "agent-worktrees"
+    owner.mkdir(parents=True)
+    _copy_application_inputs(SOURCE, owner)
+    preparation.materialize_consumer(ROOT, SOURCE, owner, deadline=deadline)
+    isolate_account_profile(owner, home)
+    settings = caller / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    environment.update(
+        COPILOT_PLUGIN_ROOT=str(owner), COPILOT_PLUGIN_STAGED_FROM=str(owner),
+        COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(caller),
+    )
+    return [
+        interpreter, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
+        "--payload-root", str(owner), "--source-payload-root", str(owner),
+        "--plugin-id", "agent-worktrees", "--legacy-root", str(root),
+        "--project-root", str(caller), "--run-lifecycle", "--managed-deployment",
+        "--", *map(str, command),
+    ]
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_application_fixture_installs_through_its_private_command_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    home, caller = tmp_path / "home", tmp_path / "caller"
+    home.mkdir()
+    caller.mkdir()
+    root = home / ".agent-worktrees"
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
+        and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+    )
+    probe = (
+        "import json,os,sys;from pathlib import Path;"
+        "owner=Path(os.environ['COPILOT_PLUGIN_STAGED_FROM']);"
+        "project=Path(os.environ['COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT']);"
+        "sys.path.insert(0,str(owner/'scripts'));import command_binding as binding;"
+        "arguments=dict(payload_root=owner,plugin_id='agent-worktrees',"
+        "legacy_root=Path(sys.argv[1]),project_root=project);"
+        "primitive=binding._load_primitive(owner);"
+        "lease=binding._load_lifecycle().borrowed_lease(binding._rules(),primitive,**arguments);"
+        "assert lease is not None and lease.purpose['origin']=='management';"
+        "sys.exit(7) if sys.argv[2]=='7' else None;"
+        "binding.write_legacy_manifest(primitive,"
+        "{'schema_version':3,'service':'agent-worktrees'},**arguments);"
+        "print(json.dumps({'owner':str(owner),'project':str(project)}))"
+    )
+    deadline = time.monotonic() + 60
+    command = _owned_application_command(
+        home, caller, root, environment,
+        [sys.executable, "-I", "-B", "-c", probe, root, str(exit_code)],
+        interpreter=sys.executable, deadline=deadline,
+    )
+    result = run_caller_owned(
+        command, cwd=caller, env=environment, timeout=max(0.01, deadline - time.monotonic()),
+        max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    if not exit_code:
+        assert json.loads(result.stdout) == {
+            "owner": environment["COPILOT_PLUGIN_STAGED_FROM"], "project": str(caller),
+        }
+    manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["commandLifecycle"]["state"] == ("pending" if exit_code else "complete")
+    assert manifest["commandLifecycle"]["owner"]["source"]["canonical"] == "github:example/plugins"
+    if exit_code:
+        assert "commandBinding" not in manifest
+    else:
+        assert Path(manifest["commandBinding"]["payloadRoot"]).is_relative_to(home)
+
+
 def _qualify_native_application(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, broker: bool | str = False,
     caller_jobs: bool = False,
@@ -1108,6 +1203,9 @@ def _qualify_native_application(
     assert environment.get("PYTEST_CURRENT_TEST")
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]
+    install = _owned_application_command(
+        home, caller, root, environment, install, interpreter=interpreter, deadline=deadline,
+    )
     installed = _run(install, cwd=caller, env=environment, deadline=deadline)
     print(f"Application installed: {time.monotonic() - started:.2f}s", flush=True)
     assert json.loads(installed.stdout)["state"] == "installed"
