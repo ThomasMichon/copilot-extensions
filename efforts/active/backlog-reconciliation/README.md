@@ -3459,6 +3459,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   live umbrella remains unsatisfied. #3983's literal whole-original/validation
   OPEN condition remains: reviewed planned receiving does not waive it or
   authorize source retirement, restore or machine operations.
+  The [complete self-update receiving proposal](journal/2026/11.16-complete-self-update-receiving.md)
+  records actual #12927 delivery and #3983's retained literal OPEN condition,
+  then extends the same Machines root for #4075's entire original and inherited
+  #4076 same-occurrence native exit/actual-work/atomic-receipt contract. The
+  finite documentation OR owned runtime convergence choice remains distinct
+  from that native lane; existing ownership and #3115's separate gate remain.
+  All technical rows stay unchecked; actual normal reviewed delivery, full
+  current readback and separate source judgment precede tracking retirement.
+  Whole #3985/#3989/#3993/#4023/#4043 remain separate OPEN canonicals for
+  their exact residuals, without new native investigation or closure credit.
   The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
   preserves #2729's five-package AND inherited #2726 contract in the existing
   Active Installer Engine Plan/local/global Validation and Coordination.

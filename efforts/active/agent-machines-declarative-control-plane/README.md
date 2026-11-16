@@ -62,10 +62,25 @@ The proposed finite #3115 and #4075 families below retain existing schema,
 resource/module/provider, scheduler, setup and native/permission custodians.
 #3115's actual separate LIVE owning-umbrella requirement is unchanged:
 closed #1418 is nonaccepting history, not a claim token, and this Active
-directory or another slice's source claim does not satisfy it. #4075 is the
-distinct selected documentation/maintenance-safe admission tail, not
-Linux/macOS scheduler acceptance. Neither source receives a replacement owner,
+directory or another slice's source claim does not satisfy it. #4075 retains
+the selected documentation/maintenance-safe admission tail AND its later
+inherited #4076 same-occurrence native receipt lane, not Linux/macOS scheduler
+acceptance. Neither source receives a replacement owner,
 automatic opt-in, host repair or resource release through this proposal.
+
+Complete #4075 planned receiving preserves its original documentation OR
+explicitly owned runtime choice for ongoing convergence, while separately
+retaining every inherited #4076 actual-work/exit/receipt obligation below.
+The finite documentation alternative needs no new broad native matrix; it
+also cannot satisfy the distinct native occurrence contract. Existing
+scheduler, installer/launcher, actual-work/state, declarative-resource and
+native-observation owners retain their claims, permissions and holds.
+Normal review, actual receiving merge and FULL current root Plan/local/global
+Validation, Coordination and Journal readback precede separate administrative
+source judgment. Planned receiving marks no technical row complete and
+authorizes no scheduler query, wrapper, task reset, maintenance, receipt
+mutation or native experiment. #3115's LIVE umbrella and #3983's literal
+OPEN-through-whole-original condition remain independent and unchanged.
 
 The proposed #3983 migration/opt-in-pack intake below retains the schema
 host/reviewer, module/provider, machine, source and native/adopter owners.
@@ -506,8 +521,61 @@ unchanged. These are two distinct outcomes, not a source-to-source fold._
   actual opted-in ongoing admission at the appropriate existing consumer
   tier. Do not add host repair, task reset, automatic registration, another
   updater or a broad native/platform matrix to this finite docs alternative.
+- [ ] **M4075-P3:** For inherited #4076, correlate the SAME native scheduled
+  occurrence and actual inner-work invocation with selected source/runtime,
+  tier and machine/config/home/installation namespace. A different root,
+  opted-out noop or preflight-only wrapper is not the reported successful
+  sweep. Keep binstub short-circuit and conhost/cmd exit swallowing as
+  unconfirmed hypotheses until measured; inspect existing reliability
+  tracking if the selected binstub is causally responsible.
+- [ ] **M4075-P4:** Trace status/exit propagation through the selected
+  compatibility binstub, conhost/cmd OR supported native launcher and Python
+  entrypoint, including first-use/reconcile shortcuts. Preserve the original
+  CLI policy, zero for ok/noop and two otherwise; distinguish successful
+  evaluated/no-change work, error, deferred, skipped/not-opted-in and
+  not-started. Outer scheduler Last Result:0 is not an actual-work receipt.
+- [ ] **M4075-P5:** Preserve atomic actual-work attempt/success authority
+  through interruption, lock contention, deferral and partial failure.
+  `last_attempt` is not `last_success`; task matching is neither receipt.
+  Never freshen a timestamp, recreate/reinstall/reset a task, run maintenance
+  or update, or change opt-in to manufacture current success.
+- [ ] **M4075-P6:** Keep the existing declarative-resource, scheduler,
+  installer/launcher, actual-work/state and native-observation custodians.
+  Record historical/current source, released and installed facts separately.
+  No new maintenance daemon, receipt authority, automatic host repair or
+  transfer of #3115's distinct scheduler programme follows from this intake.
+
+#### Local validation of the inherited #4076 occurrence lane
+
+- [ ] **M4075-V2:** Within the existing separately authorized native owner
+  lane, trace direct invocation and scheduler execution for the SAME selected
+  wrapper-to-inner-work occurrence. Compare real `$LASTEXITCODE`, scheduler
+  result and source/runtime/tier/namespace-qualified attempt/success receipts.
+  Cover actual error/defer, successful no-change, not-opted-in, preflight-only,
+  failed bootstrap and interrupted child. Python return fixtures alone do not
+  prove this original native contract.
+- [ ] **M4075-V3:** Prove atomic receipt truth for partial/interrupted/locked/
+  deferred and unknown outcomes without modifying the old occurrence or
+  forcing fresh success. Report whether the historical discrepancy is
+  established current, causally fixed or still unknown; a wrapper name,
+  matching definition or outer zero does not establish cause.
+- [ ] **M4075-V4:** BEFORE administrative retirement, read back the FULL
+  current OPEN source parent, every original/refined/inherited clause and
+  this complete current receiving ROOT after normal reviewed delivery.
+  Preserve every technical checkbox unchecked and every actual source/
+  resource/native hold. Administrative supersession is neither native
+  qualification nor completion of the receiving effort.
 
 ## Validation Plan
+
+- [ ] **M4075-GV1:** Resolve the complete M4075-P1-P6, V1-V4 and continuing
+  Coordination contract: finite ongoing-convergence documentation OR an
+  explicitly owned runtime alternative AND the distinct inherited #4076
+  same-occurrence native exit/actual-work/atomic-receipt lane. Preserve the
+  original evidence tiers, delivered guidance/matcher credit, opt-out and
+  permission controls, actual owners and independent #3115/#3983 gates.
+  Reviewed planned receiving/current full readback can support a separate
+  tracking judgment, never technical completion or an operational effect.
 
 - [ ] G1: Resolve EVERY directly retained #4137 topology-location/portability Plan,
   own Validation and continuing Coordination clause at its original finite
@@ -641,6 +709,25 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+### 2026-11-16 - Complete self-update convergence and receipt intake
+
+The complete current #4075 original and both discussions retain SU1-SU6 and
+SUV1-SUV4, including the full inherited #4076 original. Read this entire
+current root after reviewed #12927 merged as
+`a26b5e87547e2a5e1354f569176604af921ce7b9`. Its M4075-P1/P2/V1 already
+receive the finite selected documentation/admission tail; the later native
+occurrence lane was not completely represented.
+
+Added direct P3-P6, local V2-V4 and actual global GV1 for that distinct lane,
+with continuing Coordination and every incumbent checkbox unchanged.
+Documentation OR explicitly owned runtime convergence remains an alternative,
+not two required implementations; neither branch substitutes for inherited
+native receipt acceptance. #2656/#3089 credit, existing custodians, #3115's
+independently unsatisfied LIVE umbrella and #3983's literal whole-original/
+validation OPEN condition remain. The historical watchdog's completed slice
+is not an Active receiver. Normal review, actual delivery and complete current
+readback precede separate source judgment; no product or native effect ran.
 
 ### 2026-11-16 - Complete migration-family receiving reconciliation
 
