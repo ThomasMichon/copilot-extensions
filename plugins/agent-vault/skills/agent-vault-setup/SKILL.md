@@ -105,8 +105,12 @@ bash plugins/agent-vault/scripts/install.sh install --no-service
 Even without a supervised service, the CLI can cold-start the daemon on demand.
 
 For SSH key preparation/install, select the native `ssh` dependency profile
-(`-Profile ssh` / `--profile ssh`) rather than adding packages to a completed
-venv. `stamp`, `provision` and `update` support the same selection; ordinary
+(`-Profile ssh` / `--profile ssh`). The optional `federated-relay` profile supplies
+the Gateway service SDK and credential custodian; `ssh-federated-relay` combines
+both selections. Use these profiles rather than adding packages to a completed
+venv. Relay construction needs the canonical first-party application artifacts
+in the configured feed and does not enable a relay or install a Bridge service.
+`stamp`, `provision` and `update` support the same selection; ordinary
 updates preserve it. Explicit profiles require an existing Python 3.11+
 bootstrap interpreter and do not enable Vault or authorize credential changes.
 Use the [native profile reference](../../README.md#dependency-profiles) for

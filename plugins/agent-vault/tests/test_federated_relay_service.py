@@ -61,6 +61,21 @@ FIELDS = {
 }
 
 
+def test_dependency_health_does_not_select_policy_or_construct_relay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import federated_relay, federated_relay_config
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Dependency qualification must not acquire deployment resources")
+
+    monkeypatch.setattr(federated_relay_config, "load", forbidden)
+    monkeypatch.setattr(federated_relay_config, "read_reference", forbidden)
+    monkeypatch.setattr(federated_relay, "RelayRuntime", forbidden)
+    federated_relay.dependency_health()
+    federated_relay.ssh_dependency_health()
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 def test_federated_shutdown_withdraws_before_pending_warm_worker_settles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel: bool,

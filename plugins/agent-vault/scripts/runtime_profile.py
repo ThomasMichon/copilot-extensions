@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 from pathlib import Path
@@ -10,17 +11,23 @@ import re
 import stat
 import sys
 import uuid
+from typing import Any
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 
 PROFILE_FILE = "runtime-profile.json"
 PROFILE_SCHEMA = "agent-vault.runtime-profile"
-PROFILES = ("base", "ssh")
+PROFILES: dict[str, tuple[str, ...]] = {
+    "base": (),
+    "ssh": ("ssh",),
+    "federated-relay": ("federated-relay",),
+    "ssh-federated-relay": ("federated-relay", "ssh"),
+}
 
 
-def _unique_object(pairs):
-    result = {}
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("Duplicate Vault runtime-profile key")
@@ -35,7 +42,8 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
         info = path.lstat()
         if (
             not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or getattr(info, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
             or info.st_size > 4096
         ):
             raise ValueError("Vault runtime profile must be a bounded ordinary file")
@@ -53,12 +61,13 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
     return recorded if requested is None else requested
 
 
-def selection(root: Path, payload: Path, requested: str | None = None) -> dict:
-    import tomllib
+def selection(root: Path, payload: Path, requested: str | None = None) -> dict[str, Any]:
     import versioned_runtime_source as source
 
     profile = selected_profile(root, requested)
-    project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    project = importlib.import_module("tomllib").loads(
+        (payload / "pyproject.toml").read_text(encoding="utf-8"),
+    )["project"]
     version = project["version"]
     if (
         project["name"] != "agent-vault" or not isinstance(version, str)
@@ -98,7 +107,7 @@ def persist_profile(root: Path, profile: str) -> None:
 def fingerprint(payload: Path, profile: str) -> str:
     import installer_engine as engine
 
-    extras = ("ssh",) if profile == "ssh" else ()
+    extras = PROFILES[profile]
     extras = engine._selected_extras(payload, extras)
     return engine._construction_hash(engine._source_files(engine._package_roots(payload)), extras)
 
@@ -116,11 +125,16 @@ def construction_session(root: Path, payload: Path, version: str, expected_hash:
     uv = os.environ.get("AGENT_VAULT_INSTALL_UV")
     if not uv:
         raise ValueError("Vault profile construction requires its native installer's selected uv")
-    extras = ("ssh",) if selected["profile"] == "ssh" else ()
+    extras = PROFILES[selected["profile"]]
+    health_module, health_callable = "agent_vault", None
+    if "federated-relay" in extras:
+        health_module = "agent_vault.federated_relay"
+        health_callable = "ssh_dependency_health" if "ssh" in extras else "dependency_health"
+    elif "ssh" in extras:
+        health_module, health_callable = "agent_vault.ssh_key", "_crypto"
     with engine.numbered_candidate(
         root, version, plugin=payload, uv=Path(uv), base_python=Path(sys.executable),
-        health_module="agent_vault.ssh_key" if extras else "agent_vault",
-        health_callable="_crypto" if extras else None,
+        health_module=health_module, health_callable=health_callable,
         extras=extras, process_retention=True,
         expected_source_identity=selected["source_identity"],
         expected_payload_hash=expected_hash,
@@ -160,7 +174,7 @@ def current(root: Path, package_version: str, payload: Path | None = None) -> bo
     return target_current(root, payload or SCRIPTS.parent, package_version)
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--link-name", default=".venv")

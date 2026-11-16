@@ -42,7 +42,7 @@ param(
     [switch]$Purge,
     [switch]$Force,
 
-    [ValidateSet('base', 'ssh')]
+    [ValidateSet('base', 'ssh', 'federated-relay', 'ssh-federated-relay')]
     [string]$Profile,
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
@@ -74,13 +74,13 @@ $NativeWheelSelection = $null
 
 
 if (-not $Profile -and $env:AGENT_VAULT_INSTALL_PROFILE) {
-    if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh')) {
+    if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh', 'federated-relay', 'ssh-federated-relay')) {
         throw 'Unsupported Vault installation profile'
     }
     $Profile = $env:AGENT_VAULT_INSTALL_PROFILE
 }
 if ($Profile) {
-    if ($Profile -cnotin @('base', 'ssh')) { throw 'Unsupported Vault installation profile' }
+    if ($Profile -cnotin @('base', 'ssh', 'federated-relay', 'ssh-federated-relay')) { throw 'Unsupported Vault installation profile' }
     if ($Action -notin @('install', 'update', 'stamp', 'provision')) {
         throw 'Vault dependency selection requires install, update, stamp or provision'
     }
@@ -888,7 +888,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
+    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease', 'update-driver', 'credential-relay')) {
         $source = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"

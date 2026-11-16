@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import importlib
 import json
 import runpy
 import shlex
@@ -11,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Callable, Protocol, TypedDict, cast
 
 import agent_procutil
 import pytest
@@ -22,6 +24,31 @@ _HARNESS_TIMEOUT_SECONDS = 20
 _UV_INDEX_BLOCK_START = "function Test-UvConfiguredIndex {"
 _UV_INDEX_BLOCK_END = "\n# === install-contract:v3 source-kind -- keep byte-identical across plugins ==="
 _UV_LAUNCHER_BYTES: bytes | None = None
+
+
+class _StampStatus(TypedDict):
+    selected: bool
+    venvs: list[Path]
+    events: list[dict[str, str]]
+
+
+class _SnapshotState(Protocol):
+    home: Path
+    snapshot: Path
+    env: dict[str, str]
+    pwsh: str
+    fixture_root: Path
+    version: str
+    expected_version: str
+    stamp_status: _StampStatus
+
+
+class _TextRun(Protocol):
+    def __call__(
+        self, command: list[str], **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
 _UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
     index_locations: IndexLocations {
         flat_index: [],
@@ -182,6 +209,11 @@ def _stage_payload(tmp_path: Path) -> Path:
             dest_consumer_dir=payload,
             canonical_root=_PLUGIN_ROOT.parents[1],
         )
+        materialized.extend(release["materialize_installer_engine_ref_into"](
+            source_consumer_dir=_PLUGIN_ROOT,
+            dest_consumer_dir=payload,
+            canonical_root=_PLUGIN_ROOT.parents[1],
+        ))
     finally:
         sys.path[:] = previous_path
     assert not any(message.startswith("SKIP ") for message in materialized), materialized
@@ -197,6 +229,7 @@ def _stage_payload(tmp_path: Path) -> Path:
     assert project["project"]["version"] == manifest["version"]
     assert project["tool"]["uv"]["sources"] == {
         "agent-configuration-layers": {"path": "libs/configuration-layers"},
+        "agent-credential-relay": {"path": "libs/credential-relay"},
         "agent-procutil": {"path": "libs/agent-procutil"},
         "agent-zdd": {"path": "libs/zdd"},
         "agent-single-instance-lease": {"path": "libs/single-instance-lease"},
@@ -280,7 +313,7 @@ public class OfflineUv {
         }
     }
 }
-'''.replace("PYTHON", json.dumps(sys._base_executable)),
+'''.replace("PYTHON", json.dumps(getattr(sys, "_base_executable"))),
             encoding="utf-8",
         )
         compilers = (
@@ -294,7 +327,7 @@ public class OfflineUv {
             [str(compiler), "/nologo", "/target:exe", f"/out:{provider}", str(launcher)],
             env=env,
             capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
         )
         assert compilation.returncode == 0 and provider.is_file(), (
             compilation.stdout + compilation.stderr
@@ -302,11 +335,12 @@ public class OfflineUv {
         _UV_LAUNCHER_BYTES = provider.read_bytes()
     elif os.name == "nt":
         provider = directory / "uv.exe"
+        assert _UV_LAUNCHER_BYTES is not None
         provider.write_bytes(_UV_LAUNCHER_BYTES)
     else:
         provider = directory / "uv"
         provider.write_text(
-            f"#!/bin/sh\nexec {shlex.quote(sys._base_executable)} {shlex.quote(str(driver))} \"$@\"\n",
+            f"#!/bin/sh\nexec {shlex.quote(getattr(sys, '_base_executable'))} {shlex.quote(str(driver))} \"$@\"\n",
             encoding="utf-8",
         )
         provider.chmod(0o755)
@@ -323,7 +357,7 @@ public class OfflineUv {
     return provider
 
 
-def _uv_events(env: dict[str, str]) -> list[dict]:
+def _uv_events(env: dict[str, str]) -> list[dict[str, str]]:
     path = Path(env["FIXTURE_UV_LOG"])
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
@@ -367,16 +401,16 @@ def test_offline_uv_settings_preflight_is_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     global _UV_LAUNCHER_BYTES
-    compilations = []
+    compilations: list[list[str]] = []
     run = subprocess.run
 
-    def observe(command, **kwargs):
+    def observe(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if os.name == "nt" and Path(command[0]).name.casefold() == "csc.exe":
             compilations.append(command)
             assert command[1:3] == ["/nologo", "/target:exe"]
             assert kwargs["timeout"] == _HARNESS_TIMEOUT_SECONDS == 20
-            assert kwargs["creationflags"] == subprocess.CREATE_NO_WINDOW
-        return run(command, **kwargs)
+            assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW")
+        return cast(_TextRun, run)(command, **kwargs)
 
     if os.name == "nt":
         _UV_LAUNCHER_BYTES = None
@@ -408,7 +442,8 @@ def test_offline_uv_is_native_discoverable(tmp_path: Path) -> None:
     env = _isolated_install_env(tmp_path / "home")
     provider = _offline_uv(tmp_path, env)
     engine = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    def quote(value: Path) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
     result = subprocess.run(
         [pwsh, "-NoProfile", "-Command",
          "$ErrorActionPreference='Stop'; "
@@ -548,7 +583,7 @@ def test_posix_stamp_wrapper_refuses_snapshot_without_driver_dispatcher(
 
 
 @pytest.fixture(scope="module")
-def stamped_snapshot(tmp_path_factory):
+def stamped_snapshot(tmp_path_factory: pytest.TempPathFactory) -> _SnapshotState:
     tmp_path = tmp_path_factory.mktemp("vault-snapshot")
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -670,7 +705,9 @@ def _no_service_provision_command(
 
 
 @pytest.mark.parametrize("profile", ["base", "ssh"])
-def test_native_profile_stamp_persists_selection_without_runtime_or_uv(tmp_path, profile):
+def test_native_profile_stamp_persists_selection_without_runtime_or_uv(
+    tmp_path: Path, profile: str,
+) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -698,8 +735,11 @@ def test_native_profile_stamp_persists_selection_without_runtime_or_uv(tmp_path,
     assert _uv_events(env) == []
 
 
-def test_prepared_profile_inputs_preserve_source_and_published_provenance(tmp_path):
-    from .test_payload_invocation import _installer_function
+def test_prepared_profile_inputs_preserve_source_and_published_provenance(tmp_path: Path) -> None:
+    _installer_function = cast(
+        Callable[[str], str],
+        importlib.import_module(".test_payload_invocation", package=__package__)._installer_function,
+    )
 
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -742,7 +782,9 @@ def test_prepared_profile_inputs_preserve_source_and_published_provenance(tmp_pa
 
 
 @pytest.mark.timeout(60)
-def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snapshot) -> None:
+def test_stamp_snapshot_retains_resources_without_creating_runtime(
+    stamped_snapshot: _SnapshotState,
+) -> None:
     state = stamped_snapshot
     assert (state.snapshot / "scripts" / "installer-engine.ps1").is_file()
     assert (state.snapshot / "scripts" / "installer-engine.sh").is_file()
@@ -776,7 +818,7 @@ def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snaps
 
 
 @pytest.fixture(scope="module")
-def provisioned_snapshot(stamped_snapshot):
+def provisioned_snapshot(stamped_snapshot: _SnapshotState) -> _SnapshotState:
     state = stamped_snapshot
     home, snapshot, env, pwsh = state.home, state.snapshot, state.env, state.pwsh
     _offline_uv(state.fixture_root, env)
@@ -817,7 +859,9 @@ def provisioned_snapshot(stamped_snapshot):
 
 
 @pytest.mark.timeout(60)
-def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(provisioned_snapshot) -> None:
+def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(
+    provisioned_snapshot: _SnapshotState,
+) -> None:
     state = provisioned_snapshot
     before_launch = _uv_events(state.env)
     installs = [event for event in before_launch if event["phase"] == "install"]
@@ -834,7 +878,9 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(provisioned_s
 
 
 @pytest.mark.timeout(60)
-def test_snapshot_compatibility_launcher_does_not_self_provision(provisioned_snapshot) -> None:
+def test_snapshot_compatibility_launcher_does_not_self_provision(
+    provisioned_snapshot: _SnapshotState,
+) -> None:
     state = provisioned_snapshot
     before_launch = _uv_events(state.env)
     env = {**state.env, "AGENT_VAULT_NO_SELFPROVISION": "1"}
@@ -855,7 +901,9 @@ def test_snapshot_compatibility_launcher_does_not_self_provision(provisioned_sna
 
 
 @pytest.mark.timeout(60)
-def test_provisioned_management_command_cannot_start_after_withdrawal(provisioned_snapshot):
+def test_provisioned_management_command_cannot_start_after_withdrawal(
+    provisioned_snapshot: _SnapshotState,
+) -> None:
     state = provisioned_snapshot
     selected = Path(state.env["AGENT_VAULT_CONFIG"])
     before = selected.read_bytes()
@@ -898,7 +946,9 @@ def test_provisioned_management_command_cannot_start_after_withdrawal(provisione
 
 
 @pytest.mark.timeout(90)
-def test_activation_uses_completed_runtime_without_global_python(provisioned_snapshot):
+def test_activation_uses_completed_runtime_without_global_python(
+    provisioned_snapshot: _SnapshotState,
+) -> None:
     state = provisioned_snapshot
     tools = state.fixture_root / "no-global-python"
     tools.mkdir()
@@ -946,7 +996,9 @@ def test_activation_uses_completed_runtime_without_global_python(provisioned_sna
 
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell staged start fallback")
 @pytest.mark.timeout(90)
-def test_staged_start_fallback_uses_preserved_project(provisioned_snapshot):
+def test_staged_start_fallback_uses_preserved_project(
+    provisioned_snapshot: _SnapshotState,
+) -> None:
     state = provisioned_snapshot
     project = state.fixture_root / "start-project"
     project.mkdir()

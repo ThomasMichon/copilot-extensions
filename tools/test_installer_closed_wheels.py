@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-from contextlib import contextmanager
+from importlib.abc import Loader
+from importlib.machinery import ModuleSpec
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 import json
 import os
@@ -13,32 +16,55 @@ import stat
 import subprocess
 import sys
 import time
+from types import ModuleType
+from typing import TYPE_CHECKING, NoReturn, Protocol, TypedDict, cast
 import zipfile
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_dependency_policy as policy
-from installer_wheel_snapshot import retain_wheel_bundle, retain_wheel_inputs
+from installer_wheel_snapshot import (
+    WheelInstallInputs, WheelSnapshot, retain_wheel_bundle, retain_wheel_inputs,
+)
 from installer_wheel_inputs import WheelError
-from wheel_input_fixture import wheel_bytes
+from wheel_input_fixture import wheel_bytes as _wheel_bytes
+
+if TYPE_CHECKING:
+    from argparse import Namespace
+    from installer_engine import FrozenInputs, ReadyCandidate
+
+
+class _WheelBytes(Protocol):
+    def __call__(
+        self, *, metadata: bytes | None = None, name: str = "demo_pkg",
+        prefix: str = "demo_pkg-1.0.dist-info/", extra: dict[str, bytes] | None = None,
+    ) -> bytes: ...
+
+
+class _WheelProfileOptions(TypedDict, total=False):
+    expected_profile_sha256: str
+
+
+wheel_bytes = cast(_WheelBytes, _wheel_bytes)
+NativeReadiness = tuple[ModuleType, Path, Path, Path, Path, Path]
 
 
 @pytest.fixture
-def engine(monkeypatch):
+def engine(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     root = Path(__file__).resolve().parents[1]
     monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "scripts"))
     monkeypatch.syspath_prepend(str(root / "libs" / "installer-engine"))
     path = root / "libs" / "installer-engine" / "installer_engine.py"
-    spec = importlib.util.spec_from_file_location("closed_wheel_installer_engine", path)
+    spec = cast(ModuleSpec, importlib.util.spec_from_file_location("closed_wheel_installer_engine", path))
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
-    spec.loader.exec_module(module)
+    cast(Loader, spec.loader).exec_module(module)
     return module
 
 
 @pytest.fixture
-def plugin(tmp_path, engine):
+def plugin(tmp_path: Path, engine: ModuleType) -> Path:
     root = tmp_path / "sources"
     frozen = engine.freeze_inputs(
         Path(__file__).resolve().parents[1] / "libs" / "agent-procutil", root,
@@ -58,8 +84,8 @@ def plugin(tmp_path, engine):
 @pytest.mark.parametrize("fresh", [False, True])
 @pytest.mark.parametrize("failure_kind", ["launch", "timeout", "health"])
 def test_health_classifier_does_not_turn_transient_probe_failure_into_repair(
-    tmp_path, engine, fresh, failure_kind,
-):
+    tmp_path: Path, engine: ModuleType, fresh: bool, failure_kind: str,
+) -> None:
     from installer_engine_process import ChildLaunchError, ChildTimeoutExpired
 
     failure = {
@@ -68,7 +94,7 @@ def test_health_classifier_does_not_turn_transient_probe_failure_into_repair(
         "health": subprocess.CalledProcessError(1, ["fixture-health"]),
     }[failure_kind]
 
-    def run(_argv):
+    def run(_argv: list[str]) -> NoReturn:
         raise failure
 
     expected = engine.HealthRepairRequired if failure_kind == "health" and not fresh else type(failure)
@@ -84,8 +110,38 @@ def test_health_classifier_does_not_turn_transient_probe_failure_into_repair(
         assert caught.value is failure
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path import semantics")
+def test_health_import_preserves_dependency_relative_asset_lookup(
+    tmp_path: Path, engine: ModuleType,
+) -> None:
+    package = tmp_path / "fixture_app"
+    package.mkdir()
+    (tmp_path / "native-asset.bin").write_bytes(b"fixture native asset")
+    (package / "__init__.py").write_text(
+        "import os\n"
+        "assert os.path.isfile(os.path.join(os.path.dirname(__file__), '..', "
+        "'native-asset.bin')), 'dependency relative asset unavailable'\n",
+    )
+
+    def run(arguments: Iterable[str]) -> None:
+        arguments = list(arguments)
+        code = arguments.index("-c") + 1
+        arguments[code] = "import sys; sys.path.insert(0, sys.argv[1])\n" + arguments[code]
+        result = subprocess.run(
+            arguments, capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    engine.verify_installed_inputs(
+        tmp_path, Path(sys.executable), "fixture_app", origins={}, extras=(),
+        local_packages=None, excluded_packages=[], wheel_inputs=None,
+        require_frozen_origin=False, run=run,
+    )
+
+
 @pytest.fixture
-def negative_source_plugin(tmp_path):
+def negative_source_plugin(tmp_path: Path) -> Path:
     root = tmp_path / "negative-sources"
     declarations = (
         ("plugin", "demo-pkg", "demo_pkg", "fixture-middle", "../middle"),
@@ -116,8 +172,8 @@ def negative_source_plugin(tmp_path):
 
 
 def test_negative_source_graph_freezes_complete_transitive_resources(
-    tmp_path, engine, negative_source_plugin,
-):
+    tmp_path: Path, engine: ModuleType, negative_source_plugin: Path,
+) -> None:
     plugin = negative_source_plugin
     roots = engine._package_roots(plugin)
     assert {engine._package_name(root) for root in roots} == {
@@ -157,7 +213,9 @@ def test_negative_source_graph_freezes_complete_transitive_resources(
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows extended-path consumer identity")
 @pytest.mark.parametrize("deep", [False, True])
-def test_freeze_inputs_preserves_extended_source_lookup_keys(tmp_path, engine, deep):
+def test_freeze_inputs_preserves_extended_source_lookup_keys(
+    tmp_path: Path, engine: ModuleType, deep: bool,
+) -> None:
     source = tmp_path / "source"
     if deep:
         while len(str(source)) < 290:
@@ -177,7 +235,7 @@ def test_freeze_inputs_preserves_extended_source_lookup_keys(tmp_path, engine, d
     assert engine._package_roots(frozen.plugin) == frozen.packages
 
 
-def inspected(retained, **changes):
+def inspected(retained: WheelSnapshot, **changes: object) -> WheelInstallInputs:
     from packaging.markers import default_environment
     from runtime_profile import SCHEMA, validate_profile
     from runtime_profile_wheels import profile_wheel_inputs
@@ -206,17 +264,19 @@ def inspected(retained, **changes):
     )
 
 
-def candidate(engine, root, plugin, wheels, **options):
+def candidate(
+    engine: ModuleType, root: Path, plugin: Path, wheels: WheelInstallInputs, **options: object,
+) -> AbstractContextManager[ReadyCandidate]:
     uv = shutil.which("uv")
     assert uv, "native UV required"
-    return engine.numbered_candidate(
+    return cast("AbstractContextManager[ReadyCandidate]", engine.numbered_candidate(
         root, "1.0.0", plugin=plugin, uv=Path(uv), base_python=Path(sys.executable),
         health_module="demo_pkg", local_packages=("demo-pkg",), wheel_inputs=wheels, **options,
-    )
+    ))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Actual single-thread POSIX umask022 child")
-def test_fresh_private_runtime_root_under_standard_posix_umask(tmp_path):
+def test_fresh_private_runtime_root_under_standard_posix_umask(tmp_path: Path) -> None:
     """Integration, not eligible-unit CI: no controller umask mutation."""
     repository = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repository / "libs/agent-procutil/src"))
@@ -277,7 +337,9 @@ print(json.dumps({'actual_POSIX_umask':'022','fresh_root_modes':'0700',
     assert json.loads(response.stdout)["existing0755_refused_unchanged"]
 
 
-def snapshot(tmp_path, *, closure=False, version="1.0", transport="loose"):
+def snapshot(
+    tmp_path: Path, *, closure: bool = False, version: str = "1.0", transport: str = "loose",
+) -> AbstractContextManager[WheelSnapshot]:
     path = tmp_path / "demo_pkg-1.0-py3-none-any.whl"
     if not path.exists():
         path.write_bytes(wheel_bytes(
@@ -319,7 +381,9 @@ def snapshot(tmp_path, *, closure=False, version="1.0", transport="loose"):
 
 
 @pytest.mark.parametrize("changed", ["digest", "metadata", "target"])
-def test_native_wheel_receiver_refuses_changed_inputs(tmp_path, engine, plugin, changed):
+def test_native_wheel_receiver_refuses_changed_inputs(
+    tmp_path: Path, engine: ModuleType, plugin: Path, changed: str,
+) -> None:
     import install_source
 
     with snapshot(tmp_path) as retained:
@@ -338,7 +402,9 @@ def test_native_wheel_receiver_refuses_changed_inputs(tmp_path, engine, plugin, 
     assert not (tmp_path / "versions").exists()
 
 
-def test_native_wheel_receiver_rechecks_profile_after_native_setup(tmp_path, engine):
+def test_native_wheel_receiver_rechecks_profile_after_native_setup(
+    tmp_path: Path, engine: ModuleType,
+) -> None:
     import install_source
 
     with snapshot(tmp_path) as retained:
@@ -351,7 +417,9 @@ def test_native_wheel_receiver_rechecks_profile_after_native_setup(tmp_path, eng
             profile.write_text(json.dumps(record), encoding="utf-8")
 
 
-def test_native_wheel_receiver_accepts_admitted_compatible_patch_target(tmp_path, engine, plugin):
+def test_native_wheel_receiver_accepts_admitted_compatible_patch_target(
+    tmp_path: Path, engine: ModuleType, plugin: Path,
+) -> None:
     import install_source
 
     with snapshot(tmp_path) as retained:
@@ -366,7 +434,7 @@ def test_native_wheel_receiver_accepts_admitted_compatible_patch_target(tmp_path
 
 
 @pytest.fixture
-def native_readiness(tmp_path, engine, plugin):
+def native_readiness(tmp_path: Path, engine: ModuleType, plugin: Path) -> NativeReadiness:
     import install_source
 
     with snapshot(tmp_path) as retained:
@@ -395,11 +463,11 @@ def native_readiness(tmp_path, engine, plugin):
 
 
 def test_native_readiness_reuses_existing_generation_without_repeating_tree_work(
-    native_readiness, monkeypatch,
-):
+    native_readiness: NativeReadiness, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source, root, plugin, *_ = native_readiness
 
-    def scan(*_args, **_options):
+    def scan(*_args: object, **_options: object) -> NoReturn:
         pytest.fail("unchanged startup must not enumerate or hash construction trees")
 
     for name in ("_source_files", "_construction_hash", "_package_roots"):
@@ -412,7 +480,9 @@ def test_native_readiness_reuses_existing_generation_without_repeating_tree_work
     "selector", "package", "profile", "closure", "extras", "manifest", "manifest-shape", "application",
     "completion", "interpreter", "source",
 ])
-def test_native_readiness_invalidates_changed_generation_inputs(native_readiness, changed):
+def test_native_readiness_invalidates_changed_generation_inputs(
+    native_readiness: NativeReadiness, changed: str,
+) -> None:
     source, root, plugin, slot, proof, manifest = native_readiness
     if changed == "selector":
         (root / "current-version").write_text("another-generation", encoding="utf-8")
@@ -451,7 +521,9 @@ def test_native_readiness_invalidates_changed_generation_inputs(native_readiness
     assert not source.native_current(root, plugin, "demo-pkg")
 
 
-def test_native_driver_binds_and_rechecks_actual_closed_profile(tmp_path, engine, plugin, monkeypatch):
+def test_native_driver_binds_and_rechecks_actual_closed_profile(
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
     import installer_driver
 
@@ -467,23 +539,23 @@ def test_native_driver_binds_and_rechecks_actual_closed_profile(tmp_path, engine
         options=[], wheel_profile=profile, wheel_directory=tmp_path,
         wheel_python=Path(sys.executable), wheel_uv=tmp_path / "uv",
     )
-    arguments = installer_driver.native_arguments(args)
+    arguments = installer_driver.native_arguments(cast("Namespace", args))
     assert arguments[-8:] == [
         "-WheelProfile", str(profile), "-WheelDirectory", str(tmp_path),
         "-WheelPython", sys.executable, "-WheelUv", str(tmp_path / "uv"),
     ]
-    assert installer_driver.native_arguments(args) == arguments
+    assert installer_driver.native_arguments(cast("Namespace", args)) == arguments
     record["approval_source"] = "changed-after-driver-admission"
     profile.write_text(json.dumps(record), encoding="utf-8")
     with pytest.raises(ValueError, match="selection changed after driver admission"):
-        installer_driver.native_arguments(args)
+        installer_driver.native_arguments(cast("Namespace", args))
     assert not args.root.exists()
 
 
 @pytest.mark.parametrize("binding", ["driver-selection", "profile-digest"])
 def test_native_construction_refuses_a_replacement_profile_after_admission(
-    tmp_path, engine, plugin, monkeypatch, binding,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch, binding: str,
+) -> None:
     import install_source
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION", raising=False)
@@ -501,19 +573,21 @@ def test_native_construction_refuses_a_replacement_profile_after_admission(
     with pytest.raises(ValueError, match="changed after driver admission"):
         with install_source.wheel_inputs(
             profile, tmp_path,
-            **({"expected_profile_sha256": expected} if binding == "profile-digest" else {}),
+            **cast(_WheelProfileOptions, (
+                {"expected_profile_sha256": expected} if binding == "profile-digest" else {}
+            )),
         ) as inputs:
             install_source.wheel_selection(plugin, "demo-pkg", inputs)
     assert not (tmp_path / "runtime").exists()
 
 
 def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
-    tmp_path, engine, plugin, monkeypatch,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "runtime"
     observed = []
 
-    def validate(slot):
+    def validate(slot: Path) -> None:
         observed.append((slot, engine.runtime.marker_path(root, slot.name).exists()))
 
     with snapshot(tmp_path) as retained:
@@ -526,7 +600,7 @@ def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
 
     monkeypatch.setattr(engine, "_construct", lambda *_a, **_k: pytest.fail("reuse invoked writers"))
 
-    def reject(slot):
+    def reject(slot: Path) -> NoReturn:
         validate(slot)
         raise ValueError("owner rejected reused candidate")
 
@@ -540,8 +614,8 @@ def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
         assert engine.runtime.is_complete(root, ready.slot.name, expect_hash=ready.payload_hash)
 @pytest.mark.parametrize("mutation", ["source", "binding"])
 def test_expected_payload_pin_revalidates_source_and_closed_binding(
-    tmp_path, engine, plugin, mutation,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, mutation: str,
+) -> None:
     from dataclasses import replace
 
     with snapshot(tmp_path) as retained:
@@ -567,7 +641,9 @@ def test_expected_payload_pin_revalidates_source_and_closed_binding(
 
 
 @pytest.mark.parametrize("executable", ["path", "command"])
-def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, executable):
+def test_closed_transaction_is_canonical_and_cleans_owned_inputs(
+    tmp_path: Path, executable: str,
+) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV required"
     target = tmp_path / "candidate" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -588,7 +664,7 @@ def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, execu
             } == concurrency
             assert "VIRTUAL_ENV" not in transaction.environment
             assert "CONDA_PREFIX" not in transaction.environment
-            assert transaction.sources == transaction.source_hashes == {}
+            assert transaction.sources == cast(Mapping[Path, object], transaction.source_hashes) == {}
             assert Path(transaction.argv[0]).samefile(uv)
             assert transaction.argv[1:3] == ("pip", "install")
             for flag in ("--offline", "--no-index", "--no-deps", "--no-build", "--no-cache",
@@ -604,12 +680,12 @@ def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, execu
         retained.verify()
 
 
-def test_closed_transaction_does_not_relax_ordinary_source_policy(tmp_path):
+def test_closed_transaction_does_not_relax_ordinary_source_policy(tmp_path: Path) -> None:
     with pytest.raises(policy.DependencyPolicyError, match="cannot bypass"):
         policy.prepare_uv_install("unused", ["--no-deps"], env={})
 
 
-def test_closed_transaction_refuses_relative_target(tmp_path):
+def test_closed_transaction_refuses_relative_target(tmp_path: Path) -> None:
     with snapshot(tmp_path) as retained:
         with pytest.raises(policy.DependencyPolicyError, match="absolute"):
             with policy.retain_closed_wheel_install("unused", retained, python=Path("python")):
@@ -617,7 +693,7 @@ def test_closed_transaction_refuses_relative_target(tmp_path):
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_closed_transaction_preserves_snapshot_on_child_failure(tmp_path, cancel):
+def test_closed_transaction_preserves_snapshot_on_child_failure(tmp_path: Path, cancel: bool) -> None:
     uv = shutil.which("uv")
     assert uv
     with snapshot(tmp_path) as retained:
@@ -630,7 +706,7 @@ def test_closed_transaction_preserves_snapshot_on_child_failure(tmp_path, cancel
         retained.verify()
 
 
-def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path):
+def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV required"
     poison = tmp_path / "ambient"
@@ -674,19 +750,22 @@ def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path):
 @pytest.mark.parametrize("transport", ["loose", "bundle"])
 @pytest.mark.parametrize("nested", [False, True])
 def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
-    tmp_path, engine, plugin, monkeypatch, transport, nested,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+    transport: str, nested: bool,
+) -> None:
     monkeypatch.setenv("UV_INDEX_URL", "http://127.0.0.1:1/unavailable")
     monkeypatch.setenv("UV_CONFIG_FILE", str(tmp_path / "missing-config"))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "poison-cache"))
-    leases = []
+    leases: list[tuple[str, float]] = []
 
-    def bounded(lease):
+    def bounded(
+        lease: Callable[..., AbstractContextManager[int]],
+    ) -> Callable[..., AbstractContextManager[int]]:
         @contextmanager
-        def acquire(*args, **kwargs):
+        def acquire(*args: object, **kwargs: object) -> Iterator[int]:
             remaining = wheels.deadline - time.monotonic()
-            assert 0 <= kwargs["timeout"] <= remaining + 0.05
-            leases.append((lease.__name__, kwargs["timeout"]))
+            assert 0 <= cast(float, kwargs["timeout"]) <= remaining + 0.05
+            leases.append((lease.__name__, cast(float, kwargs["timeout"])))
             with lease(*args, **kwargs) as held:
                 yield held
         return acquire
@@ -722,7 +801,7 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
     with snapshot(tmp_path, closure=True, version="1", transport=transport) as retained:
         wheels = inspected(retained)
 
-        def no_reconstruction(*args, **kwargs):
+        def no_reconstruction(*args: object, **kwargs: object) -> NoReturn:
             pytest.fail("complete healthy wheel runtime must not be rebuilt")
 
         monkeypatch.setattr(engine, "_construct", no_reconstruction)
@@ -745,8 +824,8 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
 
 
 def test_closed_lease_timeout_preserves_wait_limit_and_rejects_expiry(
-    tmp_path, engine, plugin, monkeypatch,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     with snapshot(tmp_path) as retained:
         wheels = inspected(retained)
         inputs = engine.FrozenInputs(plugin, (plugin,), "fixture", wheel_inputs=wheels)
@@ -763,8 +842,8 @@ def test_closed_lease_timeout_preserves_wait_limit_and_rejects_expiry(
 
 
 def test_closed_constructor_retains_caller_relative_uv_as_absolute(
-    tmp_path, engine, plugin, monkeypatch,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     uv = shutil.which("uv")
     assert uv
     tool = tmp_path / "tools" / ("uv.exe" if os.name == "nt" else "uv")
@@ -774,13 +853,13 @@ def test_closed_constructor_retains_caller_relative_uv_as_absolute(
     child = engine._child
     installations = []
 
-    def absolute(argv, **kwargs):
+    def absolute(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if argv[1:3] == ["pip", "install"]:
             assert Path(argv[0]).is_absolute()
             assert Path(argv[0]).samefile(tool)
             assert kwargs["cwd"] != tmp_path
             installations.append(argv)
-        return child(argv, **kwargs)
+        return cast("subprocess.CompletedProcess[str]", child(argv, **kwargs))
 
     monkeypatch.setattr(engine, "_child", absolute)
     with snapshot(tmp_path) as retained:
@@ -794,14 +873,16 @@ def test_closed_constructor_retains_caller_relative_uv_as_absolute(
     assert len(installations) == 1
 
 
-def test_changed_closed_binding_cannot_reuse_numbered_identity(tmp_path, engine, plugin):
+def test_changed_closed_binding_cannot_reuse_numbered_identity(
+    tmp_path: Path, engine: ModuleType, plugin: Path,
+) -> None:
     root = tmp_path / "runtime"
     with snapshot(tmp_path, closure=True) as retained:
         wheels = inspected(retained)
         with candidate(engine, root, plugin, wheels):
             pass
         target = {**wheels.receipt()["binding"]["target"], "device": "other"}
-        for changes in [
+        changes_list: list[dict[str, object]] = [
             {"acquisition_policy": "new-policy"}, {"approval_source": "new-authority"},
             {"release": {"identity": "other-release", "sha256": "sha256:" + "3" * 64}},
             {"component": "other-component"}, {"target": target},
@@ -809,7 +890,8 @@ def test_changed_closed_binding_cannot_reuse_numbered_identity(tmp_path, engine,
             {"mode": "artifact", "artifact": {
                 "artifact_id": "sha256:" + "4" * 64, "manifest_sha256": "sha256:" + "5" * 64,
             }},
-        ]:
+        ]
+        for changes in changes_list:
             with pytest.raises(RuntimeError, match="different content"):
                 with candidate(engine, root, plugin, inspected(retained, **changes)):
                     pytest.fail("changed exact binding reused a published runtime")
@@ -817,8 +899,9 @@ def test_changed_closed_binding_cannot_reuse_numbered_identity(tmp_path, engine,
 
 @pytest.mark.parametrize("startup_hook", [None, "site-hook", "sitecustomize"])
 def test_large_closed_receipt_does_not_cross_native_command_line_limit(
-    tmp_path, engine, plugin, monkeypatch, startup_hook,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+    startup_hook: str | None,
+) -> None:
     archives = {}
     entries = []
     dependencies = []
@@ -870,11 +953,11 @@ def test_large_closed_receipt_does_not_cross_native_command_line_limit(
         child = engine._child
         probes = []
 
-        def bounded(argv, **kwargs):
+        def bounded(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
             if "-c" in argv:
                 assert len(subprocess.list2cmdline(argv)) < 16_000
                 probes.append(argv)
-            return child(argv, **kwargs)
+            return cast("subprocess.CompletedProcess[str]", child(argv, **kwargs))
 
         monkeypatch.setattr(engine, "_child", bounded)
         root = tmp_path / "runtime"
@@ -899,7 +982,9 @@ def test_large_closed_receipt_does_not_cross_native_command_line_limit(
 @pytest.mark.parametrize("corrupt", [
     "extra-distribution", "archive-digest", "missing-digest", "receipt",
 ])
-def test_closed_reuse_checks_installed_closure_origins_and_binding(tmp_path, engine, plugin, corrupt):
+def test_closed_reuse_checks_installed_closure_origins_and_binding(
+    tmp_path: Path, engine: ModuleType, plugin: Path, corrupt: str,
+) -> None:
     root = tmp_path / "runtime"
     with snapshot(tmp_path, closure=True) as retained:
         wheels = inspected(retained)
@@ -933,8 +1018,8 @@ def test_closed_reuse_checks_installed_closure_origins_and_binding(tmp_path, eng
 
 @pytest.mark.parametrize("failure", ["health", "cancel", "deadline"])
 def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
-    tmp_path, engine, plugin, monkeypatch, failure,
-):
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     root = tmp_path / "runtime"
     with snapshot(tmp_path, closure=True) as retained:
         wheels = inspected(retained)
@@ -946,12 +1031,12 @@ def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
         freeze = engine.freeze_inputs
         frozen_paths = []
 
-        def frozen(*args, **kwargs):
+        def frozen(*args: object, **kwargs: object) -> FrozenInputs:
             result = freeze(*args, **kwargs)
-            frozen_paths.append(args[1])
-            return result
+            frozen_paths.append(cast(Path, args[1]))
+            return cast("FrozenInputs", result)
 
-        def cancelled(*args, **kwargs):
+        def cancelled(*args: object, **kwargs: object) -> NoReturn:
             construct(*args, **kwargs)
             raise KeyboardInterrupt
 
@@ -965,22 +1050,22 @@ def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
             wheels = inspected(replace(retained, _deadline=started + 8))
             owned = engine.run_owned
 
-            def blocked(argv, **options):
-                timeouts.append(options["timeout"])
-                return owned([
+            def blocked(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+                timeouts.append(cast(float, options["timeout"]))
+                return cast("subprocess.CompletedProcess[str]", owned([
                     sys.executable, "-I", "-c",
                     "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
                     str(marker),
-                ], **options)
+                ], **options))
 
             monkeypatch.setattr(engine, "run_owned", blocked)
-        expected = {
+        expected = cast("type[BaseException] | tuple[type[BaseException], ...]", {
             "health": subprocess.CalledProcessError, "cancel": KeyboardInterrupt,
             "deadline": (subprocess.TimeoutExpired, WheelError),
-        }[failure]
+        }[failure])
         with pytest.raises(expected) as caught:
             with engine.numbered_candidate(
-                root, "1.0.1", plugin=plugin, uv=Path(uv), base_python=Path(sys.executable),
+                root, "1.0.1", plugin=plugin, uv=Path(cast(str, uv)), base_python=Path(sys.executable),
                 health_module="demo_pkg", health_callable="missing",
                 local_packages=("demo-pkg",), wheel_inputs=wheels,
             ):
@@ -995,14 +1080,16 @@ def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
         if failure == "deadline":
             from test_installer_wheel_acquisition import _running
             if marker.is_file():
-                assert not _running(int(marker.read_text()))
+                assert not cast(Callable[[int], bool], _running)(int(marker.read_text()))
             if not isinstance(caught.value, subprocess.TimeoutExpired):
                 assert "deadline" in str(caught.value)
             assert all(0 < timeout <= 8 for timeout in timeouts)
             assert time.monotonic() - started < 13
 
 
-def test_prepared_closed_child_uses_actual_remaining_deadline(tmp_path, engine, plugin, monkeypatch):
+def test_prepared_closed_child_uses_actual_remaining_deadline(
+    tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from test_installer_wheel_acquisition import _running
 
     frozen = engine.freeze_inputs(plugin, tmp_path / "prepared")
@@ -1010,9 +1097,9 @@ def test_prepared_closed_child_uses_actual_remaining_deadline(tmp_path, engine, 
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
     run_owned = engine.run_owned
 
-    def contained_child(argv, **options):
+    def contained_child(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         assert options.get("allow_breakaway", False) is False
-        return run_owned(argv, **options)
+        return cast("subprocess.CompletedProcess[str]", run_owned(argv, **options))
 
     monkeypatch.setattr(engine, "run_owned", contained_child)
     marker = tmp_path / "owned-child"
@@ -1028,15 +1115,15 @@ def test_prepared_closed_child_uses_actual_remaining_deadline(tmp_path, engine, 
                     "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
                     str(marker),
                 ], inputs=replace(frozen, wheel_inputs=selected), descriptor=descriptor, timeout=30)
-            assert marker.is_file() and not _running(int(marker.read_text()))
+            assert marker.is_file() and not cast(Callable[[int], bool], _running)(int(marker.read_text()))
             assert time.monotonic() - started < 6
         with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
             pass
 
 
 def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
-    tmp_path, engine, negative_source_plugin, monkeypatch,
-):
+    tmp_path: Path, engine: ModuleType, negative_source_plugin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin = negative_source_plugin
     destination = tmp_path / "partial"
     before = (plugin / "pyproject.toml").read_bytes()
@@ -1049,14 +1136,14 @@ def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
     copy_mode = engine.shutil.copymode
     calls = []
 
-    def copied(source, target, **kwargs):
+    def copied(source: Path, target: Path, **kwargs: object) -> None:
         result = copy_mode(source, target, **kwargs)
         calls.append(target)
-        return result
+        return cast(None, result)
 
-    def expired(observed_deadline):
+    def expired(observed_deadline: float | None) -> None:
         assert observed_deadline == deadline
-        return check_deadline(time.monotonic() - 1 if calls else observed_deadline)
+        return cast(None, check_deadline(time.monotonic() - 1 if calls else observed_deadline))
 
     monkeypatch.setattr(engine.shutil, "copymode", copied)
     monkeypatch.setattr(engine, "_check_deadline", expired)
@@ -1069,7 +1156,9 @@ def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
 
 
 @pytest.mark.parametrize("deadline", [0, float("inf"), True])
-def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine, deadline):
+def test_invalid_freeze_deadline_refuses_before_creating_inputs(
+    tmp_path: Path, engine: ModuleType, deadline: float,
+) -> None:
     plugin = tmp_path / "absent-source"
     destination = tmp_path / "must-not-exist"
     with pytest.raises(WheelError, match="deadline"):
@@ -1079,7 +1168,9 @@ def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows absolute-deadline guardian")
-def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp_path, monkeypatch):
+def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from test_installer_wheel_acquisition import worker_procutil
     import installer_engine_process as guardian
 
@@ -1091,16 +1182,16 @@ def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp
         "def _supervise_windows(args, argv):\n"
         "    Path(" + repr(str(guardian_marker)) + ").write_text('entered')\n    time.sleep(1.5)",
     ))
-    spec = importlib.util.spec_from_file_location("absolute_deadline_guardian", delayed)
+    spec = cast(ModuleSpec, importlib.util.spec_from_file_location("absolute_deadline_guardian", delayed))
     selected = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, selected)
-    spec.loader.exec_module(selected)
+    cast(Loader, spec.loader).exec_module(selected)
     runtime = engine.runtime
     root = tmp_path / "runtime"
     root.mkdir()
     slot = runtime.slot(root, "probe")
     marker = tmp_path / "must-not-start"
-    procutil = worker_procutil()
+    procutil = cast(Callable[[], ModuleType], worker_procutil)()
     with runtime.construction_lease(root, "probe") as descriptor:
         started = time.monotonic()
         with pytest.raises(selected.ChildTimeoutExpired):
