@@ -15,16 +15,27 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any, Callable, ContextManager, Protocol, TypeVar, cast
 
 from windows_qualification_contract import (
     DESKTOP_CASE, DESKTOP_PACKET, MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET,
-    NATIVE_LIFETIME_PACKETS, NATIVE_PACKETS, NATIVE_VERSIONS, VERSION,
-    admit, canonical, request,
+    NATIVE_LIFETIME_PACKETS, NATIVE_PACKETS, NATIVE_VERSIONS, SOURCE_PACKET, VERSION,
+    QualificationTransport, admit, canonical, request,
     validate_files, validate_result,
 )
 from windows_qualification_transport import Transport
 
 ROOT = Path(__file__).resolve().parents[1]
+T = TypeVar("T")
+
+
+class ProbeResult(Protocol):
+    @property
+    def stdout(self) -> str: ...
+
+
+class NativeProbe(Protocol):
+    def __call__(self, argv: list[str], timeout: float) -> ProbeResult: ...
 
 
 def desktop_tests(root: Path, output: Path, request_id: str) -> int:
@@ -35,7 +46,9 @@ def desktop_tests(root: Path, output: Path, request_id: str) -> int:
     admission = {**os.environ, "WINDOWS_QUALIFICATION_DESKTOP": "1"}
     require_hosted_owner(admission, system=platform.system(), contained=False)
     (output / "junit").mkdir(parents=True, exist_ok=True)
-    with TestSandbox(prefix="desktop-capability-", dir=Path(admission["RUNNER_TEMP"])) as directory:
+    with cast(Callable[..., ContextManager[str]], TestSandbox)(
+        prefix="desktop-capability-", dir=Path(admission["RUNNER_TEMP"]),
+    ) as directory:
         sandbox = Path(directory)
         env = isolated_environment(admission, sandbox, allow_explicit_tiers=True)
         env.update({
@@ -74,7 +87,9 @@ def mcp_lifetime(root: Path, output: Path) -> int:
     (output / "junit").mkdir(parents=True, exist_ok=True)
     lease = acquire(0, environment_root)
     try:
-        with TestSandbox(prefix="mcp-lifetime-", dir=Path(temporary)) as directory:
+        with cast(Callable[..., ContextManager[str]], TestSandbox)(
+            prefix="mcp-lifetime-", dir=Path(temporary),
+        ) as directory:
             sandbox = Path(directory)
             env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
             env.update({
@@ -107,7 +122,7 @@ def mcp_lifetime(root: Path, output: Path) -> int:
     return result
 
 
-def junit_cases(directory: Path) -> list[dict]:
+def junit_cases(directory: Path) -> list[dict[str, str]]:
     """Keep actual test identities, including failure and prerequisite skips."""
     cases = []
     for path in sorted(directory.rglob("*.xml")):
@@ -123,14 +138,15 @@ def junit_cases(directory: Path) -> list[dict]:
                 "class": case.get("classname", ""), "name": case.get("name", ""),
                 "outcome": outcome, "seconds": case.get("time", ""),
                 "reason": next((
-                    case.find(tag).get("message", "")[:1000]
-                    for tag in ("error", "failure", "skipped") if case.find(tag) is not None
+                    child.get("message", "")[:1000]
+                    for tag in ("error", "failure", "skipped")
+                    if (child := case.find(tag)) is not None
                 ), ""),
             })
     return cases
 
 
-def plugin_command(root: Path, selected: dict, output: Path) -> list[str]:
+def plugin_command(root: Path, selected: dict[str, Any], output: Path) -> list[str]:
     """Use the canonical plugin runner without changing its acceptance bounds."""
     argv = [
         sys.executable, str(root / "tools/run-plugin-tests.py"), selected["plugin"],
@@ -164,7 +180,24 @@ def native_command(
     ]
 
 
-def native_prerequisites(owned, *, require_feed: bool = True) -> dict:
+def governed_feed() -> None:
+    """Validate the existing URL-only feed contract without exposing its value."""
+    from governed_feed_trust import _validated_trusted_index_url
+    selected = _validated_trusted_index_url(dict(os.environ))
+    if selected is None:
+        raise ValueError("native packet requires the configured governed HTTPS feed")
+    index = urllib.parse.urlsplit(selected[0])
+    if index.username or index.password or index.query or index.fragment:
+        raise ValueError("native packet admits only a credential-free feed URL")
+    try:
+        with urllib.request.urlopen(selected[0].rstrip("/") + "/packaging/", timeout=20) as response:
+            if response.status != 200 or not response.read(256):
+                raise ValueError("package index unavailable")
+    except Exception as exc:
+        raise ValueError(f"hosted governed feed unavailable ({type(exc).__name__})") from None
+
+
+def native_prerequisites(owned: NativeProbe, *, require_feed: bool = True) -> dict[str, str]:
     """Require disposable native binaries; only Worktrees needs its governed feed."""
     if (
         os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true"
@@ -173,19 +206,7 @@ def native_prerequisites(owned, *, require_feed: bool = True) -> dict:
     ):
         raise ValueError("native packet requires its disposable hosted Windows owner")
     if require_feed:
-        from governed_feed_trust import _validated_trusted_index_url
-        selected = _validated_trusted_index_url(dict(os.environ))
-        if selected is None:
-            raise ValueError("native packet requires the configured governed HTTPS feed")
-        index = urllib.parse.urlsplit(selected[0])
-        if index.username or index.password or index.query or index.fragment:
-            raise ValueError("native packet admits only a credential-free feed URL")
-        try:
-            with urllib.request.urlopen(selected[0].rstrip("/") + "/packaging/", timeout=20) as response:
-                if response.status != 200 or not response.read(256):
-                    raise ValueError("package index unavailable")
-        except Exception as exc:
-            raise ValueError(f"hosted governed feed unavailable ({type(exc).__name__})") from None
+        governed_feed()
     versions = {}
     for name, variable, flag in (
         ("copilot", "COPILOT_NATIVE_TEST_EXECUTABLE", "--version"),
@@ -220,7 +241,7 @@ def sanitize_native_files(output: Path) -> bool:
     """Sanitize retained text even when the execution worker was interrupted."""
     omitted = False
     for path in output.rglob("*"):
-        if path.suffix not in {".xml", ".json", ".log"}:
+        if path.suffix not in {".xml", ".json", ".jsonl", ".log"}:
             continue
         if path.is_symlink() or (path.is_file() and path.stat().st_size > 16 * 1024 * 1024):
             path.unlink()
@@ -230,7 +251,7 @@ def sanitize_native_files(output: Path) -> bool:
     return omitted
 
 
-def tool_tests(root: Path, selected: dict, output: Path) -> int:
+def tool_tests(root: Path, selected: dict[str, Any], output: Path) -> int:
     """Run tool files through the existing sandbox/process containment owner."""
     from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
     files = selected["files"] or ["tools"]
@@ -241,7 +262,9 @@ def tool_tests(root: Path, selected: dict, output: Path) -> int:
     ]
     if selected["k"]:
         argv.extend(("-k", selected["k"]))
-    with TestSandbox(prefix="windows-qualification-tools-") as directory:
+    with cast(Callable[..., ContextManager[str]], TestSandbox)(
+        prefix="windows-qualification-tools-",
+    ) as directory:
         sandbox = Path(directory)
         env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=selected["explicit_tiers"])
         env["PYTHONPATH"] = str(root / "tools")
@@ -252,15 +275,17 @@ def tool_tests(root: Path, selected: dict, output: Path) -> int:
         return run_contained(argv, cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=600))
 
 
-def execute(root: Path, value: dict, output: Path) -> dict:
+def execute(root: Path, value: dict[str, Any], output: Path) -> dict[str, Any]:
     """Run selected source, retaining a truthful manifest even after failure."""
     request(value)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     native = NATIVE_PACKETS.get(value["selection"].get("name"))
+    source = value["selection"].get("name") == SOURCE_PACKET
+    sensitive = bool(native or source)
     output.mkdir(parents=True, exist_ok=True)
-    result = {
+    result: dict[str, Any] = {
         "version": VERSION, "request": value,
         "run_id": int(os.environ.get("GITHUB_RUN_ID", "0")),
         "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
@@ -275,12 +300,14 @@ def execute(root: Path, value: dict, output: Path) -> dict:
     }
     started = time.monotonic()
 
-    def save():
+    def save() -> None:
         text = canonical(result) + "\n"
-        (output / "result.json").write_text(redact_feed(text) if native else text, encoding="utf-8")
+        (output / "result.json").write_text(redact_feed(text) if sensitive else text, encoding="utf-8")
 
-    def phase(name: str, action):
-        row = {"name": name, "status": "started", "started_seconds": time.monotonic() - started}
+    def phase(name: str, action: Callable[[], T]) -> T:
+        row: dict[str, str | float] = {
+            "name": name, "status": "started", "started_seconds": time.monotonic() - started,
+        }
         result["phases"].append(row)
         save()
         print(f"[winqual] {name}: started", flush=True)
@@ -296,7 +323,9 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             save()
             print(f"[winqual] {name}: {row['status']}", flush=True)
 
-    def owned(argv, timeout, *, allow_empty=False):
+    def owned(
+        argv: list[str], timeout: float, *, allow_empty: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         from agent_procutil.owned_process import run_caller_owned
         index = len(result["phases"])
         try:
@@ -314,13 +343,13 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         except subprocess.TimeoutExpired as exc:
             for name, content in (("stdout", exc.output), ("stderr", exc.stderr)):
                 text = content.decode("utf-8", "replace") if isinstance(content, bytes) else content or ""
-                if native:
+                if sensitive:
                     text = redact_feed(text)
                 (output / f"phase-{index}.{name}.log").write_text(text, encoding="utf-8")
             result["failure_kind"] = "timeout"
             raise
-        stdout = redact_feed(completed.stdout) if native else completed.stdout
-        stderr = redact_feed(completed.stderr) if native else completed.stderr
+        stdout = redact_feed(completed.stdout) if sensitive else completed.stdout
+        stderr = redact_feed(completed.stderr) if sensitive else completed.stderr
         (output / f"phase-{index}.stdout.log").write_text(stdout, encoding="utf-8")
         (output / f"phase-{index}.stderr.log").write_text(stderr, encoding="utf-8")
         print(stdout, end="", flush=True)
@@ -337,8 +366,8 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         return completed
 
     try:
-        def verify_source():
-            transport = Transport(root, "origin")
+        def verify_source() -> None:
+            transport = cast(QualificationTransport, Transport(root, "origin"))
             actual = transport.git("rev-parse", "HEAD").stdout.strip()
             result["actual_source_sha"] = actual
             if actual != value["source_sha"]:
@@ -350,6 +379,17 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 transport.validate_tip(value["envelope_sha"])
                 transport.git("merge-base", "--is-ancestor", actual, value["envelope_sha"])
             validate_files(root, value["selection"])
+            if source:
+                transport.git(
+                    "fetch", "--no-tags", "--no-write-fetch-head", "origin",
+                    "refs/heads/main:refs/remotes/origin/main",
+                    "refs/heads/dev:refs/remotes/origin/dev",
+                )
+                for branch in ("main", "dev"):
+                    transport.git(
+                        "merge-base", "--is-ancestor", value["selection"][branch + "_sha"],
+                        "refs/remotes/origin/" + branch,
+                    )
         phase("source-and-selection", verify_source)
         selected = value["selection"]
         # Source-only import paths, not an installed host runtime or prewarmed
@@ -372,8 +412,16 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 if evidence.is_symlink() or evidence.stat().st_size > 16 * 1024 * 1024:
                     raise ValueError("desktop capability evidence exceeds its regular-file bound")
                 result["desktop"] = json.loads(evidence.read_text("utf-8"))
+        elif source:
+            from agent_procutil.owned_process import run_installation_owned
+            from windows_qualification_manager_source import qualify, require_hosted_owner
+            require_hosted_owner()
+            phase("governed-feed", governed_feed)
+            result["manager_source"] = phase(SOURCE_PACKET, lambda: qualify(
+                root, output, selected, run=run_installation_owned, redact=redact_feed,
+            ))
         elif native:
-            def prepare_native():
+            def prepare_native() -> dict[str, str]:
                 preparation = os.environ.get("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", "success")
                 if preparation != "success":
                     status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
@@ -416,10 +464,11 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             ], 120))
             result["packet"] = json.loads((output / "packet/manifest.json").read_text("utf-8"))
         if selected["kind"] in {"plugin", "packet"}:
-            def test_runtime():
+            def test_runtime() -> None:
                 from plugin_test_resources import venv_root
                 target = selected["plugin"] if selected["kind"] == "plugin" else (
                     native[0] if native else (
+                        "worktree-manager" if source else
                         "agent-mcp" if selected.get("name") == MCP_LIFETIME_PACKET else "agent-bridge"
                     )
                 )
@@ -444,12 +493,12 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         result["outcome"] = (
             "qualified" if (
                 selected["kind"] == "packet" and not native
-                and selected["name"] not in {MCP_LIFETIME_PACKET, DESKTOP_PACKET}
+                and selected["name"] not in {MCP_LIFETIME_PACKET, DESKTOP_PACKET, SOURCE_PACKET}
             ) or (
                 result["tests"] and all(case["outcome"] == "passed" for case in result["tests"])
             ) else "incomplete"
         )
-        if native or selected.get("name") in {MCP_LIFETIME_PACKET, DESKTOP_PACKET}:
+        if sensitive or selected.get("name") in {MCP_LIFETIME_PACKET, DESKTOP_PACKET}:
             validate_result(
                 result, value, run_id=result["run_id"], control_sha=result["control_sha"],
                 run_attempt=result["run_attempt"],
@@ -459,7 +508,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         result["error"] = str(exc)[:2000]
         result["tests"] = junit_cases(output / "junit")
     finally:
-        if native:
+        if sensitive:
             if "error" in result:
                 result["error"] = redact_feed(result["error"])
             if sanitize_native_files(output):
@@ -505,7 +554,7 @@ def main() -> int:
             raise ValueError("desktop worker requires its explicit named packet")
         return desktop_tests(args.candidate.resolve(), args.output.resolve(), value["request_id"])
     if args.operation == "sanitize":
-        if value["selection"].get("name") not in NATIVE_PACKETS:
+        if value["selection"].get("name") not in {*NATIVE_PACKETS, SOURCE_PACKET}:
             raise ValueError("native sanitization requires its named packet")
         output = args.output.resolve()
         omitted = sanitize_native_files(output)

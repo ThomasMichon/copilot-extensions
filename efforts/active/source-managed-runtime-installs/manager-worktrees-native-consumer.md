@@ -113,7 +113,7 @@ through the current Windows qualification owner, not a second installer,
 secret reader, execution service or acceptance authority. The parent Q2-Q5 and
 VQ1-VQ6 remain open.
 
-- [ ] PF1 - Review before implementation: land this plan alone through normal
+- [x] PF1 - Review before implementation: land this plan alone through normal
   review and required CI. Preserve the existing authentic-source implementation
   branch and its native hold. Plan approval does not qualify that branch,
   authorize a workflow dispatch or publish the protected controller.
@@ -247,6 +247,32 @@ The parent remains Active until its complete Plan and Validation Plan close;
 finishing this fixture cannot finalize the parent worktrees.
 
 ## Journal
+
+### 2026-11-16 - Protected-owner adapter plan reviewed
+
+#12801 merged as `c86849a3b86cbb3275cbf8fe99cddaae87bff1f4` after
+current-head approval with no findings and required green CI. This closes PF1
+only. The existing authentic-source implementation remains unqualified; PF2-PF7
+and VF1-VF5 still gate the protected adapter and its next hosted attempt.
+The parent Goal, including the separately owned managed-Python amendment, and
+Q2-Q5/VQ1-VQ6 remain open. No controller, feed policy or installed runtime was
+changed by this plan merge.
+
+The protected adapter source now composes the existing candidate suite owner
+with typed frozen inputs, original-owner/rerun admission, per-packet feed
+selection and the original suite allocation. Named bounded evidence includes
+JSONL, with an independent post-interruption sanitizer before upload. The
+source packet does not select pinned Copilot/PSMux acquisition. Local-owner
+admission precedes feed access.
+
+The focused packet/client/lifetime compatibility run passes 410 controls; the
+subsequent admission-order control and the updated packet file pass 26 controls.
+All six changed Python files pass whole-file strict Python 3.10 checking for
+Linux and Windows, with lint and documentation consistency green. These are
+source and lightweight process/evidence-boundary controls, not a clean-OS
+native consumer result. Controller review/publication and the held authentic
+source fixture's hosted acceptance remain pending; no productive rollout or
+parent completion is claimed.
 
 ### 2026-11-15 - Physical application environment prerequisite
 
