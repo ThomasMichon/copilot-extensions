@@ -368,6 +368,31 @@ def test_detect_baseline_covers_catalog():
     assert {"git", "python3", "uv"} <= names
 
 
+@pytest.mark.parametrize("version", ["3.9.5", "3.11.9", None])
+def test_baseline_qualifies_prepared_python_without_ambient_fallback(monkeypatch, version):
+    import sys
+    from types import SimpleNamespace
+
+    from worktree_manager import prereqs
+
+    monkeypatch.setattr(
+        prereqs, "_which", lambda name: pytest.fail("must not rediscover PATH Python"),
+    )
+    probes = []
+
+    def probe(path):
+        probes.append(path)
+        return version
+
+    monkeypatch.setattr(prereqs, "_probe_version", probe)
+    status, = detect_baseline(SimpleNamespace(
+        baseline_prereqs=[Prereq("python3", min="3.11")],
+    ))
+    assert status.path == sys._base_executable
+    assert status.satisfied is (version == "3.11.9")
+    assert probes == [sys._base_executable]
+
+
 @pytest.mark.parametrize("os_", ["windows", "macos", "linux"])
 @pytest.mark.parametrize("pwsh_present", [False, True])
 def test_setup_requires_pwsh_only_for_the_windows_core(

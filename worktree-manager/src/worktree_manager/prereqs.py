@@ -13,6 +13,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 from contextlib import nullcontext
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -147,8 +148,8 @@ def _probe_version(exe: str) -> str | None:
     return None
 
 
-def detect_prereq(pr: Prereq) -> PrereqStatus:
-    _, path = _which(pr.name)
+def detect_prereq(pr: Prereq, *, executable: str | None = None) -> PrereqStatus:
+    _, path = (pr.name, executable) if executable is not None else _which(pr.name)
     absent = PrereqStatus(
         name=pr.name,
         present=False,
@@ -156,7 +157,9 @@ def detect_prereq(pr: Prereq) -> PrereqStatus:
         optional=pr.optional,
         notes=pr.notes,
     )
-    paths = _python_candidates(path) if pr.name == "python3" else (path,)
+    paths = (
+        _python_candidates(path) if pr.name == "python3" and executable is None else (path,)
+    )
     first = None
     seen = set()
     for candidate in paths:
@@ -182,12 +185,18 @@ def detect_prereq(pr: Prereq) -> PrereqStatus:
     return first or absent
 
 
+def bootstrap_python() -> str:
+    """Keep finite setup helpers independent of the Manager package environment."""
+    return getattr(sys, "_base_executable", None) or sys.executable
+
+
 def detect_baseline(catalog=None) -> list[PrereqStatus]:
-    """Detect the catalog's baseline prerequisites for this platform."""
+    """Qualify this controller's Python and the platform's other prerequisites."""
     cat = catalog or load_catalog()
     os_ = current_os()
     return [
-        detect_prereq(pr) for pr in cat.baseline_prereqs
+        detect_prereq(pr, executable=bootstrap_python()) if pr.name == "python3"
+        else detect_prereq(pr) for pr in cat.baseline_prereqs
         if not pr.platforms or os_ in pr.platforms
     ]
 

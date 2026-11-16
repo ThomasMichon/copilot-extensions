@@ -40,6 +40,17 @@ export AGENT_WORKTREES_INSTALL_DEADLINE_SEC
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+_bootstrap_python_candidates() {
+    if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
+        case "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" in
+            /*) printf '%s\n' "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" ;;
+            *) printf '%s\n' "ERROR: Bootstrap Python must be an absolute executable." >&2; return 1 ;;
+        esac
+    else
+        type -ap python3 python
+    fi
+}
+
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
 CONTEXTUAL_INSTALL=false
@@ -190,7 +201,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 fi
                 __aw_admission_python="$(cd "$(dirname "$__aw_candidate_path")" && pwd -P)/$(basename "$__aw_candidate_path")"
                 break
-            done < <(type -ap python3 python)
+            done < <(_bootstrap_python_candidates)
             [[ -n "$__aw_admission_python" ]] || {
                 printf '%s\n' "ERROR: Attributable runtime admission requires bootstrap Python." >&2
                 exit 1
@@ -1225,9 +1236,8 @@ header()  { echo ""; echo "═══ $* $(printf '═%.0s' $(seq 1 $((56 - ${#1}
 
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
+    # venv exists (e.g. the pre-build toss). An explicit prepared interpreter
+    # excludes every fallback; legacy callers prefer the current link, then PATH.
     #
     # Pass "exclude-venv-dir" when the caller is about to INSPECT $VENV_DIR
     # itself (the slot-clean liveness census, and the lease's own resident
@@ -1266,6 +1276,9 @@ _bootstrap_python() {
             [[ -n "$link_real" && -n "$venv_real" && "$link_real" == "$venv_real" ]] && use_link_python=0
         fi
     fi
+    if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
+        use_link_python=0
+    fi
     if [[ "$use_link_python" == 1 ]] && [[ -x "$LINK_DIR/bin/python" ]]; then
         echo "$LINK_DIR/bin/python"
         return 0
@@ -1293,7 +1306,7 @@ _bootstrap_python() {
         esac
         echo "$__resolved"
         return 0
-    done < <(type -ap python3 python)
+    done < <(_bootstrap_python_candidates)
     return 1
 }
 

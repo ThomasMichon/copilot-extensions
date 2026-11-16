@@ -178,6 +178,9 @@ LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
 INSTALL_DIR="{_bash_path(runtime)}"
 PATH="{_bash_path(fallback_bin)}:$PATH"
+unset COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
+{_function_body(text, "_bootstrap_python_candidates")}
+}}
 {fn_body}
 }}
 _bootstrap_python {exclusion}
@@ -239,6 +242,9 @@ LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
 INSTALL_DIR="{_bash_path(runtime)}"
 PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}"
+unset COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
+{_function_body(text, "_bootstrap_python_candidates")}
+}}
 {fn_body}
 }}
 _bootstrap_python {exclusion}
@@ -256,6 +262,63 @@ _bootstrap_python {exclusion}
             "_bootstrap_python exclude-venv-dir must reject a PATH "
             f"fallback resolving into $VENV_DIR; got {result!r}"
         )
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("selection", ["prepared", "missing", "relative", "unsupported", "excluded"])
+def test_prepared_bootstrap_python_never_falls_back(tmp_path, selection):
+    from agent_procutil import no_window_kwargs
+
+    runtime = tmp_path / "runtime"
+    linked = runtime / "bin"
+    linked.mkdir(parents=True)
+    unexpected = tmp_path / "fallback-used"
+    fallback = '#!/bin/sh\nprintf used > "{}"\nexit 0\n'.format(_bash_path(unexpected))
+    for name in ("python", "python3"):
+        path = linked / name
+        path.write_text(fallback, encoding="utf-8")
+        path.chmod(0o700)
+    selected = _bash_path(Path(sys.executable))
+    if selection == "missing":
+        selected = _bash_path(tmp_path / "missing-python")
+    elif selection == "relative":
+        selected = "python3"
+    elif selection == "unsupported":
+        path = tmp_path / "unsupported-python"
+        path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        path.chmod(0o700)
+        selected = _bash_path(path)
+    elif selection == "excluded":
+        selected = _bash_path(linked / "python")
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    harness = f"""
+set -uo pipefail
+LINK_DIR="{_bash_path(runtime)}"
+VENV_DIR="{_bash_path(runtime)}"
+INSTALL_DIR="{_bash_path(runtime)}"
+PATH="{_bash_path(linked)}:$PATH"
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="{selected}"
+{_function_body(text, "_bootstrap_python_candidates")}
+}}
+{_function_body(text, "_bootstrap_python")}
+}}
+_bootstrap_python exclude-runtime-root
+"""
+    script = tmp_path / "prepared-python.sh"
+    script.write_text(harness, encoding="utf-8")
+    result = subprocess.run(
+        [_BASH, str(script)], capture_output=True, text=True, timeout=15,
+        **no_window_kwargs(),
+    )
+    if selection == "prepared":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == _bash_path(Path(sys.executable))
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+    assert not unexpected.exists()
 
 
 def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():

@@ -9,6 +9,7 @@ a bootstrap.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -88,5 +89,107 @@ def test_install_command_uses_resolved_checkout(tmp_path, monkeypatch):
     cmd = ci.install_command()  # no explicit repo_root -> resolves staging
     assert cmd is not None
     name = "install.ps1" if os.name == "nt" else "install.sh"
-    assert cmd[-1] == "install"
-    assert Path(cmd[-2]) == wmroot / "staging" / "plugins" / "agent-worktrees" / "scripts" / name
+    assert Path(cmd[cmd.index("install") - 1]) == (
+        wmroot / "staging" / "plugins" / "agent-worktrees" / "scripts" / name
+    )
+    if os.name == "nt":
+        assert cmd[-2:] == ["-BootstrapPython", sys._base_executable]
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_core_install_preserves_prepared_interpreter_and_child_exit(
+    tmp_path, monkeypatch, exit_code,
+):
+    import subprocess
+    from types import SimpleNamespace
+
+    source = _make_checkout(tmp_path / "source")
+    monkeypatch.setattr(ci, "core_status", lambda home: SimpleNamespace(installed=False))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", "stale-inherited-selection")
+    environment = dict(os.environ)
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options))
+        return subprocess.CompletedProcess(command, exit_code)
+
+    monkeypatch.setattr(ci.subprocess, "run", run)
+    result = ci.install_core(repo_root=source, dry_run=False)
+    assert result.ran and result.returncode == exit_code
+    command, options = calls[0]
+    assert command == result.planned_command
+    assert options["env"] == {
+        **environment, "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": sys._base_executable,
+    }
+    if os.name == "nt":
+        assert command[-2:] == ["-BootstrapPython", sys._base_executable]
+        assert options["creationflags"] & subprocess.CREATE_NO_WINDOW
+    assert dict(os.environ) == environment
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_native_core_handoff_uses_prepared_python_with_empty_path(
+    tmp_path, monkeypatch, exit_code,
+):
+    import json
+    import shlex
+    import shutil
+    import subprocess
+    from types import SimpleNamespace
+
+    shell = shutil.which("pwsh" if os.name == "nt" else "bash")
+    if not shell:
+        pytest.skip("native installer shell is unavailable")
+    receipt = tmp_path / "receipt.json"
+    program = (
+        "import json,os,pathlib,shutil,sys;"
+        "assert not any(shutil.which(name) for name in ('python', 'python3', 'py'));"
+        "pathlib.Path(sys.argv[1]).write_text(json.dumps({"
+        "'python':sys.executable,"
+        "'prepared':os.environ['COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON']}));"
+        f"raise SystemExit({exit_code})"
+    )
+    script = tmp_path / ("install.ps1" if os.name == "nt" else "install.sh")
+    if os.name == "nt":
+        quoted = program.replace("'", "''")
+        script.write_text(
+            "param([string]$Action, [string]$BootstrapPython)\n"
+            "if ($Action -ne 'install') { exit 90 }\n"
+            f"& $BootstrapPython -I -S -B -c '{quoted}' "
+            "(Join-Path $PSScriptRoot 'receipt.json')\nexit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
+    else:
+        script.write_text(
+            'test "$1" = install || exit 90\n'
+            'exec "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" -I -S -B -c '
+            f"{shlex.quote(program)} {shlex.quote(str(receipt))}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(ci, "install_script", lambda root: script)
+    command = ci.install_command()
+    command[0] = shell
+    monkeypatch.setattr(ci, "install_command", lambda root: command)
+    monkeypatch.setattr(ci, "core_status", lambda home: SimpleNamespace(installed=False))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", "stale-inherited-selection")
+    completed = []
+    run = subprocess.run
+
+    def observe(command, **options):
+        assert options["env"]["PATH"] == ""
+        result = run(command, capture_output=True, text=True, timeout=15, **options)
+        completed.append(result)
+        return result
+
+    monkeypatch.setattr(ci.subprocess, "run", observe)
+    result = ci.install_core(dry_run=False)
+    assert result.ran and result.returncode == exit_code, (
+        result.reason, [(item.stdout, item.stderr) for item in completed],
+    )
+    assert json.loads(receipt.read_text(encoding="utf-8")) == {
+        "python": sys._base_executable, "prepared": sys._base_executable,
+    }
