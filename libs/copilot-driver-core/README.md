@@ -229,6 +229,27 @@ in-process seam ships with Manager's declared Core dependency; it adds no
 independently deployed CLI or service contract and does not change observation
 or launch authority.
 
+Worktrees' native sweep retains its existing read-only observation and roster
+pass, then publishes cached presentation for fresh Manager-owned mappings that
+the native pass actually observed. It does not enter legacy PSMux CLI writes,
+handoff or pruning paths. Legacy non-native mapping identities use the existing
+Manager discovery operation with fresh native observations; unknown observations
+do not manufacture an incarnation or authorize a publication.
+
+Manager recognizes the legacy `@aw_updater`/`@aw_updater_prefix` bookkeeping
+fields without forwarding them as native ownership changes. An ownership-only
+delta requires no native write. Other unknown fields remain refused. Context
+publication initializes the canonical status formats, including for older
+mapping records, while ordinary segment refreshes retain existing coalescing.
+
+Expand the Manager writer before updating Worktrees' monitor. The unchanged
+request contract permits either older peer to remain installed during that
+sequence: an older monitor retains its observation-only PSMux behavior, and an
+older Manager refuses publication without a CLI fallback or a false success.
+Rolling either peer back likewise leaves cached presentation or an explicit
+failed publication, rather than authorizing a different transport. Service
+replacement and actual refresh verification remain with their existing owners.
+
 The explicit headed coordinator now runs in the original caller-owned pane.
 It stages the launch-bound SDK extension, retains the native child handle and
 serves the same Session Host after native session/PID binding. The ordinary

@@ -20,9 +20,26 @@ def apply_status_options(
     if not mux_discovery.passive_cli_supported(mux_bin):
         from agent_remote_driver.mux_status import apply_psmux_status
 
+        ownership_fields = {"@aw_updater", "@aw_updater_prefix"}
+        if any(not isinstance(value, str) for value in values.values()):
+            return False
+        # These fields elect legacy per-session writers. Manager already owns
+        # this mapping; acknowledging them must not mutate native ownership.
+        presentation = {
+            option: value for option, value in values.items() if option not in ownership_fields
+        }
+        if not presentation:
+            return True
+        if not entry.get("last_status_rendered_at") or "@aw_ctx" in presentation:
+            presentation = {
+                "status": "on", "status-interval": "15",
+                "status-left-length": "100", "status-left": "#{@aw_ctx} ",
+                "status-right-length": "150", "status-right": "#{@aw_seg} %H:%M ",
+                **presentation,
+            }
         return apply_psmux_status(
             entry["mux_session"], entry.get("session_incarnation", ""),
-            mux_discovery.initial_status_values(entry, values),
+            presentation,
         )
     session = entry["mux_session"]
     values = mux_discovery.initial_status_values(entry, values)
