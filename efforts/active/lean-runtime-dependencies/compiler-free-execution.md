@@ -44,8 +44,8 @@ not replaced or declared complete by this amendment.
    bounded source slices through their existing owners before implementation.
 2. Extend the existing shared Python lifecycle implementation and reuse its
    record protocol, locks, process-birth checks and Linux pidfd acquisition.
-   Thin shell entrypoints invoke setup-provided Python through normal PATH
-   resolution and invoke that shared implementation. Preserve same-process
+   Thin shell entrypoints use setup's explicit uv-managed Python selection
+   to invoke that shared implementation. Preserve same-process
    admission where required; do not add a central supervisor service or another
    inventory.
 3. Replace Linux C supervision/reconciliation with standard-library Python and

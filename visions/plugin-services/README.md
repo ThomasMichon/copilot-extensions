@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-15
+- **Last revised:** 2026-11-16
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -273,14 +273,17 @@ silently fall back to compiling native dependencies.
 
 ### setup-owned-python-prerequisite
 
-Python is a normal, composable prerequisite supplied by upfront harness or
-standalone setup and selected through the platform's ordinary PATH command.
-Helper launchers trust that selection rather than rediscovering, signing,
-attesting or physically pinning the interpreter on each invocation. Python
-provenance and signature checks, registry-only selection and special physical
-launch namespaces are not prerequisites for running the suite's helpers.
+Python is a normal, composable prerequisite prepared through upfront harness
+or standalone setup using the
+[installer's uv-managed Python contract](../installer/README.md#uv-managed-python).
+Helper launchers consume the explicit supported selection independently of
+ambient Python PATH order rather than rediscovering, signing, attesting or
+physically pinning the interpreter on each invocation. Python provenance and
+signature checks, registry-only selection and special physical launch
+namespaces are not prerequisites for running the suite's helpers.
 
-Setup owns a supported Python and tidy command exposure. The suite does not
+Setup owns supported Python preparation and explicit interpreter handoff, not
+repair of the user's default Python or PATH order. The suite does not
 accidentally publish interpreters from disposable worktrees or temporary
 environments onto durable PATH. This is provisioning and environment hygiene,
 not a per-launch blacklist or another interpreter-admission service. Missing
