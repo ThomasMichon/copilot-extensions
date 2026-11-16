@@ -260,7 +260,7 @@ def test_refresh_shim_remints_token_per_invocation(tmp_path: Path) -> None:
         "PATH": f"{real_bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
     }
     out = subprocess.run(
-        [_posix_bash(), "-c", script], env=env, capture_output=True, text=True,
+        [str(_posix_bash()), "-c", script], env=env, capture_output=True, text=True,
         check=True,
     ).stdout.splitlines()
     assert out == [
@@ -290,7 +290,7 @@ def test_refresh_shim_keeps_previous_token_when_mint_fails(tmp_path: Path) -> No
     )
     env = {"HOME": str(home), "PATH": f"{real_bin}:/usr/bin:/bin"}
     out = subprocess.run(
-        [_posix_bash(), "-c", script], env=env, capture_output=True, text=True,
+        [str(_posix_bash()), "-c", script], env=env, capture_output=True, text=True,
         check=True,
     )
     assert out.stdout.splitlines() == ["token=launch", "rc=127"]
