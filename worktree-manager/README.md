@@ -706,8 +706,8 @@ The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 `install.{ps1,sh}`, carrying that prepared base interpreter explicitly through
 the finite installer handoff. This CLI does not need the Manager daemon.
-The handoff selects the setup evaluator, not the application's construction
-version or installed generation; those retain their existing owners.
+The handoff selects the setup evaluator without waiving application/project,
+lock or ABI compatibility checks or selecting an installed generation.
 Core detection uses the same read-only, installation-context-
 qualified runtime selection as the engine client. Empty runtime/versions
 directories and a leftover global stub cannot satisfy it; a selected complete

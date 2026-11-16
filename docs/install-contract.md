@@ -3979,8 +3979,13 @@ Worktrees receiver consumes the explicit environment input at initial
 admission and subsequent bootstrap-helper selection; an invalid, unsupported or
 excluded selection never falls back to a current runtime or PATH interpreter.
 Legacy POSIX callers without an explicit input retain their existing discovery.
-This evaluator handoff does not select the application's Python construction
-version, bypass source/feed policy or require a Manager/application daemon.
+Windows also honors the explicit evaluator in versioned helpers and deployment,
+before discovery of a signed base. Its qualification preserves target/runtime
+exclusions and fails without another discovery attempt. Signed-base discovery
+for legacy construction remains separate.
+This evaluator handoff does not waive application/project, lock or ABI
+compatibility admission, bypass source/feed policy or require a
+Manager/application daemon.
 These helpers are stdlib-only. Using the base interpreter keeps an inherited
 helper hint independent of a retired Manager package environment; managed-base
 retention remains with the toolchain owner.

@@ -197,3 +197,101 @@ def test_native_core_handoff_uses_prepared_python_with_empty_path(
     assert json.loads(receipt.read_text(encoding="utf-8")) == {
         "python": getattr(sys, "_base_executable", sys.executable), "prepared": getattr(sys, "_base_executable", sys.executable),
     }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows deployment resolver")
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("selection", ["prepared", "missing", "relative", "excluded"])
+def test_real_windows_deployment_resolver_honors_prepared_python(
+    tmp_path: Path, host_name: str, selection: str,
+) -> None:
+    import json
+    import shutil
+
+    from agent_procutil import no_window_kwargs
+
+    shell = shutil.which(host_name)
+    if not shell:
+        pytest.skip("selected native PowerShell host is unavailable")
+    scripts = Path(__file__).resolve().parents[2] / "plugins" / "agent-worktrees" / "scripts"
+    prepared = sys.executable
+    excluded = tmp_path / "candidate"
+    if selection == "missing":
+        prepared = str(tmp_path / "missing-python.exe")
+    elif selection == "relative":
+        prepared = "python.exe"
+    elif selection == "excluded":
+        excluded = Path(sys.executable).parent.parent
+    script = r"""
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2
+foreach ($entry in @(
+    @{ File = 'versioned_runtime_native.ps1'; Names = @('Invoke-Hidden') },
+    @{ File = 'install.ps1'; Names = @('Get-BootstrapPython', 'Deploy-PythonRuntime') }
+)) {
+    $tokens = $null
+    $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $env:INSTALLER_SCRIPTS $entry.File), [ref]$tokens, [ref]$errors
+    )
+    if ($errors.Count) { throw 'Installer source did not parse.' }
+    foreach ($name in $entry.Names) {
+        $definition = $ast.Find({
+            param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq $name
+        }, $true)
+        if (-not $definition) { throw "Missing source function: $name" }
+        Invoke-Expression $definition.Extent.Text
+    }
+}
+$BootstrapPython = $env:PREPARED_PYTHON
+$VenvDir = $env:EXCLUDED_ROOT
+$LinkDir = $VenvDir
+$InstallDir = $env:FIXTURE_ROOT
+$WheelProfile = ''
+$WheelPython = ''
+$script:ReachedUv = $false
+$script:SelectedBase = ''
+function Get-SignedBasePython { throw 'forbidden discovery fallback' }
+function Get-ApplicationPath {
+    param([string[]]$Name)
+    if ($Name.Count -ne 1 -or $Name[0] -ne 'uv') { throw 'forbidden discovery fallback' }
+    $script:SelectedBase = Get-Variable -Name base -Scope 1 -ValueOnly
+    $script:ReachedUv = $true
+    throw 'fixture UV boundary; no installation effects'
+}
+$env:PATH = ''
+try {
+    Deploy-PythonRuntime
+    throw 'Deployment unexpectedly returned.'
+} catch {
+    [pscustomobject]@{
+        reached_uv = $script:ReachedUv
+        selected = $script:SelectedBase
+        error = $_.Exception.Message
+    } | ConvertTo-Json -Compress
+}
+"""
+    result = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        env={
+            **os.environ, "INSTALLER_SCRIPTS": str(scripts),
+            "PREPARED_PYTHON": prepared, "EXCLUDED_ROOT": str(excluded),
+            "FIXTURE_ROOT": str(tmp_path),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observation = json.loads(result.stdout)
+    assert observation["reached_uv"] is (selection == "prepared"), observation
+    assert "forbidden discovery fallback" not in observation["error"]
+    if selection == "prepared":
+        assert Path(observation["selected"]).samefile(sys.executable)
+        assert observation["error"] == "fixture UV boundary; no installation effects"
+    else:
+        assert "bootstrap Python" in observation["error"], observation
+    assert list(tmp_path.iterdir()) == []
