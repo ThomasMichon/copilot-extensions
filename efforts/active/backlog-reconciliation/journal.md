@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Complete first-adoption receiving and retained inflow](journal/2026/11.16-first-adoption-receiving-and-inflow.md)
+
 - [2026-11-16 - Complete status, catalog and roster receiving proposal](journal/2026/11.16-status-catalog-roster-receiving.md)
 
 - [2026-11-16 - Accepted ZDD tracking and current unfinished contracts](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
