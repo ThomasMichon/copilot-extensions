@@ -1,6 +1,8 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, NoReturn
 import sys
 
 from endpoint_rendezvous import write_endpoint
@@ -12,7 +14,7 @@ from agent_chat_service.transport import GatewayTransport, _http_exchange
 from test_hosting import TOKEN, configuration, running
 
 
-def local_config(root):
+def local_config(root: Path) -> dict[str, Any]:
     return {
         "schema": "agent-chat.client", "version": 1,
         "endpoint_dir": str(root / "run"), "state_dir": str(root / "client"),
@@ -21,7 +23,7 @@ def local_config(root):
     }
 
 
-def test_local_endpoint_offline_status_never_resolves_or_executes(tmp_path):
+def test_local_endpoint_offline_status_never_resolves_or_executes(tmp_path: Path) -> None:
     config = local_config(tmp_path)
     config["token_command"] = [str(tmp_path / "missing-provider")]
     path = tmp_path / "client.json"
@@ -33,7 +35,7 @@ def test_local_endpoint_offline_status_never_resolves_or_executes(tmp_path):
 
 
 @pytest.mark.parametrize("mutation", ["both", "neither", "relative", "stdio"])
-def test_local_endpoint_configuration_refuses_ambiguous_or_implicit_routes(tmp_path, mutation):
+def test_local_endpoint_configuration_refuses_ambiguous_or_implicit_routes(tmp_path: Path, mutation: str) -> None:
     config = local_config(tmp_path)
     if mutation == "both":
         config["endpoint"] = "http://localhost"
@@ -48,7 +50,9 @@ def test_local_endpoint_configuration_refuses_ambiguous_or_implicit_routes(tmp_p
     assert caught.value.code == "invalid_configuration"
 
 
-def test_local_endpoint_real_tcp_request_uses_canonical_record_and_stable_namespace(tmp_path, rpc_endpoint):
+def test_local_endpoint_real_tcp_request_uses_canonical_record_and_stable_namespace(
+    tmp_path: Path, rpc_endpoint: SimpleNamespace,
+) -> None:
     config = local_config(tmp_path)
     root = Path(config["endpoint_dir"])
     root.mkdir()
@@ -71,7 +75,9 @@ def test_local_endpoint_real_tcp_request_uses_canonical_record_and_stable_namesp
     "missing-port", "empty-port", "missing-port-alt", "empty-port-alt",
     "dead-publisher", "dead-publisher-alt",
 ])
-def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path, monkeypatch, mutation):
+def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     import agent_chat_service.transport as module
     import endpoint_rendezvous.rendezvous as rendezvous
 
@@ -116,7 +122,7 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
             else:
                 record["endpoint"] = address
         else:
-            def dead_publisher(pid):
+            def dead_publisher(pid: int) -> bool:
                 queried_pids.append(pid)
                 return False
 
@@ -126,7 +132,7 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
                               alt=[{"transport": "tcp", "endpoint": "127.0.0.1:1"}])
         path.write_text(json.dumps(record), encoding="utf-8")
 
-    def unexpected(*args, **kwargs):
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
         raise AssertionError("Invalid discovery reached a network connection")
 
     monkeypatch.setattr(module.http.client, "HTTPConnection", unexpected)
@@ -143,7 +149,7 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The native POSIX host advertises a Unix socket")
-def test_local_endpoint_real_unix_client_uses_the_published_host(tmp_path):
+def test_local_endpoint_real_unix_client_uses_the_published_host(tmp_path: Path) -> None:
     config = local_config(tmp_path)
     host_config = configuration(tmp_path)
     config["endpoint_dir"] = str(Path(host_config["data_dir"]) / "run")

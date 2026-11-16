@@ -7,11 +7,15 @@ from pathlib import Path
 import socket
 import threading
 import time
+from typing import Any, Iterator, NoReturn, Protocol, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from endpoint_rendezvous import Endpoint
 
 import pytest
 
 from agent_chat_service import hosting
-from agent_chat_service import ChatError
+from agent_chat_service import ChatError, ChatStore
 from agent_chat_service import json_bytes
 
 
@@ -19,7 +23,26 @@ TOKEN = "synthetic-local-key-" + "x" * 32
 SCHEME = "Bear" + "er "
 
 
-def configuration(tmp_path):
+class OpenHost(Protocol):
+    @property
+    def server(self) -> hosting._Server: ...
+
+    @property
+    def store(self) -> ChatStore: ...
+
+    @property
+    def transport(self) -> str: ...
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def run_dir(self) -> Path: ...
+
+    def drain(self) -> dict[str, Any]: ...
+
+
+def configuration(tmp_path: Path) -> dict[str, Any]:
     token_file = tmp_path / "key"
     token_file.write_text(TOKEN, encoding="ascii")
     token_file.chmod(0o600)
@@ -30,21 +53,24 @@ def configuration(tmp_path):
     }
 
 
-def connection(host):
+def connection(host: hosting.HostedChat | OpenHost) -> http.client.HTTPConnection:
     if host.transport == "tcp":
         name, port = host.endpoint.rsplit(":", 1)
         return http.client.HTTPConnection(name, int(port), timeout=10)
 
     class UnixConnection(http.client.HTTPConnection):
-        def connect(self):
-            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        def connect(self) -> None:
+            self.sock = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
             self.sock.settimeout(self.timeout)
             self.sock.connect(host.endpoint)
 
     return UnixConnection("localhost", timeout=10)
 
 
-def rpc(host, request, *, token=TOKEN, path="/api/v1/chat"):
+def rpc(
+    host: hosting.HostedChat | OpenHost, request: object, *, token: str = TOKEN,
+    path: str = "/api/v1/chat",
+) -> tuple[int, Any]:
     client = connection(host)
     try:
         client.request("POST", path, json.dumps(request).encode("utf-8"), {
@@ -57,22 +83,23 @@ def rpc(host, request, *, token=TOKEN, path="/api/v1/chat"):
 
 
 @contextmanager
-def running(config):
+def running(config: object) -> Iterator[OpenHost]:
     with hosting.HostedChat(config) as host:
         # Only idle fixture shutdown polling; production I/O bounds are unchanged.
-        host.server.timeout = .01
+        cast(hosting._Server, host.server).timeout = .01
         stop = threading.Event()
         thread = threading.Thread(target=host.serve, args=(stop,))
         thread.start()
         try:
-            yield host
+            # This view lasts only until this fixture stops serving and exits the host context.
+            yield cast(OpenHost, host)
         finally:
             stop.set()
             thread.join(10)
             assert not thread.is_alive()
 
 
-def test_two_participants_auth_read_progress_and_restart(tmp_path):
+def test_two_participants_auth_read_progress_and_restart(tmp_path: Path) -> None:
     config = configuration(tmp_path)
     with running(config) as host:
         assert host.transport == ("tcp" if os.name == "nt" else "unix")
@@ -80,7 +107,7 @@ def test_two_participants_auth_read_progress_and_restart(tmp_path):
             assert host.endpoint.startswith("127.0.0.1:")
             assert int(host.endpoint.rsplit(":", 1)[1]) > 0
         from endpoint_rendezvous import read_endpoint
-        advertised = read_endpoint(host.run_dir)
+        advertised = cast("Endpoint", read_endpoint(host.run_dir))
         assert advertised.transport == host.transport
         assert advertised.address == host.endpoint
         request = {"op": "join", "channel": "room", "actor": {"codename": "agent-a"}}
@@ -114,7 +141,7 @@ def test_two_participants_auth_read_progress_and_restart(tmp_path):
             assert rpc(host, {"op": "leave", "channel": "room", "codename": actor})[0] == 200
 
 
-def test_real_singleton_refuses_second_host_before_store_open(tmp_path):
+def test_real_singleton_refuses_second_host_before_store_open(tmp_path: Path) -> None:
     config = configuration(tmp_path)
     with running(config) as host:
         endpoint = (host.run_dir / "endpoint.json").read_bytes()
@@ -125,7 +152,9 @@ def test_real_singleton_refuses_second_host_before_store_open(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["health", "initialize-storage"])
-def test_finite_host_modes_do_not_admit_a_daemon_instance(tmp_path, monkeypatch, mode):
+def test_finite_host_modes_do_not_admit_a_daemon_instance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
     from agent_procutil import daemon_instances
 
     config = configuration(tmp_path)
@@ -140,7 +169,7 @@ def test_finite_host_modes_do_not_admit_a_daemon_instance(tmp_path, monkeypatch,
     assert hosting.main(["--config", str(path), "--" + mode]) == 0
 
 
-def test_explicit_storage_initialization_and_separate_run_state(tmp_path):
+def test_explicit_storage_initialization_and_separate_run_state(tmp_path: Path) -> None:
     config = configuration(tmp_path)
     data = Path(config["data_dir"])
     run = tmp_path / "ephemeral"
@@ -170,8 +199,8 @@ def test_explicit_storage_initialization_and_separate_run_state(tmp_path):
     "events", "memberships", "collaborations", "event-column",
 ])
 def test_retained_storage_refuses_replacement_without_creating_history(
-    tmp_path, monkeypatch, damage,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     config = configuration(tmp_path)
     data = Path(config["data_dir"])
     data.mkdir(mode=0o700)
@@ -195,7 +224,7 @@ def test_retained_storage_refuses_replacement_without_creating_history(
             from types import SimpleNamespace
             original = Path.lstat
 
-            def redirected(path, *args, **kwargs):
+            def redirected(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
                 info = original(path, *args, **kwargs)
                 return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400) \
                     if path == database else info
@@ -209,8 +238,8 @@ def test_retained_storage_refuses_replacement_without_creating_history(
 
 
 def test_authenticated_health_probes_serving_identity_and_drain_without_store_open(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = configuration(tmp_path)
     with running(config) as host:
         monkeypatch.setattr(hosting, "ChatStore", lambda *_a, **_k: pytest.fail("probe opened store"))
@@ -225,7 +254,7 @@ def test_authenticated_health_probes_serving_identity_and_drain_without_store_op
         with pytest.raises(hosting.HostError, match="host_unready"):
             hosting.probe_health(config, str(host.run_dir))
 
-        def trickle(handler):
+        def trickle(handler: hosting._Handler) -> None:
             handler.send_response(200)
             handler.send_header("Content-Type", "application/json")
             handler.send_header("Content-Length", "4096")
@@ -249,7 +278,9 @@ def test_authenticated_health_probes_serving_identity_and_drain_without_store_op
 
 
 @pytest.mark.parametrize("waiters", [1, 3])
-def test_held_wait_drain_and_health_keep_independent_requests_responsive(tmp_path, waiters):
+def test_held_wait_drain_and_health_keep_independent_requests_responsive(
+    tmp_path: Path, waiters: int,
+) -> None:
     with running(configuration(tmp_path)) as host:
         assert rpc(host, {"op": "join", "channel": "room",
                           "actor": {"codename": "agent-a"}})[0] == 200
@@ -290,7 +321,9 @@ def test_held_wait_drain_and_health_keep_independent_requests_responsive(tmp_pat
     b"Content-Length: -1",
     b"Content-Length: 1\r\nAuthorization: extra",
 ])
-def test_request_framing_and_duplicate_auth_refuse_before_dispatch(tmp_path, header):
+def test_request_framing_and_duplicate_auth_refuse_before_dispatch(
+    tmp_path: Path, header: bytes,
+) -> None:
     with running(configuration(tmp_path)) as host:
         client = connection(host)
         client.connect()
@@ -311,8 +344,8 @@ def test_request_framing_and_duplicate_auth_refuse_before_dispatch(tmp_path, hea
 
 @pytest.mark.parametrize("stage", ["headers", "body"])
 def test_absolute_ingress_deadline_retires_slow_input_and_releases_admission(
-    tmp_path, monkeypatch, stage,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
     monkeypatch.setattr(hosting, "IO_SECONDS", .3)
     with running(configuration(tmp_path)) as host:
         client = connection(host)
@@ -345,7 +378,7 @@ def test_absolute_ingress_deadline_retires_slow_input_and_releases_admission(
                           "actor": {"codename": "agent-a"}})[0] == 200
 
 
-def test_aggregate_headers_refuse_without_reflecting_input(tmp_path):
+def test_aggregate_headers_refuse_without_reflecting_input(tmp_path: Path) -> None:
     with running(configuration(tmp_path)) as host:
         client = connection(host)
         client.connect()
@@ -362,7 +395,9 @@ def test_aggregate_headers_refuse_without_reflecting_input(tmp_path):
             client.close()
 
 
-def test_worker_admission_is_bounded_and_overflow_does_not_spawn(tmp_path, monkeypatch):
+def test_worker_admission_is_bounded_and_overflow_does_not_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(hosting, "MAX_CONNECTIONS", 2)
     with running(configuration(tmp_path)) as host:
         clients = [connection(host) for _ in range(3)]
@@ -387,7 +422,9 @@ def test_worker_admission_is_bounded_and_overflow_does_not_spawn(tmp_path, monke
     {"token_file": "relative"}, {"installation_id": ""},
     {"installation_id": "\ud800"}, {"data_dir": "C:\\invalid\x00path"},
 ])
-def test_configuration_refuses_without_echoing_values(tmp_path, change):
+def test_configuration_refuses_without_echoing_values(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     config = {**configuration(tmp_path), **change}
     path = tmp_path / "host.json"
     path.write_text(json.dumps(config), encoding="utf-8")
@@ -398,7 +435,7 @@ def test_configuration_refuses_without_echoing_values(tmp_path, change):
     assert not (tmp_path / "data").exists()
 
 
-def test_small_or_non_ascii_secret_refuses_before_data_creation(tmp_path):
+def test_small_or_non_ascii_secret_refuses_before_data_creation(tmp_path: Path) -> None:
     config = configuration(tmp_path)
     Path(config["token_file"]).write_text("short", encoding="ascii")
     with pytest.raises(hosting.HostError, match="host_token_file_invalid"):
@@ -406,7 +443,7 @@ def test_small_or_non_ascii_secret_refuses_before_data_creation(tmp_path):
     assert not Path(config["data_dir"]).exists()
 
 
-def test_maximum_key_with_file_line_ending_is_used_without_masking(tmp_path):
+def test_maximum_key_with_file_line_ending_is_used_without_masking(tmp_path: Path) -> None:
     config = configuration(tmp_path)
     credential = "y" * 1024
     Path(config["token_file"]).write_bytes(credential.encode("ascii") + b"\r\n")
@@ -415,13 +452,15 @@ def test_maximum_key_with_file_line_ending_is_used_without_masking(tmp_path):
                           "actor": {"codename": "agent-a"}}, token=credential)[0] == 200
 
 
-def test_failed_endpoint_publication_retires_host_and_removes_own_attempt(tmp_path, monkeypatch):
+def test_failed_endpoint_publication_retires_host_and_removes_own_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import endpoint_rendezvous
 
     config = configuration(tmp_path)
     publish = endpoint_rendezvous.write_endpoint
 
-    def fail_after_publish(*args, **kwargs):
+    def fail_after_publish(*args: Any, **kwargs: Any) -> NoReturn:
         publish(*args, **kwargs)
         raise OSError("synthetic publication failure")
 
@@ -435,7 +474,9 @@ def test_failed_endpoint_publication_retires_host_and_removes_own_attempt(tmp_pa
                           "actor": {"codename": "agent-a"}})[0] == 200
 
 
-def test_close_retains_custody_until_held_transaction_and_workers_retire(tmp_path, monkeypatch):
+def test_close_retains_custody_until_held_transaction_and_workers_retire(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = configuration(tmp_path)
     entered, release = threading.Event(), threading.Event()
     with hosting.HostedChat(config) as host:
@@ -444,9 +485,9 @@ def test_close_retains_custody_until_held_transaction_and_workers_retire(tmp_pat
         serving.start()
         assert rpc(host, {"op": "join", "channel": "room",
                           "actor": {"codename": "agent-a"}})[0] == 200
-        original = host.store._post
+        original = cast(ChatStore, host.store)._post
 
-        def held_post(request):
+        def held_post(request: dict[str, Any]) -> dict[str, Any]:
             entered.set()
             assert release.wait(5)
             return original(request)
@@ -483,14 +524,16 @@ def test_close_retains_custody_until_held_transaction_and_workers_retire(tmp_pat
         assert page["messages"] == [posted["event"]]
 
 
-def test_busy_health_is_structured_and_recovers_after_transaction(tmp_path, monkeypatch):
+def test_busy_health_is_structured_and_recovers_after_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     entered, release = threading.Event(), threading.Event()
     with running(configuration(tmp_path)) as host:
         assert rpc(host, {"op": "join", "channel": "room",
                           "actor": {"codename": "agent-a"}})[0] == 200
         original = host.store._post
 
-        def held_post(request):
+        def held_post(request: dict[str, Any]) -> dict[str, Any]:
             entered.set()
             assert release.wait(5)
             return original(request)
@@ -520,7 +563,7 @@ def test_busy_health_is_structured_and_recovers_after_transaction(tmp_path, monk
             client.close()
 
 
-def test_complete_valid_membership_is_retrievable_with_wire_bounded_pages(tmp_path):
+def test_complete_valid_membership_is_retrievable_with_wire_bounded_pages(tmp_path: Path) -> None:
     with running(configuration(tmp_path)) as host:
         names = [f"member-{index:03}" for index in range(256)]
         for name in names:
@@ -557,7 +600,9 @@ def test_complete_valid_membership_is_retrievable_with_wire_bounded_pages(tmp_pa
     {"limit": 0}, {"limit": 101}, {"limit": True},
     {"after": ""}, {"after": "invalid space"}, {"after": 1},
 ])
-def test_members_page_controls_are_validated_before_lookup(tmp_path, controls):
+def test_members_page_controls_are_validated_before_lookup(
+    tmp_path: Path, controls: dict[str, Any],
+) -> None:
     with running(configuration(tmp_path)) as host:
         status, value = rpc(host, {"op": "members", "channel": "missing", **controls})
         assert status == 400 and value["error"] == "invalid"

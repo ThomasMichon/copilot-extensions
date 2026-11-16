@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
@@ -12,12 +13,12 @@ from agent_chat_service.transport import (
 )
 
 
-def config(**fields):
+def config(**fields: Any) -> dict[str, Any]:
     return {"endpoint": "http://127.0.0.1", "token_command": [sys.executable, "-c", "print('fixture')"],
             **fields}
 
 
-def test_real_authorization_construction_preserves_the_supplied_value():
+def test_real_authorization_construction_preserves_the_supplied_value() -> None:
     token = "synthetic-value"
     prefix = "Bear" + "er "
     value = authorization(token)["Authorization"]
@@ -29,7 +30,7 @@ def test_real_authorization_construction_preserves_the_supplied_value():
     "value", ["", "a\nb", "a b", "\N{SNOWMAN}", "x" * 32769],
     ids=["empty", "newline", "space", "unicode", "oversized"],
 )
-def test_invalid_credentials_are_rejected_without_echo(value):
+def test_invalid_credentials_are_rejected_without_echo(value: str) -> None:
     with pytest.raises(ClientError) as caught:
         authorization(value)
     assert caught.value.code == "invalid_credential"
@@ -40,12 +41,12 @@ def test_invalid_credentials_are_rejected_without_echo(value):
     "http://localhost/path", "http://localhost?", "http://localhost#", "http://localhost:0",
     "http://localhost:65536", "http://localhost\n", "http://localh\N{SNOWMAN}st",
 ])
-def test_endpoint_selection_is_explicit_and_does_not_downgrade(endpoint):
+def test_endpoint_selection_is_explicit_and_does_not_downgrade(endpoint: object) -> None:
     with pytest.raises(ClientError):
         GatewayTransport(config(endpoint=endpoint))
 
 
-def test_real_owned_provider_keeps_stdin_stdout_stderr_separate():
+def test_real_owned_provider_keeps_stdin_stdout_stderr_separate() -> None:
     raw = run_command(
         [sys.executable, "-c",
          "import sys; data=sys.stdin.read(); sys.stderr.write('diagnostic'); print(data,end='')"],
@@ -54,14 +55,16 @@ def test_real_owned_provider_keeps_stdin_stdout_stderr_separate():
     assert raw.decode() == "Unicode \N{SNOWMAN}"
 
 
-def test_real_owned_provider_has_a_deadline():
+def test_real_owned_provider_has_a_deadline() -> None:
     with pytest.raises(ClientError) as caught:
         run_command([sys.executable, "-c", "import time; time.sleep(10)"], timeout=.1)
     assert caught.value.code == "provider_timeout"
 
 
-def test_missing_caller_death_capability_refuses_before_legacy_helper_execution(tmp_path, monkeypatch):
-    def unexpected(*args, **kwargs):
+def test_missing_caller_death_capability_refuses_before_legacy_helper_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
         raise AssertionError("Unsupported provider execution reached the helper")
 
     monkeypatch.setitem(
@@ -73,12 +76,12 @@ def test_missing_caller_death_capability_refuses_before_legacy_helper_execution(
     assert "run_caller_owned" in caught.value.message
 
 
-def test_owned_provider_passes_separate_capture_budgets_and_stdin(monkeypatch):
+def test_owned_provider_passes_separate_capture_budgets_and_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_procutil.owned_process as owned
 
     calls = []
 
-    def bounded(argv, **kwargs):
+    def bounded(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=0, stdout="reply")
 
@@ -91,7 +94,7 @@ def test_owned_provider_passes_separate_capture_budgets_and_stdin(monkeypatch):
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_real_provider_overflow_refuses_before_its_deadline_without_disclosing_output(stream):
+def test_real_provider_overflow_refuses_before_its_deadline_without_disclosing_output(stream: str) -> None:
     with pytest.raises(ClientError) as caught:
         run_command([
             sys.executable, "-c",
@@ -102,13 +105,15 @@ def test_real_provider_overflow_refuses_before_its_deadline_without_disclosing_o
     assert stream in caught.value.message and "private" not in caught.value.message
 
 
-def test_unconfirmed_cleanup_retains_exact_typed_custody(monkeypatch):
+def test_unconfirmed_cleanup_retains_exact_typed_custody(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_procutil.owned_process as owned
 
+    # Opaque sentinels test retained custody identity without spawning a real child.
+    process: Any
     process, job = object(), object()
     failure = owned.OwnedCleanupError(process, job)
 
-    def unconfirmed(*args, **kwargs):
+    def unconfirmed(*args: object, **kwargs: object) -> NoReturn:
         raise failure
 
     monkeypatch.setattr(owned, "run_caller_owned", unconfirmed)
@@ -118,12 +123,12 @@ def test_unconfirmed_cleanup_retains_exact_typed_custody(monkeypatch):
     assert caught.value.process is process and caught.value.job is job
 
 
-def test_credential_provider_has_its_own_raw_byte_budget(monkeypatch):
+def test_credential_provider_has_its_own_raw_byte_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_chat_service.transport as transport
 
     calls = []
 
-    def execute(argv, **kwargs):
+    def execute(argv: list[str], **kwargs: Any) -> bytes:
         calls.append((argv, kwargs))
         if len(calls) == 1:
             return b"fixture\n"
@@ -140,7 +145,7 @@ def test_credential_provider_has_its_own_raw_byte_budget(monkeypatch):
     assert "fixture" not in calls[1][0]
 
 
-def test_owned_provider_exit_status_is_visible_without_its_stderr():
+def test_owned_provider_exit_status_is_visible_without_its_stderr() -> None:
     with pytest.raises(ClientError) as caught:
         run_command(
             [sys.executable, "-c", "import sys; sys.stderr.write('private-diagnostic'); sys.exit(7)"],
@@ -151,21 +156,21 @@ def test_owned_provider_exit_status_is_visible_without_its_stderr():
 
 
 @pytest.mark.parametrize("argv", [[], ["relative"], ["x\n"], [str(Path(sys.executable).with_suffix(".cmd"))]])
-def test_incomplete_or_implicit_shell_commands_refuse(argv):
+def test_incomplete_or_implicit_shell_commands_refuse(argv: list[str]) -> None:
     with pytest.raises(ClientError):
         GatewayTransport(config(token_command=argv))
 
-def test_cross_os_provider_is_refused_before_execution():
+def test_cross_os_provider_is_refused_before_execution() -> None:
     program = "wsl.exe" if os.name == "nt" else "windows-provider.exe"
     with pytest.raises(ClientError) as caught:
         GatewayTransport(config(token_command=[str(Path(sys.executable).with_name(program))]))
     assert caught.value.code == "provider_unsupported"
 
 
-def test_explicit_stdio_contract_is_bounded_and_has_no_hidden_credential_call():
+def test_explicit_stdio_contract_is_bounded_and_has_no_hidden_credential_call() -> None:
     calls = []
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> bytes:
         calls.append((argv, kwargs))
         return json.dumps({
             "schema": STDIO_RESPONSE, "version": 1, "status": 200, "result": {"members": []},
@@ -189,10 +194,10 @@ def test_explicit_stdio_contract_is_bounded_and_has_no_hidden_credential_call():
     b"not-json", b'{"schema":"a","schema":"b"}', b"[]",
     b'{"schema":"agent-chat.gateway-response","version":true,"status":200,"result":{}}',
 ])
-def test_invalid_stdio_responses_are_not_retried(reply):
+def test_invalid_stdio_responses_are_not_retried(reply: bytes) -> None:
     calls = []
 
-    def runner(*args, **kwargs):
+    def runner(*args: object, **kwargs: object) -> bytes:
         calls.append(True)
         return reply
 

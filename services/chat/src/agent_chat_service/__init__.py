@@ -17,8 +17,8 @@ def _resolve_version() -> str:
     key_pattern = r"""[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+'"""
     if '"""' in text or "'''" in text:
         raise ValueError("Chat source project version metadata is invalid.")
-    projects = []
-    section = None
+    projects: list[list[str]] = []
+    section: list[str] | None = None
     for line in text.splitlines():
         if line.lstrip().startswith("["):
             header = re.fullmatch(r"[ \t]*\[(.+?)\][ \t]*(?:#.*)?", line)
@@ -35,7 +35,7 @@ def _resolve_version() -> str:
             section.append(line)
     fields = {}
     if len(projects) == 1:
-        declarations = {"name": [], "version": []}
+        declarations: dict[str, list[str]] = {"name": [], "version": []}
         for key, value in re.findall(r"(?m)^[ \t]*([^=\r\n]+)=(.*)$", "\n".join(projects[0])):
             key = key.strip()
             if key.startswith("#"):

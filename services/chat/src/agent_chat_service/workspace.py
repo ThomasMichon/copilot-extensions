@@ -5,11 +5,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 import sys
-import time
+import time as time
+from typing import Any, NoReturn, cast
 
 from .client import ClientError
 from .store import ChatError, strict_json
-from .transport import command, run_command
+from .transport import command, run_command as run_command
 
 _KEY = re.compile(r"[A-Za-z0-9_.-]{1,256}")
 _SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -24,15 +25,15 @@ _CWD_RUNNER = (
 )
 
 
-def _refuse(code="workspace_unresolved"):
+def _refuse(code: str = "workspace_unresolved") -> NoReturn:
     raise ClientError(code, "Trusted workspace context could not be established; no adoption performed.")
 
 
-def _key(value):
+def _key(value: object) -> bool:
     return isinstance(value, str) and _KEY.fullmatch(value) is not None
 
 
-def _directory(value, code):
+def _directory(value: object, code: str) -> Path:
     if (not isinstance(value, str) or not value or len(value) > 4096
             or any(c in value for c in "\0\r\n") or not Path(value).is_absolute()):
         _refuse(code)
@@ -45,13 +46,18 @@ def _directory(value, code):
         _refuse(code)
 
 
-def _platform(value):
-    return {"win": "windows", "windows": "windows", "linux": "linux", "wsl": "wsl"}.get(
+def _platform(value: object) -> str | None:
+    platforms: dict[str | None, str] = {
+        "win": "windows", "windows": "windows", "linux": "linux", "wsl": "wsl",
+    }
+    return platforms.get(
         value if isinstance(value, str) else None,
     )
 
 
-def resolve_workspace(*, worktrees_command, session_id, cwd):
+def resolve_workspace(
+    *, worktrees_command: object, session_id: object, cwd: object,
+) -> dict[str, Any]:
     """Consume host initialization once; return no Chat actor or inbox authority."""
     if not isinstance(session_id, str) or _SESSION.fullmatch(session_id) is None:
         _refuse("invalid_initialization")
@@ -59,7 +65,7 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
     owner = command(worktrees_command)
     deadline = time.monotonic() + _WORKSPACE_TIMEOUT
 
-    def read(*args, structured=False):
+    def read(*args: str, structured: bool = False) -> Any:
         # Float subtraction can round above the original budget at a clock exponent boundary.
         remaining = min(_WORKSPACE_TIMEOUT, deadline - time.monotonic())
         if remaining <= 0:
@@ -131,7 +137,7 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
         participant = {
             "machine": row_owner, "repo": row["repo"], "kind": "worktree", "id": worktree_id,
         }
-        owner_ref = "/".join((row_owner, row["repo"], worktree_id))
+        owner_ref = "/".join((cast(str, row_owner), row["repo"], cast(str, worktree_id)))
         label = row.get("codename")
         if label is not None and (not isinstance(label, str) or _LABEL.fullmatch(label) is None):
             _refuse("workspace_response_invalid")

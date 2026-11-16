@@ -4,6 +4,33 @@ import hashlib
 import json
 import os
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Protocol
+
+
+class ExecutionReport(Protocol):
+    @property
+    def nodeid(self) -> str: ...
+
+    @property
+    def when(self) -> str: ...
+
+    @property
+    def outcome(self) -> str: ...
+
+
+class FailureReport(Protocol):
+    @property
+    def failed(self) -> bool: ...
+
+    @property
+    def nodeid(self) -> str: ...
+
+    @property
+    def when(self) -> str: ...
+
+    @property
+    def longreprtext(self) -> str: ...
 
 
 FAMILIES = {
@@ -240,7 +267,7 @@ PARAMETER_COUNTS.update({
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
-    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 16,
+    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 17,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
@@ -281,7 +308,7 @@ PARAMETER_COUNTS.update({
 })
 
 
-def membership(nodes):
+def membership(nodes: Sequence[str]) -> dict[str, str]:
     """Refuse missing/new families and duplicate nodes instead of silently omitting work."""
     if len(nodes) != len(set(nodes)):
         raise ValueError("duplicate Chat qualification nodes")
@@ -296,13 +323,15 @@ def membership(nodes):
     return {node: EXPECTED[node.split("[", 1)[0]] for node in sorted(nodes)}
 
 
-def membership_digest(mapping):
+def membership_digest(mapping: Mapping[str, str]) -> str:
     return hashlib.sha256(
         json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
-def execution_summary(mapping, profile, reports):
+def execution_summary(
+    mapping: Mapping[str, str], profile: str, reports: Iterable[ExecutionReport],
+) -> dict[str, Any]:
     if profile not in {"acceptance", "full"}:
         raise ValueError("unknown Chat qualification lane")
     expected = {

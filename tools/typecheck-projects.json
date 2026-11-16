@@ -597,7 +597,14 @@
         "services/chat"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-service-chat-requirements.txt",
+      "import_roots": [
+        "services/chat/tests",
+        "libs/agent-procutil/tests",
+        "libs/versioned-runtime",
+        "tools"
+      ]
     },
     {
       "name": "service-dispatch",
