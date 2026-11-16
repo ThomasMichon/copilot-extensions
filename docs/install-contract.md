@@ -23,6 +23,19 @@ requirements remain binding.
 
 ## Authoritative replacement and completion
 
+The [Manager-owned application-footprint vision](../visions/installer/application-footprints/README.md)
+adds the forward packaging and setup boundary: promotion produces whole-copy
+app directories, local Dev/WIP preparation assigns local output versions, and
+Manager orchestrates dependency staging and app setup rather than depending on
+Worktrees installation code. Slot-local `setup --stage` selects nothing; full
+setup establishes actual readiness, selection and neutral app/global commands.
+Shared IPC components are separate installations, not consumer imports.
+The [receiving plan and verbatim snapshot](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+retain pending conversion/qualification. Current native installers, generated
+`install` entries and import-based shared implementations below are legacy
+adoption for this boundary; this documentation does not change their code or
+weaken their independent safety and durable-state contracts.
+
 The canonical intent is
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
 This section is its normative installer contract, not a declaration that all

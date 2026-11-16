@@ -155,6 +155,17 @@ self-provisioning path remains independent and authoritative.
 
 ## Install topology — marketplace to local paths
 
+The [Manager-owned app-footprint target](../visions/installer/application-footprints/README.md)
+separates promotion-produced copyable app directories, finite Manager
+orchestration and app-owned staged/full setup. Local Dev/WIP promotion performs
+vendoring and local version assignment; declared shared runtime components are
+separate neutral-command/IPC installations, not imported implementations.
+**Current adoption remains mixed:** plugin/standalone source locations, native
+installers, generated slot-root `install` entries and Worktrees installation
+dependencies are not converted by this intent revision. The
+[existing effort amendment](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+retains one complete new-flow exemplar and broader conversion as open work.
+
 For artifact ownership, flat/nested and installation-cell variants, and
 repair-versus-code-patching boundaries, use the
 [installation footprint reference](installation-footprint.md).
