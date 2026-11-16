@@ -167,6 +167,10 @@ Environments are private repository test-cache entries keyed by requirements,
 host platform and interpreter version. A check never silently installs packages
 or falls back to another interpreter; missing preparation prints the exact
 command to run.
+The interpreter running these commands is the checker host, not the declared
+analysis target. Use an installed host compatible with the complete selected
+lock, and use the same executable for preparation and checks. Project Python
+versions and platforms remain the targets declared in the manifest.
 Each check uses an invocation-private source-view directory for emitted files,
 the target list and MyPy configuration, under the existing environment lease.
 Successful cleanup removes only that invocation's verified outputs and empty

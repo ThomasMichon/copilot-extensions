@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import ModuleType
-from typing import Any, BinaryIO, cast
+from typing import Any, BinaryIO, TypedDict, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -64,6 +64,7 @@ from installer_engine_health import (
     verify_application_wheels as verify_application_wheels,
 )
 
+_ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], None]}, total=False)
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
     "build", "dist", "node_modules",
@@ -101,9 +102,10 @@ def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
     local_packages: tuple[str, ...] | None = None,
     *, on_progress: Callable[[], None] | None = None,
     file_hashes: dict[Path, str] | None = None) -> str:
+    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
     source_hash = runtime.fingerprint_source(
         files, file_hashes=file_hashes,
-        **({"on_progress": on_progress} if on_progress is not None else {}),
+        **progress,
     )
     if not extras and local_packages is None:
         return source_hash
@@ -210,9 +212,7 @@ def _excluded_packages(inputs: FrozenInputs) -> list[str]:
     return sorted({_package_name(package) for package in inputs.packages} - set(inputs.local_packages))
 
 
-def _source_files(
-    roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None,
-) -> tuple[Path, ...]:
+def _source_files(roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None) -> tuple[Path, ...]:
     files: set[Path] = set()
 
     def scan_error(error: OSError) -> None:
@@ -266,7 +266,7 @@ def freeze_inputs(
     for root in roots:
         if destination == root or destination.is_relative_to(root):
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
-    progress = {"on_progress": on_progress} if on_progress is not None else {}
+    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
     files = _source_files(roots, **progress)
     Path(_native_retained_path(destination)).mkdir(parents=True, exist_ok=False)
     try:
