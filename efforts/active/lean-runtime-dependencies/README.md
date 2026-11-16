@@ -19,7 +19,9 @@ capabilities or independently installable services, as the unchanged Guiding
 Intent below requires. The [current lifetime amendment](../source-managed-runtime-installs/update-service-lifetimes.md)
 also governs shared process helpers: foreground update work is cancellable;
 accepted service startup has independent, qualified lifetime. Preserve the
-compiler-free and setup-owned Python requirements.
+compiler-free requirements and use uv as the suite's Python manager, independent
+of ambient Python PATH order. The [Python strategy amendment](#2026-11-16---uv-managed-python)
+records the operator's wording and the remaining migration controls.
 
 ## Guiding Intent
 
@@ -145,6 +147,23 @@ Process identity, containment, leases, authenticated endpoints and safe cleanup
 remain separate requirements. The [amendment](compiler-free-execution.md#python-prerequisite-boundary)
 owns the revised implementation and validation boundary.
 
+### 2026-11-16 - uv-managed Python
+
+Operator verbatim:
+
+> Yes. I think this is the correct strategy here. Let `uv` be our python manager, so whatever is on PATH doesn't impact us, ideally.
+
+> Yes, we need to make this architecture change and possible a vision update. Since `uv` can manage python versions this simplifies things compared to what we had been trying to do.
+
+The [installer vision](../../../visions/installer/README.md#uv-managed-python)
+and [prerequisite amendment](compiler-free-execution.md#python-prerequisite-boundary)
+replace the earlier first-PATH-Python selection and system-Python provisioning
+choice. The earlier removal of interpreter attestation and all process-safety
+requirements remain. Explicit setup prepares the declared uv-managed Python;
+helpers and managed application environments consume explicit interpreters.
+Read-only status and ordinary launch do not acquire a toolchain. This records
+source architecture, not implemented migration or installed rollout.
+
 ## Plan
 
 - [ ] Carry the updater/service lifetime distinction through the existing
@@ -225,6 +244,12 @@ owns the revised implementation and validation boundary.
   signature, PE and physical-path interpreter attestation (#9262). This closes
   selector and consumer compatibility, not the remaining compiled SDK,
   installer or daemon entrypoints.
+- [ ] Migrate setup-owned Python preparation and pre-runtime helper selection
+  to the [uv-managed contract](compiler-free-execution.md#python-prerequisite-boundary).
+  Preserve explicit application-environment interpreters, standalone setup,
+  offline prepared use, read-only non-acquisition and caller custody. Qualify
+  incompatible first PATH Python, fresh-terminal, failure and rollback cases
+  before claiming installed adoption.
 - [x] Replace the compiled installation-context PowerShell SDK with its shared
   standard-library Python owner and preserve original-shell lifetime, strict
   action/policy behavior and source-only distribution. The complete bounded
@@ -239,10 +264,10 @@ owns the revised implementation and validation boundary.
 - [ ] Replace remaining executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
-  setup-owned Python prerequisite before these helpers, invoke normal PATH
-  Python without interpreter attestation, and remove the superseded signature,
-  registry and physical-path gates rather than introduce another acquisition
-  or admission path.
+  uv-managed Python prerequisite before these helpers, carry the selected
+  interpreter without interpreter attestation, and remove the superseded
+  signature, registry and physical-path gates rather than introduce helper-owned
+  acquisition or a new admission path.
 - [x] Land the compiler-free finite owned-process helper, retained lazy
   accounting, complete construction-resource closure and original client
   startup deadline through #9687. This is source closure only; current native
