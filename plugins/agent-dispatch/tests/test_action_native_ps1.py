@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+import venv
 
 import agent_procutil
 import pytest
@@ -190,6 +191,103 @@ if ((Stop-DispatchProcess -Subcommand serve) -ne 1) { throw 'Owned child was not
             child.wait(timeout=5)
             if child.stderr is not None:
                 child.stderr.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows coordinator launcher")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("tee_failure", [False, True])
+def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_identity(
+    tmp_path: Path, tee_failure: bool, host: str,
+) -> None:
+    if PWSH is None:
+        pytest.skip("pwsh is required")
+    shell = shutil.which(host)
+    assert shell, f"required Windows shell unavailable: {host}"
+    root = tmp_path / "owned"
+    slot = root / "versions" / "fixture"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    site = slot / "Lib" / "site-packages"
+    (site / "fixture-sdk.pth").write_text(
+        str(Path(agent_procutil.__file__).resolve().parent.parent) + "\n", encoding="utf-8",
+    )
+    package = site / "agent_dispatch"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "installation_policy.py").write_text(
+        "def windows_policy(*args, **kwargs):\n return {'start_coordinator': True}\n",
+        encoding="utf-8",
+    )
+    (package / "__main__.py").write_text(
+        "import json,os,sys,time\nfrom pathlib import Path\n"
+        "with Path(os.environ['DISPATCH_NATIVE_READY']).open('a') as ready:\n"
+        " ready.write(json.dumps({'pid':os.getpid(),'prefix':sys.prefix,\n"
+        "  'root':sys._xoptions.get('agent_dispatch_install_dir')})+'\\n')\n"
+        "print('native-fixture-started',flush=True)\ntime.sleep(8)\n",
+        encoding="utf-8",
+    )
+    ready = root / "native-ready.jsonl"
+    wrapper = tmp_path / "native-entry.ps1"
+    intercept = r"""
+function Out-File {
+    param([Parameter(ValueFromPipeline)]$InputObject, $FilePath, [switch]$Append, $Encoding)
+    process {
+        if ($InputObject -eq 'native-fixture-started') { throw 'fixture tee failure' }
+        Microsoft.PowerShell.Utility\Out-File -InputObject $InputObject `
+            -FilePath $FilePath -Append:$Append -Encoding $Encoding
+    }
+}
+""" if tee_failure else ""
+    launcher = SCRIPTS.parent / "src" / "agent_dispatch" / "service_launchers" / "coordinator.ps1"
+    wrapper.write_text(
+        intercept + f"& {quote(launcher)} -InstallDir {quote(root)} "
+        f"-RuntimePython {quote(slot / 'Scripts' / 'python.exe')} -RuntimeSlot {quote(slot)}\n",
+        encoding="utf-8",
+    )
+    parent = subprocess.Popen(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(wrapper)],
+        env=dict(os.environ, DISPATCH_NATIVE_READY=str(ready)),
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, creationflags=HEADLESS,
+    )
+    try:
+        records: list[dict[str, object]] = []
+        needed = 2 if tee_failure else 1
+        deadline = time.monotonic() + 15
+        while parent.poll() is None and time.monotonic() < deadline:
+            if ready.exists():
+                records = [json.loads(line) for line in ready.read_text(encoding="utf-8").splitlines()]
+            if len(records) >= needed:
+                break
+            time.sleep(0.02)
+        if len(records) < needed and parent.poll() is not None:
+            output, error = parent.communicate()
+            pytest.fail(output + error)
+        assert len(records) >= needed, "native launcher did not reach the selected finite branch"
+        numbers = ",".join(str(record["pid"]) for record in records)
+        body = (
+            f". {quote(SCRIPTS / 'supervisor-lifecycle.ps1')}\n"
+            + function(INSTALLER, "Stop-DispatchProcess") + "\n"
+            + f"$InstallDir = {quote(root)}\n"
+            + f"$script:fixturePids = @({numbers})\n"
+            + r"""
+$env:OS = 'Windows_NT'
+$script:rows = @(foreach ($number in $script:fixturePids) {
+    CimCmdlets\Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$number" -ErrorAction Stop
+})
+function Get-CimInstance { param($ClassName, $ErrorAction) return $script:rows }
+function Write-Warn { param($Message) throw $Message }
+if (-not $script:rows.Count -or
+    (Stop-DispatchProcess -Subcommand serve) -ne $script:rows.Count) {
+    throw 'Native launcher child did not satisfy scoped retirement'
+}
+"""
+        )
+        result = run_ps(tmp_path, body, policy_required=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(record["root"] == str(root) for record in records)
+        assert all(Path(str(record["prefix"])).resolve() == slot.resolve() for record in records)
+    finally:
+        parent.communicate(timeout=12)
 
 
 def function(path: Path, name: str) -> str:

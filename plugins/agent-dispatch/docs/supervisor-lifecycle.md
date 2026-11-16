@@ -15,6 +15,9 @@ does not authorize termination. The shared native retirement helper pins the
 observed process birth to its open kernel handle before termination.
 Windows Python daemon producers emit that existing marker before SDK executable
 normalization; POSIX and non-Python command arguments remain unchanged.
+The native scheduled-task/logon coordinator launcher uses the same SDK's
+physical-interpreter resolution and venv environment for both its logged and
+logging-fallback branches, with the installation marker first in the arguments.
 
 An endpoint PID alone is not ownership evidence. A live, unclassified endpoint
 process or an unconfirmed retirement refuses the stop and preserves the
