@@ -2615,55 +2615,55 @@ function Test-CoordinatorHealthy {
 }
 
 function Stop-DispatchProcess {
-    # Terminate any RUNNING agent_dispatch process for the given subcommand
-    # ('serve' = coordinator, 'supervise' = embody supervisor), regardless of how
-    # it was launched. The launcher runs under `conhost.exe --headless`, which
-    # DETACHES the powershell+python from the Scheduled Task's tracked process
-    # tree, so `Stop-ScheduledTask` does NOT kill the actual `python -m
-    # agent_dispatch <subcommand>` process -- a stop/update otherwise leaves the
-    # OLD build running and still holding the rendezvous endpoint (#3602). Resolve
-    # the live coordinator PID from the rendezvous file (serve only) AND match the
-    # `-m agent_dispatch <subcommand>` command line, kill each, then (serve) clear
-    # the stale endpoint file so a client doesn't chase a dead endpoint and the
-    # fresh coordinator writes a clean one. Returns the count terminated.
+    # Detached services outlive their scheduled task. Scope their inventory
+    # before effects, then use the existing birth-pinned native handle owner.
     param([Parameter(Mandatory)][ValidateSet('serve', 'supervise')][string]$Subcommand)
     if ($env:OS -ne 'Windows_NT') { return 0 }
 
-    $pidsToKill = New-Object System.Collections.Generic.List[int]
-    $endpointFile = Join-Path (Join-Path $InstallDir 'run') 'endpoint.json'
-
-    # 1) The rendezvous-advertised PID (the coordinator that owns the endpoint).
-    if ($Subcommand -eq 'serve' -and (Test-Path $endpointFile)) {
-        try {
-            $ep = Get-Content $endpointFile -Raw | ConvertFrom-Json
-            if (($ep.PSObject.Properties.Name -contains 'pid') -and $ep.pid) {
-                [void]$pidsToKill.Add([int]$ep.pid)
-            }
-        } catch { }
+    $root = [IO.Path]::GetFullPath($InstallDir)
+    $prefix = $root.TrimEnd('\') + '\'
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $owned = @()
+    foreach ($row in $rows) {
+        $arguments = @(Get-SupervisorDispatchArguments -CommandLine ([string]$row.CommandLine))
+        if (-not $arguments.Count -or $arguments[0] -cne $Subcommand) { continue }
+        $executable = [string]$row.ExecutablePath
+        $underRoot = $executable -and [IO.Path]::GetFullPath($executable).StartsWith(
+            $prefix, [StringComparison]::OrdinalIgnoreCase)
+        if (-not $underRoot -and -not (Test-SupervisorInstallMarker `
+                -Executable $executable -CommandLine ([string]$row.CommandLine) -Root $root)) { continue }
+        $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+        if ($owner.ReturnValue -ne 0) { throw 'Dispatch process user ownership is unavailable' }
+        if ($owner.Sid -ne $sid) { continue }
+        if (-not $row.CreationDate) { throw 'Dispatch process birth identity is unavailable' }
+        $owned += $row
     }
-    # 2) Any matching `-m agent_dispatch <subcommand>` process (the detached child
-    #    + orphans not reflected in the rendezvous file). '\bserve\b' never matches
-    #    'supervise' (and vice-versa), so the two never cross-terminate.
-    try {
-        $needle = '\b' + [regex]::Escape($Subcommand) + '\b'
-        Get-CimInstance Win32_Process -Filter "Name LIKE 'python%.exe'" -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.CommandLine -and
-                ($_.CommandLine -match 'agent_dispatch') -and
-                ($_.CommandLine -match $needle)
-            } |
-            ForEach-Object { [void]$pidsToKill.Add([int]$_.ProcessId) }
-    } catch { }
+
+    $endpointFile = Join-Path (Join-Path $InstallDir 'run') 'endpoint.json'
+    $endpointText = $null
+    if ($Subcommand -eq 'serve' -and (Test-Path -LiteralPath $endpointFile)) {
+        $endpointText = Get-Content -LiteralPath $endpointFile -Raw -ErrorAction Stop
+        $endpoint = $endpointText | ConvertFrom-Json -ErrorAction Stop
+        if (($endpoint.pid -isnot [int] -and $endpoint.pid -isnot [long]) -or $endpoint.pid -le 0) {
+            throw 'Dispatch endpoint process identity is invalid'
+        }
+        if (@($rows | Where-Object ProcessId -eq $endpoint.pid).Count -and
+            -not @($owned | Where-Object ProcessId -eq $endpoint.pid).Count) {
+            throw 'Dispatch endpoint names an unconfirmed process; no retirement attempted'
+        }
+    }
 
     $killed = 0
-    foreach ($procId in ($pidsToKill | Select-Object -Unique)) {
-        try {
-            Stop-Process -Id $procId -Force -ErrorAction Stop
-            $killed++
-        } catch { }
+    foreach ($snapshot in $owned) {
+        if (-not (Stop-SupervisorSnapshotProcess -Snapshot $snapshot)) {
+            throw 'Dispatch process retirement is unconfirmed; endpoint preserved'
+        }
+        $killed++
     }
-    if ($Subcommand -eq 'serve' -and (Test-Path $endpointFile)) {
-        Remove-Item $endpointFile -Force -ErrorAction SilentlyContinue
+    if ($null -ne $endpointText -and (Test-Path -LiteralPath $endpointFile) -and
+        (Get-Content -LiteralPath $endpointFile -Raw -ErrorAction Stop) -ceq $endpointText) {
+        Remove-Item -LiteralPath $endpointFile -Force -ErrorAction Stop
     }
     return $killed
 }

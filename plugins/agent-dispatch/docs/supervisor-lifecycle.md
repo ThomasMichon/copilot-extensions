@@ -5,6 +5,21 @@ The existing installer, runtime handoff, and retirement seams append structured
 zdd lifecycle writer and its bounded rotation. This is observability, not a
 watchdog or a claim that an earlier outage's requester has been identified.
 
+## Windows native stop scope
+
+The installer's native process stop inventories the requested Dispatch role
+only within its exact installation root, including the existing explicit
+installation marker for a physical base-Python executable. Another
+installation, a path-prefix collision, another user or an opaque command line
+does not authorize termination. The shared native retirement helper pins the
+observed process birth to its open kernel handle before termination.
+
+An endpoint PID alone is not ownership evidence. A live, unclassified endpoint
+process or an unconfirmed retirement refuses the stop and preserves the
+endpoint. A successfully retired or already-dead endpoint is removed only
+when its observed content has not changed. This does not claim atomic
+compare-and-delete against a concurrent publisher.
+
 ## Bounded reconciliation and progress
 
 The master establishes its shared wait budget before declaration discovery,
