@@ -1,5 +1,5 @@
 {
-  "comment": "Annotate Chat source and consumed fixture contracts with scoped checker dependencies and a reviewed stdlib reader adapter annotation exception while preserving validation and native behavior",
+  "comment": "Annotate Chat source and consumed fixture contracts with scoped checker dependencies and a reviewed stdlib reader adapter annotation exception, and verify the canonical runtime cache in the installed catalog",
   "changes": [
     {
       "plugin": "agent-chat-service",

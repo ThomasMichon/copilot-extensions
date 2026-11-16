@@ -20,7 +20,7 @@ PACKAGE_FILES = (
     "client.py", "store.py", "transport.py", "hosting.py", "workspace.py", "collaboration.py",
     "construction.py", "setup.py",
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-    "versioned_runtime_publication.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py", "versioned_runtime_source.py", "versioned_runtime_cache.py",
     "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py",
     "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
     "installer_dependency_arguments.py",
