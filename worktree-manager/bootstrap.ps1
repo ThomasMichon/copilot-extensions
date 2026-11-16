@@ -237,7 +237,7 @@ function Test-BootstrapUvVersion([string]$Uv) {
 }
 
 function Find-BootstrapUv {
-    foreach ($command in @(Get-Command uv -CommandType Application,ExternalScript -All -ErrorAction SilentlyContinue)) {
+    foreach ($command in @(Get-Command uv -CommandType Application -All -ErrorAction SilentlyContinue)) {
         try {
             $candidate = Resolve-BootstrapExecutable $command.Source
             if (Test-BootstrapUvVersion $candidate) { return $candidate }

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 import agent_procutil
 
@@ -20,17 +20,18 @@ if TYPE_CHECKING:
     from .runtime_source import ResolvedSource
 
 
-def _runtime_installer():
+def _runtime_installer() -> Any:
     from .self_install import _runtime_installer as selected
-    return selected()
+    factory: Callable[[], Any] = selected
+    return factory()
 
 
-def _runtime_scripts():
+def _runtime_scripts() -> Path:
     from .self_install import _runtime_scripts as selected
     return selected()
 
 
-def running_payload_dir():
+def running_payload_dir() -> Path:
     from .self_install import running_payload_dir as selected
     return selected()
 
@@ -50,7 +51,7 @@ def preparer() -> Path:
     raise ValueError("Manager source preparation assets are unavailable; repair the Manager payload")
 
 
-def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict:
+def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict[str, Any]:
     from agent_procutil import no_window_kwargs
     from .engine_environment import _engine_environment
 
@@ -104,6 +105,7 @@ def prepare_applications(
     tool: Path, resolved: ResolvedSource, names: tuple[str, ...], output: Path, *,
     deadline: float, environment: dict[str, str] | None = None,
     extras: dict[str, tuple[str, ...]] | None = None,
+    uv: Path | None = None,
 ) -> dict[str, Path]:
     """Run the packaged canonical portfolio provider under existing process custody."""
     from .engine_environment import _engine_environment
@@ -137,15 +139,15 @@ def prepare_applications(
     if not provider.is_file():
         raise ValueError("Manager complete-application preparation assets are unavailable; update Manager")
     installer = _runtime_installer()
-    uv = shutil.which("uv")
-    if uv is None:
+    selected_uv = str(uv) if uv is not None else shutil.which("uv")
+    if selected_uv is None:
         raise ValueError("uv is required for complete-application preparation")
-    uv = installer.engine._select_uv_executable(uv)
+    selected_uv = installer.engine._select_uv_executable(selected_uv)
     command = [
         sys.executable, "-I", "-B", "-X", "utf8", str(provider),
         "--source-checkout", str(resolved.checkout), "--source-commit", resolved.commit,
         "--main-head", resolved.main_head, "--branch", resolved.selection.branch,
-        "--output", str(output), "--prepare-applications", "--uv", uv,
+        "--output", str(output), "--prepare-applications", "--uv", selected_uv,
         "--deadline", str(deadline),
     ]
     for name in names:

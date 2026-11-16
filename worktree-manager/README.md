@@ -834,13 +834,17 @@ It does not publish Python command aliases or register Python with the Windows
 launcher. These controls are supported by uv 0.8.0 and newer.
 Bootstrap checks external uv commands in PATH order and retains the first
 supported executable; an older, malformed or failing earlier copy does not
-hide a supported later copy. On Windows, an explicit OS-policy refusal
+hide a supported later copy. Windows selection excludes PowerShell-only
+scripts: the same tool must also execute from the Python constructor.
+On Windows, an explicit OS-policy refusal
 (`WinError 448` / `os error 448`) remains fatal rather than selecting another
 copy. Only when no supported candidate is found does bootstrap use its existing
 user-local prerequisite installation path, then repeat qualification.
 The same qualified UV path reaches runtime construction through the explicit
 `--bootstrap-uv` installation input, including queued installation and update
 participants. It is not a worker-environment hint or a second PATH lookup.
+Manager Dev source preparation carries it into the canonical application
+preparer before construction too; it does not reselect an ambient UV.
 The selected source's `scripts/runtime_install.py` declares this receiver
 contract with the exact line `# copilot-extensions:bootstrap-uv=1`. Bootstrap
 reads that declaration before sending the new argument; a missing or unknown

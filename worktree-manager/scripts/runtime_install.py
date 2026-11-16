@@ -680,7 +680,10 @@ def _install_payload(
 
             try:
                 install_payload, prepared_options = source_custody.enter_context(
-                    manager_payload(args.payload, args.root),
+                    manager_payload(
+                        args.payload, args.root,
+                        **({"uv": args.bootstrap_uv} if getattr(args, "bootstrap_uv", None) is not None else {}),
+                    ),
                 )
             except (OSError, ValueError, RuntimeError, ImportError) as error:
                 print(f"Manager source acquisition refused: {error}", file=sys.stderr)

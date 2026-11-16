@@ -241,23 +241,25 @@ def _fake_tools(
             f"exit /b {python_exit}\r\n",
             "utf-8",
         )
-        # PowerShell resolves .ps1 before PATHEXT executables.
-        (bin_dir / "uv.ps1").write_text(
-            "if ($args[0] -eq '--version') {\n"
-            "  if ($env:BOOTSTRAP_UV_VERSION_TRACE) {\n"
-            "    Add-Content -LiteralPath $env:BOOTSTRAP_UV_VERSION_TRACE -Value $PSCommandPath\n"
-            "  }\n"
-            f"  Write-Output 'uv {uv_version}'; exit 0\n}}\n"
-            "if ($env:BOOTSTRAP_UV_TRACE) {\n"
-            "  Add-Content -LiteralPath $env:BOOTSTRAP_UV_TRACE "
-            "-Value ($PSCommandPath + '|' + ($args -join ' '))\n"
-            "  if ($env:BOOTSTRAP_UV_POISON) {\n"
-            "    $env:PATH = $env:BOOTSTRAP_UV_POISON + ';' + $env:PATH\n"
-            "  }\n"
-            "  if ($args[1] -eq 'install') { exit 0 }\n"
-            "  if (@(Get-Content -LiteralPath $env:BOOTSTRAP_UV_TRACE).Count -eq 1) { exit 3 }\n"
-            "}\n"
-            f"Write-Output '{python}'\nexit {uv_exit}\n", "utf-8"
+        (bin_dir / "uv.cmd").write_text(
+            "@echo off\r\n"
+            'if "%~1"=="--version" (\r\n'
+            '  if defined BOOTSTRAP_UV_VERSION_TRACE >>"%BOOTSTRAP_UV_VERSION_TRACE%" echo %~f0\r\n'
+            f"  echo uv {uv_version}\r\n  exit /b 0\r\n)\r\n"
+            "if defined BOOTSTRAP_UV_TRACE (\r\n"
+            '  >>"%BOOTSTRAP_UV_TRACE%" echo %~f0^|%*\r\n'
+            '  if "%~2"=="install" exit /b 0\r\n'
+            '  if not exist "%BOOTSTRAP_UV_TRACE%.seen" (\r\n'
+            '    type nul >"%BOOTSTRAP_UV_TRACE%.seen"\r\n'
+            "    if defined BOOTSTRAP_UV_LINK (\r\n"
+            '      rmdir "%BOOTSTRAP_UV_LINK%" >nul 2>nul\r\n'
+            '      mklink /J "%BOOTSTRAP_UV_LINK%" "%BOOTSTRAP_UV_POISON%" >nul\r\n'
+            "      if errorlevel 1 exit /b 18\r\n"
+            "    )\r\n"
+            "    exit /b 3\r\n"
+            "  )\r\n"
+            ")\r\n"
+            f"echo {python}\r\nexit /b {uv_exit}\r\n", "utf-8"
         )
     else:
         python = bin_dir / "fake-python"
@@ -374,16 +376,32 @@ def _run(
     if shadow_uv:
         shadow = tmp_path / "shadow-tools"
         shadow.mkdir()
-        reports = {
-            "old": "Write-Output 'uv 0.7.0'; exit 0\n",
-            "malformed": "Write-Output 'not uv'; exit 0\n",
-            "failed": "Write-Error 'unusable UV'; exit 17\n",
-            "policy": "Write-Error 'WinError 448'; exit 17\n",
-        }
-        (shadow / "uv.ps1").write_text(
-            "Add-Content -LiteralPath $env:BOOTSTRAP_UV_VERSION_TRACE -Value $PSCommandPath\n"
-            + reports[shadow_uv], encoding="utf-8",
-        )
+        if shadow_uv == "script":
+            (shadow / "uv.ps1").write_text("throw 'PowerShell-only UV must not execute'\n", encoding="utf-8")
+        elif os.name == "nt":
+            reports = {
+                "old": "echo uv 0.7.0\r\nexit /b 0\r\n",
+                "malformed": "echo not uv\r\nexit /b 0\r\n",
+                "failed": "exit /b 17\r\n",
+                "policy": "echo WinError 448 1>&2\r\nexit /b 17\r\n",
+            }
+            (shadow / "uv.cmd").write_text(
+                '@echo off\r\n>>"%BOOTSTRAP_UV_VERSION_TRACE%" echo %~f0\r\n' + reports[shadow_uv],
+                encoding="utf-8",
+            )
+        else:
+            reports = {
+                "old": "printf '%s\\n' 'uv 0.7.0'\n",
+                "malformed": "printf '%s\\n' 'not uv'\n",
+                "failed": "exit 17\n",
+                "policy": "printf '%s\\n' 'WinError 448' >&2\nexit 17\n",
+            }
+            executable = shadow / "uv"
+            executable.write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$0" >> "$BOOTSTRAP_UV_VERSION_TRACE"\n' + reports[shadow_uv],
+                encoding="utf-8",
+            )
+            executable.chmod(0o755)
         env["PATH"] = str(shadow) + os.pathsep + env["PATH"]
         env["BOOTSTRAP_UV_VERSION_TRACE"] = str(tmp_path / "uv-versions")
         installer_mock = "function Invoke-RestMethod { throw 'Unexpected UV acquisition' }\n"
@@ -408,9 +426,10 @@ def _run(
     if linked_uv:
         poison = tmp_path / "poison"
         poison.mkdir()
-        (poison / "uv.ps1").write_text("throw 'UV was reselected from PATH'\n", "utf-8")
+        (poison / "uv.cmd").write_text("@echo off\r\necho UV was reselected 1>&2\r\nexit /b 19\r\n", "utf-8")
         env["BOOTSTRAP_UV_TRACE"] = str(tmp_path / "uv-trace.txt")
         env["BOOTSTRAP_UV_POISON"] = str(poison)
+        env["BOOTSTRAP_UV_LINK"] = str(selected_bin)
     command = [host or PWSH, "-NoProfile", "-NonInteractive"]
     if encoded or installer_mock or handoff:
         script = str(BOOTSTRAP).replace("'", "''")
@@ -521,7 +540,7 @@ def test_bootstrap_refuses_incomplete_source_even_after_zero_exit_checkout(tmp_p
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows junction contract")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
-def test_bootstrap_retains_physical_uv_across_find_install_and_path_change(
+def test_bootstrap_retains_physical_uv_across_find_install_and_link_change(
     tmp_path: Path, host_name: str,
 ) -> None:
     host = shutil.which(host_name)
@@ -530,7 +549,7 @@ def test_bootstrap_retains_physical_uv_across_find_install_and_path_change(
     result = _run(tmp_path, uv_exit=0, host=host, linked_uv=True)
     assert result.returncode == 0, result.stdout + result.stderr
     calls = (tmp_path / "uv-trace.txt").read_text(encoding="utf-8-sig").splitlines()
-    expected = str(tmp_path / "fake-bin" / "uv.ps1")
+    expected = str(tmp_path / "fake-bin" / "uv.cmd")
     assert calls == [
         expected + "|python find --no-project --system --managed-python --no-python-downloads 3.11",
         expected + "|python install --no-bin --no-registry 3.11",
@@ -547,7 +566,7 @@ def test_bootstrap_prepares_compatible_uv_before_managed_python(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
-@pytest.mark.parametrize("shadow_uv", ["old", "malformed", "failed"])
+@pytest.mark.parametrize("shadow_uv", ["old", "malformed", "failed", "script"])
 def test_bootstrap_reuses_supported_uv_later_on_path(
     tmp_path: Path, host_name: str, shadow_uv: str,
 ) -> None:
@@ -560,12 +579,14 @@ def test_bootstrap_reuses_supported_uv_later_on_path(
     assert Path((tmp_path / "python-handoff").read_text(encoding="utf-8").strip()) == expected
     assert "preparing it" not in result.stderr
     assert (tmp_path / "uv-versions").read_text(encoding="utf-8-sig").splitlines() == [
-        str(tmp_path / "shadow-tools" / "uv.ps1"),
-        str(tmp_path / "fake-bin" / ("uv.ps1" if os.name == "nt" else "uv")),
+        *([] if shadow_uv == "script" else [
+            str(tmp_path / "shadow-tools" / ("uv.cmd" if os.name == "nt" else "uv")),
+        ]),
+        str(tmp_path / "fake-bin" / ("uv.cmd" if os.name == "nt" else "uv")),
     ]
     arguments = (tmp_path / "argument-handoff").read_text(encoding="utf-8")
     assert "--bootstrap-uv" in arguments
-    assert str(tmp_path / "fake-bin" / ("uv.ps1" if os.name == "nt" else "uv")) in arguments
+    assert str(tmp_path / "fake-bin" / ("uv.cmd" if os.name == "nt" else "uv")) in arguments
 
 
 @pytest.mark.parametrize("uv_contract", [None, "2"])
