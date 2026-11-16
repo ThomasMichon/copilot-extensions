@@ -10,7 +10,7 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .config import _load_installation_context
 from .install_paths import install_dir, legacy_install_dir
@@ -129,6 +129,11 @@ class LoopGovernance:
             self._installation = None
             self.state = None
 
+    def unconfigured_legacy(self) -> bool:
+        """Distinguish absent governance from a configured or failed provider."""
+        with self._lock:
+            return self._helper is None and not os.environ.get(_CONTEXT_ENV, "").strip()
+
     def runtime_installation(self, database: Database) -> RuntimeInstallation:
         """Bind custody observations to this daemon's installation and open DB.
 
@@ -232,4 +237,4 @@ class LoopGovernance:
                 baseline = result.get("baseline")
                 self._baseline = baseline if isinstance(baseline, dict) else None
                 self.state = None
-            return result
+            return cast(dict[str, Any], result)
