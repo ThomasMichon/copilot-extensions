@@ -685,10 +685,10 @@ def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_pat
     directory = cfg.project_dir("demo-repo") / "worktrees"
     monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     monkeypatch.delenv("BASH_ENV", raising=False)
-    config = _create_config(tmp_path, platform="linux")
+    config = _create_config(tmp_path)
     create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "linux", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     runtime = tmp_path / "runtime"
@@ -708,7 +708,7 @@ def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_pat
     assert plan["no_mux"] and plan["seed_pending"]
     index = launch_seed_exec.native_setup_index(plan["cmd"])
     assert index is not None
-    assert Path(plan["cmd"][index]).is_relative_to(tmp_path / "launch-attempts")
+    assert Path(plan["cmd"][index]).is_relative_to(directory / "launch-attempts")
     observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
     assert observed_seed is not None
     assert observed_seed.text == "direct JSON seed"
