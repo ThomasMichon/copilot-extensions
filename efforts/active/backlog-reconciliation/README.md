@@ -371,6 +371,12 @@ audited `COMPLETED` disposition without settling its earlier live request or
 broader convergence owners. At 2026-11-16 12:36:14 UTC, two excluded arrivals
 since the preceding published 850-open census exceed that verified inflow
 departure by one: 851 whole open, 122 above fixed 729.
+The subsequent distinct #1176 enforcement-source admission stops before body
+access after its complete primary-author history exposes unresolved identities;
+this is not evidence that enforcement is absent. #12866's reviewed documentary
+publication is verified separately. At 2026-11-16 12:49:23 UTC, another excluded
+arrival yields 852 whole open, 123 above fixed 729, with no additional closure
+credit or change to the earlier #12841 completion.
 
 The [complete WSL provisioning intake](journal/2026/11.16-wsl-provisioning-receiving.md)
 verifies #12842's reviewed delivery of direct pre-clone noninteractive
