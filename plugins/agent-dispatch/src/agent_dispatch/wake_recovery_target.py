@@ -80,6 +80,10 @@ def reconciliation_plan(
     if any(len(rows) > HISTORY_LIMIT for key, rows in captured.items() if key != "task"):
         raise TaskError("retained history exceeds the bounded reconciliation view")
     wake = retained_wake(captured, outbox, wake_id, settlement=settlement)
+    if settlement and wake["execution_send_state"] == "pending":
+        raise TaskError(
+            "native settlement refuses an in-flight send; await its original transport outcome"
+        )
     targets = set()
     for row in captured["reservations"]:
         if row["driver"] != "ordinary-bridge":

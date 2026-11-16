@@ -153,6 +153,10 @@ Bridge CLI's version-1 `agent-bridge.send` settlement capability, then invokes
 its explicit [original-key settlement](../../agent-bridge/docs/native-send-settlement.md)
 front door. That CLI requires the actual daemon's settlement capability before
 its non-retrying POST. Receipt-only observation is never upgraded implicitly.
+An admitted send still marked `pending` is in flight and refuses settlement
+before contacting Bridge. Its original sender must first publish its transport
+outcome; expiry alone cannot grant settlement. This prevents a late busy or
+not-attempted completion from racing a provider fence, including a lost reply.
 
 A matching accepted result settles `sent`. A matching `not_admitted` result,
 including the provider's durable fence and original-request digest, settles

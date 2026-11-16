@@ -138,6 +138,37 @@ def test_retryable_not_sent_refuses_before_any_provider_fence(
         assert asdict(current(queue, task_id, wake)) == before
 
 
+@pytest.mark.parametrize("reply_lost", [False, True])
+def test_inflight_send_cannot_race_settlement_with_a_late_busy_reply(
+        retained: Any, reply_lost: bool,
+) -> None:
+        queue, task_id, wake = retained
+        with queue._connect() as conn:
+            conn.execute(
+                f"UPDATE {wake_table(wake)} SET execution_send_state='pending' WHERE id=?",  # noqa: S608
+                (wake.id,),
+            )
+        before = asdict(current(queue, task_id, wake))
+        calls = []
+
+        def provider(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            calls.append(True)
+            with queue._connect() as conn:
+                conn.execute(
+                    f"UPDATE {wake_table(wake)} SET execution_send_state='not_sent',"  # noqa: S608
+                    " execution_send_detail=? WHERE id=?",
+                    (json.dumps(NativePromptNotSent(BRIDGE, NATIVE, wake.id).receipt), wake.id),
+                )
+            if reply_lost:
+                raise TaskError("synthetic acknowledgement lost after fence")
+            return negative(wake)
+
+        with pytest.raises(TaskError, match="refuses an in-flight send"):
+            settle(queue, task_id, wake, provider)
+        assert not calls
+        assert asdict(current(queue, task_id, wake)) == before
+
+
 @pytest.mark.parametrize("change", [
     {"fenced": False}, {"request_digest": "other-request"}, {"turn_index": 0},
     {"native_session_id": "other-native"}, {"session_id": "other-bridge"},
