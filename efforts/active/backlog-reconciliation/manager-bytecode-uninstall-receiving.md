@@ -1,13 +1,19 @@
-# Manager bytecode-uninstall boundary: proposed receiving contract
+# Manager bytecode-uninstall boundary: accepted receiving contract
 
 Back to [Backlog Reconciliation](README.md).
 
 ## Intent and exact scope
 
-This agent-recommended tracking proposal would directly retain #9375's
+This agent-recommended tracking intake directly retains #9375's
 bounded Manager inventory/removal repair in the existing #1886 uninstall
 canonical. It is not a claim that the repair, its regression, release or
 supported live-removal retry is complete.
+
+The plan merged in #12797. The complete direct issue intake was published
+and read back before the separate #9375 `NOT_PLANNED` tracking retirement;
+#1886 remains OPEN and all eight technical rows remain unchecked. The
+[dated journal](journal/2026/11.15-manager-bytecode-uninstall-receiving.md)
+records actual acceptance, retained ownership and the complete 837-open census.
 
 The source's exact conjunction is important: the generation-1 supported
 Manager uninstaller refuses before effects after ordinary installed
@@ -36,7 +42,7 @@ predecessor-cleanup vetoes.
 
 The issue-only study read both complete originals and all five #1886
 discussions under stable complete metadata and a complete twelve-member
-collaborator roster. #9375 has no discussion or original edit history.
+collaborator roster. At intake, #9375 had no discussion or original edit history.
 Coordinator publication-input qualification at 2026-11-16 04:02 UTC again
 found both issues OPEN and unlocked with unchanged text metadata, complete
 histories and two equal complete rosters.
@@ -55,11 +61,12 @@ They are neither waived nor reattributed to #9375, whose literal original
 does not specify an OS, architecture or full consumer matrix. This study
 does not reassess #8669's authored text or claim that parent complete.
 
-## Proposed direct issue intake
+## Direct issue intake
 
-This addition is intended for #1886 after required review and current
-qualification. Preserve its entire incumbent body, discussions, check
-states, earlier intake and owners. The standalone bounded Manager repair
+This addition is accepted in #1886's actual issue body after required
+review and current qualification. Its entire incumbent body, discussions,
+check states, earlier intake and owners are preserved. The standalone
+bounded Manager repair
 does not have to wait for every other #1886 or #8669 objective; conversely,
 its completion cannot settle those independently owned objectives.
 
@@ -146,13 +153,14 @@ generic public-receipt or native execution gate is added to tracking intake.
 | Parent #8669, supported-uninstaller #8864 and bounded repair ownership | Coordination, V3-V4 | No whole-parent completion or custody transfer |
 | Current refusal is not uninstall or session-survival evidence | V3 | No stronger outcome inferred from a weaker observation |
 
-## Publication boundary
+## Publication and completion boundary
 
-No receiver mutation or source disposition follows from this proposal alone.
-After review, the publisher must verify the whole current incumbent, append
-the complete direct clauses without changing its existing content, and read
-back the accepted issue text. Only then make the separate source-specific
-tracking judgment, retaining any actual owner or qualification gap.
+The publisher verified the whole current incumbent, appended the reviewed
+direct clauses without changing its existing content, and read back the
+accepted issue text before the separate source-specific `NOT_PLANNED`
+judgment. The source original remains unedited and is also retained verbatim
+in the receiver. Its bounded repair claim and all actual source/native/resource
+owners and gates remain unchanged, not abandoned or transferred.
 
 All technical rows remain planned. This campaign performs no product
 implementation, real subprocess/native test, installation, supported live

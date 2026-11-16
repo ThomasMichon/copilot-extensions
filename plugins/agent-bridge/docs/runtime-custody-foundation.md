@@ -276,7 +276,7 @@ must match. Lost final-admission replies remain outstanding and cannot be
 converted to a second true result by repeating `/begin`.
 
 The actual SDK extension now has an explicitly selected
-[retained consumer](retained-sdk-consumer.md); ordinary defaults are not switched.
+[retained consumer](retained-sdk-consumer.md); selection remains client-owned.
 Unassociated legacy inbox rows remain unqualified and
 refuse a retained batch without partial handoff commits. No SDK event,
 consumption evidence, automatic replay, proxy implementation or native behavior
@@ -288,8 +288,19 @@ The independently advertised `compatible_native_inbox: 1` capability expands
 `retained-inbox-v1` with optional `receiving_api: "native-sdk-v1"`. Current Core
 consumers require that capability on the serving daemon before sending the
 selector; an old or rolled-back provider refuses before enrollment or begin.
-Selector omission preserves the installation-bound adapter, including its
-required process observations. Unknown selectors remain strict errors.
+Selector omission preserves the installation-bound adapter for configured
+governance. An ordinary, non-portable SDK consumer omitting the selector can
+use the compatible adapter when the serving daemon has neither a governance
+helper nor a configured installation context. An invalid or failed helper,
+a subsequently configured context, absent owner objects and older portable
+consumers do not select this compatibility path. The old wire form retains its
+required process observations and exact original-consumer outcome matching.
+Each automatic operation checks the stored registration's absent venue inside
+its existing database transaction, including metadata changes after negotiation
+or enrollment. A caller omitting `portable_launch` cannot bypass the registered
+remote target's contract. This restriction does not change explicit native
+selection or late outcome recording.
+Unknown selectors remain strict errors.
 There is no retirement of the legacy form or package-version equality gate.
 
 The native SDK variant retains shared-token authentication, admitted loopback
