@@ -568,9 +568,11 @@ if ($InstallSource -and $PSScriptRoot -and
 
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
 $PreviousSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
+$PreviousBootstrapPython = $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
 try {
     $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $BootstrapSourceAnchor
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
+    $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $Python
     $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))
     if ($commandArgs.Count) {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
@@ -580,6 +582,7 @@ try {
     $commandExit = $LASTEXITCODE
 } finally {
     $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $PreviousSourceAnchor
+    $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $PreviousBootstrapPython
     Pop-Location
 }
 if ($commandExit -ne 0) {
