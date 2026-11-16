@@ -202,13 +202,39 @@ def prepare_tool_dependencies(workspace: Path) -> Path:
     target = workspace / "tool-dependencies"
     target.mkdir(exist_ok=False)
     if requirements:
-        uv = host_uv(Path.cwd(), "Native recovery tool preparation")
+        uv = host_uv(REPOSITORY, "Native recovery tool preparation")
+        tomllib = importlib.import_module("tomllib")
+        manager = REPOSITORY / "worktree-manager"
+        data = tomllib.loads((manager / "pyproject.toml").read_text(encoding="utf-8"))
+        project = workspace / "tool-inputs"
+        project.mkdir(exist_ok=False)
+        mappings: dict[str, dict[str, str]] = {}
+        for name, source in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
+            path = manager / source["path"]
+            if path.is_file():
+                # The source-graph owner above validates bundled artifact identity.
+                destination = project / "vendor" / path.name
+                destination.parent.mkdir(exist_ok=True)
+                shutil.copyfile(path, destination)
+                mappings[name] = {"path": "vendor/" + path.name}
+        manifest = project / "pyproject.toml"
+        manifest.write_text(
+            "[project]\nname=" + json.dumps(data["project"]["name"])
+            + "\nversion=" + json.dumps(data["project"]["version"])
+            + "\ndependencies=" + json.dumps(requirements)
+            + "\n[tool.uv.sources]\n"
+            + "".join(json.dumps(name) + "=" + (
+                "{path=" + json.dumps(source["path"]) + "}\n"
+            ) for name, source in sorted(mappings.items())),
+            encoding="utf-8",
+        )
         deadline = time.monotonic() + 120
         with retain_uv_install(
             uv, ["--python", sys.executable, "--target", str(target),
-                 "--only-binary=:all:", "--link-mode", "hardlink", *requirements],
-            cwd=REPOSITORY / "worktree-manager", trusted_source_roots=(REPOSITORY,),
-            deadline=deadline,
+                 "--only-binary=:all:", "--link-mode", "hardlink",
+                 "--project", str(project), "-r", str(manifest)],
+            cwd=manager, trusted_source_roots=(REPOSITORY, project),
+            non_editable=True, deadline=deadline,
         ) as transaction:
             run_owned(
                 list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,

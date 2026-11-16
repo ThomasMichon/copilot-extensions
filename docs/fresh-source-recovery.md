@@ -56,8 +56,12 @@ remain unchanged.
 For apply, the toolkit first prepares the ordinary external dependencies declared
 by its Manager, Worktrees and local-library source closure into the request's
 private `tool-dependencies` directory. This uses the existing UV dependency owner
-and seasoning policy, before native installation admission. The isolated child
-uses that directory after its source and standard-library paths; it does not
+and seasoning policy, before native installation admission. A dependency-only
+input preserves Manager's approved bundled artifact mapping without installing
+the first-party source projects. Host UV discovery excludes the toolkit and
+current directory, not ordinary tool directories beneath the caller's home.
+The isolated child uses that directory after its source and standard-library
+paths; it does not
 rely on a warmed parent, execute site startup hooks or install into an existing
 runtime. These are the fresh controller's tools, not a change to the selected
 application's dependency profile. Preview does not publish application runtimes

@@ -161,12 +161,15 @@ def test_recovery_keeps_prepared_engine_snapshot_in_its_named_fields(
 
 def recovery_probe(
     toolkit: Path, queue: Path, code: str, *, settings: dict[str, str] | None = None,
+    cwd: Path | None = None, host_uv: Path | None = None,
 ) -> dict[str, Any]:
     queue.mkdir(mode=0o700)
     environment = {key: value for key, value in os.environ.items() if not key.startswith("UPDATE_DRIVER_")}
-    uv = shutil.which("uv")
+    uv = str(host_uv) if host_uv is not None else shutil.which("uv")
     assert uv is not None
-    environment["PATH"] = str(Path(uv).resolve().parent) + os.pathsep + environment.get("PATH", "")
+    environment["PATH"] = str(Path(uv).resolve().parent) + (
+        os.pathsep + environment.get("PATH", "") if host_uv is None else ""
+    )
     environment["UV_NO_INDEX"] = "1"
     if settings is not None:
         environment = {
@@ -178,7 +181,7 @@ def recovery_probe(
         [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
          str(toolkit / "tools" / "import_probe.py"),
          "recovery-parent", str(toolkit), str(queue), code],
-        capture_output=True, text=True, timeout=100, env=environment,
+        capture_output=True, text=True, timeout=100, env=environment, cwd=cwd,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -263,6 +266,43 @@ def test_cold_tool_dependencies_reach_the_real_recovery_child_before_admission(
         assert report["report"]["stage"] == "tool-preparation", report
         assert report["caught"] and report["report"]["effects"] == [], report
         assert not any(path == "/files/" + filename for path, _headers in state["requests"])
+
+
+@pytest.mark.timeout(120)
+def test_cold_recovery_retains_the_approved_bundled_wheel_without_an_index(
+    published_toolkit: Path, tmp_path: Path,
+) -> None:
+    toolkit = tmp_path / "toolkit"
+    shutil.copytree(published_toolkit, toolkit)
+    manager = toolkit / "worktree-manager"
+    wheel = "dbus_next-0.2.3-py3-none-any.whl"
+    (manager / "vendor").mkdir()
+    shutil.copyfile(REPOSITORY / "worktree-manager" / "vendor" / wheel, manager / "vendor" / wheel)
+    manifest = manager / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            'name = "worktree-manager"', 'name = "copilot-extensions-worktree-manager"',
+        ).replace(
+            "[tool.uv.sources]",
+            "dependencies=['dbus-next==0.2.3']\n[tool.uv.sources]\n"
+            'dbus-next={path="vendor/' + wheel + '"}',
+        ),
+        encoding="utf-8",
+    )
+    uv = shutil.which("uv")
+    assert uv is not None
+    home = tmp_path / "home"
+    host_uv = home / ".local" / "bin" / Path(uv).name
+    host_uv.parent.mkdir(parents=True)
+    shutil.copy2(uv, host_uv)
+    report = recovery_probe(toolkit, tmp_path / "queue", "bundled", settings={
+        "UV_NO_INDEX": "1", "UV_CACHE_DIR": str(tmp_path / "empty-cache"),
+        "UV_PYTHON_DOWNLOADS": "never",
+    }, cwd=home, host_uv=host_uv)
+    assert report["state"] == "completed" and report["exit_code"] == 0, report
+    assert report["report"]["tool_value"] == "dbus_next", report
+    tools = tmp_path / "queue" / "inputs" / "tool-dependencies"
+    assert sorted(path.name for path in tools.glob("*.dist-info")) == ["dbus_next-0.2.3.dist-info"]
 
 
 @pytest.mark.timeout(180)

@@ -52,3 +52,21 @@ def test_tool_requirements_keep_external_constraints_and_markers(
         "packaging>=25", "packaging>=24", "pyyaml>=6", "pyyaml>=6.0.3",
         "tomli>=2 ; python_version < '3.11'",
     }
+
+
+def test_host_uv_allows_home_tools_but_not_current_or_toolkit_directories(
+    recovery: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    toolkit = home / "toolkit"
+    tools = home / ".local" / "bin"
+    for directory in (home, toolkit, tools):
+        directory.mkdir(parents=True, exist_ok=True)
+    executable = "uv.exe" if recovery.os.name == "nt" else "uv"
+    for directory in (home, toolkit, tools):
+        candidate = directory / executable
+        candidate.write_bytes(b"fixture")
+        candidate.chmod(0o700)
+    monkeypatch.chdir(home)
+    monkeypatch.setenv("PATH", recovery.os.pathsep.join(map(str, (home, toolkit, tools))))
+    assert recovery.host_uv(toolkit, "fixture") == str(tools / executable)

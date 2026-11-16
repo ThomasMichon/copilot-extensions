@@ -22,7 +22,8 @@ def fixture_application(*arguments: Any) -> int:
     control = rows["fixture"]
     report["stage"] = "fixture-application"
     if "module" in control:
-        report["tool_value"] = importlib.import_module(control["module"]).VALUE
+        module = importlib.import_module(control["module"])
+        report["tool_value"] = getattr(module, "VALUE", module.__name__)
     code = int(control["code"])
     if code < 0:
         raise ControlledSourceFailure("controlled source fixture failure")
@@ -56,9 +57,10 @@ def recovery_parent(recovery: Any, toolkit: Path, queue: Path, code: str) -> int
         "selection": {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
         "manager_root": str(workspace / "manager"), "effects": [],
     }
-    control: dict[str, Any] = {"code": 0 if code == "tool" else int(code)}
-    if code == "tool":
-        control["module"] = "recovery_tool_fixture"
+    modules = {"tool": "recovery_tool_fixture", "bundled": "dbus_next"}
+    control: dict[str, Any] = {"code": 0 if code in modules else int(code)}
+    if code in modules:
+        control["module"] = modules[code]
     recovery.__file__ = str(Path(__file__))
     caught = None
     caught_stderr = None
