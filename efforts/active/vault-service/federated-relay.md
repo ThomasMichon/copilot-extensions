@@ -35,6 +35,11 @@ the remaining durable-transaction obligations rather than declaring them done.
   of Gateway admission. Preserve source-lease meanings separately from actual
   credential expiry and native execution authority. Unsupported provider
   semantics remain explicit; do not relabel an opaque acquisition as silent.
+  The first implementation uses normal bounded provider retrieval, including
+  its ordinary refresh, rather than blocking on perfect cache-only support.
+  Credential expiry may be explicitly unknown; it must not be synthesized from
+  a source lease. Preserve the stricter cache-only availability contract as a
+  separately qualified capability.
 - [ ] **R3 - User action and retained work.** Integrate auth-needed outcomes
   with Vault-owned durable transaction/interaction authority from the parent
   plan. Cache discovery and silent renewal never start a browser/native flow.
@@ -148,6 +153,16 @@ This accepts R1's isolated service/provider/consumer source flow only. It does
 not qualify installed optional profiles, every mixed-version platform lane,
 live credentials, release/adoption, R2/R3, or the full Vault parent. The remaining
 validation items and R2-R4 stay open; publication is not runtime readiness.
+
+## Selected cache and provider direction
+
+Extend the existing [Vault vision](../../../visions/vault/README.md#independent-cache-and-standard-auth-providers)
+in place: Vault owns an independent protected cache and may act as a centralized
+broker; KeePassXC is one backing store, with code-registered `gh`, `az`, GCM and
+other standard-source drivers. This is source architecture acceptance, not an
+installation, credential-export, enrollment or interactive-login grant. Reuse
+the existing Vault and Gateway owners rather than introducing a parallel
+service for the initial flow.
 
 ## Documentation and performance impact
 

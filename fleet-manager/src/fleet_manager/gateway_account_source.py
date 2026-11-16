@@ -12,15 +12,18 @@ import math
 import re
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from .gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
-from .planning import PlanError, decode
+from .gateway_vault_available import NORMAL_FETCH_CONTRACT
+from .planning import PlanError, decode as _decode
 
 LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
 INSTALLATION_HEADER = "x-agent-index-installation-id"
 _FIELDS = frozenset({"source", "account", "recipient", "host", "action"})
 _LEASE_FIELDS = frozenset({"lease_contract", "lease_id", "lease_issued_at", "lease_expires_at"})
+decode: Callable[[bytes], Any] = _decode
 
 
 class AccountSource(Protocol):
@@ -54,7 +57,7 @@ class AccountSourceGrant:
         return {name: getattr(self, name) for name in _FIELDS}
 
 
-def _json(status: int, value: dict) -> ServiceResponse:
+def _json(status: int, value: dict[str, Any]) -> ServiceResponse:
     return ServiceResponse(
         status, (("content-type", "application/json"), ("cache-control", "no-store")),
         json.dumps(value, allow_nan=False, separators=(",", ":")).encode(),
@@ -108,22 +111,32 @@ class AccountSourceHandler:
             return _json(200, {
                 "installationId": self._installation,
                 "source_credentials_contract": {"lease_contract": LEASE_CONTRACT, "exchange": "http/v1"},
+                "normal_fetch_contract": NORMAL_FETCH_CONTRACT,
             })
-        if request.method != "POST" or request.target != "/source-credentials":
+        normal = request.target == "/token-fetch"
+        if request.method != "POST" or request.target not in ("/source-credentials", "/token-fetch"):
             return _error(404, "source-route-unavailable")
-        if pins != [self._installation]:
+        if (not normal and pins != [self._installation]) or (
+                normal and pins and pins != [self._installation]):
             return _error(409, "source-installation-mismatch")
         try:
             if type(request.body) is not bytes or not 0 < len(request.body) <= 16384:
                 raise ValueError
             value = decode(request.body)
             keys = _FIELDS | {"capability"}
-            if (not isinstance(value, dict) or set(value) not in (keys, keys | {"lease_contract"})
+            shapes = ((keys | {"fetch_contract", "installationId"},) if normal else
+                      (keys, keys | {"lease_contract"}))
+            if (not isinstance(value, dict) or frozenset(value) not in shapes
                     or not all(_text(value[name]) for name in keys)
                     or len(value["capability"]) < 32):
                 raise ValueError
         except (PlanError, ValueError, UnicodeError, RecursionError):
             return _error(400, "source-request-invalid")
+        if normal:
+            if value["fetch_contract"] != NORMAL_FETCH_CONTRACT:
+                return _error(409, "source-fetch-unsupported")
+            if value["installationId"] != self._installation:
+                return _error(409, "source-installation-mismatch")
         leased = "lease_contract" in value
         if leased and value["lease_contract"] != LEASE_CONTRACT:
             return _error(409, "source-lease-unsupported")
@@ -151,11 +164,16 @@ class AccountSourceHandler:
             raise
         except Exception:
             return _error(503, "source-credential-unavailable")
+        if normal:
+            result |= {
+                **fields, "fetch_contract": NORMAL_FETCH_CONTRACT,
+                "acquisition": "normal-fetch", "token_expires_at": None,
+            }
         return _json(200, result | {"installationId": self._installation})
 
     @staticmethod
-    def _result(raw: str | None, fields: dict, leased: bool,
-                started_wall: float, started: float) -> dict:
+    def _result(raw: str | None, fields: dict[str, str], leased: bool,
+                started_wall: float, started: float) -> dict[str, Any]:
         if not isinstance(raw, str) or not 0 < len(raw) <= 16384:
             raise ValueError
         response = {}
@@ -168,7 +186,9 @@ class AccountSourceHandler:
         if (set(response) != expected or response["protocol"] != "https"
                 or response["host"] != fields["host"] or response["username"] != fields["account"]):
             raise ValueError
-        result = {"token": response["token"], "account": fields["account"], "host": fields["host"]}
+        result: dict[str, Any] = {
+            "token": response["token"], "account": fields["account"], "host": fields["host"],
+        }
         if leased:
             if (response["lease_contract"] != LEASE_CONTRACT
                     or re.fullmatch("[0-9a-f]{32}", response["lease_id"]) is None):

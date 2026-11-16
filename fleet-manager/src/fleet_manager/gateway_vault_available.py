@@ -1,4 +1,4 @@
-"""Bounded available-token selection; no credential store or interactive operation."""
+"""Bounded token selection with distinct available-only and normal-fetch profiles."""
 
 from __future__ import annotations
 
@@ -8,11 +8,18 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Literal, Protocol
 
 
 AVAILABLE_CONTRACT = "fleet-manager.vault-available/v1"
-AvailabilityState = Literal["available", "cache-miss", "unavailable", "uncertain", "unsupported"]
+NORMAL_FETCH_CONTRACT = "fleet-manager.vault-normal-fetch/v1"
+AvailabilityState = Literal[
+    "available", "fetched", "cache-miss", "unavailable", "uncertain", "unsupported",
+]
+LookupState = Literal[
+    "available", "fetched", "no-source", "cache-exhausted", "unavailable", "uncertain",
+]
 
 
 def _text(value: object) -> bool:
@@ -61,14 +68,37 @@ class AvailableToken:
 
 
 @dataclass(frozen=True)
-class SourceAvailability:
-    state: AvailabilityState
-    token: AvailableToken | None = field(default=None, repr=False)
+class FetchedToken:
+    """Normal provider retrieval, not a cache-only or known-expiry attestation."""
+
+    key: TokenKey
+    value: str = field(repr=False)
+    expires_at: float | None = None
+    acquisition: Literal["normal-fetch"] = "normal-fetch"
 
     def __post_init__(self) -> None:
-        if (self.state not in ("available", "cache-miss", "unavailable", "uncertain", "unsupported")
+        if (type(self.key) is not TokenKey or type(self.value) is not str
+                or not 0 < len(self.value) <= 32768
+                or any(not 33 <= ord(char) < 127 for char in self.value)
+                or (self.expires_at is not None and (
+                    type(self.expires_at) not in (int, float)
+                    or not -1e12 < self.expires_at < 1e12
+                    or not math.isfinite(self.expires_at)))
+                or self.acquisition != "normal-fetch"):
+            raise ValueError("invalid-vault-fetched-token")
+
+
+@dataclass(frozen=True)
+class SourceAvailability:
+    state: AvailabilityState
+    token: AvailableToken | FetchedToken | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if (self.state not in (
+                "available", "fetched", "cache-miss", "unavailable", "uncertain", "unsupported")
                 or (self.state == "available") != (type(self.token) is AvailableToken)
-                or (self.state != "available" and self.token is not None)):
+                or (self.state == "fetched") != (type(self.token) is FetchedToken)
+                or (self.state not in ("available", "fetched") and self.token is not None)):
             raise ValueError("invalid-vault-availability")
 
 
@@ -81,6 +111,14 @@ class AvailableTokenProvider(Protocol):
         Provider custody must validate the exact access binding and actual token
         expiry. An opaque resolve/login API is not an implementation of this port.
         """
+        ...
+
+
+class NormalTokenProvider(Protocol):
+    contract: str
+
+    async def fetch_normal(self, key: TokenKey, *, deadline: float) -> SourceAvailability:
+        """Bounded ordinary retrieval; normal provider refresh may occur."""
         ...
 
 
@@ -99,7 +137,7 @@ class SourceIdentity:
 @dataclass(frozen=True)
 class AvailableSource:
     identity: SourceIdentity
-    provider: AvailableTokenProvider = field(repr=False, compare=False)
+    provider: AvailableTokenProvider | NormalTokenProvider = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.identity) is not SourceIdentity:
@@ -114,8 +152,8 @@ class SourceObservation:
 
 @dataclass(frozen=True)
 class AvailableLookup:
-    state: Literal["available", "no-source", "cache-exhausted", "unavailable", "uncertain"]
-    token: AvailableToken | None = field(default=None, repr=False)
+    state: LookupState
+    token: AvailableToken | FetchedToken | None = field(default=None, repr=False)
     source: SourceIdentity | None = None
     observations: tuple[SourceObservation, ...] = ()
 
@@ -129,6 +167,11 @@ class AvailableTokenCoordinator:
     Use one instance per event loop; no work starts until ``lookup`` is called.
     """
 
+    _contract = AVAILABLE_CONTRACT
+    _method = "get_available"
+    _success: AvailabilityState = "available"
+    _token_type: type[AvailableToken] | type[FetchedToken] = AvailableToken
+
     def __init__(
         self, sources: Callable[[TokenKey], tuple[AvailableSource, ...]], *,
         budget: float = 30.0, affinity_limit: int = 256, probe_limit: int = 128,
@@ -141,7 +184,7 @@ class AvailableTokenCoordinator:
         self._sources, self._budget = sources, budget
         self._affinity_limit, self._probe_limit = affinity_limit, probe_limit
         self._affinity: OrderedDict[TokenKey, tuple[str, str]] = OrderedDict()
-        self._probes: dict[tuple[TokenKey, str, str], asyncio.Task] = {}
+        self._probes: dict[tuple[TokenKey, str, str], asyncio.Task[SourceAvailability]] = {}
         self._closed = False
 
     @property
@@ -160,11 +203,17 @@ class AvailableTokenCoordinator:
         return any(item.identity == source.identity and item.provider is source.provider
                    for item in self._snapshot(key))
 
-    def _settled(self, probe_key: tuple[TokenKey, str, str], task: asyncio.Task) -> None:
+    def _settled(
+        self, probe_key: tuple[TokenKey, str, str], task: asyncio.Task[SourceAvailability],
+    ) -> None:
         if self._probes.get(probe_key) is task:
             del self._probes[probe_key]
         if not task.cancelled():
             task.exception()
+
+    def _usable(self, key: TokenKey, token: AvailableToken | FetchedToken) -> bool:
+        return (type(token) is self._token_type and token.key == key
+                and (token.expires_at is None or token.expires_at > time.time()))
 
     async def _probe(
         self, key: TokenKey, source: AvailableSource, deadline: float,
@@ -178,7 +227,12 @@ class AvailableTokenCoordinator:
         if self._closed or loop.time() >= deadline:
             return SourceAvailability("uncertain")
         try:
-            return await source.provider.get_available(key, deadline=deadline)
+            result = await getattr(source.provider, self._method)(key, deadline=deadline)
+            if (type(result) is not SourceAvailability
+                    or (result.token is not None and (
+                        result.state != self._success or type(result.token) is not self._token_type))):
+                return SourceAvailability("uncertain")
+            return result
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -202,9 +256,9 @@ class AvailableTokenCoordinator:
         preferred = self._affinity.get(key)
         sources = tuple(sorted(sources, key=lambda source: (
             (source.identity.controller, source.identity.source) != preferred)))
-        tasks: dict[asyncio.Task, AvailableSource] = {}
+        tasks: dict[asyncio.Task[SourceAvailability], AvailableSource] = {}
         observations: dict[SourceIdentity, SourceObservation] = {}
-        candidates: list[tuple[AvailableSource, AvailableToken]] = []
+        candidates: list[tuple[AvailableSource, AvailableToken | FetchedToken]] = []
         policy_error: Exception | None = None
 
         def authorize(source: AvailableSource) -> bool:
@@ -220,16 +274,15 @@ class AvailableTokenCoordinator:
         try:
             for source in sources:
                 probe_key = (key, source.identity.controller, source.identity.source)
-                if (getattr(source.provider, "contract", None) != AVAILABLE_CONTRACT
-                        or not callable(getattr(source.provider, "get_available", None))):
+                if (getattr(source.provider, "contract", None) != self._contract
+                        or not callable(getattr(source.provider, self._method, None))):
                     observations[source.identity] = SourceObservation(source.identity, "unsupported")
                 elif probe_key in self._probes or len(self._probes) >= self._probe_limit:
                     observations[source.identity] = SourceObservation(source.identity, "uncertain")
                 else:
                     task = loop.create_task(self._probe(key, source, deadline, authorize))
                     self._probes[probe_key] = task
-                    task.add_done_callback(
-                        lambda done, probe_key=probe_key: self._settled(probe_key, done))
+                    task.add_done_callback(partial(self._settled, probe_key))
                     tasks[task] = source
             while tasks and not self._closed:
                 remaining = deadline - loop.time()
@@ -248,14 +301,13 @@ class AvailableTokenCoordinator:
                     current = authorize(source)
                     if not current:
                         result = SourceAvailability("unavailable")
-                    elif token is not None and (
-                            token.key != key or token.expires_at <= time.time()):
+                    elif token is not None and not self._usable(key, token):
                         result = SourceAvailability("unavailable")
-                    elif result.state == "available" and (
+                    elif result.state == self._success and (
                             self._closed or loop.time() >= deadline):
                         result = SourceAvailability("uncertain")
                     observations[source.identity] = SourceObservation(source.identity, result.state)
-                    if (result.state == "available" and not self._closed
+                    if (result.state == self._success and not self._closed
                             and loop.time() < deadline):
                         assert result.token is not None
                         candidates.append((source, result.token))
@@ -275,19 +327,21 @@ class AvailableTokenCoordinator:
         for source, token in candidates:
             current = authorize(source)
             if (current and not self._closed and loop.time() < deadline
-                    and token.expires_at > time.time()):
+                    and self._usable(key, token)):
                 self._affinity[key] = (source.identity.controller, source.identity.source)
                 self._affinity.move_to_end(key)
                 while len(self._affinity) > self._affinity_limit:
                     self._affinity.popitem(last=False)
                 return AvailableLookup(
-                    "available", token, source.identity, tuple(observations.values()))
+                    "fetched" if self._success == "fetched" else "available",
+                    token, source.identity, tuple(observations.values()))
             observations[source.identity] = SourceObservation(
                 source.identity, "uncertain" if self._closed or loop.time() >= deadline
                 else "unavailable")
         states = {item.state for item in observations.values()}
-        state = ("uncertain" if self._closed or loop.time() >= deadline or "uncertain" in states else
-                 "cache-exhausted" if states == {"cache-miss"} else "unavailable")
+        state: LookupState = (
+            "uncertain" if self._closed or loop.time() >= deadline or "uncertain" in states else
+            "cache-exhausted" if states == {"cache-miss"} else "unavailable")
         return AvailableLookup(state, observations=tuple(observations.values()))
 
     def stop(self) -> None:
@@ -303,3 +357,16 @@ class AvailableTokenCoordinator:
         if tasks:
             await asyncio.wait(tasks, timeout=timeout)
         return all(task.done() for task in tasks)
+
+
+class NormalFetchCoordinator(AvailableTokenCoordinator):
+    """The same bounded current-source selection, with ordinary retrieval semantics.
+
+    It never accepts an available-only provider by an implicit fallback, and its
+    results cannot pass the available-only profile's finite-expiry checks.
+    """
+
+    _contract = NORMAL_FETCH_CONTRACT
+    _method = "fetch_normal"
+    _success: AvailabilityState = "fetched"
+    _token_type = FetchedToken
