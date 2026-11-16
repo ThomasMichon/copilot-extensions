@@ -3913,6 +3913,8 @@ retains the existing setup, engine, bootstrap and application owners.
   SAC-enforcing Windows migration requires a successful supported managed
   interpreter path under that policy, not only an actionable refusal.
 
+<a id="path-python-evaluator-bootstrap"></a>
+
 ### Explicit Python handoff and compatibility evaluator bootstrap
 
 The ordinary Manager bootstrap carries its uv-managed Python selection into
