@@ -74,6 +74,20 @@ umbrella condition, release #2965's claimed driver or appoint replacement
 executors. Full original/refined contracts remain authoritative alongside the
 direct rows.
 
+### Current complete #4075 follow-through - 2026-11-16
+
+The table above records the finite documentation/admission proposal at its
+historical scope, not the later complete current source. #4075 now directly
+retains #4076's same-native-occurrence wrapper/exit/actual-work/atomic-receipt
+contract as SU3-SU6/SUV2-SUV4. The
+[complete receiving amendment](journal/2026/11.16-complete-self-update-receiving.md)
+extends the SAME Machines ROOT with direct P3-P6, local V2-V4, actual global
+GV1 and continuing Coordination/Journal, keeping incumbent P1/P2/V1 unchanged.
+Normal review, actual delivery, full current ROOT/source readback and separate
+source judgment remain outstanding. This does not add native work to the
+finite documentation alternative, waive inherited native acceptance or
+satisfy #3115's independently unsatisfied live-umbrella gate.
+
 ## Eight retained canonical or primary-home gaps
 
 The following references are not shortened receiving checklists. They preserve
