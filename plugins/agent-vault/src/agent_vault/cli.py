@@ -241,6 +241,7 @@ def send_command(
     timeout: float | None = 5.0,
     *,
     strict_endpoint: bool = False,
+    require_endpoint: bool = False,
 ) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
     context = config.resolve_context()
@@ -324,6 +325,8 @@ def send_command(
 
     if discovery_error is not None:
         raise discovery_error
+    if require_endpoint and discovered is None:
+        raise rendezvous.EndpointUnavailable("No selected native vault endpoint is advertised")
 
     if strict_endpoint and discovered is not None and discovered.transport not in (
         "tcp", "pipe" if IS_WINDOWS else "unix",

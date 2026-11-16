@@ -49,7 +49,9 @@ def test_unavailable_or_draining_service_never_activates(
     def send(request: dict[str, Any], **options: object) -> object:
         calls.append(request)
         assert request == {"action": "ping"}
-        assert options == {"timeout": 5.0, "strict_endpoint": True}
+        assert options == {
+            "timeout": 5.0, "strict_endpoint": True, "require_endpoint": True,
+        }
         return running
 
     monkeypatch.setattr(cli, "send_command", send)

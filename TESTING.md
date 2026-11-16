@@ -7464,13 +7464,14 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
-The two Vault transport-order units execute the actual `send_command` body
-with substituted context, discovery, extension and native owners. A preferred
-extension can answer despite an unavailable advertisement; if it declines, the
-original discovery refusal must precede every native or legacy dial. These
-actor-free units start no service, socket or child and do not qualify installed
-transport or credential handling. The plugin's discovery packet retains the
-separate real-record and contained runtime controls.
+Five Vault read/transport units execute the actual `read_credential` and
+`send_command` bodies with substituted context, discovery, extension and native
+owners. Preferred extensions retain authority; when they decline, unavailable
+or absent required native advertisements cannot reach legacy dialing. The
+reader must require discovery on both readiness and read, while old strict
+callers keep their existing default. These actor-free units start no service,
+socket or child and do not qualify installed transport or credential handling.
+The plugin's discovery packet retains separate real-record/runtime controls.
 The packet lives in `tools/promotion_unit_tests/`, independent of mixed
 integration test modules and their conftests. The manifest binds source and
 test bytes, the expected parameter nodes, production coverage targets and a

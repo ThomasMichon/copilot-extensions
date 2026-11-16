@@ -4,6 +4,9 @@
     "nodes": [
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_unavailable_discovery_preserves_preferred_authority_without_native_fallback[preferred]",
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_unavailable_discovery_preserves_preferred_authority_without_native_fallback[declined]",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_unavailable_discovery_preserves_preferred_authority_without_native_fallback[absent]",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_legacy_strict_call_retains_its_existing_absent_advertisement_default",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_restricted_reader_requires_advertisement_on_both_readiness_and_read",
         "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[default]",
         "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[selected]",
         "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[missing]",
@@ -5046,6 +5049,7 @@
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/cli.py",
+        "plugins/agent-vault/src/agent_vault/credential_reads.py",
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
         "tools/application_sources.py",
         "tools/local_install_profile.py",
@@ -5364,8 +5368,9 @@
         "libs/payload-invocation/bootstrap_python.py"
     ],
     "sources": {
-        "plugins/agent-vault/src/agent_vault/cli.py": "0a9c241fc3d69a9cb99ee536299b716a706bb49c0883f51094014a5db95ebaf9",
-        "tools/promotion_unit_tests/test_vault_transport_order.py": "bc414fced486235c316f4e85911a104753cc7b39ef457504b6c1d8fe665f829c",
+        "plugins/agent-vault/src/agent_vault/cli.py": "6bb45a75469e51444e2bb9135608192f99027eb7d45e85351e3b02078da5f7e1",
+        "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
+        "tools/promotion_unit_tests/test_vault_transport_order.py": "b2d31b286ba81866a130d7a0b4df3e05caba00d16b9fcbe5c5cbe189466b3ebd",
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
         "tools/promotion_unit_tests/test_application_sources.py": "1250079b456ca5565211d8b2f889c46050276288fcd0f93e2d25b398eb06cb47",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",

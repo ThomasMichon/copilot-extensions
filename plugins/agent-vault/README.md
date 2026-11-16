@@ -370,6 +370,11 @@ A present but unreachable or foreign-installation advertisement is not absence.
 Preferred extensions retain their existing priority; if they decline, the
 strict discovery error is propagated without native or legacy fallback.
 Ordinary non-strict discovery retains its existing fallback behavior.
+Restricted native reads additionally require an advertised endpoint after
+preferred transports decline. If the daemon removes its advertisement between
+readiness and the read, the second call refuses instead of selecting the legacy
+socket. A legacy daemon without discovery metadata is unsupported for this new
+mode; ordinary callers retain their existing defaults.
 This option does not change cache reconciliation or authorize an unlock prompt:
 `get --prompt` remains an explicit separate choice and batch reads never prompt.
 It does not suppress existing noninteractive credential providers or make cache

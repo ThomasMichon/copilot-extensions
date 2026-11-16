@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from contextlib import nullcontext
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -24,16 +25,18 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     ]
     assert len(selected) == 2
     calls: list[str] = []
-    state = SimpleNamespace(response=None)
+    state = SimpleNamespace(response=None, discovered=True)
 
     class DiscoveryRefusal(RuntimeError):
         pass
 
     original = DiscoveryRefusal("selected endpoint is unavailable")
 
-    def discover(_context: object, *, strict: bool) -> NoReturn:
+    def discover(_context: object, *, strict: bool) -> None:
         assert strict is True
         calls.append("discovery")
+        if not state.discovered:
+            return None
         raise original
 
     def native(*_arguments: object, **_options: object) -> NoReturn:
@@ -74,20 +77,87 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
     return SimpleNamespace(
         send=namespace["send_command"], original=original,
-        error=DiscoveryRefusal, state=state, calls=calls,
+        error=DiscoveryRefusal, state=state, calls=calls, package=package_name,
     )
 
 
-@pytest.mark.parametrize("preferred", [True, False], ids=["preferred", "declined"])
+@pytest.mark.parametrize("mode", ["preferred", "declined", "absent"])
 def test_unavailable_discovery_preserves_preferred_authority_without_native_fallback(
-    boundary: SimpleNamespace, preferred: bool,
+    boundary: SimpleNamespace, mode: str,
 ) -> None:
     request = {"action": "get", "entry": "Example/service"}
-    if preferred:
+    boundary.state.discovered = mode != "absent"
+    if mode == "preferred":
         boundary.state.response = {"ok": True, "value": "synthetic-value"}
-        assert boundary.send(request, strict_endpoint=True) is boundary.state.response
+        assert boundary.send(
+            request, strict_endpoint=True, require_endpoint=True,
+        ) is boundary.state.response
     else:
         with pytest.raises(boundary.error) as caught:
-            boundary.send(request, strict_endpoint=True)
-        assert caught.value is boundary.original
+            boundary.send(request, strict_endpoint=True, require_endpoint=True)
+        if mode == "declined":
+            assert caught.value is boundary.original
     assert boundary.calls == ["discovery", "preferred"]
+
+
+def test_legacy_strict_call_retains_its_existing_absent_advertisement_default(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary.state.discovered = False
+
+    def legacy(*_arguments: object, **_options: object) -> dict[str, Any]:
+        boundary.calls.append("legacy")
+        return {"ok": True, "value": "legacy-value"}
+
+    monkeypatch.setitem(boundary.send.__globals__, "_send_socket", legacy)
+    result = boundary.send({"action": "get"}, strict_endpoint=True)
+    assert result["value"] == "legacy-value"
+    assert boundary.calls == ["discovery", "preferred", "legacy"]
+
+
+def test_restricted_reader_requires_advertisement_on_both_readiness_and_read(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = ROOT / "plugins/agent-vault/src/agent_vault/credential_reads.py"
+    tree = ast.parse(source.read_bytes(), filename=str(source))
+    selected: list[ast.stmt] = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.FunctionDef) and node.name == "read_credential"
+    ]
+    assert len(selected) == 2
+    observations: list[tuple[str, dict[str, object]]] = []
+
+    def send(request: dict[str, Any], **options: object) -> dict[str, Any]:
+        observations.append((request["action"], options))
+        return {"ok": True, "value": "synthetic-value"}
+
+    cli = ModuleType(f"{boundary.package}.cli")
+    cli.__dict__.update(send_command=send)
+    cache = ModuleType(f"{boundary.package}.cache")
+    cache.__dict__.update(get_cache=lambda: SimpleNamespace(enabled=False))
+    monkeypatch.setitem(sys.modules, cli.__name__, cli)
+    monkeypatch.setitem(sys.modules, cache.__name__, cache)
+    monkeypatch.setattr(sys.modules[boundary.package], "cli", cli, raising=False)
+    namespace: dict[str, Any] = {
+        "__name__": f"{boundary.package}.credential_reads",
+        "__package__": boundary.package, "os": SimpleNamespace(environ={}),
+        "config": SimpleNamespace(
+            PINNED_CONTEXT_ENV="SYNTHETIC_PIN",
+            resolve_context=lambda: SimpleNamespace(group="Example"),
+            normalize_entry=lambda entry, group: entry,
+        ),
+        "canonical_field": lambda value: value,
+        "legacy_cache_entry": lambda *_args: None,
+        "contextlib": SimpleNamespace(nullcontext=nullcontext),
+        "CredentialRead": lambda code, **values: SimpleNamespace(code=code, **values),
+    }
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
+    result = namespace["read_credential"](SimpleNamespace(
+        entry="Example/service", field="password", require_running=True,
+    ))
+    assert result.code == 0
+    assert observations == [
+        ("ping", {"timeout": 5.0, "strict_endpoint": True, "require_endpoint": True}),
+        ("get", {"timeout": None, "strict_endpoint": True, "require_endpoint": True}),
+    ]

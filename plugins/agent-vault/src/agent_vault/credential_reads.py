@@ -104,7 +104,7 @@ def read_credential(args: Any) -> CredentialRead:
     try:
         if require_running:
             running = cli.send_command(
-                {"action": "ping"}, timeout=5.0, strict_endpoint=True,
+                {"action": "ping"}, timeout=5.0, strict_endpoint=True, require_endpoint=True,
             )
             ready = (
                 isinstance(running, dict) and running.get("ok") is True
@@ -148,7 +148,7 @@ def read_credential(args: Any) -> CredentialRead:
         try:
             resp = cli.send_command(
                 request, timeout=None,
-                **({"strict_endpoint": True} if require_running else {}),
+                **({"strict_endpoint": True, "require_endpoint": True} if require_running else {}),
             )
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
             if not (strict_cache or require_running):
