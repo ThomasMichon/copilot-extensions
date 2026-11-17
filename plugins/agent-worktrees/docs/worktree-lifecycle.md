@@ -111,14 +111,22 @@ source/destination ref is attempted once within one shared fetch deadline.
 That deadline includes remote and credential lookup and is checked again
 immediately before each subprocess. The entire preparation operation, including
 base selection and anchor advancement, isolates inherited repository selectors
-to the supplied anchor.
+to the supplied anchor. Existing command-scoped credential settings survive
+that isolation, without restoring repository selectors or remote URL overrides.
+The update-auth owner may still replace them with its authorized overlay.
 Policy tracking aliases retain their configured source. Equivalent source names
-are normalized and exclusions applied before ambiguity is assessed; an already
+use Git's remote resolution order and exclusions apply to resolved names before
+ambiguity is assessed; an already
 refreshed matching base can be reused despite its ordinary fetch exclusion.
+An explicitly configured short source can require a narrow advertisement lookup
+of its possible full names, cached only for this operation within the same
+deadline. HEAD, fully qualified names and object IDs need no such lookup.
 Before a potentially shared base/policy destination is written, conflicting
-configured sources are detected. Conflicting or unavailable preflight mappings
-leave refs and the anchor untouched and report a last-known fallback rather than
-overwriting authoritative policy.
+remote/source identities are detected using actual destination refs, including
+overlapping remote names. Conflicting or unavailable preflight mappings leave
+refs and the anchor untouched. Creation then selects a verified local default
+branch or refuses if none exists; it never selects the unusable tracking ref,
+an unrelated HEAD or a tag instead.
 A missing base or policy branch does not prevent refreshing surviving refs;
 failures and unavailable policy reads still report degraded freshness. A
 policy-only failure reports a refreshed base rather than calling it last-known.

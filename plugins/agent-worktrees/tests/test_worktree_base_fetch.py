@@ -677,7 +677,7 @@ def test_preparation_matches_native_remote_short_source_resolution(
     )["marker"] == "refreshed"
 
 
-@pytest.mark.parametrize("encoding", ["count", "parameters"])
+@pytest.mark.parametrize("encoding", ["count", "parameters", "parameter-pairs"])
 def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
     local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, encoding: str,
 ) -> None:
@@ -688,7 +688,11 @@ def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
     new_base = _commit(seed, "new-base.txt")
     _git("push", "origin", "trunk", cwd=seed)
     opaque = "X-Fixture-Auth: opaque space=one 'two' \\three"
-    settings = [("http.extraHeader", opaque), ("core.worktree", str(foreign))]
+    first = "X-Fixture-First: previous"
+    settings = [
+        ("http.extraHeader", first), ("core.worktree", str(foreign)),
+        ("http.extraHeader", opaque),
+    ]
     if encoding == "count":
         monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(settings)))
         for index, (key, value) in enumerate(settings):
@@ -698,17 +702,19 @@ def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
         def quote(value: str) -> str:
             return "'" + value.replace("'", "'\\''") + "'"
 
-        monkeypatch.setenv(
-            "GIT_CONFIG_PARAMETERS", " ".join(quote(f"{key}={value}") for key, value in settings),
+        parameters = " ".join(
+            quote(f"{key}={value}") if encoding == "parameters" else f"{quote(key)}={quote(value)}"
+            for key, value in settings
         )
+        monkeypatch.setenv("GIT_CONFIG_PARAMETERS", parameters)
     original_run = subprocess.run
     fixture = original_run(
-        ["git", "config", "--get", "http.extraHeader"], cwd=anchor,
+        ["git", "config", "--get-all", "http.extraHeader"], cwd=anchor,
         env=dict(os.environ), capture_output=True, text=True, timeout=10,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert fixture.returncode == 0
-    assert fixture.stdout.rstrip("\n") == opaque
+    assert fixture.stdout.rstrip("\n") == f"{first}\n{opaque}"
     observed: list[tuple[int, bool, int]] = []
 
     def checked_run(*args: Any, **kwargs: Any) -> Any:
@@ -716,14 +722,14 @@ def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
         if isinstance(command, list) and "fetch" in command:
             def probe(key: str) -> subprocess.CompletedProcess[str]:
                 return original_run(
-                    [command[0], "config", "--get", key], cwd=kwargs["cwd"],
+                    [command[0], "config", "--get-all", key], cwd=kwargs["cwd"],
                     env=kwargs["env"], capture_output=True, text=True, timeout=10,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
 
             credential = probe("http.extraHeader")
             observed.append((
-                credential.returncode, credential.stdout.rstrip("\n") == opaque,
+                credential.returncode, credential.stdout.rstrip("\n") == f"{first}\n{opaque}",
                 probe("core.worktree").returncode,
             ))
         return original_run(*args, **kwargs)
