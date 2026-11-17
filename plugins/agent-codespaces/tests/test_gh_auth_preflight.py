@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from dropin_registry import ScanAuthority, ScanSnapshot
+
+from credential_relay.sources.git_credential import GitCredentialSource
 
 from agent_codespaces import __main__ as m
 from agent_codespaces.auth_preflight import GithubCredentialPreflight
@@ -48,13 +52,13 @@ def _clean_provider_reports() -> ConfigProviderReports:
     )
 
 
-def test_parse_gh_account_scopes():
+def test_parse_gh_account_scopes() -> None:
     parsed = m._parse_gh_account_scopes(_STATUS)
     assert "codespace" in parsed["alice"]
     assert "codespace" not in parsed["bob"]
 
 
-def test_preflight_flags_mapped_account_missing_codespace_scope():
+def test_preflight_flags_mapped_account_missing_codespace_scope() -> None:
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
                return_value=(("alice", "bob"), False)):
@@ -66,7 +70,7 @@ def test_preflight_flags_mapped_account_missing_codespace_scope():
     assert "alice" not in joined
 
 
-def test_preflight_flags_missing_mapped_account():
+def test_preflight_flags_missing_mapped_account() -> None:
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
                return_value=(("ghost",), False)), \
@@ -77,7 +81,7 @@ def test_preflight_flags_missing_mapped_account():
     assert any("ghost" in msg and "not logged in" in msg for msg in msgs)
 
 
-def test_preflight_ignores_accounts_bound_only_to_deleted_codespaces():
+def test_preflight_ignores_accounts_bound_only_to_deleted_codespaces() -> None:
     from agent_codespaces.account_binding import AccountBinding
 
     bindings = [AccountBinding(codespace="cs-gone", account="stale", bound_at=0.0)]
@@ -90,7 +94,7 @@ def test_preflight_ignores_accounts_bound_only_to_deleted_codespaces():
     assert not any("stale" in msg for msg in msgs)
 
 
-def test_preflight_clean_when_all_scoped():
+def test_preflight_clean_when_all_scoped() -> None:
     status = _STATUS.replace(
         "  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'\n",
         "  - Token scopes: 'codespace', 'gist', 'repo'\n",
@@ -103,7 +107,7 @@ def test_preflight_clean_when_all_scoped():
     assert msgs == []
 
 
-def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
+def test_preflight_ignores_mapped_non_codespace_account_for_other_owner() -> None:
     status = """github.com
   x Logged in to github.com account alice (keyring)
   - Active account: true
@@ -131,7 +135,7 @@ def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
     assert "bob" not in joined
 
 
-def test_scope_accounts_reads_one_routing_snapshot_for_every_repo():
+def test_scope_accounts_reads_one_routing_snapshot_for_every_repo() -> None:
     from agent_codespaces.auth_preflight import codespace_scope_accounts
 
     repos = {f"example-org/repo-{index}": object() for index in range(6)}
@@ -150,7 +154,7 @@ def test_scope_accounts_reads_one_routing_snapshot_for_every_repo():
     listing.assert_called_once_with(concurrent=True)
 
 
-def test_preflight_checks_active_account_when_no_codespace_accounts():
+def test_preflight_checks_active_account_when_no_codespace_accounts() -> None:
     status = """github.com
   x Logged in to github.com account alice (keyring)
   - Active account: true
@@ -172,7 +176,7 @@ def test_preflight_checks_active_account_when_no_codespace_accounts():
     assert "bob" not in joined
 
 
-def test_preflight_checks_active_account_when_config_mix_includes_ambient():
+def test_preflight_checks_active_account_when_config_mix_includes_ambient() -> None:
     status = """github.com
   x Logged in to github.com account alice (keyring)
   - Active account: true
@@ -194,7 +198,9 @@ def test_preflight_checks_active_account_when_config_mix_includes_ambient():
     assert "bob" not in joined
 
 
-def test_credential_account_for_ambient_codespace_uses_active_gh_account(monkeypatch):
+def test_credential_account_for_ambient_codespace_uses_active_gh_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
@@ -209,13 +215,15 @@ def test_credential_account_for_ambient_codespace_uses_active_gh_account(monkeyp
     assert gh_account.credential_account_for_codespace("ambient-cs") == "active-user"
 
 
-def test_credential_account_never_guesses_when_the_binding_is_unreadable(monkeypatch):
+def test_credential_account_never_guesses_when_the_binding_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_codespaces import account_binding, gh_account
 
-    def contended(_name):
+    def contended(_name: str) -> NoReturn:
         raise RuntimeError("Could not acquire account binding lock (held by another process)")
 
-    def must_not_call(*_a, **_kw):
+    def must_not_call(*_a: object, **_kw: object) -> NoReturn:
         raise AssertionError("must not fall back to the resolver or ambient account")
 
     monkeypatch.setattr(account_binding, "bound_account_or_raise", contended)
@@ -224,10 +232,10 @@ def test_credential_account_never_guesses_when_the_binding_is_unreadable(monkeyp
     assert gh_account.credential_account_for_codespace("cs-a") is None
 
 
-def test_credential_account_prefers_the_binding(monkeypatch):
+def test_credential_account_prefers_the_binding(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_codespaces import gh_account
 
-    def must_not_call(*_a, **_kw):
+    def must_not_call(*_a: object, **_kw: object) -> NoReturn:
         raise AssertionError("must not probe when a binding exists")
 
     monkeypatch.setattr(
@@ -238,7 +246,7 @@ def test_credential_account_prefers_the_binding(monkeypatch):
     assert gh_account.credential_account_for_codespace("cs-1") == "bound-user"
 
 
-def test_active_account_reads_gh_json(monkeypatch):
+def test_active_account_reads_gh_json(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_codespaces import gh_account
 
     payload = json.dumps({
@@ -253,7 +261,7 @@ def test_active_account_reads_gh_json(monkeypatch):
     assert "--active" in run.call_args.args[0]
 
 
-def test_active_account_survives_a_failed_api_check(monkeypatch):
+def test_active_account_survives_a_failed_api_check(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_codespaces import gh_account
 
     for state in ("timeout", "error"):
@@ -264,7 +272,7 @@ def test_active_account_survives_a_failed_api_check(monkeypatch):
             assert gh_account.active_account() == "active-user"
 
 
-def test_preflight_ignores_an_unrelated_account_that_failed_to_log_in():
+def test_preflight_ignores_an_unrelated_account_that_failed_to_log_in() -> None:
     status = _STATUS + """
   X Failed to log in to github.com account carol (keyring)
   - The token in keyring is invalid.
@@ -276,7 +284,7 @@ def test_preflight_ignores_an_unrelated_account_that_failed_to_log_in():
         assert m._gh_auth_preflight() == []
 
 
-def test_preflight_reports_a_codespace_account_that_failed_to_log_in():
+def test_preflight_reports_a_codespace_account_that_failed_to_log_in() -> None:
     status = _STATUS + """
   X Failed to log in to github.com account carol (keyring)
   - The token in keyring is invalid.
@@ -291,14 +299,14 @@ def test_preflight_reports_a_codespace_account_that_failed_to_log_in():
     assert any("carol" in msg and "not logged in" in msg for msg in msgs)
 
 
-def test_preflight_unauthenticated_when_no_account_parses():
+def test_preflight_unauthenticated_when_no_account_parses() -> None:
     with patch("subprocess.run") as run:
         run.return_value = MagicMock(returncode=1, stdout="",
                                      stderr="You are not logged into any GitHub hosts.")
         assert m._gh_auth_preflight() == ["gh is not authenticated -- run: gh auth login"]
 
 
-def test_preflight_reports_a_status_timeout_as_a_timeout_not_a_missing_scope():
+def test_preflight_reports_a_status_timeout_as_a_timeout_not_a_missing_scope() -> None:
     status = _STATUS + """
   X Timeout trying to log in to github.com account carol (keyring)
 """
@@ -311,7 +319,7 @@ def test_preflight_reports_a_status_timeout_as_a_timeout_not_a_missing_scope():
     assert "scope" not in msgs[0]
 
 
-def test_a_failed_active_account_is_reported_as_not_logged_in():
+def test_a_failed_active_account_is_reported_as_not_logged_in() -> None:
     status = _STATUS.replace("x Logged in to github.com account alice", "X Failed to log in to github.com account alice")
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts", return_value=((), False)), \
@@ -322,10 +330,12 @@ def test_a_failed_active_account_is_reported_as_not_logged_in():
     assert msgs == ["active gh account 'alice' is not logged in -- run: gh auth login"]
 
 
-def test_fast_credential_account_never_guesses_when_the_binding_is_unreadable(monkeypatch):
+def test_fast_credential_account_never_guesses_when_the_binding_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_codespaces import account_binding, gh_account
 
-    def contended(_name, **_kw):
+    def contended(_name: str, **_kw: object) -> NoReturn:
         raise RuntimeError("Could not acquire account binding lock (held by another process)")
 
     monkeypatch.setattr(account_binding, "bound_account_or_raise", contended)
@@ -334,7 +344,7 @@ def test_fast_credential_account_never_guesses_when_the_binding_is_unreadable(mo
     assert gh_account.fast_credential_account_for_codespace("cs-a") is None
 
 
-def test_github_credential_preflight_honors_its_timeout():
+def test_github_credential_preflight_honors_its_timeout() -> None:
     import asyncio
     import time
 
@@ -343,17 +353,20 @@ def test_github_credential_preflight_honors_its_timeout():
     class Hung:
         name = "git-credential"
 
-        async def resolve(self, *_a, **_k):
+        async def resolve(self, *_a: object, **_k: object) -> None:
             await asyncio.sleep(30)
 
     started = time.monotonic()
     result = asyncio.run(github_credential_preflight(
-        "alice", git_source=Hung(), gcm_accounts=[], timeout=0.3))
+        "alice", git_source=cast(GitCredentialSource, Hung()), gcm_accounts=[],
+        timeout=0.3))
     assert not result.ok
     assert time.monotonic() - started < 5
 
 
-def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
+def test_fast_credential_account_uses_binding_without_active_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
@@ -369,7 +382,9 @@ def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
     assert gh_account.fast_credential_account_for_codespace("cs-1") == "bound-user"
 
 
-def test_fast_credential_account_bounds_the_binding_lock_wait(monkeypatch, tmp_path):
+def test_fast_credential_account_bounds_the_binding_lock_wait(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import time
 
     from agent_codespaces import account_binding, gh_account
@@ -384,7 +399,7 @@ def test_fast_credential_account_bounds_the_binding_lock_wait(monkeypatch, tmp_p
     assert lock.exists()  # a short deadline never steals a live holder's lock
 
 
-def test_fast_credential_account_falls_back_to_active(monkeypatch):
+def test_fast_credential_account_falls_back_to_active(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     from agent_codespaces import gh_account
@@ -400,14 +415,16 @@ def test_fast_credential_account_falls_back_to_active(monkeypatch):
     assert gh_account.fast_credential_account_for_codespace("cs-1") == "active-user"
 
 
-def test_fast_credential_account_binds_an_unbound_mapped_owner(monkeypatch):
+def test_fast_credential_account_binds_an_unbound_mapped_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Recovery reaches relay-launch-env without the readiness step that writes
     the binding: a missing binding must not be read as ambient ownership."""
     from types import SimpleNamespace
 
     from agent_codespaces import account_binding, gh_account
 
-    bound = []
+    bound: list[tuple[object, ...]] = []
     monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name, **_kw: None)
     monkeypatch.setattr(account_binding, "bind", lambda *a: bound.append(a))
     monkeypatch.setattr("agent_codespaces.lifecycle.list_codespaces",
@@ -419,13 +436,15 @@ def test_fast_credential_account_binds_an_unbound_mapped_owner(monkeypatch):
 
 
 @pytest.mark.parametrize("listing", ["missing", "error", "slow"])
-def test_fast_credential_account_never_guesses_an_unresolved_owner(monkeypatch, listing):
+def test_fast_credential_account_never_guesses_an_unresolved_owner(
+    monkeypatch: pytest.MonkeyPatch, listing: str,
+) -> None:
     import time as _time
     from types import SimpleNamespace
 
     from agent_codespaces import account_binding, gh_account
 
-    def list_codespaces():
+    def list_codespaces() -> list[SimpleNamespace]:
         if listing == "error":
             raise RuntimeError("gh unavailable")
         if listing == "slow":
@@ -441,14 +460,14 @@ def test_fast_credential_account_never_guesses_an_unresolved_owner(monkeypatch, 
 
 # --- _ambient_codespace_scope (focused ambient gate check, #980) ---------
 
-def test_ambient_scope_ok_when_present():
+def test_ambient_scope_ok_when_present() -> None:
     with patch("subprocess.run") as run:
         run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
         ok, remedy = m._ambient_codespace_scope()
     assert ok is True and remedy == ""
 
 
-def test_ambient_scope_missing_when_absent():
+def test_ambient_scope_missing_when_absent() -> None:
     status = _STATUS.replace("'codespace', ", "")  # strip the scope everywhere
     with patch("subprocess.run") as run:
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
@@ -456,14 +475,14 @@ def test_ambient_scope_missing_when_absent():
     assert ok is False and "gh auth refresh" in remedy
 
 
-def test_ambient_scope_unauthenticated():
+def test_ambient_scope_unauthenticated() -> None:
     with patch("subprocess.run") as run:
         run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
         ok, remedy = m._ambient_codespace_scope()
     assert ok is False and "gh auth login" in remedy
 
 
-def test_ambient_scope_degrades_to_ok_when_gh_unrunnable():
+def test_ambient_scope_degrades_to_ok_when_gh_unrunnable() -> None:
     """A gh that can't be run (FileNotFound/timeout) must NOT block an op."""
     with patch("subprocess.run", side_effect=FileNotFoundError()):
         ok, remedy = m._ambient_codespace_scope()
@@ -472,12 +491,12 @@ def test_ambient_scope_degrades_to_ok_when_gh_unrunnable():
 
 # --- _require_codespace_scope gate + doctor (#980) ------------------------
 
-def test_require_scope_proceeds_when_ok():
+def test_require_scope_proceeds_when_ok() -> None:
     with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")):
         assert m._require_codespace_scope("create") is None
 
 
-def test_require_scope_blocks_when_missing(capsys):
+def test_require_scope_blocks_when_missing(capsys: pytest.CaptureFixture[str]) -> None:
     with patch.object(m, "_ambient_codespace_scope",
                       return_value=(False, "run: gh auth refresh -s codespace")):
         rc = m._require_codespace_scope("create a CodeSpace")
@@ -486,17 +505,19 @@ def test_require_scope_blocks_when_missing(capsys):
     assert "Refusing to create a CodeSpace" in err and "gh auth refresh" in err
 
 
-def test_require_scope_escape_hatch(monkeypatch):
+def test_require_scope_escape_hatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", "1")
     with patch.object(m, "_ambient_codespace_scope", return_value=(False, "x")):
         assert m._require_codespace_scope("create") is None
 
 
-def test_selected_scope_does_not_check_unrelated_saved_accounts(monkeypatch):
+def test_selected_scope_does_not_check_unrelated_saved_accounts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", raising=False)
     environment = {"GH_TOKEN": "selected-fixture-token"}
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> MagicMock:
         assert kwargs["env"] == environment
         selected_only = "--active" in argv and argv[-2:] == ["--hostname", "github.com"]
         return MagicMock(
@@ -508,8 +529,8 @@ def test_selected_scope_does_not_check_unrelated_saved_accounts(monkeypatch):
         assert m._require_codespace_scope("create", environment=environment) is None
 
 
-def test_doctor_exit_zero_when_clean(capsys):
-    async def _ok(_account=None):
+def test_doctor_exit_zero_when_clean(capsys: pytest.CaptureFixture[str]) -> None:
+    async def _ok(_account: str | None = None) -> GithubCredentialPreflight:
         return GithubCredentialPreflight(ok=True, source="git-credential")
 
     with patch.object(m, "_gh_auth_preflight", return_value=[]), \
@@ -523,8 +544,8 @@ def test_doctor_exit_zero_when_clean(capsys):
     assert "[OK]" in capsys.readouterr().out
 
 
-def test_doctor_exit_nonzero_on_issues(capsys):
-    async def _ok(_account=None):
+def test_doctor_exit_nonzero_on_issues(capsys: pytest.CaptureFixture[str]) -> None:
+    async def _ok(_account: str | None = None) -> GithubCredentialPreflight:
         return GithubCredentialPreflight(ok=True, source="git-credential")
 
     with patch.object(
@@ -540,8 +561,8 @@ def test_doctor_exit_nonzero_on_issues(capsys):
     assert "codespace" in capsys.readouterr().err
 
 
-def test_doctor_reports_github_credential_issue(capsys):
-    async def _fail(_account=None):
+def test_doctor_reports_github_credential_issue(capsys: pytest.CaptureFixture[str]) -> None:
+    async def _fail(_account: str | None = None) -> GithubCredentialPreflight:
         return GithubCredentialPreflight(
             ok=False,
             reason_code="github-credential-unavailable",
@@ -562,10 +583,12 @@ def test_doctor_reports_github_credential_issue(capsys):
     assert "sign in" in err
 
 
-def test_doctor_checks_every_serving_account_not_only_the_active_one(capsys):
-    seen = []
+def test_doctor_checks_every_serving_account_not_only_the_active_one(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen: list[str | None] = []
 
-    async def _per_account(account=None):
+    async def _per_account(account: str | None = None) -> GithubCredentialPreflight:
         seen.append(account)
         if account == "bob":
             return GithubCredentialPreflight(
@@ -585,10 +608,12 @@ def test_doctor_checks_every_serving_account_not_only_the_active_one(capsys):
     assert "no GCM entry for bob" in capsys.readouterr().err
 
 
-def test_doctor_adds_the_active_account_when_ambient_ownership_is_in_use(capsys):
-    seen = []
+def test_doctor_adds_the_active_account_when_ambient_ownership_is_in_use(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen: list[str | None] = []
 
-    async def _ok(account=None):
+    async def _ok(account: str | None = None) -> GithubCredentialPreflight:
         seen.append(account)
         return GithubCredentialPreflight(ok=True, source="git-credential", account=account)
 
@@ -604,7 +629,7 @@ def test_doctor_adds_the_active_account_when_ambient_ownership_is_in_use(capsys)
     assert "for 'bob'" in out and "for 'alice'" in out
 
 
-def test_serving_accounts_skip_bindings_for_deleted_codespaces():
+def test_serving_accounts_skip_bindings_for_deleted_codespaces() -> None:
     from agent_codespaces import auth_preflight as ap
     from agent_codespaces.account_binding import AccountBinding
 
@@ -626,7 +651,7 @@ def test_serving_accounts_skip_bindings_for_deleted_codespaces():
         assert ap.codespace_scope_accounts(live_only=True) == (("alice", "stale"), False)
 
 
-def test_serving_accounts_include_ambient_and_mapped_owners_of_live_codespaces():
+def test_serving_accounts_include_ambient_and_mapped_owners_of_live_codespaces() -> None:
     from agent_codespaces import auth_preflight as ap
     from agent_codespaces.account_binding import AccountBinding
 
@@ -641,7 +666,7 @@ def test_serving_accounts_include_ambient_and_mapped_owners_of_live_codespaces()
         assert ap.codespace_scope_accounts(live_only=True) == (("alice", "carol"), True)
 
 
-def test_serving_accounts_include_mapped_owners_with_nothing_bound_or_configured():
+def test_serving_accounts_include_mapped_owners_with_nothing_bound_or_configured() -> None:
     from agent_codespaces import auth_preflight as ap
 
     live = [SimpleNamespace(name="cs-mapped", account="carol")]
