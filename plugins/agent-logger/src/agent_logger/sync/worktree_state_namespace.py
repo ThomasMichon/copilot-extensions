@@ -165,7 +165,10 @@ def _reservation(
             # publication legs never remove that structural ancestor.
             if not final_claim and stable is not None and parent / name in stable.parents:
                 continue
-            stack.enter_context(publication_directory(parent / name))
+            stack.enter_context(publication_directory(
+                parent / name, durable=final_claim, private=final_claim and os.name == "nt",
+                durable_root=root,
+            ))
             stack.enter_context(_domain_lock(parent / name))
             if not final_claim and _marked(parent, name):
                 yield False
@@ -181,19 +184,19 @@ def ordinary_publication(root: Path, machine: str) -> Iterator[Path | None]:
 
 
 def _claim_namespace(root: Path) -> None:
-    with publication_directory(root / DIRECTORY) as directory:
+    with publication_directory(
+        root / DIRECTORY, durable=True, private=os.name == "nt", durable_root=root,
+    ) as directory:
         if _matches(directory):
             return
         if set(directory.names()) - {_GUARD}:
             raise ValueError("typed collection namespace contains unowned or partial evidence")
-        if directory.fd is None:
-            raise OSError("typed collection namespace requires native directory barriers")
         try:
             with directory.create(_MARKER, mode=0o600) as stream:
                 stream.write(_CONTENT)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.fsync(directory.fd)
+            directory.sync()
         except FileExistsError:
             if not _matches(directory):
                 raise ValueError("concurrent typed collection namespace is incomplete")
@@ -201,6 +204,9 @@ def _claim_namespace(root: Path) -> None:
 
 def claim_namespace(root: Path) -> None:
     root = root.expanduser().absolute()
+    if os.name == "nt":
+        with publication_directory(root, durable=True, durable_root=root):
+            pass
     with _reservation(root / DIRECTORY, root=root, claiming=True) as allowed:
         if not allowed:
             raise ValueError("collection root overlaps an owned or partial typed-state namespace")

@@ -6,6 +6,8 @@ import time
 import asyncio
 import json
 import sqlite3
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -31,7 +33,9 @@ def _mk(db: Database, sid: str, status: str, updated_at: float) -> None:
 class TestDbGcPrimitives:
     @pytest.mark.parametrize("query", ["retained", "eligible"])
     @pytest.mark.parametrize("pending", [False, True])
-    def test_retention_query_work_scales_with_history(self, tmp_db, query, pending):
+    def test_retention_query_work_scales_with_history(
+        self, tmp_db: Database, query: str, pending: bool,
+    ) -> None:
         from agent_bridge.acquisition_store import AcquisitionStore
 
         AcquisitionStore(tmp_db)
@@ -73,7 +77,7 @@ class TestDbGcPrimitives:
                 )
             work = 0
 
-            def progress():
+            def progress() -> int:
                 nonlocal work
                 work += 1
                 return 0
@@ -96,7 +100,9 @@ class TestDbGcPrimitives:
         assert counts[1] < 6 * max(counts[0], 1), counts
 
     @pytest.mark.parametrize("state", ["preparing", "unknown"])
-    def test_successor_recovery_journal_retains_original_handle(self, tmp_db, tmp_path, state):
+    def test_successor_recovery_journal_retains_original_handle(
+        self, tmp_db: Database, tmp_path: Path, state: str,
+    ) -> None:
         from agent_bridge import creation_writer_schema
         from agent_bridge.creation_worktree_writer import JOURNAL_KEY
         from agent_bridge.transport import SpawnTarget
@@ -147,8 +153,8 @@ class TestDbGcPrimitives:
         "preparing", "invoking", "unknown", "complete", "not-started", "malformed", "gate-only",
     ])
     def test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc(
-        self, tmp_db, status, state,
-    ):
+        self, tmp_db: Database, status: str, state: str,
+    ) -> None:
         from agent_bridge.models import RetainedRecoveryRequest
         from agent_bridge.runtime_custody import RuntimeCustodyError
 
@@ -198,7 +204,9 @@ class TestDbGcPrimitives:
     @pytest.mark.parametrize("malformed", [
         "missing-request", "extra-field", "invalid-request", "different-operation",
     ])
-    def test_malformed_terminal_recovery_retains_original_and_successor(self, tmp_db, state, malformed):
+    def test_malformed_terminal_recovery_retains_original_and_successor(
+        self, tmp_db: Database, state: str, malformed: str,
+    ) -> None:
         from agent_bridge.acquisition_contract import AcquisitionRefused
         from agent_bridge.creation_worktree_writer import JOURNAL_KEY
         from agent_bridge.models import RetainedRecoveryRequest
@@ -210,7 +218,7 @@ class TestDbGcPrimitives:
             operation_id="original", journal_key=key, native_session_id="original-native",
             head_revision=1, bridge_installation="fixture-installation",
         ).model_dump()
-        operation = {"request": request, "state": state}
+        operation: dict[str, Any] = {"request": request, "state": state}
         if malformed == "missing-request":
             del operation["request"]
         elif malformed == "extra-field":
@@ -240,7 +248,9 @@ class TestDbGcPrimitives:
             with pytest.raises(sqlite3.IntegrityError, match="retained"):
                 tmp_db.execute_write("DELETE FROM sessions WHERE id=?", (sid,))
 
-    def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(self, tmp_db):
+    def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(
+        self, tmp_db: Database,
+    ) -> None:
         from agent_bridge import creation_writer_schema
         from agent_bridge.db_core import SCHEMA_VERSION
 
@@ -253,8 +263,10 @@ class TestDbGcPrimitives:
                 )
             }
             for name in creation_writer_schema.TRIGGERS:
-                if name.startswith("creation_recovery_"):
+                if name.startswith(("creation_recovery_", "metadata_")):
                     conn.execute(f"DROP TRIGGER {name}")
+            conn.execute(f"DROP INDEX {creation_writer_schema.ADOPTION_INDEX}")
+            conn.execute("ALTER TABLE workspace_embodiments DROP COLUMN creation_adoption_json")
             conn.execute("ALTER TABLE workspace_embodiments DROP COLUMN creation_recoveries_json")
             conn.execute("UPDATE schema_version SET version=44")
             from legacy_inbox_schema import restore_prior_inbox_guards

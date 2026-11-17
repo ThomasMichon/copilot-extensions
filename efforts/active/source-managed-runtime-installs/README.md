@@ -60,6 +60,13 @@ This supersedes that earlier setup assumption, not compiler-free execution,
 process safety or package admission. #12775 owns the bounded architecture/plan
 revision; existing implementation and deployment owners retain the open work.
 
+The [repository-suite association adapter](repository-suite-association.md)
+defines the separate consuming-repository/configuration boundary before shared
+caller changes. It reuses Manager's existing configuration owner and the
+declaration reader, without absorbing ordinary update, construction, independent
+source policies or content delivery. Its receiving design is not installed
+association or convergence evidence.
+
 The [current lifetime clarification](update-service-lifetimes.md) is part of
 this Goal: ordinary updates are foreground-owned and cancellable, while accepted
 service setup/start and its retained process/runtime tree have independent
@@ -902,6 +909,9 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+- 2026-11-17: [Finite Manager-owned application consumer](journal/2026/11.17%20manager-footprint-consumer.md)
+  merged in #12930; F1-F3 and the complete Manager reference remain open.
 
 ### 2026-11-16 - Manager reference and clean-break state boundaries
 

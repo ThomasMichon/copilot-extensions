@@ -11,12 +11,19 @@ from __future__ import annotations
 import json
 import time
 from email.utils import parsedate_to_datetime
+from typing import Any
 from urllib.parse import quote
 
-from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ThreadsResult
+from ..pr_bar import Snapshot as BarSnapshot
+from ..pr_contract import (
+    Comment, CommentThread, PRDiff, PRSnapshot, RepoPolicy, Review,
+    ReviewNudgeResult, ThreadsResult,
+)
 from .base import ProviderError, PRScope, PullResult, run_cli
 from .pr_source import gitea_source, pull_payload, source_object, source_text
-from .observation_credentials import ObservationCredentialError, ObservationCredentials
+from .observation_credentials import (
+    CredentialSource, ObservationCredentialError, ObservationCredentials,
+)
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
 # resolving/attaching labels.  A label apply is a small, idempotent call against
@@ -92,9 +99,9 @@ class GiteaProvider:
         self,
         method: str,
         url: str,
-        token: str,
+        token: str | ObservationCredentials,
         *,
-        payload: dict | None = None,
+        payload: dict[str, Any] | None = None,
         preserve_line_endings: bool = False,
         read_deadline: float | None = None,
     ) -> tuple[int, str]:
@@ -112,7 +119,10 @@ class GiteaProvider:
         ]
         if payload is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-        proc = run_cli(args, **({"preserve_line_endings": True} if preserve_line_endings else {}))
+        proc = (
+            run_cli(args, preserve_line_endings=True)
+            if preserve_line_endings else run_cli(args)
+        )
         if proc.returncode != 0:
             raise ProviderError(
                 f"curl failed talking to Gitea ({url}): "
@@ -175,7 +185,7 @@ class GiteaProvider:
         url: str,
         token: str,
         *,
-        payload: dict | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> tuple[int, str]:
         """``_curl`` with bounded retry on transient failures.
         Returns ``(status, body)``; ``status == 0`` means a curl-level failure
@@ -440,13 +450,16 @@ class GiteaProvider:
         state = str(data.get("state", "")) or "open"
         if merged:
             state = "merged"
+        source = gitea_source(data)
         return PullResult(
             url=str(data.get("html_url", "")),
             number=int(data.get("number", number)),
             state=state,
             merged=merged,
             base_ref=source_text(source_object(data, "base"), "ref"),
-            **gitea_source(data),
+            head_sha=source["head_sha"],
+            head_ref=source["head_ref"],
+            head_url=source["head_url"],
         )
 
     def observe_head(
@@ -527,7 +540,7 @@ class GiteaProvider:
         the caller does NOT self-heal on uncertainty. Returns True (contained ->
         the PR's content already merged), False (still ahead), or ``None``.
         """
-        if not base or not head_sha:
+        if not base or not head_sha or not token:
             return None
         try:
             status, body = self._curl(
@@ -564,7 +577,7 @@ class GiteaProvider:
 
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
-        credential_source=None,
+        credential_source: CredentialSource | None = None,
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
 
@@ -617,54 +630,9 @@ class GiteaProvider:
     def _all_review_objs(
         self, repo: str, number: int, api_base: str, token: str
     ) -> tuple[Review, ...]:
-        """Fetch every review, paging the endpoint, as ``pr_contract.Review``s.
-
-        Gitea paginates ``/pulls/{n}/reviews`` (default ~30) in ascending id
-        order; the watcher keys off the highest review id, so a missed later
-        page would make the newest reviews invisible and hang the wait.  Pages
-        with an explicit limit until an empty (or short) page.
-        """
-        reviews: list[Review] = []
-        page = 1
-        page_size = 50
-        while True:
-            status, body = self._curl_with_retry(
-                "GET",
-                self._api(
-                    api_base,
-                    f"/repos/{repo}/pulls/{number}/reviews?limit={page_size}&page={page}",
-                ),
-                token,
-            )
-            if status != 200:
-                raise ProviderError(
-                    f"Gitea reviews lookup failed (HTTP {status}) on page {page} "
-                    f"for {repo}#{number}",
-                    transient=_is_transient(status),
-                )
-            try:
-                batch = json.loads(body)
-            except json.JSONDecodeError as exc:
-                raise ProviderError(f"Gitea returned non-JSON reviews: {exc}") from exc
-            if not isinstance(batch, list) or not batch:
-                break
-            for r in batch:
-                if not isinstance(r, dict):
-                    continue
-                reviews.append(
-                    Review(
-                        id=int(r.get("id", 0)),
-                        state=str(r.get("state", "")),
-                        user=str((r.get("user") or {}).get("login", "")),
-                        submitted_at=str(r.get("submitted_at", "")),
-                        commit_id=str(r.get("commit_id", "") or ""),
-                        dismissed=bool(r.get("dismissed", False)),
-                    )
-                )
-            if len(batch) < page_size:
-                break
-            page += 1
-        return tuple(reviews)
+        """Validate visible review pages without claiming authoritative exhaustion."""
+        from .gitea_reviews import all_reviews
+        return all_reviews(self, repo, number, api_base, token)
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
@@ -787,7 +755,7 @@ class GiteaProvider:
     def request_review(
         self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
         token: str | None = None,
-    ):
+    ) -> ReviewNudgeResult:
         """Not implemented: Gitea has no automated PR-reviewer bot to nudge today."""
         from .base import _unsupported_review_request
         _ = (repo, number, api_base, token)
@@ -845,7 +813,7 @@ class GiteaProvider:
     def get_repo_policy(
         self, repo: str, *, default_branch: str = "", api_base: str = "",
         token: str | None = None,
-    ):
+    ) -> RepoPolicy:
         """Read Gitea repo settings + the caller's own permissions into a
         ``RepoPolicy``.
 
@@ -892,7 +860,7 @@ class GiteaProvider:
         if not isinstance(data, dict):
             return RepoPolicy(supported=False, error="unexpected repo payload shape")
 
-        def _b(key):
+        def _b(key: str) -> bool | None:
             v = data.get(key)
             return bool(v) if isinstance(v, bool) else None
 
@@ -933,7 +901,9 @@ class GiteaProvider:
             viewer_permission=_gitea_viewer_permission(data.get("permissions")),
         )
 
-    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None):
+    def get_bar_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+    ) -> BarSnapshot:
         from ..pr_bar import unsupported  # no merge-bar read here yet: every clause is unknown
         return unsupported(repo, number, self.name)
 

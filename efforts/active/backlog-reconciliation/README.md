@@ -3421,6 +3421,36 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete contracts and obsolete-consumer journal](journal/2026/11.16-complete-contracts-and-obsolete-consumer.md)
+  records actual #12983 delivery, separately verified #5785 obsolete-consumer
+  retirement and sixteen complete-original decisions retaining canonical
+  acceptance and actual owner boundaries. The full 865-issue census remains
+  136 above fixed 729 after new inflow; no technical checkbox or resource
+  obligation is completed by this documentary unit.
+  The [canonical acceptance and active-owner adjudication](journal/2026/11.16-canonical-acceptance-and-active-owners.md)
+  records actual #12971 delivery and eighteen complete-original decisions:
+  actionable existing receivers, independent finite alternatives and current
+  bounded claimants remain open without repeated implementation studies or
+  keep-open comments. Actual source boundaries remain withheld. The complete
+  863-issue census has one new arrival and no departure, 134 above fixed 729;
+  no technical acceptance, owner or resource obligation is declared complete.
+  The [complete resident-readiness receiving proposal](journal/2026/11.16-resident-readiness-receiving.md)
+  directly preserves #5215's continuous configured-sink readiness/launch and
+  connectivity outcomes, actual serving responsiveness, idle/no-command
+  visibility and honest unknown/stale/dead-producer semantics for planned
+  receiving in existing #5035. Its selected native-owner and independent
+  Linux cleanup-scope lanes and #10231 claimant remain intact. Nine new
+  technical Plan/Validation rows remain unchecked; reviewed intent, actual
+  whole receiving readback and separate source judgment precede retirement.
+  The same journal records actual #12962 delivery and fifteen whole-original
+  judgments, including current bounded claims, two-set recovery acceptance,
+  retained native/prototype gates and actual source exclusions. The complete
+  861-issue census remains 132 above fixed 729, with no new closure credit.
+  Reviewed #12966 subsequently delivered this complete intent; full current
+  #5035 receiving readback preceded verified #5215 `NOT_PLANNED` retirement.
+  All sixteen incumbent/new technical rows and existing custody remain open.
+  Five further whole-original judgments and two arrivals leave the complete
+  862-issue census 133 above fixed 729: one campaign departure, not a fix.
   The [finite Linux/WSL startup receiving proposal](journal/2026/11.16-linux-startup-and-canonical-boundaries.md)
   directly preserves #4307's equivalent startup-hook diagnostic flow AND
   bounded/async hardening of blockers actually found in the existing startup

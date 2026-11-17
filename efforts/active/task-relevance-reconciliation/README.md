@@ -7,6 +7,14 @@ visions:
 
 ## Goal
 
+**Bridge target-discovery amendment:**
+
+> One thing we still clearly need to fix: agent-bridge's available bridge set needs to be a *union* of all active, registered bridge sessions from session-host or agent-bridge extension registrations, and also of all listed worktrees. Any worktree listed by agent-worktrees, should be a valid target in agent-bridge. If there isn't a DB row for a bridge, it should just be created by reading the worktree's head session to hydrate a bridge row.
+
+Include this in the [ordinary resume consumer](retained-metadata-recovery.md#next-consumer-slice-ordinary-supervised-resume).
+Target discovery does not itself authorize native execution, a prompt or task
+acceptance; preserve authoritative head, keyed lineage and history boundaries.
+
 **Retained-writer compatibility amendment:**
 
 > "exact-build" pins should only be used for kicking a contract-compatible *daemon*. If for some reason we need to pin a contract to a specific build, then that data either needs to be ephemeral, or we always need a "contract adapter" for support for newer versions to claim it. We should avoid exact-build pins whenever possible.
@@ -139,7 +147,7 @@ merged plan does not establish running adoption.
       existing build-bound records without replaying unknown operations.
       Source accepted in #12892; the distinct runtime, concurrent-adoption
       and rollback qualifications below remain open.
-      Already-missing managed metadata additionally follows the proposed
+      Already-missing managed metadata additionally follows the reviewed
       [retained metadata recovery slice](retained-metadata-recovery.md);
       preserving source cleanup is not recovery of deleted history.
 

@@ -29,7 +29,9 @@ def _refuse(message: str) -> AcquisitionRefused:
 
 def permission_held(db: Any, target: Any) -> bool:
     row = _read(db, (target.venue or {}).get(JOURNAL_KEY))
-    return row is not None and row.get("creation_recoveries_json") is not None
+    return row is not None and (
+        row.get("creation_recoveries_json") is not None or row.get("creation_adoption_json") is not None
+    )
 
 
 def _operations(row: dict[str, Any]) -> dict[str, Any]:
@@ -58,6 +60,9 @@ def inspect(manager: Any, session_id: str, operation_id: str) -> dict[str, Any]:
     operation = _operations(row).get(operation_id) if row is not None else None
     if row is None or not isinstance(operation, dict) or set(operation) != {"request", "state"}:
         raise _refuse("Original native recovery operation is unavailable; do not replay")
+    from .retained_metadata_lineage import require_operation_epoch
+
+    require_operation_epoch(row, session_id, operation_id)
     request = RetainedRecoveryRequest.model_validate(operation["request"])
     if (
         request.operation_id != operation_id or request.journal_key != row["key_digest"]
@@ -240,13 +245,22 @@ def require_resume(manager: Any, session: Any) -> None:
     row = _read(manager.db, digest)
     if row is None:
         return
+    operations = _operations(row)
     unresolved = [
-        key for key, value in _operations(row).items()
+        key for key, value in operations.items()
         if not isinstance(value, dict) or value.get("state") not in {"complete", "not-started"}
     ]
-    if not unresolved:
-        return
     owner = _current.get()
+    if not unresolved:
+        from .retained_metadata_lineage import adoption
+
+        boundary = adoption(row)
+        if boundary is not None and not any(
+            value["state"] == "complete" and key not in boundary["prior_operations"]
+            for key, value in operations.items()
+        ):
+            raise _refuse("Adopted metadata requires owner-qualified retained native recovery")
+        return
     if (
         owner is None or owner.manager is not manager or owner.session is not session
         or unresolved != [owner.request.operation_id]
@@ -279,6 +293,9 @@ async def resume(
         if scope.worktree_writer != requirement:
             raise _refuse("Recovery changed its original Worktrees writer requirement")
         previous = _operations(row)
+        from .retained_metadata_lineage import require_operation_epoch
+
+        require_operation_epoch(row, session_id, request.operation_id)
         if request.operation_id in previous:
             if previous[request.operation_id].get("request") != request.model_dump():
                 raise _refuse("Recovery operation ID conflicts with its original request")

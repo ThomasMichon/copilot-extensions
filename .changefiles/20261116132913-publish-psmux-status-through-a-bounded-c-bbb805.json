@@ -1,0 +1,25 @@
+{
+  "comment": "Publish PSMux status through a bounded Core-native socket without starting the cleanup-bearing CLI",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -52,6 +52,13 @@ library. A branch without an identity restriction permits bounded listing of
 this repository, never organization-wide discovery. Duplicate PR numbers across
 branches coalesce. Page, pull and request limits are shared across branches,
 not multiplied by their count.
+The descriptor's `acquisition` declaration exposes the shared pure admission
+planner's identity and query-cover constraints. `query_rotation: offset/v1`
+additionally permits `--query-offset <0..63>` (default zero) to rotate the
+bounded cover before reading pages. A continuing owner advances that offset
+between cycles to avoid starving later author/reviewer queries. An older
+caller retains its default ordering; a caller requiring rotation must select
+the capability before passing the new argument.
 
 * `from.users`: canonical lowercase provider `IdentityRef.id` UUIDs, not names,
   email addresses, login aliases or inferred membership.
