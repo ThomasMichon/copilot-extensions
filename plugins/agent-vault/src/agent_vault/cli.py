@@ -8,15 +8,14 @@ import os
 import subprocess
 import sys
 import time
-from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest
-from .cache_targets import command_entries, status_command as cmd_cache_status
+from .cache_targets import command_entries as command_entries, command_plan, status_command as cmd_cache_status
 from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,
@@ -28,8 +27,11 @@ from .terminal_input import (
     _has_controlling_tty as _has_controlling_tty,
     _read_password_from_tty as _read_password_from_tty,
 )
-from .transport_binding import MutationBinding, Sender
+from .transport_binding import MutationBinding
 from .winpipe import pipe_send
+
+if TYPE_CHECKING:
+    from .command_transport import CommandRoute
 
 _read_cache_manifest = read_cache_manifest
 
@@ -247,152 +249,31 @@ def send_command(
     strict_endpoint: bool = False,
     require_endpoint: bool = False,
     binding: MutationBinding | None = None,
+    _context: ResolvedVault | None = None,
+    _route: CommandRoute | None = None,
 ) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
-    if binding is not None:
-        binding.require_unselected()
-        if request.get("action") != "ping" or request.get("health_only") is not True:
-            raise ValueError("Transport binding requires a read-only health request")
-    context = config.resolve_context()
-    request = dict(request)
-
-    def _tag(result: dict[str, Any] | None, transport: str, sender: Sender) -> dict[str, Any] | None:
-        if result is not None:
-            result["_transport"] = transport
-            if binding is not None:
-                binding.select(
-                    sender, single_attempt=True,
-                    defaults={
-                        key: request[key] for key in ("kpdb", "group", "vault")
-                        if key in request
-                    },
-                )
-        return result
-
+    from .command_transport import TransportBoundary, send_command as send
     from .extensions import TransportContext, get_registry
 
-    host = os.environ.get("AGENT_VAULT_HOST", "127.0.0.1")
-    port = context.port
-
-    # Discovery-first (backwards-compatible): resolve the daemon's *actual*
-    # endpoint from the rendezvous file, falling back to today's fixed
-    # socket/port when nothing is advertised. A discovered TCP port also feeds
-    # the extension transports (e.g. the WSL->Windows interop relay), so a
-    # dynamic/discovered port is honored end to end.
-    discovery_error: RuntimeError | None = None
-    try:
-        discovered = _discover_endpoint(context, strict=strict_endpoint)
-    except (rendezvous.EndpointUnavailable, rendezvous.EndpointStateError) as error:
-        if not strict_endpoint:
-            raise
-        discovered, discovery_error = None, error
-    discovered_unix: str | None = None
-    discovered_pipe: str | None = None
-    if discovered is not None:
-        # On WSL the daemon's native primary -- a Windows named pipe, or a Unix
-        # socket that isn't this guest's -- can't be dialed. Fall to a TCP
-        # alternate the daemon also advertises so the interop relay gets a real
-        # port instead of the legacy default (#3426). ``usable`` returns the
-        # primary when it's already dialable here, else the first matching alt.
-        if IS_WSL:
-            usable = discovered.usable(lambda t: t == "tcp")
-            if usable is not None:
-                discovered = usable
-        if discovered.transport == "unix":
-            discovered_unix = discovered.address
-        elif discovered.transport == "pipe":
-            discovered_pipe = discovered.address
-        elif discovered.transport == "tcp":
-            try:
-                d_host, d_port = discovered.tcp_host_port
-                port = d_port
-                # A locally-advertised file carries the real host; the WSL
-                # Windows-side file advertises 127.0.0.1, so keep the resolved
-                # host to cross the boundary.
-                if discovered.source != "windows":
-                    host = d_host
-            except ValueError:
-                if strict_endpoint:
-                    raise
-                discovered = None
-
-    # Inject the caller's vault selection for a LOCAL daemon only. A cross-
-    # boundary daemon reached over the WSL->Windows interop (endpoint source
-    # "windows") owns its OWN kpdb/group/vault; forwarding the guest's paths --
-    # which don't exist on the host -- would make the host daemon try to open a
-    # nonexistent database ("KeePass database not found"). Let the host daemon use
-    # its own configuration. See #3426.
-    if not (discovered is not None and discovered.source == "windows"):
-        request.setdefault("kpdb", context.kpdb)
-        request.setdefault("group", context.group)
-        request.setdefault("vault", context.vault_name)
-
-    ext_ctx = TransportContext(
-        kpdb=context.kpdb,
-        group=context.group,
-        vault_name=context.vault_name,
-        port=port,
+    boundary = TransportBoundary(
+        resolve_context=config.resolve_context,
+        discover=_discover_endpoint,
+        socket_send=_send_socket,
+        tcp_send=_send_tcp,
+        pipe_send=pipe_send,
+        registry=get_registry,
+        transport_context=TransportContext,
+        is_windows=IS_WINDOWS,
+        is_wsl=IS_WSL,
+        host=os.environ.get("AGENT_VAULT_HOST", "127.0.0.1"),
+        unavailable=rendezvous.EndpointUnavailable,
+        invalid=rendezvous.EndpointStateError,
     )
-
-    # Extension transports registered before_builtin take precedence over the
-    # local daemon (e.g. an SSH-tunnel that should reach the caller's own vault).
-    result = (
-        get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
-        if binding is None else get_registry().try_transports(
-            request, timeout, ext_ctx, before_builtin=True, binding=binding,
-        )
+    return send(
+        boundary, request, timeout, strict_endpoint=strict_endpoint,
+        require_endpoint=require_endpoint, binding=binding, _context=_context, _route=_route,
     )
-    if result is not None:
-        return result
-
-    if discovery_error is not None:
-        raise discovery_error
-    if require_endpoint and discovered is None:
-        raise rendezvous.EndpointUnavailable("No selected native vault endpoint is advertised")
-
-    if strict_endpoint and discovered is not None and discovered.transport not in (
-        "tcp", "pipe" if IS_WINDOWS else "unix",
-    ):
-        return None
-
-    # Strict selection never falls back to another daemon after a failed dial.
-    if discovered_pipe is not None and IS_WINDOWS:
-        pipe_sender = partial(pipe_send, discovered_pipe)
-        result = pipe_sender(request, timeout)
-        if result is not None or strict_endpoint:
-            return _tag(result, "discovered-pipe", pipe_sender)
-
-    # A discovered Unix socket (native, possibly non-default path) is dialed
-    # ahead of the legacy fixed socket.
-    if discovered_unix is not None and not IS_WINDOWS:
-        unix_sender = partial(_send_socket, path=discovered_unix)
-        result = unix_sender(request, timeout)
-        if result is not None or strict_endpoint:
-            return _tag(result, "discovered-unix", unix_sender)
-
-    if (
-        discovered_unix is None and not IS_WINDOWS
-        and context.sources.get("port") == "default"
-        and not (strict_endpoint and discovered is not None)
-    ):
-        socket_sender = _send_socket
-        result = socket_sender(request, timeout)
-        if result is not None:
-            return _tag(result, "unix-socket", socket_sender)
-
-    tcp_connector = _send_tcp
-
-    def tcp_sender(payload: dict[str, Any], limit: float | None) -> dict[str, Any] | None:
-        return tcp_connector(payload, host, port, limit)
-
-    result = tcp_sender(request, timeout)
-    if result is not None or strict_endpoint and discovered is not None:
-        is_disc_tcp = discovered is not None and discovered.transport == "tcp"
-        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp", tcp_sender)
-
-    if binding is None:
-        return get_registry().try_transports(request, timeout, ext_ctx)
-    return get_registry().try_transports(request, timeout, ext_ctx, binding=binding)
 
 
 # ---------------------------------------------------------------------------
@@ -1329,14 +1210,19 @@ def cmd_cache_populate(args: Any) -> int:
     ``--manifest`` file, declared targets, and registered cache-source extensions.
     Each entry is fetched so the daemon caches it (and missing entries surface early).
     """
-    pairs = command_entries(args)
-    if pairs is None:
+    plan = command_plan(args)
+    if plan is None:
         return 1
+    pairs = plan.entries
     if not pairs:
         print("No entries to cache (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
+    if plan.service_owned:
+        from .cache_maintenance_client import command
+
+        return command(args, pairs, "populate")
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1444,14 +1330,19 @@ def cmd_cache_verify(args: Any) -> int:
     from .cache import get_cache
     from .credential_fields import attribute_name
 
-    pairs = command_entries(args)
-    if pairs is None:
+    plan = command_plan(args)
+    if plan is None:
         return 1
+    pairs = plan.entries
     if not pairs:
         print("No entries to verify (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
+    if plan.service_owned:
+        from .cache_maintenance_client import command
+
+        return command(args, pairs, "verify")
     cache = get_cache()
     present = 0
     missing: list[str] = []

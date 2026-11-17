@@ -6,7 +6,6 @@ import ast
 import base64
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
-from functools import partial
 import importlib.util
 import os
 from pathlib import Path
@@ -644,6 +643,13 @@ def routed_owner(
     extensions = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, extensions)
     spec.loader.exec_module(extensions)
+    spec = importlib.util.spec_from_file_location(
+        owner.package + ".command_transport", SOURCE / "command_transport.py"
+    )
+    assert spec is not None and spec.loader is not None
+    transport = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, transport)
+    spec.loader.exec_module(transport)
     registry = extensions.ExtensionRegistry()
     registry._loaded = True
     extensions.__dict__["_REGISTRY"] = registry
@@ -685,9 +691,10 @@ def routed_owner(
     namespace: dict[str, Any] = {
         "__name__": owner.package + ".cli", "__package__": owner.package,
         "config": config, "os": SimpleNamespace(environ={}),
-        "IS_WSL": False, "IS_WINDOWS": False, "partial": partial,
+        "IS_WSL": False, "IS_WINDOWS": False,
         "_discover_endpoint": discover, "_send_tcp": native,
         "_send_socket": lambda *_a, **_kw: pytest.fail("unexpected socket fallback"),
+        "pipe_send": lambda *_a, **_kw: pytest.fail("unexpected pipe fallback"),
         "rendezvous": SimpleNamespace(
             EndpointUnavailable=RuntimeError, EndpointStateError=ValueError,
         ),
@@ -896,6 +903,22 @@ def test_bound_mutation_cannot_override_health_context(
     with pytest.raises(ValueError, match="cannot override"):
         binding.send_once({"action": "import-key-create-only", field: "other"}, 1.0)
     assert route.events == [("native", "ping")]
+
+
+def test_mutation_binding_refuses_a_maintenance_route_before_selection(
+    routed_owner: SimpleNamespace,
+) -> None:
+    route = routed_owner
+    binding = route.owner.binding.MutationBinding()
+    component = sys.modules[route.owner.package + ".command_transport"]
+    with pytest.raises(ValueError, match="cannot share a maintenance route"):
+        route.owner.cli.send_command(
+            {"action": "ping", "health_only": True},
+            binding=binding, _route=component.CommandRoute(),
+        )
+    assert route.events == []
+    assert route.state.discovery_calls == 0
+    binding.require_unselected()
 
 
 @pytest.mark.parametrize("group,entry,expected", [

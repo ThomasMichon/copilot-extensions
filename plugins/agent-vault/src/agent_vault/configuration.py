@@ -11,12 +11,12 @@ from configuration_context import context_from_owner, delivered_context, read_ow
 from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch
-from .invocation import CACHE_TARGET_FIELDS
+from .invocation import CACHE_MAINTENANCE_FIELD, CACHE_TARGET_FIELDS
 
 if TYPE_CHECKING:
     from configuration_layers import Composition
 
-FIELDS = {"vault", "group", "enabled", *CACHE_TARGET_FIELDS}
+FIELDS = {"vault", "group", "enabled", CACHE_MAINTENANCE_FIELD, *CACHE_TARGET_FIELDS}
 
 
 def service_configuration_root(cwd: str | None = None) -> str:

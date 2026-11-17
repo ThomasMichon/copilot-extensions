@@ -182,6 +182,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, en
         "credential-read-require-running-v1",
         "repository-cache-targets-v1",
         *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+        "service-cache-maintenance-v1",
     ]
     assert not (runtime / "run").exists()
 
@@ -393,6 +394,7 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
             "preserved-cache-recovery-v1", "credential-read-require-running-v1",
             "repository-cache-targets-v1",
             *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            "service-cache-maintenance-v1",
         ]
     if not prepared and dispatcher_aware and operation == "contract":
         assert json.loads(result.stdout)["runtime_prepared"] is False
