@@ -75,6 +75,8 @@ the existing continuing envelope adopts `repository_activity_version:1` in
 place. That selected projection retains these fields and stable candidate/
 conflict causes; legacy facts remain unknown. The cache-only service/client
 query uses the existing attention owner, without protected workspace readers.
+Minimal fingerprints distinguish an actually observed pre-candidate review set
+from an unqualified differing head or newly visible record in a non-atomic snapshot.
 Real-provider coverage and streaming remain separate qualification.
 
 ## Storage and backend identity

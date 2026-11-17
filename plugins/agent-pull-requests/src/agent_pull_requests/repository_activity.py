@@ -3,9 +3,49 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
+
+_VERDICTS = frozenset(("APPROVED", "COMMENT", "COMMENTED", "REQUEST_CHANGES", "CHANGES_REQUESTED"))
+_OID = re.compile(r"[a-f0-9]{40}(?:[a-f0-9]{24})?")
+
+
+@dataclass(frozen=True)
+class ReviewEvidence:
+    submitted_at: float
+    review_id: int
+    signature: str
+
+
+def review_evidence(row: dict[str, Any], observed_at: int) -> ReviewEvidence | None:
+    """Bind actual submitted metadata, not request/draft or inferred head ordering."""
+    if (
+        row.get("state") not in _VERDICTS or row.get("dismissed") is not False
+        or type(row.get("id")) is not int or row["id"] < 1
+        or not isinstance(row.get("user"), str) or not row["user"].strip()
+        or not isinstance(row.get("commit_id"), str) or not _OID.fullmatch(row["commit_id"])
+        or not isinstance(row.get("submitted_at"), str)
+    ):
+        return None
+    try:
+        submitted = datetime.fromisoformat(row["submitted_at"].replace("Z", "+00:00"))
+        timestamp = submitted.timestamp()
+        if submitted.tzinfo is None or not 0 <= timestamp <= observed_at:
+            return None
+    except (ValueError, TypeError, OSError, OverflowError):
+        return None
+    selected = {name: row[name] for name in (
+        "id", "state", "user", "commit_id", "dismissed", "submitted_at",
+    )}
+    signature = hashlib.sha256(json.dumps(
+        selected, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()).hexdigest()
+    return ReviewEvidence(timestamp, row["id"], signature)
 
 
 def extend_facts(value: dict[str, Any]) -> None:
@@ -58,8 +98,19 @@ def validate(value: object, observed_at: int | None) -> None:
     """Validate stable source-observation causes without requiring retained event bodies."""
     if value is None:
         return
-    if not isinstance(value, dict) or set(value) != {"candidate", "conflict"}:
+    if not isinstance(value, dict) or set(value) != {
+        "candidate", "conflict", "observed_reviews", "candidate_reviews",
+    }:
         raise ValueError("invalid repository activity")
+    for name in ("observed_reviews", "candidate_reviews"):
+        reviews = value[name]
+        if not isinstance(reviews, list) or len(reviews) > 1000 or any(
+            not isinstance(item, str) or re.fullmatch(r"[a-f0-9]{64}", item) is None
+            for item in reviews
+        ) or len(set(reviews)) != len(reviews):
+            raise ValueError("invalid observed review evidence")
+    if not set(value["candidate_reviews"]) <= set(value["observed_reviews"]):
+        raise ValueError("candidate review basis was not previously observed")
     for name in ("candidate", "conflict"):
         cause = value[name]
         if cause is None and name == "conflict":
@@ -81,10 +132,23 @@ def advance(
     candidate_changed = previous is None or any(
         previous[name] != facts[name] for name in ("head_sha", "base_sha")
     )
+    observed_reviews = set(activity["observed_reviews"]) if activity is not None else set()
     if activity is None or candidate_changed:
         if event_id is None:
             raise ValueError("candidate cause requires its atomic publication event")
-        activity = {"candidate": {"event_id": event_id, "since": observed_at}, "conflict": None}
+        activity = {
+            "candidate": {"event_id": event_id, "since": observed_at}, "conflict": None,
+            "observed_reviews": sorted(observed_reviews),
+            "candidate_reviews": sorted(observed_reviews),
+        }
+    if facts["reviews_complete"] is True:
+        qualified = [(row, evidence) for row in facts["reviews"]
+                     if (evidence := review_evidence(row, observed_at)) is not None]
+        observed_reviews = {evidence.signature for _row, evidence in qualified}
+        activity["observed_reviews"] = sorted(observed_reviews)
+        activity["candidate_reviews"] = sorted(
+            set(activity["candidate_reviews"]) & observed_reviews,
+        )
     if facts["mergeable"] is False and activity["conflict"] is None:
         if event_id is None:
             raise ValueError("conflict cause requires its atomic publication event")

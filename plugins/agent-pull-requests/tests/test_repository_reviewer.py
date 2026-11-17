@@ -32,7 +32,10 @@ def setup(tmp_path: Path, *, activity: bool = True) -> Selection:
     return now, store, identity, projection, RepositorySubscriptions(projection)
 
 
-def observe(selected: Selection, *, number: int = 7, **changes: Any) -> None:
+def observe(
+    selected: Selection, *, number: int = 7, members: tuple[int, ...] | None = None,
+    **changes: Any,
+) -> None:
     _now, _store, identity, projection, _registry = selected
     snapshot = decode_snapshot({
         "schema": "agent-worktrees.pr-snapshot", "version": 1,
@@ -44,7 +47,9 @@ def observe(selected: Selection, *, number: int = 7, **changes: Any) -> None:
         "updated_at": "1970-01-01T00:01:00Z", **changes,
     }, identity.repo, number)
     projection.apply(
-        {identity.key: {"outcome": "complete", "numbers": [number], "pages": 1, "error": ""}},
+        {identity.key: {
+            "outcome": "complete", "numbers": list(members or (number,)), "pages": 1, "error": "",
+        }},
         {(identity.key, identity.repo, number): snapshot}, expires_at=10000,
     )
 
@@ -110,6 +115,9 @@ def test_adoption_retains_complete_envelope_and_original_unacknowledged_delivery
         old.observation_targets(expires_at=10000)
     assert store.path.read_bytes() == original
     observe(restored, reviews=[verdict()])
+    assert request(restored)["unavailable"][0]["reason"] == "review-order-unavailable"
+    observe(restored, head_sha=OLD, reviews=[verdict()])
+    observe(restored, reviews=[verdict()])
     assert request(restored)["next_actions"][0]["action"] == "new_verdict"
 
 
@@ -166,9 +174,10 @@ def test_refresh_restart_candidate_and_conflict_keep_their_actual_cause_ages(tmp
 
 @pytest.mark.parametrize(("changes", "action", "unavailable"), [
     ({}, "initial_verdict", None),
-    ({"reviews": [verdict()]}, "new_verdict", None),
+    ({"reviews": [verdict()]}, None, "review-order-unavailable"),
     ({"reviews": [verdict(user="other")]}, "initial_verdict", None),
     ({"reviews": [verdict(state="PENDING", submitted_at=None)]}, "initial_verdict", None),
+    ({"reviews": [verdict(state="REQUEST_REVIEW", commit_id="", submitted_at=None)]}, "initial_verdict", None),
     ({"reviews_complete": False}, None, "review-activity-unavailable"),
     ({"reviews_complete": None}, None, "review-activity-unavailable"),
     ({"reviews": [verdict(commit_id=HEAD)]}, None, "reviewed-base-unknown"),
@@ -194,16 +203,106 @@ def test_only_qualified_review_causes_become_actions(
     assert selected[1].path.read_bytes() == before
 
 
-def test_late_submitted_review_wins_over_draft_creation_order_and_stale_evidence_refuses(tmp_path: Path) -> None:
+def test_observed_review_set_orders_candidate_without_relying_on_creation_order(tmp_path: Path) -> None:
     selected = setup(tmp_path)
-    observe(selected, reviews=[
-        verdict(id=10, commit_id=HEAD),
+    reviews = [
+        verdict(id=10, commit_id="d" * 40),
         verdict(id=9, submitted_at="1970-01-01T00:02:00Z"),
-    ])
-    assert request(selected)["next_actions"][0]["review"]["id"] == 9
+    ]
+    observe(selected, head_sha=OLD, reviews=reviews)
+    observe(selected, reviews=reviews)
+    row = request(selected)["next_actions"][0]
+    assert row["action"] == "new_verdict" and row["review_basis"] == "observed-before-candidate"
     selected[0][0] = 3000
     result = request(selected)
     assert not result["next_actions"] and result["unavailable"][0]["reason"] == "evidence-incomplete-or-stale"
+
+
+def test_review_ahead_of_cached_head_cannot_prove_newer_author_activity(tmp_path: Path) -> None:
+    selected = setup(tmp_path)
+    observe(selected, reviews=[verdict(commit_id=OLD)])
+    result = request(selected)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-order-unavailable"}]
+
+
+def test_newly_observed_review_with_older_reported_time_cannot_hide_behind_known_feedback(
+    tmp_path: Path,
+) -> None:
+    selected = setup(tmp_path)
+    known = verdict(submitted_at="1970-01-01T00:02:00Z")
+    observe(selected, head_sha=OLD, reviews=[known])
+    observe(selected, reviews=[
+        known, verdict(id=10, commit_id="d" * 40, submitted_at="1970-01-01T00:01:00Z"),
+    ])
+    result = request(selected)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-order-unavailable"}]
+
+
+def test_observed_prior_review_basis_survives_refresh_restart_and_settled_event_retirement(
+    tmp_path: Path,
+) -> None:
+    selected = setup(tmp_path)
+    observe(selected, head_sha=OLD, reviews=[verdict()])
+    selected[0][0] = 1100
+    observe(selected, reviews=[verdict()])
+    first = request(selected)["next_actions"][0]
+    assert first["action"] == "new_verdict" and first["review"]["id"] == 9
+    selected[0][0] = 1200
+    observe(selected, reviews=[verdict()])
+    store = ReplayStore(
+        selected[1].root, "test", clock=selected[1].clock, repository_cache=True,
+        repository_continuing=True, repository_activity=True,
+    )
+    projection = RepositoryProjection(store, (selected[2],))
+    selected = (selected[0], store, selected[2], projection, RepositorySubscriptions(projection))
+
+    def retire_settled(document: dict[str, Any]) -> None:
+        assert not document["repository_cache"]["registrations"]
+        document["repository_cache"]["events"] = []
+
+    store._review_transaction(retire_settled, expires_at=10000)
+    current = request(selected)["next_actions"][0]
+    assert current["review"] == first["review"] and current["cause"] == first["cause"]
+
+
+def test_page_fence_rejects_freshness_expiry_without_an_event(tmp_path: Path) -> None:
+    selected = setup(tmp_path)
+    observe(selected, number=7, members=(7, 8))
+    selected[0][0] = 1001
+    observe(selected, number=8, members=(7, 8))
+    first = request(selected, limit=1, max_age_seconds=10)
+    assert [row["pr"] for row in first["next_actions"]] == [7] and first["more"]
+    selected[0][0] = 1010
+    with pytest.raises(ValueError, match="page changed"):
+        request(selected, after=1, limit=1, max_age_seconds=10, cursor=first["cursor"])
+    current = request(selected, limit=1, max_age_seconds=10)
+    assert current["event_cursor"] == first["event_cursor"]
+    assert [row["pr"] for row in current["next_actions"]] == [8]
+
+
+def test_page_fence_rejects_no_event_snapshot_error_and_recovery(tmp_path: Path) -> None:
+    selected = setup(tmp_path)
+    observe(selected, number=7, members=(7, 8))
+    observe(selected, number=8, members=(7, 8))
+    first = request(selected, limit=1)
+    identity, projection = selected[2], selected[3]
+    projection.apply_facts(
+        {identity.key: {"outcome": "complete", "numbers": [7, 8], "pages": 1, "error": ""}},
+        {(identity.key, identity.repo, 7): None}, expires_at=10000,
+    )
+    with pytest.raises(ValueError, match="page changed"):
+        request(selected, after=1, limit=1, cursor=first["cursor"])
+    failed = request(selected, limit=1)
+    assert failed["event_cursor"] == first["event_cursor"]
+    assert [row["pr"] for row in failed["next_actions"]] == [8]
+    observe(selected, number=7, members=(7, 8))
+    with pytest.raises(ValueError, match="page changed"):
+        request(selected, after=1, limit=1, cursor=failed["cursor"])
+    recovered = request(selected)
+    assert recovered["event_cursor"] == first["event_cursor"]
+    assert [row["pr"] for row in recovered["next_actions"]] == [7, 8]
 
 
 def test_query_page_cursor_and_actual_scope_are_not_persistent_effects(tmp_path: Path) -> None:
@@ -216,5 +315,7 @@ def test_query_page_cursor_and_actual_scope_are_not_persistent_effects(tmp_path:
         request(selected, cursor=first["cursor"])
     with pytest.raises(ValueError):
         request(selected, limit=True)
+    with pytest.raises(ValueError, match="projection cursor"):
+        request(selected, after=1)
     with pytest.raises(ValueError):
         selected[-1].execute("foreign", "consumer", "next-actions", {"reviewer": "reviewer"}, expires_at=10000)

@@ -42,6 +42,7 @@ def core(*, filtered: bool = False, reviewer_actions: bool = False) -> None:
             capability = contract(reviewer_actions=True).get("reviewer_actions")
             if not isinstance(capability, dict) or (
                 capability.get("protocol") != "agent-pull-requests.reviewer-actions/v1"
+                or capability.get("page_cursor") != "projection-sha256"
             ):
                 raise ValueError
     except (ImportError, AttributeError, TypeError, ValueError):

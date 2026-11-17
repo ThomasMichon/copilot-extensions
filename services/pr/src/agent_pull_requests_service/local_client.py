@@ -145,6 +145,7 @@ class LocalClient:
                 feature.get("protocol") == "agent-pull-requests.reviewer-actions/v1"
                 and feature.get("storage") == "repository_activity_version:1"
                 and feature.get("effects") == "none"
+                and feature.get("page_cursor") == "projection-sha256"
             )
         if operation == "next-actions" and not self.reviewer_actions:
             raise LocalClientError("selected local reviewer-action profile unsupported")
@@ -168,7 +169,7 @@ def add_commands(commands: Any) -> None:
             if name == "next-actions":
                 parser.add_argument("--reviewer", required=True)
                 parser.add_argument("--max-age-seconds", type=int, default=1800)
-                parser.add_argument("--cursor", type=int)
+                parser.add_argument("--cursor")
             else:
                 parser.add_argument("--number", type=int)
             parser.add_argument("--after", type=int, default=0)

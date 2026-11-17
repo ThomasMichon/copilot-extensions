@@ -15,7 +15,8 @@ service launch, provider qualification or deployment grant.
 The running target's capabilities then include `reviewer_actions` with
 protocol `agent-pull-requests.reviewer-actions/v1`, storage
 `repository_activity_version:1`, operation `next-actions`, `effects: none`
-and `forge_reads: false`. Clients discover this actual support before using the
+and `forge_reads: false`. Its `page_cursor: projection-sha256` support qualifies
+the continuation fence. Clients discover this actual support before using the
 operation. Older hosts or an unselected profile refuse; there is no fallback
 to direct provider reads, another account or the optional protected
 workspace/feedback readers.
@@ -30,9 +31,16 @@ envelope and OS-admitted principal/target/consumer binding. Its request requires
 `reviewer`; optional fields are `after`, `limit`, `cursor` and
 `max_age_seconds`. `after` is an action-list offset, not a PR number. Pages
 contain at most 16 actions; the freshness default is 1,800 seconds, selectable
-in 1..86,400. Supplying the returned `cursor` fences subsequent pages to the
-same durable repository-event position; movement requires restarting that
-query, not silently merging pages from different positions.
+in 1..86,400. A nonzero `after` requires the returned `cursor`, a fingerprint
+of the actual ranked view and its scope/options. Eligibility changes from
+expiry, snapshot failure/recovery or ranking changes reject continuation before
+applying the offset, even when no durable event was emitted. Ordinary clock
+movement with an identical eligible view does not invalidate it.
+
+The separate numeric `event_cursor` retains the durable event position.
+The projection fingerprint is not an event ID, delivery position, ACK or
+authority. A changed view requires restarting the query, not silently merging
+different positions or inventing a new continuing registration.
 
 ## Evidence and action ownership
 
@@ -45,9 +53,15 @@ priority and independent attention reasons.
 The existing pure attention owner projects and ages the queue:
 
 - `initial_verdict/author_create` requires qualified history with no submitted
-  verdict from the selected reviewer.
-- `new_verdict/author_update` requires qualified newer author-side candidate
-  evidence relative to an actual submitted reviewer head.
+  verdict from the selected reviewer. Draft and `REQUEST_REVIEW` records are
+  not submitted verdicts.
+- `new_verdict/author_update` requires the current submitted review set to have
+  been observed before a later cached candidate transition, with no review
+  matching the current head. Inequality or reported review timestamps alone
+  do not prove this order: a newly observed record is
+  `review-order-unavailable`, including an older draft submitted later during
+  non-atomic acquisition. Returned `review` metadata is a supporting record,
+  not a claim that its reported timestamp proves the latest submission.
 - `rebase/stale_branch` is an author-owned conflicting-candidate action. A
   reviewer-facing recommendation does not authorize the reviewer to rebase;
   independent review reasons remain visible.
@@ -80,6 +94,10 @@ request and event identities, delivery/ACK positions and retained history.
 Prior facts receive unknown activity fields; prior current rows have no
 invented cause until a fresh qualified observation publishes one. Unchanged
 candidate/conflict refreshes and restart retain their original cause and age.
+Bounded content fingerprints retain the submitted records actually observed
+and their pre-candidate frontier; they are not handled receipts or reviewed-base
+proof. That minimal ordering evidence survives settled event-body retirement
+and is retained only for current qualified review history.
 The existing cache byte/event bounds still apply.
 
 Old strict readers refuse the adopted extension. There is no implicit

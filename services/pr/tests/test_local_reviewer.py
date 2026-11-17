@@ -61,6 +61,24 @@ def test_reviewer_selection_refuses_prior_core_without_new_keyword_support(
     assert not Path(value["root"]).exists() and not log.exists()
 
 
+def test_reviewer_selection_refuses_event_only_page_cursor_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import repository_subscriptions
+
+    prior = repository_subscriptions.contract(reviewer_actions=True)
+    capability = prior["reviewer_actions"]
+    assert isinstance(capability, dict)
+    capability.pop("page_cursor")
+    monkeypatch.setattr(repository_subscriptions, "contract", lambda **_kwargs: prior)
+    path, value, _state, log = configuration(tmp_path)
+    value["reviewer_actions"] = True
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="core/SDK unsupported"):
+        load_service_config(path)
+    assert not Path(value["root"]).exists() and not log.exists()
+
+
 def test_actual_local_profile_adopts_and_queries_without_query_triggered_provider_reads(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -70,7 +88,7 @@ def test_actual_local_profile_adopts_and_queries_without_query_triggered_provide
     value["reviewer_actions"] = True
     value["interval"] = 300
     path.write_text(json.dumps(value))
-    state.write_text(json.dumps({"head": "a" * 40}))
+    state.write_text(json.dumps({"head": "a" * 40, "members": [7, 8]}))
     script = Path(value["repository_cache"]["repositories"][0]["prefix"][1])
     script.write_text(NATIVE.replace(
         '"base_ref":"dev"',
@@ -93,17 +111,21 @@ def test_actual_local_profile_adopts_and_queries_without_query_triggered_provide
         try:
             await asyncio.wait_for(service.connector.connected.wait(), 5)
             client = LocalClient(selected.repositories.socket_path, "test", "repo-github")
-            for _ in range(100):
-                result = await asyncio.to_thread(client.request, "next-actions", {"reviewer": "reviewer"})
-                if result["next_actions"]:
-                    break
-                await asyncio.sleep(.02)
-            assert result["next_actions"][0]["action"] == "initial_verdict"
-            for _ in range(100):
-                if service._last_cycle is not None:
-                    break
-                await asyncio.sleep(.02)
+
+            async def first_cycle() -> None:
+                while service._last_cycle is None:
+                    for task in service._tasks:
+                        if task.done():
+                            task.result()
+                            raise AssertionError("service owner exited before its initial observation")
+                    await asyncio.sleep(.02)
+
+            await asyncio.wait_for(first_cycle(), selected.operation_seconds)
             assert service._last_cycle is not None
+            assert service._last_cycle["unavailable"] == service._last_cycle["unbound"] == 0
+            result = await asyncio.to_thread(client.request, "next-actions", {"reviewer": "reviewer"})
+            assert result["next_actions"], {"result": result, "status": service.status()}
+            assert result["next_actions"][0]["action"] == "initial_verdict"
             calls, persisted = log.read_bytes(), selected.store().path.read_bytes()
             for _ in range(3):
                 result = await asyncio.to_thread(client.request, "next-actions", {"reviewer": "reviewer"})
@@ -111,8 +133,18 @@ def test_actual_local_profile_adopts_and_queries_without_query_triggered_provide
             code = await asyncio.to_thread(main, [
                 "next-actions", "--socket", str(selected.repositories.socket_path),
                 "--namespace", "test", "--target", "repo-github", "--reviewer", "reviewer",
+                "--limit", "1",
             ])
-            assert code == 0 and json.loads(capsys.readouterr().out)["next_actions"]
+            first = json.loads(capsys.readouterr().out)
+            assert code == 0 and [row["pr"] for row in first["next_actions"]] == [7]
+            assert first["more"] and isinstance(first["cursor"], str)
+            code = await asyncio.to_thread(main, [
+                "next-actions", "--socket", str(selected.repositories.socket_path),
+                "--namespace", "test", "--target", "repo-github", "--reviewer", "reviewer",
+                "--limit", "1", "--after", "1", "--cursor", first["cursor"],
+            ])
+            second = json.loads(capsys.readouterr().out)
+            assert code == 0 and [row["pr"] for row in second["next_actions"]] == [8]
             assert log.read_bytes() == calls and selected.store().path.read_bytes() == persisted
             assert not service.gateway.workspaces and not service.gateway.attention
         finally:

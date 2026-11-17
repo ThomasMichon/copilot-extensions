@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
-from datetime import datetime
+import hashlib
+import json
 import re
 from typing import Any
 
 from . import attention
+from .repository_activity import review_evidence
 from .repository_contract import RepositoryIdentity
 from .repository_subscriptions import RESPONSE_BYTES, _integer
 
 PROTOCOL = "agent-pull-requests.reviewer-actions/v1"
-_VERDICTS = frozenset(("APPROVED", "COMMENT", "COMMENTED", "REQUEST_CHANGES", "CHANGES_REQUESTED"))
-_OID = re.compile(r"[a-f0-9]{40}(?:[a-f0-9]{24})?")
 
 
 def capability() -> dict[str, Any]:
@@ -22,11 +22,12 @@ def capability() -> dict[str, Any]:
         "protocol": PROTOCOL, "storage": "repository_activity_version:1",
         "operation": "next-actions", "forge_reads": False, "effects": "none",
         "reviewed_base": "unknown", "response_bytes": RESPONSE_BYTES,
+        "page_cursor": "projection-sha256",
     }
 
 
 def _activity(
-    facts: dict[str, Any], reviewer: str, observed_at: int,
+    facts: dict[str, Any], activity: dict[str, Any], reviewer: str, observed_at: int,
 ) -> tuple[attention.ReviewActivity, dict[str, Any] | None]:
     unknown = attention.ReviewActivity(reviewer, "unknown")
     if facts["reviews_complete"] is not True:
@@ -38,32 +39,28 @@ def _activity(
         if row["user"].casefold() != reviewer.casefold():
             continue
         state = row["state"]
-        if state == "PENDING":
+        if state in ("PENDING", "REQUEST_REVIEW"):
             continue
-        if state not in _VERDICTS or row["dismissed"] is not False or (
-            type(row["id"]) is not int or row["id"] < 1
-            or not isinstance(row["commit_id"], str) or not _OID.fullmatch(row["commit_id"])
-        ):
+        evidence = review_evidence(row, observed_at)
+        if evidence is None:
             return unknown, None
-        try:
-            submitted = datetime.fromisoformat(row["submitted_at"].replace("Z", "+00:00"))
-            if submitted.tzinfo is None or not 0 <= submitted.timestamp() <= observed_at:
-                return unknown, None
-        except (ValueError, TypeError, AttributeError, OverflowError):
-            return unknown, None
-        reviews.append((submitted.timestamp(), row["id"], row))
+        reviews.append((evidence.submitted_at, evidence.review_id, row, evidence.signature))
     if not reviews:
         return attention.ReviewActivity(reviewer, "initial"), None
-    row = max(reviews, key=lambda item: item[:2])[2]
-    return attention.ReviewActivity(
-        reviewer, "head-reviewed" if row["commit_id"] == facts["head_sha"] else "updated", row["id"],
-    ), row
+    matching = [item for item in reviews if item[2]["commit_id"] == facts["head_sha"]]
+    if matching:
+        row = max(matching, key=lambda item: item[:2])[2]
+        return attention.ReviewActivity(reviewer, "head-reviewed", row["id"]), row
+    selected = max(reviews, key=lambda item: item[:2])
+    if any(item[3] not in activity["candidate_reviews"] for item in reviews):
+        return attention.ReviewActivity(reviewer, "order-unknown", selected[1]), None
+    return attention.ReviewActivity(reviewer, "updated", selected[1]), selected[2]
 
 
 def page(
     state: dict[str, Any], identity: RepositoryIdentity, consumer: str, *,
     reviewer: str, now: int, max_age_seconds: int = 1800,
-    after: int = 0, limit: int = 16, cursor: int | None = None,
+    after: int = 0, limit: int = 16, cursor: str | None = None,
 ) -> dict[str, Any]:
     """Rank one admitted scope; never acquire a provider, claim work or write handled state."""
     if not isinstance(reviewer, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", reviewer):
@@ -71,24 +68,22 @@ def page(
     _integer(max_age_seconds, 1, 86400)
     _integer(after, 0, 800)
     _integer(limit, 1, 16)
-    if cursor is not None:
-        _integer(cursor)
-        if cursor != state["next_sequence"] - 1:
-            raise ValueError("reviewer page changed; restart from its current cursor")
+    if cursor is not None and (
+        not isinstance(cursor, str) or re.fullmatch(r"[a-f0-9]{64}", cursor) is None
+    ) or after and cursor is None:
+        raise ValueError("reviewer continuation requires its projection cursor")
     repository = next((row for row in state["repositories"]
                        if RepositoryIdentity.parse(row["identity"]).key == identity.key), None)
     result: dict[str, Any] = {
         "protocol": PROTOCOL, "identity": identity.document(), "reviewer": reviewer,
-        "consumer": consumer, "cursor": state["next_sequence"] - 1, "now": now,
+        "consumer": consumer, "event_cursor": state["next_sequence"] - 1, "now": now,
         "inventory": repository["inventory"] if repository is not None else {"outcome": "unknown"},
         "next_actions": [], "unavailable": [], "more": False, "next_after": None,
     }
-    if repository is None:
-        return result
     projected: list[attention.Attention] = []
     rows: dict[int, dict[str, Any]] = {}
     reviews: dict[int, dict[str, Any] | None] = {}
-    for pull in repository["pulls"]:
+    for pull in repository["pulls"] if repository is not None else ():
         number, facts, activity = pull["number"], pull["facts"], pull["activity"]
         if not pull["member"]:
             continue
@@ -103,12 +98,12 @@ def page(
         key = attention.PRKey(
             identity.provider, identity.endpoint, identity.repo, number, identity.account, identity.namespace,
         )
-        review, original = _activity(facts, reviewer, pull["observed_at"])
+        review, original = _activity(facts, activity, reviewer, pull["observed_at"])
         cause = activity["conflict"] if facts["mergeable"] is False else activity["candidate"]
         selected = attention.Facts(
             key, candidate, attention.Cursor(1, state["next_sequence"] - 1),
             pull["observed_at"], (cause or activity["candidate"])["since"],
-            repository["inventory"]["outcome"] == "complete" and not pull["error"],
+            result["inventory"]["outcome"] == "complete" and not pull["error"],
             state="merged" if facts["merged"] else "closed-unmerged" if facts["pr_state"] == "closed" else "open",
             draft=facts["draft"], conflict=facts["mergeable"] is False,
         )
@@ -128,8 +123,8 @@ def page(
         projected.append(item)
         rows[number], reviews[number] = pull, original
     ordered = attention.rank(projected, now=now, aging_seconds=300)
-    import json
-    for item in ordered[after:after + limit]:
+    actions = []
+    for item in ordered:
         pull, original = rows[item.key.number], reviews[item.key.number]
         rebase = "rebase" in item.reasons
         cause = pull["activity"]["conflict" if rebase else "candidate"]
@@ -143,9 +138,22 @@ def page(
             "actor": pull["facts"]["author"] if rebase else reviewer,
             "actor_role": "author" if rebase else "reviewer", "reasons": list(item.reasons),
             "candidate": asdict(item.candidate), "cause": cause, "review": original,
+            "review_basis": "observed-before-candidate" if "follow-up" in item.reasons else None,
             "pending_since": item.pending_since, "observed_at": item.observed_at,
             "expires_at": item.expires_at, "priority": item.priority,
         }
+        actions.append(row)
+    projection = {
+        key: value for key, value in result.items()
+        if key not in {"now", "next_actions", "more", "next_after"}
+    }
+    projection.update(next_actions=actions, max_age_seconds=max_age_seconds)
+    result["cursor"] = hashlib.sha256(json.dumps(
+        projection, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()).hexdigest()
+    if cursor is not None and cursor != result["cursor"]:
+        raise ValueError("reviewer page changed; restart from its current cursor")
+    for row in actions[after:after + limit]:
         if len(json.dumps({**result, "next_actions": [*result["next_actions"], row]}).encode()) > RESPONSE_BYTES - 8192:
             break
         result["next_actions"].append(row)

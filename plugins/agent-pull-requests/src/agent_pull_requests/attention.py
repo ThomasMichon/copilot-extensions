@@ -191,7 +191,7 @@ class ReviewActivity:
 
     def __post_init__(self) -> None:
         _text(self.reviewer)
-        if self.status not in ("initial", "updated", "head-reviewed", "unknown"):
+        if self.status not in ("initial", "updated", "head-reviewed", "order-unknown", "unknown"):
             raise ValueError("invalid review activity")
         if self.review_id is not None:
             _integer(self.review_id, 1)
@@ -277,6 +277,7 @@ def project(
         elif not reasons:
             return result("unavailable", (
                 "reviewed-base-unknown" if review_activity.status == "head-reviewed"
+                else "review-order-unavailable" if review_activity.status == "order-unknown"
                 else "review-activity-unavailable"
             ))
     if not reasons:
