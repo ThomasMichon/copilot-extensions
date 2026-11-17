@@ -1115,6 +1115,14 @@ The required unit-only packet is unchanged.
 
 The Windows Resume consumer packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
+The separate `Windows Resume qualification` workflow runs this same packet on
+disposable GitHub-hosted Windows for affected `dev` PRs, including drafts.
+It checks out the immutable PR head, uses the promotion lane's digest-pinned
+PSMux and unchanged test deadlines, and retains source-bound JUnit evidence.
+Missing, skipped or failed native cases fail qualification. Manual dispatch
+tests the selected ref's exact commit after the workflow is available on the
+default branch. This lane does not replace required unit CI or the frozen
+candidate's promotion qualification and does not touch productive hosts.
 It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture

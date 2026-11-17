@@ -1,0 +1,116 @@
+name: Windows Resume qualification
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/resume-pane-windows.yml
+      - tools/test_resume_windows_workflow.py
+      - tools/download_pinned_native.ps1
+      - tools/run-plugin-tests.py
+      - tools/plugin_test_*.py
+      - worktree-manager/**
+      - plugins/agent-remote-driver/**
+      - plugins/agent-worktrees/**
+      - libs/agent-procutil/**
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resume-pane-windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      RESUME_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      RESUME_EVIDENCE: ${{ runner.temp }}/resume-evidence
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record immutable tested source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:RESUME_SOURCE_SHA) {
+            throw 'Checkout does not match the requested immutable source'
+          }
+          $null = New-Item -ItemType Directory -Path $env:RESUME_EVIDENCE
+          @{
+            source_sha = $actual
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+          } | ConvertTo-Json | Set-Content -LiteralPath "$env:RESUME_EVIDENCE\source.json" -Encoding utf8
+      - name: Prepare pinned disposable PSMux
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Command pwsh -ErrorAction Stop | Out-Null
+          $root = Join-Path $env:RUNNER_TEMP 'resume-psmux'
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/psmux/psmux/releases/download/v3.4.0/psmux-v3.4.0-windows-x64.zip' -OutFile "$archive" -TimeoutSeconds 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721') {
+            throw 'Pinned PSMux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+          $binaries[0].DirectoryName >> $env:GITHUB_PATH
+      - name: Run real Windows Resume consumers
+        run: |
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers --junit-dir "$env:RESUME_EVIDENCE" --timeout 360 --plugin-timeout 600 --test-timeout 180
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Require executed native cases without skips
+        if: always()
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = Path(os.environ["RESUME_EVIDENCE"])
+          cases = [
+              case for path in root.rglob("*.xml")
+              for case in ET.parse(path).getroot().iter("testcase")
+          ]
+          result = {
+              "source_sha": os.environ["RESUME_SOURCE_SHA"],
+              "cases": len(cases),
+              "skipped": sum(case.find("skipped") is not None for case in cases),
+              "failed": sum(
+                  case.find("failure") is not None or case.find("error") is not None
+                  for case in cases
+              ),
+          }
+          root.mkdir(parents=True, exist_ok=True)
+          (root / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(result))
+          if not cases or result["skipped"] or result["failed"]:
+              raise SystemExit("Native Resume qualification requires executed, passing cases")
+      - name: Retain exact-source native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-windows-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.RESUME_EVIDENCE }}
+          if-no-files-found: error
+          retention-days: 7
