@@ -86,6 +86,56 @@ transfer; silence neither abandons #8669's scope nor accepts a transfer of its
 custody. Existing
 single-writer and installed lifecycle obligations keep their original scope.
 
+### Proposed source-specific #5579 tracking clarification
+
+The recorded planning, source and release milestones retained #5579 and the
+parent effort OPEN because the bounded Python-forwarding result did not
+complete broader launcher-depth, process-inventory or installed acceptance.
+The direct LS5579 intake retained those unfinished outcomes. Preserve this
+history and the bounded implementation claims; neither a milestone nor
+silence establishes abandonment, owner acceptance or custody release.
+
+Agent-recommended prospective clarification: a SEPARATE #5579-specific
+NOT_PLANNED judgment may retire redundant issue tracking after this
+clarification and complete planned receiving have actually merged through
+normal review, and current WHOLE eligible original/discussion and receiving
+readback confirms every original/refined obligation, including the complete
+#102 transfer, in this owning Plan, the canonical mini-effort, local AND
+actual global Validation, Coordination and Journal. Reconcile current
+source/receiver state, eligibility, claims, custody and actual holds.
+A proposal, source/release milestone, partial receipt or campaign-only
+record does not satisfy that documentary condition.
+
+Once that reviewed clarification and complete receiving/readback are
+established, it prospectively supersedes ONLY campaign/technical-milestone
+retention of #5579 as an OPEN administrative tracking token. It does not
+supersede an actual operator/resource or source-specific live-claim token
+condition, release a claim or imply acceptance by another owner. No generic
+new ACK or whole-program completion is required for administrative judgment.
+
+The Goal and current-owner charter/Return, statements that source slices
+do not close remaining tracking issues, Phase 4, actual global Validation
+and mini-effort parent-OPEN statements retain their TECHNICAL meaning.
+They do not require implementing or checking LS5579-P1/P2/V1, completing
+installed/native qualification or finishing the parent before the separate
+administrative judgment above. Source milestones alone remain insufficient;
+NOT_PLANNED is not COMPLETED, technical acceptance or effort completion.
+Every existing checkbox and Active status remain unchanged.
+
+Retain the whole #102 wrapper/shim/PowerShell reduction, literal arguments
+and profile decision, terminal I/O, Ctrl+C, exit/receipt bookkeeping, Job
+containment and safe reaping. Keep persistent ancestry distinct from
+transient helpers, and the grouped diagnostic as DELIVERED OR explicitly
+deferred to its named tracked outcome. No warm-broker architecture or direct
+PSMux attachment becomes mandatory.
+
+The existing Lifecycle driver, current bounded Mux-launch continuation,
+installed-acceptance and update owners retain their scopes. Shared-module,
+retained-session and #8669 installation-independent-session custody, all
+actual operational holds and the original authorization bounds remain
+unchanged. Administrative judgment authorizes no rollout, service/process
+operation, retained-session change or renewed native trial.
+
 ### Mux-launch ownership continuation
 
 The released launch-lifecycle responsibility is accepted by `curious-bolt`.
@@ -384,6 +434,18 @@ _(Agent-recommended validation detail: zero wait-only Python workers in the
 two measured forwarding roles, with live process-tree evidence.)_
 
 ## Journal
+
+### 2026-11-17 - Administrative versus technical #5579 clarification proposed
+
+Proposed prospective reconciliation of campaign/technical parent-OPEN
+retention after bounded planning/source/release milestones. Coordination
+requires actual reviewed complete receiving and current whole source/receiver
+and claims/custody readback for a separate administrative judgment; it does
+not require finishing the remaining technical programme first. Historical
+claims, all technical checkboxes, Active status, current bounded ownership,
+installed/update and retained-session boundaries, #8669 custody and actual
+holds remain unchanged. No source disposition, claim release, technical
+completion, operational permission or native-grant renewal is established.
 
 ### 2026-11-17 - Mux source repair merged
 

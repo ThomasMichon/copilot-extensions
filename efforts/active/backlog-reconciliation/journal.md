@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+
 - [2026-11-17 - Authentication, finite baseline and engine receiving](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
 
 - [2026-11-17 - Webhook and host-teardown receipt, with receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
