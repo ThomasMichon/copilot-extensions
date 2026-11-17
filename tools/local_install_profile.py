@@ -392,9 +392,12 @@ def _profile_policy(
     selected: source_inputs.ProjectSource, environment: dict[str, str],
     download_origins: tuple[str, ...],
 ) -> tuple[tuple[str, str | None], dict[str, Any]]:
-    from governed_feed_trust import _effective_default_index_url, _opaque_index_identity
+    from governed_feed_trust import ArtifactBuildError, _effective_default_index_url, _opaque_index_identity
 
-    trusted = _effective_default_index_url(environment) or ("https://pypi.org/simple", None)
+    try:
+        trusted = _effective_default_index_url(environment, strict=True) or ("https://pypi.org/simple", None)
+    except ArtifactBuildError as error:
+        raise ProfileError("native profile UV configuration is invalid") from error
     if urlsplit(trusted[0]).scheme != "https":
         raise ProfileError("native profile acquisition needs an HTTPS default feed")
     return trusted, {

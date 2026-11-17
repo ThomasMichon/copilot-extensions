@@ -22,37 +22,43 @@ from __future__ import annotations
 import csv
 import hashlib
 import hmac
+import importlib
 import io
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import time
 import urllib.parse
 from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_feed_policy import (  # noqa: F401 -- shared public-feed rejection policy
     _PUBLIC_PYPI_HOSTS, _is_public_pypi_url, _normalize_hostname,
 )
 
+fcntl: ModuleType | None
 try:
-    import fcntl
+    fcntl = importlib.import_module("fcntl")
 except ImportError:  # pragma: no cover - exercised only on Windows
     fcntl = None
 
+msvcrt: ModuleType | None
 try:
-    import msvcrt
+    msvcrt = importlib.import_module("msvcrt")
 except ImportError:  # pragma: no cover - exercised only on POSIX
     msvcrt = None
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
-    import tomllib
+    tomllib = importlib.import_module("tomllib")
 except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
+    tomllib = importlib.import_module("tomli")
 
 
 class ArtifactBuildError(Exception):
@@ -81,7 +87,7 @@ def _system_directory() -> Path:
     Raises `ArtifactBuildError` if the OS API call itself fails."""
     import ctypes
     buf = ctypes.create_unicode_buffer(260)
-    length = ctypes.windll.kernel32.GetSystemDirectoryW(buf, len(buf))
+    length = getattr(ctypes, "windll").kernel32.GetSystemDirectoryW(buf, len(buf))
     if not length:
         raise ArtifactBuildError(
             "could not resolve the Windows system directory via the "
@@ -189,8 +195,8 @@ def _well_known_sid_display_name(sid_string: str) -> str:
 
     Raises `ArtifactBuildError` if either OS API call fails."""
     import ctypes
-    advapi32 = ctypes.windll.advapi32
-    kernel32 = ctypes.windll.kernel32
+    advapi32 = getattr(ctypes, "windll").advapi32
+    kernel32 = getattr(ctypes, "windll").kernel32
     psid = ctypes.c_void_p()
     if not advapi32.ConvertStringSidToSidW(sid_string, ctypes.byref(psid)):
         raise ArtifactBuildError(
@@ -411,7 +417,7 @@ _UV_PACKAGE_SOURCE_ENV_VARS = (
 _UV_INDEX_CREDENTIAL_ENV_RE = re.compile(r"^UV_INDEX_[A-Za-z0-9_]+_(USERNAME|PASSWORD)$")
 
 
-def strip_package_source_env_vars(env: dict, *, strip_credentials: bool = False) -> None:
+def strip_package_source_env_vars(env: dict[str, str], *, strip_credentials: bool = False) -> None:
     """In-place strips every `_UV_PACKAGE_SOURCE_ENV_VARS` entry from
     ``env``. `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-shaped named-index
     credential variables are left untouched UNLESS ``strip_credentials``
@@ -471,7 +477,7 @@ _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS = 10.0
 
 
 @contextmanager
-def _provenance_key_lock():
+def _provenance_key_lock() -> Iterator[None]:
     """An OS-BACKED, genuinely exclusive lock serializing first-run
     `_provenance_key` creation across concurrent callers -- a Windows
     byte-range file lock (`LockFileEx`, covers every Terminal Services
@@ -497,7 +503,7 @@ def _provenance_key_lock():
     import ctypes
     lock_path = _provenance_key_dir() / "provenance-key.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if hasattr(ctypes, "windll"):
+    if hasattr(ctypes, "windll") and msvcrt is not None:
         # A byte-range file lock (`LockFileEx`) on the lock file itself,
         # rather than a named kernel mutex: a named mutex in the `Local\`
         # namespace is scoped to ONE Terminal Services session, so two
@@ -544,7 +550,7 @@ def _provenance_key_lock():
         deadline = time.monotonic() + _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS
         try:
             while True:
-                acquired = ctypes.windll.kernel32.LockFileEx(
+                acquired = getattr(ctypes, "windll").kernel32.LockFileEx(
                     handle,
                     LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
                     0,
@@ -565,7 +571,7 @@ def _provenance_key_lock():
             try:
                 yield
             finally:
-                ctypes.windll.kernel32.UnlockFileEx(
+                getattr(ctypes, "windll").kernel32.UnlockFileEx(
                     handle, 0, ALL_BYTES, ALL_BYTES, ctypes.byref(overlapped)
                 )
         finally:
@@ -707,7 +713,7 @@ def _url_host(url: str) -> str | None:
     return _normalize_hostname(host) if host else None
 
 
-def _trusted_index_hosts(env: dict) -> set[str]:
+def _trusted_index_hosts(env: dict[str, str]) -> set[str]:
     raw = env.get(_TRUSTED_INDEX_HOSTS_ENV_VAR, "")
     return {_normalize_hostname(h.strip()) for h in raw.split(",") if h.strip()}
 
@@ -767,7 +773,7 @@ def _project_uv_toml_candidates() -> list[tuple[Path, bool]]:
     return []
 
 
-def _effective_uv_toml_candidates(env: dict) -> list[Path]:
+def _effective_uv_toml_candidates(env: dict[str, str]) -> list[Path]:
     """The uv.toml file(s) `uv` itself would actually read for index
     config in this environment, in `uv`'s own precedence order -- user-
     level first, then system-level -- matching this repo's own
@@ -806,7 +812,7 @@ def _effective_uv_toml_candidates(env: dict) -> list[Path]:
     return candidates
 
 
-def _system_uv_toml_candidate(env: dict) -> Path | None:
+def _system_uv_toml_candidate(env: dict[str, str]) -> Path | None:
     """uv's own system-level config resolution (POSIX) picks AT MOST ONE
     file -- unlike every other tier `_effective_uv_toml_candidates`
     returns, it is never a list of further fallbacks for the caller to
@@ -837,7 +843,9 @@ def _system_uv_toml_candidate(env: dict) -> Path | None:
     return fallback if fallback.is_file() else None
 
 
-def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:
+def _effective_default_index_url(
+    env: dict[str, str], *, strict: bool = False,
+) -> tuple[str, str | None] | None:
     """The ``(url, name)`` of the index `uv` would actually use as its
     DEFAULT in this environment, or ``None`` if nothing replaces `uv`'s
     own implicit public-PyPI default. ``name`` is the `[[index]]` entry's
@@ -862,20 +870,30 @@ def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:
     candidates`'s docstring). An EXISTING higher-precedence candidate
     that fails to parse is never skipped in favor of a lower-precedence
     one -- it fails closed (returns ``None``) instead, since `uv` itself
-    would not silently fall through to a different file either."""
-    for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS:
-        value = env.get(var)
-        if value:
-            return (value, None)
+    would not silently fall through to a different file either. Strict callers
+    instead receive ArtifactBuildError for unreadable/invalid configuration,
+    even with an environment-selected index; only a valid implicit default
+    remains None. Existing governed-only callers retain the legacy result."""
+    selected: tuple[str, str | None] | None = next(
+        ((env[var], None) for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS if env.get(var)), None,
+    )
+    if selected is not None and not strict:
+        return selected
     candidates: list[tuple[Path, bool]] = []
     if not env.get("UV_CONFIG_FILE"):
         candidates.extend(_project_uv_toml_candidates())
     candidates.extend((path, False) for path in _effective_uv_toml_candidates(env))
     for candidate, is_pyproject in candidates:
-        if not candidate.is_file():
-            continue
         try:
+            if not stat.S_ISREG(candidate.stat().st_mode):
+                if strict:
+                    raise ArtifactBuildError("UV configuration is not an ordinary file")
+                continue
             data = tomllib.loads(candidate.read_text(encoding="utf-8"))
+        except (FileNotFoundError, NotADirectoryError):
+            if strict and env.get("UV_CONFIG_FILE"):
+                raise ArtifactBuildError("Explicit UV configuration is unavailable") from None
+            continue
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             # This candidate EXISTS at a real precedence tier `uv` itself
             # would read -- a parse failure here means `uv` would also
@@ -884,8 +902,12 @@ def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:
             # it could select a lower-precedence URL `uv` itself would
             # never actually use, violating this gate's fail-closed
             # contract. Fail closed: report no validated index at all.
+            if strict:
+                raise ArtifactBuildError("UV configuration cannot be read or parsed") from None
             return None
         if not isinstance(data, dict):
+            if strict:
+                raise ArtifactBuildError("UV configuration must be a table")
             return None
         if is_pyproject:
             tool = data.get("tool")
@@ -898,20 +920,34 @@ def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:
                 continue
         index_url = data.get("index-url")
         if isinstance(index_url, str) and index_url:
-            return (index_url, None)
+            if selected is None:
+                selected = (index_url, None)
+            if not strict:
+                return selected
+        elif strict and index_url is not None:
+            raise ArtifactBuildError("UV default index configuration is invalid")
         indexes = data.get("index")
+        if strict and indexes is not None and not isinstance(indexes, list):
+            raise ArtifactBuildError("UV index configuration is invalid")
         if isinstance(indexes, list):
             for entry in indexes:
+                if strict and not isinstance(entry, dict):
+                    raise ArtifactBuildError("UV index entry is invalid")
                 if not isinstance(entry, dict) or entry.get("default") is not True:
                     continue
                 url = entry.get("url")
                 if isinstance(url, str) and url:
                     name = entry.get("name")
-                    return (url, name if isinstance(name, str) and name else None)
-    return None
+                    if selected is None:
+                        selected = (url, name if isinstance(name, str) and name else None)
+                    if not strict:
+                        return selected
+                elif strict:
+                    raise ArtifactBuildError("UV default index URL is invalid")
+    return selected
 
 
-def _validated_trusted_index_url(env: dict) -> tuple[str, str | None] | None:
+def _validated_trusted_index_url(env: dict[str, str]) -> tuple[str, str | None] | None:
     """The effective default index's ``(url, name)``, but ONLY if the URL
     is explicitly configured, HTTPS and non-public -- returns the concrete
     ``(url, name)`` pair (rather than
@@ -938,7 +974,7 @@ def _validated_trusted_index_url(env: dict) -> tuple[str, str | None] | None:
     return (url, name)
 
 
-def _governed_feed_configured(*, env: dict | None = None) -> bool:
+def _governed_feed_configured(*, env: dict[str, str] | None = None) -> bool:
     """Whether UV has an explicitly configured non-public HTTPS default feed.
 
     The effective UV configuration owns selection across networks and containers;

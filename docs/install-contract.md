@@ -5758,6 +5758,8 @@ profile. This source-profile capability does not relax other consumers'
 governed-feed-only admission.
 Acquisition permits the selected public index itself, but still refuses
 substituting another selected feed with a public index, including redirects.
+Unreadable or malformed UV configuration is not an implicit public default,
+including when revalidating a completed application for reuse.
 
 An application may declare a first-party SDK association in its existing
 `pyproject.toml`, separately from its ordinary dependency/extra declaration:

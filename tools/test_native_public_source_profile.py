@@ -29,7 +29,7 @@ def test_source_profile_selects_public_default_or_configured_feed(
 ) -> None:
     import governed_feed_trust
 
-    monkeypatch.setattr(governed_feed_trust, "_effective_default_index_url", lambda _env: index)
+    monkeypatch.setattr(governed_feed_trust, "_effective_default_index_url", lambda _env, **options: index)
     monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     expected = index or ("https://pypi.org/simple", None)
     observed: dict[str, Any] = {}
@@ -54,6 +54,7 @@ def test_source_profile_selects_public_default_or_configured_feed(
     None, "https://pypi.org/simple", "https://packages.example/simple",
 ])
 @pytest.mark.parametrize("allow_public", [False, True])
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
 def test_actual_native_settings_keep_public_admission_explicit_and_seasoned(
     tmp_path: Path, index: str | None, allow_public: bool,
 ) -> None:

@@ -1404,7 +1404,7 @@ def test_local_prepared_wheel_reuse_retains_exact_inputs_without_another_build(r
 @pytest.mark.parametrize("reusable_install_source", [True], indirect=True)
 @pytest.mark.parametrize("fault", [
     None, "completion", "wheel", "application", "extras", "target", "policy",
-    "toolchain", "selected-source",
+    "toolchain", "selected-source", "malformed-config", "unreadable-config", "malformed-config-env",
 ])
 def test_complete_application_reuse_revalidates_outputs_without_constructing(
     reusable_install_source: tuple[Path, Path, dict[str, Any], dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: None | str,
@@ -1425,7 +1425,23 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     deadline = time.monotonic() + 60
     target: dict[str, Any] = {"environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
     monkeypatch.setattr(native, "_query_marker_environment", lambda *args, **kwargs: target["environment"])
+    real_policy = native._profile_policy
+    config = tmp_path / "current-uv.toml"
     policy = {"policyId": "fixture-policy"}
+    if fault in {"malformed-config", "unreadable-config", "malformed-config-env"}:
+        import governed_feed_trust
+
+        config.write_text("")
+        monkeypatch.setenv("UV_CONFIG_FILE", str(config))
+        monkeypatch.delenv("UV_DEFAULT_INDEX", raising=False)
+        monkeypatch.delenv("UV_INDEX_URL", raising=False)
+        if fault == "malformed-config-env":
+            monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
+        monkeypatch.setattr(
+            governed_feed_trust, "_opaque_index_identity",
+            lambda value: hashlib.sha256(value.encode()).hexdigest(),
+        )
+        _, policy = real_policy(selected, dict(os.environ), ())
     monkeypatch.setattr(native, "_profile_policy", lambda *args: (("fixture", None), policy))
     with native.retain_wheel_inputs(
         archives, expected, max_wheels=256, max_archive_bytes=128 << 20,
@@ -1488,6 +1504,18 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
         extras={"demo": ["bootstrap"]} if fault == "extras" else {}, deadline=deadline,
         source_record_sha256=digest, toolchain_record=toolchain_record,
     )
+    if fault in {"malformed-config", "unreadable-config", "malformed-config-env"}:
+        monkeypatch.setattr(native, "_profile_policy", real_policy)
+        assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
+        if fault in {"malformed-config", "malformed-config-env"}:
+            config.write_text("[index")
+        else:
+            read_text = Path.read_text
+            def unavailable(path: Path, *args: Any, **kwargs: Any) -> str:
+                if path == config:
+                    raise PermissionError("fixture configuration is unreadable")
+                return read_text(path, *args, **kwargs)
+            monkeypatch.setattr(Path, "read_text", unavailable)
     if fault:
         with pytest.raises(native.ProfileError if fault == "selected-source" else ProfileUnavailable):
             native.reuse_applications(output, completed, ["demo"], **options)
@@ -2299,7 +2327,7 @@ def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypat
     import governed_feed_trust
     import installer_native_feed
 
-    monkeypatch.setattr(governed_feed_trust, "_effective_default_index_url", lambda env: trusted)
+    monkeypatch.setattr(governed_feed_trust, "_effective_default_index_url", lambda env, **options: trusted)
     monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", lambda text: "1" * 64)
     monkeypatch.setattr(
         installer_native_feed, "capture_native_feed_inputs",
