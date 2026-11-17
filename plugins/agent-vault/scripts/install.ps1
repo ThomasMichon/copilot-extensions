@@ -1483,13 +1483,8 @@ function Invoke-Start {
     $task = if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
         Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     }
-    if ($task) {
-        if ($task.State -eq 'Disabled') {
-            throw 'Vault scheduled task is disabled; refusing direct-start fallback'
-        }
-        Start-ScheduledTask -TaskName $TaskName
-        Write-Ok 'agent-vault service started (Scheduled Task)'
-        return
+    if ($task -and $task.State -eq 'Disabled') {
+        throw 'Vault scheduled task is disabled; refusing direct-start fallback'
     }
     # #1836: `start` must not depend on a registered Scheduled Task (a
     # client-only -NoService host, or the ScheduledTasks module being

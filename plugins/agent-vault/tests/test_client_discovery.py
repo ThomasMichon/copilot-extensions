@@ -9,17 +9,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gc
 import json
 import socket
 import sys
 import threading
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agent_vault import cli, config, rendezvous, service, winpipe
 from agent_vault import extensions as ext
-from agent_vault.extensions import ExtensionRegistry
+from agent_vault.extensions import ExtensionRegistry, TransportContext
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -27,7 +31,7 @@ from agent_vault.extensions import ExtensionRegistry
 
 
 @pytest.fixture
-def empty_registry():
+def empty_registry() -> Iterator[ExtensionRegistry]:
     """Install a fresh, empty, pre-loaded registry (no ambient transports)."""
     reg = ExtensionRegistry()
     reg._loaded = True
@@ -37,7 +41,7 @@ def empty_registry():
 
 
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch, tmp_path):
+def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Isolate discovery from ambient config + env so tests are deterministic."""
     for var in (
         "AGENT_VAULT_ENDPOINT",
@@ -65,7 +69,7 @@ def clean_env(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def run_dir(tmp_path, monkeypatch):
+def run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     d = tmp_path / "run"
     d.mkdir()
     # Isolate via the env var so BOTH cli (config.run_dir()) and service
@@ -74,17 +78,19 @@ def run_dir(tmp_path, monkeypatch):
     return d
 
 
-def _write_tcp(directory, port, host="127.0.0.1"):
+def _write_tcp(directory: Path, port: int | None, host: str = "127.0.0.1") -> Path:
     return rendezvous.write_endpoint(directory, "tcp", f"{host}:{port}")
 
 
-def _write_pipe_with_tcp_alt(directory, port, pipe=r"\\.\pipe\agent-vault", host="127.0.0.1"):
+def _write_pipe_with_tcp_alt(
+    directory: Path, port: int, pipe: str = r"\\.\pipe\agent-vault", host: str = "127.0.0.1",
+) -> Path:
     return rendezvous.write_endpoint(
         directory, "pipe", pipe, alt=[("tcp", f"{host}:{port}")]
     )
 
 
-def _write_scoped_tcp(directory, port, installation_id: str):
+def _write_scoped_tcp(directory: Path, port: int | None, installation_id: str) -> Path:
     return rendezvous.write_endpoint(
         directory,
         "tcp",
@@ -96,10 +102,14 @@ def _write_scoped_tcp(directory, port, installation_id: str):
 class _EchoServer:
     """A one-shot loopback server that replies with a canned JSON line."""
 
-    def __init__(self, response, *, unix_path=None):
+    def __init__(self, response: dict[str, Any], *, unix_path: str | None = None) -> None:
         self.response = response
-        self.received = None
+        self.received: bytes | None = None
+        self.address: str | tuple[str, int]
+        self.sock: socket.socket
         if unix_path is not None:
+            if sys.platform == "win32":
+                raise RuntimeError("Unix socket fixture requires POSIX")
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.bind(unix_path)
             self.address = unix_path
@@ -108,11 +118,11 @@ class _EchoServer:
             self.sock.bind(("127.0.0.1", 0))
             self.address = self.sock.getsockname()
         self.sock.listen(1)
-        self.port = self.address[1] if unix_path is None else None
+        self.port = int(self.address[1]) if unix_path is None else None
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
 
-    def _serve(self):
+    def _serve(self) -> None:
         # Serve in a loop: connect_probe opens (and closes) a connection before
         # the real send, so a one-shot accept would starve the actual request.
         while True:
@@ -130,7 +140,7 @@ class _EchoServer:
             finally:
                 conn.close()
 
-    def close(self):
+    def close(self) -> None:
         with contextlib.suppress(OSError):
             self.sock.close()
 
@@ -141,8 +151,9 @@ class _EchoServer:
 
 
 def test_ping_transports_each_callers_current_vault_context(
-    run_dir, monkeypatch, tmp_path, empty_registry,
-):
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    empty_registry: ExtensionRegistry,
+) -> None:
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setattr(cli, "IS_WINDOWS", False)
     server = _EchoServer({"ok": True})
@@ -151,7 +162,9 @@ def test_ping_transports_each_callers_current_vault_context(
         for name in ("first.kdbx", "second.kdbx"):
             selected = str(tmp_path / name)
             monkeypatch.setenv("KPDB", selected)
-            assert cli.send_command({"action": "ping"})["ok"]
+            response = cli.send_command({"action": "ping"})
+            assert response is not None and response["ok"]
+            assert server.received is not None
             assert json.loads(server.received)["kpdb"] == selected
     finally:
         server.close()
@@ -159,8 +172,9 @@ def test_ping_transports_each_callers_current_vault_context(
 
 @pytest.mark.parametrize("transport", ["unix", "pipe"])
 def test_strict_failed_selection_never_contacts_legacy_tcp(
-    run_dir, monkeypatch, empty_registry, transport,
-):
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+    transport: str,
+) -> None:
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setattr(cli, "IS_WINDOWS", transport == "pipe")
     endpoint = rendezvous.Endpoint.parse(
@@ -174,17 +188,18 @@ def test_strict_failed_selection_never_contacts_legacy_tcp(
     try:
         assert cli.send_command({"action": "get"}, strict_endpoint=True) is None
         assert server.received is None
-        assert cli.send_command({"action": "get"})["value"] == "unrelated authority"
+        response = cli.send_command({"action": "get"})
+        assert response is not None and response["value"] == "unrelated authority"
     finally:
         server.close()
 
 
-def test_discover_returns_none_without_file(run_dir, monkeypatch):
+def test_discover_returns_none_without_file(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "IS_WSL", False)
     assert cli._discover_endpoint(config.resolve_context()) is None
 
 
-def test_discover_reads_live_local_tcp_file(run_dir, monkeypatch):
+def test_discover_reads_live_local_tcp_file(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "IS_WSL", False)
     server = _EchoServer({"ok": True})
     try:
@@ -197,7 +212,7 @@ def test_discover_reads_live_local_tcp_file(run_dir, monkeypatch):
         server.close()
 
 
-def test_discover_skips_stale_file(run_dir, monkeypatch):
+def test_discover_skips_stale_file(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A rendezvous file whose port has no listener is treated as not present."""
     monkeypatch.setattr(cli, "IS_WSL", False)
     # A port with (almost certainly) no listener -> connect_probe fails -> stale.
@@ -205,7 +220,7 @@ def test_discover_skips_stale_file(run_dir, monkeypatch):
     assert cli._discover_endpoint(config.resolve_context()) is None
 
 
-def test_discover_prefers_env_override(run_dir, monkeypatch):
+def test_discover_prefers_env_override(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "tcp:127.0.0.1:12321")
     _write_tcp(run_dir, 65533)  # would-be file, ignored in favor of override
@@ -216,7 +231,9 @@ def test_discover_prefers_env_override(run_dir, monkeypatch):
     assert ep.source == "env"
 
 
-def test_discover_rejects_foreign_installation_endpoint(run_dir, monkeypatch):
+def test_discover_rejects_foreign_installation_endpoint(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cli, "IS_WSL", False)
     server = _EchoServer({"ok": True})
     try:
@@ -235,12 +252,14 @@ def test_discover_rejects_foreign_installation_endpoint(run_dir, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_windows_run_dirs_honors_explicit_override(monkeypatch, tmp_path):
+def test_windows_run_dirs_honors_explicit_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", str(tmp_path / "winrun"))
     assert cli._windows_run_dirs() == [tmp_path / "winrun"]
 
 
-def test_windows_run_dirs_globs_profiles(monkeypatch, tmp_path):
+def test_windows_run_dirs_globs_profiles(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     mount = tmp_path / "mnt_c"
     users = mount / "Users"
     # A real profile with an endpoint file, plus a skipped system profile.
@@ -256,7 +275,7 @@ def test_windows_run_dirs_globs_profiles(monkeypatch, tmp_path):
     assert skipped not in dirs
 
 
-def test_read_windows_endpoint_tags_source(monkeypatch, tmp_path):
+def test_read_windows_endpoint_tags_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     winrun = tmp_path / "winrun"
     winrun.mkdir()
     _write_tcp(winrun, 40404)
@@ -268,7 +287,9 @@ def test_read_windows_endpoint_tags_source(monkeypatch, tmp_path):
     assert ep.source == "windows"
 
 
-def test_discover_falls_back_to_windows_file_under_wsl(run_dir, monkeypatch, tmp_path):
+def test_discover_falls_back_to_windows_file_under_wsl(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """No local file + WSL -> read the Windows-side rendezvous file (unprobed)."""
     monkeypatch.setattr(cli, "IS_WSL", True)
     winrun = tmp_path / "winrun"
@@ -281,7 +302,9 @@ def test_discover_falls_back_to_windows_file_under_wsl(run_dir, monkeypatch, tmp
     assert ep.tcp_host_port == ("127.0.0.1", 65533)
 
 
-def test_wsl_discovers_pipe_primary_then_resolves_tcp_alt(run_dir, monkeypatch, tmp_path):
+def test_wsl_discovers_pipe_primary_then_resolves_tcp_alt(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """#3426: a WSL guest reads the Windows daemon's *pipe-primary* record and,
     unable to open the pipe, resolves the advertised TCP **alternate** -- the port
     the interop relay dials. Before this fix the pipe-only record left WSL with no
@@ -309,7 +332,9 @@ def test_wsl_discovers_pipe_primary_then_resolves_tcp_alt(run_dir, monkeypatch, 
 # ---------------------------------------------------------------------------
 
 
-def test_send_command_discovers_tcp(run_dir, monkeypatch, empty_registry):
+def test_send_command_discovers_tcp(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+) -> None:
     server = _EchoServer({"ok": True, "value": "hi"})
     try:
         _write_tcp(run_dir, server.port)
@@ -322,8 +347,9 @@ def test_send_command_discovers_tcp(run_dir, monkeypatch, empty_registry):
 
 
 def test_send_command_omits_client_kpdb_for_windows_source(
-    run_dir, monkeypatch, tmp_path, empty_registry
-):
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    empty_registry: ExtensionRegistry,
+) -> None:
     """#3426: a cross-boundary (windows-source) request must not forward the
     guest's kpdb/group -- the host daemon owns its own DB, and the guest's Linux
     path does not exist on the host (would fail 'KeePass database not found')."""
@@ -334,9 +360,11 @@ def test_send_command_omits_client_kpdb_for_windows_source(
     winrun.mkdir()
     _write_pipe_with_tcp_alt(winrun, 45999)  # no listener -> falls to the capture xport
     monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", str(winrun))
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
-    def _capture(request, timeout, ctx):
+    def _capture(
+        request: dict[str, Any], timeout: float | None, ctx: TransportContext,
+    ) -> dict[str, Any]:
         captured.update(request)
         return {"ok": True}
 
@@ -348,7 +376,9 @@ def test_send_command_omits_client_kpdb_for_windows_source(
     assert "vault" not in captured
 
 
-def test_send_command_injects_client_kpdb_for_local(run_dir, monkeypatch, empty_registry):
+def test_send_command_injects_client_kpdb_for_local(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+) -> None:
     """A local daemon *does* receive the caller's vault selection (unchanged)."""
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setenv("KPDB", "/local/db.kdbx")
@@ -359,9 +389,11 @@ def test_send_command_injects_client_kpdb_for_local(run_dir, monkeypatch, empty_
     # the fallback still validates it.
     monkeypatch.setattr(cli, "_send_socket", lambda request, timeout=5.0, path=None: None)
     monkeypatch.setattr(cli, "_send_tcp", lambda request, host, port, timeout: None)
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
-    def _capture(request, timeout, ctx):
+    def _capture(
+        request: dict[str, Any], timeout: float | None, ctx: TransportContext,
+    ) -> dict[str, Any]:
         captured.update(request)
         return {"ok": True}
 
@@ -372,7 +404,9 @@ def test_send_command_injects_client_kpdb_for_local(run_dir, monkeypatch, empty_
     assert captured.get("kpdb")
 
 
-def test_send_command_env_override_no_file(run_dir, monkeypatch, empty_registry):
+def test_send_command_env_override_no_file(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+) -> None:
     server = _EchoServer({"ok": True})
     try:
         monkeypatch.setenv("AGENT_VAULT_ENDPOINT", f"tcp:127.0.0.1:{server.port}")
@@ -383,7 +417,9 @@ def test_send_command_env_override_no_file(run_dir, monkeypatch, empty_registry)
     assert result["_transport"] == "discovered-tcp"
 
 
-def test_send_command_legacy_tcp_fallback(run_dir, monkeypatch, empty_registry):
+def test_send_command_legacy_tcp_fallback(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+) -> None:
     """No rendezvous file -> today's legacy dial (fixed/env TCP port)."""
     server = _EchoServer({"ok": True})
     try:
@@ -398,7 +434,9 @@ def test_send_command_legacy_tcp_fallback(run_dir, monkeypatch, empty_registry):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets are POSIX-only")
-def test_send_command_discovers_unix(run_dir, monkeypatch, empty_registry, tmp_path):
+def test_send_command_discovers_unix(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry, tmp_path: Path,
+) -> None:
     sock_path = str(tmp_path / "disc.sock")
     server = _EchoServer({"ok": True}, unix_path=sock_path)
     try:
@@ -416,8 +454,8 @@ def test_send_command_discovers_unix(run_dir, monkeypatch, empty_registry, tmp_p
 
 
 def test_ensure_service_wsl_never_starts_local_for_windows_daemon(
-    run_dir, monkeypatch, tmp_path
-):
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """#3464(b): on WSL, when the reachable daemon is the cross-boundary Windows
     daemon (a pipe-primary Windows-side rendezvous record) but an interop ping
     momentarily fails, ``ensure_service`` must NOT spawn a local daemon (which
@@ -431,7 +469,7 @@ def test_ensure_service_wsl_never_starts_local_for_windows_daemon(
     monkeypatch.setattr(cli, "send_command", lambda *a, **k: None)
     started = {"called": False}
 
-    def _boom(*a, **k):
+    def _boom(*a: Any, **k: Any) -> bool:
         started["called"] = True
         return True
 
@@ -441,15 +479,15 @@ def test_ensure_service_wsl_never_starts_local_for_windows_daemon(
 
 
 def test_ensure_service_wsl_starts_local_without_windows_daemon(
-    run_dir, monkeypatch
-):
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A generic WSL install with no cross-boundary Windows daemon still starts a
     local daemon (the #3464 guard is scoped to windows-source endpoints only)."""
     monkeypatch.setattr(cli, "IS_WSL", True)
     monkeypatch.setattr(cli, "send_command", lambda *a, **k: None)
     started = {"called": False}
 
-    def _start(*a, **k):
+    def _start(*a: Any, **k: Any) -> bool:
         started["called"] = True
         return True
 
@@ -458,13 +496,15 @@ def test_ensure_service_wsl_starts_local_without_windows_daemon(
     assert started["called"] is True
 
 
-def test_ensure_service_returns_true_when_ping_ok(run_dir, monkeypatch):
+def test_ensure_service_returns_true_when_ping_ok(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When the daemon answers ping, ensure_service short-circuits to True and
     never consults discovery or start_service."""
     monkeypatch.setattr(cli, "IS_WSL", True)
     monkeypatch.setattr(cli, "send_command", lambda *a, **k: {"ok": True})
 
-    def _boom(*a, **k):
+    def _boom(*a: Any, **k: Any) -> None:
         raise AssertionError("start_service must not be called when ping succeeds")
 
     monkeypatch.setattr(cli, "start_service", _boom)
@@ -476,7 +516,9 @@ def test_ensure_service_returns_true_when_ping_ok(run_dir, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_service_send_command_discovers_tcp(run_dir, monkeypatch):
+def test_service_send_command_discovers_tcp(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     server = _EchoServer({"ok": True, "action": "pong"})
     try:
         _write_tcp(run_dir, server.port)
@@ -487,7 +529,9 @@ def test_service_send_command_discovers_tcp(run_dir, monkeypatch):
     assert result["ok"] is True
 
 
-def test_service_send_command_legacy_when_no_file(run_dir, monkeypatch):
+def test_service_send_command_legacy_when_no_file(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """No file -> service falls back to the configured/legacy TCP port."""
     server = _EchoServer({"ok": True})
     try:
@@ -507,50 +551,76 @@ def test_service_send_command_legacy_when_no_file(run_dir, monkeypatch):
 class _PipeEcho:
     """Proactor-loop named-pipe server in a thread; echoes a canned reply."""
 
-    def __init__(self, pipe_path, response):
+    def __init__(self, pipe_path: str, response: dict[str, Any]) -> None:
         self.pipe_path = pipe_path
         self.response = response
-        self.loop = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.handlers: set[asyncio.Task[None]] = set()
         self._ready = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         if not self._ready.wait(5):
             raise RuntimeError("pipe server did not start")
 
-    def _run(self):
-        self.loop = asyncio.ProactorEventLoop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self._start())
-        self.loop.run_forever()
+    def _run(self) -> None:
+        if sys.platform != "win32":
+            raise RuntimeError("pipe fixture requires Windows")
+        loop = asyncio.ProactorEventLoop()
+        self.loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._start())
+            loop.run_forever()
+        finally:
+            loop.close()
 
-    async def _start(self):
-        async def handle(reader, writer):
+    async def _start(self) -> None:
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            task = asyncio.current_task()
+            assert task is not None
+            self.handlers.add(task)
             try:
                 await reader.readline()
                 writer.write((json.dumps(self.response) + "\n").encode())
                 await writer.drain()
             finally:
-                writer.close()
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                finally:
+                    self.handlers.discard(task)
 
         self.servers = await winpipe.start_pipe_server(self.pipe_path, handle)
         self._ready.set()
 
-    def close(self):
-        if self.loop is not None:
-            def _shutdown():
-                for s in getattr(self, "servers", []):
-                    with contextlib.suppress(Exception):
-                        s.close()
-                self.loop.stop()
+    async def _shutdown(self) -> None:
+        for server in self.servers:
+            server.close()
+        # Let pending accept/connection callbacks register their handlers before
+        # waiting; writer.wait_closed() retains each transport through settlement.
+        await asyncio.sleep(0)
+        while self.handlers:
+            await asyncio.gather(*self.handlers)
 
-            self.loop.call_soon_threadsafe(_shutdown)
-            self.thread.join(timeout=3)
-            with contextlib.suppress(Exception):
-                self.loop.close()
+    def close(self) -> None:
+        loop = self.loop
+        if loop is not None and not loop.is_closed():
+            shutdown = asyncio.run_coroutine_threadsafe(self._shutdown(), loop)
+            try:
+                shutdown.result(timeout=3)
+            finally:
+                loop.call_soon_threadsafe(loop.stop)
+                self.thread.join(timeout=3)
+            assert not self.thread.is_alive(), "pipe fixture thread did not stop"
+            assert loop.is_closed(), "pipe fixture loop did not close"
+            assert not self.handlers, "pipe fixture handlers did not settle"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
-def test_send_command_discovers_pipe(run_dir, monkeypatch, empty_registry):
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_send_command_discovers_pipe(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+) -> None:
     pipe = rf"\\.\pipe\agent-vault-test-{uuid.uuid4().hex}"
     server = _PipeEcho(pipe, {"ok": True, "value": "pong"})
     try:
@@ -561,10 +631,14 @@ def test_send_command_discovers_pipe(run_dir, monkeypatch, empty_registry):
     assert result is not None
     assert result["ok"] is True
     assert result["_transport"] == "discovered-pipe"
+    del server
+    gc.collect()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
-def test_send_command_pipe_falls_back_to_tcp(run_dir, monkeypatch, empty_registry):
+def test_send_command_pipe_falls_back_to_tcp(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+) -> None:
     """A discovered pipe with no server falls through to the legacy TCP dial."""
     dead_pipe = rf"\\.\pipe\agent-vault-dead-{uuid.uuid4().hex}"
     rendezvous.write_endpoint(run_dir, "pipe", dead_pipe)
@@ -580,7 +654,10 @@ def test_send_command_pipe_falls_back_to_tcp(run_dir, monkeypatch, empty_registr
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
-def test_service_send_command_discovers_pipe(run_dir, monkeypatch):
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_service_send_command_discovers_pipe(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pipe = rf"\\.\pipe\agent-vault-svc-{uuid.uuid4().hex}"
     server = _PipeEcho(pipe, {"ok": True})
     try:
@@ -590,3 +667,5 @@ def test_service_send_command_discovers_pipe(run_dir, monkeypatch):
         server.close()
     assert result is not None
     assert result["ok"] is True
+    del server
+    gc.collect()
