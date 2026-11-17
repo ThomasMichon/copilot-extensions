@@ -6236,7 +6236,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/tracking_save_notifications.py": "94271c98c0d02c0d7bc8c538b8b7f136b7511ae2ae72b435a8ca41b7ad0bd618",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py": "eb8d80a0ebd815c2825805e3c970e503932be701e3472d060ee375170ad83fc6",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_session_registry.py": "cd9d1f7c76879b00921adb9f2a3b5ced9d92cf7431208878dd6b4e8d1370d6b7",
-        "plugins/agent-worktrees/src/agent_worktrees/worktree_base_preparation.py": "05fc79bf498e7bc57576a9a159225a92e84060f375af22e24dbb43b3d01b6a37",
+        "plugins/agent-worktrees/src/agent_worktrees/worktree_base_preparation.py": "e6fbc9f373b0eaf44a8018a5a44f8808a4b6d981b0a30e3dc3c4345e20d55421",
         "plugins/agent-worktrees/src/agent_worktrees/worktree_machine_identity.py": "ebbbbf38dc6876ea017c5c8a0aac6440b900fb24494107edcc66b6b491570bce",
         "plugins/agent-worktrees/tests/test_pr_target_probes.py": "219ecc24697ea1c55b95772dce73ae9c9f2bc2d7cbf9f5c069f96a2c376ec3ac",
         "tools/promotion_unit_tests/test_pr_target_probes.py": "3a761a7bfaeeb5a803b9053e9bb186e2ee05a6c176866d271a93d7bc8c378030",
