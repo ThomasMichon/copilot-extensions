@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [bootstrap, reporting and generation checkpoint](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
+  retains three complete canonical contracts without mistaking partial owner
+  evidence, eventual transport or consolidated tracking for whole acceptance.
   The [provider-first delivery reconciliation](journal/2026/11.17-provider-first-delivery-boundaries.md)
   maps #12947's complete contract against the finite comparison client and
   retains independent storage, native, provider and operational acceptance.
