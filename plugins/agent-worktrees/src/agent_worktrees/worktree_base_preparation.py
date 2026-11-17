@@ -83,7 +83,7 @@ class _RemoteSources:
     def __init__(self, anchor: Path, remote: str) -> None:
         self.anchor = anchor
         self.remote = remote
-        self.cache: dict[str, str] = {}
+        self.cache: dict[str, str | None] = {}
 
     def resolve(self, ref: str) -> str:
         if not ref:
@@ -93,6 +93,7 @@ class _RemoteSources:
         ):
             return ref
         if ref not in self.cache:
+            self.cache[ref] = None
             candidates = (
                 ref, f"refs/{ref}", f"refs/tags/{ref}", f"refs/heads/{ref}",
                 f"refs/remotes/{ref}", f"refs/remotes/{ref}/HEAD",
@@ -112,7 +113,10 @@ class _RemoteSources:
             if selected is None:
                 raise ValueError("configured policy fetch source is unavailable")
             self.cache[ref] = selected
-        return self.cache[ref]
+        selected = self.cache[ref]
+        if selected is None:
+            raise ValueError("configured policy fetch source is unavailable")
+        return selected
 
 
 @dataclass(frozen=True)

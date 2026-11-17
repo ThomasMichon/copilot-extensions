@@ -677,6 +677,45 @@ def test_preparation_matches_native_remote_short_source_resolution(
     )["marker"] == "refreshed"
 
 
+def test_preparation_does_not_repeat_unavailable_short_source_lookup(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed, anchor = local_repositories
+    path = ".agent-worktrees/config.yaml"
+    old_policy = _commit(seed, path, "default_branch: stable\nmarker: cached\n")
+    _git("tag", "release", cwd=seed)
+    _git("push", "origin", "trunk", "refs/tags/release", cwd=seed)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        "+release:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git("fetch", "origin", "--refmap=", "+release:refs/remotes/origin/stable", cwd=anchor)
+    _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stable", cwd=anchor)
+    _git("push", "origin", ":refs/tags/release", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    original_git = git_ops.git
+    observed: list[tuple[str, ...]] = []
+
+    def counted_git(
+        *args: str, **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        if "ls-remote" in args:
+            observed.append(args)
+        return original_git(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", counted_git)
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert len(observed) == 1
+    assert prepared.fetched is True
+    assert prepared.fetch_error is not None
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert _git("rev-parse", "origin/stable", cwd=anchor) == old_policy
+
+
 @pytest.mark.parametrize("encoding", ["count", "parameters", "parameter-pairs"])
 def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
     local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, encoding: str,
