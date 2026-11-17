@@ -3496,7 +3496,7 @@ all 16 prefixed-probe controls on each Windows shell (69.85 seconds on Windows
 PowerShell and 77.60 seconds on PowerShell 7), and 12 selected native-fixture
 contract controls in 6.16 seconds. These retain the 30-second item and
 180-second group limits; they are not a local execution of the whole-suite
-acceptance fixture. The installer contract passes for all 13 runtime plugins.
+acceptance fixture. The installer contract passes for every declared runtime-contract adopter.
 The refreshed source inventory preserves all 5,039 admitted Dev unit cases
 and 316 coverage targets and adds only the readiness source to its closure.
 
