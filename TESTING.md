@@ -69,6 +69,15 @@ child deadline. Use the contained runner with `--allow-explicit-tiers
 These observations do not explain an earlier timeout, waive a failed run or
 replace the complete prepared-membership acceptance portfolio.
 
+The same file's `-k registered_policy_timeout_observation` selection invokes
+the unchanged `cross-modes` cell composition on both engines. Only that test
+module's subprocess namespace is adapted. If its original ten-second entry
+times out, the adapter reports fixed shell-build/policy-start/policy-complete
+marker counts and partial-output byte counts, never command or output text.
+It re-raises the same exception even if observation fails. Pure controls cover
+redaction and error preservation; a passing diagnostic is nonreproduction,
+not a cause or accepted timeout disposition.
+
 The T2 `test_deployed_anchor_registry_and_bytecode_are_removed_by_native_profile`
 case in Worktrees `tests/test_guard_deploy_contract.py` uses the existing
 `--allow-explicit-tiers` runner selection. It deploys the actual helper into

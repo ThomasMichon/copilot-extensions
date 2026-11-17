@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Protocol, cast
 
 import pytest
@@ -34,6 +35,115 @@ class Fixture(Protocol):
     test_registered_file_local_write_reuses_original_guard_facts: Callable[
         [Path, pytest.MonkeyPatch, pytest.CaptureFixture[str], str, str], None
     ]
+
+
+class PolicyFixture(Protocol):
+    test_registered_full_policy_composition: Callable[
+        [Path, pytest.MonkeyPatch, pytest.CaptureFixture[str], str, bool, str], None
+    ]
+
+
+def policy_timeout_observation(error: subprocess.TimeoutExpired) -> dict[str, object]:
+    def raw(value: object) -> bytes:
+        if isinstance(value, bytes):
+            return value
+        return value.encode("utf-8", errors="replace") if isinstance(value, str) else b""
+
+    stderr = raw(error.stderr)
+    lines = stderr.decode("utf-8", errors="replace").splitlines()
+    return {
+        "shell_build_markers": sum(
+            re.fullmatch(r"NATURAL_SHELL_BUILD [0-9]+(?:\.[0-9]+){1,3}", line) is not None
+            for line in lines
+        ),
+        "policy_start_markers": lines.count("NATURAL_POLICY_START"),
+        "policy_complete_markers": lines.count("NATURAL_POLICY_COMPLETE"),
+        "stdout_bytes": len(raw(error.output)),
+        "stderr_bytes": len(stderr),
+    }
+
+
+def observe_policy_timeout(
+    call: Callable[[], subprocess.CompletedProcess[str]],
+    emit: Callable[[dict[str, object]], None],
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return call()
+    except subprocess.TimeoutExpired as error:
+        try:
+            emit(policy_timeout_observation(error))
+        except Exception:
+            pass
+        raise
+
+
+@pytest.mark.parametrize("observer_fails", [False, True])
+def test_policy_timeout_observation_preserves_original_failure_and_redacts_output(
+    observer_fails: bool,
+) -> None:
+    error = subprocess.TimeoutExpired(
+        ["synthetic-private-command"], 10, output=b"synthetic-private-output",
+        stderr=(
+            b"NATURAL_SHELL_BUILD 5.1.123.4\r\nNATURAL_POLICY_START\r\n"
+            b"synthetic-private-error\r\n"
+        ),
+    )
+    observations: list[dict[str, object]] = []
+
+    def call() -> subprocess.CompletedProcess[str]:
+        raise error
+
+    def emit(value: dict[str, object]) -> None:
+        observations.append(value)
+        if observer_fails:
+            raise RuntimeError("synthetic observation failure")
+
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        observe_policy_timeout(call, emit)
+    assert captured.value is error
+    assert error.output == b"synthetic-private-output"
+    assert error.stderr is not None
+    assert observations == [{
+        "shell_build_markers": 1, "policy_start_markers": 1,
+        "policy_complete_markers": 0, "stdout_bytes": len(error.output),
+        "stderr_bytes": len(error.stderr),
+    }]
+    assert "synthetic-private" not in json.dumps(observations)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows policy timeout observation")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_registered_policy_timeout_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], shell: str,
+) -> None:
+    original = cast(PolicyFixture, importlib.import_module("test_native_pre_policy"))
+    native_run = cast(Callable[..., subprocess.CompletedProcess[str]], subprocess.run)
+    selected_calls = 0
+
+    def emit(value: dict[str, object]) -> None:
+        with capsys.disabled():
+            print(json.dumps({"registered_policy_timeout": {"shell": shell, **value}}), flush=True)
+
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal selected_calls
+        command = args[0] if args else kwargs.get("args")
+        selected = isinstance(command, list) and any(
+            isinstance(value, str) and "NATURAL_SHELL_BUILD " in value for value in command
+        )
+        if not selected:
+            return native_run(*args, **kwargs)
+        assert kwargs.get("timeout") == 10
+        selected_calls += 1
+        return observe_policy_timeout(lambda: native_run(*args, **kwargs), emit)
+
+    monkeypatch.setattr(original, "subprocess", SimpleNamespace(**(vars(subprocess) | {"run": run})))
+    original.test_registered_full_policy_composition(
+        tmp_path, monkeypatch, capsys, shell, True, "cross-modes",
+    )
+    assert selected_calls == 3
 
 
 def fixture() -> Fixture:
