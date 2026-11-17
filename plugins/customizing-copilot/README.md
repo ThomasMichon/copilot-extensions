@@ -48,16 +48,19 @@ Copilot CLI exposes two kinds of customization:
   `joinSession(...)` to register tools/commands, subscribe to `session.on(...)`
   events, and drive the session via `session.send(...)`.
 
-**Prefer the declarative surfaces.** They are simpler, safer, and first-class in
-the runtime. The Extensions API is heavier and **may be on its way out**: the
-native runtime (1.0.66+) already **removed extension SDK callback hooks**
-(`joinSession({ hooks: {...} })` now fails the extension at load), and the
-**declarative hook system has grown to cover what those callbacks did** --
+**Prefer the declarative surfaces** when they express the goal. The Extensions
+API remains available, including callback hooks subject to native trust and
+managed policy. Current hosts resolve `@microsoft/copilot-sdk/extension` and
+register callbacks under `hooks.handlers`; preceding hosts resolve
+`@github/copilot-sdk/extension` and use flat `hooks`. A namespace-only change
+does not migrate the registration shape. Read the selected host's bundled SDK
+declarations rather than inferring callback removal from an older warning.
+The **declarative hook system also covers many callback use cases** --
 including injecting `additionalContext` into the model from `postToolUse` /
 `notification` / `sessionStart` (see the `authoring-skills` hooks section). A
 hook can read a small **state file** (maintained by a lightweight background
 process if needed) and emit `{"additionalContext": "..."}`, which is the
-declarative replacement for the old extension `onPostToolUse` injection. Reach
+declarative alternative to extension `onPostToolUse` injection. Reach
 for an extension only when no declarative surface can express the goal (e.g. a
 genuinely interactive slash command with live UI), and keep the imperative part
 minimal.

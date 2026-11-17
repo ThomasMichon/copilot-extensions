@@ -19,6 +19,16 @@ before SDK activation rather than falling back to source. The same original
 plugin root is checked against native loadout observations after relocation.
 No additional SDK join, default-mode change or permission declaration is added.
 
+The Core-owned SDK adapter selects the current
+`@microsoft/copilot-sdk/extension` namespace, or the preceding
+`@github/copilot-sdk/extension` only when the current namespace is absent.
+It preserves the original registrations while mapping tools to
+`tools.definitions`, callbacks to `hooks.handlers`, commands to
+`interaction.commands` and permission handling to `permissions.onRequest`
+on current hosts. Dependency/evaluation failures and failed joins are not
+retried through another SDK. Each released extension carries its own projected
+helper; no sibling plugin or installed runtime supplies it.
+
 An original Copilot Driver headed launch supplies
 `COPILOT_DRIVER_HEADED_CLIENT` and thereby selects retained delivery for that
 launch. Ordinary receiving uses the already-joined public SDK session, not
@@ -98,7 +108,7 @@ admission requirements. Current Core omits process diagnostics from new-mode
 requests; optional valid observations from other consumers remain advisory.
 Proxy ingress remains unsupported.
 
-The already-used `@microsoft/copilot-sdk` session must expose `send()`, `getEvents()`
+The already-joined host SDK session must expose `send()`, `getEvents()`
 and `rpc.metadata.snapshot()`. Its actual `sessionId`, metadata session ID and
 working directory must agree with the registered native context. Metadata alone
 cannot redirect a stale SDK handle's send target. A resume whose SDK handle

@@ -74,14 +74,8 @@ class _OfflineCli:
 
 def _native_sdk_import() -> str:
     """Keep generated native fixtures on the production SDK resolution contract."""
-    entrypoint = (
-        Path(__file__).resolve().parents[2]
-        / "extensions" / "agent-remote-driver" / "extension.mjs"
-    )
-    source = entrypoint.read_text(encoding="utf-8")
-    start = source.index("async function importExtensionSdk(")
-    end = source.index("\n}", start) + 2
-    return source[start:end] + '\nconst { joinSession } = await importExtensionSdk("/extension");\n'
+    source = dict(extension_sources())["sdk-compat.mjs"].decode("utf-8")
+    return source + "\nconst { joinSession } = await loadExtensionSdk();\n"
 
 
 @pytest.fixture

@@ -6,8 +6,7 @@
 // Uses the session.usage_info event for accurate context window monitoring
 // (currentTokens / tokenLimit) instead of heuristic turn counting.
 //
-// Integration points (all via observable session events -- the native runtime
-// removed SDK callback hooks, so no `hooks` object is passed to joinSession):
+// Integration points (via observable session events, without callback hooks):
 // 1. generate_handoff_prompt tool -- on-demand structured handoff data
 // 2. save_handoff_prompt tool -- persist composed handoff to machine-local state
 // 3. session.usage_info event -- real-time context utilization monitoring
@@ -33,20 +32,12 @@ import {
 } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-async function importExtensionSdk(subpath = "") {
-  try {
-    return await import(`@microsoft/copilot-sdk${subpath}`);
-  } catch (error) {
-    if (error?.code !== "ERR_MODULE_NOT_FOUND" ||
-        !error.message?.startsWith("Cannot find package '@microsoft/copilot-sdk' imported from ")) {
-      throw error;
-    }
-    return import(`@github/copilot-sdk${subpath}`);
-  }
-}
-
-const { approveAll } = await importExtensionSdk();
-const { joinSession } = await importExtensionSdk("/extension");
+const { loadExtensionSdk } = await import(
+  existsSync(new URL("./sdk-compat.mjs", import.meta.url))
+    ? new URL("./sdk-compat.mjs", import.meta.url).href
+    : new URL("../../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs", import.meta.url).href
+);
+const { joinSession, approveAll } = await loadExtensionSdk();
 import {
   agentDispatchAvailable,
   agentWorktreesGet,

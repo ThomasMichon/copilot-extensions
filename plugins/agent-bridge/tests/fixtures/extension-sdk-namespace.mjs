@@ -70,11 +70,9 @@ for (const specifier of ["@github/copilot-sdk", "@github/copilot-sdk/extension"]
 for (const entry of entries) {
   const source = readFileSync(entry, "utf8");
   await link(source, pathToFileURL(entry).href);
-  const start = source.indexOf("async function importExtensionSdk(");
-  assert.notEqual(start, -1, `${entry} must preserve mixed-loader compatibility`);
-  const end = source.indexOf("\n}", start) + 2;
-  assert.ok(end > start);
-  const helper = source.slice(start, end);
+}
+const helperPath = join(root, "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs");
+const helper = readFileSync(helperPath, "utf8");
   for (const available of ["microsoft", "github", "both", "dependency-failure", "initialization-failure"]) {
     const calls = [];
     const dependencyFailure = Object.assign(new Error(
@@ -82,8 +80,8 @@ for (const entry of entries) {
     ), { code: "ERR_MODULE_NOT_FOUND" });
     const failure = available === "initialization-failure"
       ? new Error("SDK initialization failed") : dependencyFailure;
-    const module = new vm.SourceTextModule(`${helper}\nexport { importExtensionSdk };`, {
-      identifier: pathToFileURL(entry).href,
+    const module = new vm.SourceTextModule(helper, {
+      identifier: pathToFileURL(helperPath).href,
       importModuleDynamically: async (specifier) => {
         calls.push(specifier);
         const modern = specifier.startsWith("@microsoft/");
@@ -104,20 +102,17 @@ for (const entry of entries) {
     });
     await module.link(() => assert.fail("isolated helper must have no static imports"));
     await module.evaluate();
-    for (const subpath of ["", "/extension"]) {
-      calls.length = 0;
       if (available.endsWith("-failure")) {
-        await assert.rejects(module.namespace.importExtensionSdk(subpath),
+        await assert.rejects(module.namespace.loadExtensionSdk(),
           (error) => error === failure);
-        assert.deepEqual(calls, [`@microsoft/copilot-sdk${subpath}`]);
+        assert.deepEqual(calls, ["@microsoft/copilot-sdk/extension"]);
       } else {
-        const exports = await module.namespace.importExtensionSdk(subpath);
-        assert.equal(typeof exports[subpath ? "joinSession" : "approveAll"], "function");
+        const exports = await module.namespace.loadExtensionSdk();
+        assert.equal(typeof exports.joinSession, "function");
+        assert.equal(typeof exports.approveAll, "function");
         assert.deepEqual(calls, available === "github"
-          ? [`@microsoft/copilot-sdk${subpath}`, `@github/copilot-sdk${subpath}`]
-          : [`@microsoft/copilot-sdk${subpath}`]);
+          ? ["@microsoft/copilot-sdk/extension", "@github/copilot-sdk/extension", "@github/copilot-sdk"]
+          : ["@microsoft/copilot-sdk/extension", "@microsoft/copilot-sdk"]);
       }
-    }
   }
-}
 console.log(`Linked ${entries.length} extension entrypoints; verified Microsoft/GitHub SDK compatibility`);
