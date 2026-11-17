@@ -32,7 +32,7 @@ def target_id(snapshot: PRSnapshot) -> str:
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
-def _run_native(argv: list[str]) -> subprocess.CompletedProcess:
+def _run_native(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return run_command(argv, timeout=NATIVE_SNAPSHOT_TIMEOUT)
 
 
@@ -137,7 +137,7 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
 
 def fetch_snapshot(
     repo: str, number: int, command: str, *, prefix: list[str] | None = None,
-    runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
     credential_command: list[str] | None = None,
     config_file: str | None = None,
 ) -> PRSnapshot:

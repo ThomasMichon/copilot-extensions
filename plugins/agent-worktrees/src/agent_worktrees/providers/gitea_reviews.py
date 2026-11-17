@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from ..pr_snapshot import Review
+from ..pr_review_policy import KNOWN_REVIEW_STATES, normalize_review_state
 from .base import ProviderError
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ def _review(value: object) -> Review:
         or not isinstance(actor, dict)
         or not isinstance(actor.get("login"), str) or not actor["login"].strip()
         or not isinstance(value.get("state"), str) or not value["state"].strip()
+        or normalize_review_state(value["state"]) not in KNOWN_REVIEW_STATES | {"REQUEST_REVIEW"}
         or type(value.get("dismissed", False)) is not bool
         or any(value.get(name) is not None and not isinstance(value[name], str)
                for name in ("submitted_at", "commit_id"))

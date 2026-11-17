@@ -9,7 +9,7 @@ from .pr_contract import Baseline
 from .pr_snapshot import PRSnapshot
 
 
-def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str, api_base: str) -> dict:
+def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str, api_base: str) -> dict[str, object]:
     return {
         "schema": "agent-worktrees.pr-snapshot", "version": 1,
         "provider": provider, "api_base": api_base, "repo": repo, "pr": number,

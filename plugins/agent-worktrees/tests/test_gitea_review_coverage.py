@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from agent_worktrees.pr_snapshot_payload import snapshot_payload
+from agent_worktrees.pr_snapshot import Review
 from agent_worktrees.providers.base import ProviderError
 from agent_worktrees.providers.gitea import GiteaProvider
 
 
-def review(number: int, **changes: object) -> dict:
+def review(number: object, **changes: object) -> dict[str, Any]:
     return {
         "id": number, "state": "APPROVED", "user": {"login": "reviewer"},
         "submitted_at": "2026-01-01T00:00:00Z", "commit_id": "a" * 40,
@@ -20,11 +23,13 @@ def review(number: int, **changes: object) -> dict:
     }
 
 
-def read(monkeypatch: pytest.MonkeyPatch, pages: list[object]) -> tuple:
+def read(
+    monkeypatch: pytest.MonkeyPatch, pages: Sequence[object],
+) -> tuple[tuple[Review, ...], list[int]]:
     provider = GiteaProvider()
     calls: list[int] = []
 
-    def request(method: str, url: str, token: str, *, payload: dict | None = None) -> tuple[int, str]:
+    def request(method: str, url: str, token: str, *, payload: dict[str, Any] | None = None) -> tuple[int, str]:
         assert method == "GET"
         page = int(parse_qs(urlsplit(url).query)["page"][0])
         calls.append(page)
@@ -37,7 +42,7 @@ def read(monkeypatch: pytest.MonkeyPatch, pages: list[object]) -> tuple:
 
 @pytest.mark.parametrize("final", [[], [review(51, state="PENDING", submitted_at=None)]])
 def test_complete_pages_retain_later_and_pending_reviews(
-    monkeypatch: pytest.MonkeyPatch, final: list,
+    monkeypatch: pytest.MonkeyPatch, final: list[dict[str, Any]],
 ) -> None:
     pages = [[review(n) for n in range(1, 51)], final]
     if final:
@@ -58,7 +63,7 @@ def test_server_clamped_short_pages_do_not_truncate_review_history(
 @pytest.mark.parametrize("invalid", [
     {}, None, [None], [review(True)], [review(0)], [review("1")],
     [review(51, user=None)], [review(51, user={"login": ""})],
-    [review(51, state=None)], [review(51, dismissed="false")],
+    [review(51, state=None)], [review(51, state="BROKEN")], [review(51, dismissed="false")],
     [review(51, submitted_at=42)], [review(51, commit_id=False)],
     [review(1)], [review(51)] * 51,
 ])
@@ -74,7 +79,7 @@ def test_empty_review_history_is_complete_but_provider_failure_is_not(
 ) -> None:
     provider = GiteaProvider()
 
-    def request(method: str, url: str, token: str, *, payload: dict | None = None) -> tuple[int, str]:
+    def request(method: str, url: str, token: str, *, payload: dict[str, Any] | None = None) -> tuple[int, str]:
         if "/reviews?" in url:
             return 200, "[]"
         if "/commits/" in url:

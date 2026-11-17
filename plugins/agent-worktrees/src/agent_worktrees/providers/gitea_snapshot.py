@@ -1,13 +1,19 @@
 """Gitea snapshot acquisition under the provider's existing native read owner."""
 
+from __future__ import annotations
+
 import json
+from typing import Any
 
 from ..pr_contract import PRSnapshot
 from .base import ProviderError
 from .observation_credentials import MAX_SNAPSHOT_REQUESTS, ObservationCredentials
 
 
-def snapshot(owner, repo, number, *, api_base="", token=None, credential_source=None):
+def snapshot(
+    owner: Any, repo: str, number: int, *, api_base: str = "",
+    token: Any = None, credential_source: Any = None,
+) -> PRSnapshot:
     if credential_source is not None:
         if token is not None:
             raise ProviderError("explicit observation credentials cannot select a legacy token")
