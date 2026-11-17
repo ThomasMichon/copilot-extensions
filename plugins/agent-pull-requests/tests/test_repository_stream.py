@@ -7,6 +7,7 @@ import importlib
 import asyncio
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,6 +85,47 @@ def test_stream_reprojects_freshness_without_a_new_durable_event(tmp_path: Path)
     assert not second["frames"][2][1]["view"]["next_actions"]
     assert second["frames"][2][1]["view"]["unavailable"]
     assert selected[1].path.read_bytes() == before
+
+
+@pytest.mark.parametrize("interval", [1, 300])
+def test_backlogged_events_preserve_the_full_sample_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interval: int,
+) -> None:
+    from agent_pull_requests import repository_stream
+
+    selected = setup(tmp_path)
+    observe(selected)
+    row = request(selected, "subscribe", request_id="cadence", ttl=3600, after=0)["subscription"]
+    stream = RepositoryStream(selected[-1], selected[2].key, "consumer", {
+        "registration_id": row["registration_id"], "reviewer": "reviewer", "limit": 1,
+        "interval": interval, "seconds": interval * 2 + 1,
+    }, None)
+    initial = stream.sample(expires_at=10000)
+    assert initial["more"]
+    clock = [0.0]
+    samples: list[float] = []
+    sleep = asyncio.sleep
+
+    async def advance(seconds: float) -> None:
+        clock[0] += seconds
+        await sleep(0)
+
+    def sample() -> dict[str, object]:
+        samples.append(clock[0])
+        return stream.sample(expires_at=10000)
+
+    monkeypatch.setattr(repository_stream, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(asyncio, "sleep", advance)
+
+    async def scenario() -> None:
+        frames = [frame async for frame in chunks(stream, initial, sample, lambda: None)]
+        assert b'"reason":"window_elapsed"' in frames[-1]
+
+    asyncio.run(scenario())
+    assert samples == pytest.approx([interval, interval * 2])
+    assert request(selected, "inspect", registration_id=row["registration_id"])[
+        "subscription"
+    ]["acknowledged"] == 0
 
 
 def test_cancelled_stream_joins_its_started_sample_before_releasing_owner(tmp_path: Path) -> None:

@@ -122,6 +122,8 @@ operations for further pages or full retained event facts. A snapshot can be
 newer than the accompanying delivery batch; its independent current event and
 projection cursors remain visible. Streams reevaluate cached freshness/ranking
 without requiring a new durable event and never trigger forge acquisition.
+Full samples honor the selected interval even while event delivery is backlogged;
+catch-up does not accelerate store validation or view reprojection.
 
 Reconnect with `--last-event-id ID` (HTTP `Last-Event-ID`) and the same
 registration, reviewer, page limit and freshness selection. The ID binds that

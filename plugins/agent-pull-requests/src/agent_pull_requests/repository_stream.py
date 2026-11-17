@@ -162,7 +162,7 @@ async def chunks(
         if remaining <= 0:
             yield encode("end", {"reason": "window_elapsed"})
             return
-        wake = time.monotonic() + min(.01 if result["more"] else stream.interval, remaining)
+        wake = time.monotonic() + min(stream.interval, remaining)
         while time.monotonic() < wake:
             await asyncio.sleep(min(.1, max(0, wake - time.monotonic())))
             check()
