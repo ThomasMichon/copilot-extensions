@@ -14,6 +14,7 @@ from agent_worktrees import config as cfg, push_timeout
 from agent_worktrees import status_monitor_presentation as presentation
 from agent_worktrees.observation_progress import NativeInventory, capture_inventory, progress_scope
 from agent_worktrees.status_monitor_presentation import run_monitor_sweep
+from agent_worktrees.status_monitor_roster_demand import managed_roster_projects
 
 
 class UnloadedRecord(tracking.WorktreeRecord):
@@ -133,6 +134,69 @@ def test_native_presentation_precedes_bulk_roster_collection(
     ) == 1
     assert len(before_collection) == 1
     assert [request["mux_session"] for request in before_collection[0]] == ["wt-one"]
+
+
+def test_mux_only_project_is_computed_by_the_scheduled_owner_without_external_demand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.closure_descriptor import DESCRIPTOR_VERSION
+
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("projection computed Git"))
+
+    class UnrenderedSegments(Segments):
+        def get_cached(self, path: str) -> None:
+            return None
+
+    state: dict[str, Any] = {}
+    computations: list[str] = []
+    requests: list[dict[str, Any]] = []
+
+    def collect_roster() -> None:
+        computations.append(cfg.active_project() or "")
+        state.update({
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": str(tmp_path), "state": "convo", "turn_count": 12,
+                "closure": {
+                    "version": DESCRIPTOR_VERSION, "label": "CONVO", "style": "convo",
+                    "compact": "CONVO", "closure": {"final": False},
+                    "action": {"disposition": "blocked"}, "claims": {"held": 0},
+                    "follow_ups": {"open": 0},
+                },
+            }],
+        })
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    context_done: set[str] = set()
+    published: dict[tuple[str, str], str] = {}
+    for _ in range(2):
+        projects = managed_roster_projects(cache)
+        assert projects == {"project"}
+        assert run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", context_done,
+            picker_projects=projects, roster_publisher=collect_roster,
+            managed_mux_cache=cache, segment_cache=UnrenderedSegments(),
+            state_snapshot=lambda project: state, published=published,
+        ) == 1
+    assert computations == ["project", "project"]
+    assert "STATE(?)" in requests[0]["values"]["@aw_seg"]
+    assert "CONVO 12\U0001f4ac" in requests[1]["values"]["@aw_seg"]
+    assert managed_roster_projects(None) == set()
 
 
 def test_native_projection_reads_computed_segment_without_git(

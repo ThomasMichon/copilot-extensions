@@ -69,14 +69,19 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     scope = load("observation_progress")
     load("monitor_projection_cache")
     formatter = load("mux_state_projection")
+    projects = load("status_monitor_roster_demand")
     presentation = load("status_monitor_presentation")
     return SimpleNamespace(
         scope=scope, presentation=presentation, formatter=formatter, package=package,
+        projects=projects,
     )
 
 
 class CompletedSegments:
-    def get_cached(self, path: str) -> str:
+    def observation_blocked(self, project: str, path: str | None = None) -> bool:
+        return False
+
+    def get_cached(self, path: str) -> str | None:
         return "completed"
 
     def get(self, path: str) -> str:
@@ -102,6 +107,7 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
     api.package.mux_status_link.publish_managed_session_status = publish
 
     def sweep(*args: Any, **options: Any) -> int:
+        assert options["picker_projects"] == {"project"}
         live = observed_collect(args[0])
         assert live is not None
         options["catalog_observer"](set(live))
@@ -117,6 +123,7 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
         managed_mux_cache=object(), segment_cache=CompletedSegments(),
         catalog_observer=lambda names: events.append("catalog"),
         state_snapshot=snapshot,
+        picker_projects=api.projects.managed_roster_projects(object()),
     ) == 1
     assert events == ["catalog", "write:wt-one", "roster"]
     assert inventories == ["psmux.exe"] and snapshots == ["project"]
@@ -135,6 +142,42 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
     assert api.presentation.run_monitor_sweep(
         sweep, "tmux", "monitor", "fixture", set(), segment_cache=segments,
     ) == 1
+    path_reads: list[str] = []
+    snapshots: list[str] = []
+
+    class Row(dict[str, Any]):
+        def get(self, key: str, default: Any = None) -> Any:
+            if key == "path":
+                path_reads.append(self["id"])
+            return super().get(key, default)
+
+    class Unrendered(CompletedSegments):
+        def get_cached(self, path: str) -> None:
+            return None
+
+    def snapshot(project: str) -> dict[str, Any]:
+        snapshots.append(project)
+        return {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [
+                Row(id="one", path="/synthetic/one", title="unique"),
+                Row(id="two", path="/synthetic/two", title="ambiguous"),
+                Row(id="alias", path="/synthetic/two", title="alias"),
+            ],
+        }
+
+    def indexed_sweep(*args: Any, **options: Any) -> int:
+        view = options["segment_cache"]
+        assert view.get("/synthetic/one").startswith("unique ")
+        assert not view.get("/synthetic/two").startswith(("ambiguous ", "alias "))
+        assert not view.get("/synthetic/missing").startswith("unique ")
+        assert view.get("/synthetic/one").startswith("unique ")
+        return 1
+
+    assert api.presentation.run_monitor_sweep(
+        indexed_sweep, "tmux", "monitor", "fixture", set(),
+        segment_cache=Unrendered(), state_snapshot=snapshot,
+    ) == 1
+    assert snapshots == ["project"] and path_reads == ["one", "two", "alias"]
 
 
 def test_cooperative_progress_uses_completion_based_cadence_and_no_reentry(api: SimpleNamespace) -> None:
@@ -191,3 +234,14 @@ def test_projected_formatter_marks_advisory_state_without_inventing_counts(api: 
     assert "\u21912" in current and "\u2193" not in current
     assert "DIRTY ?" in stale and "\u2191" not in stale
     assert "STATE(?)" in api.formatter.render_projected_segment(None, current=False)
+    convo = {
+        **row, "state": "convo", "turn_count": 12,
+        "closure": {"supported": True, "style": "convo", "compact": "CONVO"},
+    }
+    assert "CONVO 12\U0001f4ac" in api.formatter.render_projected_segment(convo, current=True)
+    advisory = api.formatter.render_projected_segment(convo, current=False)
+    assert "CONVO ?" in advisory and "\U0001f4ac" not in advisory
+    for count in (True, -1, None):
+        assert "\U0001f4ac" not in api.formatter.render_projected_segment(
+            {**convo, "turn_count": count}, current=True,
+        )

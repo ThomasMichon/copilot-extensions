@@ -17,6 +17,7 @@ from .status_monitor_idle import (
     _wait_for_tracking_write_idle as _wait_for_tracking_write_idle,
 )
 from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
+from .status_monitor_roster_demand import managed_roster_projects
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
 
 if TYPE_CHECKING:
@@ -855,7 +856,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 allocation_linker.tick()
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
-                external_projects = picker_projects | demand_projects | worktrees_runtime.demand_projects()
+                external_projects = (
+                    picker_projects | demand_projects | worktrees_runtime.demand_projects()
+                    | managed_roster_projects(managed_mux_runtime.cache)
+                )
                 served = run_monitor_sweep(
                     core._monitor_sweep,
                     mux_bin,

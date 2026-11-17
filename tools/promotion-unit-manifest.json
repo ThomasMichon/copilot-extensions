@@ -5647,7 +5647,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/observation_progress.py",
         "plugins/agent-worktrees/src/agent_worktrees/monitor_projection_cache.py",
         "plugins/agent-worktrees/src/agent_worktrees/mux_state_projection.py",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_presentation.py"
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_presentation.py",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_roster_demand.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -5677,7 +5678,7 @@
         "libs/payload-invocation/runtime_admission.py": "41e856c4fcfbc5f98cb59cc4e5525da07b3afa9451e59905fe3f47fbbb68efbf",
         "tools/promotion_unit_tests/test_runtime_admission_delivery.py": "dbb56e0d18615ff20c03f3422f49e0ace70e57a1c49a73271c5bb6c34c2a03e8",
         "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py": "9886d39d2f23973999333f780b72e7ccf63ebd6bcf654e2942075159c299038f",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "edcfde8acf56828aa5be88d26a3d67ee807ae549fb4e1c9fb8fe445c256cf2a7",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "ecb0fa71a317575c20644983b0e69d6af8d66677b5db693cf79200d49ef4879e",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
         "tools/promotion_unit_tests/test_hook_demand.py": "699e774bfd04d87fd4b4fd7e24f8188cfb7c51557b5bf4c14f7997f418d19a9c",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
@@ -6481,9 +6482,10 @@
         "tools/promotion_unit_tests/test_retained_admission_work.py": "bdde7bac4e96079165d6b1bdf94735a8e7ddc9c43e2566fe51e9420d9bc9515e",
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba",
         "plugins/agent-worktrees/src/agent_worktrees/monitor_projection_cache.py": "96a5d521df3272df471512a2d1a432d160d36f701f2fde53e08522fc5bc9760f",
-        "plugins/agent-worktrees/src/agent_worktrees/mux_state_projection.py": "5826df869af2e87b348ac05d7d10ba5e5bf16497ab203ee3b32d9ba8df37a057",
+        "plugins/agent-worktrees/src/agent_worktrees/mux_state_projection.py": "e425c8a594009ab0edb1cb1965b5d8a2c769b74cac0c68880657b311249cafab",
         "plugins/agent-worktrees/src/agent_worktrees/observation_progress.py": "4df55d21de9e1e1376dce5c1581fcfbe2432af698e2293e6c7ea0205220a5b65",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_presentation.py": "acf90c0ffd1be276a25b52665648b22653b437e30ea0a32d02f75bbe6441d061",
-        "tools/promotion_unit_tests/test_mux_projection_progress.py": "ae5cf4218c1e2b81c536b89477ba2fac39489dc1d68fde253fb25301003acaa6"
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_presentation.py": "35e2f1b445393ea6ebdced67a51a280c7b70a4f968fa5b3c641720c93e3f6165",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py": "f2a2b0d8a4a93a25c27694a7e62c61d83e86760a44e1fcd0c3f709f225651166",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_roster_demand.py": "d989253a6bf75feb1ea56e1bfffad010b8c3e6e57b74e821b26746121ed8b4f9"
     }
 }

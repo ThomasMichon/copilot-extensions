@@ -245,6 +245,11 @@ compute-on-miss segment getter, Git classification or a refresh request.
 The normal TMux monitor path also uses this read-only segment view. Explicit
 status commands and the existing Git sweep, lifecycle and watcher owners retain
 their own refresh behavior.
+Managed live mux projects remain enrolled in that scheduled roster computation
+even without a Picker, list request or runtime demand. Projection itself does
+not enroll demand or request refreshes. Path lookup uses one per-project index
+and refuses ambiguous paths; current CONVO descriptors retain their computed
+conversation turn count, while advisory counts stay suppressed.
 
 Native presentation runs before bulk roster collection. During that same
 owner's roster pass, moderated cooperative progress between record observations

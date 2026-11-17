@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
 import time
 from typing import Any
 
@@ -14,6 +15,13 @@ from . import status_bar_cli, status_monitor_runtime, tracking
 from .monitor_projection_cache import ProjectedSegments, SegmentOwner
 from .mux_state_projection import render_projected_segment
 from .observation_progress import inventory_scope
+
+
+@dataclass
+class _ComputedProject:
+    by_id: dict[str, dict[str, Any]]
+    by_path: dict[str, dict[str, Any] | None]
+    current: bool
 
 
 class PresentationProgress:
@@ -97,7 +105,7 @@ def run_monitor_sweep(
 
     def computed_segment(
         project: str | None, path: str, worktree_id: str | None,
-        snapshots: dict[str, tuple[dict[str, dict[str, Any]], bool]],
+        snapshots: dict[str, _ComputedProject],
     ) -> str:
         if not project:
             cached = segments.get_cached(path) if segments is not None else None
@@ -108,32 +116,37 @@ def run_monitor_sweep(
             reply = state_snapshot(project) if state_snapshot is not None else {}
             rows = reply.get("worktrees")
             projection = reply.get("projection")
-            snapshots[project] = ({
+            by_id = {
                 row["id"]: row for row in rows
                 if isinstance(row, dict) and isinstance(row.get("id"), str)
-            } if isinstance(rows, list) else {}, (
+            } if isinstance(rows, list) else {}
+            by_path: dict[str, dict[str, Any] | None] = {}
+            for indexed in by_id.values():
+                indexed_path = indexed.get("path")
+                if isinstance(indexed_path, str):
+                    by_path[indexed_path] = None if indexed_path in by_path else indexed
+            snapshots[project] = _ComputedProject(by_id, by_path, (
                 reply.get("ok") is True
                 and isinstance(projection, dict)
                 and projection.get("quality") == "current"
                 and not reply.get("availability")
             ))
-        rows_by_id, current = snapshots[project]
+        snapshot = snapshots[project]
         if worktree_id is not None:
-            row = rows_by_id.get(worktree_id)
+            row = snapshot.by_id.get(worktree_id)
         else:
-            matches = [row for row in rows_by_id.values() if row.get("path") == path]
-            row = matches[0] if len(matches) == 1 else None
-        if row is not None and current:
+            row = snapshot.by_path.get(path)
+        if row is not None and snapshot.current:
             return render_projected_segment(row, current=True)
         cached = segments.get_cached(path) if segments is not None else None
         if isinstance(cached, str):
             return cached
         if segments is not None and segments.observation_blocked(project, path):
             return segments.pending_segment_for_path(path)
-        return render_projected_segment(row, current=current)
+        return render_projected_segment(row, current=snapshot.current)
 
     if not is_psmux(mux_bin) or cache is None:
-        snapshots: dict[str, tuple[dict[str, dict[str, Any]], bool]] = {}
+        snapshots: dict[str, _ComputedProject] = {}
         return sweep(
             mux_bin, token, prefix, ctx_done, **dict(options, segment_cache=ProjectedSegments(
                 segments, lambda path: computed_segment(cfg.active_project(), path, None, snapshots),
@@ -151,7 +164,7 @@ def run_monitor_sweep(
 
     def publish_session(
         session: str, original: dict[str, Any], observed: tuple[int, str],
-        snapshots: dict[str, tuple[dict[str, dict[str, Any]], bool]],
+        snapshots: dict[str, _ComputedProject],
     ) -> None:
         recheck(options.get("governance"), "pre-mutation:discover-connected-mux")
         entry = _native_entry(original, mux_bin, cache, observed)
@@ -213,7 +226,7 @@ def run_monitor_sweep(
 
     def present(live: dict[str, tuple[int, str]]) -> None:
         entries, _, _ = status_monitor_runtime._monitor_managed_session_union(cache, {})
-        snapshots: dict[str, tuple[dict[str, dict[str, Any]], bool]] = {}
+        snapshots: dict[str, _ComputedProject] = {}
         for session, original in entries.items():
             if session not in live:
                 continue

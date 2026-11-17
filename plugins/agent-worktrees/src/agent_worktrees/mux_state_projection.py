@@ -24,13 +24,18 @@ def render_projected_segment(row: dict[str, Any] | None, *, current: bool) -> st
     bg = _DESCRIPTOR_STYLE_BG.get(descriptor["style"], "colour238")
     tags: list[str] = []
     if descriptor["supported"] and current:
-        for name, marker in (("ahead", "\u2191"), ("behind", "\u2193")):
-            count = row.get(name)
-            if (
-                isinstance(count, int) and not isinstance(count, bool) and count > 0
-                and (name != "ahead" or row.get("state") != "completed")
-            ):
-                tags.append(marker + str(count))
+        if row.get("state") == "convo":
+            turns = row.get("turn_count")
+            if isinstance(turns, int) and not isinstance(turns, bool) and turns >= 0:
+                tags.append(f"{turns}\U0001f4ac")
+        else:
+            for name, marker in (("ahead", "\u2191"), ("behind", "\u2193")):
+                count = row.get(name)
+                if (
+                    isinstance(count, int) and not isinstance(count, bool) and count > 0
+                    and (name != "ahead" or row.get("state") != "completed")
+                ):
+                    tags.append(marker + str(count))
     tag = " " + " ".join(tags) if tags else ""
     block = f"#[bg={bg},fg=colour015,bold] {text(label)}{tag} #[default]"
     return " ".join(part for part in (text(title), block) if part)
