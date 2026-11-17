@@ -172,15 +172,17 @@ class FilteredProjection:
             first_new = state["next_sequence"]
             progressed = False
             for row in rows:
+                selected = self.expression(row)
                 pending = set(row["pending_removals"])
                 if scan["outcome"] == "complete":
                     pending.update(set(row["members"]) - prepared.keys())
                 pending.difference_update(prepared)
+                pending.update(number for number in row["members"] if number in known
+                               and selected.evaluate(known[number], now=observed_at) == NONMATCH)
                 row["pending_removals"] = sorted(pending)
-                # Row rollback must retain absence proved by this accepted scan.
+                # Row rollback must retain nonmembership proved by this accepted scan.
                 before = copy.deepcopy(row)
                 event_count, sequence = len(state["events"]), state["next_sequence"]
-                selected = self.expression(row)
                 previous: set[int] = set(row["members"])
                 members, unknown = set(previous), False
                 capacity_limited = False

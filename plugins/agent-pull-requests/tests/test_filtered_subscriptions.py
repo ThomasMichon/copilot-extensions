@@ -1,5 +1,6 @@
 """Filtered consumers retain independent intent and delivery under the existing owner."""
 
+import json
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -639,3 +640,47 @@ def test_blocked_departures_survive_restart_ack_and_incomplete_scan(
     assert not {event["event_id"] for event in pending} & {event["event_id"] for event in retained}
     observe(renewed, {7: facts()} if returned else {}, outcome=outcome, error="provider_incomplete")
     assert events(renewed, "broad", broad) == pending
+
+
+@pytest.mark.parametrize("returned", [False, True])
+def test_partial_nonmatch_survives_projection_rollback_and_cache_eviction(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch, returned: bool,
+) -> None:
+    from agent_pull_requests import filtered_state
+
+    broad = subscribe(selected, "broad", {"tags": {"any": ["special"]}})
+    narrow = subscribe(selected, "narrow", {"publication": ["draft"]})
+    monkeypatch.setattr(filtered_state, "MAX_EVENTS", 4)
+    observe(selected, {1007: facts(tags=["special"]), 1008: facts(tags=["special"])})
+    retained = events(selected, "broad", broad)
+    initial = events(selected, "narrow", narrow)
+    execute(selected, "narrow", "acknowledge", {
+        **registration(narrow), "event_id": initial[-1]["event_id"],
+    })
+    observe(selected, {1007: facts(), 1008: facts()}, outcome="partial", error="page_limit")
+    assert events(selected, "broad", broad) == retained
+    for start in (1, 201):
+        observe(selected, {number: facts() for number in range(start, start + 200)},
+                outcome="partial", error="page_limit")
+    cache = json.loads(selected[1].path.read_bytes())["repository_cache"]["repositories"][0]["pulls"]
+    assert not {1007, 1008} & {pull["number"] for pull in cache}
+    assert [pull["number"] for pull in execute(
+        selected, "broad", "query", registration(broad),
+    )["baseline"]["pulls"]] == [1007, 1008]
+    now, old, identity, _projection, _registry = selected
+    restored = ReplayStore(
+        old.root, "test", clock=lambda: now[0], repository_cache=True,
+        repository_continuing=True, repository_filtered=True,
+    )
+    projection = FilteredProjection(restored, (identity,), capabilities={identity.key: CAPABILITIES})
+    renewed = now, restored, identity, projection, FilteredSubscriptions(projection)
+    execute(renewed, "broad", "acknowledge", {
+        **registration(broad), "event_id": retained[-1]["event_id"],
+    })
+    observe(renewed, {1007: facts(tags=["special"])} if returned else {},
+            outcome="partial" if returned else "unavailable", error="provider_incomplete")
+    assert [pull["number"] for pull in execute(
+        renewed, "broad", "query", registration(broad),
+    )["baseline"]["pulls"]] == ([1007] if returned else [])
+    assert {event["number"] for event in events(renewed, "broad", broad)
+            if event["kind"] == "departure"} == ({1008} if returned else {1007, 1008})
