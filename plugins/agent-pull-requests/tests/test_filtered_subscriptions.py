@@ -642,9 +642,9 @@ def test_blocked_departures_survive_restart_ack_and_incomplete_scan(
     assert events(renewed, "broad", broad) == pending
 
 
-@pytest.mark.parametrize("returned", [False, True])
+@pytest.mark.parametrize(("returned", "unknown"), [(False, False), (False, True), (True, True)])
 def test_partial_nonmatch_survives_projection_rollback_and_cache_eviction(
-    selected: Selected, monkeypatch: pytest.MonkeyPatch, returned: bool,
+    selected: Selected, monkeypatch: pytest.MonkeyPatch, returned: bool, unknown: bool,
 ) -> None:
     from agent_pull_requests import filtered_state
 
@@ -659,6 +659,17 @@ def test_partial_nonmatch_survives_projection_rollback_and_cache_eviction(
     })
     observe(selected, {1007: facts(), 1008: facts()}, outcome="partial", error="page_limit")
     assert events(selected, "broad", broad) == retained
+    ready = events(selected, "narrow", narrow)
+    execute(selected, "narrow", "acknowledge", {
+        **registration(narrow), "event_id": ready[-1]["event_id"],
+    })
+    if unknown:
+        observe(selected, {1007: facts(tags=None), 1008: facts(tags=None)},
+                outcome="partial", error="facts_missing")
+        ready = events(selected, "narrow", narrow)
+        execute(selected, "narrow", "acknowledge", {
+            **registration(narrow), "event_id": ready[-1]["event_id"],
+        })
     for start in (1, 201):
         observe(selected, {number: facts() for number in range(start, start + 200)},
                 outcome="partial", error="page_limit")

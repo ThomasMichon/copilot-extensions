@@ -71,6 +71,7 @@ of shared-cache eviction.
 After ACK makes room, reconciliation can emit the departure even if the next
 scan is incomplete or the provider is unavailable. New positive observations
 supersede that nonmembership; cancellation or generation replacement clears it.
+An intervening observation with unknown facts does not clear proved removal.
 Acknowledged or otherwise unprotected old events can be reclaimed independently
 of an earlier event retained for another consumer. Unsettled delivery and events
 created in the current transaction remain protected.

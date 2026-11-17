@@ -176,7 +176,8 @@ class FilteredProjection:
                 pending = set(row["pending_removals"])
                 if scan["outcome"] == "complete":
                     pending.update(set(row["members"]) - prepared.keys())
-                pending.difference_update(prepared)
+                pending.difference_update(number for number, facts in prepared.items()
+                                          if selected.evaluate(facts, now=observed_at) == MATCH)
                 pending.update(number for number in row["members"] if number in known
                                and selected.evaluate(known[number], now=observed_at) == NONMATCH)
                 row["pending_removals"] = sorted(pending)
