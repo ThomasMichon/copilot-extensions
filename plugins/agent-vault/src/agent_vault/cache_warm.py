@@ -12,11 +12,13 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from . import cache_sources, config
+from . import cache_sources, cache_targets, config
 from .cache import cache_enabled
+from .cache_limits import WorkBudget
 from .cache_warm_status import WarmState
 from .credential_fields import canonical_field
 from .extensions import get_registry
+from .invocation import use_configuration_root
 from .service_cache import ReadAdmissionExpired, get_cache
 from .service_cache_store import ServiceCacheStore
 from .service_connections import settle_owned
@@ -35,11 +37,12 @@ WARM_SECONDS = 60.0
 @dataclass
 class WarmRequest:
     kpdb: str
-    group: str
+    group: str | None
     stamp: float
     token: object
     deadline: float
-    sources: tuple[cache_sources.CacheSource, ...]
+    configuration_root: str
+    sources: tuple[cache_sources.CacheSource, ...] = ()
     progress: WarmState = field(default_factory=lambda: WarmState("queued"))
 
 
@@ -50,11 +53,11 @@ class CacheWarmQueue:
         self._lock = threading.Lock()
         self._foreground = threading.Condition()
         self._foreground_count = 0
-        self._records: OrderedDict[tuple[str, str], WarmRequest] = OrderedDict()
-        self._pending: OrderedDict[tuple[str, str], WarmRequest] = OrderedDict()
+        self._records: OrderedDict[tuple[str, str | None], WarmRequest] = OrderedDict()
+        self._pending: OrderedDict[tuple[str, str | None], WarmRequest] = OrderedDict()
         self._epochs: dict[str, object] = {}
         self._default_groups: dict[str, str] = {}
-        self._refused: tuple[tuple[str, str], WarmState] | None = None
+        self._refused: tuple[tuple[str, str | None], WarmState] | None = None
 
     @contextlib.contextmanager
     def foreground(self) -> Iterator[None]:
@@ -86,28 +89,11 @@ class CacheWarmQueue:
                 return WarmState("not-queued", "service-closing")
             if confirmed and kpdb in self._epochs:
                 self._epochs[kpdb] = object()
-            if confirmed and group is None:
+            if confirmed:
                 self._default_groups.pop(kpdb, None)
         if not cache_enabled():
             return WarmState("disabled")
-        selected_group = group
-        try:
-            selected_group = group if group is not None else config.load_config().group or ""
-            sources = tuple(
-                source.fn for source in get_registry().cache_sources[: MAX_SOURCES + 1]
-            )
-        except Exception:
-            state = WarmState("not-queued", "configuration-unavailable")
-            if selected_group is not None:
-                with self._lock:
-                    self._refused = (kpdb, selected_group), state
-            return replace(state)
-        if not sources:
-            state = WarmState("disabled", "no-cache-sources")
-            with self._lock:
-                self._refused = (kpdb, selected_group), state
-            return replace(state)
-        key = kpdb, selected_group
+        key = kpdb, group
         stamp = self.service._password_set_at.get(kpdb)
         if stamp is None:
             return WarmState("not-queued", "unknown-unlock-generation")
@@ -116,11 +102,17 @@ class CacheWarmQueue:
                 return WarmState("not-queued", "service-closing")
             token = self._epochs.get(kpdb)
             current = self._records.get(key)
+            if current is None and group is None and kpdb in self._default_groups:
+                current = self._records.get((kpdb, self._default_groups[kpdb]))
             if current is not None and current.stamp == stamp and current.token is token:
-                if group is None:
-                    self._default_groups[kpdb] = selected_group
                 return replace(current.progress)
-            if current is None and len(self._records) >= MAX_CONTEXTS:
+            try:
+                root = config.configuration_root()
+            except (OSError, RuntimeError, ValueError):
+                state = WarmState("not-queued", "configuration-unavailable")
+                self._refused = key, state
+                return replace(state)
+            if key not in self._records and len(self._records) >= MAX_CONTEXTS:
                 reusable = next(
                     (
                         context
@@ -142,19 +134,40 @@ class CacheWarmQueue:
             self._epochs[kpdb] = token
             request = WarmRequest(
                 kpdb,
-                selected_group,
+                group,
                 stamp,
                 token,
                 time.monotonic() + WARM_SECONDS,
-                sources,
+                root,
             )
             self._records[key] = self._pending[key] = request
-            if group is None:
-                self._default_groups[kpdb] = selected_group
             self._records.move_to_end(key)
             if self._refused is not None and self._refused[0] == key:
                 self._refused = None
             return replace(request.progress)
+
+    def bind_group(self, request: WarmRequest, group: str) -> bool:
+        """Bind deferred defaults without duplicating an accepted context's work."""
+        with self._lock:
+            if self.closed or self._epochs.get(request.kpdb) is not request.token:
+                return False
+            previous = request.kpdb, request.group
+            key = request.kpdb, group
+            if request.group is None:
+                self._default_groups[request.kpdb] = group
+            current = self._records.get(key)
+            if current is not None and current is not request:
+                if current.stamp == request.stamp and current.token is request.token:
+                    if current.progress.state != "queued":
+                        self._records.pop(previous, None)
+                        return False
+                    request.deadline = min(request.deadline, current.deadline)
+                self._pending.pop(key, None)
+            if previous != key:
+                self._records.pop(previous, None)
+            request.group = group
+            self._records[key] = request
+            return True
 
     def take(self) -> WarmRequest | None:
         with self._lock:
@@ -181,12 +194,12 @@ class CacheWarmQueue:
             return WarmState("idle").describe()
         with self._lock:
             selected_group = group if group is not None else self._default_groups.get(kpdb)
-            if selected_group is None:
-                return WarmState("idle", "context-unavailable").describe()
             key = kpdb, selected_group
             if self._refused is not None and self._refused[0] == key:
                 return self._refused[1].describe()
             request = self._records.get(key)
+            if request is None and selected_group is None:
+                return WarmState("idle", "context-unavailable").describe()
             if request is not None and self._epochs.get(kpdb) is not request.token:
                 return WarmState("not-queued", "unlock-generation-changed").describe()
             return (request.progress if request is not None else WarmState("idle")).describe()
@@ -280,6 +293,38 @@ class CacheWarmRuntime:
             if not persistent.enabled:
                 progress.state, progress.reason = "failed", "cache-unavailable"
                 return
+            budget = WorkBudget(
+                MAX_ITEMS, request.deadline, lambda: bool(self._stopped(request)),
+                clock=time.monotonic,
+            )
+            try:
+                with use_configuration_root(request.configuration_root):
+                    group = (
+                        request.group if request.group is not None
+                        else config.load_config().group or ""
+                    )
+                    if not self.queue.bind_group(request, group):
+                        progress.state = "cancelled"
+                        return
+                    if not budget.available():
+                        progress.state, progress.reason = "partial", self._stopped(request)
+                        return
+                    declared = cache_targets.configured_source(budget=budget)
+                    sources = tuple(
+                        source.fn for source in get_registry().cache_sources[:MAX_SOURCES + 1]
+                    )
+            except Exception:
+                progress.state, progress.reason = "failed", "configuration-unavailable"
+                return
+            if not budget.available():
+                progress.state, progress.reason = "partial", self._stopped(request)
+                return
+            request.sources = (
+                (declared, *sources[:MAX_SOURCES]) if declared is not None else sources
+            )
+            if not request.sources:
+                progress.state, progress.reason = "disabled", "no-cache-sources"
+                return
             targets = cache_sources.collect(
                 request.sources,
                 None,
@@ -287,6 +332,8 @@ class CacheWarmRuntime:
                 max_items=MAX_ITEMS,
                 max_sources=MAX_SOURCES,
                 deadline=request.deadline,
+                budget=budget,
+                metered_sources=(declared,) if declared is not None else (),
             )
             entries: list[tuple[str, str]] = []
             seen: set[tuple[str, str]] = set()
@@ -297,6 +344,7 @@ class CacheWarmRuntime:
                     seen.add(identity)
                     entries.append((entry, field_name))
             progress.selected = len(entries)
+            progress.reason = self._stopped(request)
             progress.failed_sources, progress.truncated = targets.failed_sources, targets.truncated
             self.queue.update(request, progress)
             self.service._request_ctx.allow_prompt = False
@@ -354,6 +402,8 @@ class CacheWarmRuntime:
                 or progress.truncated
                 else "complete"
             )
+        except cache_targets.CacheTargetError:
+            progress.state, progress.reason = "failed", "configuration-unavailable"
         except Exception:
             progress.state, progress.reason = "failed", "cache-unavailable"
         finally:
