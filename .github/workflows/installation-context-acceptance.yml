@@ -2378,7 +2378,9 @@ jobs:
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
       - name: Retained source to complete profile and actual offline construction
-        run: python -m pytest -q tools/test_runtime_source_wheels.py
+        run: python -m pytest -q tools/test_runtime_source_wheels.py tools/test_runtime_source_witness.py
+      - name: Native source compile selected-wheel export
+        run: python -m pytest -q tools/test_runtime_source_lock.py -k native_source_lock_binds
       - name: Copied application retention without legacy payload helpers
         shell: python
         run: |

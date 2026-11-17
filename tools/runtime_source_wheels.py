@@ -232,6 +232,19 @@ def retain_source_profile(
         if build_profile is not None or offline:
             raise ProfileError("associated first-party wheels cannot request backend construction")
     pins = {entry["name"]: entry for entry in record["pins"]}
+    selected_files = record.get("files")
+    if selected_files is not None:
+        if not isinstance(selected_files, list) or any(
+            not isinstance(entry, dict)
+            or entry.keys() != {"name", "version", "filename", "sha256"}
+            for entry in selected_files
+        ):
+            raise ProfileError("exact third-party files do not complete the source lock")
+        exact_files = {entry["name"]: entry for entry in selected_files}
+        if len(exact_files) != len(selected_files) or exact_files.keys() != pins.keys():
+            raise ProfileError("exact third-party files do not complete the source lock")
+    else:
+        exact_files = None
     if len(selected_projects) + len(pins) > max_wheels:
         raise ProfileError("source closure exceeds the wheel count budget")
     third_party = dict(third_party)
@@ -241,9 +254,14 @@ def retain_source_profile(
         name, version, _, _ = _wheel_filename(filename, limits.max_tags, deadline)
         digest = _digest(path, limits.max_archive_bytes, deadline)
         pin = pins.get(name)
+        exact = exact_files.get(name) if exact_files is not None else None
         if (
             path.name != filename or name in third_names or pin is None
             or Version(pin["version"]) != version or digest not in pin["hashes"]
+            or (exact_files is not None and (
+                exact is None or exact["filename"] != filename or exact["sha256"] != digest
+                or Version(exact["version"]) != version
+            ))
         ):
             raise ProfileError("third-party wheel differs from the selected source lock")
         third_names.add(name)

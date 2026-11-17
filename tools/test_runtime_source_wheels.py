@@ -67,7 +67,8 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     files[prefix + "RECORD"] = record.getvalue().encode()
     with zipfile.ZipFile(pathlib.Path(wheel_directory) / filename, "w") as wheel:
         for path, data in files.items():
-            wheel.writestr(zipfile.ZipInfo(path, (2000, 1, 1, 0, 0, 0)), data)
+            wheel.writestr(zipfile.ZipInfo(path, (2000, 1, 1, 0, 0, 0)), data,
+                           compress_type=zipfile.ZIP_DEFLATED)
     return filename
 """
 
@@ -275,7 +276,7 @@ def test_native_source_lock_completes_helpers_extras_before_existing_offline_con
             assert receipt["wheel_inputs"]["binding"]["source_lock"]["trigger"] == "release-index-unavailable"
 
 
-@pytest.mark.parametrize("change", ["requirements", "source", "missing-pin", "wrong-hash", "extra-wheel"])
+@pytest.mark.parametrize("change", ["requirements", "source", "missing-pin", "wrong-hash", "wrong-filename", "extra-wheel"])
 def test_incomplete_or_changed_source_lock_refuses_before_build(
     adopter, source, target, toolchain, tmp_path, monkeypatch, change,
 ):
@@ -294,6 +295,13 @@ def test_incomplete_or_changed_source_lock_refuses_before_build(
         record = candidate.record()
         if change != "extra-wheel":
             record["pins"] = [{"name": "fixture-registry", "version": "1.0", "hashes": ["sha256:" + "1" * 64]}]
+            if change == "wrong-filename":
+                digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                record["pins"][0]["hashes"] = [digest]
+                record["files"] = [{
+                    "name": "fixture-registry", "version": "1.0",
+                    "filename": "fixture_registry-1.0-1-py3-none-any.whl", "sha256": digest,
+                }]
             candidate = replace(candidate, canonical=json.dumps(record).encode())
         if change != "missing-pin":
             paths[path.name] = path
@@ -301,6 +309,34 @@ def test_incomplete_or_changed_source_lock_refuses_before_build(
     with pytest.raises(ProfileError):
         with completion.retain_source_profile(candidate, third_party=paths, **arguments(toolchain)):
             pytest.fail("invalid source candidate reached a complete profile")
+
+
+def test_exact_file_record_accepts_equivalent_version_before_build(
+    adopter, source, target, toolchain, tmp_path, monkeypatch,
+):
+    candidate = selected_source(source, target, adopter)
+    path = tmp_path / "fixture_registry-1.0-py3-none-any.whl"
+    path.write_bytes(wheel_bytes(
+        name="fixture_registry", prefix="fixture_registry-1.0.dist-info/",
+        metadata=b"Metadata-Version: 2.3\nName: fixture-registry\nVersion: 1.0\n\n",
+    ))
+    digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    record = candidate.record()
+    record["pins"] = [{"name": "fixture-registry", "version": "1.0.0", "hashes": [digest]}]
+    record["files"] = [{
+        "name": "fixture-registry", "version": "1.0.0", "filename": path.name, "sha256": digest,
+    }]
+    candidate = replace(candidate, canonical=json.dumps(record).encode())
+
+    def build(*_args, **_options):
+        raise RuntimeError("reached selected build")
+
+    monkeypatch.setattr(completion, "build_wheel", build)
+    with pytest.raises(RuntimeError, match="reached selected build"):
+        with completion.retain_source_profile(
+            candidate, third_party={path.name: path}, **arguments(toolchain),
+        ):
+            pytest.fail("the test build boundary must stop construction")
 
 
 def test_actual_metadata_cannot_drop_selected_helper_extra(

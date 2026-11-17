@@ -121,7 +121,7 @@ def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
 
 def _wheel_pins(
     content: bytes, target: dict, deadline: float, *, prefer_target_tags: bool = False,
-    local_wheels: Mapping[str, Path] | None = None,
+    local_wheels: Mapping[str, Path] | None = None, diagnostic: bytes | None = None,
 ) -> list[dict]:
     """Keep remote defaults; local witnesses must match an already-held wheel set."""
     _check_deadline(deadline)
@@ -129,7 +129,22 @@ def _wheel_pins(
         raise ProfileError("native source wheel matching needs an explicit boolean")
     if local_wheels is not None and not isinstance(local_wheels, Mapping):
         raise ProfileError("native local wheel witnesses require a held mapping")
+    if diagnostic is not None and (
+        type(diagnostic) is not bytes or prefer_target_tags or local_wheels is not None
+    ):
+        raise ProfileError("native source selection needs its own bounded diagnostic bytes")
     try:
+        selections = {}
+        if diagnostic is not None:
+            for line in diagnostic.decode("utf-8").splitlines():
+                _check_deadline(deadline)
+                match = re.fullmatch(
+                    r"DEBUG Selecting: ([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+) \[compatible\] \(([^()]+)\)",
+                    line,
+                )
+                if match:
+                    key = canonicalize_name(match[1], validate=True), Version(match[2])
+                    selections.setdefault(key, set()).add(match[3])
         document = dependencies._toml_parser().loads(content.decode("utf-8"))
         if (
             set(document) - {"lock-version", "created-by", "requires-python", "packages"}
@@ -160,7 +175,7 @@ def _wheel_pins(
                 )
                 or not isinstance(package["name"], str) or not isinstance(package["version"], str)
                 or not isinstance(package["wheels"], list) or not package["wheels"]
-                or (not prefer_target_tags and len(package["wheels"]) != 1)
+                or (diagnostic is None and not prefer_target_tags and len(package["wheels"]) != 1)
             ):
                 raise ProfileError("native source wheel-lock needs one exact wheel per package")
             if "marker" in package and (
@@ -172,6 +187,14 @@ def _wheel_pins(
             version = Version(package["version"])
             if name in names:
                 raise ProfileError("unsupported native source wheel witness")
+            native_choice = None
+            if diagnostic is not None:
+                filenames = selections.get((name, version), set())
+                if len(filenames) != 1:
+                    raise ProfileError("native source compile lacks an unambiguous selected-wheel witness")
+                native_choice = next(iter(filenames))
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,250}\.whl", native_choice) is None:
+                    raise ProfileError("native source compile lacks an unambiguous selected-wheel witness")
             candidates = []
             for wheel in package["wheels"]:
                 _check_deadline(deadline)
@@ -210,7 +233,7 @@ def _wheel_pins(
                 if wheel_name != name or wheel_version != version:
                     raise ProfileError("native source wheel witness differs from the selected target")
                 ranks = [priority[tag] for tag in tags if tag in priority]
-                if ranks:
+                if ranks and (native_choice is None or filename == native_choice):
                     candidates.append((min(ranks), filename, wheel["hashes"]["sha256"]))
             if not candidates:
                 raise ProfileError("native source wheel witness differs from the selected target")
@@ -229,6 +252,8 @@ def _wheel_pins(
     except (OSError, ValueError, TypeError, KeyError, InvalidMarker) as exc:
         if isinstance(exc, ProfileError):
             raise
+        if diagnostic is not None:
+            raise ProfileError("native source compile lacks an unambiguous selected-wheel witness") from None
         raise ProfileError("invalid native source wheel-lock output") from exc
 
 
@@ -278,6 +303,7 @@ def retain_source_configuration(
     env: dict[str, str] | None = None, wheel_witness: bool = False,
     include_build_tools: bool = False,
     installation: dict | None = None,
+    _capture_diagnostics: bool = False,
 ):
     """Capture source/compiler settings without executing dependency resolution.
 
@@ -285,6 +311,8 @@ def retain_source_configuration(
     No installation, source discovery, alternate release or artifact is used.
     """
     _check_deadline(deadline)
+    if type(_capture_diagnostics) is not bool or (_capture_diagnostics and not wheel_witness):
+        raise ProfileError("native source diagnostics require the wheel-lock transaction")
     if type(include_build_tools) is not bool or (include_build_tools and not wheel_witness):
         raise ProfileError("build tools require an exact native source wheel lock")
     if include_build_tools and installation is None:
@@ -345,7 +373,8 @@ def retain_source_configuration(
         )
         projection = []
         with dependencies.retain_uv_source_compile(
-            uv, [*arguments, "--output-file", str(output),
+            uv, [*arguments,
+                 *(["-v"] if _capture_diagnostics else ["--output-file", str(output)]),
                  *(["--format", "pylock.toml"] if wheel_witness else [])],
             cwd=payload, env=environment, trusted_source_roots=(payload,),
             deadline=deadline, native_target=True, _projection=projection,
@@ -353,6 +382,11 @@ def retain_source_configuration(
             _source(payload, expected_source)
             _retained_source(transaction, payload, deadline)
             retained_roots = tuple(transaction.sources.values())
+            if _capture_diagnostics and any(
+                dependencies._toml(path / "pyproject.toml")["project"].get("dynamic")
+                for path in retained_roots
+            ):
+                raise ProfileError("source wheel witness requires static retained project metadata")
             retained_hash = runtime.fingerprint_source(_source_files(retained_roots))
             configuration_policy = None
             if installation is not None:
@@ -401,33 +435,48 @@ def retain_source_configuration(
 @contextmanager
 def _retain_source_lock(
     plan: InstallationProfilePlan, *, max_lock_bytes: int, deadline: float,
-    wheel_witness: bool = False, **options,
+    wheel_witness: bool = False, max_diagnostic_bytes: int | None = None, **options,
 ):
     """Resolve only after the actual source/settings owner has been captured."""
     _check_deadline(deadline)
     if type(max_lock_bytes) is not int or max_lock_bytes <= 0:
         raise ProfileError("source candidate needs a positive lock byte budget")
+    capture_diagnostics = max_diagnostic_bytes is not None
+    if capture_diagnostics and (
+        not wheel_witness or type(max_diagnostic_bytes) is not int or max_diagnostic_bytes <= 0
+    ):
+        raise ProfileError("source wheel witness needs a positive diagnostic byte budget")
     with retain_source_configuration(
-        plan, deadline=deadline, wheel_witness=wheel_witness, **options,
+        plan, deadline=deadline, wheel_witness=wheel_witness,
+        _capture_diagnostics=capture_diagnostics, **options,
     ) as configuration:
         transaction = configuration.transaction
-        result = subprocess.run(
-            list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=deadline - time.monotonic(),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        _check_deadline(deadline)
-        if result.returncode:
-            raise ProfileError("retained source candidate resolution failed")
-        with configuration.output.open("rb") as stream:
-            content = stream.read(max_lock_bytes + 1)
+        diagnostic = None
+        if capture_diagnostics:
+            from runtime_source_capture import capture
+
+            content, diagnostic = capture(
+                transaction, configuration.output.parent.resolve(strict=True),
+                max_stdout=max_lock_bytes, max_stderr=max_diagnostic_bytes, deadline=deadline,
+            )
+        else:
+            result = subprocess.run(
+                list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=deadline - time.monotonic(),
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            _check_deadline(deadline)
+            if result.returncode:
+                raise ProfileError("retained source candidate resolution failed")
+            with configuration.output.open("rb") as stream:
+                content = stream.read(max_lock_bytes + 1)
         if len(content) > max_lock_bytes:
             raise ProfileError("source candidate exceeds its lock byte budget")
         configuration.verify()
         record = configuration.record()
         native_lock = content if wheel_witness else None
-        files = _wheel_pins(content, record["target"], deadline) if wheel_witness else None
+        files = _wheel_pins(content, record["target"], deadline, diagnostic=diagnostic) if wheel_witness else None
         if files is not None:
             content = "".join(
                 f'{item["name"]}=={item["version"]} --hash={item["sha256"]}\n' for item in files

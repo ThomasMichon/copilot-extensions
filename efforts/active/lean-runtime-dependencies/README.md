@@ -218,8 +218,9 @@ architecture/plan revision, not an implementation or rollout assignment.
   automatically authorized governed source fallback, optional overrides only.
   Do not require users to assemble an approval map or wait for artifact
   publication before source installation.
-  Configuration-intent resolution merged in #8494; authenticated selection,
-  governed closure and constructor acceptance remain open.
+  Configuration-intent resolution (#8494) and retained-source to offline
+  constructor preparation (#8791) are merged. Authentication, governed
+  acquisition/admitted reuse and native engine-consumer acceptance remain open.
 - [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
@@ -240,7 +241,7 @@ architecture/plan revision, not an implementation or rollout assignment.
 ### Phase 6 - Close the measured delta
 - [x] Publish before/after profile footprint and fresh-install evidence, with
   running-state proof for any authorized rollout.
-- [ ] Remove redundant package-preparation transactions identified by the
+- [x] Remove redundant package-preparation transactions identified by the
   installation-latency audit, preserving build prerequisites, source/feed
   admission, immutable construction and health/cutover semantics.
 - [ ] Resolve or explicitly transfer every implementation and validation item;
@@ -431,10 +432,12 @@ The existing-owner configuration-intent reader merged in #8494, including
 management publication holds and policy invalidation. It does not close the
 authenticated adopting-policy/source adapter or its actual governed closure.
 The release-authentication adapter (#8568) and policy/release planner (#8586)
-also merged under the artifact owner's continuation. They remain repository-only
-preparation: no independently locked source closure, governed acquisition or
-production consumer is enabled. Coordinate actual source-lock/acquisition
-composition with that owner under #4876 rather than duplicating it.
+also merged under the artifact owner's continuation. The retained source-lock
+candidate (#8705) and complete inspected source-profile construction (#8791)
+now supply repository-only source preparation and actual fixture construction.
+They do not authenticate source acquisition, admit a production closure or
+enable a native engine consumer. Compose the existing bounded acquisition
+boundary (#8820) under #4876 rather than adding another resolver or owner.
 #6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
@@ -2130,3 +2133,20 @@ transfer without acceptance by a named tracked objective.
   its existing setuptools/PyYAML prerequisites, then measure the authorized
   updater's actual changed and unchanged paths. Do not restart profile plumbing
   or infer an installed speedup from the merged source fix.
+
+### 2026-10-25 - Source closure and Logger qualification supplement
+
+[Retained-source construction and Logger batching](journal/2026/10.25-source-closure-and-logger.md)
+records the remaining qualification detail and #8997's merge. Only the repeated
+package-preparation source-change item closes; complete-update timing and the
+broader campaign remain open.
+
+### 2026-11-16 - Bounded native-selection continuation
+
+The preserved native-selection work now composes with the current source
+configuration and wheel-lock adapters, rather than restoring superseded
+configuration helpers. Its explicit diagnostic-byte-budget opt-in retains the
+same native compiler's selected file; existing defaults stay unchanged.
+Windows compiler, construction and bounded process-settlement controls cover
+the repository-only seam. Source authentication/adoption, aggregate profiles,
+complete-update timing and rollout remain with their existing tracked owners.

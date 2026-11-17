@@ -984,11 +984,12 @@ def test_source_profile_acceptance_uses_existing_opt_in_and_unchanged_native_bud
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 6
         commands = [step["run"] for step in job["steps"] if "run" in step]
-        assert commands[:2] == [
+        assert commands[:3] == [
             "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml",
-            "python -m pytest -q tools/test_runtime_source_wheels.py",
+            "python -m pytest -q tools/test_runtime_source_wheels.py tools/test_runtime_source_witness.py",
+            "python -m pytest -q tools/test_runtime_source_lock.py -k native_source_lock_binds",
         ]
-        assert len(commands) == 3
+        assert len(commands) == 4
         execution = job["steps"][-1]
         assert execution["shell"] == "python"
         packet = execution["run"]

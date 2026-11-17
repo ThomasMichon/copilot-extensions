@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import zipfile
 
 from packaging.markers import default_environment
+from packaging.tags import sys_tags
 import pytest
 
 import runtime_profile_policy as planner
@@ -89,12 +90,15 @@ def test_expired_outer_source_transaction_preserves_active_timeout_and_diagnosti
         assert observed.value.output == b"output" and observed.value.stderr == b"diagnostics"
 
 
-@pytest.mark.parametrize("wheel_witness", [False, True])
+@pytest.mark.parametrize("wheel_witness,capture_diagnostics", [(False, False), (True, False), (True, True)])
 def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_closure(
-    adopter, source, target, tmp_path, wheel_witness,
+    adopter, source, target, tmp_path, wheel_witness, capture_diagnostics,
 ):
     # This source has no third-party requirements; an empty third-party lock is real.
-    with candidate(adopter, source, target, tmp_path, wheel_witness=wheel_witness) as selected:
+    with candidate(
+        adopter, source, target, tmp_path, wheel_witness=wheel_witness,
+        **({"max_diagnostic_bytes": 65536} if capture_diagnostics else {}),
+    ) as selected:
         record = selected.record()
         assert record["source"] == source[1].document()
         assert record["trigger"] == "release-index-unavailable"
@@ -121,9 +125,11 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
 
 
 @pytest.mark.parametrize("as_extra", [False, True])
-@pytest.mark.parametrize("wheel_witness,multiple", [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize("wheel_witness,multiple,capture_diagnostics", [
+    (False, False, False), (True, False, False), (True, True, False), (True, True, True),
+])
 def test_native_source_lock_binds_nonempty_dated_feed_output(
-    adopter, source, target, tmp_path, as_extra, wheel_witness, multiple,
+    adopter, source, target, tmp_path, as_extra, wheel_witness, multiple, capture_diagnostics,
 ):
     filename = "fixture_registry-1.0-py3-none-any.whl"
     archive = io.BytesIO()
@@ -135,6 +141,18 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
     content = archive.getvalue()
     digest = hashlib.sha256(content).hexdigest()
     filenames = [filename, "fixture_registry-1.0-py2.py3-none-any.whl"] if multiple else [filename]
+    files = dict.fromkeys(filenames, content)
+    if capture_diagnostics:
+        native_tag = str(next(sys_tags()))
+        native_filename = filename.replace("py3-none-any", native_tag)
+        native_archive = io.BytesIO()
+        with zipfile.ZipFile(native_archive, "w") as wheel:
+            wheel.writestr(prefix + "METADATA", "Metadata-Version: 2.1\nName: fixture-registry\nVersion: 1.0\n")
+            wheel.writestr(prefix + "WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: false\nTag: " + native_tag + "\n")
+            wheel.writestr(prefix + "RECORD", "")
+        files[native_filename] = native_archive.getvalue()
+        filename, digest = native_filename, hashlib.sha256(files[native_filename]).hexdigest()
+        target["tags"].insert(0, native_tag)
 
     class Index(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -151,12 +169,12 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
                 body = json.dumps({
                     "meta": {"api-version": "1.2"}, "name": "fixture-registry",
                     "files": [{"filename": name, "url": "/files/" + name,
-                               "hashes": {"sha256": digest}, "upload-time": "2000-01-01T00:00:00Z"}
-                              for name in filenames],
+                               "hashes": {"sha256": hashlib.sha256(data).hexdigest()},
+                               "upload-time": "2000-01-01T00:00:00Z"} for name, data in files.items()],
                 }).encode()
                 kind = "application/vnd.pypi.simple.v1+json"
-            elif self.path in {"/files/" + name for name in filenames}:
-                body, kind = content, "application/octet-stream"
+            elif self.path.removeprefix("/files/") in files:
+                body, kind = files[self.path.removeprefix("/files/")], "application/octet-stream"
             else:
                 self.send_error(404)
                 return
@@ -173,6 +191,12 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
         text += '\n[project.optional-dependencies]\nfeature=["fixture-registry>=1"]\n'
     else:
         text = text.replace("dependencies=[]", 'dependencies=["fixture-registry>=1"]')
+    if capture_diagnostics:
+        helper = source_project(source[0] / "libs" / "helper", name="fixture-helper")
+        text = text.replace("dependencies=[", 'dependencies=["fixture-helper", ', 1)
+        text += '\n[tool.uv.sources]\nfixture-helper={path="libs/helper"}\n'
+        for path in (source[0], helper):
+            (path / "fixture_backend.py").write_text("raise RuntimeError('metadata backend must not execute')\n")
     manifest.write_text(text)
     selected_source = _selected_identity(source[0])
     server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
@@ -187,24 +211,29 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
     )
     environment["UV_CONFIG_FILE"] = str(configuration)
     try:
-        with (pytest.raises(ProfileError, match="one exact wheel") if multiple else nullcontext()), candidate(
-            adopter, selected_source, target, tmp_path, env=environment,
-            extras=("feature",) if as_extra else (), wheel_witness=wheel_witness,
-        ) as selected:
-            assert selected.record()["pins"] == [
-                {"name": "fixture-registry", "version": "1.0", "hashes": ["sha256:" + digest]},
-            ]
-            assert b"fixture-registry==1.0" in selected.requirements
-            assert selected.record()["source"] == selected_source[1].document()
-            assert selected.record()["extras"] == (["feature"] if as_extra else [])
-            if wheel_witness:
-                assert selected.record()["files"] == [{
-                    "name": "fixture-registry", "version": "1.0", "filename": filename,
-                    "sha256": "sha256:" + digest,
+        for _ in range(2 if capture_diagnostics else 1):
+            with (
+                pytest.raises(ProfileError, match="one exact wheel")
+                if multiple and not capture_diagnostics else nullcontext()
+            ), candidate(
+                adopter, selected_source, target, tmp_path, env=environment,
+                extras=("feature",) if as_extra else (), wheel_witness=wheel_witness,
+                **({"max_diagnostic_bytes": 65536} if capture_diagnostics else {}),
+            ) as selected:
+                assert selected.record()["pins"] == [
+                    {"name": "fixture-registry", "version": "1.0", "hashes": ["sha256:" + digest]},
+                ]
+                assert b"fixture-registry==1.0" in selected.requirements
+                assert selected.record()["source"] == selected_source[1].document()
+                assert selected.record()["extras"] == (["feature"] if as_extra else [])
+                if wheel_witness:
+                    assert selected.record()["files"] == [{
+                        "name": "fixture-registry", "version": "1.0", "filename": filename,
+                        "sha256": "sha256:" + digest,
                 }]
-                assert filename.encode() in selected.native_lock
-                assert b"127.0.0.1" not in selected.canonical
-                assert b"127.0.0.1" not in selected.requirements
+                    assert filename.encode() in selected.native_lock
+                    assert b"127.0.0.1" not in selected.canonical
+                    assert b"127.0.0.1" not in selected.requirements
     finally:
         server.shutdown()
         server.server_close()
