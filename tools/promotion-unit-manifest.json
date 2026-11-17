@@ -5654,7 +5654,7 @@
         "tools/core_native_public_feed.py": "e417db26f8331e1ed758edb0d85b5e6f8883d975ee67b9ba028e0dc41a14c8c8",
         "tools/core_release_delivery.py": "7e0e9639e86fa0c3e54a86c8a93bd64eaf172ffb8fabb323047eca34167d46e7",
         "tools/core_release_inputs.py": "b4f14520dd52527eb0b5608bb366b00ce6a58a5c6037e5c027b530e94f2f3867",
-        "tools/local_install_profile.py": "1c09561568128bec739f4af2a786eb327f44fd5376ad6e4868d05a9d74504701",
+        "tools/local_install_profile.py": "02dddf953f327b3d8fa67494495dc372de606339e2299370e1b775e7a81b4c24",
         "tools/local_install_source.py": "779fdc4eadcc911710eb1a2c1bc499de5016534289cb657cb8e2eb5e04c29512",
         "tools/prepare_runtime_source.py": "944ec173e8d2a2bb6ccc20125541121477b965afb5284c303150a5ef8c88adaa",
         "tools/runtime_profile_bundle.py": "4710950140ca7f8e7b9a0d497e2ae4225765f9aae25b2d1d34764ef6dc28b876",

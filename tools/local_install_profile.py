@@ -374,8 +374,10 @@ def _lock_application(application: Path, *, uv: str, deadline: float) -> None:
     }
     command = [uv, "lock", "--offline", "--python", sys.executable]
     if os.name == "nt":
-        native: Callable[[Path], str] = getattr(engine, "_native_retained_path")
-        command.extend(["--project", native(application)])
+        # UV's relative wheel paths are not relocatable with a deep verbatim project operand.
+        project = str(application)
+        project = "\\\\" + project[8:] if project.startswith("\\\\?\\UNC\\") else project.removeprefix("\\\\?\\")
+        command.extend(["--project", project])
     result = subprocess.run(
         command, cwd=Path(application.anchor) if os.name == "nt" else application,
         env=isolated, capture_output=True, text=True,

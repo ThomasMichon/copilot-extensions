@@ -13,6 +13,7 @@ import sys
 import time
 from types import SimpleNamespace
 from typing import Any
+import zipfile
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -404,3 +405,43 @@ def test_native_toolchain_query_from_a_deep_preparation_output(
         application, uv=uv, deadline=time.monotonic() + 30,
     )
     assert (application / "uv.lock").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows application-lock path spelling")
+@pytest.mark.parametrize("spelling", ["ordinary", "extended", "deep-extended"])
+def test_native_application_lock_remains_copyable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str,
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "tools"))
+    profile = importlib.import_module("local_install_profile")
+    uv = shutil.which("uv")
+    assert uv is not None
+    app = tmp_path / ("deep-" + "x" * 140 if spelling == "deep-extended" else "prepared")
+    app = app / "profiles" / "manager" / "snapshot" / "applications" / "manager"
+    (app / "wheels").mkdir(parents=True)
+    wheel = "fixture-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(app / "wheels" / wheel, "w") as archive:
+        archive.writestr(
+            "fixture-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: fixture\nVersion: 1.0\n\n",
+        )
+        archive.writestr(
+            "fixture-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
+        )
+        archive.writestr("fixture-1.0.dist-info/RECORD", "")
+    (app / "pyproject.toml").write_text(
+        '[project]\nname="fixture-application"\nversion="0"\nrequires-python=">=3.10"\n'
+        'dependencies=["fixture==1.0"]\n[tool.uv]\npackage=false\n'
+        f'[tool.uv.sources]\nfixture={{path="wheels/{wheel}"}}\n',
+    )
+    selected = app if spelling == "ordinary" else Path("\\\\?\\" + str(app))
+    profile._lock_application(selected, uv=uv, deadline=time.monotonic() + 30)
+    relocated = tmp_path / "relocated"
+    shutil.copytree(app, relocated)
+    result = subprocess.run(
+        [uv, "lock", "--check", "--offline", "--python", sys.executable, "--project", str(relocated)],
+        capture_output=True, text=True, timeout=30, cwd=Path(tmp_path.anchor),
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
