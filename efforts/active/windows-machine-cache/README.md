@@ -237,3 +237,10 @@ metadata, rather than advertising a guessed minimum. Four native controls pass,
 including real compiled below/above-floor versions with nonzero revisions,
 the original production guard and structured observation refusal. Full fresh
 native Resume qualification and release remain required.
+
+The metadata implementation also landed independently in #13070 during the
+follow-up's review window. Rebase preserves it completely, including its
+unversioned-adapter compatibility for unreadable backends and unchanged
+production refusal. The remaining follow-up supplies real compiled
+version-resource/creation-floor and observer-refusal controls, plus source
+completion records; neither independently merged repair is replaced.

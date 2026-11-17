@@ -1,5 +1,5 @@
 {
-  "comment": "Preserve backend file-version metadata and observation refusals in native Resume fixtures",
+  "comment": "Qualify real compiled native adapter versions and observation refusals",
   "changes": [
     {
       "plugin": "worktree-manager",
