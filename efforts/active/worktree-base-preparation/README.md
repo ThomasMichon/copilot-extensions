@@ -22,9 +22,10 @@ is not implementation completion, and source acceptance is not rollout.
 tracking-alias and freshness-diagnostic findings locally while retaining the
 unchanged-runtime negative candidate. Both negative and positive consumer
 qualification, followed by exact-source review/CI, remain publication gates.
-The expanded positive packet also requires correcting its separate creation
-fixture inputs to the existing receiving-ledger contract; no production
-authority or another contributor's seed-delivery files are changed.
+The expanded positive packet now qualifies the separate creation fixture
+correction. Finish qualification of the native Git short-source mapping form,
+then publish the exact tested correction and obtain fresh review/CI. No
+production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -117,7 +118,7 @@ custody remain independent.
   negatives before revising the fetch, then repeat impacted validation.
 - [x] Resolve the subsequent policy-head, source-namespace, independent-ref
   failure and stale-declared-hop findings with real-Git regressions.
-- [ ] Resolve the later deadline/authentication, unavailable-policy-probe,
+- [x] Resolve the later deadline/authentication, unavailable-policy-probe,
   aliased-tracking-source and truthful caller-warning findings.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
@@ -146,7 +147,7 @@ custody remain independent.
   optional HEAD; refresh surviving refs in either deletion direction; align a
   non-origin creation remote with the reader's policy namespace; refresh a
   newly declared but already tracked policy source before consuming it.
-- [ ] **Remaining boundaries:** delayed authentication cannot launch a fetch
+- [x] **Remaining boundaries:** delayed authentication cannot launch a fetch
   after the shared deadline; unavailable policy probes are not certified
   absent; aliased policy tracking refs retain their configured sources; the
   actual caller reports a refreshed base accurately after policy-only failure.
@@ -392,6 +393,25 @@ typing exemption or pending-project admission.
   non-native packet without dropping any of the15 failures or claiming those
   native contracts ran. Source consumer proof, exact-head review/CI and actual
   merge remain open.
+
+### 2026-11-17 - Expanded caller packet qualifies
+
+- [Run 44081145187](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44081145187)
+  qualifies exact source `07089125344a35ed0b7a49dae9139536a9cbd423`:
+  **162 passed, zero failed/skipped**, with source/selection, canonical tests
+  and runtime verification all passed. This includes all19 preparation cases,
+  30 keyed-creation controls and23 creation-seed controls. Every previously
+  failing creation case remains selected and now passes.
+- The three opt-in fresh-owner native cases remain unchanged and outside this
+  explicit non-native packet; no native enrollment or acceptance is invented.
+  Their literal inputs, decorators and assertions are preserved.
+- Self-review then identified a valid Git fetch mapping whose source is the
+  short name `production`, not only `refs/heads/production`. Retain that native
+  source syntax and add a real alias regression instead of rejecting an
+  otherwise valid mapping. Empty sources, ambiguous mappings and collisions
+  retain their existing error/preservation behavior. That final compatibility
+  refinement still requires exact-source positive qualification before the
+  pending PR update.
 
 ### 2026-11-17 - Finite correction validated locally
 

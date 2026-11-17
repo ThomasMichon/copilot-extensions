@@ -47,7 +47,9 @@ def _policy_source(anchor: Path, remote: str, branch: str) -> str:
     if len(sources) > 1:
         raise ValueError("committed policy fetch mapping is ambiguous")
     selected = next(iter(sources), f"refs/heads/{branch}")
-    if not selected.startswith("refs/") or any(
+    if not selected:
+        raise ValueError("committed policy fetch mapping has no source")
+    if any(
         _mapped_source(selected, pattern, selected) is not None for pattern in exclusions
     ):
         raise ValueError("committed policy fetch mapping excludes its source")
