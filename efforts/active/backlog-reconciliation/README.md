@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+  retain ten whole outcomes while prospectively correcting the actual
+  #4163 citation-classifier barrier without releasing linked-source custody.
   The [ten source deltas and gate-provenance checkpoint](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
   preserves actual source conditions without inventing operator vetoes,
   distinguishes partial receiving and records independently owned inflow.
