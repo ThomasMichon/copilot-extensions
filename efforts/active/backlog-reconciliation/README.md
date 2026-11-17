@@ -3421,6 +3421,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [ordinary Windows test-custody reconciliation](journal/2026/11.17-ordinary-windows-test-custody.md)
+  records actual #13078 delivery and the complete #12717 prerequisite
+  original-to-source/regression/hosted-qualification crosswalk for a proposed
+  source-scope completion, while retaining #12111's unchanged lock-source
+  gap, #12696's reviewed-compatibility prerequisite and all failed-resource
+  custody. The complete census observes 880 whole open, 151 above fixed 729,
+  following two excluded metadata-only arrivals and no departures or new
+  campaign closure credit. All incumbent checkbox states remain unchanged.
   The [delivery, presentation and native failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
   record actual #13073 delivery and six complete-original judgments, retaining
   Draft user-output delivery, installed presentation acceptance, distinct
