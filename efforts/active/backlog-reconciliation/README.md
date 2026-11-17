@@ -3421,6 +3421,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [canonical acceptance and active-owner adjudication](journal/2026/11.16-canonical-acceptance-and-active-owners.md)
+  records actual #12971 delivery and eighteen complete-original decisions:
+  actionable existing receivers, independent finite alternatives and current
+  bounded claimants remain open without repeated implementation studies or
+  keep-open comments. Actual source boundaries remain withheld. The complete
+  863-issue census has one new arrival and no departure, 134 above fixed 729;
+  no technical acceptance, owner or resource obligation is declared complete.
   The [complete resident-readiness receiving proposal](journal/2026/11.16-resident-readiness-receiving.md)
   directly preserves #5215's continuous configured-sink readiness/launch and
   connectivity outcomes, actual serving responsiveness, idle/no-command
