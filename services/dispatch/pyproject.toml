@@ -10,7 +10,7 @@ name = "agent-dispatch-service"
 version = "0.1.0-dev1"
 description = "Standalone, Copilot-independent distribution of the agent-dispatch coordinator daemon."
 readme = "README.md"
-license = "MIT"
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 authors = [{ name = "Thomas Michon" }]
 # The coordinator lifecycle (CLI, `serve` command, installer) already lives
