@@ -5318,7 +5318,8 @@
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_selection_reads_actual_helper_without_executing[malformed]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_cli_keeps_callback_separator_and_refuses_stage",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[2.0]",
-        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[1.0]"
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[1.0]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_candidate_manager_application_has_an_owner_without_waiving_the_strict_ratchet"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -6483,8 +6484,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
-        "tools/typecheck-projects.json": "38a05de57b269cd654a304fb3eddfbc6c739725de4566cb5c6a4e11d65b2db63",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py": "4615dd0831e531913f97835cf0cab7bcc48435e7804949d62cc8684047b08921",
+        "tools/typecheck-projects.json": "a3a4a5dcae91c6976c7089344d72a72ad94146ef8dec91003f7dfed2e2042316",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py": "d5e76fb790520f02a87be738f34296a49225b4dce33d569d49fcdd7f29ff23b3",
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "bb82a11398538564c98a99ffac7c27c8b25ffd0a64ce10f7438ecdf5a6ef676b",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268",
