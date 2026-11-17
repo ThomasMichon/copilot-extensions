@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager, nullcontext
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Protocol, cast
 
 import pytest
 
@@ -25,9 +25,13 @@ limits = importlib.import_module(f"{PACKAGE}.cache_limits")
 read_manifest = cast(Callable[..., Iterator[tuple[str, str]]], manifests.iter_cache_manifest)
 
 
-def memory_manifest(stream: StringIO) -> Path:
+class TextRows(Protocol):
+    def readline(self, size: int = -1) -> str: ...
+
+
+def memory_manifest(stream: TextRows) -> Path:
     class Manifest:
-        def open(self, *, encoding: str) -> AbstractContextManager[StringIO]:
+        def open(self, *, encoding: str) -> AbstractContextManager[TextRows]:
             assert encoding == "utf-8"
             return nullcontext(stream)
 
@@ -105,18 +109,20 @@ def test_vault_manifest_scanning_observes_deadline_and_cancellation(reason: str)
     clock = [0.0]
     cancelled = [False]
 
-    class Stream(StringIO):
-        reads = 0
+    class Stream:
+        def __init__(self) -> None:
+            self.reads = 0
+            self.content = StringIO("# first\n# second\nentry | password\n")
 
-        def readline(self, size: int | None = -1) -> str:
+        def readline(self, size: int = -1) -> str:
             self.reads += 1
             if reason == "deadline":
                 clock[0] += 1.0
             else:
                 cancelled[0] = True
-            return super().readline(size)
+            return self.content.readline(size)
 
-    stream = Stream("# first\n# second\nentry | password\n")
+    stream = Stream()
     budget = limits.WorkBudget(1024, 2.0, lambda: cancelled[0], clock=lambda: clock[0])
     assert list(read_manifest(memory_manifest(stream), budget=budget)) == []
     assert budget.stopped
