@@ -16,3 +16,11 @@ def managed_roster_projects(cache: ManagedMuxCache | None) -> set[str]:
         entry["project"] for entry in entries.values()
         if isinstance(entry.get("project"), str) and entry["project"]
     }
+
+
+def scheduled_roster_projects(
+    picker_projects: set[str], list_projects: set[str], runtime_projects: set[str],
+    cache: ManagedMuxCache | None,
+) -> set[str]:
+    """Combine the existing demand sources with fresh managed mux enrollment."""
+    return picker_projects | list_projects | runtime_projects | managed_roster_projects(cache)

@@ -51,7 +51,10 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     stub("push_timeout", ObservationCleanupError=type("CleanupError", (Exception,), {}),
          ObservationCleanupPending=type("CleanupPending", (Exception,), {}))
     stub("status_bar_cli", _render_status_context=lambda *a, **k: "context",
+         _find_record_for_path=lambda path: None,
+         _render_status_segment=lambda path, **options: "cached:" + path,
          _DESCRIPTOR_STYLE_BG={"dirty": "colour001"}, _SEGMENT_TITLE_MAX=48)
+    stub("git_ops", _windows_observation=lambda: False)
     stub("closure_descriptor", interpret_descriptor_payload=lambda payload: payload or {
         "supported": False, "style": "unknown", "compact": "STATE(?)",
     })
@@ -65,10 +68,12 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     ))
     stub("mux_status_link")
     stub("__main__", _status_monitor_recheck=lambda *a: None,
+         _self_override=lambda name, default: default,
          _StatusMonitorGovernanceDeferred=type("GovernanceDeferred", (Exception,), {}))
     scope = load("observation_progress")
     load("monitor_projection_cache")
     content = load("status_monitor_content")
+    cache = load("status_segment_cache")
     formatter = load("mux_state_projection")
     projects = load("status_monitor_roster_demand")
     presentation = load("status_monitor_presentation")
@@ -76,6 +81,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         scope=scope, presentation=presentation, formatter=formatter, package=package,
         projects=projects,
         content=content,
+        cache=cache,
     )
 
 
@@ -150,7 +156,7 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
         managed_mux_cache=object(), segment_cache=segments,
         catalog_observer=lambda names: events.append("catalog"),
         state_snapshot=snapshot,
-        picker_projects=api.projects.managed_roster_projects(object()),
+        picker_projects=api.projects.scheduled_roster_projects(set(), set(), set(), object()),
     ) == 1
     assert events == ["catalog", "write:wt-one", "roster"]
     assert inventories == ["psmux.exe"] and snapshots == ["project"]
@@ -213,6 +219,25 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
         segment_cache=Unrendered(), state_snapshot=snapshot,
     ) == 1
     assert snapshots == ["project"] and path_reads == ["one", "two", "alias"]
+    real_cache = api.cache._StatusSegmentCache()
+    warm_paths = ["/warm/one", "/warm/two", "/warm/three"]
+    for path in warm_paths:
+        assert real_cache.get(path) == "cached:" + path
+    real_cache.project_for_observation_path = lambda path: pytest.fail("warm cache path scan")
+
+    def cached_sweep(*args: Any, **options: Any) -> int:
+        for path in warm_paths:
+            assert options["segment_cache"].get(path) == "cached:" + path
+        return len(warm_paths)
+
+    assert api.presentation.run_monitor_sweep(
+        cached_sweep, "tmux", "monitor", "fixture", set(), segment_cache=real_cache,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [
+                {"id": path, "path": path, "state": "active"} for path in warm_paths
+            ],
+        },
+    ) == len(warm_paths)
 
 
 def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleNamespace) -> None:
@@ -256,6 +281,36 @@ def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleN
         )
     assert attempted == ["cleanup", "pending", "ready", "governance"]
     assert api.package.config.active_project() == "project"
+    held = [False]
+    policy_attempts: list[str] = []
+    policy_checks: list[str] = []
+
+    class ChangingPolicy(CompletedSegments):
+        def get(self, path: str) -> str:
+            policy_attempts.append(path)
+            held[0] = True
+            return "completed"
+
+    api.content.refresh_content_segments(
+        "project", {"one", "two"}, ChangingPolicy(), governance_deferred=governance,
+        admitted=lambda: not held[0], before_observation=lambda: policy_checks.append("checked"),
+    )
+    assert policy_attempts == ["one"] and policy_checks == ["checked"]
+    held[0] = False
+    policy_attempts.clear()
+    policy_checks.clear()
+
+    def recheck() -> None:
+        policy_checks.append("checked")
+        if held[0]:
+            raise governance("held")
+
+    with pytest.raises(governance):
+        api.content.refresh_content_segments(
+            "project", {"one", "two"}, ChangingPolicy(), governance_deferred=governance,
+            before_observation=recheck,
+        )
+    assert policy_attempts == ["one"] and policy_checks == ["checked", "checked"]
 
 
 def test_cooperative_progress_uses_completion_based_cadence_and_no_reentry(api: SimpleNamespace) -> None:

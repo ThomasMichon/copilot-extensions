@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,6 +12,7 @@ from agent_worktrees import git_ops, push_timeout, status_bar_cli, status_monito
 from agent_worktrees import status_monitor_runtime, status_updater_cli, tracking
 from agent_worktrees.status_monitor_content import refresh_monitor_content
 from agent_worktrees.status_monitor_presentation import run_monitor_sweep
+from agent_worktrees.status_segment_cache import _StatusSegmentCache
 
 
 class StandaloneContent:
@@ -95,3 +97,53 @@ def test_cold_standalone_updater_handoff_gets_scheduled_content_without_tracking
     segments = [value for option, value in writes if option == "@aw_seg"]
     assert len(segments) == 2 and "STATE(?)" in segments[0]
     assert segments[1] == "standalone WIP"
+
+
+def test_warm_posix_multi_session_projection_avoids_path_scans_and_keeps_cleanup_fences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: False)
+    monkeypatch.setattr(cfg, "active_project", lambda: "project")
+    monkeypatch.setattr(core, "_find_record_for_path", lambda path: None, raising=False)
+    rendered: list[str] = []
+
+    def render(path: str, **options: object) -> str:
+        rendered.append(path)
+        return "computed:" + Path(path).name
+
+    monkeypatch.setattr(core, "_render_status_segment", render, raising=False)
+    owner = _StatusSegmentCache()
+    paths = [str(tmp_path / name) for name in ("one", "two", "three", "four")]
+    for path in paths:
+        assert owner.get(path) == "computed:" + Path(path).name
+    scanned: list[str] = []
+    original = owner.project_for_observation_path
+
+    def project_scan(path: str) -> str | None:
+        scanned.append(path)
+        return original(path)
+
+    monkeypatch.setattr(owner, "project_for_observation_path", project_scan)
+
+    def sweep(*args: Any, **options: Any) -> int:
+        view = options["segment_cache"]
+        for path in paths:
+            assert view.get(path) == "computed:" + Path(path).name
+        return len(paths)
+
+    assert run_monitor_sweep(
+        sweep, "tmux", "monitor", "fixture", set(), segment_cache=owner,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [
+                {"id": Path(path).name, "path": path, "state": "active"} for path in paths
+            ],
+        },
+    ) == len(paths)
+    assert rendered == paths and scanned == []
+    ticket = owner.begin_observation("cleanup-project", None, paths[0])
+    failure = push_timeout.ObservationCleanupError("held")
+    monkeypatch.setattr(failure, "try_settle", lambda: pytest.fail("not the cleanup owner"))
+    owner.retain_cleanup(ticket, failure)
+    assert owner.get_cached(paths[0]) is None
+    assert owner.get_cached(paths[1]) == "computed:two"
+    assert scanned == []

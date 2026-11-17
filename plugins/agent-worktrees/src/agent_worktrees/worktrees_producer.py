@@ -70,6 +70,8 @@ def publish_active_project(
     observe_records: Callable[[str, list[tracking.WorktreeRecord]], object] | None = None,
     cleanup_owner: ObservationOwner | None = None, managed_mux_cache: Any = None,
     on_progress: Callable[[], None] | None = None, content_cache: ContentOwner | None = None,
+    content_admitted: Callable[[], bool] | None = None,
+    content_recheck: Callable[[], None] | None = None,
 ) -> int:
     """Publish existing facts, yielding between records when requested."""
     from . import __main__ as core
@@ -99,6 +101,7 @@ def publish_active_project(
                 project, content_paths, content_cache,
                 governance_deferred=core._StatusMonitorGovernanceDeferred,
                 on_progress=on_progress,
+                admitted=content_admitted, before_observation=content_recheck,
             )
         return count
     except Exception as exc:

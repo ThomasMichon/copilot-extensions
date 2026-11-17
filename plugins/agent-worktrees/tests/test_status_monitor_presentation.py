@@ -283,6 +283,7 @@ def test_scheduled_producer_preserves_content_for_active_mux_rows(
     monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
     monkeypatch.setattr(delegate_cli, "annotate_delegate_graph", lambda *a, **k: None)
     events: list[str] = []
+    policy_checks: list[str] = []
 
     class DataOwner(Segments):
         depth = 0
@@ -335,7 +336,9 @@ def test_scheduled_producer_preserves_content_for_active_mux_rows(
     try:
         assert worktrees_producer.publish_active_project(
             runtime, cleanup_owner=owner, content_cache=owner,
+            content_admitted=lambda: True, content_recheck=lambda: policy_checks.append("content"),
         ) == 1
+        assert policy_checks == ["content"]
         assert events == ["roster", "content:" + content_state]
         assert state["worktrees"][0]["state"] == "active"
         owner.may_compute = False

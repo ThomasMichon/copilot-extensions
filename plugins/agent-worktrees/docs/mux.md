@@ -257,6 +257,10 @@ Roster `ACTIVE` is a liveness disposition, not a content status. For observed
 mux worktrees in that state, the scheduled computation owner also refreshes the
 separate content-segment cache after releasing the roster observation ticket.
 The cache retains its existing TTL, invalidation and cleanup ownership.
+Every content observation rechecks lifecycle admission and governance; pending
+priority ends the batch rather than waiting under the shared lock. A stored
+empty project remains a known POSIX cache owner, avoiding repeated path scans
+without weakening cleanup fences.
 Presentation reads only completed fresh content bytes and never substitutes
 `ACTIVE` for DIRTY, WIP or CONVO; unavailable content remains pending rather
 than triggering Git work in the projection path.

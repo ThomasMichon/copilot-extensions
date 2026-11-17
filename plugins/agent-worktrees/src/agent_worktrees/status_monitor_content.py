@@ -21,11 +21,17 @@ class LifecyclePriority(Protocol):
 def refresh_content_segments(
     project: str, paths: set[str], owner: ContentOwner, *,
     governance_deferred: type[Exception], on_progress: Callable[[], None] | None = None,
+    admitted: Callable[[], bool] | None = None,
+    before_observation: Callable[[], None] | None = None,
 ) -> None:
     """Refresh observed content through its original computation and cleanup owner."""
     for path in sorted(paths):
         if on_progress is not None:
             on_progress()
+        if admitted is not None and not admitted():
+            return
+        if before_observation is not None:
+            before_observation()
         try:
             owner.get(path)
         except governance_deferred:
@@ -57,10 +63,9 @@ def refresh_registered_content(
             try:
                 cfg.set_active_project(project)
                 with config_cache.project_scope(config_cache_for_project, project):
-                    if before_observation is not None:
-                        before_observation()
                     refresh_content_segments(
                         project or "", {path}, owner, governance_deferred=governance_deferred,
+                        admitted=admitted, before_observation=before_observation,
                     )
             finally:
                 cfg.set_active_project(previous_project)

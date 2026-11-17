@@ -17,7 +17,7 @@ from .status_monitor_idle import (
     _wait_for_tracking_write_idle as _wait_for_tracking_write_idle,
 )
 from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
-from .status_monitor_roster_demand import managed_roster_projects
+from .status_monitor_roster_demand import scheduled_roster_projects
 from .status_monitor_content import refresh_monitor_content
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
 
@@ -855,11 +855,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     allocation_linker.discover()
                 allocation_linker.tick()
-                picker_projects = monitor_roots.live_picker_projects()
-                demand_projects = core.list_cache.recent_demand_projects()
-                external_projects = (
-                    picker_projects | demand_projects | worktrees_runtime.demand_projects()
-                    | managed_roster_projects(managed_mux_runtime.cache)
+                external_projects = scheduled_roster_projects(
+                    monitor_roots.live_picker_projects(), core.list_cache.recent_demand_projects(),
+                    worktrees_runtime.demand_projects(), managed_mux_runtime.cache,
                 )
                 registered_content: dict[str, str | None] = {}
                 served = run_monitor_sweep(
@@ -892,6 +890,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         managed_mux_cache=managed_mux_runtime.cache,
                         on_progress=presentation_progress,
                         content_cache=segment_cache,
+                        content_admitted=lambda: not lifecycle_priority.is_set(),
+                        content_recheck=lambda: core._status_monitor_recheck(
+                            governance, "pre-mutation:render-status",
+                        ),
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,
