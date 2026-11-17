@@ -1,0 +1,146 @@
+# Observational reviewer-feed consumers
+
+The [reviewer view](REVIEWER.md) is a common input to a round-robin reviewer
+coordinator, a Dispatch adapter and an independent shadow evaluator. None is
+enabled by selecting the view or reading its SSE stream. This document defines
+the consumer boundary; it does not install a coordinator, register an emitter,
+create a task or authorize a review, rebase, CI retry or merge.
+
+## One observation owner, separate consumer custody
+
+Use the existing local client and admitted repository target. Retain the full
+namespace/provider/endpoint/account/repository identity, configured consumer,
+selected reviewer and original registration. Do not equate repository strings
+or PR numbers across accounts or forges. The observation account does not select
+the identity used for a later write.
+
+Polling `next-actions` and consuming its SSE view must have the same selection
+semantics. The stream supplies current first pages, not an archive of transient
+rankings or a complete repository dump. If `more` is true, use `next_after`
+with that view's projection `cursor` to collect further action pages. A changed
+cursor requires restarting the current view; do not combine offsets from
+different rankings. Keep the existing page and aggregate consumer-work limits.
+A bounded partial pass is acceptable when recorded as partial, not as proof
+that an omitted PR has no action.
+
+Preserve `unavailable`, inventory coverage, observation/expiry and independent
+attention reasons. An empty action page with unavailable evidence is not an
+all-clear. Recheck freshness before admitting work; an old buffered frame can
+expire after the service produced it. A cache read never refreshes the forge.
+
+An action's proposed work identity includes the full admitted scope, PR,
+reviewer, action/reason, candidate head/base and original cause event. Hashing
+those fields is a convenient opaque correlation key, not authentication.
+Do not include rank, current poll time, page offset or stream connection ID:
+unchanged refreshes and duplicate frames must retain the same proposed work.
+Keep this identity distinct from both the long-lived task identity and the
+event-delivery identity.
+
+## Round-robin reviewer coordinator
+
+Use one bounded pass through the current ranked view and the coordinator's
+existing owned workers/tasks, not one forge watcher per worker.
+
+1. Reconcile any previously attempted assignment or notification through its
+   original owner before choosing another effect for that PR. A lost response,
+   missing local note or transport timeout is not proof of nonacceptance.
+2. Select an eligible action for the configured reviewer. `actor_role: author`
+   remains an explanation for the author; a reviewer must not perform its
+   `rebase/stale_branch` recommendation. Preserve independent review reasons
+   instead of converting the author action into reviewer authority.
+3. Use the existing worker/task association to hand off the selected action.
+   Selection and frame delivery are not claims. Recheck the task's current
+   owner, generation, holds and action candidate at its real admission boundary.
+4. Reconcile actual publication through the existing review/write owner and
+   fresh observed activity. A worker's statement, task submission, SSE ID or
+   content marker alone does not establish that the current head was reviewed.
+   Preserve unknown outcomes and newer author activity.
+5. After a confirmed outcome, suspend the same retained worker through its
+   ordinary task lifecycle and give another eligible PR its turn. Retain the
+   coordinator's current position in its existing durable owner. A process
+   restart must not discard an unresolved assignment or create another worker.
+
+Round-robin fairness is consumer policy layered on the service's existing
+ranking, not a second attention engine. Rotation must not rewrite pending age,
+clear an action, ACK another consumer or fabricate handled feedback. A reviewer's
+own confirmed echo must not request another verdict; if the cache cannot
+establish that relationship, report unavailable evidence rather than declaring
+the echo handled.
+
+## Dispatch new-task and steer adapter
+
+The actual task owner is
+[`agent-dispatch`](../../plugins/agent-dispatch/README.md). Its existing reviewer
+recipe, exact dedup lookup, steering and suspend owners supply the relevant
+boundaries; this feed introduces no new queue or task state schema.
+
+Render the existing `reviewer` recipe with an explicitly configured target and
+landing model. Use `recipes.dedup_key_for` for its stable target identity,
+not an event/candidate-specific replacement task key. Resolve the forge-qualified
+target through trusted configuration: do not pass a bare non-GitHub
+`owner/repo` to a helper that interprets that shorthand as GitHub. Keep the
+Dispatch harness lane separate from the PR's code repository.
+
+Use `DispatchClient.lookup_dedup(key, repo=lane)` for exact current association,
+then inspect the returned task through its owner. A capped task roster, title
+search or local cached absence is not a negative lookup. A failed, unsupported
+or ambiguous lookup remains unknown. More than one conflicting association
+requires reconciliation, not arbitrary selection.
+
+| Observed association | Proposed next step, only after separate effect admission |
+|---|---|
+| Conclusively absent, with no unresolved prior creation | Create through the ordinary deduplicated task owner using the existing recipe and original request identity. Reconcile its acknowledgement; do not spawn a worker directly. |
+| Queued, reserved, claimed or actively executing | Preserve the same task and owner. Notify only when materially new activity needs delivery; unchanged input is NoOp, not a new task. |
+| Suspended under its existing owner | Prepare an ordinary scoped steer/nudge for materially new activity. Reuse its original request identity and recovery record; wake through the existing task owner, not a separate process launcher. |
+| Held, awaiting operator input, failed or terminal | Preserve that state and its original decision/settlement owner. A feed item does not answer a form, clear a hold, retry a failed operation or reopen completed work. |
+| Unknown lookup or mutation result | Reconcile the original operation through the same owner. Do not create a replacement task or infer that a missing live dedup result settles an older operation. |
+
+`DispatchClient.steer` supports the owner's current status/revision and
+complete `expected_scope` (`queue`, `installation`, `machine`), with an
+idempotency key and prepared-request recovery. Obtain those values from the
+actual task owner, not from PR metadata. Negotiate the executing coordinator's
+support before relying on those semantics; a prior coordinator silently
+ignoring fields is not equivalent enforcement. Retain the original prepared
+request after uncertainty instead of reconstructing it with a new key.
+
+A stable task key prevents overlapping live review tasks; it is not an
+exactly-once notification guarantee. Conversely, an action correlation key
+prevents unchanged-input nudges only when the existing consumer owner durably
+records accepted or unresolved requests. Neither key proves publication or
+authorizes a task takeover. This contract does not claim that a normal
+Dispatch startup already selects a repository-feed adapter.
+
+## Delivery is not task handling
+
+Keep three receipts distinct: PR-service event delivery, task-owner acceptance
+and confirmed review/publication. Writing an SSE frame proves none of the last
+two. Do not ACK on printing, selecting a row or attempting a task mutation.
+
+If a separately activated consumer chooses ACK, first durably retain enough
+original scope/event/task/request identity in its existing owner to reconcile
+accepted or unknown effects. ACK only through the original registration and
+delivered event IDs. Cumulative ACK must not skip an earlier unsettled delivery.
+Task completion does not authorize ACKing another registration, and ACK never
+marks the underlying PR action handled. Newer candidate activity stays visible.
+
+Reconnect uses the same registration and scoped SSE ID. Duplicate current views
+are expected. A gap or expired registration requires explicit recovery while
+retaining unresolved task effects; it is not permission to create a fresh
+baseline and forget them. Polling remains supported when streaming is absent.
+
+## Inert qualification and operational exits
+
+Consumer examples/tests must exercise actual cache views with synthetic
+activities, retained IDs and task-owner doubles or isolated queues. Include
+unchanged refresh/reconnect, newer candidate activity while a task is suspended,
+author-owned recommendations, partial/stale evidence, conflicting associations,
+lost creation/steer replies and restart with an unresolved request. Assert no
+new task or repeated wake for unchanged input and no ACK/handled write from
+selection alone.
+
+Those are source controls, not evidence that a real reviewer, emitter or
+coordinator is running. Independently admitted provider comparison belongs to
+the evaluator; it must retain the same request accounting and distinguish
+disagreement from stale/unavailable evidence. Source review, release,
+installation, provider agreement and consumer activation remain separate exits
+in the [canonical feed plan](../../efforts/active/durable-pr-watch-delegation/reviewer-action-feeds.md).
