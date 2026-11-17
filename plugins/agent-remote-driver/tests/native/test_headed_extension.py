@@ -483,7 +483,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     if os.name != "nt" or not binary:
         pytest.skip("This native headed fixture selects an existing Windows PSMux")
@@ -772,7 +772,7 @@ async def _native_coordinator_flow(
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     if os.name != "nt" or not binary:
         pytest.skip("The native coordinator fixture requires existing Windows PSMux")
