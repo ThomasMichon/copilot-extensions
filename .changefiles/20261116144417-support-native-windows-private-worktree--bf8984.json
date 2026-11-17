@@ -1,0 +1,9 @@
+{
+  "comment": "Support native Windows private worktree-history collection and retained owner-flow readback",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

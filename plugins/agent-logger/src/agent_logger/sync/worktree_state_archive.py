@@ -38,13 +38,11 @@ def _read(directory: PublicationDirectory, name: str, limit: int) -> bytes:
 
 
 def _write(directory: PublicationDirectory, name: str, raw: bytes) -> None:
-    if directory.fd is None:
-        raise WorktreeStateError("typed collection requires directory-relative durable publication")
     with directory.create(name, mode=0o600) as stream:
         stream.write(raw)
         stream.flush()
         os.fsync(stream.fileno())
-    os.fsync(directory.fd)
+    directory.sync()
 
 
 def _verified_manifest(
@@ -52,10 +50,11 @@ def _verified_manifest(
 ) -> tuple[dict[str, Any], bytes]:
     raw = _read(directory, "manifest.json", MAX_MANIFEST_BYTES)
     manifest = decode_object(raw)
-    verified = verify(
-        directory.path, worktree=identity.worktree, store_id=identity.store_id,
-        expected_revision=identity.revision,
-    )
+    with directory.open("agenda.sqlite3", protected=True):
+        verified = verify(
+            directory.path, worktree=identity.worktree, store_id=identity.store_id,
+            expected_revision=identity.revision,
+        )
     if (
         manifest != verified or manifest.get("schema") != "efforts.agenda-export"
         or type(manifest.get("version")) is not int or manifest["version"] != 1
@@ -141,14 +140,18 @@ def _provenance(
 ) -> bytes | None:
     if read is None:
         return None
-    raw = contributor_bytes(directory.path, identity, manifest, read)
-    if _read(directory, "manifest.json", MAX_MANIFEST_BYTES) != manifest:
-        raise WorktreeStateError("manifest changed during contributor verification")
-    return raw
+    with directory.open("agenda.sqlite3", protected=True):
+        raw = contributor_bytes(directory.path, identity, manifest, read)
+        if _read(directory, "manifest.json", MAX_MANIFEST_BYTES) != manifest:
+            raise WorktreeStateError("manifest changed during contributor verification")
+        return raw
 
 
 def _references(directory: Path, receipt: WorktreeStateReceipt, sessions: tuple[str, ...]) -> None:
-    with publication_directory(directory) as references:
+    with publication_directory(
+        directory, durable=True, private=os.name == "nt",
+        durable_root=Path(receipt.destination),
+    ) as references:
         for session in sessions:
             name = hashlib.sha256(session.encode("utf-8")).hexdigest() + ".json"
             raw = canonical_bytes({
@@ -169,10 +172,18 @@ def _readback(
 ) -> WorktreeStateReceipt:
     if not has_namespace(root):
         raise WorktreeStateError("typed collection namespace is missing or unowned")
-    with publication_directory(directory, create=False) as revision:
-        with publication_directory(directory / "export", create=False) as exported:
-            manifest, raw = _verified_manifest(exported, identity, verify)
-            provenance = _provenance(exported, identity, raw, contributors)
+    with (
+        publication_directory(
+            directory, create=False, private=os.name == "nt",
+        ) as revision,
+        publication_directory(
+            directory / "export", create=False, private=os.name == "nt",
+        ) as exported,
+        exported.open("agenda.sqlite3", protected=True),
+        exported.open("manifest.json", protected=True),
+    ):
+        manifest, raw = _verified_manifest(exported, identity, verify)
+        provenance = _provenance(exported, identity, raw, contributors)
         if provenance is not None and _read(
             revision, "contributors.json", MAX_CONTRIBUTOR_BYTES,
         ) != provenance:
@@ -214,7 +225,7 @@ def collect_worktree_state(
     source = source.expanduser().absolute()
     if source == root or source in root.parents or root in source.parents:
         raise WorktreeStateError("export source and collection destination must be disjoint")
-    with publication_directory(source, create=False) as exported:
+    with publication_directory(source, create=False, private=os.name == "nt") as exported:
         manifest, raw = _verified_manifest(exported, identity, verify)
         provenance = _provenance(exported, identity, raw, contributors)
         receipt = _receipt(identity, root, manifest, raw, provenance)
@@ -223,7 +234,9 @@ def collect_worktree_state(
             claim_namespace(root)
         except ValueError as error:
             raise WorktreeStateError(str(error)) from error
-        with publication_directory(destination) as revision:
+        with publication_directory(
+            destination, durable=True, private=os.name == "nt", durable_root=root,
+        ) as revision:
             names = revision.names()
             if not names:
                 try:
@@ -245,7 +258,10 @@ def collect_worktree_state(
                 if existing != receipt:
                     raise WorktreeStateError("same worktree revision has different exported bytes")
             else:
-                with publication_directory(destination / "export") as copied:
+                with publication_directory(
+                    destination / "export", durable=True, private=os.name == "nt",
+                    durable_root=root,
+                ) as copied:
                     if copied.names():
                         raise WorktreeStateError("new collection export directory is not empty")
                     _copy_member(exported, copied, manifest["members"]["agenda.sqlite3"], budget)
