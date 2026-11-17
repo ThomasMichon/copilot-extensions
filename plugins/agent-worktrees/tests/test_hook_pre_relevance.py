@@ -11,11 +11,22 @@ import sys
 from pathlib import Path
 
 import pytest
+from typing import TypeVar, Any, Callable, NoReturn, cast
+from types import ModuleType
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
-def _pretool_recovery_fixture(tmp_path, fault):
+
+
+_T = TypeVar("_T")
+_U = TypeVar("_U")
+
+def _append_result(values: list[_T], value: _T, result: _U) -> _U:
+    values.append(value)
+    return result
+
+def _pretool_recovery_fixture(tmp_path: Path, fault: str) -> tuple[Path, Path, Path, dict[str, str]]:
     home = tmp_path / "home"
     cwd = home / "consumer"
     scripts = home / ".agent-worktrees" / "bin"
@@ -86,7 +97,7 @@ def _pretool_recovery_fixture(tmp_path, fault):
     return home, cwd, scripts, env
 
 
-def _assert_pretool_recovery_outcome(result):
+def _assert_pretool_recovery_outcome(result: dict[str, Any]) -> None:
     assert "permissionDecision" not in result, result
     context = result.get("additionalContext")
     assert isinstance(context, str) and context, result
@@ -94,7 +105,7 @@ def _assert_pretool_recovery_outcome(result):
         assert field in context.lower(), context
 
 
-def _run_pretool_manifest(tmp_path, consumer, fault, protected=False, read=False, raw=False):
+def _run_pretool_manifest(tmp_path: Path, consumer: str, fault: str, protected: bool=False, read: bool=False, raw: bool=False) -> Any:
     import shlex
 
     from agent_procutil import no_window_kwargs
@@ -114,7 +125,7 @@ def _run_pretool_manifest(tmp_path, consumer, fault, protected=False, read=False
     binaries.mkdir()
     if consumer == "powershell":
         shell = _powershell()
-        argv = [shell, "-NoLogo", "-NoProfile", "-Command", _hooks("preToolUse")[0][consumer]]
+        argv = [shell, "-NoLogo", "-NoProfile", "-Command", cast(str, _hooks("preToolUse")[0][consumer])]
         if fault == "missing-runtime":
             (scripts / "resolve-runtime.ps1").write_text(
                 "param([string]$TraceMode)\n$AwPy = $null\n", encoding="utf-8-sig",
@@ -133,7 +144,7 @@ def _run_pretool_manifest(tmp_path, consumer, fault, protected=False, read=False
             )
             shim.chmod(0o755)
             env["PATH"] = str(binaries) + os.pathsep + env.get("PATH", "")
-        argv = [shell, "-c", _hooks("preToolUse")[0][consumer]]
+        argv = [shell, "-c", cast(str, _hooks("preToolUse")[0][consumer])]
     completed = subprocess.run(
         argv, input=payload_text, capture_output=True, text=True, encoding="utf-8",
         cwd=cwd, env=env, timeout=35, **no_window_kwargs(),
@@ -149,7 +160,7 @@ def _run_pretool_manifest(tmp_path, consumer, fault, protected=False, read=False
 @pytest.mark.parametrize("fault", [
     "missing-entry", "missing-policy", "broken-policy", "missing-runtime", "malformed-event",
 ])
-def test_pretool_manifest_unavailable_keeps_repair_usable(tmp_path, consumer, fault):
+def test_pretool_manifest_unavailable_keeps_repair_usable(tmp_path: Path, consumer: str, fault: str) -> None:
     result = _run_pretool_manifest(tmp_path, consumer, fault)
     if fault == "malformed-event":
         assert result == {}, "an event without session membership remains inert"
@@ -158,14 +169,14 @@ def test_pretool_manifest_unavailable_keeps_repair_usable(tmp_path, consumer, fa
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
-def test_pretool_manifest_unavailable_keeps_read_usable(tmp_path, consumer):
+def test_pretool_manifest_unavailable_keeps_read_usable(tmp_path: Path, consumer: str) -> None:
     result = _run_pretool_manifest(tmp_path, consumer, "missing-runtime", read=True)
     if result:
         _assert_pretool_recovery_outcome(result)
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
-def test_pretool_manifest_confirmed_violation_still_denied(tmp_path, consumer):
+def test_pretool_manifest_confirmed_violation_still_denied(tmp_path: Path, consumer: str) -> None:
     result = _run_pretool_manifest(tmp_path, consumer, "none", protected=True)
     assert result.get("permissionDecision") == "deny", result
     assert "personal" in result.get("permissionDecisionReason", "").lower(), result
@@ -173,7 +184,7 @@ def test_pretool_manifest_confirmed_violation_still_denied(tmp_path, consumer):
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
 @pytest.mark.parametrize("decision", ["deny", "ask"])
-def test_pretool_manifest_component_failure_retains_protected_decision(tmp_path, consumer, decision):
+def test_pretool_manifest_component_failure_retains_protected_decision(tmp_path: Path, consumer: str, decision: str) -> None:
     result = _run_pretool_manifest(tmp_path, consumer, "failed-component-" + decision, protected=True)
     assert result.get("permissionDecision") == decision, result
     assert "anchor" in result.get("permissionDecisionReason", "").lower(), result
@@ -181,14 +192,14 @@ def test_pretool_manifest_component_failure_retains_protected_decision(tmp_path,
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
-def test_pretool_missing_sibling_retains_confirmed_violation(tmp_path, consumer):
+def test_pretool_missing_sibling_retains_confirmed_violation(tmp_path: Path, consumer: str) -> None:
     result = _run_pretool_manifest(tmp_path, consumer, "missing-sibling-protected", protected=True)
     assert result.get("permissionDecision") == "deny", result
     assert "personal" in result.get("permissionDecisionReason", "").lower(), result
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
-def test_pretool_compat_failed_entry_preserves_streamed_deny(tmp_path, consumer):
+def test_pretool_compat_failed_entry_preserves_streamed_deny(tmp_path: Path, consumer: str) -> None:
     completed = _run_pretool_manifest(tmp_path, consumer, "compat-deny-failure", raw=True)
     assert json.loads(completed.stdout) == {
         "permissionDecision": "deny", "permissionDecisionReason": "confirmed fixture policy",
@@ -197,23 +208,24 @@ def test_pretool_compat_failed_entry_preserves_streamed_deny(tmp_path, consumer)
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
-def test_pretool_compat_partial_failure_does_not_append_replacement_json(tmp_path, consumer):
+def test_pretool_compat_partial_failure_does_not_append_replacement_json(tmp_path: Path, consumer: str) -> None:
     completed = _run_pretool_manifest(tmp_path, consumer, "compat-partial-failure", raw=True)
     assert completed.stdout == '{"permissionDecision":'
     assert "output completeness is unknown" in completed.stderr
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     spec = importlib.util.spec_from_file_location("relevance_client", SCRIPTS / "hook_client.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
     return module
 
 
-def payload(tool, command=None):
+def payload(tool: str, command: str | dict[str, str] | None=None) -> dict[str, Any]:
     return {"toolName": tool, "cwd": str(SCRIPTS), "toolArgs": {"command": command}}
 
 
@@ -224,8 +236,8 @@ def payload(tool, command=None):
     payload("powershell", "Get-Content README.md"),
     payload("bash", "pwd"), payload("bash", "cat README.md"),
 ])
-def test_irrelevant_pre_tool_never_reaches_ipc_or_policy(client, monkeypatch, tmp_path, event):
-    def forbidden(*args, **kwargs):
+def test_irrelevant_pre_tool_never_reaches_ipc_or_policy(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, event: dict[str, Any]) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("irrelevant tool reached IPC, discovery, registry, or subprocess")
 
     monkeypatch.setattr(client, "_request", forbidden)
@@ -260,10 +272,10 @@ def test_irrelevant_pre_tool_never_reaches_ipc_or_policy(client, monkeypatch, tm
     payload("powershell", None), payload("powershell", {"bad": "command"}),
     payload("unknown"), {},
 ])
-def test_uncertain_or_interesting_pre_tool_preserves_resident_decision(client, monkeypatch, tmp_path, event):
+def test_uncertain_or_interesting_pre_tool_preserves_resident_decision(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, event: dict[str, Any]) -> None:
     seen = []
     decision = {"permissionDecision": "deny", "permissionDecisionReason": "existing policy"}
-    def resident(*args):
+    def resident(*args: Any) -> dict[str, str]:
         seen.append(args)
         return decision
     monkeypatch.setattr(client, "_request", resident)
@@ -275,11 +287,11 @@ def test_uncertain_or_interesting_pre_tool_preserves_resident_decision(client, m
     payload("apply_patch"), payload("multi_edit"),
     {**payload("powershell", "Get-Location"), "toolCalls": []},
 ])
-def test_native_write_forms_preserve_original_local_fallback(client, monkeypatch, tmp_path, event):
+def test_native_write_forms_preserve_original_local_fallback(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, event: dict[str, Any]) -> None:
     seen = []
     decision = {"permissionDecision": "deny", "permissionDecisionReason": "original local policy"}
 
-    def fallback(value, home):
+    def fallback(value: dict[str, Any], home: Path) -> dict[str, str]:
         seen.append((value, home))
         return decision
 
@@ -289,29 +301,29 @@ def test_native_write_forms_preserve_original_local_fallback(client, monkeypatch
     assert seen == [(event, tmp_path)]
 
 
-def test_installation_context_preserves_existing_admission(client, monkeypatch, tmp_path):
+def test_installation_context_preserves_existing_admission(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
-    seen = []
-    monkeypatch.setattr(client, "_request", lambda *args: seen.append(args) or {"permissionDecision": "deny"})
+    seen: list[tuple[object, ...]] = []
+    monkeypatch.setattr(client, "_request", lambda *args: _append_result(seen, args, {"permissionDecision": "deny"}))
     assert client.decide("preToolUse", payload("view"), home=tmp_path)["permissionDecision"] == "deny"
     assert len(seen) == 1
 
 
-def test_legacy_argument_aliases_use_real_predicate(client, monkeypatch, tmp_path):
+def test_legacy_argument_aliases_use_real_predicate(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(client, "_request", lambda *args: pytest.fail("unexpected IPC"))
     assert client.decide("preToolUse", {
         "tool_name": "powershell", "tool_input": json.dumps({"command": "Get-Date"}),
     }, home=tmp_path) == {}
 
 
-def test_actual_main_read_tool_skips_resident(client, monkeypatch, capsys):
+def test_actual_main_read_tool_skips_resident(client: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(client, "_request", lambda *args: pytest.fail("unexpected IPC"))
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload("view"))))
     assert client.main(["preToolUse"]) == 0
     assert capsys.readouterr().out == ""
 
 
-def test_missing_relevance_helper_retains_policy(client, monkeypatch, tmp_path):
+def test_missing_relevance_helper_retains_policy(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     loader = client._load_sibling
     monkeypatch.setattr(client, "_load_sibling", lambda name: None if name == "hook_pre_relevance.py" else loader(name))
     decision = {"permissionDecision": "deny"}
@@ -319,11 +331,11 @@ def test_missing_relevance_helper_retains_policy(client, monkeypatch, tmp_path):
     assert client.decide("preToolUse", payload("view"), home=tmp_path) is decision
 
 
-def test_canonical_shell_heads_preserve_ordinary_argument_grammar(client, monkeypatch, tmp_path):
+def test_canonical_shell_heads_preserve_ordinary_argument_grammar(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     relevance = client._load_sibling("hook_pre_relevance.py")
-    seen = []
+    seen: list[tuple[object, ...]] = []
     decision = {"permissionDecision": "deny", "permissionDecisionReason": "original policy"}
-    monkeypatch.setattr(client, "_request", lambda *args: seen.append(args) or decision)
+    monkeypatch.setattr(client, "_request", lambda *args: _append_result(seen, args, decision))
     for head in relevance.SHELL_READ_HEADS:
         for command in (head, head + " README.md"):
             before = len(seen)
@@ -337,7 +349,7 @@ def test_canonical_shell_heads_preserve_ordinary_argument_grammar(client, monkey
 
 @pytest.mark.parametrize("event, bypass", [(payload("view"), True), (payload("powershell", "Get-Date"), True), (payload("edit"), False)])
 @pytest.mark.skipif(os.name != "nt" or not os.environ.get("COPILOT_TEST_HOOK_PRE_PYTHON"), reason="explicit contained native interpreter fixture")
-def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_path, event, bypass):
+def test_cached_native_pre_command_uses_real_relevance(client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, event: dict[str, Any], bypass: bool) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees import guarded_anchors
     from test_managed_session import fixture_project
@@ -347,7 +359,7 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
     interpreter = Path(os.environ["COPILOT_TEST_HOOK_PRE_PYTHON"])
     assert interpreter.is_file()
     home = tmp_path / "home"
-    cwd, _registry = fixture_project(home)
+    cwd, _registry = cast(Callable[[Path], tuple[Path, Path]], fixture_project)(home)
     monkeypatch.setenv("AGENT_HOME", str(home))
     monkeypatch.setenv("COPILOT_PROJECT_DIR", str(cwd))
     monkeypatch.setenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", "command")
@@ -401,8 +413,8 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
     assert guarded_anchors.refresh([cwd], registry_root=scripts.parent)["published"] == 1
     assert client._load_sibling("managed_session.py").admitted(event, home=home)
     original_run = subprocess.run
-    def contained_run(*args, **kwargs):
-        return original_run(*args, input=json.dumps(event), timeout=30, **no_window_kwargs(), **kwargs)
+    def contained_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return cast(Callable[..., subprocess.CompletedProcess[str]], original_run)(*args, input=json.dumps(event), timeout=30, **no_window_kwargs(), **kwargs)
     monkeypatch.setattr(subprocess, "run", contained_run)
     result = _run(str(_hooks("preToolUse")[0]["powershell"]), shell, home, cwd)
     assert result.returncode == 0, result.stderr

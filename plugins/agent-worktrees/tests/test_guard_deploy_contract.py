@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 import pytest
+from typing import Any, Callable, NoReturn, cast
 
 pytestmark = pytest.mark.guard
 
@@ -46,7 +47,7 @@ def _py_hook_scripts() -> set[str]:
     return scripts
 
 
-def test_py_hooks_are_nonempty_and_exist():
+def test_py_hooks_are_nonempty_and_exist() -> None:
     scripts = _py_hook_scripts()
     # Sanity: we actually found the wired hooks (not a parsing miss).
     assert scripts == {"hook_client.py"}
@@ -54,7 +55,7 @@ def test_py_hooks_are_nonempty_and_exist():
         assert (_SCRIPTS / g).is_file(), f"hooks.json wires {g} but scripts/{g} is missing"
 
 
-def test_python_hook_runners_recover_from_invalid_windows_cwd():
+def test_python_hook_runners_recover_from_invalid_windows_cwd() -> None:
     data = json.loads(_HOOKS.read_text("utf-8"))
     for event in _PY_HOOK_EVENTS:
         hooks = data["hooks"][event]
@@ -68,7 +69,7 @@ def test_python_hook_runners_recover_from_invalid_windows_cwd():
         assert "[IO.Directory]::SetCurrentDirectory((Get-Location).Path)" in command
 
 
-def test_all_installers_deploy_every_py_hook():
+def test_all_installers_deploy_every_py_hook() -> None:
     scripts = _py_hook_scripts() | {
         "statelessness_guard.py",
         "cross_repo_guard.py",
@@ -115,7 +116,7 @@ def test_all_installers_deploy_every_py_hook():
         "installer (they would silently no-op):\n  " + "\n  ".join(missing))
 
 
-def test_wrappers_deploy_before_monitor_activation():
+def test_wrappers_deploy_before_monitor_activation() -> None:
     ps1 = _INSTALL_PS1.read_text("utf-8")
     sh = _INSTALL_SH.read_text("utf-8")
     lifecycle = (_PLUGIN / "scripts" / "runtime_install.py").read_text("utf-8")
@@ -131,7 +132,7 @@ def test_wrappers_deploy_before_monitor_activation():
     assert '[[ "$ACTION" != install && "$ACTION" != update ]] || scope=wrappers' in sh
 
 
-def test_legacy_python_installer_uses_manager_wrapper_manifest():
+def test_legacy_python_installer_uses_manager_wrapper_manifest() -> None:
     manifest = json.loads((_PLUGIN / "launch-wrapper-assets.json").read_text("utf-8"))
     from agent_worktrees import launch_wrapper_assets
 
@@ -150,7 +151,7 @@ def test_legacy_python_installer_uses_manager_wrapper_manifest():
 
 
 @pytest.mark.guard
-def test_bootstrap_state_guards_are_deployed_before_every_bootstrap_caller():
+def test_bootstrap_state_guards_are_deployed_before_every_bootstrap_caller() -> None:
     import ast
     sources = {
         "install.ps1": _INSTALL_PS1.read_text("utf-8"),
@@ -180,7 +181,7 @@ def test_bootstrap_state_guards_are_deployed_before_every_bootstrap_caller():
             assert lines[0].index(guard) < lines[0].index(caller), name
 
 
-def test_native_read_contract_matches_actual_guard_semantics(tmp_path, monkeypatch):
+def test_native_read_contract_matches_actual_guard_semantics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import hashlib
     import importlib.util
 
@@ -188,6 +189,7 @@ def test_native_read_contract_matches_actual_guard_semantics(tmp_path, monkeypat
     expected = {"statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py"}
     assert set(policy["guards"]) == expected
     spec = importlib.util.spec_from_file_location("native_contract_client", _SCRIPTS / "hook_client.py")
+    assert spec is not None and spec.loader is not None
     client = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(client)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -197,7 +199,7 @@ def test_native_read_contract_matches_actual_guard_semantics(tmp_path, monkeypat
         assert hashlib.sha256(text.encode("utf-8")).hexdigest() == policy["guards"][name], "Run tools/render-hook-read-policy.py after guard changes"
         guard = client._load_sibling(name)
         assert guard is not None
-        def forbidden(*args, **kwargs):
+        def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
             pytest.fail("native read exemption would skip meaningful guard work")
         for helper in ("find_repo_root", "load_guarded_roots", "load_worktree_anchors", "_current_login"):
             if hasattr(guard, helper):
@@ -206,7 +208,7 @@ def test_native_read_contract_matches_actual_guard_semantics(tmp_path, monkeypat
             assert guard.decide({"toolName": tool, "cwd": str(tmp_path), "toolArgs": {"path": "test"}}, env={}, home=tmp_path) is None
 
 
-def test_native_write_contract_matches_actual_target_and_map_readers():
+def test_native_write_contract_matches_actual_target_and_map_readers() -> None:
     import hashlib
 
     policy = json.loads((_SCRIPTS / "hook-read-policy.json").read_text("utf-8"))
@@ -221,18 +223,19 @@ def test_native_write_contract_matches_actual_target_and_map_readers():
     ("tool_input", False), ("tool_input", True),
 ])
 @pytest.mark.parametrize("suffix", ["", " .\\read.txt -Tail 1"])
-def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monkeypatch, argument_key, raw, suffix):
+def test_native_shell_contract_preserves_original_guard_decisions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argument_key: str, raw: bool, suffix: str) -> None:
     import hashlib
     import importlib.util
     from test_managed_session import fixture_linked_worktree, fixture_project
 
-    anchor, _registry = fixture_project(tmp_path)
-    workspace, _admin = fixture_linked_worktree(tmp_path, anchor)
+    anchor, _registry = cast(Callable[[Path], tuple[Path, Path]], fixture_project)(tmp_path)
+    workspace, _admin = cast(Callable[[Path, Path], tuple[Path, Path]], fixture_linked_worktree)(tmp_path, anchor)
     config = workspace / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
     config.write_text("stateless: true\n", encoding="utf-8")
     policy = json.loads((_SCRIPTS / "hook-read-policy.json").read_text("utf-8"))
     spec = importlib.util.spec_from_file_location("native_shell_contract_client", _SCRIPTS / "hook_client.py")
+    assert spec is not None and spec.loader is not None
     client = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(client)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -249,11 +252,11 @@ def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monk
         command += suffix
         keys = policy["nativeShellReadCommandKeys"]
         for index, key in enumerate(keys[:1] if raw else keys):
-            arguments = {earlier: None for earlier in keys[:index]}
+            arguments: dict[str, Any] = {earlier: None for earlier in keys[:index]}
             arguments.update({key: command, "description": "Fixture read"})
             if index + 1 < len(keys):
                 arguments[keys[index + 1]] = protected_command
-            event = {
+            event: dict[str, Any] = {
                 "toolName": "powershell", "cwd": str(workspace),
                 argument_key: command if raw else arguments,
             }
@@ -273,16 +276,17 @@ def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monk
 
 
 @pytest.mark.parametrize("mixed", [False, True])
-def test_native_literal_batch_preserves_original_expansion_and_guard_decisions(tmp_path, monkeypatch, mixed):
+def test_native_literal_batch_preserves_original_expansion_and_guard_decisions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed: bool) -> None:
     import importlib.util
     from test_managed_session import fixture_linked_worktree, fixture_project
 
-    anchor, _registry = fixture_project(tmp_path)
-    workspace, _admin = fixture_linked_worktree(tmp_path, anchor)
+    anchor, _registry = cast(Callable[[Path], tuple[Path, Path]], fixture_project)(tmp_path)
+    workspace, _admin = cast(Callable[[Path, Path], tuple[Path, Path]], fixture_linked_worktree)(tmp_path, anchor)
     config = workspace / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
     config.write_text("stateless: true\n", encoding="utf-8")
     spec = importlib.util.spec_from_file_location("native_batch_client", _SCRIPTS / "hook_client.py")
+    assert spec is not None and spec.loader is not None
     client = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(client)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -294,12 +298,12 @@ def test_native_literal_batch_preserves_original_expansion_and_guard_decisions(t
     env = {"AGENT_HOME": str(tmp_path)}
     for head in policy["nativeShellReadCommands"]:
         for index, key in enumerate(policy["nativeShellReadCommandKeys"]):
-            args = {earlier: None for earlier in policy["nativeShellReadCommandKeys"][:index]}
+            args: dict[str, Any] = {earlier: None for earlier in policy["nativeShellReadCommandKeys"][:index]}
             args[key] = head
             calls = [{"name": "powershell", "args": args}, {"name": "pwsh", "args": head}]
             if mixed:
                 calls.insert(1, {"name": "view", "args": {"command": protected}})
-            event = {
+            event: dict[str, Any] = {
                 "cwd": str(workspace), "toolName": "edit", "toolArgs": {"path": "efforts/private.md"},
                 "tool_input": {"command": protected}, "toolCalls": calls,
             }
@@ -324,12 +328,13 @@ def test_native_literal_batch_preserves_original_expansion_and_guard_decisions(t
     "tuple(['Get-Location'])",
     repr(tuple(f"Read-{index}-" + "a" * 80 for index in range(64))),
 ])
-def test_native_shell_renderer_rejects_invalid_or_oversized_declarations(tmp_path, declaration):
+def test_native_shell_renderer_rejects_invalid_or_oversized_declarations(tmp_path: Path, declaration: str) -> None:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
         "native_shell_contract_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
     )
+    assert spec is not None and spec.loader is not None
     renderer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(renderer)
     for name in (*renderer.GUARDS, *renderer.WRITE_DEPENDENCIES):
@@ -353,12 +358,13 @@ def test_native_shell_renderer_rejects_invalid_or_oversized_declarations(tmp_pat
     're.compile("[a-z-[b]]", re.IGNORECASE)',
     're.compile("read$", re.IGNORECASE)',
 ])
-def test_native_argument_renderer_refuses_unqualified_regex_semantics(expression):
+def test_native_argument_renderer_refuses_unqualified_regex_semantics(expression: str) -> None:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
         "native_argument_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
     )
+    assert spec is not None and spec.loader is not None
     renderer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(renderer)
     with pytest.raises(ValueError):
@@ -371,12 +377,13 @@ def test_native_argument_renderer_refuses_unqualified_regex_semantics(expression
     "reordered",
     repr(tuple(f"key-{index}" for index in range(129))),
 ])
-def test_native_shell_renderer_rejects_invalid_original_key_selection(tmp_path, declaration):
+def test_native_shell_renderer_rejects_invalid_original_key_selection(tmp_path: Path, declaration: str | None) -> None:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
         "native_selection_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
     )
+    assert spec is not None and spec.loader is not None
     renderer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(renderer)
     for name in (*renderer.GUARDS, *renderer.WRITE_DEPENDENCIES, "hook_pre_relevance.py"):

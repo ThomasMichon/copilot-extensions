@@ -15,11 +15,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from typing import TypeVar, TYPE_CHECKING, Any, Callable, NoReturn, cast
+import argparse
+
+if TYPE_CHECKING:
+    import ctypes
+    import importlib.machinery
 from agent_procutil import no_window_kwargs
 
 import agent_worktrees.hook_ipc as hook_ipc
 import agent_worktrees.__main__ as main
 from agent_worktrees import reconcile
+from agent_worktrees.status_segment_cache import _StatusSegmentCache
 from agent_worktrees.hook_ipc import HookIpcServer, HookUnavailable
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "hook_client.py"
@@ -32,10 +39,19 @@ sys.modules[_SPEC.name] = hook_client
 _SPEC.loader.exec_module(hook_client)
 
 
-def test_dynamic_loopback_endpoint_roundtrip(tmp_path):
-    seen = {}
 
-    def decide(kind, payload, deadline):
+
+_T = TypeVar("_T")
+_U = TypeVar("_U")
+
+def _append_result(values: list[_T], value: _T, result: _U) -> _U:
+    values.append(value)
+    return result
+
+def test_dynamic_loopback_endpoint_roundtrip(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+
+    def decide(kind: str, payload: dict[str, Any], deadline: float) -> dict[str, Any]:
         seen.update(kind=kind, payload=payload)
         return {"additionalContext": "resident"}
 
@@ -65,10 +81,10 @@ def test_dynamic_loopback_endpoint_roundtrip(tmp_path):
         server.close()
 
 
-def test_read_demand_uses_original_idle_grace_without_policy_or_reply():
-    calls = []
+def test_read_demand_uses_original_idle_grace_without_policy_or_reply() -> None:
+    calls: list[tuple[object, ...]] = []
     server = HookIpcServer(
-        lambda *args: calls.append(args) or {}, read_demand_admitted=lambda: True,
+        lambda *args: _append_result(calls, args, {}), read_demand_admitted=lambda: True,
     )
     clock = [0.0]
     server._clock = lambda: clock[0]
@@ -76,11 +92,11 @@ def test_read_demand_uses_original_idle_grace_without_policy_or_reply():
     try:
         endpoint = server.rendezvous()
         assert hook_ipc.READ_DEMAND_CAPABILITY in endpoint["hook_capabilities"]
-        request = {
+        request: dict[str, Any] = {
             "version": 1, "token": server.token, "kind": "readHookDemand",
             "hook_generation": endpoint["hook_generation"], "deadline": time.time() + 1,
         }
-        with socket.create_connection(server.server.server_address, timeout=1) as conn:
+        with socket.create_connection(cast(tuple[str, int], server.server.server_address), timeout=1) as conn:
             conn.sendall(json.dumps(request).encode() + b"\n")
             assert conn.recv(1) == b""
         assert calls == []
@@ -92,11 +108,11 @@ def test_read_demand_uses_original_idle_grace_without_policy_or_reply():
 
 
 @pytest.mark.parametrize("coalesced", [False, True])
-def test_worktree_change_is_generation_bound_and_does_not_wait_for_reply(tmp_path, coalesced):
+def test_worktree_change_is_generation_bound_and_does_not_wait_for_reply(tmp_path: Path, coalesced: bool) -> None:
     seen = []
     entered, release = threading.Event(), threading.Event()
 
-    def changed(cwd):
+    def changed(cwd: str | None) -> None:
         seen.append(cwd)
         entered.set()
         assert release.wait(timeout=2)
@@ -125,24 +141,25 @@ def test_worktree_change_is_generation_bound_and_does_not_wait_for_reply(tmp_pat
         server.close()
 
 
-def test_worktree_change_rejects_bad_generation_payload_deadline_and_closed_owner(tmp_path):
-    seen = []
+def test_worktree_change_rejects_bad_generation_payload_deadline_and_closed_owner(tmp_path: Path) -> None:
+    seen: list[str | None] = []
     server = HookIpcServer(lambda *args: {}, worktree_changed=seen.append)
     server.start()
     try:
-        request = {
+        request: dict[str, Any] = {
             "version": 1, "token": server.token, "kind": hook_ipc.WORKTREE_CHANGE_KIND,
             "hook_generation": server.generation, "deadline": time.time() + 1,
             "payload": {"cwd": str(tmp_path)},
         }
 
-        def send(change=None):
+        def send(change: dict[str, Any] | None=None) -> None:
             value = {**request, "deadline": time.time() + 1, **(change or {})}
-            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+            with socket.create_connection(cast(tuple[str, int], server.server.server_address), timeout=1) as conn:
                 conn.sendall(json.dumps(value).encode() + b"\n")
                 conn.shutdown(socket.SHUT_WR)
                 assert conn.recv(1) == b""
 
+        change: dict[str, Any]
         for change in (
             {"hook_generation": "b" * 32}, {"token": "wrong"}, {"version": True},
             {"payload": {"cwd": "relative"}}, {"payload": {"cwd": str(tmp_path), "extra": True}},
@@ -171,29 +188,30 @@ def test_worktree_change_rejects_bad_generation_payload_deadline_and_closed_owne
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("network")
 @pytest.mark.parametrize("kind", ["readHookDemand", "nativeToolMutation", "worktreeChanged"])
-def test_notification_receiver_keeps_real_state_lock_bound(tmp_path, kind):
-    calls, waits = [], []
+def test_notification_receiver_keeps_real_state_lock_bound(tmp_path: Path, kind: str) -> None:
+    calls: list[str] = []
+    waits: list[float] = []
     lock = threading.Lock()
 
     class ObservedLock:
-        def acquire(self, *, timeout):
+        def acquire(self, *, timeout: float) -> bool:
             waits.append(timeout)
             return lock.acquire(timeout=timeout)
 
-        def release(self):
+        def release(self) -> None:
             lock.release()
 
     server = HookIpcServer(
         lambda *args: pytest.fail("notification invoked policy"),
         read_demand_lock=ObservedLock(),
-        read_demand_admitted=lambda: calls.append("admitted") or True,
-        native_mutation_decide=lambda *args: calls.append("mutation") or {},
+        read_demand_admitted=lambda: _append_result(calls, "admitted", True),
+        native_mutation_decide=lambda *args: _append_result(calls, "mutation", {}),
         worktree_changed=lambda cwd: calls.append("changed"),
     )
     lock.acquire()
     server.start()
     try:
-        request = {
+        request: dict[str, Any] = {
             "version": 1, "token": server.token, "kind": kind,
             "hook_generation": server.generation, "deadline": time.time() + 1,
         }
@@ -201,7 +219,7 @@ def test_notification_receiver_keeps_real_state_lock_bound(tmp_path, kind):
             request["payload"] = {"cwd": str(tmp_path)}
             if kind == "nativeToolMutation":
                 request["payload"].update(toolName="edit", toolArgs={"path": "source.py"})
-        with socket.create_connection(server.server.server_address, timeout=1) as conn:
+        with socket.create_connection(cast(tuple[str, int], server.server.server_address), timeout=1) as conn:
             conn.sendall(json.dumps(request).encode() + b"\n")
             conn.shutdown(socket.SHUT_WR)
             assert conn.recv(1) == b""
@@ -216,27 +234,28 @@ def test_notification_receiver_keeps_real_state_lock_bound(tmp_path, kind):
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("network")
 @pytest.mark.parametrize("kind", ["readHookDemand", "nativeToolMutation", "worktreeChanged"])
-def test_notification_receiver_rechecks_deadline_after_state_lock(tmp_path, monkeypatch, kind):
-    calls, waits = [], []
+def test_notification_receiver_rechecks_deadline_after_state_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    calls: list[str] = []
+    waits: list[float] = []
     lock = threading.Lock()
     wall = [time.time()]
 
     class ExpiringLock:
-        def acquire(self, *, timeout):
+        def acquire(self, *, timeout: float) -> bool:
             waits.append(timeout)
             acquired = lock.acquire(timeout=timeout)
             if acquired:
                 wall[0] += 2
             return acquired
 
-        def release(self):
+        def release(self) -> None:
             lock.release()
 
     server = HookIpcServer(
         lambda *args: pytest.fail("notification invoked policy"),
         read_demand_lock=ExpiringLock(),
-        read_demand_admitted=lambda: calls.append("admitted") or True,
-        native_mutation_decide=lambda *args: calls.append("mutation") or {},
+        read_demand_admitted=lambda: _append_result(calls, "admitted", True),
+        native_mutation_decide=lambda *args: _append_result(calls, "mutation", {}),
         worktree_changed=lambda cwd: calls.append("changed"),
     )
     monkeypatch.setattr(hook_ipc, "time", SimpleNamespace(
@@ -244,7 +263,7 @@ def test_notification_receiver_rechecks_deadline_after_state_lock(tmp_path, monk
     ))
     server.start()
     try:
-        request = {
+        request: dict[str, Any] = {
             "version": 1, "token": server.token, "kind": kind,
             "hook_generation": server.generation, "deadline": wall[0] + 1,
         }
@@ -252,7 +271,7 @@ def test_notification_receiver_rechecks_deadline_after_state_lock(tmp_path, monk
             request["payload"] = {"cwd": str(tmp_path)}
             if kind == "nativeToolMutation":
                 request["payload"].update(toolName="edit", toolArgs={"path": "source.py"})
-        with socket.create_connection(server.server.server_address, timeout=1) as conn:
+        with socket.create_connection(cast(tuple[str, int], server.server.server_address), timeout=1) as conn:
             conn.sendall(json.dumps(request).encode() + b"\n")
             conn.shutdown(socket.SHUT_WR)
             assert conn.recv(1) == b""
@@ -263,7 +282,7 @@ def test_notification_receiver_rechecks_deadline_after_state_lock(tmp_path, monk
         server.close()
 
 
-def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path, monkeypatch):
+def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     lock = tmp_path / "owner.lock"
     endpoint = {
         "hook_transport": "tcp", "hook_endpoint": "127.0.0.1:12345",
@@ -271,9 +290,10 @@ def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path, mo
         "hook_capabilities": ["session-lifecycle-v1"],
     }
     monkeypatch.setattr(
-        hook_ipc.socket, "create_connection",
+        getattr(hook_ipc, "socket"), "create_connection",
         lambda *args, **kwargs: pytest.fail("unsupported notification dialed a peer"),
     )
+    document: object
     for document in (
         None, [],
         *(
@@ -294,17 +314,17 @@ def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path, mo
     "lock-receipt", "lock-marketplace", "lock-root",
 ])
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
-def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_kind, mode):
+def test_native_extension_notification_uses_actual_selected_peer(tmp_path: Path, peer_kind: str, mode: str) -> None:
     seen = []
     received = threading.Event()
     connections = []
 
     class Server(HookIpcServer):
-        def _on_request_accepted(self):
+        def _on_request_accepted(self) -> None:
             connections.append(True)
             super()._on_request_accepted()
 
-    def changed(cwd):
+    def changed(cwd: str | None) -> None:
         seen.append(cwd)
         received.set()
 
@@ -329,14 +349,14 @@ def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_
         session = tmp_path / "session"
         instructions = session / "instructions" / "agent-worktrees"
         instructions.mkdir(parents=True)
-        identity = {
+        identity: dict[str, Any] = {
             "runtimeRoot": str(runtime), "pluginId": "agent-worktrees",
             "installationId": "fixture-installation", "sourceFingerprint": "fixture-source",
             "mode": mode,
         }
         if mode == "namespaced":
             identity.update(installReceipt=receipt, installGeneration=1, activationGeneration=1)
-        catalog = {
+        catalog: dict[str, Any] = {
             "schema": "copilot-extensions.session-command-catalog", "version": 1,
             "plugin": "agent-worktrees",
             "binding": {
@@ -362,7 +382,7 @@ def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_
             "{sessionDirectory:process.argv[2],cwd:process.argv[3]})));"
         )
         result = subprocess.run(
-            [shutil.which("node"), "--input-type=module", "-e", script,
+            [cast(str, shutil.which("node")), "--input-type=module", "-e", script,
              module.as_uri(), str(session), str(tmp_path)],
             capture_output=True, text=True, timeout=10, **no_window_kwargs(),
         )
@@ -381,7 +401,7 @@ def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_
 
 
 @pytest.mark.parametrize("operation", ["tracking", "reclaim"])
-def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monkeypatch, operation):
+def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
     from agent_worktrees import reclaim_cli, tracking, worktrees_client
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -389,10 +409,10 @@ def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monk
     root.mkdir()
     records = tmp_path / "records"
     records.mkdir()
-    monkeypatch.setattr(reclaim_cli.cfg, "install_dir", lambda: root)
-    monkeypatch.setattr(reclaim_cli.cfg, "tracking_dir", lambda *args, **kwargs: records)
-    monkeypatch.setattr(reclaim_cli.cfg, "project_name", lambda: "project")
-    record = tracking.WorktreeRecord(
+    monkeypatch.setattr(getattr(reclaim_cli, "cfg"), "install_dir", lambda: root)
+    monkeypatch.setattr(getattr(reclaim_cli, "cfg"), "tracking_dir", lambda *args, **kwargs: records)
+    monkeypatch.setattr(getattr(reclaim_cli, "cfg"), "project_name", lambda: "project")
+    record = cast(Callable[..., tracking.WorktreeRecord], tracking.WorktreeRecord)(
         worktree_id="one", branch="worktree/one", worktree_path=str(tmp_path / "checkout"),
         repo="project", machine="fixture-host", platform="windows", title="Fixture",
         started_at="2026-11-07T01:00:00", last_resumed_at=None,
@@ -405,7 +425,7 @@ def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monk
     wake, cancel = threading.Event(), threading.Event()
     seen = []
 
-    def changed(cwd):
+    def changed(cwd: str | None) -> None:
         seen.append(cwd)
         wake.set()
 
@@ -422,7 +442,7 @@ def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monk
             owner = WorktreesRuntime(tmp_path / "current.sqlite3")
             owner.activate()
 
-            def publish(live):
+            def publish(live: bool) -> None:
                 observed = time.time()
                 owner.publish("project", [{
                     "id": "one", "session_bound_live": live, "mux_session": False,
@@ -434,7 +454,7 @@ def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monk
 
             publish(True)
 
-            def observe_after_event():
+            def observe_after_event() -> None:
                 if wake.wait(timeout=3) and not cancel.is_set():
                     publish(False)
 
@@ -458,32 +478,33 @@ def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monk
             owner.shutdown()
 
 
-def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
-    calls = []
+def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications() -> None:
+    calls: list[tuple[object, ...]] = []
     admitted = [True]
     server = HookIpcServer(
-        lambda *args: calls.append(args) or {},
+        lambda *args: _append_result(calls, args, {}),
         read_demand_admitted=lambda: admitted[0],
     )
     server.start()
     try:
-        request = {
+        request: dict[str, Any] = {
             "version": 1, "token": server.token, "kind": "readHookDemand",
             "hook_generation": server.generation, "deadline": time.time() + 1,
         }
 
-        def send(change=None, *, oversized=False, newline=True):
+        def send(change: dict[str, Any] | None=None, *, oversized: bool=False, newline: bool=True) -> None:
             value = {**request, "deadline": time.time() + 1, **(change or {})}
             raw = json.dumps(value).encode()
             if oversized:
                 raw += b" " * 2048
-            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+            with socket.create_connection(cast(tuple[str, int], server.server.server_address), timeout=1) as conn:
                 conn.sendall(raw + (b"\n" if newline else b""))
                 conn.shutdown(socket.SHUT_WR)
                 assert conn.recv(1) == b""
             assert not server.has_recent_hook_demand()
             assert calls == []
 
+        change: dict[str, Any]
         for change in (
             {"hook_generation": "b" * 32}, {"token": "wrong"},
             {"deadline": time.time() - 1}, {"deadline": time.time() + 60},
@@ -506,11 +527,11 @@ def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
 
 
 @pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"])
-def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
-    calls = []
+def test_native_mutation_wire_is_generation_bound_and_send_only(kind: str) -> None:
+    calls: list[tuple[object, ...]] = []
     server = HookIpcServer(
         lambda *args: pytest.fail("notification must not use response policy"),
-        native_mutation_decide=lambda *args: calls.append(args) or {},
+        native_mutation_decide=lambda *args: _append_result(calls, args, {}),
     )
     server.start()
     try:
@@ -518,7 +539,7 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
         assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY in server.capabilities()
         assert hook_ipc.SHELL_MUTATION_CAPABILITY in server.capabilities()
         assert hook_ipc.MIXED_BATCH_MUTATION_CAPABILITY in server.capabilities()
-        request = {
+        request: dict[str, Any] = {
             "version": 1, "token": server.token, "kind": kind,
             "hook_generation": server.generation, "deadline": time.time() + 1,
             "payload": (
@@ -530,13 +551,14 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
             ),
         }
 
-        def send(change=None, suffix=b"\n"):
+        def send(change: dict[str, Any] | None=None, suffix: bytes=b"\n") -> None:
             value = {**request, "deadline": time.time() + 1, **(change or {})}
-            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+            with socket.create_connection(cast(tuple[str, int], server.server.server_address), timeout=1) as conn:
                 conn.sendall(json.dumps(value).encode() + suffix)
                 conn.shutdown(socket.SHUT_WR)
                 assert conn.recv(1) == b""
 
+        change: dict[str, Any]
         for change in (
             {"hook_generation": "b" * 32}, {"token": "wrong"}, {"version": True},
             {"payload": []}, {"deadline": time.time() - 1}, {"deadline": float("nan")},
@@ -565,8 +587,8 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
 
 
 def test_send_best_effort_matches_and_rejects_an_explicit_installation_context(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """With an explicit installation context selected (not the legacy
     no-context default), a live server's lock belonging to a DIFFERENT
     context (mismatched installReceipt/marketplaceId/pluginRoot) must be
@@ -596,10 +618,10 @@ def test_send_best_effort_matches_and_rejects_an_explicit_installation_context(
         server.close()
 
 
-def test_send_best_effort_roundtrip_against_a_real_server(tmp_path):
-    seen = {}
+def test_send_best_effort_roundtrip_against_a_real_server(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
 
-    def decide(kind, payload, deadline):
+    def decide(kind: str, payload: dict[str, Any], deadline: float) -> dict[str, Any]:
         seen.update(kind=kind, payload=payload)
         return {}
 
@@ -618,15 +640,15 @@ def test_send_best_effort_roundtrip_against_a_real_server(tmp_path):
 
 
 def test_send_best_effort_never_raises_when_installation_context_resolution_raises(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``registry_paths.installation_context()`` can raise (e.g.
     ``RegistryRootError``) for a malformed/unavailable explicit context --
     this must resolve to ``False``, not propagate, since the context check
     sits outside the lock-read guard."""
     from agent_worktrees import registry_paths
 
-    def _raise():
+    def _raise() -> NoReturn:
         raise RuntimeError("malformed explicit context")
 
     monkeypatch.setattr(registry_paths, "installation_context", _raise)
@@ -640,7 +662,7 @@ def test_send_best_effort_never_raises_when_installation_context_resolution_rais
         server.close()
 
 
-def test_send_best_effort_never_raises_for_an_overflowing_timeout(tmp_path):
+def test_send_best_effort_never_raises_for_an_overflowing_timeout(tmp_path: Path) -> None:
     """``socket.create_connection``/``settimeout`` raise ``OverflowError``
     (not ``OSError``) for ``float('inf')`` or another too-large finite
     timeout -- uncaught, that would violate this function's never-raises
@@ -657,14 +679,14 @@ def test_send_best_effort_never_raises_for_an_overflowing_timeout(tmp_path):
         server.close()
 
 
-def test_send_best_effort_is_false_and_never_raises_with_no_resident(tmp_path):
+def test_send_best_effort_is_false_and_never_raises_with_no_resident(tmp_path: Path) -> None:
     missing_lock = tmp_path / "no-such-lock.json"
     assert hook_ipc.send_best_effort(
         "handoffWake", {"worktree_id": "wt-1"}, lock_path=missing_lock,
     ) is False
 
 
-def test_send_best_effort_is_false_on_a_stale_or_mismatched_lock(tmp_path):
+def test_send_best_effort_is_false_on_a_stale_or_mismatched_lock(tmp_path: Path) -> None:
     lock_path = tmp_path / "status-monitor.lock"
     lock_path.write_text(json.dumps({"hook_transport": "tcp", "hook_endpoint": "127.0.0.1:1", "hook_token": ""}), encoding="utf-8")
     assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
@@ -674,7 +696,7 @@ def test_send_best_effort_is_false_on_a_stale_or_mismatched_lock(tmp_path):
     assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
 
 
-def test_send_best_effort_never_raises_for_a_port_out_of_valid_range(tmp_path):
+def test_send_best_effort_never_raises_for_a_port_out_of_valid_range(tmp_path: Path) -> None:
     """``isdigit()`` alone accepts any non-negative integer string, but
     ``socket.create_connection`` raises ``OverflowError`` (not ``OSError``)
     for a port outside 1..65535 -- uncaught, that would violate this
@@ -692,7 +714,7 @@ def test_send_best_effort_never_raises_for_a_port_out_of_valid_range(tmp_path):
     assert hook_ipc.send_best_effort("handoffWake", {}, lock_path=lock_path) is False
 
 
-def test_send_best_effort_never_raises_for_a_non_serializable_payload_or_bad_timeout(tmp_path):
+def test_send_best_effort_never_raises_for_a_non_serializable_payload_or_bad_timeout(tmp_path: Path) -> None:
     """Request construction (JSON serialization, ``deadline = time.time() +
     timeout``) happens before the guarded socket block -- it must still
     never propagate a TypeError/ValueError into the caller, or an
@@ -707,13 +729,13 @@ def test_send_best_effort_never_raises_for_a_non_serializable_payload_or_bad_tim
             "handoffWake", {"bad": object()}, lock_path=lock_path,
         ) is False
         assert hook_ipc.send_best_effort(
-            "handoffWake", {}, lock_path=lock_path, timeout="not-a-number",
+            "handoffWake", {}, lock_path=lock_path, timeout=cast(float, "not-a-number"),
         ) is False
     finally:
         server.close()
 
 
-def test_send_best_effort_is_false_when_rejected_by_a_bad_token(tmp_path):
+def test_send_best_effort_is_false_when_rejected_by_a_bad_token(tmp_path: Path) -> None:
     server = HookIpcServer(lambda kind, payload, deadline: {})
     server.start()
     try:
@@ -726,7 +748,7 @@ def test_send_best_effort_is_false_when_rejected_by_a_bad_token(tmp_path):
         server.close()
 
 
-def test_send_best_effort_is_false_for_a_live_server_from_a_different_installation(tmp_path):
+def test_send_best_effort_is_false_for_a_live_server_from_a_different_installation(tmp_path: Path) -> None:
     """A live, perfectly reachable resident belonging to a DIFFERENT
     installation (a mismatched ``installReceipt``/``marketplaceId`` on its
     own published lock) must never be treated as this call's intended
@@ -745,7 +767,7 @@ def test_send_best_effort_is_false_for_a_live_server_from_a_different_installati
         server.close()
 
 
-def test_send_best_effort_is_false_on_an_explicit_fallback_response(tmp_path):
+def test_send_best_effort_is_false_on_an_explicit_fallback_response(tmp_path: Path) -> None:
     server = HookIpcServer(lambda kind, payload, deadline: (_ for _ in ()).throw(HookUnavailable))
     server.start()
     try:
@@ -756,7 +778,7 @@ def test_send_best_effort_is_false_on_an_explicit_fallback_response(tmp_path):
         server.close()
 
 
-def test_bad_token_gets_no_response(tmp_path):
+def test_bad_token_gets_no_response(tmp_path: Path) -> None:
     server = HookIpcServer(lambda kind, payload, deadline: {})
     server.start()
     try:
@@ -777,7 +799,7 @@ def test_bad_token_gets_no_response(tmp_path):
         server.close()
 
 
-def test_stalled_connection_is_closed_after_read_timeout():
+def test_stalled_connection_is_closed_after_read_timeout() -> None:
     server = HookIpcServer(lambda kind, payload, deadline: {})
     server.start()
     try:
@@ -790,9 +812,9 @@ def test_stalled_connection_is_closed_after_read_timeout():
         server.close()
 
 
-def test_fallback_write_ignores_disconnected_client():
+def test_fallback_write_ignores_disconnected_client() -> None:
     class DisconnectedWriter:
-        def write(self, data):
+        def write(self, data: bytes) -> NoReturn:
             raise BrokenPipeError
 
     handler = hook_ipc._Handler.__new__(hook_ipc._Handler)
@@ -806,13 +828,13 @@ def test_fallback_write_ignores_disconnected_client():
             "deadline": time.time() - 1,
         }).encode() + b"\n"
     )
-    handler.wfile = DisconnectedWriter()
-    handler.server = SimpleNamespace(token="token", decide=lambda *args: {})
+    handler.wfile = cast(io.BufferedIOBase, DisconnectedWriter())
+    handler.server = cast(socketserver.BaseServer, SimpleNamespace(token="token", decide=lambda *args: {}))
     handler.handle()
 
 
-def test_busy_server_explicitly_requests_fallback(tmp_path):
-    def unavailable(kind, payload, deadline):
+def test_busy_server_explicitly_requests_fallback(tmp_path: Path) -> None:
+    def unavailable(kind: str, payload: dict[str, Any], deadline: float | None) -> NoReturn:
         raise HookUnavailable
 
     server = HookIpcServer(unavailable)
@@ -828,7 +850,7 @@ def test_busy_server_explicitly_requests_fallback(tmp_path):
         server.close()
 
 
-def test_close_admission_rejects_new_connections_with_reason_but_keeps_listening():
+def test_close_admission_rejects_new_connections_with_reason_but_keeps_listening() -> None:
     """Single-shot-caller admission discipline: once ``close_admission`` is
     called, the socket stays open and a new connection still completes a
     round trip -- it just gets a structured ``{"fallback": true, "reason":
@@ -858,10 +880,10 @@ def test_close_admission_rejects_new_connections_with_reason_but_keeps_listening
         server.close()
 
 
-def test_open_admission_reverses_close_admission_on_a_still_live_server():
-    seen = {}
+def test_open_admission_reverses_close_admission_on_a_still_live_server() -> None:
+    seen: dict[str, Any] = {}
 
-    def decide(kind, payload, deadline):
+    def decide(kind: str, payload: dict[str, Any], deadline: float) -> dict[str, Any]:
         seen["ran"] = True
         return {"ok": True}
 
@@ -891,10 +913,10 @@ def test_open_admission_reverses_close_admission_on_a_still_live_server():
         server.close()
 
 
-def test_client_falls_back_to_pre_guards(monkeypatch, tmp_path):
+def test_client_falls_back_to_pre_guards(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class Guard:
         @staticmethod
-        def decide(payload, home):
+        def decide(payload: dict[str, Any], home: Path) -> dict[str, Any] | None:
             return {"permissionDecision": "deny"}
 
     monkeypatch.setattr(hook_client, "_request", lambda *a, **k: None)
@@ -904,20 +926,20 @@ def test_client_falls_back_to_pre_guards(monkeypatch, tmp_path):
     ) == {"permissionDecision": "deny"}
 
 
-def test_advisory_guard_does_not_suppress_later_deny(monkeypatch, tmp_path):
+def test_advisory_guard_does_not_suppress_later_deny(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class Allow:
         @staticmethod
-        def decide(payload, home):
+        def decide(payload: dict[str, Any], home: Path) -> dict[str, Any] | None:
             return None
 
     class Warn:
         @staticmethod
-        def decide(payload, home, deadline=None):
+        def decide(payload: dict[str, Any], home: Path, deadline: float | None=None) -> dict[str, Any] | None:
             return {"additionalContext": "route elsewhere"}
 
     class Deny:
         @staticmethod
-        def decide(payload, home):
+        def decide(payload: dict[str, Any], home: Path) -> dict[str, Any] | None:
             return {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "anchor protected",
@@ -933,7 +955,7 @@ def test_advisory_guard_does_not_suppress_later_deny(monkeypatch, tmp_path):
     assert result["additionalContext"] == "route elsewhere"
 
 
-def test_client_does_not_import_agent_worktrees_main():
+def test_client_does_not_import_agent_worktrees_main() -> None:
     text = _SCRIPT.read_text("utf-8")
     runtime_text = _SCRIPT.with_name("hook_lifecycle_runtime.py").read_text("utf-8")
     assert "agent_worktrees.__main__" not in text
@@ -942,7 +964,7 @@ def test_client_does_not_import_agent_worktrees_main():
     assert '"session-lifecycle"' in runtime_text
 
 
-def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
+def test_session_start_fallback_uses_one_runtime_process(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     runtime = tmp_path / ".agent-worktrees"
     python = runtime / "versions" / "1.2.3" / (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
@@ -958,9 +980,9 @@ def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     (runtime / "current-version").write_text("1.2.3", encoding="utf-8")
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         seen["argv"] = argv
         seen["kwargs"] = kwargs
         return SimpleNamespace(
@@ -988,8 +1010,8 @@ def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("kind", ["sessionStart", "sessionEnd"])
 def test_session_hook_rejects_old_resident_without_lifecycle_capability(
-    monkeypatch, tmp_path, kind,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str,
+) -> None:
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir(parents=True)
     (runtime / "status-monitor.lock").write_text(
@@ -1003,19 +1025,19 @@ def test_session_hook_rejects_old_resident_without_lifecycle_capability(
     )
 
     class Connection:
-        def __enter__(self):
+        def __enter__(self) -> Connection:
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> None:
             return None
 
-        def settimeout(self, timeout):
+        def settimeout(self, timeout: float) -> None:
             pass
 
-        def sendall(self, request):
+        def sendall(self, request: bytes) -> None:
             pass
 
-        def recv(self, size):
+        def recv(self, size: int) -> bytes:
             return b'{"version":1,"result":{}}\n'
 
     monkeypatch.setattr(
@@ -1031,7 +1053,7 @@ def test_session_hook_rejects_old_resident_without_lifecycle_capability(
 
 
 @pytest.mark.parametrize("advertised", [[], ["session-start-source-v1"]])
-def test_source_aware_start_does_not_accept_legacy_start_capability(monkeypatch, tmp_path, advertised):
+def test_source_aware_start_does_not_accept_legacy_start_capability(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, advertised: list[str]) -> None:
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir()
     (runtime / "status-monitor.lock").write_text(json.dumps({
@@ -1040,19 +1062,19 @@ def test_source_aware_start_does_not_accept_legacy_start_capability(monkeypatch,
     }))
 
     class Connection:
-        def __enter__(self):
+        def __enter__(self) -> Connection:
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> None:
             return None
 
-        def settimeout(self, timeout):
+        def settimeout(self, timeout: float) -> None:
             pass
 
-        def sendall(self, request):
+        def sendall(self, request: bytes) -> None:
             pass
 
-        def recv(self, size):
+        def recv(self, size: int) -> bytes:
             return b'{"version":1,"capabilities":["session-lifecycle-v1"],"result":{}}\n'
 
     monkeypatch.setattr(hook_client.socket, "create_connection", lambda *args, **kwargs: Connection())
@@ -1067,11 +1089,11 @@ def test_source_aware_start_does_not_accept_legacy_start_capability(monkeypatch,
 
 @pytest.mark.parametrize("kind", ["sessionStart", "sessionEnd"])
 @pytest.mark.parametrize("capabilities", [None, ["session-lifecycle-v1"]])
-def test_source_aware_hook_never_dispatches_to_legacy_peer(tmp_path, kind, capabilities):
+def test_source_aware_hook_never_dispatches_to_legacy_peer(tmp_path: Path, kind: str, capabilities: None | list[str]) -> None:
     mutations = []
 
     class LegacyHandler(socketserver.StreamRequestHandler):
-        def handle(self):
+        def handle(self) -> None:
             request = json.loads(self.rfile.readline())
             mutations.append(request["kind"])
             self.wfile.write(
@@ -1104,7 +1126,7 @@ def test_source_aware_hook_never_dispatches_to_legacy_peer(tmp_path, kind, capab
 @pytest.mark.parametrize("installer", [
     "install.sh", "install.ps1", "installer.py", "runtime_install_publication.py",
 ])
-def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypatch, installer):
+def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installer: str) -> None:
     scripts = _SCRIPT.parent
     installed = tmp_path / "runtime" / "bin"
     installed.mkdir(parents=True)
@@ -1155,8 +1177,8 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     if installer.endswith(".sh"):
         declared = text.split("for script in ", 1)[1].split("; do", 1)[0].split()
     elif installer.endswith(".ps1"):
-        declared = text.split("foreach ($script in @(", 1)[1].split(")) {", 1)[0]
-        declared = [name.strip().strip("'") for name in declared.split(",")]
+        declaration = text.split("foreach ($script in @(", 1)[1].split(")) {", 1)[0]
+        declared = [name.strip().strip("'") for name in declaration.split(",")]
     for name in helpers:
         assert name in declared, f"{installer} does not deploy {name}"
     if installer.endswith((".sh", ".ps1")):
@@ -1256,6 +1278,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     )
     assert imports.returncode == 0, imports.stderr
     spec = importlib.util.spec_from_file_location("installed_hook_client", installed / "hook_client.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     # The test process need not have a native CLI ancestor; prove that the
@@ -1263,9 +1286,9 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     loaded = []
     original = module.importlib.util.spec_from_file_location
 
-    def load(name, path):
+    def load(name: str, path: str) -> importlib.machinery.ModuleSpec | None:
         loaded.append(Path(path))
-        return original(name, path)
+        return cast("importlib.machinery.ModuleSpec | None", original(name, path))
 
     monkeypatch.setattr(module.importlib.util, "spec_from_file_location", load)
     assert module._capture_native_source()["version"] == 1
@@ -1286,8 +1309,8 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
 
 @pytest.mark.parametrize("failure", ["nonconformant", "timeout"])
 def test_lifecycle_fixture_admits_canonical_bash_without_path(
-    tmp_path, monkeypatch, failure,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     import native_shell_support as shells
 
     canonical_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
@@ -1301,7 +1324,7 @@ def test_lifecycle_fixture_admits_canonical_bash_without_path(
     monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: None)
     calls = []
 
-    def probe(argv, **kwargs):
+    def probe(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         assert argv[0] == str(canonical_bash)
         assert kwargs["timeout"] == 5
@@ -1322,8 +1345,8 @@ def test_lifecycle_fixture_admits_canonical_bash_without_path(
     ("0.9.0", 0, "{}"),
 ])
 def test_source_aware_start_never_downgrades_to_old_startup_scripts(
-    monkeypatch, tmp_path, runtime_version, returncode, stdout,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runtime_version: str, returncode: int, stdout: str,
+) -> None:
     python = tmp_path / "versions" / runtime_version / "bin" / "python"
     monkeypatch.setattr(hook_client, "_runtime_python", lambda home: python)
     monkeypatch.setattr(
@@ -1332,7 +1355,7 @@ def test_source_aware_start_never_downgrades_to_old_startup_scripts(
     )
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
@@ -1352,8 +1375,8 @@ def test_source_aware_start_never_downgrades_to_old_startup_scripts(
 
 @pytest.mark.parametrize("installed", [False, True])
 def test_session_start_old_runtime_uses_legacy_compatibility(
-    monkeypatch, tmp_path, installed
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, installed: bool
+) -> None:
     runtime = tmp_path / ".agent-worktrees"
     python = runtime / "versions" / "1.5.3-dev744" / (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
@@ -1375,9 +1398,9 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     manager = tmp_path / "manager"
     manager.mkdir()
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager))
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def legacy(payload):
+    def legacy(payload: dict[str, Any]) -> dict[str, str]:
         seen.update(payload)
         return {"additionalContext": "legacy"}
 
@@ -1389,7 +1412,7 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
         "run",
         lambda *args, **kwargs: pytest.fail("old runtime must not be invoked"),
     )
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "cwd": str(tmp_path),
         "_agentWorktrees": {
@@ -1404,8 +1427,8 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
 
 
 def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An external update owner does not suppress non-install lifecycle work."""
     runtime = tmp_path / ".agent-worktrees"
     python = runtime / "versions" / "1.5.3-dev744" / (
@@ -1435,9 +1458,9 @@ def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
             _pid_image_path=lambda pid: str(python),
         ),
     )
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def lifecycle(payload, *, skip_reconcile=False):
+    def lifecycle(payload: dict[str, Any], *, skip_reconcile: bool=False) -> dict[str, str]:
         seen["skip_reconcile"] = skip_reconcile
         seen["sessionId"] = payload["sessionId"]
         return {"additionalContext": "registered"}
@@ -1448,7 +1471,7 @@ def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
         "run",
         lambda *args, **kwargs: pytest.fail("old runtime must not be invoked"),
     )
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "cwd": str(tmp_path),
         "_agentWorktrees": {
@@ -1465,16 +1488,16 @@ def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
 @pytest.mark.parametrize("skip_reconcile", [False, True])
 @pytest.mark.parametrize("caller_flags", [False, True])
 def test_session_start_always_preserves_only_non_install_legacy_hooks(
-    monkeypatch, tmp_path, skip_reconcile, caller_flags,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, skip_reconcile: bool, caller_flags: bool,
+) -> None:
     launched = []
 
     class Process:
-        def __init__(self, argv, **kwargs):
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
             script = next(arg for arg in argv if arg.endswith((".ps1", ".sh")))
             launched.append((Path(script).stem, kwargs["env"]))
 
-        def communicate(self, *args, **kwargs):
+        def communicate(self, *args: Any, **kwargs: Any) -> tuple[str, str]:
             return '{"additionalContext":"lifecycle"}', ""
 
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: "shell")
@@ -1483,6 +1506,7 @@ def test_session_start_always_preserves_only_non_install_legacy_hooks(
     monkeypatch.setattr(
         hook_client, "_runtime_python", lambda _home: runtime / "versions/1.0.0/bin/python",
     )
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(tmp_path / "unqualified-cache"))
     for flag in ("WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"):
         if caller_flags:
             monkeypatch.setenv(flag, "caller-value")
@@ -1495,8 +1519,8 @@ def test_session_start_always_preserves_only_non_install_legacy_hooks(
         "project-hooks", "register-nudge", "register-session", "anchor-hygiene-check", "provision-check"
     }
     for name, env in launched:
-        cache = env["PYTHONPYCACHEPREFIX"].replace("\\\\?\\", "")
-        assert Path(cache).is_relative_to(runtime / "cache/python")
+        assert "PYTHONPYCACHEPREFIX" not in env
+        assert env["PYTHONDONTWRITEBYTECODE"] == "1"
         for flag in ("WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"):
             assert env.get(flag) == ("caller-value" if caller_flags else None)
 
@@ -1516,8 +1540,8 @@ def test_session_start_always_preserves_only_non_install_legacy_hooks(
     ],
 )
 def test_update_driver_rejects_absent_or_invalid_ownership(
-    monkeypatch, tmp_path, ownership
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ownership: None | dict[str, Any]
+) -> None:
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir()
     if ownership is not None:
@@ -1534,7 +1558,7 @@ def test_update_driver_rejects_absent_or_invalid_ownership(
 
 
 @pytest.mark.parametrize("alive,image", [(False, "matching"), (True, None), (True, "other")])
-def test_update_driver_rejects_dead_or_wrong_process(monkeypatch, tmp_path, alive, image):
+def test_update_driver_rejects_dead_or_wrong_process(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, alive: bool, image: str | None) -> None:
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir()
     (runtime / "updater.lock").write_text(
@@ -1551,7 +1575,7 @@ def test_update_driver_rejects_dead_or_wrong_process(monkeypatch, tmp_path, aliv
     assert not hook_client._external_update_driver_active(tmp_path, python)
 
 
-def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path):
+def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path: Path) -> None:
     from agent_worktrees import update_stage
 
     runtime = tmp_path / ".agent-worktrees"
@@ -1572,7 +1596,7 @@ def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path):
 
 
 @pytest.mark.parametrize("protocol", [None, "kernel-lease-v1"])
-def test_update_driver_does_not_expire_a_live_stage(monkeypatch, tmp_path, protocol):
+def test_update_driver_does_not_expire_a_live_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, protocol: None | str) -> None:
     from agent_worktrees import update_stage
 
     runtime = tmp_path / ".agent-worktrees"
@@ -1598,7 +1622,7 @@ def test_update_driver_does_not_expire_a_live_stage(monkeypatch, tmp_path, proto
         update_stage.release_lock(lock)
 
 
-def test_update_driver_rejects_reused_pid_with_matching_python(tmp_path):
+def test_update_driver_rejects_reused_pid_with_matching_python(tmp_path: Path) -> None:
     from agent_worktrees import update_stage
 
     runtime = tmp_path / ".agent-worktrees"
@@ -1614,11 +1638,11 @@ def test_update_driver_rejects_reused_pid_with_matching_python(tmp_path):
             "start_time": "not-this-process-birth",
         }), encoding="utf-8",
     )
-    assert update_stage.locks.process_start_time(os.getpid()) is not None
+    assert getattr(update_stage, "locks").process_start_time(os.getpid()) is not None
     assert not hook_client._external_update_driver_active(tmp_path, Path(image))
 
 
-def test_update_driver_identity_probe_needs_no_installed_runtime(tmp_path):
+def test_update_driver_identity_probe_needs_no_installed_runtime(tmp_path: Path) -> None:
     from agent_worktrees import update_stage
 
     runtime = tmp_path / ".agent-worktrees"
@@ -1638,7 +1662,7 @@ def test_update_driver_identity_probe_needs_no_installed_runtime(tmp_path):
         result = subprocess.run(
             [sys.executable, "-I", "-S", "-c", script, str(_SCRIPT), str(tmp_path), image],
             capture_output=True, text=True, timeout=10,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
         )
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
@@ -1646,14 +1670,14 @@ def test_update_driver_identity_probe_needs_no_installed_runtime(tmp_path):
 
 
 @pytest.mark.parametrize("case", ["lifetime", "legacy-age", "kernel-age", "reused-pid", "isolated"])
-def test_real_update_driver_fixtures_use_darwin_image_fallback(monkeypatch, tmp_path, case):
+def test_real_update_driver_fixtures_use_darwin_image_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, case: str) -> None:
     import ctypes
 
     helper = hook_client._load_sibling("versioned_runtime.py")
     image = hook_client._RUNTIME.update_driver_image(helper, os.getpid())
     assert image
 
-    def probe(pid, buffer, size):
+    def probe(pid: int, buffer: Any, size: int) -> int:
         buffer.value = os.fsencode(image)
         return len(buffer.value)
 
@@ -1663,7 +1687,7 @@ def test_real_update_driver_fixtures_use_darwin_image_fallback(monkeypatch, tmp_
     )
     original_cdll = ctypes.CDLL
 
-    def load(path, *args, **kwargs):
+    def load(path: str, *args: Any, **kwargs: Any) -> ctypes.CDLL | SimpleNamespace:
         if path == "/usr/lib/libproc.dylib" and not args and not kwargs:
             return SimpleNamespace(proc_pidpath=probe)
         return original_cdll(path, *args, **kwargs)
@@ -1683,15 +1707,15 @@ def test_real_update_driver_fixtures_use_darwin_image_fallback(monkeypatch, tmp_
 
 @pytest.mark.parametrize("failure", ["unavailable", "probe-error"])
 def test_update_driver_unverified_ownership_preserves_recovery(
-    monkeypatch, tmp_path, failure
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir()
     (runtime / "updater.lock").write_text(
         json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
     )
 
-    def probe(pid):
+    def probe(pid: int) -> NoReturn:
         raise OSError("process probe unavailable")
 
     helper = None if failure == "unavailable" else SimpleNamespace(_pid_image_path=probe)
@@ -1700,7 +1724,7 @@ def test_update_driver_unverified_ownership_preserves_recovery(
 
 
 @pytest.mark.parametrize("result", ["/runtime/bin/python", None, "probe-error"])
-def test_update_driver_darwin_native_image_probe(monkeypatch, tmp_path, result):
+def test_update_driver_darwin_native_image_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, result: str | None) -> None:
     import ctypes
 
     runtime = tmp_path / ".agent-worktrees"
@@ -1710,7 +1734,7 @@ def test_update_driver_darwin_native_image_probe(monkeypatch, tmp_path, result):
     )
     calls = []
 
-    def probe(pid, buffer, size):
+    def probe(pid: int, buffer: Any, size: int) -> int:
         calls.append((pid, size))
         if result == "probe-error":
             raise OSError("native probe unavailable")
@@ -1737,8 +1761,8 @@ def test_update_driver_darwin_native_image_probe(monkeypatch, tmp_path, result):
 
 
 def test_session_start_enriches_payload_with_session_environment(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
     monkeypatch.setenv("WORKTREE_ID", "worktree-1")
     monkeypatch.setenv("TMUX_PANE", "%7")
@@ -1764,15 +1788,15 @@ def test_session_start_enriches_payload_with_session_environment(
 
 
 def test_session_start_writes_combined_session_guidance(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
     monkeypatch.setattr(
         hook_client,
         "_command_catalog_context",
         lambda: "## command catalog\n\ncatalog",
     )
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "cwd": str(tmp_path),
         "source": "new",
@@ -1812,8 +1836,8 @@ def test_session_start_writes_combined_session_guidance(
 
 
 def test_session_start_reuses_registration_with_command_catalog(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         hook_client,
         "_registration_context",
@@ -1859,8 +1883,8 @@ def test_session_start_reuses_registration_with_command_catalog(
     ),
 )
 def test_session_start_replaces_stale_guidance_on_logical_failure(
-    monkeypatch, tmp_path, registration, catalog, expected
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, registration: str, catalog: str, expected: str
+) -> None:
     monkeypatch.setattr(
         hook_client,
         "_registration_context",
@@ -1890,8 +1914,8 @@ def test_session_start_replaces_stale_guidance_on_logical_failure(
 
 
 def test_session_start_guidance_overwrites_on_resume(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
     monkeypatch.setattr(
         hook_client, "_command_catalog_context", lambda: "catalog"
@@ -1906,7 +1930,7 @@ def test_session_start_guidance_overwrites_on_resume(
         / "session-guidance.instructions.md"
     )
     for timestamp, binding in ((1_000, "first"), (1_001, "second")):
-        payload = {
+        payload: dict[str, Any] = {
             "sessionId": "session-1",
             "cwd": str(tmp_path),
             "source": "resume",
@@ -1929,11 +1953,11 @@ def test_session_start_guidance_overwrites_on_resume(
 
 
 @pytest.mark.parametrize("source", ["new", "resume"])
-def test_session_machine_guidance_survives_missing_registration(monkeypatch, tmp_path, source):
+def test_session_machine_guidance_survives_missing_registration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str) -> None:
     monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
     monkeypatch.setattr(hook_client, "_command_catalog_context", lambda: "catalog")
     monkeypatch.setattr(hook_client.socket, "gethostname", lambda: "VM-ABC")
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1", "cwd": str(tmp_path),
         "source": source, "timestamp": 1000,
     }
@@ -1963,7 +1987,7 @@ def test_session_machine_guidance_survives_missing_registration(monkeypatch, tmp
     assert not list(snapshots.glob("register-session-*"))
 
 
-def test_session_machine_guidance_survives_context_budget_failure(monkeypatch, tmp_path):
+def test_session_machine_guidance_survives_context_budget_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(hook_client.socket, "gethostname", lambda: "VM-ABC")
     monkeypatch.setattr(hook_client, "_registration_context", lambda payload, home: "x" * 4096)
     monkeypatch.setattr(hook_client, "_command_catalog_context", lambda: "")
@@ -1980,13 +2004,13 @@ def test_session_machine_guidance_survives_context_budget_failure(monkeypatch, t
     assert len(content.encode("utf-8")) <= 4096
 
 
-def test_session_machine_rewrite_keeps_caller_payload_catalog(monkeypatch, tmp_path):
+def test_session_machine_rewrite_keeps_caller_payload_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     catalog = "## agent-worktrees session command catalog\n\npayload-owned catalog"
     monkeypatch.setattr(
         hook_client, "_command_catalog_context",
         lambda: pytest.fail("deployed runtime must not rediscover the payload catalog"),
     )
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "_agentWorktrees": {"commandCatalog": catalog},
     }
@@ -2002,8 +2026,8 @@ def test_session_machine_rewrite_keeps_caller_payload_catalog(monkeypatch, tmp_p
     assert "No current agent-worktrees session guidance" not in content
 
 
-def test_session_machine_late_lifecycle_cannot_overwrite_newer_resume(tmp_path):
-    older = {
+def test_session_machine_late_lifecycle_cannot_overwrite_newer_resume(tmp_path: Path) -> None:
+    older: dict[str, Any] = {
         "sessionId": "same-session", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "new",
         "_agentWorktrees": {
@@ -2040,8 +2064,8 @@ def test_session_machine_late_lifecycle_cannot_overwrite_newer_resume(tmp_path):
     assert "old catalog" not in target.read_text(encoding="utf-8")
 
 
-def test_session_machine_lifecycle_cannot_claim_an_unstarted_launch(tmp_path):
-    payload = {
+def test_session_machine_lifecycle_cannot_claim_an_unstarted_launch(tmp_path: Path) -> None:
+    payload: dict[str, Any] = {
         "sessionId": "same-session", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "new",
         "_agentWorktrees": {"pluginVersion": "1.2.3-dev4"},
@@ -2053,8 +2077,8 @@ def test_session_machine_lifecycle_cannot_claim_an_unstarted_launch(tmp_path):
     ).exists()
 
 
-def test_session_machine_same_launch_final_writer_reads_latest_snapshot(monkeypatch, tmp_path):
-    payload = {
+def test_session_machine_same_launch_final_writer_reads_latest_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    payload: dict[str, Any] = {
         "sessionId": "same-session", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "resume",
         "_agentWorktrees": {
@@ -2068,11 +2092,11 @@ def test_session_machine_same_launch_final_writer_reads_latest_snapshot(monkeypa
     real_write = hook_client._RUNTIME.write_guidance
     results = []
 
-    def delayed_write(*args, **kwargs):
+    def delayed_write(*args: Any, **kwargs: Any) -> bool:
         if threading.current_thread() is worker:
             reached_write.set()
             assert release_final.wait(5)
-        return real_write(*args, **kwargs)
+        return cast(bool, real_write(*args, **kwargs))
 
     monkeypatch.setattr(hook_client._RUNTIME, "write_guidance", delayed_write)
     worker = threading.Thread(target=lambda: results.append(
@@ -2110,8 +2134,8 @@ def test_session_machine_same_launch_final_writer_reads_latest_snapshot(monkeypa
     assert "late final" in content
 
 
-def test_session_machine_owner_check_and_replace_share_one_lock(tmp_path):
-    payload = {
+def test_session_machine_owner_check_and_replace_share_one_lock(tmp_path: Path) -> None:
+    payload: dict[str, Any] = {
         "sessionId": "same-session", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "new",
         "_agentWorktrees": {"pluginVersion": "1.2.3-dev4"},
@@ -2124,7 +2148,7 @@ def test_session_machine_owner_check_and_replace_share_one_lock(tmp_path):
     done = threading.Event()
     results = []
 
-    def resume():
+    def resume() -> None:
         results.append(hook_client._write_session_guidance(
             {**payload, "timestamp": 1001, "source": "resume"}, home=tmp_path,
         ))
@@ -2142,14 +2166,14 @@ def test_session_machine_owner_check_and_replace_share_one_lock(tmp_path):
     assert not hook_client._write_session_guidance(payload, home=tmp_path, claim_launch=False)
 
 
-def test_session_machine_native_deployed_writer_keeps_payload_catalog(tmp_path):
+def test_session_machine_native_deployed_writer_keeps_payload_catalog(tmp_path: Path) -> None:
     deployed = tmp_path / "runtime" / "bin"
     deployed.mkdir(parents=True)
     for name in ("hook_client.py", "hook_runtime.py"):
         (deployed / name).write_bytes((_SCRIPT.parent / name).read_bytes())
     catalog = hook_client._command_catalog_context()
     assert catalog.startswith(hook_client._COMMAND_CATALOG_HEADING)
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "deployed-writer",
         "_agentWorktrees": {"commandCatalog": catalog},
     }
@@ -2169,7 +2193,7 @@ def test_session_machine_native_deployed_writer_keeps_payload_catalog(tmp_path):
         [sys.executable, "-c", child, str(deployed / "hook_client.py"), str(tmp_path)],
         input=json.dumps(payload), capture_output=True, text=True,
         timeout=20, env=environment,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"ok": True}
@@ -2183,7 +2207,7 @@ def test_session_machine_native_deployed_writer_keeps_payload_catalog(tmp_path):
     assert not (deployed / "command_binding.py").exists()
 
 
-def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts(tmp_path):
+def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts(tmp_path: Path) -> None:
     child = (
         "import importlib.util,json,sys; from pathlib import Path; "
         "spec=importlib.util.spec_from_file_location('hook',sys.argv[1]); "
@@ -2203,7 +2227,7 @@ def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts
         [sys.executable, "-c", child, str(_SCRIPT)],
         input=json.dumps({"sessionId": "first-touch", "cwd": str(tmp_path)}),
         capture_output=True, text=True, timeout=20, env=environment,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {}
@@ -2219,15 +2243,15 @@ def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts
 
 @pytest.mark.parametrize("recover_project", [False, True])
 def test_session_machine_lifecycle_writes_guidance_before_registration(
-    monkeypatch, tmp_path, recover_project,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, recover_project: bool,
+) -> None:
     from agent_worktrees import local_cache_refresh
 
     (tmp_path / "machines.yaml").write_text(
         "machines:\n  worker-a:\n    hostname: VM-ABC\n    display_name: builder\n",
         encoding="utf-8",
     )
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1", "cwd": str(tmp_path),
         "source": "resume", "timestamp": 1000,
         "_agentWorktrees": {"pluginVersion": "1.2.3-dev4", "environment": {}},
@@ -2237,13 +2261,13 @@ def test_session_machine_lifecycle_writes_guidance_before_registration(
         / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
     )
     state = {"project": None if recover_project else "project"}
-    monkeypatch.setattr(main.cfg, "active_project", lambda: state["project"])
-    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: state.update(project=value))
+    monkeypatch.setattr(getattr(main, "cfg"), "active_project", lambda: state["project"])
+    monkeypatch.setattr(getattr(main, "cfg"), "set_active_project", lambda value: state.update(project=value))
     monkeypatch.setattr(
-        main.cfg, "load_config",
+        getattr(main, "cfg"), "load_config",
         lambda **kwargs: SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path))),
     )
-    monkeypatch.setattr(main.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(getattr(main, "cfg"), "detect_platform", lambda: "windows")
     monkeypatch.setattr(hook_client.socket, "gethostname", lambda: "VM-ABC")
     monkeypatch.setattr(main, "_aw_runtime_home", lambda: tmp_path / ".agent-worktrees")
     monkeypatch.setattr(hook_client, "_selected_runtime_root", lambda home: home / ".agent-worktrees")
@@ -2260,14 +2284,14 @@ def test_session_machine_lifecycle_writes_guidance_before_registration(
     monkeypatch.setattr(main, "_finish_project_session_hook", lambda process, deadline: ({}, ""))
     monkeypatch.setattr(main, "_registration_nudge_context", lambda cwd: "")
     monkeypatch.setattr(main, "_write_session_lifecycle_receipt", lambda *args: None)
-    monkeypatch.setattr(main.terminal_identity, "record_session_terminal", lambda *args: None)
+    monkeypatch.setattr(getattr(main, "terminal_identity"), "record_session_terminal", lambda *args: None)
     monkeypatch.setattr(main, "_migrate_legacy_marketplace_overrides", lambda *args: None)
     monkeypatch.setattr(main, "_reconcile_knowledge_plugin_overlay", lambda *args: None)
     monkeypatch.setattr(local_cache_refresh, "sessionstart_diagnostic", lambda *args, **kwargs: "")
     monkeypatch.setattr(main, "_anchor_hygiene_diagnostic", lambda cwd: "")
     monkeypatch.setattr(main, "_start_provisioning_if_needed", lambda *args: "")
 
-    def failed_registration(args):
+    def failed_registration(args: argparse.Namespace) -> int:
         content = target.read_text(encoding="utf-8")
         assert '"hostname": "VM-ABC"' in content
         if recover_project:
@@ -2292,10 +2316,10 @@ def test_session_machine_lifecycle_writes_guidance_before_registration(
 
 @pytest.mark.parametrize("suffix", (".json", ""))
 def test_registration_context_rejects_oversized_snapshots(
-    monkeypatch, tmp_path, suffix
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, suffix: str
+) -> None:
     monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "cwd": str(tmp_path),
         "source": "new",
@@ -2316,8 +2340,8 @@ def test_registration_context_rejects_oversized_snapshots(
     ("", "../escape", "slash/value", "a" * 129),
 )
 def test_session_start_guidance_rejects_unsafe_session_ids(
-    monkeypatch, tmp_path, session_id
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, session_id: str
+) -> None:
     monkeypatch.setattr(
         hook_client, "_command_catalog_context", lambda: "catalog"
     )
@@ -2328,8 +2352,8 @@ def test_session_start_guidance_rejects_unsafe_session_ids(
 
 
 def test_session_start_guidance_rejects_instruction_directory_escape(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         hook_client, "_command_catalog_context", lambda: "catalog"
     )
@@ -2353,8 +2377,8 @@ def test_session_start_guidance_rejects_instruction_directory_escape(
 
 
 def test_session_start_guidance_rejects_session_root_escape(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         hook_client, "_command_catalog_context", lambda: "catalog"
     )
@@ -2377,8 +2401,8 @@ def test_session_start_guidance_rejects_session_root_escape(
 
 @pytest.mark.parametrize("component", (".copilot", "session-state"))
 def test_session_start_guidance_rejects_state_root_escape(
-    monkeypatch, tmp_path, component
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, component: str
+) -> None:
     monkeypatch.setattr(
         hook_client, "_command_catalog_context", lambda: "catalog"
     )
@@ -2401,7 +2425,7 @@ def test_session_start_guidance_rejects_state_root_escape(
     assert not (outside / "session-1").exists()
 
 
-def test_reparse_detection_does_not_require_creating_a_link():
+def test_reparse_detection_does_not_require_creating_a_link() -> None:
     path = SimpleNamespace(
         lstat=lambda: SimpleNamespace(
             st_mode=hook_client._RUNTIME.stat.S_IFDIR,
@@ -2412,8 +2436,8 @@ def test_reparse_detection_does_not_require_creating_a_link():
 
 
 def test_session_start_guidance_fails_open_on_resolve_loop(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         hook_client, "_registration_context", lambda payload, home: ""
     )
@@ -2422,7 +2446,7 @@ def test_session_start_guidance_fails_open_on_resolve_loop(
     )
     original_resolve = Path.resolve
 
-    def resolve(path, *args, **kwargs):
+    def resolve(path: Path, *args: Any, **kwargs: Any) -> Path:
         if path.name == "session-state":
             raise RuntimeError("symlink loop")
         return original_resolve(path, *args, **kwargs)
@@ -2433,14 +2457,14 @@ def test_session_start_guidance_fails_open_on_resolve_loop(
     )
 
 
-def _hook_catalog(context):
-    return json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
+def _hook_catalog(context: str) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0]))
 
 
 @pytest.mark.parametrize("status", ["selected", "unresolved", "blocked"])
 def test_session_start_catalog_preserves_binding_without_subprocess(
-    monkeypatch, status
-):
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
     binding = {
         "schema": "copilot-extensions.command-installation-binding",
         "version": 1,
@@ -2450,7 +2474,7 @@ def test_session_start_catalog_preserves_binding_without_subprocess(
         "installation": {"installationId": "fixture-installation"},
     }
     seen = []
-    def resolve(*args):
+    def resolve(*args: Any) -> dict[str, Any]:
         assert sys.dont_write_bytecode
         seen.append(args)
         return binding
@@ -2475,7 +2499,7 @@ def test_session_start_catalog_preserves_binding_without_subprocess(
 
 
 @pytest.mark.parametrize("missing", ["command", "installer"])
-def test_session_start_catalog_preserves_unavailable_commands(monkeypatch, missing):
+def test_session_start_catalog_preserves_unavailable_commands(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     original = Path.is_file
     target = (
         "agent-worktrees.ps1" if os.name == "nt" else "agent-worktrees"
@@ -2491,7 +2515,7 @@ def test_session_start_catalog_preserves_unavailable_commands(monkeypatch, missi
     ] == "unavailable"
 
 
-def test_session_start_catalog_reports_missing_binding_helper(monkeypatch, capsys):
+def test_session_start_catalog_reports_missing_binding_helper(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(hook_client, "_load_sibling", lambda _: None)
     original_bytecode = sys.dont_write_bytecode
     assert hook_client._command_catalog_context() == ""
@@ -2512,9 +2536,9 @@ def _guidance_file(home: Path, session_id: str) -> Path:
 
 
 def test_session_start_catalog_import_error_keeps_guidance_floor(
-    monkeypatch, tmp_path, capsys
-):
-    def binding_for_payload(*_):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def binding_for_payload(*_: Any) -> NoReturn:
         raise ImportError("cannot import name 'ParamSpec' from 'typing'")
 
     monkeypatch.setattr(
@@ -2547,13 +2571,13 @@ def test_session_start_catalog_import_error_keeps_guidance_floor(
 
 
 def test_session_start_render_failure_writes_guidance_floor(
-    monkeypatch, tmp_path, capsys
-):
-    def registration(*_):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def registration(*_: Any) -> NoReturn:
         raise OSError("registration lookup failed")
 
     monkeypatch.setattr(hook_client, "_registration_context", registration)
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "render-session", "cwd": str(tmp_path), "timestamp": 1000,
         "source": "new", "_agentWorktrees": {"pluginVersion": "1.0.0"},
     }
@@ -2572,7 +2596,7 @@ def test_session_start_render_failure_writes_guidance_floor(
 class _OldInterpreter:
     version_info = (3, 9, 5, "final", 0)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(sys, name)
 
 
@@ -2585,26 +2609,26 @@ class _OldInterpreter:
     ),
 )
 def test_session_start_main_writes_guidance_floor_when_enrichment_fails(
-    monkeypatch, tmp_path, capsys, interpreter, runtime, reason
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], interpreter: str, runtime: str, reason: str
+) -> None:
     monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "floor-session", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "new",
     }
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 
-    def enrich(_):
+    def enrich(_: dict[str, Any]) -> NoReturn:
         raise ImportError("cannot import name 'ParamSpec' from 'typing'")
 
-    decided = []
+    decided: list[tuple[object, ...]] = []
     floor = hook_client._write_guidance_floor
     monkeypatch.setattr(
         hook_client, "_write_guidance_floor",
         lambda value, reason: floor(value, reason, home=tmp_path),
     )
     monkeypatch.setattr(hook_client, "_enrich_session_payload", enrich)
-    monkeypatch.setattr(hook_client, "decide", lambda *args: decided.append(args) or {})
+    monkeypatch.setattr(hook_client, "decide", lambda *args: _append_result(decided, args, {}))
     if interpreter == "old":
         monkeypatch.setattr(hook_client, "sys", _OldInterpreter())
     if not runtime:
@@ -2632,7 +2656,7 @@ def test_session_start_main_writes_guidance_floor_when_enrichment_fails(
     assert "<!-- agent-worktrees:session-guidance " in content
 
 
-def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
+def test_session_start_catalog_matches_native_emitter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     root = _SCRIPT.parents[1]
@@ -2653,7 +2677,7 @@ def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
     result = hook_client.subprocess.run(
         argv, capture_output=True, text=True, check=True, timeout=15,
         env=environment,
-        **({"creationflags": hook_client.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **({"creationflags": getattr(hook_client.subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
     native = _hook_catalog(json.loads(result.stdout)["additionalContext"])
     generated = _hook_catalog(hook_client._command_catalog_context())
@@ -2663,9 +2687,9 @@ def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
 
 
 def test_session_start_main_folds_decision_context_and_emits_empty_result(
-    monkeypatch, capsys
-):
-    payload = {"sessionId": "session-1", "cwd": str(Path.cwd())}
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload: dict[str, Any] = {"sessionId": "session-1", "cwd": str(Path.cwd())}
     enriched = {
         **payload,
         "_agentWorktrees": {
@@ -2673,11 +2697,11 @@ def test_session_start_main_folds_decision_context_and_emits_empty_result(
             "environment": {},
         },
     }
-    seen = {"enrichment_calls": 0}
+    seen: dict[str, Any] = {"enrichment_calls": 0}
     monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 
-    def enrich(value):
+    def enrich(value: dict[str, Any]) -> dict[str, Any]:
         seen["enrichment_calls"] += 1
         return enriched
 
@@ -2710,8 +2734,8 @@ def test_session_start_main_folds_decision_context_and_emits_empty_result(
 
 
 def test_session_start_main_emits_empty_object_on_unhandled_exception(
-    monkeypatch, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """sessionStart must emit a single JSON object even if decide() raises.
 
     main()'s output defaults to "{}" before any risky work runs, so an
@@ -2731,10 +2755,10 @@ def test_session_start_main_emits_empty_object_on_unhandled_exception(
 
 @pytest.mark.parametrize("decision_fails", [False, True])
 def test_session_start_catalog_exists_before_lifecycle_decision(
-    monkeypatch, tmp_path, capsys, decision_fails
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], decision_fails: bool
+) -> None:
     monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "early-catalog", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "new",
         "_agentWorktrees": {"pluginVersion": "1.2.3-dev4"},
@@ -2753,7 +2777,7 @@ def test_session_start_catalog_exists_before_lifecycle_decision(
     path = (tmp_path / ".copilot" / "session-state" / "early-catalog"
             / "instructions" / "agent-worktrees" / "session-guidance.instructions.md")
 
-    def decide(*_):
+    def decide(*_: Any) -> dict[str, Any] | None:
         assert "canonical fixture catalog" in path.read_text()
         if decision_fails:
             raise RuntimeError("finite lifecycle failure")
@@ -2770,7 +2794,7 @@ def test_session_start_catalog_exists_before_lifecycle_decision(
     assert "Session guidance degraded" not in output.err
 
 
-def test_first_install_never_invokes_legacy_bootstrap_output(monkeypatch, tmp_path):
+def test_first_install_never_invokes_legacy_bootstrap_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copyfile(_SCRIPT.with_name("hook_lifecycle_runtime.py"),
@@ -2797,7 +2821,7 @@ def test_first_install_never_invokes_legacy_bootstrap_output(monkeypatch, tmp_pa
     assert result == {}
 
 
-def test_first_install_never_invokes_non_object_bootstrap_output(monkeypatch, tmp_path):
+def test_first_install_never_invokes_non_object_bootstrap_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copyfile(_SCRIPT.with_name("hook_lifecycle_runtime.py"),
@@ -2827,15 +2851,15 @@ def test_first_install_never_invokes_non_object_bootstrap_output(monkeypatch, tm
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
 @pytest.mark.parametrize("returncode", [0, 3])
 def test_windows_first_install_never_enters_installation_lifecycle(
-    monkeypatch, tmp_path, returncode,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, returncode: int,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
     shell = str(tmp_path / "powershell.exe")
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: shell)
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         seen.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(returncode=returncode, stdout="stamp diagnostic\n", stderr="warning\n")
 
@@ -2845,7 +2869,7 @@ def test_windows_first_install_never_enters_installation_lifecycle(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ANSI parent / UTF-8 child")
-def test_windows_first_install_never_executes_binding_child(monkeypatch, tmp_path):
+def test_windows_first_install_never_executes_binding_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in ("bootstrap-check.ps1", "install.ps1"):
@@ -2862,7 +2886,7 @@ def test_windows_first_install_never_executes_binding_child(monkeypatch, tmp_pat
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold hook consumer")
-def test_windows_first_install_never_constructs_runtime_or_binstub(monkeypatch, tmp_path):
+def test_windows_first_install_never_constructs_runtime_or_binstub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     scripts = tmp_path / "payload/scripts"
     scripts.mkdir(parents=True)
     for name in ("bootstrap-check.ps1", "install.ps1", "command_binding.py"):
@@ -2884,15 +2908,15 @@ def test_windows_first_install_never_constructs_runtime_or_binstub(monkeypatch, 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
 @pytest.mark.parametrize("state", ['{"active":true,"reason":"maintenance"}', '\ufeff{"active":true}'])
 def test_windows_first_install_paused_before_any_lifecycle_child(
-    monkeypatch, tmp_path, state,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     state_file = tmp_path / "killswitch.json"
     state_file.write_text(state, encoding="utf-8")
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(state_file))
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("Paused bootstrap must not start admission or an installer")
 
     monkeypatch.setattr(hook_client.subprocess, "run", forbidden)
@@ -2901,10 +2925,10 @@ def test_windows_first_install_paused_before_any_lifecycle_child(
     assert not (tmp_path / ".agent-worktrees").exists()
 
 
-def test_first_install_explicit_context_never_enters_legacy_bootstrap(monkeypatch):
+def test_first_install_explicit_context_never_enters_legacy_bootstrap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{}")
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("Explicit installation context must not enter legacy bootstrap")
 
     monkeypatch.setattr(hook_client.subprocess, "run", forbidden)
@@ -2914,8 +2938,8 @@ def test_first_install_explicit_context_never_enters_legacy_bootstrap(monkeypatc
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
 @pytest.mark.parametrize("state", ['{"active":false}', "malformed", "[]", "{}"])
 def test_windows_first_install_does_not_consult_inactive_or_malformed_switch(
-    monkeypatch, tmp_path, state,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     state_file = tmp_path / "killswitch.json"
     state_file.write_text(state, encoding="utf-8")
@@ -2923,7 +2947,7 @@ def test_windows_first_install_does_not_consult_inactive_or_malformed_switch(
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
     invoked = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         invoked.append(argv)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -2933,12 +2957,12 @@ def test_windows_first_install_does_not_consult_inactive_or_malformed_switch(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
-def test_windows_first_install_never_launches_an_installer(monkeypatch, tmp_path):
+def test_windows_first_install_never_launches_an_installer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
 
-    def run(*args, **kwargs):
+    def run(*args: Any, **kwargs: Any) -> NoReturn:
         raise OSError("interpreter launch refused")
 
     monkeypatch.setattr(hook_client.subprocess, "run", run)
@@ -2946,8 +2970,8 @@ def test_windows_first_install_never_launches_an_installer(monkeypatch, tmp_path
 
 
 def test_project_hook_uses_exact_current_session_environment(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     project_dir = tmp_path / "project"
     hooks = project_dir / "hooks"
     hooks.mkdir(parents=True)
@@ -2956,18 +2980,18 @@ def test_project_hook_uses_exact_current_session_environment(
         else "session-start.sh"
     )
     script.write_text("", encoding="utf-8")
-    seen = {}
+    seen: dict[str, Any] = {}
 
     monkeypatch.setattr(main, "_activate_project_for_path", lambda *args, **kwargs: None)
-    monkeypatch.setattr(main.cfg, "project_name", lambda: "example")
-    monkeypatch.setattr(main.cfg, "project_dir", lambda project: project_dir)
-    monkeypatch.setattr(main.shutil, "which", lambda shell: f"/bin/{shell}")
+    monkeypatch.setattr(getattr(main, "cfg"), "project_name", lambda: "example")
+    monkeypatch.setattr(getattr(main, "cfg"), "project_dir", lambda project: project_dir)
+    monkeypatch.setattr(getattr(main, "shutil"), "which", lambda shell: f"/bin/{shell}")
 
-    def popen(argv, **kwargs):
+    def popen(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         seen.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace()
 
-    monkeypatch.setattr(main.subprocess, "Popen", popen)
+    monkeypatch.setattr(getattr(main, "subprocess"), "Popen", popen)
     environment = {
         "PATH": "current-path",
         "CUSTOM_SESSION_VALUE": "current-session",
@@ -2978,7 +3002,7 @@ def test_project_hook_uses_exact_current_session_environment(
     assert seen["kwargs"]["env"] == environment
 
 
-def test_windows_session_hook_rejects_windowsapps_python_alias():
+def test_windows_session_hook_rejects_windowsapps_python_alias() -> None:
     hooks = json.loads(
         (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
     )
@@ -2993,7 +3017,7 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     assert '${COPILOT_PLUGIN_ROOT:-$PWD}' not in bash
 
 
-def test_explicit_context_pre_and_post_hooks_use_payload_client_only():
+def test_explicit_context_pre_and_post_hooks_use_payload_client_only() -> None:
     hooks = json.loads(
         (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
     )
@@ -3006,16 +3030,16 @@ def test_explicit_context_pre_and_post_hooks_use_payload_client_only():
         assert '${COPILOT_PLUGIN_ROOT:-}/scripts' not in entry["bash"]
 
 
-def test_explicit_context_uses_matching_resident_monitor(monkeypatch, tmp_path):
+def test_explicit_context_uses_matching_resident_monitor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv(
         "COPILOT_EXTENSIONS_CONTEXT",
         str(tmp_path / "cell" / "install.json"),
     )
-    seen = []
+    seen: list[bool] = []
     monkeypatch.setattr(
         hook_client,
         "_request",
-        lambda *_args, **_kwargs: seen.append(True) or {"permissionDecision": "allow"},
+        lambda *_args, **_kwargs: _append_result(seen, True, {"permissionDecision": "allow"}),
     )
     monkeypatch.setattr(
         hook_client,
@@ -3029,7 +3053,7 @@ def test_explicit_context_uses_matching_resident_monitor(monkeypatch, tmp_path):
     assert seen == [True]
 
 
-def test_explicit_context_request_reads_selected_cell_lock(monkeypatch, tmp_path):
+def test_explicit_context_request_reads_selected_cell_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cell = tmp_path / "cell"
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir(parents=True)
@@ -3052,11 +3076,11 @@ def test_explicit_context_request_reads_selected_cell_lock(monkeypatch, tmp_path
 
         class RegistryRoot:
             @staticmethod
-            def resolve_registry_root(**_kwargs):
+            def resolve_registry_root(**_kwargs: Any) -> Path:
                 return cell
 
             @staticmethod
-            def resolve_registry_context(**_kwargs):
+            def resolve_registry_context(**_kwargs: Any) -> dict[str, str]:
                 return {
                     "marketplaceId": "cell-a",
                     "installReceipt": str(cell / "install.json"),
@@ -3076,7 +3100,7 @@ def test_explicit_context_request_reads_selected_cell_lock(monkeypatch, tmp_path
         server.close()
 
 
-def test_explicit_context_request_rejects_mismatched_monitor(monkeypatch, tmp_path):
+def test_explicit_context_request_rejects_mismatched_monitor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cell = tmp_path / "cell"
     cell.mkdir(parents=True)
     server = HookIpcServer(lambda kind, payload, deadline: {"additionalContext": "cell"})
@@ -3093,11 +3117,11 @@ def test_explicit_context_request_rejects_mismatched_monitor(monkeypatch, tmp_pa
 
         class RegistryRoot:
             @staticmethod
-            def resolve_registry_root(**_kwargs):
+            def resolve_registry_root(**_kwargs: Any) -> Path:
                 return cell
 
             @staticmethod
-            def resolve_registry_context(**_kwargs):
+            def resolve_registry_context(**_kwargs: Any) -> dict[str, str]:
                 return {
                     "marketplaceId": "cell-a",
                     "installReceipt": str(cell / "install.json"),
@@ -3116,8 +3140,8 @@ def test_explicit_context_request_rejects_mismatched_monitor(monkeypatch, tmp_pa
 
 
 def test_explicit_context_session_start_selects_cell_runtime(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cell = tmp_path / "cell"
     version = "1.2.3-dev4"
     slot = cell / "versions" / version
@@ -3136,7 +3160,7 @@ def test_explicit_context_session_start_selects_cell_runtime(
 
     class RegistryRoot:
         @staticmethod
-        def resolve_registry_root(**_kwargs):
+        def resolve_registry_root(**_kwargs: Any) -> Path:
             return cell
 
     monkeypatch.setattr(
@@ -3149,8 +3173,8 @@ def test_explicit_context_session_start_selects_cell_runtime(
 
 
 def test_explicit_context_registration_context_uses_cell_session_context(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cell = tmp_path / "cell"
     cell.mkdir(parents=True)
     monkeypatch.setenv(
@@ -3160,7 +3184,7 @@ def test_explicit_context_registration_context_uses_cell_session_context(
 
     class RegistryRoot:
         @staticmethod
-        def resolve_registry_root(**_kwargs):
+        def resolve_registry_root(**_kwargs: Any) -> Path:
             return cell
 
     monkeypatch.setattr(
@@ -3168,7 +3192,7 @@ def test_explicit_context_registration_context_uses_cell_session_context(
         "_load_sibling",
         lambda name: RegistryRoot if name == "registry_root.py" else None,
     )
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "cwd": str(tmp_path),
         "source": "resume",
@@ -3192,8 +3216,8 @@ def test_explicit_context_registration_context_uses_cell_session_context(
 
 
 def test_explicit_context_session_start_never_uses_legacy_fallback(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv(
         "COPILOT_EXTENSIONS_CONTEXT",
         str(tmp_path / "cell" / "install.json"),
@@ -3205,7 +3229,7 @@ def test_explicit_context_session_start_never_uses_legacy_fallback(
         "_fallback_legacy_session_start",
         lambda _payload: pytest.fail("legacy lifecycle must not run"),
     )
-    payload = {
+    payload: dict[str, Any] = {
         "_agentWorktrees": {"pluginVersion": "1.0.1"},
     }
 
@@ -3213,8 +3237,8 @@ def test_explicit_context_session_start_never_uses_legacy_fallback(
 
 
 def test_invalid_explicit_context_reports_unavailable_before_guard_fallback(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv(
         "COPILOT_EXTENSIONS_CONTEXT",
         str(tmp_path / "invalid" / "install.json"),
@@ -3222,7 +3246,7 @@ def test_invalid_explicit_context_reports_unavailable_before_guard_fallback(
 
     class InvalidRegistryRoot:
         @staticmethod
-        def resolve_registry_root(**_kwargs):
+        def resolve_registry_root(**_kwargs: Any) -> NoReturn:
             raise ValueError("invalid")
 
     monkeypatch.setattr(
@@ -3242,7 +3266,7 @@ def test_invalid_explicit_context_reports_unavailable_before_guard_fallback(
     assert "not authorization" in result["additionalContext"]
 
 
-def test_hooks_json_does_not_register_user_prompt_submitted():
+def test_hooks_json_does_not_register_user_prompt_submitted() -> None:
     """No ``userPromptSubmitted`` hook: the Phase 8 reopen mechanism this
     would have driven turned out to guard nothing -- ``prune.py``'s
     ``held_claims`` check already treats an ``at-rest`` (not just
@@ -3258,18 +3282,18 @@ def test_hooks_json_does_not_register_user_prompt_submitted():
 
 
 def test_explicit_context_session_end_uses_cell_runtime(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     python = tmp_path / "cell" / "versions" / "1.0.0" / "bin" / "python"
-    seen = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(hook_client, "_runtime_python", lambda _home: python)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         seen.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(hook_client.subprocess, "run", run)
-    payload = {"sessionId": "session-1", "cwd": str(tmp_path)}
+    payload: dict[str, Any] = {"sessionId": "session-1", "cwd": str(tmp_path)}
 
     assert hook_client._fallback_session_end(payload, tmp_path) == {}
     assert seen["argv"][:3] == [str(python), "-I", "-B"]
@@ -3288,8 +3312,8 @@ def test_explicit_context_session_end_uses_cell_runtime(
     None, [], ["session-lifecycle-v1"], ["session-lifecycle-v1", "session-start-source-v1"],
 ])
 def test_nested_hook_uses_installed_contract_not_payload_version(
-    monkeypatch, tmp_path, capabilities,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capabilities: None | list[str],
+) -> None:
     root = tmp_path / ".agent-worktrees"
     version = "1.0.0+source." + "a" * 40
     slot = root / "versions" / version
@@ -3311,7 +3335,7 @@ def test_nested_hook_uses_installed_contract_not_payload_version(
         }), encoding="utf-8")
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
@@ -3327,14 +3351,14 @@ def test_nested_hook_uses_installed_contract_not_payload_version(
         assert result == {}
         assert len(calls) == 1 and calls[0][0] == str(python)
         assert "--source-bound" in calls[0]
-        assert calls[0][1:3] == ["-I", "-X"]
-        assert str(root).casefold() in calls[0][3].casefold()
+        assert calls[0][1:3] == ["-I", "-B"]
+        assert "-X" not in calls[0]
     else:
         assert not calls
         assert "does not declare" in result["_stderr"]
 
 
-def test_hook_runtime_refuses_unordered_source_recovery(tmp_path):
+def test_hook_runtime_refuses_unordered_source_recovery(tmp_path: Path) -> None:
     root = tmp_path / "runtime"
     version = "1.0.0+source." + "a" * 40
     slot = root / "versions" / version
@@ -3350,7 +3374,7 @@ def test_hook_runtime_refuses_unordered_source_recovery(tmp_path):
 
 
 @pytest.mark.parametrize("event", ["preToolUse", "postToolUse", "sessionEnd"])
-def test_native_hooks_prefer_payload_without_legacy_install(monkeypatch, tmp_path, event):
+def test_native_hooks_prefer_payload_without_legacy_install(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, event: str) -> None:
     root = _SCRIPT.parents[1]
     entry = json.loads((root / "hooks.json").read_text(encoding="utf-8"))["hooks"][event][0]
     payload = tmp_path / "payload"
@@ -3387,13 +3411,13 @@ def test_native_hooks_prefer_payload_without_legacy_install(monkeypatch, tmp_pat
     )
     result = subprocess.run(
         command, input="{}", env=environment, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["additionalContext"] == "payload-" + event
 
 
-def test_session_end_transports_original_source_without_terminal_or_env_probe(monkeypatch, tmp_path):
+def test_session_end_transports_original_source_without_terminal_or_env_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     origin = {"version": 1, "qualified": True, "ancestors": [{"pid": 101, "start_time": "100"}]}
     monkeypatch.setattr(hook_client, "_capture_native_source", lambda: origin)
     monkeypatch.setattr(
@@ -3407,37 +3431,37 @@ def test_session_end_transports_original_source_without_terminal_or_env_probe(mo
     for key, value in binding.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("UNRELATED_ENVIRONMENT_VALUE", "not-transported")
-    seen = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(
         hook_client, "_request",
         lambda kind, payload, home: seen.update(kind=kind, payload=payload) or {},
     )
-    payload = {"sessionId": "old-session", "reason": "user_exit"}
+    payload: dict[str, Any] = {"sessionId": "old-session", "reason": "user_exit"}
     assert hook_client.decide("sessionEnd", payload, home=tmp_path) == {}
     assert seen["payload"] == {
         **payload, "_agentWorktrees": {"nativeSource": origin, "environment": binding},
     }
 
 
-def test_resident_dispatches_source_bound_session_end(monkeypatch, tmp_path):
+def test_resident_dispatches_source_bound_session_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from agent_worktrees import session_binding_cli
 
-    monkeypatch.setattr(main.sys, "platform", "linux")
+    monkeypatch.setattr(getattr(main, "sys"), "platform", "linux")
     original = {"qualified": True, "ancestors": [{"pid": 101, "start_time": "100"}]}
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "old-session", "cwd": str(tmp_path), "reason": "user_exit",
         "_agentWorktrees": {"nativeSource": original},
     }
     seen = []
 
-    def end(args):
+    def end(args: argparse.Namespace) -> int:
         seen.append(args)
         args.result_holder.append({"ok": True, "lifecycle": "historical"})
         return 0
 
     monkeypatch.setattr(session_binding_cli, "cmd_deregister_session", end)
     result = main._resident_hook_decision(
-        "sessionEnd", payload, segment_cache=main._StatusSegmentCache(), policy=SimpleNamespace(),
+        "sessionEnd", payload, segment_cache=_StatusSegmentCache(), policy=cast(main._ResidentHookPolicy, SimpleNamespace()),
     )
     assert result == {"ok": True, "lifecycle": "historical"}
     assert len(seen) == 1
@@ -3447,17 +3471,17 @@ def test_resident_dispatches_source_bound_session_end(monkeypatch, tmp_path):
     assert seen[0].launch_id is None
 
 
-def test_native_session_end_roundtrip_is_not_an_empty_unhandled_success(tmp_path):
-    seen = []
+def test_native_session_end_roundtrip_is_not_an_empty_unhandled_success(tmp_path: Path) -> None:
+    seen: list[tuple[str, dict[str, Any]]] = []
     server = HookIpcServer(
-        lambda kind, payload, deadline: seen.append((kind, payload)) or {"lifecycle": "historical"},
+        lambda kind, payload, deadline: _append_result(seen, (kind, payload), {"lifecycle": "historical"}),
     )
     server.start()
     try:
         runtime = tmp_path / ".agent-worktrees"
         runtime.mkdir()
         (runtime / "status-monitor.lock").write_text(json.dumps(server.rendezvous()))
-        payload = {"sessionId": "old-session", "reason": "user_exit"}
+        payload: dict[str, Any] = {"sessionId": "old-session", "reason": "user_exit"}
         result = hook_client._request("sessionEnd", payload, tmp_path)
         assert result == {"lifecycle": "historical"}
         assert seen == [("sessionEnd", payload)]
@@ -3466,9 +3490,9 @@ def test_native_session_end_roundtrip_is_not_an_empty_unhandled_success(tmp_path
 
 
 def test_started_resident_lifecycle_suppresses_duplicate_fallback(
-    monkeypatch, tmp_path
-):
-    payload = {
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "cwd": str(tmp_path),
         "source": "new",
@@ -3501,17 +3525,17 @@ def test_started_resident_lifecycle_suppresses_duplicate_fallback(
     ) == {}
 
 
-def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch):
-    seen = {}
+def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
     provisioning_start_event = threading.Event()
 
     def lifecycle(
-        payload,
+        payload: dict[str, Any],
         *,
-        deadline=None,
-        provisioning_start_event=None,
-        plugin_related_anchors=None,
-    ):
+        deadline: float | None=None,
+        provisioning_start_event: threading.Event | None=None,
+        plugin_related_anchors: list[Path] | None=None,
+    ) -> dict[str, str]:
         seen.update(
             payload=payload,
             deadline=deadline,
@@ -3524,10 +3548,10 @@ def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch):
     result = main._resident_hook_decision(
         "sessionStart",
         {"cwd": str(Path.cwd()), "sessionId": "session-1"},
-        segment_cache=main._StatusSegmentCache(),
-        policy=SimpleNamespace(
+        segment_cache=_StatusSegmentCache(),
+        policy=cast(main._ResidentHookPolicy, SimpleNamespace(
             plugin_related_anchors=lambda: ["plugin-anchor"]
-        ),
+        )),
         deadline=123.0,
         provisioning_start_event=provisioning_start_event,
     )
@@ -3538,14 +3562,14 @@ def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch):
     assert seen["plugin_related_anchors"] == ["plugin-anchor"]
 
 
-def test_resident_policy_caches_plugin_related_anchors(monkeypatch):
+def test_resident_policy_caches_plugin_related_anchors(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import related
 
-    calls = []
+    calls: list[str] = []
     monkeypatch.setattr(
         related,
         "installed_plugin_related_anchors",
-        lambda: calls.append("discover") or ["plugin-anchor"],
+        lambda: _append_result(calls, "discover", ["plugin-anchor"]),
     )
     policy = main._ResidentHookPolicy(None)
 
@@ -3554,8 +3578,8 @@ def test_resident_policy_caches_plugin_related_anchors(monkeypatch):
     assert calls == ["discover"]
 
 
-def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_path):
-    payload = {
+def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "workingDirectory": str(tmp_path),
         "source": "new",
@@ -3574,14 +3598,14 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     snapshots = []
     restored = []
 
-    monkeypatch.setattr(main.cfg, "active_project", lambda: "before")
+    monkeypatch.setattr(getattr(main, "cfg"), "active_project", lambda: "before")
     monkeypatch.setattr(
-        main.cfg, "set_active_project", lambda value: restored.append(value)
+        getattr(main, "cfg"), "set_active_project", lambda value: restored.append(value)
     )
     monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: "p")
     from agent_worktrees import session_context
 
-    monkeypatch.setattr(main.cfg, "load_config", lambda **kwargs: object())
+    monkeypatch.setattr(getattr(main, "cfg"), "load_config", lambda **kwargs: object())
     monkeypatch.setattr(session_context, "render_machine_context", lambda config: "identity")
     monkeypatch.setattr(
         main, "_load_hook_client_module",
@@ -3608,7 +3632,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     )
     registration = {}
 
-    def register(args):
+    def register(args: argparse.Namespace) -> int:
         registration.update(vars(args))
         args.result_holder.append('{"additionalContext":"binding"}')
         return 0
@@ -3667,7 +3691,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     assert registration["resident_environment"] is True
 
 
-def test_session_start_keeps_existing_paired_plugin_overlay(monkeypatch, tmp_path):
+def test_session_start_keeps_existing_paired_plugin_overlay(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from agent_worktrees import knowledge_plugins
 
     monkeypatch.setattr(knowledge_plugins, "compose_from_pair",
@@ -3675,26 +3699,26 @@ def test_session_start_keeps_existing_paired_plugin_overlay(monkeypatch, tmp_pat
     snapshots = []
     monkeypatch.setattr(main, "_write_session_lifecycle_snapshot",
                         lambda *args: snapshots.append(args))
-    payload = {"sessionId": "fixture-session"}
+    payload: dict[str, Any] = {"sessionId": "fixture-session"}
     main._reconcile_knowledge_plugin_overlay(payload, str(tmp_path))
     assert snapshots == [("knowledge-plugin-overlay", payload, "{}")]
 
 
 def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """``_run_session_lifecycle`` repeats the worktree-scoped-dynamic-
     guidance render as a backup (docs/patterns/worktree-scoped-dynamic-
     guidance.md §4), independent of every other collaborator in the
     combined-lifecycle test above."""
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "workingDirectory": str(tmp_path),
         "source": "new",
         "timestamp": 1_000,
     }
-    monkeypatch.setattr(main.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: None)
+    monkeypatch.setattr(getattr(main, "cfg"), "active_project", lambda: None)
+    monkeypatch.setattr(getattr(main, "cfg"), "set_active_project", lambda value: None)
     monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: None)
     monkeypatch.setattr(
         main, "_finish_project_session_hook", lambda process, deadline: ({}, "")
@@ -3718,7 +3742,7 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
         main, "_start_provisioning_if_needed", lambda cwd, environment, **kwargs: ""
     )
 
-    calls = []
+    calls: list[str] = []
     from agent_worktrees import guarded_anchors, local_cache_refresh
 
     monkeypatch.setattr(
@@ -3729,7 +3753,7 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
     monkeypatch.setattr(
         local_cache_refresh,
         "_queue_refresh",
-        lambda repo_root: calls.append(repo_root) or local_cache_refresh.RefreshResult("queued"),
+        lambda repo_root: _append_result(calls, repo_root, local_cache_refresh.RefreshResult("queued")),
     )
 
     main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
@@ -3738,17 +3762,17 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
 
 
 def test_session_lifecycle_reports_local_cache_refresh_failure(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A refresh failure is diagnosed without failing session registration."""
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "session-1",
         "workingDirectory": str(tmp_path),
         "source": "new",
         "timestamp": 1_000,
     }
-    monkeypatch.setattr(main.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: None)
+    monkeypatch.setattr(getattr(main, "cfg"), "active_project", lambda: None)
+    monkeypatch.setattr(getattr(main, "cfg"), "set_active_project", lambda value: None)
     monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: None)
     monkeypatch.setattr(
         main, "_finish_project_session_hook", lambda process, deadline: ({}, "")
@@ -3774,7 +3798,7 @@ def test_session_lifecycle_reports_local_cache_refresh_failure(
 
     from agent_worktrees import local_cache_refresh
 
-    def _boom(repo_root, **k):
+    def _boom(repo_root: str | Path, **k: Any) -> NoReturn:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(local_cache_refresh, "_queue_refresh", _boom)
@@ -3785,7 +3809,7 @@ def test_session_lifecycle_reports_local_cache_refresh_failure(
     assert "boom" in result["_stderr"]
 
 
-def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
+def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     settings_local = repo / ".github" / "copilot" / "settings.local.json"
     settings_local.parent.mkdir(parents=True)
@@ -3826,7 +3850,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
     assert result["extraKnownMarketplaces"]["operator-own"] == unrelated_value
 
 
-def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
+def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     settings_local = repo / ".github" / "copilot" / "settings.local.json"
     settings_local.parent.mkdir(parents=True)
@@ -3861,7 +3885,7 @@ def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
     assert result["extraKnownMarketplaces"]["example-knowledge-repo"] == edited_value
 
 
-def test_migrate_legacy_marketplace_overrides_no_marker_is_noop(tmp_path):
+def test_migrate_legacy_marketplace_overrides_no_marker_is_noop(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     settings_local = repo / ".github" / "copilot" / "settings.local.json"
     settings_local.parent.mkdir(parents=True)
@@ -3873,7 +3897,7 @@ def test_migrate_legacy_marketplace_overrides_no_marker_is_noop(tmp_path):
     assert json.loads(settings_local.read_text(encoding="utf-8")) == original
 
 
-def test_migrate_legacy_marketplace_overrides_no_file_is_noop(tmp_path):
+def test_migrate_legacy_marketplace_overrides_no_file_is_noop(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     # Must not raise or create a file when there's nothing to migrate.
@@ -3885,8 +3909,8 @@ def test_migrate_legacy_marketplace_overrides_no_file_is_noop(tmp_path):
     "flag", ["WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"]
 )
 def test_session_provisioning_honors_current_session_opt_out(
-    monkeypatch, tmp_path, flag
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flag: str
+) -> None:
     monkeypatch.setattr(
         main,
         "_aw_runtime_home",
@@ -3903,17 +3927,17 @@ def test_session_provisioning_honors_current_session_opt_out(
 
 
 def test_session_provisioning_ignores_stale_resident_opt_out(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("WORKTREE_NO_PROVISION", "1")
     monkeypatch.setattr(
         main,
         "_aw_runtime_home",
         lambda: tmp_path / ".agent-worktrees",
     )
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def build_plan(repo, *, save):
+    def build_plan(repo: Path, *, save: bool) -> dict[str, str]:
         seen.update(repo=repo, save=save)
         return {"action": "none"}
 
@@ -3923,8 +3947,8 @@ def test_session_provisioning_ignores_stale_resident_opt_out(
 
 
 def test_session_lifecycle_schedules_provisioning_without_waiting(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     started = threading.Event()
     release = threading.Event()
     completed = threading.Event()
@@ -3936,12 +3960,12 @@ def test_session_lifecycle_schedules_provisioning_without_waiting(
     )
 
     def provision(
-        cwd,
-        environment,
+        cwd: str,
+        environment: dict[str, str],
         *,
-        include_status_diagnostic,
-        process_holder,
-    ):
+        include_status_diagnostic: bool,
+        process_holder: list[object],
+    ) -> str:
         started.set()
         release.wait(5)
         completed.set()
@@ -3964,8 +3988,8 @@ def test_session_lifecycle_schedules_provisioning_without_waiting(
 
 
 def test_session_lifecycle_deduplicates_provisioning_preview(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     started = threading.Event()
     release = threading.Event()
     completed = threading.Event()
@@ -3977,17 +4001,17 @@ def test_session_lifecycle_deduplicates_provisioning_preview(
     )
 
     class Process:
-        def wait(self):
+        def wait(self) -> None:
             release.wait(5)
             completed.set()
 
     def provision(
-        cwd,
-        environment,
+        cwd: str,
+        environment: dict[str, str],
         *,
-        include_status_diagnostic,
-        process_holder,
-    ):
+        include_status_diagnostic: bool,
+        process_holder: list[object],
+    ) -> str:
         calls.append(cwd)
         process_holder.append(Process())
         started.set()
@@ -4003,8 +4027,8 @@ def test_session_lifecycle_deduplicates_provisioning_preview(
     assert completed.wait(1)
 
 
-def test_late_completed_request_does_not_request_duplicate_fallback(tmp_path):
-    def decide(kind, payload, deadline):
+def test_late_completed_request_does_not_request_duplicate_fallback(tmp_path: Path) -> None:
+    def decide(kind: str, payload: dict[str, Any], deadline: float) -> dict[str, Any]:
         time.sleep(0.55)
         return {"additionalContext": "completed"}
 
@@ -4030,17 +4054,17 @@ def test_late_completed_request_does_not_request_duplicate_fallback(tmp_path):
         server.close()
 
 
-def test_session_start_enrichment_carries_fail_soft_terminal_probe(monkeypatch):
+def test_session_start_enrichment_carries_fail_soft_terminal_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3")
     monkeypatch.setattr(hook_client, "_probe_terminal", lambda: {"ancestors": [5]})
     enriched = hook_client._enrich_session_payload({"sessionId": "s"})
     assert enriched["_agentWorktrees"]["terminal"] == {"ancestors": [5]}
 
 
-def test_probe_terminal_never_raises_when_sibling_fails(monkeypatch):
+def test_probe_terminal_never_raises_when_sibling_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Broken:
         @staticmethod
-        def probe():
+        def probe() -> NoReturn:
             raise OSError("no win32")
 
     monkeypatch.setattr(hook_client, "_load_sibling", lambda name: _Broken)

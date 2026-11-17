@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import Callable, NamedTuple
+from typing import Any, BinaryIO, Callable, NamedTuple
 
 SCHEMA = "agent-worktrees.guarded-anchors"
 VERSION = 1
@@ -21,12 +21,12 @@ def validate_directory(path: Path) -> None:
         raise ValueError("non-directory or indirected guard-map store")
 
 
-def _open_map(path: Path):
+def _open_map(path: Path) -> BinaryIO:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise ValueError("nonregular or indirected guard input")
     if os.name != "nt":
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK") | getattr(os, "O_NOFOLLOW", 0))
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise ValueError("nonregular guard input")
@@ -38,7 +38,10 @@ def _open_map(path: Path):
     import msvcrt
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    native_ctypes: Any = ctypes
+    native_msvcrt: Any = msvcrt
+    native_os: Any = os
+    kernel = native_ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -52,9 +55,9 @@ def _open_map(path: Path):
     # Match endpoint-rendezvous: readers must permit atomic replace and removal.
     handle = kernel.CreateFileW(native, 0x80000000, 0x7, None, 3, 0x00200080, None)
     if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise native_ctypes.WinError(native_ctypes.get_last_error())
     try:
-        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        descriptor = native_msvcrt.open_osfhandle(handle, os.O_RDONLY | native_os.O_BINARY)
     except BaseException:
         kernel.CloseHandle(handle)
         raise
@@ -91,7 +94,7 @@ def _path_mode(path: Path) -> int:
 
 def repository_identity(
     start: str | Path, *, observe: Callable[[Path], None] | None = None,
-) -> dict | None:
+) -> dict[str, str] | None:
     """Nearest checkout/common directory, including new targets and bare roots.
 
     Only Git's filesystem markers are inspected; no config, index, object
@@ -172,14 +175,14 @@ def map_path(source_root: str | Path, registry_root: str | Path) -> Path:
 
 class MapRead(NamedTuple):
     status: str
-    roots: list[dict]
+    roots: list[dict[str, Any]]
     reason: str = ""
-    postures: list[dict] | None = None
+    postures: list[dict[str, Any]] | None = None
     posture_errors: list[str] | None = None
-    anchor_inventory: dict | None = None
+    anchor_inventory: dict[str, Any] | None = None
 
 
-def unavailable_anchor_inventory(reason: str) -> dict:
+def unavailable_anchor_inventory(reason: str) -> dict[str, Any]:
     return {
         "version": 1, "status": "unavailable", "qualification": "managed-observation",
         "rows": [], "observations": [], "reason": reason,
@@ -196,7 +199,7 @@ def _inventory_text(value: object, limit: int = 4096) -> bool:
     return True
 
 
-def read_anchor_inventory(value: object, *, row_limit: int | None = None) -> dict:
+def read_anchor_inventory(value: object, *, row_limit: int | None = None) -> dict[str, Any]:
     """Validate supplemental original-owner facts without probing their paths."""
     invalid = unavailable_anchor_inventory("invalid-anchor-inventory")
     if (
@@ -309,7 +312,10 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
         return MapRead("unusable", [], str(exc))
 
 
-def matches(path: str, guarded: dict, *, identity_cache: dict | None = None) -> bool:
+def matches(
+    path: str, guarded: dict[str, Any], *,
+    identity_cache: dict[str, dict[str, str] | None] | None = None,
+) -> bool:
     """Do not attribute nested repositories to a containing guarded checkout."""
     identity = guarded.get("identity")
     if identity is None:

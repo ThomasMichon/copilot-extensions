@@ -5,7 +5,10 @@ import os
 from pathlib import Path
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from versioned_runtime_publication import CopyBinding
 
 import versioned_runtime as runtime
 
@@ -45,7 +48,9 @@ TOOLS = (
 )
 
 
-def declared_copies(content: Path, root: Path, scope: str, shell: str, contextual: bool) -> list[dict]:
+def declared_copies(
+    content: Path, root: Path, scope: str, shell: str, contextual: bool,
+) -> list[dict[str, Any]]:
     """The owner's allowlist, not authority inferred from callback output."""
     publication = runtime._runtime_component("versioned_runtime_publication")
     result = []
@@ -90,7 +95,7 @@ def declared_copies(content: Path, root: Path, scope: str, shell: str, contextua
     return result
 
 
-def parse_copies(plan: dict) -> list:
+def parse_copies(plan: dict[str, Any]) -> list[CopyBinding]:
     publication = runtime._runtime_component("versioned_runtime_publication")
     raw = Path(plan["copies"]).read_bytes()
     fields = raw.decode("utf-8").split("\0")
@@ -163,7 +168,7 @@ class HelperPublication:
 
 
 def publish(
-    plan: dict, directory: Path, metadata: dict[Path, tuple[int, int]],
+    plan: dict[str, Any], directory: Path, metadata: dict[Path, tuple[int, int]],
     validate_inputs: Callable[[], None],
 ) -> HelperPublication:
     publication = runtime._runtime_component("versioned_runtime_publication")

@@ -71,6 +71,8 @@ import re
 import sys
 import time
 from pathlib import Path
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -398,7 +400,7 @@ def _git_subcommand_writes_worktree(subcommand: str) -> bool:
     return bool(separator and prefix in _GIT_WORKTREE_WRITE_SUBCOMMANDS)
 
 
-def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | None = None) -> bool:
+def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern[str] | None = None) -> bool:
     """Classify post-tool invalidation, not permission to write an anchor."""
     pending = [(command, 0)]
     remaining = 128
@@ -417,13 +419,14 @@ def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | Non
                     (child, depth + 1)
                     for child in _shell_command_substitutions(segment, tool, scan_budget=scan_budget)
                 )
-                effective, data_assignment = _normalize_post_command(
+                normalized, data_assignment = _normalize_post_command(
                     effective, tool, normalize=_effective_seg, scan_budget=scan_budget,
                 )
             except ValueError:
                 return True
-            if effective is None:
+            if normalized is None:
                 return True
+            effective = normalized
             syntax: set[str] = {"read"} if data_assignment else set()
             targets = _literal_write_targets(effective, tool, syntax=syntax)
             if targets or syntax & {"{", "evaluation", "write", "control", "unknown"} or (
@@ -481,7 +484,7 @@ def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
 
 
-def _mode(env) -> str:
+def _mode(env: Mapping[str, str]) -> str:
     m = (env.get("ANCHOR_WRITE_GUARD_MODE") or "").strip().lower()
     return m if m in {"deny", "ask", "warn", "off"} else "deny"
 
@@ -526,7 +529,7 @@ def is_linked_worktree(root: Path) -> bool:
         return False
 
 
-def _as_args(tool_args) -> dict:
+def _as_args(tool_args: object) -> dict[str, Any]:
     if isinstance(tool_args, str):
         try:
             parsed = json.loads(tool_args)
@@ -536,7 +539,7 @@ def _as_args(tool_args) -> dict:
     return tool_args if isinstance(tool_args, dict) else {}
 
 
-def _pick(args: dict, keys) -> str | None:
+def _pick(args: dict[str, Any], keys: Iterable[str]) -> str | None:
     for k in keys:
         v = args.get(k)
         if isinstance(v, str) and v:
@@ -558,14 +561,16 @@ def active_break_glass(repo_name: str, home: Path, *, registry_root: Path | None
         data = json.loads(
             ((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
-        return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
+        return bool(g) and float(cast(dict[str, Any], g).get("expires_at_ms", 0)) > time.time() * 1000
     except (OSError, ValueError, TypeError, KeyError):
         return False
 
 
 # --- Worktree-class anchor discovery (repos.yaml, stdlib parse) ---------------
 
-def load_worktree_anchors(registry_root: Path, *, _observations=None) -> list[dict]:
+def load_worktree_anchors(
+    registry_root: Path, *, _observations: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
     """The guarded anchors: every ``class: worktree`` repo in ``repos.yaml``
     that is not adopted in base-repo mode (:func:`load_base_repo_names`)."""
     if _observations is None:
@@ -592,9 +597,9 @@ _ORIGINAL_CLASS_ANCHOR_LOADER = _load_worktree_class_anchors
 _ORIGINAL_ANCHOR_LOADER = load_worktree_anchors
 
 
-def anchor_inventory_report(registry_root: Path) -> dict:
+def anchor_inventory_report(registry_root: Path) -> dict[str, Any]:
     """Observe the original acquisition once; this is not a reusable input proof."""
-    observations: list[dict] = []
+    observations: list[dict[str, str]] = []
     if load_worktree_anchors is _ORIGINAL_ANCHOR_LOADER:
         rows = load_worktree_anchors(registry_root, _observations=observations)
     else:
@@ -642,7 +647,9 @@ def _anchor_token(root_str: str) -> str:
     return re.escape(root_str) + r"(?:[\\/][^\s\"';|&]*)?(?=[\"'\s;|&]|$)"
 
 
-def _cwd_anchor_dict(path: str, canon_anchor: dict) -> dict | None:
+def _cwd_anchor_dict(
+    path: str, canon_anchor: dict[str, dict[str, str]],
+) -> dict[str, str] | None:
     """The anchor dict whose repo-root contains ``path``, or None. A linked
     worktree cwd (.git is a file) is exempt. Used for a repo-scoped git write
     that names no path -- the target is the (effective) cwd's repo."""
@@ -653,8 +660,8 @@ def _cwd_anchor_dict(path: str, canon_anchor: dict) -> dict | None:
 
 
 def _git_target_anchor(
-    kind: str, path: str, canon_anchor: dict,
-) -> dict | None:
+    kind: str, path: str, canon_anchor: dict[str, dict[str, str]],
+) -> dict[str, str] | None:
     if kind != "git-dir":
         return _cwd_anchor_dict(path, canon_anchor)
     target = _real_canon(path)
@@ -712,8 +719,8 @@ def _linked_worktree_git_dir(
 
 
 def _shell_hit(
-    cmd: str, cwd: str, anchors: list[dict], tool: str,
-) -> dict | None:
+    cmd: str, cwd: str, anchors: list[dict[str, str]], tool: str,
+) -> dict[str, str] | None:
     """Return an anchor hit for a shell command that WRITES into an anchor, or
     None. Fires only on a real write target (redirect target / command-position
     write verb argument / git mutation via ``-C <anchor>`` or the effective cwd),
@@ -795,16 +802,16 @@ def _shell_hit(
             for kind, target in git_targets:
                 if kind == "git-dir" and _real_canon(target) == linked_git_dir:
                     continue
-                a = _git_target_anchor(kind, target, canon_anchor)
-                if a is not None:
-                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
+                target_anchor = _git_target_anchor(kind, target, canon_anchor)
+                if target_anchor is not None:
+                    return {**target_anchor, "reason": _deny_reason(target_anchor["name"], target_anchor["path"])}
         # 3b. Without an explicit target, a repo-scoped git write targets the
         #     EFFECTIVE cwd's repo -- catches ``cd <anchor>; git commit`` as
         #     well as a session already inside the anchor.
         if git_write and not has_repo_override:
-            a = _cwd_anchor_dict(eff_cwd, canon_anchor)
-            if a is not None:
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            cwd_anchor = _cwd_anchor_dict(eff_cwd, canon_anchor)
+            if cwd_anchor is not None:
+                return {**cwd_anchor, "reason": _deny_reason(cwd_anchor["name"], cwd_anchor["path"])}
         # Follow an in-command ``cd`` to a resolvable path for later segments.
         nd = _cd_target(eff, eff_cwd)
         if nd:
@@ -812,7 +819,9 @@ def _shell_hit(
     return None
 
 
-def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | None:
+def evaluate(
+    tool: str, args: dict[str, Any], cwd: str, anchors: list[dict[str, str]],
+) -> dict[str, str] | None:
     """Return the anchor hit (with a ``reason``), or None to allow."""
     if not anchors:
         return None
@@ -836,7 +845,7 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
     return None
 
 
-def _hit_to_output(hit: dict, mode: str) -> dict | None:
+def _hit_to_output(hit: dict[str, str], mode: str) -> dict[str, str] | None:
     if not hit or mode == "off":
         return None
     if mode == "warn":
@@ -848,8 +857,10 @@ def _hit_to_output(hit: dict, mode: str) -> dict | None:
             "permissionDecisionReason": hit["reason"]}
 
 
-def decide(payload: dict, *, env=None, home=None,
-           anchors=None) -> dict | None:
+def decide(
+    payload: dict[str, Any], *, env: Mapping[str, str] | None = None,
+    home: str | Path | None = None, anchors: list[dict[str, str]] | None = None,
+) -> dict[str, str] | None:
     """Return a hook-output decision dict, or None to allow. Pure/injectable."""
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()

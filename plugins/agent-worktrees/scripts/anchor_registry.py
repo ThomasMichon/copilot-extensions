@@ -1,9 +1,12 @@
 """Original standalone-anchor registry acquisition and optional observations."""
 
 from pathlib import Path
+from typing import Any
 
 
-def _inventory_observation(observations, path, parser, *, reason="") -> None:
+def _inventory_observation(
+    observations: list[dict[str, str]] | None, path: Path, parser: str, *, reason: str = "",
+) -> None:
     if observations is not None:
         observations.append({
             "source": str(path), "parser": parser,
@@ -25,7 +28,7 @@ def _yaml_unquote(val: str) -> str:
     return val
 
 
-def _mapping_observed(document, section: str) -> bool:
+def _mapping_observed(document: object, section: str) -> bool:
     if document is None:
         return True
     return isinstance(document, dict) and (
@@ -33,7 +36,9 @@ def _mapping_observed(document, section: str) -> bool:
     )
 
 
-def load_base_repo_names(registry_root: Path, *, _observations=None) -> set[str]:
+def load_base_repo_names(
+    registry_root: Path, *, _observations: list[dict[str, str]] | None = None,
+) -> set[str]:
     """Original projects.yaml base-repository exclusions; never raises."""
     source = registry_root / "projects.yaml"
     try:
@@ -42,11 +47,11 @@ def load_base_repo_names(registry_root: Path, *, _observations=None) -> set[str]
         _inventory_observation(_observations, source, "none", reason=type(exc).__name__)
         return set()
     try:
-        import yaml  # type: ignore
+        import yaml
 
-        data = yaml.safe_load(text)
+        data: Any = yaml.safe_load(text)
         projects = (data or {}).get("projects") or {}
-        names = {
+        names: set[str] = {
             str(name) for name, meta in projects.items()
             if isinstance(meta, dict) and meta.get("base_repo") is True
         } if isinstance(projects, dict) else set()
@@ -57,7 +62,7 @@ def load_base_repo_names(registry_root: Path, *, _observations=None) -> set[str]
         return names
     except Exception as exc:
         fallback_reason = "" if isinstance(exc, ImportError) else type(exc).__name__
-    names: set[str] = set()
+    names = set()
     in_projects = False
     cur_name: str | None = None
     for raw in text.splitlines():
@@ -78,7 +83,9 @@ def load_base_repo_names(registry_root: Path, *, _observations=None) -> set[str]
     return names
 
 
-def _load_worktree_class_anchors(registry_root: Path, *, _observations=None) -> list[dict]:
+def _load_worktree_class_anchors(
+    registry_root: Path, *, _observations: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
     """Original exact worktree-class rows across all platform keys; never raises."""
     source = _repos_yaml(registry_root)
     try:
@@ -87,10 +94,10 @@ def _load_worktree_class_anchors(registry_root: Path, *, _observations=None) -> 
         _inventory_observation(_observations, source, "none", reason=type(exc).__name__)
         return []
     try:
-        import yaml  # type: ignore
+        import yaml
 
-        data = yaml.safe_load(text)
-        anchors: list[dict] = []
+        data: Any = yaml.safe_load(text)
+        anchors: list[dict[str, str]] = []
         repos = (data or {}).get("repos") or {}
         if isinstance(repos, dict):
             for name, meta in repos.items():
