@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 import importlib
 import json
 from pathlib import Path
@@ -60,12 +60,15 @@ async def test_failed_mux_kill_requires_subsequent_confirmed_absence(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("original_pane", [True, False], ids=["owned-pane", "different-pane"])
+@pytest.mark.parametrize("pane_outcome", ["owned", "different", "failed"])
 async def test_startup_snapshot_is_redacted_and_requires_original_pane(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, original_pane: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pane_outcome: str,
 ) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
     module = importlib.import_module("generation_headed_transport")
+    driver_tests = Path(__file__).resolve().parents[2] / "agent-remote-driver" / "tests"
+    monkeypatch.syspath_prepend(str(driver_tests))
+    mux_module = importlib.import_module("headed_mux_fixture")
     client = module.HeadedClient.__new__(module.HeadedClient)
     client.directory = tmp_path
     client.workspace = tmp_path / "workspace"
@@ -80,11 +83,16 @@ async def test_startup_snapshot_is_redacted_and_requires_original_pane(
     client._native_started_at = time.monotonic() - 10
     calls: list[tuple[str, ...]] = []
 
-    def query(*arguments: str) -> subprocess.CompletedProcess[str]:
+    mux = mux_module.FixtureMux("fixture-mux", tmp_path, {})
+
+    def run(argv: Sequence[str], **_options: object) -> subprocess.CompletedProcess[str]:
+        arguments = tuple(argv[1 + len(mux.mux_args):])
         calls.append(arguments)
         if arguments[0] == "display-message":
-            output = client.identity if original_pane else "$9:999|%9"
+            output = "$9:999|%9" if pane_outcome == "different" else client.identity
         else:
+            if pane_outcome == "failed":
+                raise OSError("synthetic-private-nonce")
             output = (
                 "Startup waiting\nsynthetic-private-nonce\n"
                 + str(tmp_path / "workspace" / "private.txt")
@@ -92,7 +100,13 @@ async def test_startup_snapshot_is_redacted_and_requires_original_pane(
             )
         return subprocess.CompletedProcess(arguments, 0, stdout=output, stderr="")
 
-    client.mux = SimpleNamespace(target="fixture", query=query)
+    monkeypatch.setattr(mux_module.subprocess, "run", run)
+    client.mux = mux
+    with pytest.raises(ValueError, match="exact fixture target"):
+        mux.query("capture-pane", "-p", "-t", "%1")
+    with pytest.raises(ValueError, match="original fixture incarnation"):
+        mux.capture_original_pane("%1")
+    assert not calls
     monkeypatch.setattr(module, "identity_state", lambda *_: "matching")
     snapshot = await client.startup_snapshot()
     assert snapshot["phase"] == "native_starting"
@@ -102,15 +116,19 @@ async def test_startup_snapshot_is_redacted_and_requires_original_pane(
     assert "synthetic-private-nonce" not in serialized
     assert str(tmp_path) not in serialized
     assert "https://example.test" not in serialized
-    if original_pane:
+    if pane_outcome == "owned":
         assert snapshot["pane_state"] == "captured"
         assert "Startup waiting" in snapshot["pane"]
         assert str(tmp_path) not in snapshot["pane"]
         assert [call[0] for call in calls] == ["display-message", "capture-pane"]
         assert calls[-1][-1] == "%1"
-    else:
+    elif pane_outcome == "different":
         assert snapshot["pane_state"] == "different-owner"
         assert [call[0] for call in calls] == ["display-message"]
+    else:
+        assert snapshot["pane_state"] == "unavailable"
+        assert snapshot["pane_error"] == "OSError"
+        assert [call[0] for call in calls] == ["display-message", "capture-pane"]
 
 
 @pytest.mark.asyncio

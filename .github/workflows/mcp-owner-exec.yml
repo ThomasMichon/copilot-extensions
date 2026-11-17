@@ -18,6 +18,7 @@ on:
       - "tools/plugin_test_selection.py"
       - "plugins/agent-remote-driver/tests/test_headed_native_handoff.py"
       - "plugins/agent-remote-driver/tests/test_headed_launcher.py"
+      - "plugins/agent-remote-driver/tests/headed_mux_fixture.py"
       - "plugins/agent-remote-driver/tests/test_session_host_core.py"
       - "plugins/agent-remote-driver/tests/native/test_headed_extension.py"
       - "plugins/agent-mcp/src/agent_mcp/owner_exec.py"

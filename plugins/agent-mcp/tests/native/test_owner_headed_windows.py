@@ -33,6 +33,10 @@ class _Mux(Protocol):
     def query(self, *args: str) -> subprocess.CompletedProcess[str]: ...
 
 
+class _PaneMux(_Mux, Protocol):
+    def capture_original_pane(self, identity: str) -> subprocess.CompletedProcess[str]: ...
+
+
 class _StartupInfo(Protocol):
     lpAttributeList: dict[str, list[int]]
 
@@ -210,7 +214,7 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
     provider_for = cast(Callable[[Path], Path], bootstrap._provider)
     monkeypatch.syspath_prepend(str(driver_tests.parent))
     fixture_mux = cast(
-        Callable[[str, Path, dict[str, str]], _Mux],
+        Callable[[str, Path, dict[str, str]], _PaneMux],
         importlib.import_module("headed_mux_fixture").FixtureMux,
     )
     from agent_remote_driver.session_host.client import SessionHostClient
@@ -229,7 +233,7 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         executable=executable, home=copilot_home, workspace=workspace,
         env=environment, logs=tmp_path / "logs",
     )
-    mux: _Mux | None = None
+    mux: _PaneMux | None = None
     identity: str | None = None
     state: dict[str, Any] | None = None
     try:
@@ -304,6 +308,8 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         assert observed["owner_birth"] == "windows:" + state["child_process_start_time"]
         assert observed["context"] == "retained-private-overlay"
         assert observed["initialized"] == 1
+        pane = await asyncio.to_thread(mux.capture_original_pane, identity)
+        assert pane.returncode == 0, pane.stderr
         for archive in (tmp_path / "original-attempt" / "runtime").glob("*.pyz"):
             assert b"retained-private-overlay" not in archive.read_bytes()
         client = await SessionHostClient.connect(port=state["port"])

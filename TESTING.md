@@ -2722,8 +2722,12 @@ mismatch. They do not start a headed client or replace native qualification.
 If that fixture fails before its control attachment, it emits one bounded
 `MCP_HEADED_STARTUP` observation before exact cleanup. The report whitelists
 startup phase, original identity states and local output-presence counts;
-it reads a pane only after the original mux incarnation matches, targeting
-that original pane ID rather than a reusable session name. Binding data,
+the shared fixture's `capture_original_pane` operation reads a pane only after
+the original mux incarnation matches, targeting that original pane ID rather
+than a reusable session name. Ordinary fixture queries still require the exact
+fixture session. The focused controls exercise the real selector validation,
+and the existing native copied-receiver case exercises that capture against
+the real private mux. Binding data,
 paths and credential-shaped output are redacted. Diagnostic failure cannot
 replace the original exception or skip cleanup. The existing 30-second state,
 5-second final-text and 15-second settlement waits retain their values through

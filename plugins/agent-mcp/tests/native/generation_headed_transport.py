@@ -27,6 +27,8 @@ class _FixtureMux(Protocol):
 
     def query(self, *arguments: str) -> subprocess.CompletedProcess[str]: ...
 
+    def capture_original_pane(self, identity: str) -> subprocess.CompletedProcess[str]: ...
+
 
 def _redact_startup(text: str, directory: Path, nonce: object) -> str:
     if len(text) > 8192:
@@ -231,21 +233,15 @@ class HeadedClient:
         if self.identity is None:
             snapshot["pane_state"] = "unbound"
             return snapshot
-        observation = await self.query(
-            "display-message", "-p", "-t", self.mux.target,
-            "#{session_id}:#{session_created}|#{pane_id}",
-        )
-        if observation.returncode != 0:
-            snapshot["pane_state"] = "unavailable"
-            return snapshot
-        if observation.stdout.strip() != self.identity:
+        try:
+            pane = await asyncio.to_thread(self.mux.capture_original_pane, self.identity)
+        except ValueError:
             snapshot["pane_state"] = "different-owner"
             return snapshot
-        pane_id = self.identity.rsplit("|", 1)[-1]
-        if re.fullmatch(r"%[0-9]+", pane_id) is None:
-            snapshot["pane_state"] = "invalid-identity"
+        except Exception as error:
+            snapshot["pane_state"] = "unavailable"
+            snapshot["pane_error"] = type(error).__name__
             return snapshot
-        pane = await self.query("capture-pane", "-p", "-t", pane_id)
         snapshot["pane_state"] = "captured" if pane.returncode == 0 else "unavailable"
         if pane.returncode == 0:
             snapshot["pane"] = _redact_startup(pane.stdout, self.directory, state.get("nonce"))
