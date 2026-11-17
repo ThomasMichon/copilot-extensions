@@ -36,6 +36,11 @@ async def hydrate(worktree_id: str, request: Any) -> JSONResponse:
     manager = request.app.state.session_manager
     if manager.is_draining or not getattr(request.app.state, "ready", False):
         raise _refuse("owner_unavailable", "Metadata hydration requires a ready owner", status=503)
+    discovered = await worktrees.list_worktrees(request, render=False, refresh=False)
+    if discovered["discovery"].get("completeness") != "complete":
+        raise _refuse(
+            "target_inventory_incomplete", "Discovery cannot exclude another workspace owner", status=503,
+        )
     candidates = [
         (owner, entry.path)
         for owner, entries in worktrees.cache_for_app(request.app).get_all().items()
@@ -111,15 +116,15 @@ async def _hydrate(worktree_id: str, request: Any) -> JSONResponse:
 
     record, head = await observe()
     native = head["head_session"]
+    expected_target = resolver.resolve(owner)
     matches = [
         session for session in manager.list_sessions()
         if session.target.worktree_id == worktree_id and session.acp_session_id == native
         and session.target.cwd == entry.path and session.target.project == config.project
         and session.agent_name == owner
-        and (
-            session.target.type == "local" and not config.host and not session.target.host
-            or session.target.type == "ssh" and config.host and session.target.host == config.host
-        )
+        and expected_target.type in {"local", "ssh"}
+        and session.target.type == expected_target.type
+        and session.target.host == expected_target.host
     ]
     if len(matches) > 1:
         raise _refuse("ambiguous_metadata", "Multiple managed records claim this native workspace")
@@ -164,7 +169,7 @@ async def _hydrate(worktree_id: str, request: Any) -> JSONResponse:
         ):
             raise _refuse("host_custody", "Host inventory cannot exclude an existing native owner")
         target = replace(
-            resolver.resolve(owner), cwd=entry.path, worktree_id=worktree_id, explicit_cwd=True,
+            expected_target, cwd=entry.path, worktree_id=worktree_id, explicit_cwd=True,
         )
         entry = replace(entry, bound_agent=record["bound_agent"])
         target = _apply_bound_charter(target, resolver, entry, worktree_id)

@@ -114,6 +114,61 @@ async def test_duplicate_handle_linkage_requires_the_complete_workspace_scope(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("predecessor_status", [SessionStatus.STOPPED, SessionStatus.IDLE])
+async def test_real_handoff_projection_prefers_live_successor_and_honors_exclusion(
+    metadata_boundary: Any, predecessor_status: SessionStatus,
+) -> None:
+    from agent_bridge.client import BridgeClientError
+    from agent_bridge.routes.sessions import _session_info
+    from agent_bridge.session_start_cli import _resolve_read_worktree_session
+    from agent_bridge.session_targeting_cli import _resolve_target
+
+    bound = metadata_boundary
+    target = replace(bound.request.app.state.resolver.resolve("example"), worktree_id=bound.entry.id)
+    now = time.time()
+    for sid, status, age, selected in [
+        ("predecessor", predecessor_status, 1, target),
+        ("successor", SessionStatus.IDLE, 0, target),
+        ("foreign", SessionStatus.IDLE, 2, replace(target, type="ssh", host="foreign-host")),
+    ]:
+        session = Session(sid, sid, selected, agent_name="example")
+        session.status, session.acp_session_id, session.updated_at = status, "native-" + sid, now + age
+        bound.db.create_session(
+            session_id=sid, name=sid, agent_name="example", caller_id=None,
+            target_dir=selected.cwd, target_type=selected.type, status=status.value,
+            now=now + age, target_json=selected.to_json(), acp_session_id=session.acp_session_id,
+        )
+        bound.manager._sessions[sid] = session
+    inventory = await worktree_native_resume.list_targets(bound.request)
+    workspace = next(item for item in inventory["targets"] if item["kind"] == "worktree")
+    if predecessor_status == SessionStatus.STOPPED:
+        assert workspace["worktree"]["session_id"] == "successor"
+
+    def get_session(sid: str) -> dict[str, Any]:
+        existing = bound.manager.get_session(sid)
+        if existing is None:
+            raise BridgeClientError(404, "missing")
+        return _session_info(existing, bound.manager).model_dump(mode="json")
+
+    def no_head_probe(_target: str) -> Any:
+        raise AssertionError("a qualified successor must not require metadata/head hydration")
+
+    client = SimpleNamespace(
+        list_targets=lambda: inventory, get_session=get_session,
+        list_sessions=lambda: [get_session(session.session_id) for session in bound.manager.list_sessions()],
+        hydrate_worktree=no_head_probe,
+    )
+    assert _resolve_read_worktree_session(
+        client, bound.entry.id, exclude_session_id="predecessor",
+    ) == "successor"
+    if predecessor_status == SessionStatus.STOPPED:
+        assert _resolve_target(client, bound.entry.id) == "successor"
+    assert not bound.calls
+    bound.manager.start_session.assert_not_called()
+    bound.manager.resume_session.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_failed_inventory_is_visible_without_losing_other_sources(
     metadata_boundary: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

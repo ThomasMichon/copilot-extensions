@@ -424,12 +424,54 @@ present birth records and qualified handoff successors retain their ordinary
 paths. Source tests cover lost replies and concurrent retries against the real
 resume front door without a second native load.
 
-This provider integration does not itself implement the complete target union,
-ordinary lazy lookup hydration, Dispatch control-identity migration, assignment
-delivery or affirmative worker task acceptance. Those consumers must negotiate
-their required receiving semantics independently. Neither source controls nor
-a successful resume prove a new native turn, task `STARTED`, closeout or
-installed recovery.
+### Target inventory and metadata-only lookup
+
+`agent-bridge targets --json` consumes `target_inventory: 1` and returns the
+typed union of active managed records, live Session Host and extension
+registrations, and every discovered workspace. It retains each source's
+availability and discovery completeness rather than treating an unavailable
+source as empty. `--refresh` requests the existing workspace refresh.
+Legacy `sessions` and its HTTP response remain managed-record listings.
+
+Ordinary workspace-handle `read`, `wait` and raw `send` select this inventory
+before falling through to profile matching. A workspace without a managed
+record uses `worktree_metadata_hydration: 1` to read its authoritative head
+and persist metadata through the original keyed adoption or native-import owner.
+Listing and hydration never load the native conversation, submit a prompt,
+claim a launch gate or accept a task. A dormant managed target refuses raw
+send with `resume_required`; explicitly resume the workspace first. Lost
+hydration responses terminate the CLI, including enclosing handoff-follow
+reconnect loops, with `workspace_hydration_unconfirmed`; they are not replayed.
+Structured owner refusals retain their actual reason rather than becoming an
+inferred missing target.
+
+An unqualified workspace handle requires complete workspace discovery, including
+on the metadata receiver. Once the projection identifies a qualified managed
+record, the CLI reuses that record while it exists. Reading existing history
+does not depend on a new head probe or the absence of a pending handoff.
+Only a missing managed record enters metadata hydration.
+Workspace projections prefer live qualified records over inactive predecessors.
+Handoff following excludes its predecessor and can select another live managed
+record in the same owner/project/path/transport scope without probing a head;
+it never falls backward to older inactive history.
+
+Conflicting workspace owners, unavailable discovery and unresolved registered
+transports refuse instead of creating a replacement profile session. A known
+workspace on an older receiver reports the missing inventory/hydration contract
+before effects. Existing legacy managed-session reads remain supported.
+Explicit provider and venue forms retain their own resolution/admission path
+when an unrelated workspace source is incomplete, on current and older
+receivers. A known unresolved registration still refuses rather than being
+reinterpreted as a provider creation request.
+Owner qualification compares the resolver's actual transport, including local
+loopback and resolved SSH aliases, not the profile's raw host spelling. Cached
+rendering projects that identity from topology without synchronous launch-plugin
+or repository-settings discovery.
+
+Dispatch control-identity migration, assignment delivery and affirmative worker
+task acceptance remain separate consumers. Neither these source controls nor a
+successful resume prove a new native turn, task `STARTED`, closeout or installed
+recovery.
 
 ## Qualification boundary
 

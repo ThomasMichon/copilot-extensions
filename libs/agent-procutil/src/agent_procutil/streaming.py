@@ -11,10 +11,38 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import Any, IO, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import asyncio
+
+
+def _windows_pipe_probe(binary: IO[Any]) -> Callable[[], int | None]:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    native: Any = ctypes
+    kernel = native.WinDLL("kernel32", use_last_error=True)
+    kernel.PeekNamedPipe.argtypes = [
+        wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel.PeekNamedPipe.restype = wintypes.BOOL
+    get_osfhandle: Callable[[int], int] = getattr(msvcrt, "get_osfhandle")
+    handle = get_osfhandle(binary.fileno())
+
+    def available() -> int | None:
+        count = wintypes.DWORD()
+        if kernel.PeekNamedPipe(handle, None, 0, None, ctypes.byref(count), None):
+            return count.value
+        error = native.get_last_error()
+        if error == 109:  # ERROR_BROKEN_PIPE is EOF, not an idle live writer.
+            return None
+        raise native.WinError(error)
+
+    return available
 
 
 class SyncProcessOutput:
@@ -28,7 +56,7 @@ class SyncProcessOutput:
     """
 
     def __init__(
-        self, process: subprocess.Popen, *,
+        self, process: subprocess.Popen[Any], *,
         on_output: Callable[[str, bytes], None] | None = None,
         output_fds: Mapping[str, int] | None = None, capture: bool = True,
         input_bytes: bytes | None = None,
@@ -43,7 +71,7 @@ class SyncProcessOutput:
             raise ValueError("captured input requires a bounded byte packet and a stdin pipe")
         self.process = process
         self._input_writer = None
-        self._input_errors = []
+        self._input_errors: list[BaseException] = []
         self.on_output = on_output
         self._notified = False
         self._finished = False
@@ -62,8 +90,8 @@ class SyncProcessOutput:
             raise
         self._capture = capture
         self._relay_failed = False
-        self._pending = None
-        self._events: queue.Queue = queue.Queue(maxsize=64)
+        self._pending: tuple[str, bytes | BaseException | None] | None = None
+        self._events: queue.Queue[tuple[str, bytes | BaseException | None]] = queue.Queue(maxsize=64)
         self._output = {"stdout": bytearray(), "stderr": bytearray()}
         self._last_output = time.monotonic()
         self._has_output = False
@@ -72,7 +100,7 @@ class SyncProcessOutput:
         self._readers = []
         self._startup_errors = []
         self._done = set()
-        self._streams = {}
+        self._streams: dict[str, IO[Any]] = {}
         for name in ("stdout", "stderr"):
             stream = getattr(process, name)
             if stream is None:
@@ -100,12 +128,12 @@ class SyncProcessOutput:
                 writer.start()
             except BaseException as error:
                 self._startup_errors.append(error)
-                process.stdin.close()
+                cast(IO[Any], process.stdin).close()
             else:
                 self._input_writer = writer
 
     def _write_input(self, content: bytes) -> None:
-        stream = self.process.stdin
+        stream = cast(IO[Any], self.process.stdin)
         try:
             binary = getattr(stream, "buffer", stream)
             remaining = memoryview(content)
@@ -123,23 +151,36 @@ class SyncProcessOutput:
             except BaseException as error:
                 self._input_errors.append(error)
 
-    def _read(self, name, stream) -> None:
+    def _read(self, name: str, stream: IO[Any]) -> None:
         try:
             binary = getattr(stream, "buffer", stream)
             read = getattr(binary, "read1", binary.read)
+            available = _windows_pipe_probe(binary) if os.name == "nt" else None
             with (
                 selectors.DefaultSelector() if os.name != "nt" else nullcontext()
             ) as poller:
                 if poller is not None:
                     poller.register(binary, selectors.EVENT_READ)
                 while True:
+                    size = 4096
+                    if available is not None:
+                        retiring = self._stop_at_idle.is_set()
+                        count = available()
+                        if count is None:
+                            return
+                        if not count:
+                            if retiring:
+                                return
+                            self._stop_at_idle.wait(.01)
+                            continue
+                        size = min(size, count)
                     if poller is not None and not poller.select(
                         0 if self._stop_at_idle.is_set() else .1,
                     ):
                         if self._stop_at_idle.is_set():
                             return
                         continue
-                    chunk = read(4096)
+                    chunk = read(size)
                     if not chunk:
                         return
                     with self._lock:
@@ -151,7 +192,7 @@ class SyncProcessOutput:
         finally:
             self._events.put((name, None))
 
-    def _deliver(self, name, chunk) -> bool:
+    def _deliver(self, name: str, chunk: bytes | BaseException | None) -> bool:
         if chunk is None:
             self._done.add(name)
         elif isinstance(chunk, BaseException):
@@ -179,7 +220,9 @@ class SyncProcessOutput:
                 if failure is None:
                     failure = error
                 else:
-                    failure.add_note(str(error))
+                    add_note = getattr(failure, "add_note", None)
+                    if callable(add_note):
+                        add_note(str(error))
         if failure is not None:
             raise failure
 
@@ -216,7 +259,7 @@ class SyncProcessOutput:
                 if self._input_errors:
                     raise self._input_errors.pop(0)
                 if activity_observer is not None and deadline is not None and time.monotonic() >= deadline:
-                    raise subprocess.TimeoutExpired(self.process.args, timeout, *self.output())
+                    raise subprocess.TimeoutExpired(self.process.args, cast(float, timeout), *self.output())
                 for _ in range(64):
                     try:
                         event = self._pending or self._events.get_nowait()
@@ -273,7 +316,7 @@ class SyncProcessOutput:
                     expires = deadline if expires is None else min(expires, deadline)
                 remaining = None if expires is None else expires - time.monotonic()
                 if remaining is not None and remaining <= 0:
-                    raise subprocess.TimeoutExpired(self.process.args, timeout, *self.output())
+                    raise subprocess.TimeoutExpired(self.process.args, cast(float, timeout), *self.output())
                 if self._pending is not None:
                     time.sleep(.01 if remaining is None else min(.01, remaining))
                     continue
@@ -290,26 +333,30 @@ class SyncProcessOutput:
                     {"deadline": cleanup_deadline} if cleanup_deadline is not None else {}
                 ))
             except BaseException as cleanup_error:
-                cleanup_error.add_note(f"relay cleanup failed after {type(error).__name__}: {error}")
+                add_note = getattr(cleanup_error, "add_note", None)
+                if callable(add_note):
+                    add_note(f"relay cleanup failed after {type(error).__name__}: {error}")
                 raise cleanup_error from error
             raise
 
     def output(self) -> tuple[str | bytes | None, str | bytes | None]:
-        values = []
+        values: list[str | bytes | None] = []
         for name in ("stdout", "stderr"):
             stream = self._streams.get(name)
             value = bytes(self._output[name]) if stream is not None else None
-            if value is not None and self.process.text_mode:
-                value = value.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
-            values.append(value)
-        return tuple(values)
+            if value is not None and stream is not None and getattr(self.process, "text_mode"):
+                values.append(
+                    value.decode(getattr(stream, "encoding"), getattr(stream, "errors"))
+                    .replace("\r\n", "\n").replace("\r", "\n")
+                )
+            else:
+                values.append(value)
+        return values[0], values[1]
 
     def finish(
         self, timeout: float, *, stop_at_idle: bool = False, deadline: float | None = None,
     ) -> tuple[str | bytes | None, str | bytes | None]:
         if stop_at_idle:
-            if os.name == "nt":
-                raise ValueError("idle pipe retirement requires POSIX selectable pipes")
             self._stop_at_idle.set()
         failure = None
         absolute = deadline
@@ -318,21 +365,17 @@ class SyncProcessOutput:
             if timeout > 0:
                 self.wait(
                     timeout, inactivity_start=time.monotonic(),
-                    **({"deadline": absolute, "cleanup_deadline": absolute} if absolute is not None else {}),
+                    deadline=absolute, cleanup_deadline=absolute,
                 )
                 deadline = min(time.monotonic() + timeout, absolute) if absolute is not None else time.monotonic() + timeout
             else:
-                self.wait(None, deadline=deadline, **(
-                    {"cleanup_deadline": absolute} if absolute is not None else {}
-                ))
+                self.wait(None, deadline=deadline, cleanup_deadline=absolute)
         except BaseException as error:
             failure = error
             # The caller has retired the producer. Finish its bounded reader
             # queue even when the sink failed or its delivery deadline expired.
             deadline = min(time.monotonic() + 10, absolute) if absolute is not None else time.monotonic() + 10
-            self.wait(None, deadline=deadline, **(
-                {"cleanup_deadline": absolute} if absolute is not None else {}
-            ))
+            self.wait(None, deadline=deadline, cleanup_deadline=absolute)
         if self._relay_failed:
             self._abort_relays(**({"deadline": absolute} if absolute is not None else {}))
         for reader in self._readers:
@@ -398,13 +441,12 @@ async def communicate_progress(
         finally:
             writer.close()
 
-    tasks = [
-        asyncio.create_task(collect("stdout", process.stdout)),
-        asyncio.create_task(collect("stderr", process.stderr)),
-        asyncio.create_task(write_input()),
-    ]
+    stdout_task = asyncio.create_task(collect("stdout", process.stdout))
+    stderr_task = asyncio.create_task(collect("stderr", process.stderr))
+    input_task = asyncio.create_task(write_input())
+    tasks = (stdout_task, stderr_task, input_task)
     try:
-        stdout, stderr, _ = await asyncio.gather(*tasks)
+        stdout, stderr, _ = await asyncio.gather(stdout_task, stderr_task, input_task)
         await process.wait()
         return stdout, stderr
     finally:

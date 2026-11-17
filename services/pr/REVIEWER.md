@@ -172,6 +172,6 @@ remain with their owners.
 
 - [Local configuration, admission and lifetime](LOCAL.md)
 - [Round-robin and Dispatch consumer boundaries](CONSUMERS.md)
-- [Finite independent-reference comparison](EVALUATION.md)
+- [Finite local comparison CLI and independent-reference contract](EVALUATION.md)
 - [Repository cache source contract](../../plugins/agent-pull-requests/docs/repository-cache.md)
 - [Reviewer feed effort and remaining acceptance](../../efforts/active/durable-pr-watch-delegation/reviewer-action-feeds.md)
