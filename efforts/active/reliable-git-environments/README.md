@@ -12,7 +12,7 @@ repository-policy qualification layer.
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source worktree; sequential plan and implementation PRs
 - **Created:** 2026-11-16
-- **Status:** Draft
+- **Status:** Active; reviewed plan merged, focused source implementation under validation
 - **Vision:** [Worktree identity and native mapping](../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity);
   [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #12939
@@ -85,16 +85,16 @@ installed-code patch or unknown-operation replay follows from this plan.
 
 ### Phase 1 - Reviewed intent
 
-- [ ] Land this source plan and the clarified native-mapping vision before runtime realization.
-- [ ] Coordinate the mapping/policy boundary with the existing #12433 contributor, preserving that PR's ownership.
+- [x] Land this source plan and the clarified native-mapping vision before runtime realization.
+- [x] Coordinate the mapping/policy boundary with the existing #12433 contributor, preserving that PR's ownership.
 
 ### Phase 2 - Durable source delivery
 
-- [ ] Select one cohesive shared discovery owner and migrate the addressed real Git consumers to resolved absolute executables.
-- [ ] Preserve explicit selection and portable PATH semantics; add Windows fresh OS PATH and installation-registry fallbacks without per-app installation guesses.
-- [ ] Cache successful resolution; do not retain absence forever. Rediscover only confirmed executable disappearance before launch, not missing CWD, timeout or ambiguous creation.
-- [ ] Build fresh per-child daemon environments with intended runtime overrides and existing credential/session scrubbing, without global environment mutation.
-- [ ] Keep registration-model correction coordinated with its existing owner; do not extend Git-backed policy reconstruction to solve executable lookup or claim that PATH repair alone implements the native-mapping model.
+- [x] Select one cohesive shared discovery owner and migrate the addressed real Git consumers to resolved absolute executables.
+- [x] Preserve explicit selection and portable PATH semantics; add Windows fresh OS PATH and installation-registry fallbacks without per-app installation guesses.
+- [x] Cache successful resolution; do not retain absence forever. Rediscover only confirmed executable disappearance before launch, not missing CWD, timeout or ambiguous creation.
+- [x] Build fresh per-child daemon environments with intended runtime overrides and existing credential/session scrubbing, without global environment mutation.
+- [x] Keep registration-model correction coordinated with its existing owner; do not extend Git-backed policy reconstruction to solve executable lookup or claim that PATH repair alone implements the native-mapping model.
 - [ ] Land focused implementation through required source checks, changefiles, review and CI; distinguish merge from promotion and installation.
 
 ### Phase 3 - Source closeout
@@ -103,11 +103,11 @@ installed-code patch or unknown-operation replay follows from this plan.
 
 ## Validation Plan
 
-- [ ] Focused unit controls cover explicit selection, stale/process/portable PATH, Windows fresh PATH and nondefault registry discovery, missing-then-installed Git and positive-cache disappearance.
-- [ ] No retry follows a possibly started command, timeout or a missing CWD; concurrent consumers do not mutate global environment.
-- [ ] A real child consumer exercises absolute Git invocation under a stale inherited PATH rather than testing only a resolver return value.
-- [ ] An isolated native service fixture proves fresh environment plus preserved selectors and credential/session scrubbing, using its existing lifecycle/lease cleanup owner.
-- [ ] Mapping acceptance distinguishes Git/Copilot reconstruction from copied machine/platform policy and preserves journals, claims and unknown operations; coordinate the existing registration tests rather than weakening them silently.
+- [x] Focused unit controls cover explicit selection, stale/process/portable PATH, Windows fresh PATH and nondefault registry discovery, missing-then-installed Git and positive-cache disappearance.
+- [x] No retry follows a possibly started command, timeout or a missing CWD; concurrent consumers do not mutate global environment.
+- [x] A real child consumer exercises absolute Git invocation under a stale inherited PATH rather than testing only a resolver return value.
+- [x] An isolated native service fixture proves fresh environment plus preserved selectors and credential/session scrubbing, using its existing lifecycle/lease cleanup owner.
+- [x] Mapping acceptance distinguishes Git/Copilot reconstruction from copied machine/platform policy and preserves journals, claims and unknown operations; coordinate the existing registration tests rather than weakening them silently.
 - [ ] Record focused source gates and required PR CI separately from optional integration/native evidence, with honest platform limitations.
 - [ ] Confirm merged source and final source-worktree/claim settlement; report promotion, installation and live adoption separately.
 
@@ -128,8 +128,71 @@ production rollout.
 
 ## Journal
 
+### 2026-11-17 - Composition and consumer follow-through
+
+Mechanical process/launch-context extraction meets the unchanged module caps.
+The contained Git/environment/nested-isolation packet passed 139 tests with
+external configuration unchanged. Required CI then passed on `06d064d88f`.
+Fresh review identified three further consumer edges: launcher-only mux PATH,
+POSIX relative Git PATH under a different child CWD, and environment failure
+escaping detached-spawn recovery.
+
+The corrections preserve the absolute mux selection, distinguish automatic
+POSIX lookup from launcher-relative explicit selection and native Windows
+lookup, and retain the guarded spawn refusal. Seventeen actor-free controls
+pass; the corrected contained packet passes 145 tests with one Windows-only
+skip of POSIX empty-PATH semantics. Nine addressed whole-file strict contracts
+pass for both platforms. Updated-head review and required CI remain open.
+
+The separate Windows native publication failure is the exact fixture teardown
+race tracked in #13057, already owned by #12357. Failed evidence is retained
+and attached to that issue; no competing correction or accepted-flake exception
+is claimed. Fresh qualification remains required after its owner's correction.
+
 ### 2026-11-16 - Source plan
 
 Captured the generic dependency/environment defect, clarified the native
 mapping intent and separated overlapping registration-policy ownership.
 No runtime source implementation is included in this planning change.
+
+### 2026-11-17 - Reviewed base and source implementation
+
+#12941 merged after current-head Copilot approval and required green CI.
+Implementation uses `plugin_resolve.git` for shared absolute discovery and
+`plugin_resolve.environment` for fresh per-child OS environments. Worktrees
+and plugin activation adopt the resolver; only future Windows monitor launches
+adopt fresh environments. Existing contained-test roots remain authoritative
+inside their cleanup boundary.
+
+The focused discovery packet passed eight controls. The focused Worktrees
+packet passed 145 controls, including actual Git invocation and the isolated
+leased native daemon plus existing native interpreter composition.
+Activation's existing symlink case requires traversal, not creation alone;
+this Windows execution policy refuses traversal, recorded as a skip. Its
+cross-process memo assertion now distinguishes unchanged input evidence from
+concurrent shared-ancestor changes while preserving all A-to-B-to-A
+invalidation controls. No production identity-policy relaxation is included.
+
+Linux/macOS native execution and a disposable fresh OS image were unavailable
+in this local Windows lane; real Windows child/daemon fixtures supplement
+portable unit controls, not those unrun platform/clean-room tiers. No external
+deployment lane is needed or claimed for source-only delivery. Required PR CI
+and review remain separate publication gates.
+
+Review corrections keep the shared implementation in the existing lightweight
+`plugin_resolve` dependency, synchronize real payload copies, preserve
+unavailable discovery results, tolerate a deleted caller CWD and anchor
+relative configured paths before daemon CWD changes. Whole-file strict typing
+of the addressed production wrappers and tests now passes without suppressions;
+the final canonical contained Worktrees packet passed 152 tests with repository
+configuration unchanged. Text/binary return contracts and typed callback/mock
+boundaries retain the assertions and no-replay behavior.
+
+The credential negative fixture no longer assumes a caller's basetemp is
+outside every checkout: its Git probe is substituted and any attempted
+credential-write command fails the unit. A separate real nested-consumer
+regression uses the canonical environment and containment owners, deliberately
+places basetemp inside a disposable enclosing repository, and checks private
+home/config/project bindings, a successful synthetic inner-repo pin and an
+unchanged external sentinel configuration. The contained regression passed;
+no live configuration is used as the sentinel.

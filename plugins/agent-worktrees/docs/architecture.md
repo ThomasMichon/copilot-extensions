@@ -1,5 +1,40 @@
 # Agent Worktrees -- Architecture
 
+## Git and resident launch environments
+
+The Git wrapper and checkout-anchor probe select an absolute executable through
+the shared `plugin_resolve.git` resolver. `AGENT_GIT_EXECUTABLE` explicitly
+selects an installation; invalid explicit selection fails rather than falling
+back. Process PATH precedes Windows fresh user/system PATH and Git installation
+registry fallbacks. Positive discovery is reused while the file remains present;
+missing discovery is not retained forever. No Git command is retried after a
+launch failure, timeout or unknown outcome.
+
+The wrapper preserves binary output when binary input is supplied; diagnostic
+`GitError.stderr` remains UTF-8 text with replacement for invalid bytes.
+
+On Windows, future resident-monitor launches build a per-child fresh OS user
+environment. Only explicit `AGENT_`, `COPILOT_`, mux, UV and Python runtime
+selectors are overlaid from the launching context; stale PATH is not.
+The explicit Manager root and non-secret `GH_CONFIG_DIR`/`GH_HOST` selectors
+are also retained. The selected GitHub CLI directory is anchored and retained
+alongside fresh OS PATH so account acquisition and bare-`gh` Git credential
+helpers keep working with portable installations; unrelated launcher PATH
+entries are discarded. Git is resolved before
+refreshing the environment: portable process-PATH-only selections travel as
+an absolute soft discovery hint, while explicit Git configuration retains its
+explicit-selection semantics. A vanished soft hint can be rediscovered.
+Path-valued relative Git selections are anchored before changing the child's
+CWD; bare command names remain searchable. The existing credential and session-ID exclusions apply after that merge,
+including values originating in the OS environment. POSIX inheritance is
+unchanged. Contained tests retain their existing private roots/environment
+rather than escaping into the production user's roots.
+
+This changes dependency selection and launch context, not registration policy,
+the wire protocol or runtime replacement authority. The native Git/Copilot
+mapping model remains the governing intent; registration-policy work retains
+its separate contributor and acceptance gates.
+
 ## Required-application New admission
 
 An opted-in repository's `require_application_readiness` extends the existing
