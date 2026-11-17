@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [build-isolation and native-acceptance checkpoint](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+  establishes the retained #1838 case's actual current installer/policy wiring
+  and credits #13074/#13096 source delivery without claiming native acceptance.
   The [hygiene-engine and Index-custody checkpoint](journal/2026/11.17-hygiene-engine-and-index-custody.md)
   distinguishes #1544's engine from current privacy adapters and verifies
   #1843's complete planned receiving without releasing its assigned coordination.
