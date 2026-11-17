@@ -12,6 +12,70 @@
   #11081 (guarded native telemetry adoption), #11119 (local hourly health store),
   #11157 (passive owner observations)
 
+## Goal
+
+**Root goal:** Agent Machines provides an out-of-band hourly machine-health
+history, supported portable preferences and telemetry/service reports that
+remain useful when interactive agents, SSH or Gateway access are unavailable.
+This is the delivery outcome, not the current implementation or rollout slice.
+
+**Root source:** the operator's
+[standing heartbeat intent](inception-transcript.md#standing-heartbeat-intent),
+preserved verbatim:
+
+> We should come up with a scheme by which each machine emits periodic health checks into a designated slot on OneDrive. Keep 7-days worth of history, once an hour (for 24x7 total update slots). We need to know health of SSH, Gateway visibility, auth status, active agent count, etc. Lack of an update indicates an outage, liekly due to a machine restarting or going offline. Then we need to report any diagosed errors within those hourly blocks. OneDrive can be used as a high-latency multicast broadcaster so all machines know the status of all others, even if SSH or the Gateway are down. This is a good addendum to the Telemetry and Logging visions in Copilot Extensions. Since we already rely on OneDrive as the default Vault carrier, we can also treat it as a Health Heartbeat carrier, and a user-side Preferences carrier.
+
+The later requests and narrowing remain in [Request](#request) and its linked
+capture. This charter does not reinterpret suspected outages as proven causes,
+require a Vault runtime, or enlarge any activation or publication authority.
+
+**Kind:** completion. The implementation request sets a finite capability
+delivery goal; it does not assign this agent an indefinite monitoring service.
+
+### Acceptance
+
+- Preserve 168 absolute UTC hourly slots and source ages through the explicitly
+  selected carrier, with actual peer receipt and useful last-known reports
+  independent of interactive agents, SSH and Gateway availability. Missing,
+  delayed and conflicted observations remain explicit, not invented uptime.
+- Distinguish SSH direction and proof age, Gateway visibility, authorization,
+  credential readiness and logical active agents through their existing owners;
+  unsupported or missing evidence stays unknown, and diagnoses remain separate
+  from symptoms and hypotheses.
+- Exchange the four supported nonsecret preference domains through their native
+  configuration owners, including canonical harness-to-knowledge defaults and
+  per-machine overrides, without silently binding, activating or remediating.
+- Aggregate genuine retained telemetry and versioned installable-service hourly
+  contributions into bounded diagnostic, performance and reliability reports.
+  Preserve privacy, independent schema/transport qualification and local-only
+  operation; add no essential resident collector.
+- Resolve every [Plan](#plan) and [Validation Plan](#validation-plan) item with
+  its required review, source, release, installed, platform, native execution
+  and carrier/peer evidence, or an explicit transfer to a named tracked
+  objective. Existing scope and activation gates remain independent.
+
+### Finalization criterion
+
+The acceptance above and every Plan/Validation Plan item are resolved or
+explicitly transferred under the effort lifecycle, the effort is marked Done,
+and its delivery and resource obligations are settled through their owners.
+Only then may its worktrees be finalized. A merged child PR, installed report,
+single successful hourly run or restart is not that finish line.
+
+### Now
+
+The installed local Windows collection/report slice is verified. Receiver
+selection and broader carrier, preference, domain and platform gates remain
+open. Preserve current operator holds and the local-only result; do not infer
+new receiving, binding, credential or rollout authority.
+
+### Return
+
+After each narrower research, fix, validation or maintenance slice, return to
+the first unmet outcome in this effort's Plan and Validation Plan. Resume a held
+operation only after its applicable authoritative release, not because a child
+phase finished or a session restarted.
+
 ## Guiding Intent
 
 Make machine outages diagnosable without making monitoring another essential
