@@ -693,7 +693,6 @@ def _create_worktree_core(
         with step("Validating paired worktree policy", worktree_id=worktree_id):
             core._paired_knowledge_allocation_preflight(config)
 
-    # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
     with step("Preparing worktree source", worktree_id=worktree_id):
@@ -848,7 +847,6 @@ def _create_worktree_core(
                     prepared.start_point,
                 )
 
-            # Write tracking YAML
             record_options: CreationRecordOptions = {}
             if machine_identity is not None:
                 record_options["machine_identity"] = machine_identity

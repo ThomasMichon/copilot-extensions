@@ -227,7 +227,9 @@ def test_preparation_refreshes_base_despite_unavailable_policy_head(
         assert "using last-known 'origin/trunk'" not in warning
 
 
-@pytest.mark.parametrize("mapping", ["exact", "wildcard", "source-only", "ambiguous", "base-collision"])
+@pytest.mark.parametrize(
+    "mapping", ["exact", "wildcard", "short-source", "source-only", "ambiguous", "base-collision"],
+)
 def test_preparation_preserves_policy_head_alias_mapping(
     local_repositories: tuple[Path, Path], mapping: str,
 ) -> None:
@@ -252,6 +254,11 @@ def test_preparation_preserves_policy_head_alias_mapping(
         _git(
             "config", "--replace-all", "remote.origin.fetch",
             "+refs/heads/production*:refs/remotes/origin/stable*", cwd=anchor,
+        )
+    elif mapping == "short-source":
+        _git(
+            "config", "--replace-all", "remote.origin.fetch",
+            "+production:refs/remotes/origin/stable", cwd=anchor,
         )
     elif mapping == "source-only":
         _git("config", "--add", "remote.origin.fetch", "refs/heads/side", cwd=anchor)
