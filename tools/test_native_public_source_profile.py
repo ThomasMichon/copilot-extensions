@@ -17,6 +17,7 @@ import pytest
 import installer_dependency_policy as dependencies
 import installer_native_feed as native
 from install_source import ProjectSource
+from runtime_profile import ProfileError
 import installer_wheel_acquisition as acquisition
 
 
@@ -154,7 +155,7 @@ def test_reuse_configuration_keeps_valid_public_and_internal_selection(
             )
         if duplicate:
             # Named Never and anonymous Auto credentials are not one feed identity.
-            with pytest.raises(profiles.ProfileError, match="indexes differ"):
+            with pytest.raises(ProfileError, match="indexes differ"):
                 capture()
         else:
             _, feed = capture()
