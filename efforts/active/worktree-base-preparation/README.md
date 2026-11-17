@@ -18,8 +18,9 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** resolve the final-head review's four policy-refresh edge cases with
-measured negatives, then repeat impacted qualification and exact-source review/CI.
+**Now:** resolve the next final-head review's deadline, unavailable-read,
+tracking-alias and freshness-diagnostic findings with measured negatives,
+then repeat impacted qualification and exact-source review/CI.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -110,8 +111,10 @@ custody remain independent.
 - [x] Resolve the initial review's actual refmap, policy-discovery,
   fixture-isolation and moved-source-closure findings. Prove the new behavioral
   negatives before revising the fetch, then repeat impacted validation.
-- [ ] Resolve the subsequent policy-head, source-namespace, independent-ref
+- [x] Resolve the subsequent policy-head, source-namespace, independent-ref
   failure and stale-declared-hop findings with real-Git regressions.
+- [ ] Resolve the later deadline/authentication, unavailable-policy-probe,
+  aliased-tracking-source and truthful caller-warning findings.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
 - [ ] Record the finite accepted result, settle #13013 and its original claim,
@@ -135,10 +138,14 @@ custody remain independent.
 - [x] **Fresh consumer:** local bare repositories and isolated Git configuration
   exercise actual subprocess/ref behavior without network credentials, operator
   state, installed runtimes or product checkouts.
-- [ ] **Policy edge cases:** refresh the configured base with a non-symbolic
+- [x] **Policy edge cases:** refresh the configured base with a non-symbolic
   optional HEAD; refresh surviving refs in either deletion direction; align a
   non-origin creation remote with the reader's policy namespace; refresh a
   newly declared but already tracked policy source before consuming it.
+- [ ] **Remaining boundaries:** delayed authentication cannot launch a fetch
+  after the shared deadline; unavailable policy probes are not certified
+  absent; aliased policy tracking refs retain their configured sources; the
+  actual caller reports a refreshed base accurately after policy-only failure.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
 - [x] **Evidence tiers:** document why the local-Git consumer is the relevant
@@ -193,6 +200,17 @@ following additional declarations or invoking a broad configured refmap.
 Keep the reader offline and its candidate precedence unchanged; capture its
 bootstrap parse and refresh the declared source before the caller's next
 ordinary policy read. An optional non-symbolic HEAD cannot block base refresh.
+
+The following review requires carrying that deadline through the existing
+remote/authentication subprocesses and recomputing the remaining timeout at
+launch. Related policy sources must be resolved from their positive configured
+tracking mappings without re-enabling unrelated refmaps. Preserve unknown
+versus confirmed-absent policy observations. Keep the result model's existing
+field layout, but distinguish whether the creation base refreshed from a
+supplemental policy failure so the actual caller does not label a fresh base
+last-known. The existing base-failure warning stays byte-for-byte compatible.
+Any necessary caller edit owes the same whole-file strict ratchet, not a
+typing exemption or pending-project admission.
 
 ## Journal
 
@@ -272,6 +290,32 @@ ordinary policy read. An optional non-symbolic HEAD cannot block base refresh.
   surviving refs. The reader remains unchanged and offline. Whole-file strict
   checking passes all four changed Python files on Linux and Windows/Python3.10.
   Positive consumer qualification and exact-source review/CI remain required.
+- Disposable Windows
+  [run 44051416434](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44051416434)
+  then qualified exact source `177e4b72a27511a156577d7d3805991b1b44b09a`:
+  **101 passed, zero failed or skipped**, including all11 preparation cases
+  and the binary/text, committed-reader and safe-anchor preservation packet.
+  Source/selection, canonical tests and runtime verification all passed.
+  This journal update changes no qualified runtime/test inputs. Final-head
+  required review/CI and actual merge remain mandatory.
+
+### 2026-11-17 - Remaining deadline and diagnostic boundaries
+
+- Genuine final-head review5936165877 at
+  `0dd24b860b6383ba401e68e240f943ea40d006f8` recognizes the prior four findings
+  as resolved, but reports four new Medium findings: authentication can consume
+  a previously computed fetch timeout, unavailable policy reads can masquerade
+  as absent, recorded HEAD tracking names can alias a different source branch,
+  and a policy-only failure mislabels the refreshed base as last-known.
+  The complete review and all four inline comments were read.
+- All actual source CI is green. The earlier reviewer run was cancelled during
+  request processing; a normal explicit re-request produced the current genuine
+  verdict. Neither the old cancellation nor green CI authorizes ignoring its
+  findings. No source merge or finite acceptance is claimed.
+- Added focused negative controls for delayed authentication on a distinct
+  policy remote, timed-out HEAD/bootstrap probes, an aliased recorded HEAD
+  with a real decoy branch, and the actual caller's deleted-policy warning.
+  Runtime remains unchanged pending meaningful fail-first results.
 
 ### 2026-11-17 - Finite correction validated locally
 

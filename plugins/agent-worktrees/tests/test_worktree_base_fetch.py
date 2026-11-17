@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -187,7 +190,7 @@ def test_preparation_preserves_committed_policy_branch_discovery(
 
 @pytest.mark.parametrize("policy_head", ["direct", "deleted"])
 def test_preparation_refreshes_base_despite_unavailable_policy_head(
-    local_repositories: tuple[Path, Path], policy_head: str,
+    local_repositories: tuple[Path, Path], policy_head: str, capsys: pytest.CaptureFixture[str],
 ) -> None:
     seed, anchor = local_repositories
     if policy_head == "direct":
@@ -208,14 +211,124 @@ def test_preparation_refreshes_base_despite_unavailable_policy_head(
     new_base = _commit(seed, "new-base.txt")
     _git("push", "origin", "trunk", cwd=seed)
 
-    prepared = git_ops.prepare_worktree_base(
+    prepared = worktree_creation._prepare_worktree_source(
         anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+        label="fixture",
     )
 
     assert prepared.start_point == "origin/trunk"
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
-    assert prepared.fetched is (policy_head == "direct")
+    assert prepared.fetched is True
     assert (prepared.fetch_error is not None) is (policy_head == "deleted")
+    if policy_head == "deleted":
+        warning = capsys.readouterr().err
+        assert "policy refresh failed for fixture" in warning
+        assert "using refreshed 'origin/trunk'" in warning
+        assert "using last-known 'origin/trunk'" not in warning
+
+
+def test_preparation_preserves_policy_head_alias_mapping(
+    local_repositories: tuple[Path, Path],
+) -> None:
+    seed, anchor = local_repositories
+    policy_path = ".agent-worktrees/config.yaml"
+    _git("checkout", "-b", "production", cwd=seed)
+    _commit(seed, policy_path, "default_branch: trunk\nmarker: old\n")
+    _git("checkout", "-b", "stable", cwd=seed)
+    _commit(seed, policy_path, "default_branch: trunk\nmarker: wrong\n")
+    _git("push", "origin", "production", "stable", cwd=seed)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        "+refs/heads/production:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git(
+        "fetch", "origin", "--refmap=",
+        "+refs/heads/production:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stable", cwd=anchor)
+    _git("checkout", "production", cwd=seed)
+    new_policy = _commit(seed, policy_path, "default_branch: trunk\nmarker: refreshed\n")
+    _git("push", "origin", "production", cwd=seed)
+    _git("checkout", "trunk", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert prepared.fetched is True
+    assert prepared.fetch_error is None
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert _git("rev-parse", "origin/stable", cwd=anchor) == new_policy
+    discovered = inrepo_config_source.load_inrepo_config_from_committed_ref(
+        anchor, (Path(policy_path),),
+    )
+    assert discovered["marker"] == "refreshed"
+
+
+@pytest.mark.parametrize("probe", ["head", "bootstrap"])
+def test_preparation_reports_unavailable_policy_probes(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, probe: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seed, anchor = local_repositories
+    new_base = _commit(seed, ".agent-worktrees/config.yaml", "default_branch: trunk\n")
+    _git("push", "origin", "trunk", cwd=seed)
+    original_git = git_ops.git
+
+    def unavailable(
+        *args: str, **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        head_probe = args[:2] == ("symbolic-ref", "-q") and "refs/remotes/origin/HEAD" in args
+        if (probe == "head" and head_probe) or (
+            probe == "bootstrap" and args[0] in {"cat-file", "show"}
+        ):
+            raise subprocess.TimeoutExpired(["git", *args], 0.1)
+        return original_git(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", unavailable)
+    prepared = worktree_creation._prepare_worktree_source(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+        label="fixture",
+    )
+
+    assert prepared.fetched is True
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert prepared.fetch_error is not None
+    warning = capsys.readouterr().err
+    assert "policy refresh failed for fixture" in warning
+    assert "using refreshed 'origin/trunk'" in warning
+
+
+def test_preparation_does_not_fetch_policy_after_auth_exhausts_deadline(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed, anchor = local_repositories
+    old_policy = _git("rev-parse", "origin/trunk", cwd=anchor)
+    origin_url = _git("remote", "get-url", "origin", cwd=anchor)
+    _git("remote", "add", "upstream", origin_url, cwd=anchor)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    real_monotonic = time.monotonic
+    elapsed = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: real_monotonic() + elapsed[0])
+
+    def delayed_auth(remote: str, *, cwd: str | Path) -> list[str]:
+        if remote == "origin":
+            elapsed[0] += git_ops.DEFAULT_FETCH_TIMEOUT + 1
+        return []
+
+    monkeypatch.setattr(git_ops, "_auth_config_args", delayed_auth)
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="upstream", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert elapsed[0] > git_ops.DEFAULT_FETCH_TIMEOUT
+    assert prepared.fetched is True
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert _git("rev-parse", "origin/trunk", cwd=anchor) == old_policy
+    assert prepared.fetch_error is not None
 
 
 def test_preparation_caller_reports_literal_offline_failure_and_last_known_base(
