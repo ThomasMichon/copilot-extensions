@@ -73,7 +73,7 @@ def resolve_context(
 
     environment = environment if environment is not None else os.environ
     home = Path(environment.get("HOME") or Path.home())
-    copilot_value = Path(copilot_home or home / ".copilot")
+    copilot_value = Path(copilot_home or environment.get("COPILOT_HOME") or home / ".copilot")
     durable_value = Path(durable_home or home / ".copilot-extensions")
     if not _path_is_fully_qualified(copilot_value) or not _path_is_fully_qualified(
         durable_value
