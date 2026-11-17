@@ -1,5 +1,5 @@
 {
-  "comment": "Publish original standalone-anchor acquisition observations through existing bounded guard facts",
+  "comment": "Publish original standalone-anchor acquisition observations through existing bounded guard facts and add opt-in registered membership tail diagnostics",
   "changes": [
     {
       "plugin": "agent-worktrees",

@@ -59,6 +59,16 @@ non-repository unit always substitutes the Git probe: a caller placing
 basetemp beneath a checkout must never redirect its credential writes there.
 Do not use inline fixture adapters or a live checkout/config as test state.
 
+Prepared-membership tail diagnostics use the opt-in Worktrees
+`tests/test_prepared_membership_tail.py` selection. Its typed adapter invokes
+the unchanged registered `patch-input` fixture on both real PowerShell engines
+and adds fixed wall/CPU boundaries to fixture copies only. Strict framing and
+native timeout controls preserve genuine stderr and the original ten-second
+child deadline. Use the contained runner with `--allow-explicit-tiers
+--test-timeout 30 --timeout 300 --plugin-timeout 300`.
+These observations do not explain an earlier timeout, waive a failed run or
+replace the complete prepared-membership acceptance portfolio.
+
 The opt-in native receiving relocation case
 `tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
 uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit
