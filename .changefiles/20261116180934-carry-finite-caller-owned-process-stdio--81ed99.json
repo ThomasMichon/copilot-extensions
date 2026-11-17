@@ -1,0 +1,9 @@
+{
+  "comment": "Carry finite caller-owned process stdio support in dependent runtimes.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}
