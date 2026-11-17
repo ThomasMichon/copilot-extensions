@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify frozen installed runtime closure through ordinary Manager update and actual Machines readiness",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

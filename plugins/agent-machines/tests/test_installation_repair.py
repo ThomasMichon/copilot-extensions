@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator, Mapping, Sequence
 import os
 import shutil
 import subprocess
 import sys
 import time
+import platform as host_platform
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeAlias, TypedDict, cast
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 import pytest
-from agent_procutil import no_window_kwargs
+from agent_procutil import JobHandle, no_window_kwargs
+import installation_context
 
 from agent_machines import installation_repair as repair_api
 from agent_machines import installation_repair_admission as admission_api
@@ -17,12 +25,34 @@ from agent_machines.installation_repair_admission import (
     RepairAdmissionError, admit_host, ordinary_environment,
 )
 from agent_machines.installation_repair_process import run_action
+from installer_readiness.model import Invocation, Module, Platform, PluginInstallation
+
+
+class _ReadOptions(TypedDict):
+    readonly: bool
+    timeout: float
+
+
+class _RepairOptions(TypedDict, total=False):
+    required: bool
+    apply: bool
+    confirm_restart: str
+
+
+class Configure(Protocol):
+    def __call__(
+        self, *, restart: str = "none", classification: str = "required",
+        dependencies: tuple[str, ...] = (),
+    ) -> None: ...
+
+
+RepairFixture: TypeAlias = tuple[Path, Path, Path, Configure, str]
 
 pytestmark = pytest.mark.guard
 
 
 @pytest.mark.parametrize("reparse", [False, True])
-def test_payload_identity_refuses_parent_replacement_during_enumeration(tmp_path, monkeypatch, reparse):
+def test_payload_identity_refuses_parent_replacement_during_enumeration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reparse: bool) -> None:
     import stat
     from types import SimpleNamespace
 
@@ -32,20 +62,20 @@ def test_payload_identity_refuses_parent_replacement_during_enumeration(tmp_path
     replaced = False
     original_lstat, original_iterdir = Path.lstat, Path.iterdir
 
-    def entries(path):
+    def entries(path: Path) -> Iterator[Path]:
         nonlocal replaced
         result = list(original_iterdir(path))
         if path == root:
             replaced = True
         return iter(result)
 
-    def observed(path, *args, **kwargs):
+    def observed(path: Path) -> os.stat_result | SimpleNamespace:
         if path == root and replaced:
             return SimpleNamespace(
                 st_mode=stat.S_IFDIR if reparse else stat.S_IFLNK,
                 st_file_attributes=0x400 if reparse else 0,
             )
-        return original_lstat(path, *args, **kwargs)
+        return original_lstat(path)
 
     monkeypatch.setattr(Path, "iterdir", entries)
     monkeypatch.setattr(Path, "lstat", observed)
@@ -53,7 +83,7 @@ def test_payload_identity_refuses_parent_replacement_during_enumeration(tmp_path
         admission_api.payload_identity(root)
 
 
-def test_payload_identity_preserves_content_paths_and_ignored_directories(tmp_path):
+def test_payload_identity_preserves_content_paths_and_ignored_directories(tmp_path: Path) -> None:
     import hashlib
 
     root = tmp_path / "payload"
@@ -74,7 +104,7 @@ def test_payload_identity_preserves_content_paths_and_ignored_directories(tmp_pa
 
 
 @pytest.mark.parametrize("kind", ["reparse-file", "reparse-directory", "nonregular", "oversized"])
-def test_payload_identity_keeps_entry_refusals(tmp_path, monkeypatch, kind):
+def test_payload_identity_keeps_entry_refusals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     import stat
     from types import SimpleNamespace
 
@@ -87,8 +117,8 @@ def test_payload_identity_keeps_entry_refusals(tmp_path, monkeypatch, kind):
         entry.write_bytes(b"content")
     original = Path.lstat
 
-    def observed(path, *args, **kwargs):
-        info = original(path, *args, **kwargs)
+    def observed(path: Path) -> os.stat_result | SimpleNamespace:
+        info = original(path)
         if path != entry:
             return info
         return SimpleNamespace(
@@ -104,10 +134,10 @@ def test_payload_identity_keeps_entry_refusals(tmp_path, monkeypatch, kind):
 
 @pytest.mark.parametrize("containerized,expected", [(True, "linux"), (False, "wsl")])
 def test_installation_repair_platform_uses_userspace_not_container_host_kernel(
-    monkeypatch, containerized, expected,
-):
-    monkeypatch.setattr(repair_api.sys, "platform", "linux")
-    monkeypatch.setattr(repair_api.host_platform, "release", lambda: "6.6-microsoft-standard-WSL2")
+    monkeypatch: pytest.MonkeyPatch, containerized: bool, expected: str,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(host_platform, "release", lambda: "6.6-microsoft-standard-WSL2")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     monkeypatch.delenv("container", raising=False)
     monkeypatch.setattr(Path, "is_file", lambda path: containerized)
@@ -120,7 +150,7 @@ def write_json(path: Path, value: object) -> None:
 
 
 @pytest.fixture
-def repair_fixture(tmp_path):
+def repair_fixture(tmp_path: Path) -> RepairFixture:
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     project.mkdir()
@@ -147,6 +177,10 @@ def repair_fixture(tmp_path):
         "legacyRuntimeRoot": ".agent-example", "installationContext": "required",
         "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
         "payloadRootEnv": "AGENT_EXAMPLE_PAYLOAD_ROOT", "purpose": "Fixture runtime",
+    })
+    write_json(payload / "readiness-isolation.json", {
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-example", "module": "agent_example",
     })
     scripts = payload / "scripts"
     scripts.mkdir()
@@ -178,7 +212,10 @@ def repair_fixture(tmp_path):
         encoding="utf-8",
     )
 
-    def configure(*, restart="none", classification="required", dependencies=()):
+    def configure(
+        *, restart: str = "none", classification: str = "required",
+        dependencies: tuple[str, ...] = (),
+    ) -> None:
         modules = []
         for name, deps in (("base", ()), ("child", dependencies)):
             local_id = "agent-example/" + name
@@ -216,7 +253,10 @@ def repair_fixture(tmp_path):
     return home, project, payload, configure, identity
 
 
-def invoke(fixture, *, apply=False, digest=None, selection=("child",)):
+def invoke(
+    fixture: RepairFixture, *, apply: bool = False, digest: str | None = None,
+    selection: Sequence[str] = ("child",),
+) -> repair_api.RepairReport:
     home, project, _, _, identity = fixture
     return repair_api.repair(
         project, home=home,
@@ -225,7 +265,7 @@ def invoke(fixture, *, apply=False, digest=None, selection=("child",)):
     )
 
 
-def use_installer_runtime(payload):
+def use_installer_runtime(payload: Path) -> None:
     (payload / "payload-invocation.json").unlink()
     manifest_path = payload / "plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -238,7 +278,7 @@ def use_installer_runtime(payload):
     })
 
 
-def test_installer_runtime_optional_owner_preserves_required_census(repair_fixture, monkeypatch):
+def test_installer_runtime_optional_owner_preserves_required_census(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     home, project, payload, _, _ = repair_fixture
     add_repair_peer(repair_fixture, "agent-peer")
     use_installer_runtime(payload)
@@ -257,11 +297,13 @@ def test_installer_runtime_optional_owner_preserves_required_census(repair_fixtu
     assert not list(home.glob("*.ready"))
 
 
-def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, monkeypatch):
-    home, project, payload, _, _ = repair_fixture
+def test_readiness_probe_names_selected_project_outside_payload(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    home, project, _, _, _ = repair_fixture
     calls = []
 
-    def capture(argv, *, cwd, environment, **_):
+    def capture(
+        argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str], **_: object,
+    ) -> repair_api.ActionResult:
         from agent_machines.installation_repair_process import ActionResult
 
         calls.append((cwd, environment))
@@ -276,11 +318,11 @@ def test_readiness_probe_names_selected_project_outside_payload(repair_fixture, 
     assert plan["requiredSatisfied"]
     assert calls
     for cwd, environment in calls:
-        assert Path(cwd) == payload
+        assert Path(cwd) == project.resolve()
         assert Path(environment["COPILOT_PROJECT_DIR"]) == project.resolve()
 
 
-def test_plan_digest_binds_the_selected_project(repair_fixture, tmp_path):
+def test_plan_digest_binds_the_selected_project(repair_fixture: RepairFixture, tmp_path: Path) -> None:
     home, project, _, _, _ = repair_fixture
     other = tmp_path / "other"
     write_json(other / ".github" / "copilot" / "settings.json", {
@@ -305,8 +347,8 @@ def test_plan_digest_binds_the_selected_project(repair_fixture, tmp_path):
     {"command": "invented"}, {"noSelfProvisionEnv": None},
 ])
 def test_installer_runtime_invalid_contract_refuses_before_probes(
-    repair_fixture, monkeypatch, change,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     use_installer_runtime(payload)
     path = payload / "installer-runtime.json"
@@ -322,8 +364,8 @@ def test_installer_runtime_invalid_contract_refuses_before_probes(
 @pytest.mark.parametrize("reference", [None, "", "../outside.json", "/outside.json",
                                        "C:outside.json", "sub\\owner.json", "\0invalid", "missing.json"])
 def test_installer_runtime_invalid_reference_refuses_before_probes(
-    repair_fixture, monkeypatch, reference,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, reference: str,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     use_installer_runtime(payload)
     path = payload / "plugin.json"
@@ -337,8 +379,8 @@ def test_installer_runtime_invalid_reference_refuses_before_probes(
 
 @pytest.mark.parametrize("reparse", [False, True])
 def test_installer_runtime_refuses_linked_declaration_ancestor(
-    repair_fixture, monkeypatch, reparse,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, reparse: bool,
+) -> None:
     import stat
     from types import SimpleNamespace
 
@@ -353,8 +395,8 @@ def test_installer_runtime_refuses_linked_declaration_ancestor(
     write_json(path, data)
     original = Path.lstat
 
-    def lstat(path, *args, **kwargs):
-        info = original(path, *args, **kwargs)
+    def lstat(path: Path) -> os.stat_result | SimpleNamespace:
+        info = original(path)
         if path == nested:
             return SimpleNamespace(
                 st_mode=info.st_mode if reparse else stat.S_IFLNK,
@@ -368,7 +410,7 @@ def test_installer_runtime_refuses_linked_declaration_ancestor(
         repair_api.repair(project, home=home, required=True, readiness_only=True)
 
 
-def test_installer_runtime_dual_protocol_refuses_before_probes(repair_fixture, monkeypatch):
+def test_installer_runtime_dual_protocol_refuses_before_probes(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     home, project, payload, _, _ = repair_fixture
     invocation = (payload / "payload-invocation.json").read_bytes()
     use_installer_runtime(payload)
@@ -381,8 +423,8 @@ def test_installer_runtime_dual_protocol_refuses_before_probes(repair_fixture, m
 @pytest.mark.parametrize("readiness_only", [False, True])
 @pytest.mark.parametrize("hash_excluded", [False, True])
 def test_installer_runtime_changes_invalidate_plan(
-    repair_fixture, monkeypatch, readiness_only, hash_excluded,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, readiness_only: bool, hash_excluded: bool,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     use_installer_runtime(payload)
     path = payload / "installer-runtime.json"
@@ -413,8 +455,8 @@ def test_installer_runtime_changes_invalidate_plan(
 
 @pytest.mark.parametrize("readiness_only", [False, True])
 def test_installer_runtime_claim_without_readiness_is_not_skipped(
-    repair_fixture, monkeypatch, readiness_only,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, readiness_only: bool,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     peer = add_repair_peer(repair_fixture, "agent-peer", shared_root=True)
     use_installer_runtime(payload)
@@ -436,12 +478,12 @@ def test_installer_runtime_claim_without_readiness_is_not_skipped(
 
 
 @pytest.mark.parametrize("mode", ["migration", "unready-core"])
-def test_installer_runtime_preserves_mode_refusal(repair_fixture, monkeypatch, mode):
+def test_installer_runtime_preserves_mode_refusal(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     home, _, payload, _, _ = repair_fixture
     use_installer_runtime(payload)
-    original = admission_api.context.probe_legacy_entrypoint
+    original = installation_context.probe_legacy_entrypoint
 
-    def probe(**kwargs):
+    def probe(**kwargs: object) -> dict[str, object]:
         result = original(**kwargs)
         result.update(
             actualMode="namespaced" if mode == "unready-core" else "legacy",
@@ -449,7 +491,7 @@ def test_installer_runtime_preserves_mode_refusal(repair_fixture, monkeypatch, m
         )
         return result
 
-    monkeypatch.setattr(admission_api.context, "probe_legacy_entrypoint", probe)
+    monkeypatch.setattr(installation_context, "probe_legacy_entrypoint", probe)
     monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("unadmitted mode"))
     plan = invoke(repair_fixture)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
@@ -457,7 +499,10 @@ def test_installer_runtime_preserves_mode_refusal(repair_fixture, monkeypatch, m
     assert not list(home.glob("*.ready"))
 
 
-def _ready_read(module, owner, platform, *, readonly, timeout):
+def _ready_read(
+    module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+    readonly: bool, timeout: float,
+) -> repair_api.ActionResult:
     from agent_machines.installation_repair_process import ActionResult
 
     assert readonly
@@ -467,14 +512,14 @@ def _ready_read(module, owner, platform, *, readonly, timeout):
     }).encode())
 
 
-def test_readiness_only_never_walks_payload_or_qualifies_installers(repair_fixture, monkeypatch):
+def test_readiness_only_never_walks_payload_or_qualifies_installers(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     home, project, _, _, _ = repair_fixture
     monkeypatch.setattr(admission_api, "payload_identity", lambda *a: pytest.fail("payload walk"))
     monkeypatch.setattr(repair_api, "_invoke", _ready_read)
     original = repair_api._admit_invocation
     actions = []
 
-    def qualify(invocation, platform):
+    def qualify(invocation: Invocation, platform: Platform) -> tuple[list[str], Path, str, str]:
         actions.append(invocation.arguments[0])
         return original(invocation, platform)
 
@@ -491,8 +536,8 @@ def test_readiness_only_never_walks_payload_or_qualifies_installers(repair_fixtu
 @pytest.mark.parametrize("linked", ["declaration", "action", "directory"])
 @pytest.mark.parametrize("reparse", [False, True])
 def test_readiness_only_refuses_original_linked_paths_before_resolution(
-    repair_fixture, monkeypatch, linked, reparse,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, linked: str, reparse: bool,
+) -> None:
     import stat
     from types import SimpleNamespace
 
@@ -513,21 +558,21 @@ def test_readiness_only_refuses_original_linked_paths_before_resolution(
         shutil.copytree(source, destination)
     original_lstat, original_resolve = Path.lstat, Path.resolve
 
-    def lstat(path, *args, **kwargs):
+    def lstat(path: Path) -> os.stat_result | SimpleNamespace:
         if path == source:
             return SimpleNamespace(
                 st_mode=original_lstat(path).st_mode if reparse else stat.S_IFLNK,
                 st_file_attributes=0x400 if reparse else 0,
                 st_reparse_tag=0,
             )
-        return original_lstat(path, *args, **kwargs)
+        return original_lstat(path)
 
-    def resolve(path, *args, **kwargs):
+    def resolve(path: Path, strict: bool = False) -> Path:
         if path == source:
             return destination
         if linked == "directory" and path.is_relative_to(source):
             return destination / path.relative_to(source)
-        return original_resolve(path, *args, **kwargs)
+        return original_resolve(path, strict=strict)
 
     monkeypatch.setattr(Path, "lstat", lstat)
     monkeypatch.setattr(Path, "resolve", resolve)
@@ -537,8 +582,8 @@ def test_readiness_only_refuses_original_linked_paths_before_resolution(
 
 
 def test_readiness_only_skips_capabilities_but_retains_declared_runtime_claims(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     capability = payload.parent / "tool-only"
     write_json(capability / "plugin.json", {
@@ -552,14 +597,14 @@ def test_readiness_only_skips_capabilities_but_retains_declared_runtime_claims(
     data = json.loads(settings.read_text())
     data["enabledPlugins"]["tool-only@fixture"] = True
     write_json(settings, data)
-    original = admission_api.context.resolve_payload_source
+    original = installation_context.resolve_payload_source
 
-    def resolve(**kwargs):
+    def resolve(**kwargs: Any) -> dict[str, object]:
         if kwargs["plugin_id"] == "tool-only":
             assert (capability / "payload-invocation.json").exists(), "non-application qualified"
         return original(**kwargs)
 
-    monkeypatch.setattr(admission_api.context, "resolve_payload_source", resolve)
+    monkeypatch.setattr(installation_context, "resolve_payload_source", resolve)
     monkeypatch.setattr(repair_api, "_invoke", _ready_read)
     assert repair_api.repair(project, home=home, required=True, readiness_only=True)["requiredSatisfied"]
     shutil.copyfile(payload / "payload-invocation.json", capability / "payload-invocation.json")
@@ -568,7 +613,7 @@ def test_readiness_only_skips_capabilities_but_retains_declared_runtime_claims(
     assert all(row["observedBefore"]["state"] == "unknown" for row in result["outcomes"])
 
 
-def test_readiness_only_incomplete_enabled_inventory_still_refuses(repair_fixture, monkeypatch):
+def test_readiness_only_incomplete_enabled_inventory_still_refuses(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     home, project, _, _, _ = repair_fixture
     settings = project / ".github" / "copilot" / "settings.json"
     data = json.loads(settings.read_text())
@@ -581,8 +626,8 @@ def test_readiness_only_incomplete_enabled_inventory_still_refuses(repair_fixtur
 
 @pytest.mark.parametrize("dependency", [False, True])
 def test_readiness_only_qualifies_only_owners_in_the_required_closure(
-    repair_fixture, monkeypatch, dependency,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, dependency: bool,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     optional = payload.parent / "optional-addon"
     shutil.copytree(payload, optional)
@@ -607,7 +652,10 @@ def test_readiness_only_qualifies_only_owners_in_the_required_closure(
         write_json(declaration, data)
     invoked = []
 
-    def observe(module, owner, platform, **kwargs):
+    def observe(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform,
+        **kwargs: Unpack[_ReadOptions],
+    ) -> repair_api.ActionResult:
         invoked.append(module.module_id)
         return _ready_read(module, owner, platform, **kwargs)
 
@@ -620,7 +668,7 @@ def test_readiness_only_qualifies_only_owners_in_the_required_closure(
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_readiness_only_digest_cannot_authorize_apply(repair_fixture, monkeypatch, empty):
+def test_readiness_only_digest_cannot_authorize_apply(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, empty: bool) -> None:
     home, project, _, _, _ = repair_fixture
     if empty:
         settings = project / ".github" / "copilot" / "settings.json"
@@ -639,11 +687,14 @@ def test_readiness_only_digest_cannot_authorize_apply(repair_fixture, monkeypatc
 
 @pytest.mark.parametrize("changed", ["readiness", "declaration", "documentation"])
 def test_readiness_only_revalidates_its_execution_and_declaration_scope(
-    repair_fixture, monkeypatch, changed,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
     home, project, payload, _, _ = repair_fixture
 
-    def observe(module, owner, platform, **kwargs):
+    def observe(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform,
+        **kwargs: Unpack[_ReadOptions],
+    ) -> repair_api.ActionResult:
         if changed == "readiness":
             path = module.readiness[platform].target
             path.write_text(path.read_text() + "\n# changed\n", encoding="utf-8")
@@ -669,10 +720,230 @@ def test_readiness_only_revalidates_its_execution_and_declaration_scope(
     {"required": True, "apply": True}, {"required": False},
     {"required": True, "confirm_restart": "unselected"},
 ])
-def test_readiness_only_refuses_effectful_or_unrequired_scope_before_state(monkeypatch, options):
+def test_readiness_only_refuses_effectful_or_unrequired_scope_before_state(monkeypatch: pytest.MonkeyPatch, options: _RepairOptions) -> None:
     monkeypatch.setattr(repair_api, "RestartJournal", lambda *a: pytest.fail("state accessed"))
     with pytest.raises(RepairAdmissionError, match="read-only required selection"):
         repair_api.repair(Path("unused"), readiness_only=True, **options)
+
+
+@pytest.mark.parametrize("changed", ("missing", "reparse"))
+def test_readonly_invocation_refuses_changed_project_context_before_execution(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    import stat
+    from types import SimpleNamespace
+
+    home, project, _, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home, readiness_only=True)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    original = Path.lstat
+
+    def lstat(path: Path) -> os.stat_result | SimpleNamespace:
+        if path == project:
+            if changed == "missing":
+                raise FileNotFoundError("project context disappeared")
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+        return original(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("changed context executed"))
+    result = repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=True, timeout=1,
+    )
+    assert result.status == "invocation-refused"
+
+
+@pytest.mark.parametrize("contract", ["missing", "unknown", "changed"])
+def test_readiness_refuses_unqualified_payload_before_execution_without_blocking_installer(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, contract: str,
+) -> None:
+    home, project, payload, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    declaration = payload / "readiness-isolation.json"
+    if contract == "missing":
+        declaration.unlink()
+    else:
+        value = json.loads(declaration.read_text())
+        value["version" if contract == "unknown" else "newOptionalField"] = 2
+        write_json(declaration, value)
+    calls = []
+
+    def run(argv: Sequence[str], *, readonly: bool, **kwargs: object) -> repair_api.ActionResult:
+        assert readonly is False
+        calls.append(argv)
+        return repair_api.ActionResult("exited", 0)
+
+    monkeypatch.setattr(repair_api, "run_action", run)
+    observation = repair_api._observe(module, owners[module.owner.owner_id], platform, 1)
+    assert observation.state == "unknown"
+    assert observation.reason == (
+        "readiness-invocation-refused" if contract == "changed"
+        else "readiness-isolation-unqualified"
+    )
+    assert not calls
+    assert repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=False, timeout=1,
+    ).status == "exited"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("qualified_refusal", [True, False])
+def test_runtime_contract_refusal_stays_unknown_with_owning_update_recovery(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, qualified_refusal: bool,
+) -> None:
+    from configuration_context.readiness import REFUSAL
+
+    home, project, _, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home, readiness_only=True)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    output = json.dumps(REFUSAL).encode() if qualified_refusal else b"unrelated failure"
+    monkeypatch.setattr(
+        repair_api, "run_action",
+        lambda *args, **kwargs: repair_api.ActionResult("exited", 126, output),
+    )
+    observed = repair_api._observe(module, owners[module.owner.owner_id], platform, 1)
+    assert observed.state == "unknown"
+    assert observed.reason == (
+        "readiness-isolation-unqualified" if qualified_refusal else "readiness-invalid-output"
+    )
+    assert observed.evidence().get("recovery") == (
+        "update-owning-installation" if qualified_refusal else None
+    )
+
+
+def test_readiness_project_context_does_not_change_installer_working_directory(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, project, payload, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+
+    def run(
+        argv: Sequence[str], *, cwd: Path, readonly: bool, **kwargs: object,
+    ) -> repair_api.ActionResult:
+        assert cwd == payload and readonly is False
+        assert repair_api.PROBE_ENV not in cast(Mapping[str, str], kwargs["environment"])
+        return repair_api.ActionResult("exited", 0)
+
+    monkeypatch.setattr(repair_api, "run_action", run)
+    assert repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=False, timeout=1,
+    ).status == "exited"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("relative,absolute", (("", True), (".", True), ("tools", True), (".", False)))
+def test_readonly_environment_excludes_checkout_git_before_actual_index_gate(
+    repair_fixture: RepairFixture, relative: str, absolute: bool,
+) -> None:
+    from dataclasses import replace
+
+    home, project, _, _, _ = repair_fixture
+    subprocess.run(["git", "init", "-q", str(project)], check=True, **no_window_kwargs())
+    shell = shutil.which("pwsh") or shutil.which("powershell") if os.name == "nt" else shutil.which("bash")
+    if shell is None:
+        pytest.skip("native gate interpreter is unavailable")
+    local = project / relative if relative else project
+    local.mkdir(exist_ok=True)
+    marker = project / "checkout-git-executed"
+    shadow = local / ("git.cmd" if os.name == "nt" else "git")
+    shadow.write_text(
+        f'@echo shadow>"{marker}"\r\n@exit /b 99\r\n' if os.name == "nt" else
+        f'#!/bin/sh\nprintf shadow > "{marker.as_posix()}"\nexit 99\n',
+        encoding="utf-8",
+    )
+    shadow.chmod(0o755)
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    source = dict(owner.environment)
+    source["PATH"] = relative + (os.pathsep + source["PATH"] if absolute else "")
+    environment = repair_api._environment(replace(owner, environment=source), readonly=True)
+    assert all(Path(entry).is_absolute() for entry in environment["PATH"].split(os.pathsep))
+    assert environment["NoDefaultCurrentDirectoryInExePath"] == "1"
+    scripts = Path(__file__).resolve().parents[3] / "plugins/agent-index/scripts"
+    command = (
+        [shell, "-NoProfile", "-File", str(scripts / "runtime-gate.ps1")] if os.name == "nt"
+        else [shell, str(scripts / "runtime-gate.sh")]
+    )
+    result = subprocess.run(
+        [*command, "installer-readiness"], cwd=project, env=environment,
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == (0 if absolute else 1), result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == ("configuration-empty" if absolute else "failed")
+    assert not marker.exists()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="native Windows executable discovery")
+@pytest.mark.parametrize("relative", ("", ".", "tools"))
+def test_readiness_host_discovery_excludes_checkout_interpreter(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, relative: str,
+) -> None:
+    from installer_readiness.model import Invocation, Platform
+
+    _, project, payload, _, _ = repair_fixture
+    script = payload / "host-probe.ps1"
+    script.write_text("'installed-host'\n", encoding="utf-8")
+    local = project / relative if relative else project
+    local.mkdir(exist_ok=True)
+    for name in ("pwsh.exe", "powershell.exe"):
+        (local / name).write_bytes(b"not an admitted interpreter")
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("PATH", relative + os.pathsep + os.environ["PATH"])
+    argv = repair_api._argv(Invocation("payload-script", script, ()), Platform.WINDOWS)
+    assert Path(argv[0]).is_absolute()
+    assert Path(argv[0]).parent != local
+    result = run_action(
+        argv, cwd=project, environment=os.environ, timeout=10, readonly=True,
+    )
+    assert result.status == "exited" and result.exit_code == 0
+    assert result.stdout.strip() == b"installed-host"
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("readonly", (False, True))
+def test_readonly_environment_excludes_relative_bash_startup(repair_fixture: RepairFixture, readonly: bool) -> None:
+    from dataclasses import replace
+    from .test_invoke_payload_runtime_lock import _bash
+
+    bash = _bash()
+    if bash is None:
+        pytest.skip("Bash is unavailable")
+    home, project, payload, _, _ = repair_fixture
+    startup = project / "checkout-startup.sh"
+    startup.write_text("printf sourced > checkout-startup-ran\n", encoding="utf-8")
+    script = payload / "readiness.sh"
+    script.write_text("printf '{\"state\":\"ready\"}\\n'\n", encoding="utf-8")
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    source = dict(owner.environment, BASH_ENV="./checkout-startup.sh")
+    environment = repair_api._environment(replace(owner, environment=source), readonly=readonly)
+    result = run_action(
+        [bash, script.as_posix()], cwd=project, environment=environment,
+        timeout=10, readonly=readonly,
+    )
+    assert result.status == "exited" and result.exit_code == 0
+    assert json.loads(result.stdout)["state"] == "ready"
+    assert (project / "checkout-startup-ran").exists() is (not readonly)
+    assert ("BASH_ENV" in environment) is (not readonly)
+    assert source["BASH_ENV"] == "./checkout-startup.sh"
 
 
 @pytest.mark.timeout(30)
@@ -680,16 +951,35 @@ def test_readiness_only_refuses_effectful_or_unrequired_scope_before_state(monke
 @pytest.mark.effect("process")
 @pytest.mark.contract("agent_machines.caller_owned_required_readiness")
 @pytest.mark.parametrize("generic", [False, True])
-def test_readiness_only_actual_caller_observes_without_constructing_an_install_plan(repair_fixture, generic):
+def test_readiness_only_actual_caller_observes_without_constructing_an_install_plan(repair_fixture: RepairFixture, generic: bool) -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     home, project, payload, _, _ = repair_fixture
+    windows = payload / "scripts" / "action.ps1"
+    windows.write_text(windows.read_text().replace(
+        "$state =",
+        "if (-not [string]::Equals((Get-Location).ProviderPath, $env:REPAIR_EXPECTED_PROJECT, "
+        "[StringComparison]::OrdinalIgnoreCase)) {\n"
+        "  @{schema='copilot-extensions.module-readiness'; version=1; module=$Module; "
+        "state='failed'; detail='wrong project context'} | ConvertTo-Json -Compress\n"
+        "  exit 1\n}\n$state =",
+        1,
+    ), encoding="utf-8")
+    posix = payload / "scripts" / "action.sh"
+    posix.write_text(posix.read_text().replace(
+        'state="$HOME/',
+        'if [ "$PWD" != "$REPAIR_EXPECTED_PROJECT" ]; then\n'
+        '  printf \'{"schema":"copilot-extensions.module-readiness","version":1,'
+        '"module":"%s","state":"failed","detail":"wrong project context"}\\n\' "$2"\n'
+        '  exit 1\nfi\nstate="$HOME/',
+        1,
+    ), encoding="utf-8")
     plugin = "service-example" if generic else "agent-example"
     if generic:
         payload = payload.rename(payload.with_name(plugin))
         for path in (
             payload / "plugin.json", payload / "payload-invocation.json",
-            payload / "installer-readiness.json",
+            payload / "installer-readiness.json", payload / "readiness-isolation.json",
             payload.parent / ".claude-plugin" / "marketplace.json",
             project / ".github" / "copilot" / "settings.json",
         ):
@@ -722,15 +1012,17 @@ def test_readiness_only_actual_caller_observes_without_constructing_an_install_p
         (home / f"{plugin}-{name}.ready").write_text("ready")
     with (payload / "unrelated.bin").open("wb") as stream:
         stream.truncate(8 * 1024 * 1024 + 1)
+    environment = ordinary_environment(os.environ, home=home, payload=payload)
+    environment["REPAIR_EXPECTED_PROJECT"] = str(project)
     result = run_caller_owned(
         [sys.executable, "-m", "agent_machines", "installation-repair",
          "--project-root", str(project), "--required", "--caller-owned-readiness"],
-        cwd=project, env=ordinary_environment(os.environ, home=home, payload=payload),
+        cwd=home, env=environment,
         timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout)
-    assert observed["requiredSatisfied"] and observed["callerOwnedReadiness"]
+    assert observed["requiredSatisfied"] and observed["callerOwnedReadiness"], observed
     assert not observed["apply"] and not any(row["attempted"] for row in observed["outcomes"])
     assert not (home / ("." + plugin)).exists()
 
@@ -739,8 +1031,9 @@ def test_readiness_only_actual_caller_observes_without_constructing_an_install_p
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.contract("agent_machines.caller_owned_required_readiness_budget")
-def test_readiness_only_roster_respects_the_original_caller_budget(repair_fixture):
-    from agent_procutil.owned_process import OwnedExecutionBudget, run_caller_owned
+def test_readiness_only_roster_respects_the_original_caller_budget(repair_fixture: RepairFixture) -> None:
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import run_caller_owned
 
     home, project, payload, _, _ = repair_fixture
     names = ["agent-example", *(f"agent-example-{index}" for index in range(1, 12))]
@@ -784,7 +1077,7 @@ def test_readiness_only_roster_respects_the_original_caller_budget(repair_fixtur
     assert not observed["apply"] and not any(row["attempted"] for row in observed["outcomes"])
 
 
-def test_installation_repair_discovery_and_plan_never_install(repair_fixture):
+def test_installation_repair_discovery_and_plan_never_install(repair_fixture: RepairFixture) -> None:
     home, project, _, _, _ = repair_fixture
     discovery = repair_api.repair(project, home=home)
     assert discovery["status"] == "discovered"
@@ -800,7 +1093,7 @@ def test_installation_repair_discovery_and_plan_never_install(repair_fixture):
 
 
 @pytest.mark.parametrize("dependency", [True, False])
-def test_installation_repair_required_selects_only_required_closure(repair_fixture, dependency):
+def test_installation_repair_required_selects_only_required_closure(repair_fixture: RepairFixture, dependency: bool) -> None:
     home, project, _, configure, identity = repair_fixture
     configure(classification="optional", dependencies=("agent-example/base",) if dependency else ())
     result = repair_api.repair(project, home=home, required=True)
@@ -814,8 +1107,8 @@ def test_installation_repair_required_selects_only_required_closure(repair_fixtu
 
 @pytest.mark.parametrize("invalid", ["settings", "missing-payload", "missing-contract"])
 def test_installation_repair_required_refuses_incomplete_census_before_probes(
-    repair_fixture, monkeypatch, invalid,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     settings_path = project / ".github" / "copilot" / "settings.json"
     if invalid == "settings":
@@ -836,7 +1129,7 @@ def test_installation_repair_required_refuses_incomplete_census_before_probes(
     assert not list(home.glob("*.ready"))
 
 
-def test_installation_repair_required_empty_set_is_qualified_observation(repair_fixture):
+def test_installation_repair_required_empty_set_is_qualified_observation(repair_fixture: RepairFixture) -> None:
     home, project, payload, _, _ = repair_fixture
     manifest_path = payload / "installer-readiness.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -848,7 +1141,7 @@ def test_installation_repair_required_empty_set_is_qualified_observation(repair_
     assert result["selected"] == [] and not list(home.glob("*.ready"))
 
 
-def test_installation_repair_required_keeps_unsupported_requirement(repair_fixture):
+def test_installation_repair_required_keeps_unsupported_requirement(repair_fixture: RepairFixture) -> None:
     home, project, payload, _, _ = repair_fixture
     manifest_path = payload / "installer-readiness.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -864,7 +1157,7 @@ def test_installation_repair_required_keeps_unsupported_requirement(repair_fixtu
     assert not list(home.glob("*.ready"))
 
 
-def test_installation_repair_required_rejects_mixed_selection(repair_fixture):
+def test_installation_repair_required_rejects_mixed_selection(repair_fixture: RepairFixture) -> None:
     home, project, _, _, identity = repair_fixture
     with pytest.raises(RepairAdmissionError, match="selection"):
         repair_api.repair(
@@ -874,7 +1167,7 @@ def test_installation_repair_required_rejects_mixed_selection(repair_fixture):
         repair_api.repair(project, home=home, required=True, confirm_restart="unused")
 
 
-def test_installation_repair_required_rejects_changed_selection_before_apply(repair_fixture):
+def test_installation_repair_required_rejects_changed_selection_before_apply(repair_fixture: RepairFixture) -> None:
     home, project, _, configure, _ = repair_fixture
     configure(classification="optional")
     preview = repair_api.repair(project, home=home, required=True)
@@ -887,7 +1180,7 @@ def test_installation_repair_required_rejects_changed_selection_before_apply(rep
     assert not list(home.glob("*.ready"))
 
 
-def add_repair_peer(fixture, name, *, shared_root=False):
+def add_repair_peer(fixture: RepairFixture, name: str, *, shared_root: bool = False) -> Path:
     _, project, payload, _, _ = fixture
     peer = payload.parent / name
     shutil.copytree(payload, peer)
@@ -909,8 +1202,8 @@ def add_repair_peer(fixture, name, *, shared_root=False):
 
 
 def test_installation_repair_required_refuses_collisions_before_independent_probe(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home, project, _, _, _ = repair_fixture
     add_repair_peer(repair_fixture, "agent-peer", shared_root=True)
     add_repair_peer(repair_fixture, "agent-independent")
@@ -931,8 +1224,8 @@ def test_installation_repair_required_refuses_collisions_before_independent_prob
     (True, "missing-contract", "post-install"),
 ])
 def test_installation_repair_required_revalidates_complete_selection_after_probe(
-    repair_fixture, monkeypatch, apply, transition, stage,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, apply: bool, transition: str, stage: str,
+) -> None:
     home, project, _, _, _ = repair_fixture
     peer = add_repair_peer(repair_fixture, "agent-peer")
     manifest_path = peer / "plugin.json"
@@ -955,7 +1248,10 @@ def test_installation_repair_required_revalidates_complete_selection_after_probe
     original_invoke = repair_api._invoke
     changed = False
 
-    def invoke_then_change(*args, **kwargs):
+    def invoke_then_change(
+        *args: Unpack[tuple[Module, repair_api.OwnerBinding, Platform]],
+        **kwargs: Unpack[_ReadOptions],
+    ) -> repair_api.ActionResult:
         nonlocal changed
         result = original_invoke(*args, **kwargs)
         if kwargs["readonly"] and not changed and (
@@ -988,13 +1284,13 @@ def test_installation_repair_required_revalidates_complete_selection_after_probe
 
 
 @pytest.mark.timeout(60 if os.name == "nt" else 30)
-def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fixture):
+def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fixture: RepairFixture) -> None:
     plan = invoke(repair_fixture)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "ready"
     assert result["requiredSatisfied"]
     assert [row["attempted"] for row in result["outcomes"]] == [True, True]
-    assert [row["observedAfter"]["state"] for row in result["outcomes"]] == ["ready", "ready"]
+    assert [cast(dict[str, str], row["observedAfter"])["state"] for row in result["outcomes"]] == ["ready", "ready"]
     again = invoke(repair_fixture, apply=True, digest=result["planDigest"])
     assert again["status"] == "ready"
     assert not any(row["attempted"] for row in again["outcomes"])
@@ -1004,8 +1300,8 @@ def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fix
     (True, False), (False, True), (True, True),
 ])
 def test_installation_repair_refreshes_dependent_after_native_prerequisite(
-    repair_fixture, initial_ready, prerequisite_makes_ready,
-):
+    repair_fixture: RepairFixture, initial_ready: bool, prerequisite_makes_ready: bool,
+) -> None:
     home, _, payload, _, _ = repair_fixture
     child_state = home / "agent-example-child.ready"
     if initial_ready:
@@ -1043,7 +1339,7 @@ def test_installation_repair_refreshes_dependent_after_native_prerequisite(
     assert base["attempted"]
     assert child["observedBefore"]["state"] == ("ready" if initial_ready else "not-ready")
     assert child["attempted"] is not prerequisite_makes_ready
-    assert child["observedAfter"]["state"] == "ready"
+    assert cast(dict[str, str], child["observedAfter"])["state"] == "ready"
     assert child_state.read_text(encoding="utf-8") == "ready"
 
 
@@ -1051,8 +1347,8 @@ def test_installation_repair_refreshes_dependent_after_native_prerequisite(
 @pytest.mark.parametrize("boundary", ["post-install", "dependent"])
 @pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_revalidation_cancellation_retains_completed_outcomes(
-    repair_fixture, monkeypatch, stage, boundary,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, stage: str, boundary: str,
+) -> None:
     home, _, _, _, _ = repair_fixture
     target = {
         "admission": "admit_host", "closure": "_closure",
@@ -1061,11 +1357,11 @@ def test_installation_repair_revalidation_cancellation_retains_completed_outcome
     original = getattr(repair_api, target)
     passed_post_install = False
 
-    def interrupted(*args, **kwargs):
+    def interrupted(*args: object, **kwargs: object) -> object:
         nonlocal passed_post_install
         if (home / "agent-example-base.ready").exists() and (
             stage != "readiness" or (
-                kwargs["readonly"] and args[0].module_id == (
+                kwargs["readonly"] and cast(Module, args[0]).module_id == (
                     "agent-example/base" if boundary == "post-install" else "agent-example/child"
                 )
             )
@@ -1095,7 +1391,7 @@ def test_installation_repair_revalidation_cancellation_retains_completed_outcome
         assert child["observedAfter"] is None
         assert child["blockedBy"] == [base["module"]]
     else:
-        assert base["observedAfter"]["state"] == "ready"
+        assert cast(dict[str, str], base["observedAfter"])["state"] == "ready"
     assert not (home / "agent-example-child.ready").exists()
 
 
@@ -1104,13 +1400,16 @@ def test_installation_repair_revalidation_cancellation_retains_completed_outcome
 ])
 @pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_refuses_binding_changed_during_post_install_readiness(
-    repair_fixture, monkeypatch, selection, changed_module,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, selection: tuple[str, ...], changed_module: str,
+) -> None:
     home, _, payload, _, _ = repair_fixture
     original = repair_api._invoke
     final_module = "agent-example/" + changed_module
 
-    def changing(module, owner, platform, *, readonly, timeout):
+    def changing(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         result = original(module, owner, platform, readonly=readonly, timeout=timeout)
         if (
             readonly and module.module_id == final_module
@@ -1139,7 +1438,7 @@ def test_installation_repair_refuses_binding_changed_during_post_install_readine
         assert not (home / "agent-example-child.ready").exists()
 
 
-def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixture):
+def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixture: RepairFixture) -> None:
     _, _, payload, configure, identity = repair_fixture
     configure(dependencies=())
     declaration = payload / "contracts" / "readiness.json"
@@ -1161,12 +1460,15 @@ def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixt
 
 @pytest.mark.parametrize("probe_ready", [False, True])
 def test_installation_repair_refuses_binding_changed_during_refreshed_readiness(
-    repair_fixture, monkeypatch, probe_ready,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, probe_ready: bool,
+) -> None:
     home, _, payload, _, _ = repair_fixture
     original = repair_api._invoke
 
-    def changing(module, owner, platform, *, readonly, timeout):
+    def changing(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         refreshed = (
             readonly and module.module_id == "agent-example/child"
             and (home / "agent-example-base.ready").exists()
@@ -1186,35 +1488,35 @@ def test_installation_repair_refuses_binding_changed_during_refreshed_readiness(
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     base, child = result["outcomes"]
     assert result["status"] == "incomplete" and not result["requiredSatisfied"]
-    assert base["attempted"] and base["observedAfter"]["state"] == "ready"
+    assert base["attempted"] and cast(dict[str, str], base["observedAfter"])["state"] == "ready"
     assert not child["attempted"]
     assert child["installer"] == {"status": "refused", "reason": "owner-binding-changed"}
-    assert child["observedAfter"]["state"] == ("ready" if probe_ready else "not-ready")
+    assert cast(dict[str, str], child["observedAfter"])["state"] == ("ready" if probe_ready else "not-ready")
     assert (home / "agent-example-child.ready").exists() is probe_ready
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows execution-policy contract")
 def test_installation_repair_powershell_fallback_has_process_scoped_policy(
-    repair_fixture, monkeypatch,
-):
-    original = shutil.which
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = repair_api.path_interpreter
     if not original("powershell"):
         pytest.skip("Windows PowerShell is unavailable")
     monkeypatch.setattr(
-        repair_api.shutil, "which", lambda name: None if name == "pwsh" else original(name),
+        repair_api, "path_interpreter", lambda name: None if name == "pwsh" else original(name),
     )
     monkeypatch.setenv("PSExecutionPolicyPreference", "Restricted")
     plan = invoke(repair_fixture)
     assert all(row["observedBefore"]["state"] == "not-ready" for row in plan["outcomes"])
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "ready"
-    assert all(row["observedAfter"]["state"] == "ready" for row in result["outcomes"])
+    assert all(cast(dict[str, str], row["observedAfter"])["state"] == "ready" for row in result["outcomes"])
 
 
 @pytest.mark.parametrize("failure", ["installer", "restart"])
 def test_installation_repair_ready_middle_cannot_hide_transitive_blocker(
-    repair_fixture, monkeypatch, failure,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     home, _, payload, _, _ = repair_fixture
@@ -1233,7 +1535,10 @@ def test_installation_repair_ready_middle_cannot_hide_transitive_blocker(
     write_json(declaration, value)
     original = repair_api._invoke
 
-    def invoke_owner(module, owner, platform, *, readonly, timeout):
+    def invoke_owner(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         if readonly and module.module_id == "agent-example/child":
             return ActionResult("exited", 0, json.dumps({
                 "schema": "copilot-extensions.module-readiness", "version": 1,
@@ -1258,7 +1563,7 @@ def test_installation_repair_ready_middle_cannot_hide_transitive_blocker(
     assert not (home / "agent-example-leaf.ready").exists()
 
 
-def test_installation_repair_stale_digest_refuses_before_execution(repair_fixture):
+def test_installation_repair_stale_digest_refuses_before_execution(repair_fixture: RepairFixture) -> None:
     plan = invoke(repair_fixture)
     home, _, payload, _, _ = repair_fixture
     (payload / "scripts" / "action.ps1").write_text("# changed\n", encoding="utf-8")
@@ -1268,19 +1573,19 @@ def test_installation_repair_stale_digest_refuses_before_execution(repair_fixtur
 
 
 @pytest.mark.parametrize("modules,digest", [((), None), (("child",), None), ((), "a" * 64)])
-def test_installation_repair_apply_requires_explicit_bound_selection(repair_fixture, modules, digest):
+def test_installation_repair_apply_requires_explicit_bound_selection(repair_fixture: RepairFixture, modules: tuple[str, ...], digest: str | None) -> None:
     with pytest.raises(RepairAdmissionError, match="requires qualified modules"):
         invoke(repair_fixture, apply=True, digest=digest, selection=modules)
 
 
-def test_installation_repair_restart_blocks_actual_dependents(repair_fixture):
+def test_installation_repair_restart_blocks_actual_dependents(repair_fixture: RepairFixture) -> None:
     _, _, _, configure, _ = repair_fixture
     configure(restart="session", dependencies=("agent-example/base",))
     plan = invoke(repair_fixture)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "incomplete"
     base, child = result["outcomes"]
-    assert base["observedAfter"]["state"] == "ready"
+    assert cast(dict[str, str], base["observedAfter"])["state"] == "ready"
     assert base["restartRequired"]
     assert not child["attempted"]
     assert child["blockedBy"] == [base["module"]]
@@ -1289,8 +1594,8 @@ def test_installation_repair_restart_blocks_actual_dependents(repair_fixture):
 @pytest.mark.parametrize("restart", ["shell", "session", "machine"])
 @pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_restart_survives_repeated_apply_until_exact_confirmation(
-    repair_fixture, restart,
-):
+    repair_fixture: RepairFixture, restart: str,
+) -> None:
     home, project, _, configure, _ = repair_fixture
     configure(restart=restart, dependencies=("agent-example/base",))
     plan = invoke(repair_fixture)
@@ -1320,7 +1625,7 @@ def test_installation_repair_restart_survives_repeated_apply_until_exact_confirm
 
 
 @pytest.mark.timeout(60 if os.name == "nt" else 30)
-def test_installation_repair_accumulates_independent_restart_steps(repair_fixture):
+def test_installation_repair_accumulates_independent_restart_steps(repair_fixture: RepairFixture) -> None:
     _, _, payload, configure, identity = repair_fixture
     configure(restart="session", dependencies=())
     declaration = payload / "installer-readiness.json"
@@ -1346,13 +1651,16 @@ def test_installation_repair_accumulates_independent_restart_steps(repair_fixtur
 
 
 def test_installation_repair_restart_is_recorded_before_interrupted_action(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home, _, _, configure, _ = repair_fixture
     configure(restart="session", dependencies=("agent-example/base",))
     original = repair_api._invoke
 
-    def interrupted(module, owner, platform, *, readonly, timeout):
+    def interrupted(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         if not readonly:
             journal = repair_api.RestartJournal(home)
             journal.load()
@@ -1371,13 +1679,13 @@ def test_installation_repair_restart_is_recorded_before_interrupted_action(
 
 
 def test_installation_repair_restart_publication_failure_prevents_installer(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home, _, _, configure, _ = repair_fixture
     configure(restart="session", dependencies=("agent-example/base",))
     plan = invoke(repair_fixture)
 
-    def fail_save(self):
+    def fail_save(self: repair_api.RestartJournal) -> NoReturn:
         raise OSError("synthetic publication failure")
 
     monkeypatch.setattr(repair_api.RestartJournal, "_save", fail_save)
@@ -1386,12 +1694,15 @@ def test_installation_repair_restart_publication_failure_prevents_installer(
     assert not list(home.glob("*.ready"))
 
 
-def test_installation_repair_failed_installer_cannot_count_ready(repair_fixture, monkeypatch):
+def test_installation_repair_failed_installer_cannot_count_ready(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     original = repair_api._invoke
 
-    def failed(module, owner, platform, *, readonly, timeout):
+    def failed(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         result = original(module, owner, platform, readonly=readonly, timeout=timeout)
         return result if readonly else ActionResult("exited", 7)
 
@@ -1400,13 +1711,13 @@ def test_installation_repair_failed_installer_cannot_count_ready(repair_fixture,
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "incomplete"
     base, child = result["outcomes"]
-    assert base["observedAfter"]["state"] == "ready"
-    assert base["installer"]["exitCode"] == 7
+    assert cast(dict[str, str], base["observedAfter"])["state"] == "ready"
+    assert cast(dict[str, str | int | None], base["installer"])["exitCode"] == 7
     assert not child["attempted"]
     assert child["blockedBy"] == [base["module"]]
 
 
-def test_installation_repair_ordinary_environment_drops_inherited_core(tmp_path):
+def test_installation_repair_ordinary_environment_drops_inherited_core(tmp_path: Path) -> None:
     clean = ordinary_environment({
         "COPILOT_EXTENSIONS_CONTEXT": "foreign", "COPILOT_EXTENSIONS_ACTION": "repair",
         "AGENT_EXAMPLE_CELL_ROOT": "foreign", "COPILOT_PLUGIN_STAGED_FROM": "foreign",
@@ -1419,7 +1730,7 @@ def test_installation_repair_ordinary_environment_drops_inherited_core(tmp_path)
     }
 
 
-def test_installation_repair_missing_readonly_protocol_never_runs(repair_fixture):
+def test_installation_repair_missing_readonly_protocol_never_runs(repair_fixture: RepairFixture) -> None:
     home, _, payload, _, _ = repair_fixture
     (payload / "payload-invocation.json").unlink()
     plan = invoke(repair_fixture)
@@ -1433,18 +1744,16 @@ def test_installation_repair_missing_readonly_protocol_never_runs(repair_fixture
 
 
 def test_installation_repair_migration_permission_is_not_repair_permission(
-    repair_fixture, monkeypatch,
-):
-    from agent_machines import installation_repair_admission as admission
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_probe = installation_context.probe_legacy_entrypoint
 
-    real_probe = admission.context.probe_legacy_entrypoint
-
-    def migration(**kwargs):
+    def migration(**kwargs: object) -> dict[str, object]:
         result = real_probe(**kwargs)
         result.update(status="migration-required", desiredMode="namespaced", allowMutation=True)
         return result
 
-    monkeypatch.setattr(admission.context, "probe_legacy_entrypoint", migration)
+    monkeypatch.setattr(installation_context, "probe_legacy_entrypoint", migration)
     plan = invoke(repair_fixture)
     assert plan["outcomes"][0]["observedBefore"]["reason"] == (
         "ordinary-owner-mutation-not-admitted"
@@ -1454,15 +1763,18 @@ def test_installation_repair_migration_permission_is_not_repair_permission(
 
 
 def test_installation_repair_changed_binding_after_probe_prevents_install(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     plan = invoke(repair_fixture)
     home, _, payload, _, _ = repair_fixture
     calls = []
 
-    def changed(module, owner, platform, *, readonly, timeout):
+    def changed(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         calls.append(readonly)
         assert readonly
         (payload / "plugin.json").write_text(
@@ -1476,16 +1788,19 @@ def test_installation_repair_changed_binding_after_probe_prevents_install(
 
     monkeypatch.setattr(repair_api, "_invoke", changed)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
-    assert result["outcomes"][0]["installer"]["reason"] == "owner-binding-changed"
+    assert cast(dict[str, str | int | None], result["outcomes"][0]["installer"])["reason"] == "owner-binding-changed"
     assert not any(row["attempted"] for row in result["outcomes"])
     assert calls == [True, True]
     assert not list(home.glob("*.ready"))
 
 
-def test_installation_repair_interruption_preserves_partial_outcomes(repair_fixture, monkeypatch):
+def test_installation_repair_interruption_preserves_partial_outcomes(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
-    def interrupted(module, owner, platform, *, readonly, timeout):
+    def interrupted(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         if not readonly:
             raise KeyboardInterrupt
         return ActionResult("exited", 0, json.dumps({
@@ -1498,7 +1813,7 @@ def test_installation_repair_interruption_preserves_partial_outcomes(repair_fixt
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["interrupted"]
     assert result["status"] == "incomplete"
-    assert result["outcomes"][0]["installer"]["status"] == "interrupted"
+    assert cast(dict[str, str | int | None], result["outcomes"][0]["installer"])["status"] == "interrupted"
     assert not result["outcomes"][1]["attempted"]
 
 
@@ -1508,8 +1823,8 @@ def test_installation_repair_interruption_preserves_partial_outcomes(repair_fixt
      b'"module":"foreign/runtime","state":"ready"}', "unknown"),
 ])
 def test_installation_repair_invalid_probe_is_not_dependency_readiness(
-    repair_fixture, monkeypatch, output, state,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, output: bytes, state: str,
+) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     monkeypatch.setattr(
@@ -1519,20 +1834,23 @@ def test_installation_repair_invalid_probe_is_not_dependency_readiness(
     plan = invoke(repair_fixture)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     base, child = result["outcomes"]
-    assert base["observedAfter"]["state"] == state
+    assert cast(dict[str, str], base["observedAfter"])["state"] == state
     assert child["blockedBy"] == [base["module"]]
     assert not child["attempted"]
     assert result["status"] == "incomplete"
 
 
-def test_installation_repair_independent_branch_continues(repair_fixture, monkeypatch):
+def test_installation_repair_independent_branch_continues(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     _, _, _, configure, _ = repair_fixture
     configure(dependencies=())
     real_invoke = repair_api._invoke
 
-    def fail_base(module, owner, platform, *, readonly, timeout):
+    def fail_base(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         if module.module_id.endswith("/base"):
             if not readonly:
                 return ActionResult("exited", 3)
@@ -1548,11 +1866,11 @@ def test_installation_repair_independent_branch_continues(repair_fixture, monkey
         repair_fixture, selection=("base", "child"), apply=True, digest=plan["planDigest"],
     )
     assert result["status"] == "incomplete"
-    assert result["outcomes"][1]["observedAfter"]["state"] == "ready"
+    assert cast(dict[str, str], result["outcomes"][1]["observedAfter"])["state"] == "ready"
     assert result["outcomes"][1]["attempted"]
 
 
-def test_installation_repair_distinct_sources_refuse_shared_legacy_writer(repair_fixture):
+def test_installation_repair_distinct_sources_refuse_shared_legacy_writer(repair_fixture: RepairFixture) -> None:
     home, project, payload, _, _ = repair_fixture
     peer = project / ".peer"
     shutil.copytree(payload.parent, peer)
@@ -1597,8 +1915,8 @@ def _directory_alias(path: Path, target: Path) -> None:
     "missing-enabled-payload",
 ])
 def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_writer(
-    repair_fixture, monkeypatch, peer_mode,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, peer_mode: str,
+) -> None:
     home, project, payload, _, _ = repair_fixture
     peer = payload.parent / "agent-peer"
     shutil.copytree(payload, peer)
@@ -1690,7 +2008,7 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
     assert not list(home.glob("*.ready"))
 
 
-def test_installation_repair_disabled_unavailable_peer_does_not_poison_census(repair_fixture):
+def test_installation_repair_disabled_unavailable_peer_does_not_poison_census(repair_fixture: RepairFixture) -> None:
     home, project, _, _, _ = repair_fixture
     settings = project / ".github" / "copilot" / "settings.json"
     value = json.loads(settings.read_text())
@@ -1702,15 +2020,21 @@ def test_installation_repair_disabled_unavailable_peer_does_not_poison_census(re
 
 
 def test_installation_repair_census_binding_disagreement_refuses_execution(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from dataclasses import replace
 
     home, project, _, _, _ = repair_fixture
     original = admission_api._binding
 
-    def changed(*args, **kwargs):
-        return replace(original(*args, **kwargs), legacy_root=home / ".different")
+    def changed(
+        installation: PluginInstallation, *, source: str, home: Path,
+        project_root: Path, environment: Mapping[str, str], readiness_only: bool = False,
+    ) -> repair_api.OwnerBinding:
+        return replace(original(
+            installation, source=source, home=home, project_root=project_root,
+            environment=environment, readiness_only=readiness_only,
+        ), legacy_root=home / ".different")
 
     monkeypatch.setattr(admission_api, "_binding", changed)
     monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
@@ -1723,7 +2047,7 @@ def test_installation_repair_census_binding_disagreement_refuses_execution(
     assert not any(row["attempted"] for row in result["outcomes"])
 
 
-def test_installation_repair_cycle_refuses_before_any_invocation(repair_fixture, monkeypatch):
+def test_installation_repair_cycle_refuses_before_any_invocation(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     _, _, payload, _, _ = repair_fixture
     path = payload / "installer-readiness.json"
     declaration = json.loads(path.read_text())
@@ -1734,7 +2058,7 @@ def test_installation_repair_cycle_refuses_before_any_invocation(repair_fixture,
         invoke(repair_fixture)
 
 
-def test_installation_repair_unsupported_platform_never_invokes(repair_fixture, monkeypatch):
+def test_installation_repair_unsupported_platform_never_invokes(repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     _, _, payload, _, _ = repair_fixture
     path = payload / "installer-readiness.json"
     declaration = json.loads(path.read_text())
@@ -1754,8 +2078,8 @@ def test_installation_repair_unsupported_platform_never_invokes(repair_fixture, 
 
 @pytest.mark.parametrize("empty_satisfied", [True, False])
 def test_installation_repair_optional_empty_prerequisite_respects_declared_semantics(
-    repair_fixture, monkeypatch, empty_satisfied,
-):
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch, empty_satisfied: bool,
+) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     _, _, payload, configure, _ = repair_fixture
@@ -1767,7 +2091,10 @@ def test_installation_repair_optional_empty_prerequisite_respects_declared_seman
     )
     write_json(path, declaration)
 
-    def probe(module, owner, platform, *, readonly, timeout):
+    def probe(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform, *,
+        readonly: bool, timeout: float,
+    ) -> repair_api.ActionResult:
         if readonly:
             state = "configuration-empty" if module.module_id.endswith("/base") else "ready"
             return ActionResult("exited", 0, json.dumps({
@@ -1792,8 +2119,8 @@ def test_installation_repair_optional_empty_prerequisite_respects_declared_seman
 
 
 def test_installation_repair_active_cell_validates_receipts_and_refuses_ordinary_init(
-    repair_fixture,
-):
+    repair_fixture: RepairFixture,
+) -> None:
     import installation_context as context
 
     home, project, payload, _, identity = repair_fixture
@@ -1835,7 +2162,7 @@ def test_installation_repair_active_cell_validates_receipts_and_refuses_ordinary
     assert owner.environment["COPILOT_EXTENSIONS_CONTEXT"] == str(install_path)
     plan = invoke(repair_fixture)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
-    assert result["outcomes"][0]["installer"]["reason"] == "active-core-action-not-declared"
+    assert cast(dict[str, str | int | None], result["outcomes"][0]["installer"])["reason"] == "active-core-action-not-declared"
     assert not any(row["attempted"] for row in result["outcomes"])
     assert not list(home.glob("*.ready"))
     for name in ("base", "child"):
@@ -1845,7 +2172,7 @@ def test_installation_repair_active_cell_validates_receipts_and_refuses_ordinary
 
 
 @pytest.mark.parametrize("pipe", ["stdout", "stderr"])
-def test_installation_repair_process_bounds_both_pipes(tmp_path, pipe):
+def test_installation_repair_process_bounds_both_pipes(tmp_path: Path, pipe: str) -> None:
     result = run_action(
         [sys.executable, "-c", f"import sys; sys.{pipe}.write('x' * 70000)"],
         cwd=tmp_path, environment=os.environ, timeout=5, readonly=True,
@@ -1854,7 +2181,7 @@ def test_installation_repair_process_bounds_both_pipes(tmp_path, pipe):
     assert result.stdout == b""
 
 
-def test_installation_repair_process_timeout(tmp_path):
+def test_installation_repair_process_timeout(tmp_path: Path) -> None:
     result = run_action(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         cwd=tmp_path, environment=os.environ, timeout=0.2, readonly=True,
@@ -1863,7 +2190,7 @@ def test_installation_repair_process_timeout(tmp_path):
     assert result.exit_code is not None
 
 
-def test_caller_owned_readiness_borrows_verified_posix_group_without_detaching(tmp_path, monkeypatch):
+def test_caller_owned_readiness_borrows_verified_posix_group_without_detaching(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from agent_machines import installation_repair_process as process_api
 
@@ -1872,7 +2199,7 @@ def test_caller_owned_readiness_borrows_verified_posix_group_without_detaching(t
     ))
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         calls.append(kwargs)
         assert kwargs["borrow_parent_scope"] is True and kwargs["binary"] is True
         return subprocess.CompletedProcess(argv, 0, b"observed", b"")
@@ -1887,7 +2214,7 @@ def test_caller_owned_readiness_borrows_verified_posix_group_without_detaching(t
     assert not process_api._termination.caller_owned_readiness
 
 
-def test_caller_owned_readiness_refuses_a_foreign_group_before_probes(monkeypatch):
+def test_caller_owned_readiness_refuses_a_foreign_group_before_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from agent_machines import installation_repair_process as process_api
 
@@ -1902,7 +2229,7 @@ def test_caller_owned_readiness_refuses_a_foreign_group_before_probes(monkeypatc
 @pytest.mark.parametrize("extra", [
     ["--apply"], ["--expected-plan-digest", "unselected"], ["--confirm-restart", "unselected"],
 ])
-def test_caller_owned_readiness_never_admits_repair_or_restart_effects(monkeypatch, extra):
+def test_caller_owned_readiness_never_admits_repair_or_restart_effects(monkeypatch: pytest.MonkeyPatch, extra: list[str]) -> None:
     from agent_machines.__main__ import main
 
     monkeypatch.setattr(repair_api, "repair", lambda *a, **k: pytest.fail("effectful selection"))
@@ -1913,7 +2240,7 @@ def test_caller_owned_readiness_never_admits_repair_or_restart_effects(monkeypat
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.contract("agent_machines.caller_owned_required_readiness")
-def test_outer_required_read_timeout_reaps_nested_probe(repair_fixture):
+def test_outer_required_read_timeout_reaps_nested_probe(repair_fixture: RepairFixture) -> None:
     import shlex
     from agent_procutil.owned_process import run_caller_owned
 
@@ -1953,7 +2280,7 @@ def test_outer_required_read_timeout_reaps_nested_probe(repair_fixture):
         _assert_process_stopped(pid, timeout=0)
 
 
-def test_installation_repair_process_cancellation_reaps_started_process(tmp_path, monkeypatch):
+def test_installation_repair_process_cancellation_reaps_started_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines import installation_repair_process as process_api
 
     started = []
@@ -1961,12 +2288,15 @@ def test_installation_repair_process_cancellation_reaps_started_process(tmp_path
     sleep = process_api.time.sleep
     interrupted = False
 
-    def record(*args, **kwargs):
-        result = spawn(*args, **kwargs)
+    def record(
+        argv: list[str] | str, *, require_job: bool = False,
+        allow_breakaway: bool = True, **kwargs: Any,
+    ) -> tuple[subprocess.Popen[bytes], JobHandle | None]:
+        result = spawn(argv, require_job=require_job, allow_breakaway=allow_breakaway, **kwargs)
         started.append(result[0])
         return result
 
-    def interrupt(_seconds):
+    def interrupt(_seconds: float) -> None:
         nonlocal interrupted
         if not interrupted:
             interrupted = True
@@ -1984,7 +2314,7 @@ def test_installation_repair_process_cancellation_reaps_started_process(tmp_path
     assert started[0].poll() is not None
 
 
-def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path):
+def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path: Path) -> None:
     marker = tmp_path / "descendant-pid"
     code = (
         "import subprocess, sys; from pathlib import Path; "
@@ -2002,14 +2332,14 @@ def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path):
     _assert_process_stopped(int(marker.read_text()))
 
 
-def _assert_process_stopped(pid, *, timeout=5):
+def _assert_process_stopped(pid: int, *, timeout: float = 5) -> None:
     deadline = time.monotonic() + timeout
     while True:
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
 
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
             kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             kernel.OpenProcess.restype = wintypes.HANDLE
             kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
@@ -2037,7 +2367,7 @@ def _assert_process_stopped(pid, *, timeout=5):
 @pytest.mark.parametrize("required", [False, True])
 @pytest.mark.parametrize("protocol", ["payload-invocation", "installer-runtime"])
 @pytest.mark.timeout(60)
-def test_installation_repair_installed_cli_native_first_touch(repair_fixture, required, protocol):
+def test_installation_repair_installed_cli_native_first_touch(repair_fixture: RepairFixture, required: bool, protocol: str) -> None:
     home, project, payload, _, identity = repair_fixture
     if protocol == "installer-runtime":
         use_installer_runtime(payload)

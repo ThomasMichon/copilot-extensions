@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in create-only attachment imports without service activation",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

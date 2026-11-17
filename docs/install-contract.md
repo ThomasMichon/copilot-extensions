@@ -3664,6 +3664,14 @@ The existing format fixes *what the binstub is*. Each Windows entry point in
   bare `CreateProcess`/`PATHEXT` spawn, `cmd /c` Windows Terminal profiles, ssh
   launchers) that cannot resolve a `.ps1`. Forwards with `%*`.
 
+Standalone application front doors render ordinary Windows file-root aliases
+consistently: extended drive and `UNC` spellings become their ordinary drive
+and UNC forms before quoting only when their components retain ordinary Win32
+semantics. Trailing-dot/space names, reserved devices, traversal and alternate
+streams retain their extended spelling; other device namespaces stay unchanged.
+This is launcher presentation, not a relaxation of physical-root or ownership
+checks; explicit environment root overrides retain their existing precedence.
+
 ### Why `.ps1` is primary, not `.cmd`
 
 A `.cmd` forwarding `%*` **re-tokenizes** the command line through cmd.exe's
@@ -3869,6 +3877,16 @@ at `extensions/<name>/extension.{mjs,cjs,js}` in the plugin; the CLI scans an
 **enabled** plugin's `extensions/` dir at session startup and loads it as a
 `plugin`-source extension. The canonical example is **context-handoff**
 (`plugins/context-handoff/extensions/context-handoff/extension.mjs`).
+
+Prefer `@microsoft/copilot-sdk/extension` for `joinSession` and
+`@microsoft/copilot-sdk` for shared SDK exports such as `approveAll`. Copilot
+CLI 1.0.113 resolves these names to its bundled SDK; older CLI loaders resolve
+only `@github/copilot-sdk`. Keep extension entrypoints self-contained and use
+dynamic imports with a legacy fallback only when the Microsoft SDK package
+itself is missing (`ERR_MODULE_NOT_FOUND`). Missing dependencies inside a
+resolved SDK, missing exports and other initialization failures must propagate,
+not select a different SDK. Do not install a separate SDK package into extension
+payloads to mask a namespace mismatch.
 
 Such a plugin ships **no `scripts/install.*`**, no deploy manifest, and copies
 nothing to `~/.copilot/extensions/`. `copilot plugin update <name>` (or repo
@@ -4557,6 +4575,24 @@ version, SHA-256 remains mandatory, known auxiliary hashes must be well formed,
 and package markers must apply to the selected environment. The unique
 best-ranked compatible file is retained; ties refuse. This is not a second
 resolver or permission to acquire from any recorded URL.
+
+`retain_source_wheel_lock` may instead receive an explicit positive
+`max_diagnostic_bytes`. This opt-in captures `pylock.toml` and verbose selection
+diagnostics from the same held native compile, with caller-supplied finite
+stream limits and the shared deadline. Each final exact package/version must
+name one compatible selected wheel whose SHA-256 appears exactly once in its
+pylock package; missing, ambiguous or unsupported output refuses rather than
+ranking alternatives or running another resolver. Retained first-party
+metadata must be static. The existing single-file and target-tag paths retain
+their defaults.
+
+The fixed stdlib capture worker keeps UV in the existing installer's
+Job/process group and settles all descendants before retained input cleanup,
+including on stream overflow or timeout. Private control files live only in
+the invocation-owned retained root. Normalized source records exclude raw
+diagnostics and URLs, and downstream source-profile assembly enforces exact
+file records when present. None of these facts authenticates a source, admits
+a file or enables a production caller.
 
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
@@ -5584,8 +5620,9 @@ snapshot/wheel/profile portfolio. Otherwise it builds the explicitly selected
 first-party projects once and calls the existing complete-profile owner for
 each component. One selected UV executable and monotonic deadline cover the
 portfolio. Component extras are explicit inputs to that same profile owner.
-The complete-profile worker borrows the same locked build-toolchain interpreter
-while its workspace remains held, including the compact Windows workspace.
+The complete-profile worker uses the invoking provider's interpreter through the
+caller-owned process adapter and shared monotonic deadline. The build-toolchain
+context remains held, including the compact Windows workspace.
 The cold parent needs no ambient Packaging installation. The worker checks its
 actual native marker environment against the selected parent interpreter and
 binds its source-record inspection to the parent's exact record. Existing

@@ -1,9 +1,0 @@
-{
-  "comment": "Reuse private real-Git partial-publication setup for refusal cases while preserving accepted-head history and immutable seed state",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

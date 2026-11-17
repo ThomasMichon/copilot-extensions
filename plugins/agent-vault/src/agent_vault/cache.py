@@ -1,26 +1,10 @@
-"""Persistent, encrypted on-disk credential cache for agent-vault.
+"""Opt-in persistent credentials, independent of daemon/password lifetime.
 
-The daemon caches unlocked credentials in memory with a TTL; that cache dies when
-the daemon restarts and cannot serve reads while the vault is locked. The
-*persistent* cache is a separate, **opt-in** tier: a Fernet-encrypted file on disk
-that survives restarts and answers reads without unlocking the vault -- so a
-consumer can fetch a previously-cached secret even when the master password is not
-loaded (e.g. an unattended job on a locked box). On Windows without PyCryptodome,
-new caches use native user-bound DPAPI directly, including on ARM64. Existing
-Fernet caches use the same format through PyCryptodome; they are never discarded
-to create a replacement. DPAPI caches remain readable if that package is installed.
-
-It is inert unless enabled. Storing secrets on disk -- even encrypted with a
-local key -- is a deliberate tradeoff, so the cache does nothing until switched on
-via the ``AGENT_VAULT_CACHE`` env var (truthy) or a configured cache directory
-(``AGENT_VAULT_CACHE_DIR``). When disabled, every operation is a safe no-op.
-POSIX caches also require the optional ``pycryptodomex`` dependency.
-
-Security posture: the Fernet key sits beside the cache file, **wrapped at rest** --
-DPAPI (per-OS-user) on Windows via the ``kek`` module, or a ``0600`` file on POSIX.
-On Windows the wrapped key is only unwrappable by the same user account; on POSIX it
-is hygiene, not high security, so physical-access control and full-disk encryption
-remain the real barriers. Never treat the on-disk cache as a trust boundary.
+AGENT_VAULT_CACHE or AGENT_VAULT_CACHE_DIR enables this tier. Windows supports
+native user-DPAPI and existing Fernet formats; explicitly prepared machine-DPAPI
+copies provide read-only fallback. POSIX requires PyCryptodome and a private key
+file. Machine-copy confidentiality depends on its owner/SYSTEM DACL, not user-bound
+cryptography. The plugin README documents the accepted at-rest tradeoffs.
 """
 
 from __future__ import annotations
@@ -30,9 +14,11 @@ import json
 import os
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from .config import IS_WINDOWS, default_config_path, home_dir
+from .config import IS_WINDOWS as IS_WINDOWS, default_config_path, home_dir
 from .config import normalize_entry
 from .credential_fields import canonical_field
 
@@ -41,10 +27,14 @@ CACHE_ENABLE_ENV = "AGENT_VAULT_CACHE"
 CACHE_DIR_ENV = "AGENT_VAULT_CACHE_DIR"
 
 _TRUTHY = {"1", "true", "yes", "on"}
+Store = dict[str, Any]
+if TYPE_CHECKING:
+    from .cache_dpapi import DpapiCacheCipher
+    from .protected_crypto import Fernet
 
 
 def _truthy(value: str | None) -> bool:
-    return bool(value) and value.strip().lower() in _TRUTHY
+    return value is not None and value.strip().lower() in _TRUTHY
 
 
 def default_cache_dir() -> Path:
@@ -94,9 +84,9 @@ class PersistentCache:
             base = default_cache_dir()
         self._root_dir = base
         self._base_dir = base
-        self._fernet = None  # lazy
+        self._fernet: DpapiCacheCipher | Fernet | None = None
         self._available: bool | None = None
-        self._recovery = None
+        self._recovery: Store | None = None
         self._replacement_mutex = threading.RLock()
         self._replacement_state = threading.local()
         self._selection_mutex = threading.RLock()
@@ -137,7 +127,7 @@ class PersistentCache:
             self._select_base(base)
 
     @contextlib.contextmanager
-    def _selection_guard(self):
+    def _selection_guard(self) -> Iterator[None]:
         if not self._selection_mutex.acquire(timeout=2.0):
             raise TimeoutError("protected cache is busy")
         try:
@@ -145,7 +135,7 @@ class PersistentCache:
         finally:
             self._selection_mutex.release()
 
-    def prepare(self) -> dict:
+    def prepare(self) -> Store:
         """Bound legacy adoption; only explicit population/setup calls this."""
         from .cache_recovery import prepare_cache
 
@@ -173,7 +163,12 @@ class PersistentCache:
             self._available = False
         return self._available
 
-    def _get_fernet(self, *, readonly: bool = False):
+    def _read_input(self, path: Path) -> bytes:
+        from .cache_machine import _read, enabled
+
+        return _read(path) if enabled(self) else path.read_bytes()
+
+    def _get_fernet(self, *, readonly: bool = False) -> DpapiCacheCipher | Fernet | None:
         if self._fernet is not None and not readonly:
             return self._fernet
         if not self._crypto_available():
@@ -204,7 +199,7 @@ class PersistentCache:
         if not readonly:
             self._base_dir.mkdir(parents=True, exist_ok=True)
         if _path_exists(self._key_file):
-            blob = self._key_file.read_bytes()
+            blob = self._read_input(self._key_file)
             if kek.is_wrapped(blob):
                 if readonly and not IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
                     raise CacheProtectionError("cache key requires an unavailable Windows wrapping backend")
@@ -253,11 +248,19 @@ class PersistentCache:
 
     # -- atomic file I/O ---------------------------------------------------
 
-    def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
-        with self._selection_guard():
-            return self._read_selected_store(readonly=readonly, strict=strict)
+    def _read_store(self, *, readonly: bool = False, strict: bool = False) -> Store:
+        from .cache_dpapi import CacheDecryptionUnavailable
+        from .cache_machine import enabled, read_store
 
-    def _read_selected_store(self, *, readonly: bool, strict: bool) -> dict:
+        with self._selection_guard():
+            try:
+                return self._read_selected_store(readonly=readonly, strict=strict)
+            except CacheDecryptionUnavailable:
+                if not enabled(self):
+                    raise
+                return read_store(self)
+
+    def _read_selected_store(self, *, readonly: bool, strict: bool) -> Store:
         self._refresh_selection()
         if not _path_exists(self._cache_file):
             if strict:
@@ -279,7 +282,7 @@ class PersistentCache:
         if f is None or not _path_exists(self._cache_file):
             return {"v": 1, "entries": {}}
         try:
-            plaintext = f.decrypt(self._cache_file.read_bytes())
+            plaintext = f.decrypt(self._read_input(self._cache_file))
             data = json.loads(plaintext)
             if (
                 not isinstance(data, dict) or data.get("v") != 1
@@ -297,7 +300,7 @@ class PersistentCache:
             raise CacheProtectionError("Protected cache data is invalid; not replaced") from exc
 
     @contextlib.contextmanager
-    def _file_lock(self, lock_file: Path, *, readonly: bool = False):
+    def _file_lock(self, lock_file: Path, *, readonly: bool = False) -> Iterator[None]:
         from .ssh_key_files import _ordinary
 
         if not readonly:
@@ -314,11 +317,11 @@ class PersistentCache:
                             import msvcrt
 
                             lock_fd.seek(0)
-                            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+                            getattr(msvcrt, "locking")(lock_fd.fileno(), getattr(msvcrt, "LK_NBLCK"), 1)
                         else:
                             import fcntl
 
-                            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            getattr(fcntl, "flock")(lock_fd, getattr(fcntl, "LOCK_EX") | getattr(fcntl, "LOCK_NB"))
                         locked = True
                     except (BlockingIOError, PermissionError):
                         if time.monotonic() >= deadline:
@@ -329,14 +332,14 @@ class PersistentCache:
                 with contextlib.suppress(Exception):
                     if locked and IS_WINDOWS:
                         lock_fd.seek(0)
-                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                        getattr(msvcrt, "locking")(lock_fd.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
                     elif locked:
                         import fcntl
 
-                        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                        getattr(fcntl, "flock")(lock_fd, getattr(fcntl, "LOCK_UN"))
 
     @contextlib.contextmanager
-    def _store_lock(self):
+    def _store_lock(self) -> Iterator[None]:
         from .cache_recovery import require_coordinated
 
         with self._selection_guard():
@@ -354,7 +357,7 @@ class PersistentCache:
                     self._store_pinned = False
 
     @contextlib.contextmanager
-    def replacement_lock(self, *, readonly: bool = False):
+    def replacement_lock(self, *, readonly: bool = False) -> Iterator[None]:
         """Serialize a caller's complete credential replacement transaction."""
         if not self.enabled:
             yield
@@ -374,7 +377,11 @@ class PersistentCache:
         finally:
             self._replacement_mutex.release()
 
-    def _write_store_unlocked(self, store: dict) -> bool:
+    def _write_store_unlocked(self, store: Store) -> bool:
+        from .cache_machine import MachineReadStore, write_copy
+
+        if isinstance(store, MachineReadStore):
+            return False
         f = self._get_fernet()
         if f is None:
             return False
@@ -389,7 +396,7 @@ class PersistentCache:
             from .cache_dpapi import DpapiCacheCipher
 
             if not isinstance(f, DpapiCacheCipher) and _path_exists(self._key_file):
-                blob = self._key_file.read_bytes()
+                blob = self._read_input(self._key_file)
                 if not kek.is_wrapped(blob):
                     with contextlib.suppress(OSError, RuntimeError, ValueError):
                         self._write_key(blob.strip())
@@ -403,6 +410,7 @@ class PersistentCache:
                 os.close(fd)
                 if not IS_WINDOWS:
                     os.chmod(tmp_path, 0o600)
+                write_copy(self, store, ciphertext)
                 os.replace(tmp_path, str(self._cache_file))
                 if not IS_WINDOWS:
                     directory_fd = os.open(self._base_dir, os.O_RDONLY)
@@ -420,7 +428,7 @@ class PersistentCache:
         except Exception:
             return False
 
-    def _write_store(self, store: dict) -> bool:
+    def _write_store(self, store: Store) -> bool:
         try:
             with self._store_lock():
                 return self._write_store_unlocked(store)
@@ -430,7 +438,7 @@ class PersistentCache:
     # -- public API --------------------------------------------------------
 
     @staticmethod
-    def _field_record(store: dict, entry: str, field: str, *, strict: bool = False):
+    def _field_record(store: Store, entry: str, field: str, *, strict: bool = False) -> Any:
         from .cache_dpapi import CacheProtectionError
 
         entries = store.get("entries")
@@ -444,7 +452,7 @@ class PersistentCache:
         record = fields.get(field)
         if strict and field in fields:
             valid = isinstance(record, dict)
-            if valid and "rotation" in record:
+            if isinstance(record, dict) and "rotation" in record:
                 rotation = record["rotation"]
                 previous = rotation.get("previous") if isinstance(rotation, dict) else None
                 valid = (
@@ -461,13 +469,13 @@ class PersistentCache:
                     )
                 )
             else:
-                valid = valid and isinstance(record.get("value"), str)
+                valid = isinstance(record, dict) and isinstance(record.get("value"), str)
             if not valid:
                 raise CacheProtectionError("Selected protected cache record is invalid")
         return record
 
     @staticmethod
-    def _fields_for_write(store: dict, entry: str) -> tuple[dict, dict]:
+    def _fields_for_write(store: Store, entry: str) -> tuple[Store, Store]:
         entries = store.get("entries")
         if not isinstance(entries, dict):
             entries = {}
@@ -480,8 +488,8 @@ class PersistentCache:
 
     @classmethod
     def _matching_aliases(
-        cls, store: dict, entry: str, field: str, *, strict: bool,
-    ) -> list[tuple[str, str, dict]]:
+        cls, store: Store, entry: str, field: str, *, strict: bool,
+    ) -> list[tuple[str, str, Store]]:
         identity = normalize_entry(entry, "")
         matches = []
         for path, fields in store["entries"].items():
@@ -498,7 +506,7 @@ class PersistentCache:
         return matches
 
     @classmethod
-    def _pending_alias(cls, store: dict, entry: str, field: str, *, strict: bool) -> bool:
+    def _pending_alias(cls, store: Store, entry: str, field: str, *, strict: bool) -> bool:
         return any(
             "rotation" in record
             for _path, _attribute, record in cls._matching_aliases(store, entry, field, strict=strict)
@@ -513,6 +521,7 @@ class PersistentCache:
         legacy_entry: str | None = None,
         legacy_field: str | None = None,
         readonly: bool = False,
+        machine_only: bool = False,
     ) -> str | None:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
         if not self.enabled:
@@ -529,33 +538,45 @@ class PersistentCache:
                 return self._get_value(
                     entry, field, max_age_seconds, legacy_entry=legacy_entry,
                     legacy_field=legacy_field, readonly=readonly,
+                    machine_only=machine_only,
                 )
 
     def _get_value(
-        self, entry, field, max_age_seconds, *, legacy_entry, legacy_field, readonly,
+        self, entry: str, field: str, max_age_seconds: int | None, *,
+        legacy_entry: str | None, legacy_field: str | None, readonly: bool,
+        machine_only: bool = False,
     ) -> str | None:
-        store = (
+        from .cache_dpapi import CacheDecryptionUnavailable
+        from .cache_machine import MachineReadStore, read_store, write_copy
+
+        store = read_store(self) if machine_only else (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
-        if self._pending_alias(store, entry, field, strict=readonly):
+        readonly = readonly or isinstance(store, MachineReadStore)
+        def missing() -> str | None:
+            if isinstance(store, MachineReadStore) and not machine_only:
+                raise CacheDecryptionUnavailable("User cache unavailable and machine cache has no usable value")
             return None
+        if self._pending_alias(store, entry, field, strict=readonly):
+            return missing()
         if not readonly and _path_exists(self._key_file):
             from . import kek
 
-            if not kek.is_wrapped(self._key_file.read_bytes()):
+            if not kek.is_wrapped(self._read_input(self._key_file)):
                 # Only a successfully decoded, still-locked store may migrate its key.
                 with contextlib.suppress(OSError):
                     with self._store_lock():
-                        self._read_store(readonly=True, strict=True)
-                        blob = self._key_file.read_bytes()
+                        current_store = self._read_store(readonly=True, strict=True)
+                        blob = self._read_input(self._key_file)
                         if not kek.is_wrapped(blob):
                             with contextlib.suppress(OSError, RuntimeError, ValueError):
                                 self._write_key(blob.strip())
+                                write_copy(self, current_store, self._read_input(self._cache_file))
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
             if self._pending_alias(store, legacy_entry, field, strict=readonly):
-                return None
+                return missing()
             rec = self._field_record(store, legacy_entry, field, strict=readonly)
             if rec is not None and not readonly:
                 self.migrate_entry(legacy_entry, entry, field)
@@ -571,14 +592,15 @@ class PersistentCache:
             if rec is None and legacy_entry and legacy_entry != entry:
                 rec = self._field_record(store, legacy_entry, legacy_field, strict=readonly)
         if not isinstance(rec, dict) or "rotation" in rec:
-            return None
+            return missing()
         if max_age_seconds is not None:
             cached_epoch = rec.get("cached_at_epoch")
             if not isinstance(cached_epoch, (int, float)):
-                return None
+                return missing()
             if time.time() - cached_epoch > max_age_seconds:
-                return None
-        return rec.get("value")
+                return missing()
+        value = rec.get("value")
+        return value if isinstance(value, str) else missing()
 
     def put(
         self,
@@ -649,7 +671,7 @@ class PersistentCache:
         except Exception:
             return False
 
-    def pending_replace(self, entry: str, field: str) -> dict | None:
+    def pending_replace(self, entry: str, field: str) -> Store | None:
         """Return a pending replacement journal, if one exists."""
         if not self.enabled:
             return None
@@ -915,11 +937,13 @@ class PersistentCache:
                 service_cache_epochs.revoke(self._root_dir, None, reset=True)
                 if self._cache_file.exists():
                     self._cache_file.unlink()
+                from .cache_machine import clear_copy
+                clear_copy(self)
             return True
         except (OSError, RuntimeError, ValueError):
             return False
 
-    def status(self) -> dict:
+    def status(self) -> Store:
         """Return cache metadata (enabled, location, counts, staleness)."""
         self._refresh_selection()
         readable = True

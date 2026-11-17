@@ -1,9 +1,0 @@
-{
-  "comment": "Add default-off user-level tracing of ordinary Bridge CLI calls without changing execution or ownership.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

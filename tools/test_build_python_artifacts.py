@@ -9,7 +9,15 @@ import subprocess
 import sys
 import time
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol
+
+if TYPE_CHECKING:
+    from types import SimpleNamespace
+
+    from build_toolchain_lock import ToolchainLock
+    from configuration_context.readiness import ProbeContract
 
 import pytest
 
@@ -34,7 +42,7 @@ def _whoami_user_stdout(account: str = _FAKE_TOKEN_ACCOUNT, sid: str = _FAKE_TOK
     return f'"{account}","{sid}"\r\n'
 
 
-def _fake_whoami_run(cmd: list[str]) -> subprocess.CompletedProcess | None:
+def _fake_whoami_run(cmd: list[str]) -> subprocess.CompletedProcess[str] | None:
     """Returns a canned successful `whoami /user` result for ``cmd``, or
     ``None`` if ``cmd`` isn't a `whoami` invocation at all -- callers chain
     this before their own `icacls`-specific handling in a shared
@@ -107,7 +115,7 @@ _WHOAMI_PATH = r"C:\Windows\System32\whoami.exe"
 
 
 @pytest.fixture(autouse=True)
-def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`_opaque_index_identity`'s keyed-hash machinery persists a per-
     machine key under the real LOCALAPPDATA/XDG_STATE_HOME -- no test in
     this file may read or write that real, shared location. Isolated to
@@ -174,7 +182,7 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 # below -- passed explicitly to `build_plugin_artifacts`/`build_wheel` so
 # none of these tests ever invokes the real `resolve_toolchain_lock` (which
 # would shell out to real `uv venv`/`uv pip install`).
-_FAKE_TOOLCHAIN = bpa.ToolchainLock(
+_FAKE_TOOLCHAIN: ToolchainLock = bpa.ToolchainLock(
     Path("/fake/toolchain-venv/bin/python"),
     {"setuptools": "84.1.0", "wheel": "0.44.0"},
     provenance={
@@ -185,10 +193,17 @@ _FAKE_TOOLCHAIN = bpa.ToolchainLock(
 )
 
 
+class _WheelBuilder(Protocol):
+    def __call__(
+        self, source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path: ...
+
+
 # --- parse_wheel_filename -----------------------------------------------
 
 
-def test_parse_wheel_filename_pure_python():
+def test_parse_wheel_filename_pure_python() -> None:
     info = bpa.parse_wheel_filename(Path("agent_bridge-0.4.1.dev3-py3-none-any.whl"))
     assert info == {
         "name": "agent_bridge",
@@ -199,7 +214,7 @@ def test_parse_wheel_filename_pure_python():
     }
 
 
-def test_parse_wheel_filename_platform_specific():
+def test_parse_wheel_filename_platform_specific() -> None:
     info = bpa.parse_wheel_filename(
         Path("pydantic_core-2.46.5-cp312-cp312-win_amd64.whl")
     )
@@ -208,7 +223,7 @@ def test_parse_wheel_filename_platform_specific():
     assert info["platform_tag"] == "win_amd64"
 
 
-def test_parse_wheel_filename_with_build_tag():
+def test_parse_wheel_filename_with_build_tag() -> None:
     # Regression: a wheel filename may carry an optional numeric build tag
     # between version and the compatibility tags (PEP 427) -- it must not
     # be absorbed into `version`.
@@ -220,12 +235,12 @@ def test_parse_wheel_filename_with_build_tag():
     assert info["platform_tag"] == "any"
 
 
-def test_parse_wheel_filename_malformed_raises():
+def test_parse_wheel_filename_malformed_raises() -> None:
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.parse_wheel_filename(Path("not-a-wheel.txt"))
 
 
-def test_parse_wheel_filename_non_normalized_name_raises():
+def test_parse_wheel_filename_non_normalized_name_raises() -> None:
     # Regression: a well-formed wheel's distribution name is always
     # exactly one token (PEP 427 normalizes '-'/'_'/'.' runs to a single
     # '_' specifically so this split is unambiguous). A hyphenated,
@@ -238,7 +253,7 @@ def test_parse_wheel_filename_non_normalized_name_raises():
 # --- overall_identity_tags -----------------------------------------------
 
 
-def test_overall_identity_tags_all_universal():
+def test_overall_identity_tags_all_universal() -> None:
     infos = [
         {"python_tag": "py3", "abi_tag": "none", "platform_tag": "any"},
         {"python_tag": "py3", "abi_tag": "none", "platform_tag": "any"},
@@ -250,7 +265,7 @@ def test_overall_identity_tags_all_universal():
     }
 
 
-def test_overall_identity_tags_one_platform_specific_wins():
+def test_overall_identity_tags_one_platform_specific_wins() -> None:
     infos = [
         {"python_tag": "py3", "abi_tag": "none", "platform_tag": "any"},
         {"python_tag": "cp312", "abi_tag": "cp312", "platform_tag": "win_amd64"},
@@ -262,7 +277,7 @@ def test_overall_identity_tags_one_platform_specific_wins():
     }
 
 
-def test_overall_identity_tags_conflicting_specific_tags_raise():
+def test_overall_identity_tags_conflicting_specific_tags_raise() -> None:
     infos = [
         {"python_tag": "cp311", "abi_tag": "cp311", "platform_tag": "win_amd64"},
         {"python_tag": "cp312", "abi_tag": "cp312", "platform_tag": "win_amd64"},
@@ -288,20 +303,20 @@ def _make_fake_wheel(path: Path, *, generator: str | None) -> None:
             )
 
 
-def test_read_wheel_generator_present(tmp_path: Path):
+def test_read_wheel_generator_present(tmp_path: Path) -> None:
     wheel = tmp_path / "fake_pkg-1.0-py3-none-any.whl"
     _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
     assert bpa.read_wheel_generator(wheel) == "setuptools (84.1.0)"
 
 
-def test_read_wheel_generator_absent_raises(tmp_path: Path):
+def test_read_wheel_generator_absent_raises(tmp_path: Path) -> None:
     wheel = tmp_path / "fake_pkg-1.0-py3-none-any.whl"
     _make_fake_wheel(wheel, generator=None)
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.read_wheel_generator(wheel)
 
 
-def test_read_wheel_generator_missing_dist_info_raises(tmp_path: Path):
+def test_read_wheel_generator_missing_dist_info_raises(tmp_path: Path) -> None:
     wheel = tmp_path / "empty-1.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as zf:
         zf.writestr("not_dist_info.txt", "nothing here")
@@ -309,7 +324,7 @@ def test_read_wheel_generator_missing_dist_info_raises(tmp_path: Path):
         bpa.read_wheel_generator(wheel)
 
 
-def test_read_wheel_generator_multiple_dist_info_raises(tmp_path: Path):
+def test_read_wheel_generator_multiple_dist_info_raises(tmp_path: Path) -> None:
     # Regression: a malformed wheel with more than one matching
     # dist-info/WHEEL entry must not silently trust whichever ZIP member
     # happens to come first -- that could record the WRONG distribution's
@@ -328,7 +343,7 @@ def test_read_wheel_generator_multiple_dist_info_raises(tmp_path: Path):
         bpa.read_wheel_generator(wheel)
 
 
-def test_read_wheel_generator_invalid_utf8_raises(tmp_path: Path):
+def test_read_wheel_generator_invalid_utf8_raises(tmp_path: Path) -> None:
     # Regression: errors="replace" would silently accept corrupt metadata
     # and record a replacement-character Generator as if the real toolchain
     # were known -- the opposite of fail-closed.
@@ -342,7 +357,7 @@ def test_read_wheel_generator_invalid_utf8_raises(tmp_path: Path):
 # --- sha256_file -----------------------------------------------------------
 
 
-def test_sha256_file_matches_hashlib(tmp_path: Path):
+def test_sha256_file_matches_hashlib(tmp_path: Path) -> None:
     import hashlib
 
     f = tmp_path / "data.bin"
@@ -394,7 +409,7 @@ def _seed_valid_lib(repo: Path, lib: str) -> Path:
     return lib_dir
 
 
-def test_resolve_vendored_libs_direct(fake_repo: Path):
+def test_resolve_vendored_libs_direct(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_dir = _seed_valid_lib(fake_repo, "widget")
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
@@ -486,7 +501,7 @@ def test_artifact_discovery_refuses_invalid_flat_sources(
         bpa.resolve_vendored_libs(consumer)
 
 
-def test_resolve_vendored_libs_recurses_nested(fake_repo: Path):
+def test_resolve_vendored_libs_recurses_nested(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_a = _seed_valid_lib(fake_repo, "a")
     lib_b = _seed_valid_lib(fake_repo, "b")
@@ -507,7 +522,7 @@ def test_resolve_vendored_libs_recurses_nested(fake_repo: Path):
 
 def test_resolve_vendored_libs_nested_editable_ref_missing_src_raises(
     fake_repo: Path,
-):
+) -> None:
     # Regression: a NESTED editable reference (one level deeper than the
     # originally requested top-level plugin) was queued and would be built
     # completely unvalidated -- only the top-level consumer's own
@@ -531,14 +546,14 @@ def test_resolve_vendored_libs_nested_editable_ref_missing_src_raises(
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_no_sources_is_empty(fake_repo: Path):
+def test_resolve_vendored_libs_no_sources_is_empty(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     _write_pyproject(plugin_dir)
 
     assert bpa.resolve_vendored_libs(plugin_dir) == []
 
 
-def test_read_sources_table_rejects_malformed_tool_table(tmp_path: Path):
+def test_read_sources_table_rejects_malformed_tool_table(tmp_path: Path) -> None:
     # Invariant: every intermediate table ([tool], [tool.uv]) must be
     # validated before `.get()` is called on it -- a structurally valid
     # TOML document whose `tool` key is not itself a table (e.g. an array)
@@ -555,7 +570,7 @@ def test_read_sources_table_rejects_malformed_tool_table(tmp_path: Path):
         bpa.find_in_tree_lib_sources(d)
 
 
-def test_read_sources_table_rejects_malformed_uv_table(tmp_path: Path):
+def test_read_sources_table_rejects_malformed_uv_table(tmp_path: Path) -> None:
     d = tmp_path / "demo"
     d.mkdir()
     (d / "pyproject.toml").write_text(
@@ -566,7 +581,7 @@ def test_read_sources_table_rejects_malformed_uv_table(tmp_path: Path):
         bpa.find_in_tree_lib_sources(d)
 
 
-def test_resolve_vendored_libs_unsafe_name_raises(fake_repo: Path):
+def test_resolve_vendored_libs_unsafe_name_raises(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     # A `path` whose final component is ".." resolves outside the consumer
     # root (so `find_uv_editable_refs` includes it) but its derived `lib`
@@ -579,7 +594,7 @@ def test_resolve_vendored_libs_unsafe_name_raises(fake_repo: Path):
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_non_editable_raises(fake_repo: Path):
+def test_resolve_vendored_libs_non_editable_raises(fake_repo: Path) -> None:
     # Missing `editable = true` would resolve to a frozen, non-live copy on
     # `dev` -- `uv_editable_problems` rejects it, and so must this script.
     plugin_dir = fake_repo / "plugins" / "demo"
@@ -595,7 +610,7 @@ def test_resolve_vendored_libs_non_editable_raises(fake_repo: Path):
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_missing_canonical_dir_raises(fake_repo: Path):
+def test_resolve_vendored_libs_missing_canonical_dir_raises(fake_repo: Path) -> None:
     # References a lib that was never seeded under libs/ at all.
     plugin_dir = fake_repo / "plugins" / "demo"
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
@@ -604,7 +619,7 @@ def test_resolve_vendored_libs_missing_canonical_dir_raises(fake_repo: Path):
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_in_tree_editable_combination_raises(fake_repo: Path):
+def test_resolve_vendored_libs_in_tree_editable_combination_raises(fake_repo: Path) -> None:
     # Regression: an `editable = true` entry whose path does NOT escape its
     # own consumer root falls through BOTH discovery functions
     # (find_uv_editable_refs only returns escaping entries;
@@ -625,7 +640,7 @@ def test_resolve_vendored_libs_in_tree_editable_combination_raises(fake_repo: Pa
 
 def test_resolve_vendored_libs_name_collision_different_canonical_raises(
     fake_repo: Path,
-):
+) -> None:
     # Regression: deduplicating solely by the final directory name would
     # silently drop one of two genuinely distinct sources that happen to
     # share a name (here, two different "widget" libs nested under two
@@ -674,7 +689,7 @@ def _seed_in_tree_lib(consumer_dir: Path, lib: str) -> Path:
     return lib_dir
 
 
-def test_find_in_tree_lib_sources_direct(fake_repo: Path):
+def test_find_in_tree_lib_sources_direct(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_dir = _seed_in_tree_lib(plugin_dir, "widget")
     _write_in_tree_pyproject(plugin_dir, sources={"demo-widget": "libs/widget"})
@@ -685,7 +700,7 @@ def test_find_in_tree_lib_sources_direct(fake_repo: Path):
     assert (plugin_dir / "libs" / "widget").resolve() == lib_dir.resolve()
 
 
-def test_find_in_tree_lib_sources_ignores_escaping_entries(fake_repo: Path):
+def test_find_in_tree_lib_sources_ignores_escaping_entries(fake_repo: Path) -> None:
     # An escaping entry is find_uv_editable_refs's own job -- this function
     # must not also report it, or resolve_vendored_libs would validate it
     # twice under two different (incompatible) acceptance rules.
@@ -696,7 +711,7 @@ def test_find_in_tree_lib_sources_ignores_escaping_entries(fake_repo: Path):
     assert bpa.find_in_tree_lib_sources(plugin_dir) == []
 
 
-def test_resolve_vendored_libs_discovers_in_tree_only_consumer(fake_repo: Path):
+def test_resolve_vendored_libs_discovers_in_tree_only_consumer(fake_repo: Path) -> None:
     # Simulates a plugin that vendors its libs in-tree by design (e.g.
     # agent-worktrees), with no escaping `uv`-editable reference at all.
     plugin_dir = fake_repo / "plugins" / "demo"
@@ -708,7 +723,7 @@ def test_resolve_vendored_libs_discovers_in_tree_only_consumer(fake_repo: Path):
     assert libs == [("widget", lib_dir.resolve())]
 
 
-def test_resolve_vendored_libs_discovers_post_materialization_form(fake_repo: Path):
+def test_resolve_vendored_libs_discovers_post_materialization_form(fake_repo: Path) -> None:
     # Simulates the REAL state build_python_artifacts actually runs against
     # during promotion: materialize_main.py has already rewritten the
     # escaping dev-branch reference into the local, non-editable
@@ -723,7 +738,7 @@ def test_resolve_vendored_libs_discovers_post_materialization_form(fake_repo: Pa
     assert libs == [("widget", lib_dir.resolve())]
 
 
-def test_resolve_vendored_libs_in_tree_recurses_nested(fake_repo: Path):
+def test_resolve_vendored_libs_in_tree_recurses_nested(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_a = _seed_in_tree_lib(plugin_dir, "a")
     _write_in_tree_pyproject(plugin_dir, sources={"demo-a": "libs/a"})
@@ -736,7 +751,7 @@ def test_resolve_vendored_libs_in_tree_recurses_nested(fake_repo: Path):
     assert libs["b"] == lib_b.resolve()
 
 
-def test_resolve_vendored_libs_sibling_cross_reference(fake_repo: Path):
+def test_resolve_vendored_libs_sibling_cross_reference(fake_repo: Path) -> None:
     # Regression (found via a real smoke test against agent-worktrees):
     # plugins/agent-worktrees/libs/plugin-activation depends on its SIBLING
     # plugins/agent-worktrees/libs/dropin-registry via a plain
@@ -757,7 +772,7 @@ def test_resolve_vendored_libs_sibling_cross_reference(fake_repo: Path):
     assert libs["b"] == lib_b.resolve()
 
 
-def test_find_in_tree_lib_sources_rejects_cross_plugin_escape(fake_repo: Path):
+def test_find_in_tree_lib_sources_rejects_cross_plugin_escape(fake_repo: Path) -> None:
     # Regression: a non-editable path resolving to an UNRELATED plugin's
     # libs/ directory (not the consumer's own, nor a sibling in the same
     # parent libs/ folder) must not be accepted as a legitimate in-tree
@@ -775,7 +790,7 @@ def test_find_in_tree_lib_sources_rejects_cross_plugin_escape(fake_repo: Path):
 
 def test_resolve_vendored_libs_cross_plugin_escape_raises_not_silently_omitted(
     fake_repo: Path,
-):
+) -> None:
     # Invariant: a non-editable, escaping reference that doesn't resolve
     # to an allowed in-tree vendored-lib location must fail the build
     # closed, matching what `materialize_nested_uv_editable_refs` would do
@@ -792,7 +807,7 @@ def test_resolve_vendored_libs_cross_plugin_escape_raises_not_silently_omitted(
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_in_tree_missing_src_raises(fake_repo: Path):
+def test_resolve_vendored_libs_in_tree_missing_src_raises(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_dir = plugin_dir / "libs" / "widget"
     lib_dir.mkdir(parents=True)
@@ -803,7 +818,7 @@ def test_resolve_vendored_libs_in_tree_missing_src_raises(fake_repo: Path):
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_in_tree_symlink_raises(fake_repo: Path):
+def test_resolve_vendored_libs_in_tree_symlink_raises(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     real_lib = _seed_in_tree_lib(fake_repo, "widget")  # elsewhere, irrelevant path
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -824,7 +839,7 @@ def test_resolve_vendored_libs_in_tree_symlink_raises(fake_repo: Path):
         bpa.resolve_vendored_libs(plugin_dir)
 
 
-def test_resolve_vendored_libs_in_tree_nested_symlink_raises(fake_repo: Path):
+def test_resolve_vendored_libs_in_tree_nested_symlink_raises(fake_repo: Path) -> None:
     # Regression: the lib directory itself is a real directory (not a
     # symlink), but a file WITHIN it is a symlink -- the shallow
     # `unresolved.is_symlink()` check alone would miss this, letting
@@ -848,13 +863,13 @@ def test_resolve_vendored_libs_in_tree_nested_symlink_raises(fake_repo: Path):
 # --- read_project_version / version correspondence -------------------------
 
 
-def test_read_project_version(fake_repo: Path):
+def test_read_project_version(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     _write_pyproject(plugin_dir)
     assert bpa.read_project_version(plugin_dir) == "0.1.0"
 
 
-def test_read_project_version_missing_raises(tmp_path: Path):
+def test_read_project_version_missing_raises(tmp_path: Path) -> None:
     d = tmp_path / "demo"
     d.mkdir()
     (d / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
@@ -862,7 +877,7 @@ def test_read_project_version_missing_raises(tmp_path: Path):
         bpa.read_project_version(d)
 
 
-def test_read_project_version_malformed_project_table_raises(tmp_path: Path):
+def test_read_project_version_malformed_project_table_raises(tmp_path: Path) -> None:
     # Invariant: [project] itself must be validated as a table before
     # .get() is called on it -- a TOML-valid manifest where `project` is
     # not a table (e.g. an array) must raise the documented
@@ -874,14 +889,14 @@ def test_read_project_version_malformed_project_table_raises(tmp_path: Path):
         bpa.read_project_version(d)
 
 
-def test_assert_version_corresponds_accepts_hyphen_normalization():
+def test_assert_version_corresponds_accepts_hyphen_normalization() -> None:
     # No exception means acceptance.
     bpa._assert_version_corresponds(
         raw_version="0.4.1-dev3", wheel_version="0.4.1.dev3", label="demo"
     )
 
 
-def test_assert_version_corresponds_rejects_real_mismatch():
+def test_assert_version_corresponds_rejects_real_mismatch() -> None:
     with pytest.raises(bpa.ArtifactBuildError):
         bpa._assert_version_corresponds(
             raw_version="0.4.1-dev3", wheel_version="9.9.9", label="demo"
@@ -891,21 +906,21 @@ def test_assert_version_corresponds_rejects_real_mismatch():
 # --- directory_content_hash / compute_payload_hash -------------------------
 
 
-def test_directory_content_hash_stable_for_unchanged_content(tmp_path: Path):
+def test_directory_content_hash_stable_for_unchanged_content(tmp_path: Path) -> None:
     d = tmp_path / "pkg"
     d.mkdir()
     (d / "a.py").write_text("x = 1\n", encoding="utf-8")
     assert bpa.directory_content_hash(d) == bpa.directory_content_hash(d)
 
 
-def test_hash_fields_no_concatenation_ambiguity():
+def test_hash_fields_no_concatenation_ambiguity() -> None:
     # Regression: naively joining fields with a plain separator lets two
     # DIFFERENT field sequences serialize identically (e.g. "ab"+"c" ==
     # "a"+"bc" == "abc"); length-prefixing must keep them distinct.
     assert bpa._hash_fields("ab", "c") != bpa._hash_fields("a", "bc")
 
 
-def test_directory_content_hash_changes_with_content(tmp_path: Path):
+def test_directory_content_hash_changes_with_content(tmp_path: Path) -> None:
     d = tmp_path / "pkg"
     d.mkdir()
     (d / "a.py").write_text("x = 1\n", encoding="utf-8")
@@ -915,7 +930,7 @@ def test_directory_content_hash_changes_with_content(tmp_path: Path):
     assert before != after
 
 
-def test_directory_content_hash_ignores_pycache_and_build_dirs(tmp_path: Path):
+def test_directory_content_hash_ignores_pycache_and_build_dirs(tmp_path: Path) -> None:
     d = tmp_path / "pkg"
     d.mkdir()
     (d / "a.py").write_text("x = 1\n", encoding="utf-8")
@@ -930,7 +945,7 @@ def test_directory_content_hash_ignores_pycache_and_build_dirs(tmp_path: Path):
 
 def test_directory_content_hash_ignores_egg_info_across_repeated_calls(
     tmp_path: Path,
-):
+) -> None:
     # Regression: *.egg-info has a per-package-varying name (unlike the
     # fixed names in _PAYLOAD_IGNORE_DIR_NAMES), and a build backend can
     # leave one behind inside the source tree. Without ignoring it by
@@ -949,7 +964,7 @@ def test_directory_content_hash_ignores_egg_info_across_repeated_calls(
 
 def test_directory_content_hash_reflects_uncommitted_working_tree_mutation(
     tmp_path: Path,
-):
+) -> None:
     # The whole point of hashing the working tree instead of git HEAD:
     # a promotion-time mutation (e.g. a version bump) that was never
     # committed must still change the payload hash.
@@ -964,7 +979,7 @@ def test_directory_content_hash_reflects_uncommitted_working_tree_mutation(
 
 def test_compute_payload_hash_deterministic_regardless_of_order(
     fake_repo: Path,
-):
+) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "f.py").write_text("x\n", encoding="utf-8")
@@ -979,7 +994,7 @@ def test_compute_payload_hash_deterministic_regardless_of_order(
     assert h1.startswith("sha256:")
 
 
-def test_compute_payload_hash_changes_when_either_dir_changes(fake_repo: Path):
+def test_compute_payload_hash_changes_when_either_dir_changes(fake_repo: Path) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "f.py").write_text("x\n", encoding="utf-8")
@@ -1002,10 +1017,10 @@ def _staging_dir_from_cmd(cmd: list[str]) -> Path:
     return Path(cmd[cmd.index("-o") + 1])
 
 
-def test_build_wheel_moves_output_into_out_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_build_wheel_moves_output_into_out_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     out_dir = tmp_path / "dist"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         (_staging_dir_from_cmd(cmd) / "new_pkg-2.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1017,7 +1032,7 @@ def test_build_wheel_moves_output_into_out_dir(tmp_path: Path, monkeypatch: pyte
 
 def test_build_wheel_overwrites_existing_same_name_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a second invocation that rebuilds the exact same wheel
     # filename (identical version rebuilt again, or a retry after a later
     # manifest step failed and left a same-named wheel behind) must still
@@ -1028,7 +1043,7 @@ def test_build_wheel_overwrites_existing_same_name_output(
     existing = out_dir / "demo-1.0-py3-none-any.whl"
     existing.write_bytes(b"old-bytes")
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(
             b"new-bytes"
         )
@@ -1040,8 +1055,8 @@ def test_build_wheel_overwrites_existing_same_name_output(
     assert wheel.read_bytes() == b"new-bytes"
 
 
-def test_build_wheel_nonzero_exit_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+def test_build_wheel_nonzero_exit_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -1049,8 +1064,8 @@ def test_build_wheel_nonzero_exit_raises(tmp_path: Path, monkeypatch: pytest.Mon
         bpa.build_wheel(tmp_path / "src", tmp_path / "dist")
 
 
-def test_build_wheel_ambiguous_output_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+def test_build_wheel_ambiguous_output_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         staging = _staging_dir_from_cmd(cmd)
         (staging / "a-1.0-py3-none-any.whl").write_bytes(b"")
         (staging / "b-1.0-py3-none-any.whl").write_bytes(b"")
@@ -1061,11 +1076,11 @@ def test_build_wheel_ambiguous_output_raises(tmp_path: Path, monkeypatch: pytest
         bpa.build_wheel(tmp_path / "src", tmp_path / "dist")
 
 
-def test_direct_wheel_build_keeps_the_caller_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_direct_wheel_build_keeps_the_caller_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1704067200")
     seen = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         seen.append(kwargs["env"]["SOURCE_DATE_EPOCH"])
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1077,12 +1092,12 @@ def test_direct_wheel_build_keeps_the_caller_epoch(tmp_path: Path, monkeypatch: 
 
 def test_artifact_wheel_build_overrides_the_caller_epoch(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _write_pyproject(fake_repo / "plugins" / "demo")
     monkeypatch.setattr(bpa, "_assert_toolchain_satisfies_build_requires", lambda *a, **k: None)
     seen = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         seen.append(kwargs["env"]["SOURCE_DATE_EPOCH"])
         _make_fake_wheel(
             _staging_dir_from_cmd(cmd) / "demo-0.1.0-py3-none-any.whl",
@@ -1101,7 +1116,7 @@ def test_artifact_wheel_build_overrides_the_caller_epoch(
 
 def test_first_party_wheels_ignore_source_and_ambient_timestamps(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     if not shutil.which("uv"):
         pytest.skip("uv is required for the real wheel-build control")
     try:
@@ -1152,12 +1167,139 @@ def test_first_party_wheels_ignore_source_and_ambient_timestamps(
     assert results[0][0] != results[2][0]
 
 
+def _real_provider_wheel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str,
+) -> tuple[str, Path, ProbeContract]:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("uv is required for the real wheel-delivery control")
+    try:
+        setuptools = importlib.metadata.version("setuptools")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("setuptools is required for the real wheel-delivery control")
+    repository = MODULE_PATH.parent.parent
+    monkeypatch.syspath_prepend(str(repository / "libs" / "configuration-layers" / "src"))
+    from configuration_context.readiness import (
+        CONTRACT_FILE, payload_contract, runtime_contract_path,
+    )
+
+    monkeypatch.setattr(bpa.subprocess, "run", _REAL_SUBPROCESS_RUN)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_NO_CONFIG", "1")
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
+    payload = repository / "plugins" / plugin
+    contract = payload_contract(payload, plugin)
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    for name in ("pyproject.toml", "README.md", CONTRACT_FILE):
+        shutil.copy2(payload / name, source / name)
+    shutil.copytree(payload / "src", source / "src", ignore=shutil.ignore_patterns(
+        "__pycache__", "*.pyc", "*.egg-info",
+    ))
+    lock = bpa.ToolchainLock(
+        Path(sys.executable), {"setuptools": setuptools},
+        provenance={
+            "source_policy": "governed", "python": sys.executable,
+            "validated_index_identity": "fixture",
+        },
+    )
+    deadline = time.monotonic() + 25
+    wheel = bpa.build_wheel(source, tmp_path / "dist", toolchain=lock, deadline=deadline, uv=uv)
+    with zipfile.ZipFile(wheel) as archive:
+        descriptor = [
+            name for name in archive.namelist()
+            if name.endswith(".data/data/" + runtime_contract_path(contract.module).as_posix())
+        ]
+        assert len(descriptor) == 1
+        assert archive.read(descriptor[0]) == (payload / CONTRACT_FILE).read_bytes()
+        metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/WHEEL"))
+        assert f"Generator: {lock.generator}" in archive.read(metadata).decode("utf-8")
+    return uv, wheel, contract
+
+
+@pytest.mark.parametrize("plugin", [
+    "agent-bridge", "agent-codespaces", "agent-containers", "agent-dispatch",
+    "agent-index", "agent-machines", "agent-mcp", "agent-vault", "agent-worktrees",
+])
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_real_provider_wheel_delivers_readiness_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str,
+) -> None:
+    uv, wheel, contract = _real_provider_wheel(tmp_path, monkeypatch, plugin)
+    from configuration_context.readiness import (
+        ProbeContractError, runtime_contract, runtime_contract_path,
+    )
+
+    deadline = time.monotonic() + 10
+    prefix = tmp_path / "installed"
+    environment = bpa.sanitize_subprocess_env()
+    bpa.strip_package_source_env_vars(environment, strip_credentials=True)
+    for command in (
+        [uv, "venv", "--offline", "--no-config", "--no-python-downloads",
+         "--python", sys.executable, str(prefix)],
+        [uv, "pip", "install", "--offline", "--no-index", "--no-config", "--no-deps",
+         "--no-compile", "--python", str(bpa._venv_python_path(prefix)), str(wheel)],
+    ):
+        result = bpa._build_child(command, environment, deadline)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+    python = bpa._venv_python_path(prefix)
+    delivered = runtime_contract(python, contract.module, plugin=plugin)
+    assert delivered.path == prefix / runtime_contract_path(contract.module)
+    assert delivered.sha256 == contract.sha256
+    with pytest.raises(ProbeContractError):
+        runtime_contract(python, contract.module, plugin="another-provider")
+    delivered.path.unlink()
+    with pytest.raises(ProbeContractError):
+        runtime_contract(python, contract.module, plugin=plugin)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_real_provider_wheels_keep_independent_contracts_in_shared_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheels = [
+        _real_provider_wheel(tmp_path / plugin, monkeypatch, plugin)
+        for plugin in ("agent-machines", "agent-worktrees")
+    ]
+    from configuration_context.readiness import ProbeContractError, runtime_contract
+
+    deadline = time.monotonic() + 10
+    prefix = tmp_path / "core"
+    python = bpa._venv_python_path(prefix)
+    environment = bpa.sanitize_subprocess_env()
+    bpa.strip_package_source_env_vars(environment, strip_credentials=True)
+    uv = wheels[0][0]
+    for command in (
+        [uv, "venv", "--offline", "--no-config", "--no-python-downloads",
+         "--python", sys.executable, str(prefix)],
+        [uv, "pip", "install", "--offline", "--no-index", "--no-config", "--no-deps",
+         "--no-compile", "--python", str(python), *(str(wheel) for _, wheel, _ in wheels)],
+    ):
+        result = bpa._build_child(command, environment, deadline)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+    for _, _, contract in wheels:
+        assert runtime_contract(python, contract.module, plugin=contract.plugin).sha256 == contract.sha256
+    result = bpa._build_child(
+        [uv, "pip", "uninstall", "--offline", "--no-config", "--python", str(python),
+         "agent-machines"], environment, deadline,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    with pytest.raises(ProbeContractError):
+        runtime_contract(python, "agent_machines", plugin="agent-machines")
+    remaining = wheels[1][2]
+    assert runtime_contract(python, remaining.module, plugin=remaining.plugin).sha256 == remaining.sha256
+
+
 # --- build_plugin_artifacts (end-to-end, mocked build_wheel) ---------------
 
 @pytest.mark.parametrize("provenance", [None, {}, {"source_policy": "governed"}])
 def test_build_plugin_artifacts_rejects_missing_provenance_before_build(
-    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, provenance
-):
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, provenance: dict[str, str] | None,
+) -> None:
     _write_pyproject(fake_repo / "plugins" / "demo", sources={})
     lock = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0"}, provenance=provenance)
     monkeypatch.setattr(bpa, "build_wheel", lambda *args, **kwargs: pytest.fail("unprovenanced build"))
@@ -1168,8 +1310,8 @@ def test_build_plugin_artifacts_rejects_missing_provenance_before_build(
 
 @pytest.mark.parametrize("relative", ["plugins/demo", ".marketplace/demo"])
 def test_build_plugin_artifacts_end_to_end(
-    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, relative,
-):
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, relative: str,
+) -> None:
     plugin_dir = fake_repo / relative
     if relative != "plugins/demo":
         (fake_repo / "pyproject.toml").write_text(
@@ -1180,7 +1322,10 @@ def test_build_plugin_artifacts_end_to_end(
 
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         name = source_dir.name.replace("-", "_")
         wheel = out / f"{name}-0.1.0-py3-none-any.whl"
@@ -1217,7 +1362,7 @@ def test_build_plugin_artifacts_end_to_end(
 
 def test_build_plugin_artifacts_rejects_nested_symlink_in_plugin_dir(
     fake_repo: Path,
-):
+) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     _write_pyproject(plugin_dir)
     outside = fake_repo / "outside.txt"
@@ -1235,7 +1380,7 @@ def test_build_plugin_artifacts_rejects_nested_symlink_in_plugin_dir(
 
 def test_build_plugin_artifacts_payload_hash_excludes_build_residue(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: payload_hash must reflect the PRE-build source tree, not
     # whatever a build backend happens to leave behind inside it (e.g.
     # setuptools' build_meta creating a *.egg-info directory alongside the
@@ -1245,7 +1390,10 @@ def test_build_plugin_artifacts_payload_hash_excludes_build_residue(
     expected_hash = bpa.compute_payload_hash([plugin_dir])
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         (source_dir / "demo.egg-info").mkdir(exist_ok=True)
         (source_dir / "demo.egg-info" / "PKG-INFO").write_text(
             "build residue", encoding="utf-8"
@@ -1269,7 +1417,7 @@ def test_build_plugin_artifacts_payload_hash_excludes_build_residue(
 
 def test_build_plugin_artifacts_artifact_id_changes_with_wheel_bytes(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: artifact_id must fold in the wheels' own digests, not just
     # payload hash/tags/toolchain -- two byte-distinct wheel sets built from
     # identical source must not collide on the same artifact_id.
@@ -1277,8 +1425,11 @@ def test_build_plugin_artifacts_artifact_id_changes_with_wheel_bytes(
     _write_pyproject(plugin_dir)
     out_dir = fake_repo / "dist"
 
-    def make_builder(payload: bytes):
-        def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def make_builder(payload: bytes) -> _WheelBuilder:
+        def fake_build_wheel(
+            source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+            reserved_names: set[str] | None = None, **_: object,
+        ) -> Path:  # noqa: ARG001
             out.mkdir(parents=True, exist_ok=True)
             wheel = out / "demo-0.1.0-py3-none-any.whl"
             with zipfile.ZipFile(wheel, "w") as zf:
@@ -1304,7 +1455,7 @@ def test_build_plugin_artifacts_artifact_id_changes_with_wheel_bytes(
 
 def test_build_plugin_artifacts_rejects_out_dir_nested_in_source(
     fake_repo: Path,
-):
+) -> None:
     # Regression: an out_dir nested under a hashed source directory would
     # be created and populated with wheels/manifest BEFORE a retry's own
     # payload_hash computation, folding a prior run's own output into its
@@ -1317,7 +1468,7 @@ def test_build_plugin_artifacts_rejects_out_dir_nested_in_source(
 
 def test_build_plugin_artifacts_preserves_raw_version(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the manifest's version (and filename) must be the raw
     # declared version ("0.4.1-dev3"-shaped), not the wheel's PEP 440
     # normalization ("0.4.1.dev3"), so it exactly matches the
@@ -1329,7 +1480,10 @@ def test_build_plugin_artifacts_preserves_raw_version(
     )
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.4.1.dev3-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
@@ -1344,7 +1498,7 @@ def test_build_plugin_artifacts_preserves_raw_version(
 
 def test_build_plugin_artifacts_rejects_real_version_mismatch(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     plugin_dir = fake_repo / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "pyproject.toml").write_text(
@@ -1352,7 +1506,10 @@ def test_build_plugin_artifacts_rejects_real_version_mismatch(
     )
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-9.9.9-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
@@ -1365,7 +1522,7 @@ def test_build_plugin_artifacts_rejects_real_version_mismatch(
 
 def test_build_plugin_artifacts_unsafe_plugin_name_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `plugin` becomes a path component (PLUGINS_DIR / plugin,
     # and the manifest filename) -- an absolute value or `../` traversal
     # must be rejected before either is constructed.
@@ -1376,7 +1533,7 @@ def test_build_plugin_artifacts_unsafe_plugin_name_raises(
 
 def test_build_plugin_artifacts_rejects_duplicate_wheel_filename(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: two DIFFERENT sources (here, the plugin and its one
     # vendored lib) producing the identical wheel filename within the SAME
     # invocation must fail closed -- silently overwriting would leave an
@@ -1386,7 +1543,10 @@ def test_build_plugin_artifacts_rejects_duplicate_wheel_filename(
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         # Every source produces the SAME filename, regardless of identity.
         wheel = out / "collision-0.1.0-py3-none-any.whl"
@@ -1404,10 +1564,10 @@ def test_build_plugin_artifacts_rejects_duplicate_wheel_filename(
 
 def test_build_wheel_rejects_filename_already_reserved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     out_dir = tmp_path / "dist"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1417,7 +1577,7 @@ def test_build_wheel_rejects_filename_already_reserved(
         bpa.build_wheel(tmp_path / "src", out_dir, reserved_names=reserved)
 
 
-def test_build_plugin_artifacts_unknown_plugin_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_build_plugin_artifacts_unknown_plugin_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bpa, "PLUGINS_DIR", tmp_path / "plugins")
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.build_plugin_artifacts("nope", out_dir=tmp_path / "dist")
@@ -1426,18 +1586,18 @@ def test_build_plugin_artifacts_unknown_plugin_raises(tmp_path: Path, monkeypatc
 # --- ToolchainLock -----------------------------------------------------
 
 
-def test_toolchain_lock_generator():
+def test_toolchain_lock_generator() -> None:
     lock = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0", "wheel": "0.44.0"})
     assert lock.generator == "setuptools (84.1.0)"
 
 
-def test_toolchain_lock_id_stable_for_same_packages():
+def test_toolchain_lock_id_stable_for_same_packages() -> None:
     lock_a = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0", "wheel": "0.44.0"})
     lock_b = bpa.ToolchainLock(Path("/other/python"), {"wheel": "0.44.0", "setuptools": "84.1.0"})
     assert lock_a.lock_id == lock_b.lock_id
 
 
-def test_toolchain_lock_id_changes_with_different_packages():
+def test_toolchain_lock_id_changes_with_different_packages() -> None:
     lock_a = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0", "wheel": "0.44.0"})
     lock_b = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.2.0", "wheel": "0.44.0"})
     assert lock_a.lock_id != lock_b.lock_id
@@ -1476,13 +1636,13 @@ def _assume_governed_feed_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_resolve_toolchain_lock_creates_venv_and_installs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     calls: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         calls.append(cmd)
         if cmd[:2] == ["uv", "venv"]:
             # cmd[3] is the STAGING dir -- resolve_toolchain_lock builds
@@ -1514,8 +1674,8 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
     "mode", ["cold", "warm", "expired-retention", "expired-query", "install-timeout"],
 )
 def test_toolchain_selected_uv_retains_one_deadline_through_preparation(
-    tmp_path, monkeypatch, mode,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
     from contextlib import contextmanager
     from types import SimpleNamespace
 
@@ -1538,14 +1698,16 @@ def test_toolchain_selected_uv_retains_one_deadline_through_preparation(
         btl._write_provenance_marker(target, "https://example.internal/simple/", python)
 
     @contextmanager
-    def retain(selected, arguments, *, env, deadline):
+    def retain(
+        selected: str, arguments: list[str], *, env: dict[str, str], deadline: float,
+    ) -> Iterator[SimpleNamespace]:
         retained.append((selected, deadline))
         clock[0] = 121.0 if mode == "expired-retention" else clock[0] + 3
         yield SimpleNamespace(
             argv=[selected, "pip", "install", *arguments], environment=env, cwd=tmp_path,
         )
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         calls.append((command, options["timeout"]))
         assert options["timeout"] == 120.0 - clock[0]
         clock[0] += 2
@@ -1589,7 +1751,7 @@ def test_toolchain_selected_uv_retains_one_deadline_through_preparation(
     assert retained == ([] if mode == "warm" else [(str(uv), 120.0)])
 
 
-def test_toolchain_absolute_uv_without_deadline_keeps_existing_install_policy(tmp_path, monkeypatch):
+def test_toolchain_absolute_uv_without_deadline_keeps_existing_install_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     uv = tmp_path / "selected-uv"
     uv.write_bytes(b"fixture executable, never run")
     target = tmp_path / "toolchain"
@@ -1603,7 +1765,7 @@ def test_toolchain_absolute_uv_without_deadline_keeps_existing_install_policy(tm
         btl, "_resolve_interpreter_identity", lambda python, env, **kw: str(tmp_path / "python"),
     )
 
-    def run(command, **options):
+    def run(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         assert "timeout" not in options
         if command[1] == "venv":
@@ -1625,8 +1787,8 @@ def test_toolchain_absolute_uv_without_deadline_keeps_existing_install_policy(tm
 
 @pytest.mark.parametrize("selection", ["relative", "missing", "directory"])
 def test_toolchain_explicit_uv_refuses_before_feed_or_path_substitution(
-    tmp_path, monkeypatch, selection,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str,
+) -> None:
     selected = {
         "relative": "uv",
         "missing": tmp_path / "absent",
@@ -1640,7 +1802,7 @@ def test_toolchain_explicit_uv_refuses_before_feed_or_path_substitution(
 
 
 @pytest.mark.parametrize("deadline", [True, float("nan"), float("inf"), 99.0])
-def test_toolchain_invalid_or_expired_budget_refuses_before_effects(tmp_path, monkeypatch, deadline):
+def test_toolchain_invalid_or_expired_budget_refuses_before_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deadline: float) -> None:
     monkeypatch.setattr(btl.time, "monotonic", lambda: 100.0)
     monkeypatch.setattr(
         btl, "_validated_trusted_index_url", lambda *a: pytest.fail("expired caller queried feed"),
@@ -1650,10 +1812,10 @@ def test_toolchain_invalid_or_expired_budget_refuses_before_effects(tmp_path, mo
     assert not (tmp_path / "toolchain").exists()
 
 
-def test_toolchain_public_discovery_retains_caller_budget_before_construction(tmp_path, monkeypatch):
+def test_toolchain_public_discovery_retains_caller_budget_before_construction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deadline = time.monotonic() + 10
 
-    def resolve(packages, age, **options):
+    def resolve(packages: tuple[str, ...], age: int, **options: object) -> NoReturn:
         assert packages == btl._LOCKED_TOOLCHAIN_PACKAGES
         assert age == 7
         assert options == {"deadline": deadline}
@@ -1670,8 +1832,8 @@ def test_toolchain_public_discovery_retains_caller_budget_before_construction(tm
 
 @pytest.mark.parametrize("expire_after", [None, "venv", "install", "versions"])
 def test_toolchain_preparation_uses_selected_uv_and_one_deadline(
-    tmp_path, monkeypatch, expire_after,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expire_after: str | None,
+) -> None:
     from contextlib import contextmanager
     from types import SimpleNamespace
 
@@ -1693,7 +1855,7 @@ def test_toolchain_preparation_uses_selected_uv_and_one_deadline(
     before = {path.relative_to(target): path.read_bytes() for path in target.rglob("*") if path.is_file()}
     calls = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         if command[0] == uv and command[1:3] == ["python", "find"]:
             phase, output = "find", python
         elif command[:2] == [uv, "venv"]:
@@ -1714,7 +1876,9 @@ def test_toolchain_preparation_uses_selected_uv_and_one_deadline(
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 
     @contextmanager
-    def retain(executable, arguments, *, env, deadline):
+    def retain(
+        executable: str, arguments: list[str], *, env: dict[str, str], deadline: float,
+    ) -> Iterator[SimpleNamespace]:
         assert executable == uv and deadline == 200.0
         yield SimpleNamespace(
             argv=[executable, "pip", "install", *arguments], environment=env, cwd=tmp_path,
@@ -1744,7 +1908,7 @@ def test_toolchain_preparation_uses_selected_uv_and_one_deadline(
 
 
 @pytest.mark.parametrize("deadline", [False, float("nan"), float("inf"), 99.0])
-def test_toolchain_refuses_invalid_or_expired_budget_before_resolution(tmp_path, monkeypatch, deadline):
+def test_toolchain_refuses_invalid_or_expired_budget_before_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deadline: float) -> None:
     monkeypatch.setattr(btl.time, "monotonic", lambda: 100.0)
     monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: pytest.fail(
         "an invalid caller budget must fail before source or interpreter resolution",
@@ -1757,7 +1921,7 @@ def test_toolchain_refuses_invalid_or_expired_budget_before_resolution(tmp_path,
 
 def test_resolve_toolchain_lock_version_query_uses_isolated_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a direct-interpreter `-c` probe must use `-I` (isolated
     # mode) -- otherwise a local `json.py`/`platform.py` reachable from the
     # subprocess's current working directory could shadow the stdlib
@@ -1772,7 +1936,7 @@ def test_resolve_toolchain_lock_version_query_uses_isolated_mode(
     btl._write_provenance_marker(venv_dir, "https://example.internal/simple/")
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         return subprocess.CompletedProcess(
             cmd, 0,
@@ -1791,10 +1955,10 @@ def test_resolve_toolchain_lock_version_query_uses_isolated_mode(
 
 def test_query_marker_environment_uses_isolated_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         return subprocess.CompletedProcess(
             cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
@@ -1808,8 +1972,8 @@ def test_query_marker_environment_uses_isolated_mode(
 
 @pytest.mark.parametrize("reuse_only", [False, True])
 def test_resolve_toolchain_lock_reuses_existing_venv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse_only,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse_only: bool,
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     # Regression: a second call with the SAME venv_dir (the mechanism a
     # caller uses to share one toolchain lock across several plugins in
@@ -1825,7 +1989,7 @@ def test_resolve_toolchain_lock_reuses_existing_venv(
     btl._write_provenance_marker(venv_dir, "https://example.internal/simple/")
     calls: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         calls.append(cmd)
         assert cmd[:2] != ["uv", "venv"]
         assert cmd[:3] != ["uv", "pip", "install"]
@@ -1844,8 +2008,8 @@ def test_resolve_toolchain_lock_reuses_existing_venv(
 
 @pytest.mark.parametrize("occupation", ["absent", "partial", "unmarked", "index", "python"])
 def test_toolchain_reuse_only_never_provisions_a_missing_or_mismatched_environment(
-    tmp_path, monkeypatch, occupation,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, occupation: str,
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     target = tmp_path / "retained"
     btl._toolchain_identity_hash("https://example.internal/simple/", "")
@@ -1883,7 +2047,7 @@ def test_toolchain_reuse_only_never_provisions_a_missing_or_mismatched_environme
 
 def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: an interpreter existing at venv_dir is NOT itself a
     # trust signal -- a venv published before this provenance check
     # existed (no marker at all) must never be silently reused just
@@ -1899,7 +2063,7 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(
     venv_python.write_text("stale-unmarked-interpreter", encoding="utf-8")
     calls: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         calls.append(cmd)
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -1933,7 +2097,7 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(
 
 def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a venv published from a DIFFERENT index than the one
     # currently validated (e.g. built under a prior/different trust
     # policy) must never be reused just because its marker exists -- only
@@ -1947,7 +2111,7 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
     venv_python.write_text("", encoding="utf-8")
     btl._write_provenance_marker(venv_dir, "https://different.example/simple/")
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -1979,7 +2143,7 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
 
 def test_resolve_toolchain_lock_reuses_alternate_sibling_on_repeat_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a SECOND call sharing the same venv_dir, with the same
     # differing identity, must reuse the alternate sibling built by the
     # first call rather than rebuilding it again -- the "shared lock"
@@ -1994,7 +2158,7 @@ def test_resolve_toolchain_lock_reuses_alternate_sibling_on_repeat_mismatch(
 
     build_count = {"n": 0}
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             build_count["n"] += 1
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -2019,7 +2183,7 @@ def test_resolve_toolchain_lock_reuses_alternate_sibling_on_repeat_mismatch(
 
 def test_resolve_toolchain_lock_treats_different_python_as_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the reuse identity must not ignore the requested
     # --python -- a venv created for one interpreter must never be
     # silently returned for a later call that explicitly asked for a
@@ -2034,7 +2198,7 @@ def test_resolve_toolchain_lock_treats_different_python_as_mismatch(
     )
     build_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             build_cmds.append(cmd)
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -2065,13 +2229,13 @@ def test_resolve_toolchain_lock_treats_different_python_as_mismatch(
 
 def test_resolve_interpreter_identity_queries_uv_python_find(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     real_interpreter = tmp_path / "real-python"
     real_interpreter.write_text("", encoding="utf-8")
     seen_cmds: list[list[str]] = []
-    seen_envs: list[dict] = []
+    seen_envs: list[dict[str, str] | None] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         seen_envs.append(kwargs.get("env"))
         return subprocess.CompletedProcess(
@@ -2096,7 +2260,7 @@ def test_resolve_interpreter_identity_queries_uv_python_find(
 
 def test_resolve_interpreter_identity_fails_closed_on_failure(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # Regression: a failed probe (nonzero exit, empty output,
     # or `uv` itself missing) must raise, never fall back to the raw
     # selector text. A text fallback is NOT fail-closed: if the probe
@@ -2114,7 +2278,7 @@ def test_resolve_interpreter_identity_fails_closed_on_failure(
     with pytest.raises(bpa.ArtifactBuildError):
         btl._resolve_interpreter_identity(None, {})
 
-    def raise_oserror(cmd, **kwargs):  # noqa: ARG001
+    def raise_oserror(cmd: list[str], **kwargs: object) -> NoReturn:  # noqa: ARG001
         raise OSError("uv not found")
 
     monkeypatch.setattr(btl.subprocess, "run", raise_oserror)
@@ -2124,7 +2288,7 @@ def test_resolve_interpreter_identity_fails_closed_on_failure(
 
 def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same_selector_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression (the core scenario motivating resolved-identity
     # tracking): the SAME selector text (e.g. a symlink, or a bare
     # command resolved via PATH) can resolve to a genuinely DIFFERENT
@@ -2152,7 +2316,7 @@ def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same
     resolved["value"] = "/opt/pythons/3.11/bin/python"
     build_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             build_cmds.append(cmd)
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -2177,7 +2341,7 @@ def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same
 
 def test_resolve_toolchain_lock_rejects_anomalous_alternate_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the alternate sibling is keyed EXACTLY on this call's
     # own identity, so finding something there that does NOT match is a
     # genuine anomaly (never an expected race) -- must fail closed rather
@@ -2207,7 +2371,7 @@ def test_resolve_toolchain_lock_rejects_anomalous_alternate_mismatch(
 
 def test_resolve_toolchain_lock_treats_preexisting_empty_dir_as_occupied(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: an empty (or partially-built) pre-existing directory at
     # --toolchain-venv -- e.g. manually created by an operator, or residue
     # from a crashed prior run -- is not detectable via `venv_python.
@@ -2222,7 +2386,7 @@ def test_resolve_toolchain_lock_treats_preexisting_empty_dir_as_occupied(
 
     build_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             build_cmds.append(cmd)
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -2260,7 +2424,7 @@ def _credentialed_url(host_path: str) -> str:
     return "https://" + "produser" + ":" + "hunter2" + "@" + host_path
 
 
-def test_provenance_marker_redacts_embedded_credentials(tmp_path: Path):
+def test_provenance_marker_redacts_embedded_credentials(tmp_path: Path) -> None:
     # Regression: a validated index URL may carry embedded credentials
     # (uv supports this), but those credentials must never be written to
     # the on-disk marker persisted into every shared venv -- the marker
@@ -2277,7 +2441,7 @@ def test_provenance_marker_redacts_embedded_credentials(tmp_path: Path):
     assert "example.internal" not in marker_text
 
 
-def test_provenance_matches_compares_full_url_identity(tmp_path: Path):
+def test_provenance_matches_compares_full_url_identity(tmp_path: Path) -> None:
     # The exact same credentialed URL, re-supplied on a later call (e.g. a
     # second plugin build in the same promotion run), must still match.
     venv_dir = tmp_path / "toolchain-venv"
@@ -2300,7 +2464,7 @@ def test_provenance_matches_compares_full_url_identity(tmp_path: Path):
 
 def test_provenance_matches_treats_differing_query_as_different_identity(
     tmp_path: Path,
-):
+) -> None:
     # Regression: a query string can select a tenant/feed, not just carry
     # a credential -- two URLs sharing a host and path but differing only
     # by query parameter must be treated as genuinely different indexes,
@@ -2313,7 +2477,7 @@ def test_provenance_matches_treats_differing_query_as_different_identity(
     assert not btl._provenance_matches(venv_dir, "https://example.internal/simple/")
 
 
-def test_opaque_index_identity_is_not_reversible_to_the_raw_url():
+def test_opaque_index_identity_is_not_reversible_to_the_raw_url() -> None:
     digest = btl._opaque_index_identity(_credentialed_url("example.internal/simple/"))
     assert "hunter2" not in digest
     assert "produser" not in digest
@@ -2326,7 +2490,7 @@ def test_opaque_index_identity_is_not_reversible_to_the_raw_url():
 
 def test_opaque_index_identity_is_keyed_not_a_bare_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a bare `hashlib.sha256(url)` digest is an
     # offline-crackable verifier for a low-entropy embedded credential --
     # most of a governed-feed URL is predictable, so an attacker holding
@@ -2348,7 +2512,7 @@ def test_opaque_index_identity_is_keyed_not_a_bare_hash(
 
 def test_provenance_key_persists_and_is_reused_across_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # The key must be generated once per machine and REUSED, not re-rolled
     # per call -- otherwise the same (index, python) identity would never
     # compare equal across separate invocations, breaking
@@ -2371,7 +2535,7 @@ def test_provenance_key_persists_and_is_reused_across_calls(
 
 def test_provenance_key_hardens_acl_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the key is just as credential-bearing as the
     # index-config temp file it protects -- 0o600 mode bits alone are not
     # an owner-only ACL on Windows, so it must go through the same
@@ -2380,7 +2544,7 @@ def test_provenance_key_hardens_acl_on_windows(
     monkeypatch.setattr(gft.sys, "platform", "win32")
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -2400,7 +2564,7 @@ def test_provenance_key_hardens_acl_on_windows(
 
 def test_provenance_key_concurrent_callers_converge_on_one_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: two concurrent first-run callers must
     # both end up with the EXACT SAME key, never each publishing their
     # own and silently disagreeing. A real-thread test (not a mocked
@@ -2414,7 +2578,7 @@ def test_provenance_key_concurrent_callers_converge_on_one_key(
     results_lock = threading.Lock()
     barrier = threading.Barrier(4)
 
-    def worker():
+    def worker() -> None:
         barrier.wait()  # maximize actual contention on the lockfile
         key = gft._provenance_key()
         with results_lock:
@@ -2433,7 +2597,7 @@ def test_provenance_key_concurrent_callers_converge_on_one_key(
 
 def test_provenance_key_stale_lock_file_left_by_crashed_process_does_not_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a lock FILE left behind on disk by a crashed process
     # must not block a new caller -- `_provenance_key_lock` is OS-backed
     # (a Windows byte-range file lock / POSIX flock), which the OS itself
@@ -2451,7 +2615,7 @@ def test_provenance_key_stale_lock_file_left_by_crashed_process_does_not_block(
 
 def test_provenance_key_times_out_when_lock_genuinely_held(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # A GENUINELY held lock (a real thread/process still inside the
     # critical section, not merely a leftover file) must still cause a
     # bounded, fail-closed timeout rather than hanging indefinitely.
@@ -2465,7 +2629,7 @@ def test_provenance_key_times_out_when_lock_genuinely_held(
     holder_ready = threading.Event()
     release_holder = threading.Event()
 
-    def hold_lock():
+    def hold_lock() -> None:
         with gft._provenance_key_lock():
             holder_ready.set()
             release_holder.wait(timeout=5)
@@ -2481,7 +2645,7 @@ def test_provenance_key_times_out_when_lock_genuinely_held(
         holder_thread.join(timeout=5)
 
 
-def test_credential_free_index_identity_strips_userinfo_only():
+def test_credential_free_index_identity_strips_userinfo_only() -> None:
     assert (
         btl._credential_free_index_identity(
             _credentialed_url("example.internal:8443/simple/")
@@ -2495,7 +2659,7 @@ def test_credential_free_index_identity_strips_userinfo_only():
     )
 
 
-def test_credential_free_index_identity_strips_query_and_fragment():
+def test_credential_free_index_identity_strips_query_and_fragment() -> None:
     # Regression: a governed feed may use a signed URL with credentials
     # carried in the query string (e.g. `?token=...`) or fragment, not
     # just userinfo -- both must be stripped before the value is ever
@@ -2522,10 +2686,10 @@ def test_credential_free_index_identity_strips_query_and_fragment():
 
 def test_resolve_toolchain_lock_venv_creation_failure_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no governed feed")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -2535,11 +2699,11 @@ def test_resolve_toolchain_lock_venv_creation_failure_raises(
 
 def test_resolve_toolchain_lock_install_failure_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -2554,14 +2718,14 @@ def test_resolve_toolchain_lock_install_failure_raises(
 
 def test_resolve_toolchain_lock_query_nonzero_exit_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     venv_python.write_text("", encoding="utf-8")
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -2571,14 +2735,14 @@ def test_resolve_toolchain_lock_query_nonzero_exit_raises(
 
 def test_resolve_toolchain_lock_query_malformed_json_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     venv_python.write_text("", encoding="utf-8")
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 0, stdout="not json", stderr="")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -2588,7 +2752,7 @@ def test_resolve_toolchain_lock_query_malformed_json_raises(
 
 def test_resolve_toolchain_lock_missing_package_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     # Regression: a locked venv genuinely missing one of the two required
     # packages (e.g. a previous partial/failed install) must fail closed
@@ -2598,7 +2762,7 @@ def test_resolve_toolchain_lock_missing_package_raises(
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     venv_python.write_text("", encoding="utf-8")
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(
             cmd, 0, stdout=_toolchain_query_stdout({"setuptools": "84.1.0"}), stderr=""
         )
@@ -2613,7 +2777,7 @@ def test_resolve_toolchain_lock_missing_package_raises(
 _TRUST_VAR = bpa._TRUSTED_INDEX_HOSTS_ENV_VAR
 
 
-def test_governed_feed_configured_via_default_index_env_vars():
+def test_governed_feed_configured_via_default_index_env_vars() -> None:
     assert bpa._governed_feed_configured(
         env={"UV_INDEX_URL": "https://example.internal/simple/", _TRUST_VAR: "example.internal"}
     )
@@ -2623,14 +2787,14 @@ def test_governed_feed_configured_via_default_index_env_vars():
 
 
 @pytest.mark.parametrize("host", ["packages.example", "other.example"])
-def test_governed_feed_configured_without_per_host_allowance(host):
+def test_governed_feed_configured_without_per_host_allowance(host: str) -> None:
     env = {"UV_DEFAULT_INDEX": f"https://{host}/simple/"}
     assert bpa._governed_feed_configured(env=env)
     env[_TRUST_VAR] = "obsolete.example"
     assert bpa._governed_feed_configured(env=env)
 
 
-def test_governed_feed_not_configured_via_supplemental_uv_index_alone():
+def test_governed_feed_not_configured_via_supplemental_uv_index_alone() -> None:
     # Regression: UV_INDEX (plural) only adds a SUPPLEMENTAL index -- `uv`
     # still falls back to public PyPI for anything it doesn't resolve, so
     # this alone must never satisfy the governed-feed-only contract, even
@@ -2640,7 +2804,7 @@ def test_governed_feed_not_configured_via_supplemental_uv_index_alone():
     )
 
 
-def test_governed_feed_not_configured_when_default_index_is_public_pypi():
+def test_governed_feed_not_configured_when_default_index_is_public_pypi() -> None:
     # Regression: an explicitly configured default that just points AT
     # public PyPI itself is not a governed feed, even if (implausibly)
     # pypi.org were ever listed in the trust policy.
@@ -2652,13 +2816,13 @@ def test_governed_feed_not_configured_when_default_index_is_public_pypi():
     )
 
 
-def test_governed_feed_not_configured_with_empty_env():
+def test_governed_feed_not_configured_with_empty_env() -> None:
     assert not bpa._governed_feed_configured(env={})
 
 
 def test_governed_feed_configured_via_user_uv_toml_index_url_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(bpa.sys, "platform", "win32")
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
@@ -2670,7 +2834,7 @@ def test_governed_feed_configured_via_user_uv_toml_index_url_windows(
 
 def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(bpa.sys, "platform", "linux")
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
@@ -2695,7 +2859,7 @@ def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
 
 def test_effective_uv_toml_candidates_windows_includes_programdata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a system-level uv.toml (%PROGRAMDATA%) must also be
     # discovered -- matching this repo's own install.ps1 precedent
     # (Test-UvConfiguredIndex) -- not just the user-level %APPDATA% path.
@@ -2714,7 +2878,7 @@ def test_effective_uv_toml_candidates_windows_includes_programdata(
 
 def test_governed_feed_configured_via_programdata_uv_toml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(bpa.sys, "platform", "win32")
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
@@ -2731,7 +2895,7 @@ def _posix_xdg_entry(path: Path) -> str:
 
 def test_effective_uv_toml_candidates_posix_includes_system_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # Regression: a system-level uv.toml must also be discovered --
     # matching this repo's own install.sh precedent (_ensure_uv_index),
     # not just the user-level path. `uv` itself resolves system config to
@@ -2754,7 +2918,7 @@ def test_effective_uv_toml_candidates_posix_includes_system_paths(
 
 def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # Regression: a SET `XDG_CONFIG_DIRS`
     # (colon-separated, in listed order) must be consulted instead of the
     # hardcoded `/etc/xdg` default -- matching uv's own
@@ -2778,7 +2942,7 @@ def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
 
 def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(btl.sys, "platform", "linux")
     only_dir = tmp_path / "only"
@@ -2793,7 +2957,7 @@ def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entrie
 
 def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: with multiple `XDG_CONFIG_DIRS` entries, the
     # FIRST one that actually exists is used -- a later entry (or
     # `/etc/uv/uv.toml`) must never be consulted once an earlier one is
@@ -2814,7 +2978,7 @@ def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
 
 def test_effective_default_index_url_does_not_fall_through_past_chosen_system_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: once the system tier's first EXISTING file
     # is chosen, a DIFFERENT (lower-priority) system file must never be
     # consulted even if the chosen one simply has no index configured --
@@ -2836,7 +3000,7 @@ def test_effective_default_index_url_does_not_fall_through_past_chosen_system_fi
 
 def test_governed_feed_not_configured_via_supplemental_index_table_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: an `[[index]]` entry with no `default = true` only adds
     # a supplemental index -- `uv` still falls back to public PyPI for the
     # default, so this alone must not satisfy the gate.
@@ -2854,7 +3018,7 @@ def test_governed_feed_not_configured_via_supplemental_index_table_only(
 
 def test_governed_feed_not_configured_when_uv_toml_default_index_is_public_pypi(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(bpa.sys, "platform", "win32")
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
@@ -2866,7 +3030,7 @@ def test_governed_feed_not_configured_when_uv_toml_default_index_is_public_pypi(
 
 def test_governed_feed_not_configured_when_uv_toml_has_no_index(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(bpa.sys, "platform", "win32")
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
@@ -2878,7 +3042,7 @@ def test_governed_feed_not_configured_when_uv_toml_has_no_index(
 
 def test_governed_feed_not_configured_ignores_malformed_uv_toml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # A malformed uv.toml must never be silently treated as "configured" --
     # fail closed the same as "absent".
     monkeypatch.setattr(bpa.sys, "platform", "win32")
@@ -2892,14 +3056,14 @@ def test_governed_feed_not_configured_ignores_malformed_uv_toml(
 
 def test_resolve_toolchain_lock_refuses_when_no_governed_feed_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: with no configured governed feed at all, resolving the
     # toolchain must fail closed rather than let `uv pip install` silently
     # resolve setuptools/wheel from public PyPI.
     monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: None)  # noqa: ARG005
     calls: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -2914,7 +3078,7 @@ def test_resolve_toolchain_lock_refuses_when_no_governed_feed_configured(
 
 def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a FIRST attempt where `uv venv` succeeds but `uv pip
     # install` fails (simulating an interrupted/failed setup) must not
     # leave behind a venv that looks complete -- a retry must redo both
@@ -2923,7 +3087,7 @@ def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
     venv_dir = tmp_path / "toolchain-venv"
     attempt = {"n": 0}
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -2952,7 +3116,7 @@ def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
 
 def test_resolve_toolchain_lock_never_publishes_venv_failing_version_query(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: if the installed-versions query fails against the
     # STAGING venv (malformed output, a missing package), the venv must
     # never be published (marker written + renamed) -- otherwise every
@@ -2962,7 +3126,7 @@ def test_resolve_toolchain_lock_never_publishes_venv_failing_version_query(
     venv_dir = tmp_path / "toolchain-venv"
     attempt = {"n": 0}
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3005,11 +3169,11 @@ def test_resolve_toolchain_lock_never_publishes_venv_failing_version_query(
 
 def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3034,7 +3198,7 @@ def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
 
 def test_build_wheel_with_toolchain_uses_no_build_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     out_dir = tmp_path / "dist"
     src_dir = tmp_path / "src"
     src_dir.mkdir()
@@ -3046,7 +3210,7 @@ def test_build_wheel_with_toolchain_uses_no_build_isolation(
     )
     seen_cmd: list[str] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[0] == str(toolchain.venv_python):
             return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         seen_cmd.extend(cmd)
@@ -3068,7 +3232,7 @@ def test_build_wheel_with_toolchain_uses_no_build_isolation(
 
 def test_governed_feed_uv_config_file_is_exclusive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: UV_CONFIG_FILE disables uv's normal config discovery --
     # a governed user-level uv.toml must NOT be consulted once it's set,
     # even though it exists and would otherwise satisfy the gate (and
@@ -3090,7 +3254,7 @@ def test_governed_feed_uv_config_file_is_exclusive(
 
 def test_governed_feed_uv_config_file_governed_is_honored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(bpa.sys, "platform", "win32")
     explicit_config = tmp_path / "explicit-uv.toml"
     explicit_config.write_text(
@@ -3106,7 +3270,7 @@ def test_governed_feed_uv_config_file_governed_is_honored(
 
 def test_governed_feed_project_uv_toml_takes_precedence_over_user(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a project-level uv.toml (found by walking up from the
     # current working directory) must be consulted BEFORE user-/system-
     # level config, and its own index wins even when a DIFFERENT
@@ -3130,7 +3294,7 @@ def test_governed_feed_project_uv_toml_takes_precedence_over_user(
 
 def test_governed_feed_project_pyproject_tool_uv_section_is_honored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # A pyproject.toml's own [tool.uv] table is the project-level
     # equivalent of a dedicated uv.toml, nested under `tool.uv` rather
     # than top-level.
@@ -3146,7 +3310,7 @@ def test_governed_feed_project_pyproject_tool_uv_section_is_honored(
 
 def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # A pyproject.toml with no [tool.uv] table at all carries no uv
     # config -- must not be mistaken for an empty-but-present index.
     # Regression: since this gate no longer stops at such a
@@ -3166,7 +3330,7 @@ def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
 
 def test_project_uv_toml_candidates_continues_past_pyproject_without_tool_uv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `uv` itself ignores a `pyproject.toml` with
     # no `[tool.uv]` table and keeps searching parent directories -- this
     # must never be returned as a candidate, so a child/leaf package's
@@ -3185,7 +3349,7 @@ def test_project_uv_toml_candidates_continues_past_pyproject_without_tool_uv(
 
 def test_project_uv_toml_candidates_stops_at_malformed_pyproject(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a malformed/unreadable `pyproject.toml`
     # must STOP the walk (returned as a candidate anyway), never be
     # skipped the way a validly-parsed-but-`[tool.uv]`-less one is --
@@ -3204,7 +3368,7 @@ def test_project_uv_toml_candidates_stops_at_malformed_pyproject(
 
 def test_governed_feed_malformed_pyproject_fails_closed_not_parent_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Same regression, exercised end-to-end: `_effective_default_index_url`
     # must fail closed (None) rather than silently certifying the PARENT
     # directory's own, otherwise-valid index.
@@ -3221,7 +3385,7 @@ def test_governed_feed_malformed_pyproject_fails_closed_not_parent_fallback(
 
 def test_governed_feed_project_discovery_skips_nested_pyproject_without_tool_uv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Same regression as above, exercised end-to-end through
     # `_effective_default_index_url`: the real parent project's own
     # `uv.toml` must still be found and honored.
@@ -3242,7 +3406,7 @@ def test_governed_feed_project_discovery_skips_nested_pyproject_without_tool_uv(
 
 def test_governed_feed_project_discovery_skipped_when_uv_config_file_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # UV_CONFIG_FILE's exclusivity (uv skips ALL normal discovery once
     # set) must suppress project-level discovery too, not just user/
     # system config.
@@ -3261,7 +3425,7 @@ def test_governed_feed_project_discovery_skipped_when_uv_config_file_set(
 
 def test_governed_feed_malformed_project_config_fails_closed_not_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a malformed HIGHER-precedence config (one that exists
     # at a real tier `uv` itself would read) must never be skipped in
     # favor of a lower-precedence one -- `uv` itself would not silently
@@ -3286,13 +3450,13 @@ def test_governed_feed_malformed_project_config_fails_closed_not_fallback(
 # --- Test PyPI is treated as public --------------------------------------
 
 
-def test_governed_feed_not_configured_when_default_index_is_test_pypi():
+def test_governed_feed_not_configured_when_default_index_is_test_pypi() -> None:
     assert not bpa._governed_feed_configured(
         env={"UV_DEFAULT_INDEX": "https://test.pypi.org/simple", _TRUST_VAR: "test.pypi.org"}
     )
 
 
-def test_governed_feed_not_configured_when_public_pypi_host_has_trailing_dot():
+def test_governed_feed_not_configured_when_public_pypi_host_has_trailing_dot() -> None:
     # Regression: a fully-qualified hostname ending in "." (DNS-equivalent
     # to the same host without it) must not bypass the public-PyPI
     # denylist, even if that exact spelling is listed as trusted.
@@ -3304,7 +3468,7 @@ def test_governed_feed_not_configured_when_public_pypi_host_has_trailing_dot():
     )
 
 
-def test_governed_feed_configured_when_trusted_host_has_trailing_dot_either_side():
+def test_governed_feed_configured_when_trusted_host_has_trailing_dot_either_side() -> None:
     # The normalization must work symmetrically: a trusted-list entry with
     # a trailing dot must still match an index URL host without one, and
     # vice versa.
@@ -3319,7 +3483,7 @@ def test_governed_feed_configured_when_trusted_host_has_trailing_dot_either_side
 # --- HTTPS is required even for a trusted hostname ------------------------
 
 
-def test_governed_feed_not_configured_when_trusted_host_is_plain_http():
+def test_governed_feed_not_configured_when_trusted_host_is_plain_http() -> None:
     # Regression: an allowlisted HOSTNAME is not itself proof of identity
     # over a plaintext connection -- a network attacker able to intercept
     # `http://<trusted-host>/...` could impersonate the real governed feed.
@@ -3328,7 +3492,7 @@ def test_governed_feed_not_configured_when_trusted_host_is_plain_http():
     )
 
 
-def test_governed_feed_configured_when_trusted_host_is_https():
+def test_governed_feed_configured_when_trusted_host_is_https() -> None:
     assert bpa._governed_feed_configured(
         env={"UV_DEFAULT_INDEX": "https://example.internal/simple", _TRUST_VAR: "example.internal"}
     )
@@ -3339,7 +3503,7 @@ def test_governed_feed_configured_when_trusted_host_is_https():
 
 def test_resolve_toolchain_lock_defers_to_winner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: if another process publishes a complete venv at the same
     # venv_dir between our own absence check and our own publish, we must
     # NOT delete/replace that live venv -- discard our own staging copy
@@ -3348,7 +3512,7 @@ def test_resolve_toolchain_lock_defers_to_winner(
     venv_dir = tmp_path / "toolchain-venv"
     sentinel = venv_dir / "WINNER"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_dir = Path(cmd[3])
             staging_python = bpa._venv_python_path(staging_dir)
@@ -3383,7 +3547,7 @@ def test_resolve_toolchain_lock_defers_to_winner(
 
 def test_resolve_toolchain_lock_different_identity_race_redirects_to_alternate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a rename failure caused by a DIFFERENT
     # identity winning the race must NOT fail closed -- two concurrent
     # callers validating DIFFERENT indexes can both observe an absent
@@ -3396,7 +3560,7 @@ def test_resolve_toolchain_lock_different_identity_race_redirects_to_alternate(
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_dir = Path(cmd[3])
             staging_python = bpa._venv_python_path(staging_dir)
@@ -3436,7 +3600,7 @@ def test_resolve_toolchain_lock_different_identity_race_redirects_to_alternate(
 
 def test_resolve_toolchain_lock_fails_closed_on_mismatch_at_alternate_slot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a mismatch found AT an identity-keyed alternate path
     # (never the original shared slot) is a genuine anomaly, not an
     # expected race -- this must still fail closed, exactly like the
@@ -3452,7 +3616,7 @@ def test_resolve_toolchain_lock_fails_closed_on_mismatch_at_alternate_slot(
     btl._write_provenance_marker(venv_dir, "https://different.example/simple/", "")
     alt_dir = btl._alternate_toolchain_dir(venv_dir, "https://example.internal/simple/", "")
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_dir = Path(cmd[3])
             staging_python = bpa._venv_python_path(staging_dir)
@@ -3481,7 +3645,7 @@ def test_resolve_toolchain_lock_fails_closed_on_mismatch_at_alternate_slot(
 
 def test_resolve_toolchain_lock_rechecks_occupancy_after_interpreter_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the occupied-by-other-identity check must
     # happen as the LAST thing before the reuse/build decision -- AFTER
     # interpreter-identity resolution (which can itself take real time,
@@ -3496,7 +3660,7 @@ def test_resolve_toolchain_lock_rechecks_occupancy_after_interpreter_resolution(
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
-    def fake_resolve_interpreter_identity(python, env):  # noqa: ARG001
+    def fake_resolve_interpreter_identity(python: str | None, env: dict[str, str]) -> str:  # noqa: ARG001
         winner_python = bpa._venv_python_path(venv_dir)
         winner_python.parent.mkdir(parents=True, exist_ok=True)
         winner_python.write_text("", encoding="utf-8")
@@ -3505,7 +3669,7 @@ def test_resolve_toolchain_lock_rechecks_occupancy_after_interpreter_resolution(
 
     monkeypatch.setattr(btl, "_resolve_interpreter_identity", fake_resolve_interpreter_identity)
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3530,12 +3694,12 @@ def test_resolve_toolchain_lock_rechecks_occupancy_after_interpreter_resolution(
     assert btl._provenance_matches(venv_dir, "https://different.example/simple/", "")
 
 
-def test_target_dir_for_identity_returns_venv_dir_when_absent(tmp_path: Path):
+def test_target_dir_for_identity_returns_venv_dir_when_absent(tmp_path: Path) -> None:
     venv_dir = tmp_path / "toolchain-venv"
     assert btl._target_dir_for_identity(venv_dir, "https://example.internal/simple/", "") == venv_dir
 
 
-def test_target_dir_for_identity_returns_venv_dir_when_matching(tmp_path: Path):
+def test_target_dir_for_identity_returns_venv_dir_when_matching(tmp_path: Path) -> None:
     venv_dir = tmp_path / "toolchain-venv"
     bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
     bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
@@ -3543,7 +3707,7 @@ def test_target_dir_for_identity_returns_venv_dir_when_matching(tmp_path: Path):
     assert btl._target_dir_for_identity(venv_dir, "https://example.internal/simple/", "") == venv_dir
 
 
-def test_target_dir_for_identity_redirects_when_occupied_by_other_identity(tmp_path: Path):
+def test_target_dir_for_identity_redirects_when_occupied_by_other_identity(tmp_path: Path) -> None:
     venv_dir = tmp_path / "toolchain-venv"
     bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
     bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
@@ -3554,7 +3718,7 @@ def test_target_dir_for_identity_redirects_when_occupied_by_other_identity(tmp_p
     ) == expected_alt
 
 
-def test_target_dir_for_identity_fails_closed_on_mismatch_at_alternate_slot(tmp_path: Path):
+def test_target_dir_for_identity_fails_closed_on_mismatch_at_alternate_slot(tmp_path: Path) -> None:
     venv_dir = tmp_path / "toolchain-venv"
     bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
     bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
@@ -3569,7 +3733,7 @@ def test_target_dir_for_identity_fails_closed_on_mismatch_at_alternate_slot(tmp_
 
 def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a rename failure must not be silently swallowed as if a
     # concurrent publisher always won -- if the destination never actually
     # appeared (a genuine permission/filesystem/invalid-destination
@@ -3578,7 +3742,7 @@ def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3590,7 +3754,7 @@ def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
 
     real_rename = Path.rename
 
-    def failing_rename(self, target):  # noqa: ARG001
+    def failing_rename(self: Path, target: str | os.PathLike[str]) -> NoReturn:  # noqa: ARG001
         raise OSError("simulated permission error")
 
     monkeypatch.setattr(Path, "rename", failing_rename)
@@ -3605,7 +3769,7 @@ def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
 
 def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the staging directory name must be genuinely unique per
     # call (tempfile.mkdtemp), not merely PID-qualified -- two calls in
     # the SAME process (simulating two threads sharing a PID) must never
@@ -3613,7 +3777,7 @@ def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
     _assume_governed_feed_configured(monkeypatch)
     staging_dirs_seen: list[str] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_dirs_seen.append(cmd[3])
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -3638,7 +3802,7 @@ def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
 
 def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the validated index URL must never appear in
     # the `uv pip install` subprocess's own argv (visible in process
     # listings). Instead it is written to a minimal, sanitized temp uv
@@ -3664,7 +3828,7 @@ def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
     install_kwargs = []
     config_texts_at_install_time = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3710,7 +3874,7 @@ def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
 
 def test_resolve_toolchain_lock_pins_named_index_and_preserves_credential_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a NAMED `[[index]]` entry's `name` must be
     # written into the sanitized temp config too, so a
     # `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-authenticated index can still
@@ -3728,7 +3892,7 @@ def test_resolve_toolchain_lock_pins_named_index_and_preserves_credential_env(
     install_kwargs = []
     config_texts_at_install_time = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3761,7 +3925,7 @@ def test_resolve_toolchain_lock_pins_named_index_and_preserves_credential_env(
 
 def test_resolve_toolchain_lock_cleans_up_sanitized_config_on_install_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the temp sanitized config file must be cleaned up even
     # when `uv pip install` itself fails, not just on the success path.
     monkeypatch.setattr(
@@ -3772,7 +3936,7 @@ def test_resolve_toolchain_lock_cleans_up_sanitized_config_on_install_failure(
     venv_dir = tmp_path / "toolchain-venv"
     seen_config_paths: list[Path] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -3796,7 +3960,7 @@ def test_resolve_toolchain_lock_cleans_up_sanitized_config_on_install_failure(
 
 def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `--no-config` does not suppress `UV_CONSTRAINT`/
     # `UV_OVERRIDE`/`UV_BUILD_CONSTRAINT` -- any of these could redirect
     # the setuptools/wheel/packaging install to a direct URL regardless of
@@ -3810,9 +3974,9 @@ def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
     monkeypatch.setenv("UV_OVERRIDE", "https://untrusted.example/overrides.txt")
     monkeypatch.setenv("UV_BUILD_CONSTRAINT", "https://untrusted.example/build-constraints.txt")
     venv_dir = tmp_path / "toolchain-venv"
-    seen_envs: list[dict] = []
+    seen_envs: list[dict[str, str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_envs.append(kwargs.get("env") or {})
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -3838,7 +4002,7 @@ def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
 
 def test_resolve_toolchain_lock_strips_uv_insecure_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `uv` honors `UV_INSECURE_HOST` to disable TLS
     # certificate verification for a named host -- left ambient, it could
     # let a network attacker impersonate even an allowlisted, HTTPS-only
@@ -3851,9 +4015,9 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
     monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: python or "")
     monkeypatch.setenv("UV_INSECURE_HOST", "governed.example")
     venv_dir = tmp_path / "toolchain-venv"
-    seen_envs: list[dict] = []
+    seen_envs: list[dict[str, str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_envs.append(kwargs.get("env") or {})
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -3878,7 +4042,7 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
 # --- shared strip helper + final-build credential stripping ----
 
 
-def test_strip_package_source_env_vars_keeps_credentials_by_default():
+def test_strip_package_source_env_vars_keeps_credentials_by_default() -> None:
     env = {
         "UV_INDEX": "x", "UV_INDEX_URL": "x", "UV_INSECURE_HOST": "x",
         "UV_INDEX_GOVERNED_USERNAME": "svc", "UV_INDEX_GOVERNED_PASSWORD": "tok",
@@ -3893,7 +4057,7 @@ def test_strip_package_source_env_vars_keeps_credentials_by_default():
     assert env["OTHER"] == "keep"
 
 
-def test_strip_package_source_env_vars_with_strip_credentials():
+def test_strip_package_source_env_vars_with_strip_credentials() -> None:
     env = {
         "UV_INDEX_URL": "x",
         "UV_INDEX_GOVERNED_USERNAME": "svc",
@@ -3911,7 +4075,7 @@ def test_strip_package_source_env_vars_with_strip_credentials():
 
 def test_build_wheel_strips_index_credentials_with_toolchain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `--no-build-isolation` means this build needs
     # NO index access at all -- yet the build BACKEND executes arbitrary
     # code from the source tree, which would otherwise still observe an
@@ -3924,9 +4088,9 @@ def test_build_wheel_strips_index_credentials_with_toolchain(
     (source_dir / "pyproject.toml").write_text(
         '[build-system]\nrequires = []\n', encoding="utf-8"
     )
-    build_envs: list[dict] = []
+    build_envs: list[dict[str, str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "build"]:
             build_envs.append(kwargs.get("env") or {})
             out_dir = Path(cmd[cmd.index("-o") + 1])
@@ -3956,7 +4120,7 @@ def test_build_wheel_strips_index_credentials_with_toolchain(
 
 def test_build_wheel_keeps_index_credentials_without_toolchain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Without a locked toolchain, this falls back to uv's normal ISOLATED
     # build, which genuinely needs index access to resolve build-system
     # requires -- credentials must NOT be stripped in that path.
@@ -3966,9 +4130,9 @@ def test_build_wheel_keeps_index_credentials_without_toolchain(
     (source_dir / "pyproject.toml").write_text(
         '[build-system]\nrequires = []\n', encoding="utf-8"
     )
-    seen_envs: list[dict] = []
+    seen_envs: list[dict[str, str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_envs.append(kwargs.get("env") or {})
         if cmd[:2] == ["uv", "build"]:
             out_dir = Path(cmd[cmd.index("-o") + 1])
@@ -3987,12 +4151,17 @@ def test_build_wheel_keeps_index_credentials_without_toolchain(
 
 def test_restrict_file_to_owner_is_noop_on_posix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setattr(btl.sys, "platform", "linux")
     calls: list[list[str]] = []
+
+    def record_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
     monkeypatch.setattr(
         btl.subprocess, "run",
-        lambda cmd, **kwargs: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),  # noqa: ARG005
+        record_run,
     )
     btl._restrict_file_to_owner(tmp_path / "secret.toml")
     assert calls == []
@@ -4001,7 +4170,7 @@ def test_restrict_file_to_owner_is_noop_on_posix(
 @pytest.mark.parametrize("directory", [False, True])
 def test_restrict_file_to_owner_invokes_icacls_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, directory: bool,
-):
+) -> None:
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
     monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
@@ -4012,7 +4181,7 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
         target.touch()
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         if cmd == [_ICACLS_PATH, str(target)]:
             return subprocess.CompletedProcess(
@@ -4048,7 +4217,7 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
 
 def test_restrict_file_to_owner_ignores_forged_environment_variables(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `USERDOMAIN`/`USERNAME` are ordinary,
     # caller-controlled process environment, not an authenticated
     # property of the process token -- a forged value here must NOT be
@@ -4060,7 +4229,7 @@ def test_restrict_file_to_owner_ignores_forged_environment_variables(
     monkeypatch.setenv("USERNAME", "attacker")
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -4075,7 +4244,7 @@ def test_restrict_file_to_owner_ignores_forged_environment_variables(
 
 def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(
         btl.subprocess, "run",
@@ -4087,14 +4256,14 @@ def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
 
 def test_restrict_file_to_owner_fails_closed_when_identity_cannot_be_resolved(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # Regression: a credential-bearing file must never be
     # ACL'd against an identity this process could not itself confirm --
     # if `_current_token_identity` cannot resolve one (e.g. `whoami`
     # itself failed), `_restrict_file_to_owner` must fail closed too.
     monkeypatch.setattr(btl.sys, "platform", "win32")
 
-    def fake_identity():
+    def fake_identity() -> NoReturn:
         raise bpa.ArtifactBuildError("could not resolve the current process token's identity")
 
     monkeypatch.setattr(gft, "_current_token_identity", fake_identity)
@@ -4104,7 +4273,7 @@ def test_restrict_file_to_owner_fails_closed_when_identity_cannot_be_resolved(
 
 def test_restrict_file_to_owner_rejects_similarly_named_principal(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # Regression: the final verification must compare the
     # EXACT, normalized principal name, never a substring -- an icacls
     # query listing `REDMOND\svc-backup` must NOT be accepted just
@@ -4114,7 +4283,7 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
     monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[-1] == str(target) and len(cmd) == 2:
             # the final bare verify query
             return subprocess.CompletedProcess(
@@ -4135,7 +4304,7 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
 
 def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # Regression: a principal merely CONTAINING the substring
     # "system" (e.g. a local account literally named that) must not be
     # mistaken for `NT AUTHORITY\SYSTEM` by a loose substring check.
@@ -4144,7 +4313,7 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[-1] == str(target) and len(cmd) == 2:
             return subprocess.CompletedProcess(
                 cmd, 0,
@@ -4163,7 +4332,7 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
 
 def test_verify_restricted_acl_fails_closed_on_empty_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # Regression: empty or unparseable `icacls` output must
     # NOT vacuously pass verification just because nothing UNEXPECTED was
     # found in it -- both expected principals must actually be OBSERVED.
@@ -4179,7 +4348,7 @@ def test_verify_restricted_acl_fails_closed_on_empty_output(
 
 def test_verify_restricted_acl_fails_closed_when_only_one_expected_principal_present(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # A transcript naming ONLY the owner (SYSTEM genuinely absent) must
     # also fail closed -- not just the "zero principals" case above.
     target = tmp_path / "secret.toml"
@@ -4196,7 +4365,7 @@ def test_verify_restricted_acl_fails_closed_when_only_one_expected_principal_pre
 
 def test_verify_restricted_acl_passes_with_both_expected_principals(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     target = tmp_path / "secret.toml"
     monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     monkeypatch.setattr(
@@ -4215,7 +4384,7 @@ def test_verify_restricted_acl_passes_with_both_expected_principals(
 
 def test_current_token_identity_parses_whoami_output(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # Exercises the REAL `_current_token_identity` (the autouse fixture
     # mocks it for every other test) against a canned `whoami /user`
     # response.
@@ -4231,7 +4400,7 @@ def test_current_token_identity_parses_whoami_output(
 
 def test_current_token_identity_fails_closed_when_whoami_fails(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
     monkeypatch.setattr(
         gft.subprocess, "run",
@@ -4243,7 +4412,7 @@ def test_current_token_identity_fails_closed_when_whoami_fails(
 
 def test_current_token_identity_fails_closed_on_unparseable_output(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
     monkeypatch.setattr(
         gft.subprocess, "run",
@@ -4255,7 +4424,7 @@ def test_current_token_identity_fails_closed_on_unparseable_output(
 
 def test_current_token_identity_fails_closed_on_implausible_sid(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # `whoami` succeeding with a well-formed CSV row whose second column
     # isn't actually SID-shaped must still be rejected -- a parse SUCCESS
     # is not the same as a plausible identity.
@@ -4272,7 +4441,7 @@ def test_current_token_identity_fails_closed_on_implausible_sid(
 
 def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # Regression: invoking `whoami` by a bare name does not
     # authenticate the executable -- Windows resolves it through the
     # current directory/`PATH`, where a substituted `whoami.exe` could
@@ -4281,7 +4450,7 @@ def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
     monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout=_whoami_user_stdout(), stderr="")
 
@@ -4292,7 +4461,7 @@ def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
 
 @pytest.mark.windows_only
 @pytest.mark.skipif(sys.platform != "win32", reason="requires a real Windows System32")
-def test_trusted_system32_tool_resolves_absolute_path():
+def test_trusted_system32_tool_resolves_absolute_path() -> None:
     # Exercises the REAL resolver (the autouse fixture fakes it for every
     # other test) -- only meaningful, and only safe to assert
     # `.is_file()` for, on an actual Windows machine.
@@ -4304,7 +4473,7 @@ def test_trusted_system32_tool_resolves_absolute_path():
 
 def test_trusted_system32_tool_fails_closed_when_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # A resolved system directory that does not actually contain the
     # requested tool must fail closed rather than fall back to a bare,
     # PATH-resolved name.
@@ -4317,7 +4486,7 @@ def test_trusted_system32_tool_fails_closed_when_missing(
 @pytest.mark.skipif(sys.platform != "win32", reason="requires a real Windows System32")
 def test_trusted_system32_tool_ignores_forged_system_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     # Regression: `SystemRoot` is itself caller-controlled
     # process environment -- an attacker-forged value pointing at a
     # directory with substituted executables must NOT be consulted at
@@ -4334,7 +4503,7 @@ def test_trusted_system32_tool_ignores_forged_system_root(
 
 @pytest.mark.windows_only
 @pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
-def test_well_known_sid_display_name_resolves_system_account():
+def test_well_known_sid_display_name_resolves_system_account() -> None:
     # Exercises the real `LookupAccountSidW`/`ConvertStringSidToSidW`
     # resolution for the well-known SYSTEM SID.
     name = gft._well_known_sid_display_name(gft._SYSTEM_ACCOUNT_SID)
@@ -4345,7 +4514,7 @@ def test_well_known_sid_display_name_resolves_system_account():
 @pytest.mark.skipif(sys.platform != "win32", reason="requires the real Windows LockFileEx path")
 def test_provenance_key_lock_excludes_a_real_child_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: `_provenance_key_lock`'s Windows branch uses a
     # `LockFileEx` byte-range lock on the lock file itself rather than a
     # named `Local\` mutex, precisely because a named mutex is scoped to
@@ -4362,8 +4531,10 @@ def test_provenance_key_lock_excludes_a_real_child_process(
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: key_dir)
     key_dir.mkdir(parents=True)
 
+    module_file = gft.__file__
+    assert module_file is not None
     child_script = (
-        "import sys; sys.path.insert(0, " + repr(str(Path(gft.__file__).parent)) + ")\n"
+        "import sys; sys.path.insert(0, " + repr(str(Path(module_file).parent)) + ")\n"
         "import pathlib\n"
         "import governed_feed_trust as gft\n"
         "gft._provenance_key_dir = lambda: pathlib.Path(" + repr(str(key_dir)) + ")\n"
@@ -4389,7 +4560,7 @@ def test_provenance_key_lock_excludes_a_real_child_process(
 
 def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the sanitized temp index-config file must be protected
     # from the moment it exists. It lives INSIDE the staging venv
     # directory, which instead hardens THAT DIRECTORY's own ACL
@@ -4404,7 +4575,7 @@ def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
     hardened_dirs: list[Path] = []
     config_existed_at_harden_time: list[bool] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:1] == [_ICACLS_PATH] and len(cmd) >= 2 and Path(cmd[1]).is_dir():
             staging_dir = Path(cmd[1])
             hardened_dirs.append(staging_dir)
@@ -4440,7 +4611,7 @@ def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
 
 def test_resolve_toolchain_lock_index_config_removed_before_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the index-config file lives INSIDE the
     # staging venv directory, which is renamed wholesale to publish it --
     # it must be removed before that rename, or it would end up
@@ -4448,7 +4619,7 @@ def test_resolve_toolchain_lock_index_config_removed_before_publish(
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
@@ -4471,7 +4642,7 @@ def test_resolve_toolchain_lock_index_config_removed_before_publish(
 
 def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: an ambient PYTHONPATH/PYTHONHOME must never reach the
     # subprocesses that invoke a specific interpreter directly -- an
     # ambient module on PYTHONPATH could otherwise shadow the locked
@@ -4487,9 +4658,9 @@ def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
     monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
     venv_dir = tmp_path / "toolchain-venv"
-    seen_envs: list[dict] = []
+    seen_envs: list[dict[str, str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_envs.append(kwargs.get("env") or {})
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -4515,12 +4686,12 @@ def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
 
 def test_query_marker_environment_strips_pythonpath_and_pythonhome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
     monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
-    seen_env = {}
+    seen_env: dict[str, str] = {}
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_env.update(kwargs.get("env") or {})
         return subprocess.CompletedProcess(
             cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
@@ -4535,16 +4706,16 @@ def test_query_marker_environment_strips_pythonpath_and_pythonhome(
 
 def test_build_wheel_strips_pythonpath_and_pythonhome_from_build_subprocess(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the final `uv build --no-build-isolation` call itself
     # inherited the caller's ambient PYTHONPATH/PYTHONHOME, letting an
     # ambient module shadow the locked setuptools even though the
     # manifest claims the locked venv was authoritative.
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
     monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
-    seen_envs: list[dict] = []
+    seen_envs: list[dict[str, str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_envs.append(kwargs.get("env") or {})
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -4612,7 +4783,7 @@ def _run_build_requires_check_inline(payload_json: str, *, file_input: bool = Fa
 
 
 @pytest.mark.parametrize("file_input", [False, True])
-def test_build_requires_checker_accepts_subprocess_stdin_and_owned_file(file_input):
+def test_build_requires_checker_accepts_subprocess_stdin_and_owned_file(file_input: bool) -> None:
     result = _run_build_requires_check_inline(json.dumps({
         "requires": ["setuptools>=60"], "locked_packages": {"setuptools": "84.1.0"},
         "marker_environment": {"python_version": "3.12", "sys_platform": "win32"},
@@ -4620,7 +4791,7 @@ def test_build_requires_checker_accepts_subprocess_stdin_and_owned_file(file_inp
     assert json.loads(result) == {"ok": True}
 
 
-def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path):
+def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_build_system_requires(source, [])
     packages = {f"dependency-{index:04d}-" + "x" * 93: "1.0" for index in range(300)}
@@ -4628,7 +4799,7 @@ def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path
     toolchain = bpa.ToolchainLock(Path(sys.executable), packages)
     payload_paths = []
 
-    def run(argv):
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         assert len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 < 32767
         if "--payload-file" in argv:
             path = Path(argv[-1])
@@ -4636,7 +4807,7 @@ def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path
             assert json.loads(path.read_text())["locked_packages"] == packages
         return _REAL_SUBPROCESS_RUN(
             argv, capture_output=True, text=True, check=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
         )
 
     btl._assert_toolchain_satisfies_build_requires(source, toolchain, run=run)
@@ -4645,8 +4816,9 @@ def test_owned_build_requires_payload_can_exceed_windows_argument_limit(tmp_path
 
 
 def _dispatch_toolchain_subprocess(
-    cmd, kwargs, toolchain, *, marker_environment: dict | None = None
-):
+    cmd: list[str], kwargs: dict[str, object], toolchain: ToolchainLock,
+    *, marker_environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Shared `fake_run` dispatcher for `build_wheel(..., toolchain=...)`
     tests below: routes the two distinct subprocess calls
     `_assert_toolchain_satisfies_build_requires` (and the
@@ -4669,21 +4841,23 @@ def _dispatch_toolchain_subprocess(
             stderr="",
         )
     assert script == btl._BUILD_REQUIRES_CHECK_SCRIPT
+    payload = kwargs["input"]
+    assert isinstance(payload, str)
     return subprocess.CompletedProcess(
-        cmd, 0, stdout=_run_build_requires_check_inline(kwargs["input"]), stderr=""
+        cmd, 0, stdout=_run_build_requires_check_inline(payload), stderr=""
     )
 
 
 def test_build_wheel_rejects_toolchain_below_declared_build_requires(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     src_dir = tmp_path / "src"
     _write_build_system_requires(src_dir, ["setuptools>=90.0.0"])
     toolchain = bpa.ToolchainLock(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4693,7 +4867,7 @@ def test_build_wheel_rejects_toolchain_below_declared_build_requires(
 
 def test_build_wheel_rejects_direct_url_build_requirement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a direct URL reference (`name @ https://...`) has an
     # EMPTY version specifier and would otherwise trivially "pass" against
     # any installed version, despite actually requiring a specific
@@ -4706,7 +4880,7 @@ def test_build_wheel_rejects_direct_url_build_requirement(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4716,7 +4890,7 @@ def test_build_wheel_rejects_direct_url_build_requirement(
 
 def test_build_wheel_rejects_build_requirement_with_extras(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: an extras clause (`name[extra]`) would otherwise "pass"
     # without the extra's own additional dependencies ever being
     # installed, since this locked toolchain only ever installs the bare
@@ -4727,7 +4901,7 @@ def test_build_wheel_rejects_build_requirement_with_extras(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4737,14 +4911,14 @@ def test_build_wheel_rejects_build_requirement_with_extras(
 
 def test_build_wheel_accepts_toolchain_meeting_declared_build_requires(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     src_dir = tmp_path / "src"
     _write_build_system_requires(src_dir, ["setuptools>=60.0.0", "wheel"])
     toolchain = bpa.ToolchainLock(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[0] == str(toolchain.venv_python):
             return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
@@ -4756,7 +4930,7 @@ def test_build_wheel_accepts_toolchain_meeting_declared_build_requires(
 
 def test_build_wheel_matches_build_requires_name_case_insensitively(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: PEP 508 names are case-insensitive, but Requirement.name
     # preserves the source's own literal spelling -- a declared
     # "Setuptools>=60" must still match the locked lowercase "setuptools"
@@ -4767,7 +4941,7 @@ def test_build_wheel_matches_build_requires_name_case_insensitively(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[0] == str(toolchain.venv_python):
             return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
@@ -4779,7 +4953,7 @@ def test_build_wheel_matches_build_requires_name_case_insensitively(
 
 def test_build_wheel_rejects_build_requires_for_packages_outside_toolchain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: an applicable requirement on a package this toolchain
     # does NOT lock at all (e.g. a project-specific build backend) must
     # fail closed, not be silently treated as satisfied -- with
@@ -4790,7 +4964,7 @@ def test_build_wheel_rejects_build_requires_for_packages_outside_toolchain(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4800,7 +4974,7 @@ def test_build_wheel_rejects_build_requires_for_packages_outside_toolchain(
 
 def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # A constraint gated behind an environment marker that doesn't apply
     # here must be skipped, not enforced.
     src_dir = tmp_path / "src"
@@ -4811,7 +4985,7 @@ def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[0] == str(toolchain.venv_python):
             # the marker-environment query against the locked interpreter
             # reports python_version "3.12", so the marker does not apply
@@ -4825,7 +4999,7 @@ def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
 
 def test_build_wheel_evaluates_markers_against_locked_interpreter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: markers must evaluate against the LOCKED interpreter's
     # own environment (queried from toolchain.venv_python), never the
     # process running this tool -- simulate a locked interpreter reporting
@@ -4839,7 +5013,7 @@ def test_build_wheel_evaluates_markers_against_locked_interpreter(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return _dispatch_toolchain_subprocess(
             cmd, kwargs, toolchain,
             marker_environment={"python_version": "2.7", "sys_platform": "win32"},
@@ -4852,11 +5026,11 @@ def test_build_wheel_evaluates_markers_against_locked_interpreter(
 
 def test_toolchain_lock_marker_environment_is_queried_once_and_cached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     toolchain = bpa.ToolchainLock(tmp_path / "venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"})
     calls = {"n": 0}
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         calls["n"] += 1
         return subprocess.CompletedProcess(
             cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
@@ -4872,8 +5046,8 @@ def test_toolchain_lock_marker_environment_is_queried_once_and_cached(
 
 def test_query_marker_environment_nonzero_exit_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4883,8 +5057,8 @@ def test_query_marker_environment_nonzero_exit_raises(
 
 def test_query_marker_environment_malformed_json_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 0, stdout="not json", stderr="")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4894,7 +5068,7 @@ def test_query_marker_environment_malformed_json_raises(
 
 def test_query_marker_environment_against_real_interpreter(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     # Regression: implementation_version must come from
     # sys.implementation.version (via the same format_full_version logic
     # packaging.markers uses), NOT platform.python_version() -- they
@@ -4916,14 +5090,14 @@ def test_query_marker_environment_against_real_interpreter(
 
 def test_build_wheel_rejects_unparseable_build_requires_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     src_dir = tmp_path / "src"
     _write_build_system_requires(src_dir, ["not a valid requirement!!!"])
     toolchain = bpa.ToolchainLock(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
@@ -4933,7 +5107,7 @@ def test_build_wheel_rejects_unparseable_build_requires_entry(
 
 def test_assert_toolchain_satisfies_build_requires_runs_check_inside_toolchain_venv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: the [build-system].requires verification must run
     # through the LOCKED toolchain's own interpreter (where `packaging` is
     # guaranteed present, since it is one of this toolchain's own locked
@@ -4949,7 +5123,7 @@ def test_assert_toolchain_satisfies_build_requires_runs_check_inside_toolchain_v
     )
     seen_cmds: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         seen_cmds.append(cmd)
         return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
@@ -4963,7 +5137,7 @@ def test_assert_toolchain_satisfies_build_requires_runs_check_inside_toolchain_v
 
 def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_lacks_packaging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a toolchain venv genuinely missing `packaging` (e.g. an
     # on-disk venv published before this toolchain locked it) must fail
     # closed through the normal subprocess-failure path, with an
@@ -4975,7 +5149,7 @@ def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_l
         {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"},
     )
 
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         if cmd[-1] == btl._MARKER_ENV_QUERY_SCRIPT:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
@@ -4992,11 +5166,11 @@ def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_l
 
 def test_build_wheel_skips_build_requires_check_without_toolchain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Unaffected baseline: without a toolchain (the direct-callers / low-
     # level isolated-build path), no pyproject.toml is needed at all --
     # this check must only engage when a toolchain is actually given.
-    def fake_run(cmd, **kwargs):  # noqa: ARG001
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:  # noqa: ARG001
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -5009,7 +5183,7 @@ def test_build_wheel_skips_build_requires_check_without_toolchain(
 
 def test_build_plugin_artifacts_rejects_generator_mismatch_with_toolchain(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a wheel whose actual Generator: does not match the
     # locked toolchain means --no-build-isolation did not really use the
     # pinned venv -- this must fail closed, not silently record a drifted
@@ -5018,7 +5192,10 @@ def test_build_plugin_artifacts_rejects_generator_mismatch_with_toolchain(
     _write_pyproject(plugin_dir)
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.1.0-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (60.0.0)")
@@ -5031,7 +5208,7 @@ def test_build_plugin_artifacts_rejects_generator_mismatch_with_toolchain(
 
 def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Regression: a caller that doesn't pass a toolchain (today's CLI
     # default) must still get a real, pinned, non-isolated build -- this
     # verifies build_plugin_artifacts resolves (and cleans up) its own
@@ -5042,7 +5219,7 @@ def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
     resolved_dirs: list[Path] = []
     parent_existed_at_call: list[bool] = []
 
-    def fake_resolve_toolchain_lock(venv_dir: Path, *, python=None):  # noqa: ARG001
+    def fake_resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:  # noqa: ARG001
         resolved_dirs.append(venv_dir)
         # Regression: the path passed must itself NOT pre-exist (a real
         # `tempfile.TemporaryDirectory()` creates ITS OWN directory
@@ -5054,7 +5231,10 @@ def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
         assert not venv_dir.exists()
         return _FAKE_TOOLCHAIN
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
+    def fake_build_wheel(
+        source_dir: Path, out: Path, *, toolchain: ToolchainLock | None = None,
+        reserved_names: set[str] | None = None, **_: object,
+    ) -> Path:  # noqa: ARG001
         assert toolchain is _FAKE_TOOLCHAIN
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.1.0-py3-none-any.whl"

@@ -5,17 +5,28 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
+import os as os
 import re
-import shutil
+import shutil as shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from collections.abc import Mapping
+from typing import TypedDict, cast
 
-from agent_procutil.owned_process import run_caller_owned
+
+class DriverResponse(TypedDict, total=False):
+    capabilities: dict[str, bool]
+    member: dict[str, str]
+    members: list[dict[str, str]]
+    exitCode: int
+    stdout: str
+    stderr: str
+
+from agent_procutil.owned_process import run_caller_owned as run_caller_owned
 
 from .config import FLEET_LABEL, SECURITY_PROFILE_LABEL, TRUSTED_PROFILE
+from .external_driver import _resolve_executable
 from .runtime_drivers import DRIVER_LABEL, INSTANCE_LABEL
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
@@ -29,12 +40,12 @@ _VERBS = ("capabilities", "provision", "list", "inspect", "start", "stop",
 class PodmanError(RuntimeError):
     """A portable protocol failure without captured native diagnostics."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
 
 
-def _text(value: Any, label: str) -> str:
+def _text(value: object, label: str) -> str:
     if (
         not isinstance(value, str) or not value or value.startswith("-")
         or any(ord(char) < 32 for char in value)
@@ -43,27 +54,27 @@ def _text(value: Any, label: str) -> str:
     return value
 
 
-def _name(value: Any, label: str) -> str:
-    value = _text(value, label)
-    if not _NAME.fullmatch(value):
+def _name(value: object, label: str) -> str:
+    text = _text(value, label)
+    if not _NAME.fullmatch(text):
         raise PodmanError("invalid_request", f"invalid {label}")
-    return value
+    return text
 
 
-def _mapping(value: Any, label: str) -> dict[str, str]:
+def _mapping(value: object, label: str) -> dict[str, str]:
     if not isinstance(value, dict) or not all(
         isinstance(key, str) and _ENV.fullmatch(key)
         and isinstance(val, str) and "\0" not in val
         for key, val in value.items()
     ):
         raise PodmanError("invalid_request", f"{label} must map environment names to strings")
-    return value
+    return cast(dict[str, str], value)
 
 
 class PodmanDriver:
     """Use one explicitly selected Podman client and its native configuration."""
 
-    def __init__(self, request: dict[str, Any]):
+    def __init__(self, request: Mapping[str, object]) -> None:
         if type(request.get("protocolVersion")) is not int or request["protocolVersion"] != 1:
             raise PodmanError("unsupported_protocol", "expected protocolVersion 1")
         if request.get("driver") != "podman":
@@ -81,14 +92,20 @@ class PodmanDriver:
         connection = options.get("connection")
         if connection is not None:
             connection = _text(connection, "driverOptions.connection")
-        selected = shutil.which(executable)
+        selected = (
+            _resolve_executable(executable)
+            if os.environ.get("NoDefaultCurrentDirectoryInExePath") == "1"
+            else shutil.which(executable)
+        )
         if selected is None:
             raise PodmanError("runtime_unavailable", "selected Podman executable is unavailable")
         self.command = [selected]
         if connection is not None:
             self.command += ["--connection", connection]
 
-    def _run(self, args: list[str], *, timeout: float = 60, stdin: str | None = None):
+    def _run(
+        self, args: list[str], *, timeout: float = 60, stdin: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         try:
             return run_caller_owned(
                 [*self.command, *args], timeout=timeout, input_text=stdin,
@@ -114,16 +131,16 @@ class PodmanDriver:
             )
         return done.stdout
 
-    def _json(self, args: list[str]) -> list[dict]:
+    def _json(self, args: list[str]) -> list[dict[str, object]]:
         try:
             rows = json.loads(self._checked(args))
         except ValueError:
             raise PodmanError("runtime_unavailable", "Podman returned invalid JSON") from None
         if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
             raise PodmanError("runtime_unavailable", "Podman returned invalid inspection rows")
-        return rows
+        return cast(list[dict[str, object]], rows)
 
-    def _member(self, row: dict) -> dict:
+    def _member(self, row: Mapping[str, object]) -> dict[str, str]:
         config, state = row.get("Config"), row.get("State")
         if not isinstance(config, dict) or not isinstance(state, dict):
             raise PodmanError("runtime_unavailable", "incomplete Podman inspection")
@@ -145,7 +162,7 @@ class PodmanDriver:
             "state": status, "status": status, "image": str(row.get("Image") or self.image),
         }
 
-    def _inspect(self, name: str, instance_id: str | None = None) -> dict:
+    def _inspect(self, name: str, instance_id: str | None = None) -> dict[str, str]:
         target = instance_id or name
         done = self._run(["container", "inspect", target])
         if done.returncode:
@@ -166,7 +183,10 @@ class PodmanDriver:
             raise PodmanError("conflict", "member incarnation changed")
         return member
 
-    def _exec_args(self, request: dict, member: dict, *, stream: bool = False) -> list[str]:
+    def _exec_args(
+        self, request: Mapping[str, object], member: Mapping[str, str], *,
+        stream: bool = False,
+    ) -> list[str]:
         argv = request.get("argv")
         if not isinstance(argv, list) or not argv or not all(
             isinstance(arg, str) and "\0" not in arg for arg in argv
@@ -190,7 +210,7 @@ class PodmanDriver:
             args += ["--env", key]
         return [*args, member["id"], *argv]
 
-    def handle(self, verb: str, request: dict) -> dict:
+    def handle(self, verb: str, request: Mapping[str, object]) -> DriverResponse:
         """Return response fields, or raise without replaying an uncertain effect."""
         if verb == "exec-stream" and os.name == "nt":
             raise PodmanError("unsupported", "Podman streaming transport requires a POSIX host")

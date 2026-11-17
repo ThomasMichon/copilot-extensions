@@ -24,13 +24,17 @@ import json
 import logging
 import os
 import re
-import shutil
+import shutil as shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .lifecycle import DockerContainerInfo
 
 from .config import (
     FLEET_LABEL,
@@ -91,6 +95,27 @@ def _resolve_executable(value: str) -> str | None:
     path = Path(value).expanduser()
     if path.is_absolute():
         return str(path) if path.is_file() and os.access(path, os.X_OK) else None
+    if os.environ.get("NoDefaultCurrentDirectoryInExePath") == "1":
+        if path.name != value:
+            return None
+        names = [value]
+        if os.name == "nt":
+            extensions = [
+                extension
+                for extension in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+                if re.fullmatch(r"\.[a-zA-Z0-9]+", extension)
+            ]
+            if not any(value.lower().endswith(extension.lower()) for extension in extensions):
+                names = [value + extension for extension in extensions]
+        for entry in os.get_exec_path():
+            directory = Path(entry)
+            if not directory.is_absolute():
+                continue
+            for name in names:
+                selected = shutil.which(str(directory / name))
+                if selected:
+                    return selected
+        return None
     return shutil.which(value)
 
 
@@ -161,11 +186,11 @@ def find_driver(name: str) -> DriverSpec:
     )
     if name == "podman" and detail:
         raise RuntimeError(f"invalid explicit Podman registration{detail}")
-    on_path = shutil.which(PATH_PREFIX + name)
+    on_path = _resolve_executable(PATH_PREFIX + name)
     if on_path:
         return DriverSpec(name, (on_path,), "PATH")
     if name in BUNDLED_DRIVERS:
-        return DriverSpec(name, (sys.executable, "-m", BUNDLED_DRIVERS[name]),
+        return DriverSpec(name, (sys.executable, "-I", "-B", "-X", "utf8", "-m", BUNDLED_DRIVERS[name]),
                           "bundled")
     raise RuntimeError(
         f"runtime driver '{name}' is not registered: add "
@@ -183,7 +208,7 @@ def _require_member_name(value: Any, label: str) -> str:
 class ExternalDriver(RuntimeDriver):
     """A fleet's runtime driven through the external command protocol."""
 
-    def __init__(self, spec: DriverSpec, fleet_name: str, fleet: FleetConfig):
+    def __init__(self, spec: DriverSpec, fleet_name: str, fleet: FleetConfig) -> None:
         self.spec = spec
         self.name = spec.name
         self.fleet_name = fleet_name
@@ -236,14 +261,16 @@ class ExternalDriver(RuntimeDriver):
                 f"expected {PROTOCOL_VERSION}",
             )
         if response.get("ok") is not True or done.returncode != 0:
-            error = response.get("error") if isinstance(response.get("error"), dict) else {}
+            error = response.get("error")
+            if not isinstance(error, dict):
+                error = {}
             raise DriverError(
                 self.name, verb, str(error.get("code") or "driver_failed"),
                 str(error.get("message") or f"exit {done.returncode}"),
             )
         return response
 
-    def _run(self, argv: list[str], request: str, limit: float) -> subprocess.CompletedProcess:
+    def _run(self, argv: list[str], request: str, limit: float) -> subprocess.CompletedProcess[str]:
         """Run one protocol call as an owned process tree.
 
         On timeout the driver and every descendant it spawned are retired and
@@ -256,7 +283,7 @@ class ExternalDriver(RuntimeDriver):
             max_stdout_bytes=_MAX_STDOUT, max_stderr_bytes=_MAX_STDERR,
         )
 
-    def _member(self, payload: Any, *, expected: str | None = None):
+    def _member(self, payload: object, *, expected: str | None = None) -> DockerContainerInfo:
         from .lifecycle import DockerContainerInfo
 
         if not isinstance(payload, dict):
@@ -296,14 +323,16 @@ class ExternalDriver(RuntimeDriver):
         )
         return info
 
-    def _member_or_error(self, verb: str, payload: Any, expected: str | None = None):
+    def _member_or_error(
+        self, verb: str, payload: object, expected: str | None = None,
+    ) -> DockerContainerInfo:
         """Parse one reported member without touching routing state."""
         try:
             return self._member(payload, expected=expected)
         except ValueError as exc:
             raise DriverError(self.name, verb, "protocol_error", str(exc)) from None
 
-    def _bind(self, *members):
+    def _bind(self, *members: DockerContainerInfo) -> tuple[DockerContainerInfo, ...]:
         """Commit routing only for a response whose every member validated."""
         for info in members:
             bind_member(self, info)
@@ -333,7 +362,7 @@ class ExternalDriver(RuntimeDriver):
         })
         return self._bind(self._member_or_error("provision", response.get("member"), name))[0].name
 
-    def list_members(self, *, timeout: float | None = None):
+    def list_members(self, *, timeout: float | None = None) -> list[DockerContainerInfo]:
         members = self.call("list", timeout=timeout).get("members")
         if not isinstance(members, list):
             raise DriverError(self.name, "list", "protocol_error",
@@ -341,7 +370,9 @@ class ExternalDriver(RuntimeDriver):
         parsed = [self._member_or_error("list", member) for member in members]
         return list(self._bind(*parsed))
 
-    def _inspect_member(self, name: str, instance_id: str | None = None):
+    def _inspect_member(
+        self, name: str, instance_id: str | None = None,
+    ) -> DockerContainerInfo | None:
         try:
             response = self.call("inspect", self._identity(name, instance_id))
         except DriverError as exc:
@@ -353,7 +384,7 @@ class ExternalDriver(RuntimeDriver):
             return None
         return self._bind(info)[0]
 
-    def inspect(self, name: str, *, instance_id: str | None = None) -> dict:
+    def inspect(self, name: str, *, instance_id: str | None = None) -> dict[str, object]:
         info = self._inspect_member(name, instance_id)
         if info is None:
             from .lifecycle import ContainerNotFoundError
@@ -388,8 +419,11 @@ class ExternalDriver(RuntimeDriver):
                instance_id: str | None = None) -> None:
         self.call("remove", {**self._identity(name, instance_id), "force": bool(force)})
 
-    def exec(self, name, argv, *, user=None, env=None, workdir=None,
-             stdin=None, timeout=30.0, instance_id=None) -> ExecResult:
+    def exec(
+        self, name: str, argv: Sequence[str], *, user: str | None = None,
+        env: Mapping[str, str] | None = None, workdir: str | None = None,
+        stdin: str | None = None, timeout: float = 30.0, instance_id: str | None = None,
+    ) -> ExecResult:
         response = self.call("exec", {
             **self._identity(name, instance_id), "argv": list(argv), "user": user,
             "env": dict(env or {}), "workdir": workdir, "stdin": stdin,
@@ -403,8 +437,11 @@ class ExternalDriver(RuntimeDriver):
             code, str(response.get("stdout") or ""), str(response.get("stderr") or ""),
         )
 
-    def stream_exec_argv(self, name, argv, *, user=None, env=None,
-                         inherit_env=None, workdir=None, instance_id=None) -> list[str]:
+    def stream_exec_argv(
+        self, name: str, argv: Sequence[str], *, user: str | None = None,
+        env: Mapping[str, str] | None = None, inherit_env: Sequence[str] | None = None,
+        workdir: str | None = None, instance_id: str | None = None,
+    ) -> list[str]:
         request = self._request({
             **self._identity(name, instance_id), "argv": list(argv), "user": user,
             "env": dict(env or {}), "inheritEnv": list(inherit_env or []),

@@ -16,6 +16,7 @@ $_awUpdatePayload = $true
 . (Join-Path $payloadRoot 'bin\agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $passiveObservation = $false
+$readinessEntry = $false
 $skipProject = $false
 $worktreesAlias = $false
 $firstArgument = $true
@@ -32,6 +33,7 @@ foreach ($argument in $forwardArgs) {
         continue
     }
     $passiveObservation = $argument -in @('worktree-observations', 'worktree-observation-history', 'worktree-data-read')
+    $readinessEntry = $argument -cin @('installer-readiness', 'invocation-contract')
     break
 }
 $scriptDir = Join-Path $payloadRoot 'scripts'
@@ -484,6 +486,11 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        if ($readinessEntry) {
+            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
+            & $Python -I -B -X utf8 $probeEntry --plugin agent-worktrees --module agent_worktrees -- @forwardArgs
+            exit $LASTEXITCODE
+        }
         $cacheArguments = @('-B')
         $cacheSelector = @'
 import json, sys

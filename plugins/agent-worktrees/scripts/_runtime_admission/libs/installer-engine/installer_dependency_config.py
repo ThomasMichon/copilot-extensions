@@ -15,22 +15,164 @@ import sys
 import tempfile
 import time as clock
 import types
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
 from contextlib import contextmanager
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time
 from pathlib import Path, PureWindowsPath
+from typing import TYPE_CHECKING, ContextManager, Protocol, TypeVar, TypedDict, cast, overload
+
+if TYPE_CHECKING:
+    import ctypes
+    from installer_dependency_arguments import (
+        check_compile_projection as check_compile_projection,
+        cutoff_arguments as cutoff_arguments,
+        cutoff_value as cutoff_value,
+        package_cutoffs as package_cutoffs,
+        resolver_configuration as resolver_configuration,
+    )
+
+_Path = str | os.PathLike[str]
+_Error = type[Exception]
+_T = TypeVar("_T")
+_U = TypeVar("_U")
+_T_co = TypeVar("_T_co", covariant=True)
+_PathT = TypeVar("_PathT", bound=_Path)
+_Pairs = Callable[[list[str]], Iterable[tuple[str, str]]]
+_Balanced = Callable[[str, int, str, str], tuple[str, int]]
+_Toml = Callable[[Path], dict[str, object]]
+_Mirror = Callable[[Path], Path]
+_SourceInputs = tuple[Path, set[Path], set[Path], set[Path]]
+
+
+class _ArgumentPairs(Protocol):
+    def __call__(
+        self, arguments: Iterable[str], value_options: Set[str], *, error_type: _Error,
+    ) -> Iterator[tuple[str, str]]: ...
+
+
+class _RawBalanced(Protocol):
+    def __call__(
+        self, text: str, start: int, opening: str, closing: str, *, error_type: _Error,
+    ) -> tuple[str, int]: ...
+
+
+class _UVCommand(Protocol):
+    def __call__(
+        self, uv: str, arguments: list[str], *, cwd: Path | None, directory: Path,
+        operation: str, windows: bool, argument_pairs: _Pairs, value_options: Set[str],
+    ) -> tuple[list[str], Path | None]: ...
+
+
+class _WindowsLibrary(Protocol):
+    def __call__(self, name: str, *, use_last_error: bool) -> ctypes.CDLL: ...
+
+
+class _ContentMap(Protocol):
+    def __call__(
+        self, check: Callable[[_T], _U], inputs: Iterable[_T], *,
+        on_result: Callable[[_U], object] | None = None,
+    ) -> list[_U]: ...
+
+
+class _SourceHashes(Protocol):
+    def __call__(
+        self, projects: Iterable[Path], mirror: _Mirror, *,
+        native_path: Callable[[_Path], str], check_time: Callable[[], object],
+        error_type: _Error, content_map: _ContentMap = ...,
+        on_progress: Callable[[], object] | None = None,
+    ) -> dict[Path, str]: ...
+
+
+class _InspectSources(Protocol):
+    def __call__(
+        self, arguments: list[str], environment: dict[str, str], cwd: Path | None,
+        trusted_source_roots: tuple[Path, ...], *, operation: str = "install",
+    ) -> _SourceInputs: ...
+
+
+class _Cutoff(Protocol):
+    def __call__(
+        self, settings: str, *, now: datetime | None = None, _operation: str = "install",
+    ) -> list[str]: ...
+
+
+class _TransactionFactory(Protocol[_T_co]):
+    def __call__(
+        self, argv: tuple[str, ...], environment: dict[str, str], cwd: Path,
+        sources: dict[Path, Path], source_hashes: dict[Path, str],
+    ) -> _T_co: ...
+
+
+class _RetainOptions(TypedDict, total=False):
+    env: dict[str, str] | None
+    cwd: Path | None
+    now: datetime | None
+    trusted_source_roots: tuple[Path, ...]
+    retained_resource_roots: tuple[Path, ...]
+    non_editable: bool
+    _operation: str
+    deadline: float | None
+    native_target: bool
+    _projection: list[str] | None
+    on_progress: Callable[[], object] | None
+
+
+class _Retain(Protocol[_T_co]):
+    def __call__(
+        self, uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+        cwd: Path | None = None, now: datetime | None = None,
+        trusted_source_roots: tuple[Path, ...] = (),
+        retained_resource_roots: tuple[Path, ...] = (), non_editable: bool = False,
+        _operation: str = "install", _generated_constraints: tuple[Path, ...] = (),
+        deadline: float | None = None, native_target: bool = False,
+        _projection: list[str] | None = None, on_progress: Callable[[], object] | None = None,
+    ) -> ContextManager[_T_co]: ...
+
+
+class _Finalizer(Protocol):
+    def detach(self) -> object: ...
+
+
+class _TemporaryInputs(Protocol):
+    name: str
+    _finalizer: _Finalizer
+
+    def _rmtree(self, name: str, *, ignore_errors: bool) -> None: ...
+
+
+class _Remap(Protocol):
+    def __call__(self, value: _T) -> _T: ...
+
+
+class _ProjectMetadata(TypedDict, total=False):
+    name: str
+    dependencies: list[object]
+
+
+class _ProjectDocument(TypedDict):
+    project: _ProjectMetadata
+    tool: dict[str, dict[str, dict[str, object]]]
 
 _arguments_path = Path(__file__).with_name("installer_dependency_arguments.py")
 _arguments = types.ModuleType(__name__ + "_arguments")
 _arguments.__file__ = str(_arguments_path)
 exec(compile(_arguments_path.read_bytes(), str(_arguments_path), "exec"), _arguments.__dict__)
-argument_pairs = _arguments.argument_pairs
-balanced = _arguments.balanced
-uv_command = _arguments.uv_command
+argument_pairs = cast(_ArgumentPairs, _arguments.argument_pairs)
+balanced = cast(_RawBalanced, _arguments.balanced)
+uv_command = cast(_UVCommand, _arguments.uv_command)
+if not TYPE_CHECKING:
+    check_compile_projection = _arguments.check_compile_projection
+    cutoff_arguments = _arguments.cutoff_arguments
+    cutoff_value = _arguments.cutoff_value
+    package_cutoffs = _arguments.package_cutoffs
+    resolver_configuration = _arguments.resolver_configuration
 
 _WINDOWS = os.name == "nt"
 
 
-def immutable_install_arguments(arguments, pairs, *, error_type):
+def immutable_install_arguments(
+    arguments: Iterable[str], pairs: Sequence[tuple[str, str]], *, error_type: _Error,
+) -> list[str]:
     if any(option in ("-e", "--editable") for option, _ in pairs):
         raise error_type("deployed runtimes require non-editable immutable versioned slots")
     if any(option == "--link-mode" and value != "copy" for option, value in pairs):
@@ -45,14 +187,26 @@ _content_path = Path(__file__).with_name("installer_retained_content.py")
 _content = types.ModuleType(__name__ + "_content")
 _content.__file__ = str(_content_path)
 exec(compile(_content_path.read_bytes(), str(_content_path), "exec"), _content.__dict__)
-bounded_content_map = _content.bounded_content_map
-retained_source_hashes = _content.retained_source_hashes
+bounded_content_map = cast(_ContentMap, _content.bounded_content_map)
+retained_source_hashes = cast(_SourceHashes, _content.retained_source_hashes)
 verify_retained_sources = retained_source_hashes
 
 
 
 
-def remaining_timeout(deadline, *, error_type, cap=None):
+@overload
+def remaining_timeout(deadline: float | None, *, error_type: _Error, cap: float) -> float: ...
+
+
+@overload
+def remaining_timeout(
+    deadline: float | None, *, error_type: _Error, cap: None = None,
+) -> float | None: ...
+
+
+def remaining_timeout(
+    deadline: float | None, *, error_type: _Error, cap: float | None = None,
+) -> float | None:
     if deadline is None:
         return cap
     if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
@@ -63,10 +217,13 @@ def remaining_timeout(deadline, *, error_type, cap=None):
     return remaining if cap is None else min(remaining, cap)
 
 
-def copy_retained_file(source, destination, *, native_path, deadline, error_type, on_progress=None):
+def copy_retained_file(
+    source: _Path, destination: _PathT, *, native_path: Callable[[_Path], str],
+    deadline: float | None, error_type: _Error, on_progress: Callable[[], object] | None = None,
+) -> str | _PathT:
     remaining_timeout(deadline, error_type=error_type)
     if deadline is None:
-        result = shutil.copy2(native_path(source), native_path(destination))
+        result: str | _PathT = shutil.copy2(native_path(source), native_path(destination))
     else:
         with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
             while True:
@@ -86,10 +243,14 @@ def copy_retained_file(source, destination, *, native_path, deadline, error_type
 
 
 def prepare_uv_install(
-    uv, arguments, *, environment, cwd, now, trusted_source_roots, projection,
-    operation, deadline, native_target, compile_inputs, source_inputs, select_uv,
-    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless, value_options,
-):
+    uv: str, arguments: list[str], *, environment: dict[str, str], cwd: Path | None,
+    now: datetime | None, trusted_source_roots: tuple[Path, ...], projection: list[str] | None,
+    operation: str, deadline: float | None, native_target: bool,
+    compile_inputs: Callable[[list[str], dict[str, str], Path | None, tuple[Path, ...], str], list[str]],
+    source_inputs: _InspectSources, select_uv: Callable[[str], str],
+    cutoff: _Cutoff, argument_pairs: _Pairs, balanced: _Balanced, error_type: _Error,
+    settings_timeout: float, headless: int, value_options: Set[str],
+) -> list[str]:
     remaining_timeout(deadline, error_type=error_type)
     if native_target and environment.get("UV_PYTHON_PLATFORM"):
         raise error_type("native source lock export cannot override its selected target")
@@ -193,13 +354,13 @@ def physical_executable(path: str) -> str | None:
 # native-executable:end
 
 
-def select_uv_executable(uv, *, error_type):
+def select_uv_executable(uv: str, *, error_type: _Error) -> str:
     if not _WINDOWS:
         return uv
     if str(uv).lower() in ("uv", "uv.exe"):
         import ctypes
 
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("kernel32", use_last_error=True)
         kernel.SearchPathW.argtypes = [
             ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
             ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_void_p,
@@ -208,7 +369,8 @@ def select_uv_executable(uv, *, error_type):
         buffer = ctypes.create_unicode_buffer(32768)
         length = kernel.SearchPathW(None, str(uv), ".exe", len(buffer), buffer, None)
         if not length:
-            raise error_type(f"Native Windows UV lookup failed (error {ctypes.get_last_error()})")
+            get_last_error = cast(Callable[[], int], getattr(ctypes, "get_last_error"))
+            raise error_type(f"Native Windows UV lookup failed (error {get_last_error()})")
         if length >= len(buffer):
             raise error_type("Selected UV executable exceeds the native path limit")
         uv = buffer.value
@@ -220,28 +382,22 @@ def select_uv_executable(uv, *, error_type):
     return selected
 
 
-_STRUCTURED_CUTOFF = re.compile(
-    r"ExcludeNewerValue\s*\{\s*timestamp:\s*([^,\s]+),\s*span:\s*"
-    r"(?:None|Some\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)),?\s*\}"
-)
-
-
 class RetainedInputCleanupError(RuntimeError):
     """Installation inputs could not be removed after execution settled."""
 
 
-def report_cleanup_error(error):
+def report_cleanup_error(error: BaseException) -> None:
     print(f"retained-input-cleanup: {error}", file=sys.stderr)
 
 
-def native_retained_path(path):
+def native_retained_path(path: _Path) -> str:
     value = os.path.abspath(path)
     if os.name != "nt" or value.startswith("\\\\?\\"):
         return value
     return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
 
 
-def file_uri(path):
+def file_uri(path: Path | PureWindowsPath) -> str:
     """Keep extended Windows filesystem spelling out of file URI authorities."""
     if isinstance(path, PureWindowsPath) and str(path).startswith("\\\\?\\"):
         value = str(path)
@@ -251,19 +407,21 @@ def file_uri(path):
 
 @contextmanager
 def retain_closed_wheels(
-    uv, snapshot, *, python, env, captured_environment, select_uv,
-    transaction_type, error_type,
-):
+    uv: str, snapshot: object, *, python: _Path, env: dict[str, str] | None,
+    captured_environment: Callable[[dict[str, str] | None], dict[str, str]],
+    select_uv: Callable[[str], str], transaction_type: _TransactionFactory[_T], error_type: _Error,
+) -> Iterator[_T]:
     """Retain the policy owner's fixed, closed wheel invocation projection."""
     from installer_wheel_snapshot import WheelSnapshot
 
     if not isinstance(snapshot, WheelSnapshot):
         raise error_type("closed wheel installation requires retained wheel custody")
-    python = Path(python)
-    if not python.is_absolute():
+    python_path = Path(python)
+    if not python_path.is_absolute():
         raise error_type("closed wheel interpreter must be an absolute candidate path")
     uv = select_uv(uv)
     if not Path(uv).is_absolute():
+        selected: str | None
         if os.path.dirname(uv):
             selected = uv
         else:
@@ -275,7 +433,8 @@ def retain_closed_wheels(
         uv = select_uv(os.path.abspath(selected))
     environment = {
         key: value for key, value in captured_environment(env).items()
-        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
+        if (key in ("UV_CONCURRENT_INSTALLS", "UV_CONCURRENT_DOWNLOADS", "UV_CONCURRENT_BUILDS")
+            or not key.upper().startswith(("UV_", "PIP_", "PYTHON")))
         and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
     }
     with temporary_inputs(None) as temporary:
@@ -292,16 +451,16 @@ def retain_closed_wheels(
             (uv, "pip", "install", "--no-config", "--no-cache", "--offline",
              "--no-python-downloads", "--no-index", "--no-deps", "--no-build",
              "--no-sources", "--require-hashes", "--link-mode", "copy",
-             "--python", native_retained_path(python), "--requirements", str(requirements)),
+             "--python", native_retained_path(python_path), "--requirements", str(requirements)),
             environment, root, {}, {},
         )
         snapshot.verify()
 
 
 @contextmanager
-def temporary_inputs(parent):
+def temporary_inputs(parent: _Path | None) -> Iterator[str]:
     prefix = "uv-" if parent is not None else "seasoned-uv-"
-    temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
+    temporary = cast(_TemporaryInputs, tempfile.TemporaryDirectory(prefix=prefix, dir=parent))
     # Retaining owners, not collection or interpreter shutdown, retire inputs.
     temporary._finalizer.detach()
     failed = False
@@ -328,7 +487,11 @@ def temporary_inputs(parent):
 
 
 @contextmanager
-def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, error_type, **options):
+def retain_local_exclusions(
+    retain: _Retain[_T], uv: str, arguments: list[str], *,
+    excluded_local_packages: tuple[str, ...], error_type: _Error, **options: object,
+) -> Iterator[_T]:
+    retained_options = cast(_RetainOptions, options)
     if not isinstance(excluded_local_packages, tuple) or any(
         not isinstance(name, str)
         or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None
@@ -339,7 +502,7 @@ def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, e
     if len(set(names)) != len(names):
         raise error_type("excluded local packages contain duplicate names")
     if not names:
-        with retain(uv, arguments, **options) as transaction:
+        with retain(uv, arguments, **retained_options) as transaction:
             yield transaction
         return
     with temporary_inputs(None) as temporary:
@@ -350,15 +513,18 @@ def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, e
         option = "--constraints" if options.get("_operation") in ("compile", "source-compile") else "--constraint"
         with retain(
             uv, [*arguments, option, str(constraint)],
-            _generated_constraints=(constraint,), **options,
+            _generated_constraints=(constraint,), **retained_options,
         ) as transaction:
             yield transaction
 
 
 def retained_source_layout(
-    root, projects, files, resources, base, arguments, environment, editables, *,
-    argument_pairs, file_options, toml, config_inputs, generated_constraints=(),
-):
+    root: Path, projects: set[Path], files: set[Path], resources: Iterable[Path],
+    base: Path, arguments: list[str], environment: dict[str, str], editables: set[Path], *,
+    argument_pairs: _Pairs, file_options: set[str], toml: _Toml,
+    config_inputs: Callable[[list[str], dict[str, str], Path], list[tuple[Path, bool]]],
+    generated_constraints: tuple[Path, ...] = (),
+) -> tuple[dict[str, Path], _Mirror]:
     context_project = dict(argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
     pairs = list(argument_pairs(arguments))
     operands = [value for option, value in pairs if not option]
@@ -391,7 +557,7 @@ def retained_source_layout(
         common = Path(os.path.commonpath(members))
         anchors[anchor] = common.parent if common.is_file() else common
 
-    def mirror(path):
+    def mirror(path: Path) -> Path:
         path = Path(path).resolve()
         if path in generated_constraints:
             return root / "generated" / path.name
@@ -401,7 +567,7 @@ def retained_source_layout(
     return anchors, mirror
 
 
-def retained_source_remapper(paths, mirror):
+def retained_source_remapper(paths: Iterable[Path], mirror: _Mirror) -> _Remap:
     replacements = {}
     for path in sorted(paths, key=lambda item: len(str(item)), reverse=True):
         retained_path = mirror(path)
@@ -414,19 +580,22 @@ def retained_source_remapper(paths, mirror):
             replacements[before] = after
     pattern = re.compile("|".join(re.escape(before) for before in replacements)) if replacements else None
 
-    def remap(value):
+    def remap(value: _T) -> _T:
         if isinstance(value, list):
-            return [remap(item) for item in value]
+            return cast(_T, [remap(item) for item in cast(list[object], value)])
         if isinstance(value, dict):
-            return {key: remap(item) for key, item in value.items()}
+            return cast(_T, {key: remap(item) for key, item in cast(dict[object, object], value).items()})
         if not isinstance(value, str) or pattern is None:
             return value
-        return pattern.sub(lambda match: replacements[match[0]], value)
+        return cast(_T, pattern.sub(lambda match: replacements[match[0]], value))
 
     return remap
 
 
-def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_type):
+def config_inputs(
+    arguments: list[str], environment: dict[str, str], base: Path, *,
+    argument_pairs: _Pairs, toml: _Toml, error_type: _Error,
+) -> list[tuple[Path, bool]]:
     pairs = dict(argument_pairs(arguments))
     if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):
         return []
@@ -464,29 +633,34 @@ def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_t
         )) / "uv" / "uv.toml"
         candidates.append((user, False))
         system = Path("/etc/uv/uv.toml")
-        for directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
-            if not directory:
+        for config_directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
+            if not config_directory:
                 break
-            candidate = base / directory / "uv" / "uv.toml"
+            candidate = base / config_directory / "uv" / "uv.toml"
             if candidate.is_file():
                 system = candidate
                 break
         candidates.append((system, False))
-    return [(path, project) for path, project in candidates if path.is_file()]
+    return [(path, is_project) for path, is_project in candidates if path.is_file()]
 
 
-def freeze_source_editables(data):
-    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+def freeze_source_editables(data: dict[str, object]) -> None:
+    document = cast(_ProjectDocument, data)
+    sources = document.get("tool", {}).get("uv", {}).get("sources", {})
     for entries in sources.values():
-        for source in entries if isinstance(entries, list) else [entries]:
+        for source in cast(list[dict[str, object]], entries if isinstance(entries, list) else [entries]):
             if source.get("editable") is True:
                 source["editable"] = False
 
 
-def retain_editable_metadata(project, *, error_type):
+class _CaseSensitiveConfigParser(configparser.ConfigParser):
+    def optionxform(self, optionstr: str) -> str:
+        return str(optionstr)
+
+
+def retain_editable_metadata(project: Path, *, error_type: _Error) -> None:
     configuration = Path(native_retained_path(project / "setup.cfg"))
-    config = configparser.ConfigParser(interpolation=None)
-    config.optionxform = str
+    config = _CaseSensitiveConfigParser(interpolation=None)
     try:
         if configuration.exists():
             config.read_string(configuration.read_text(encoding="utf-8"))
@@ -499,7 +673,7 @@ def retain_editable_metadata(project, *, error_type):
         raise error_type("cannot retain editable build metadata") from error
 
 
-def metadata_needs_caller_layout(value):
+def metadata_needs_caller_layout(value: object) -> bool:
     if isinstance(value, dict):
         # Source-bearing metadata can contain relative references or traversals
         # outside and back into a source root. Keep its established layout.
@@ -509,138 +683,21 @@ def metadata_needs_caller_layout(value):
             "dependency-metadata", "extra-build-dependencies",
         )):
             return True
-        return any(metadata_needs_caller_layout(item) for item in value.values())
+        return any(metadata_needs_caller_layout(item) for item in cast(dict[object, object], value).values())
     if isinstance(value, list):
-        return any(metadata_needs_caller_layout(item) for item in value)
+        return any(metadata_needs_caller_layout(item) for item in cast(list[object], value))
     return isinstance(value, str) and (
         "file:" in value.lower() or re.search(r"(?:^|[\s/\\])\.\.(?:[/\\]|$)", value) is not None
     )
 
 
-def cutoff_value(value: str, now: datetime, *, error_type) -> datetime:
-    value = value.strip().removesuffix(",").strip()
-    structured = _STRUCTURED_CUTOFF.fullmatch(value)
-    if structured:
-        cutoff = cutoff_value(f"Absolute({structured[1]})", now, error_type=error_type)
-        if structured[2] is not None:
-            relative = cutoff_value(
-                f"Relative(ExcludeNewerSpan({structured[2]}))", now, error_type=error_type,
-            )
-            cutoff = min(cutoff, relative)
-        return cutoff
-    absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
-    if absolute:
-        timestamp = re.sub(
-            r"\.(\d{1,9})(?=Z$|[+-]\d{2}:\d{2}$)",
-            lambda match: "." + match[1][:6].ljust(6, "0"), absolute[1],
-        )
-        try:
-            result = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise error_type("UV returned an invalid cutoff timestamp") from exc
-        if result.tzinfo is None:
-            raise error_type("UV returned a cutoff without a timezone")
-        return result.astimezone(timezone.utc)
-    relative = re.fullmatch(
-        r"Relative\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)",
-        value,
-    )
-    if relative:
-        span = relative[1]
-        parts = re.findall(r"(\d+)(w|d|h|m|s)", span)
-        if not parts or "".join(number + unit for number, unit in parts) != span:
-            raise error_type("unsupported UV relative cutoff; use an RFC3339 timestamp")
-        seconds = sum(int(number) * {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
-                      for number, unit in parts)
-        try:
-            return now - timedelta(seconds=seconds)
-        except OverflowError as exc:
-            raise error_type("UV relative cutoff exceeds the supported range") from exc
-    raise error_type("unsupported UV cutoff representation")
-
-
-def package_cutoffs(entries, *, balanced, error_type):
-    result = []
-    entries = entries.strip()
-    while entries:
-        entry = re.match(r'PackageName\(\s*"([a-z0-9._-]+)",?\s*\):\s*Enabled\(', entries)
-        if entry is None:
-            raise error_type("disabled or unsupported package-specific seasoning")
-        value, stop = balanced(entries, entry.end() - 1, "(", ")")
-        result.append((entry[1], value))
-        entries = entries[stop:].lstrip(", \r\n\t")
-    return result
-
-
-def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_reference, error_type):
-    now = datetime.now(timezone.utc) if now is None else now
-    if now.tzinfo is None:
-        raise error_type("seasoning requires a timezone-aware clock")
-    floor = now.astimezone(timezone.utc) - timedelta(seconds=min_age)
-    projection = {"install": "PipInstallSettings", "compile": "PipCompileSettings"}.get(operation)
-    if projection is None:
-        raise error_type("unsupported UV dependency operation")
-    projections = list(re.finditer(r"(?m)^" + projection + r" \{", settings))
-    if len(projections) != 1:
-        raise error_type("UV installation settings projection is unsupported")
-    _, projection_end = balanced(settings, settings.index("{", projections[0].start()), "{", "}")
-    if settings[projection_end:].strip():
-        raise error_type("UV settings projection has unexpected trailing content")
-    settings = settings[projections[0].start():projection_end]
-    if (re.search(r"(?m)^\s*dependency_mode:\s*(?!Transitive\b)\S+", settings)
-            or re.search(r"(?m)^\s*build_isolation:\s*(?!Isolate\b)\S+", settings)):
-        raise error_type("dependency or isolated-build resolution cannot bypass seasoning")
-    indexes = list(re.finditer(r"(?m)^\s*index_locations: IndexLocations \{", settings))
-    if len(indexes) != 1:
-        raise error_type("UV registry source configuration is unsupported")
-    index_body, indexes_end = balanced(settings, settings.index("{", indexes[0].start()), "{", "}")
-    flat = re.search(r"\bflat_index:\s*\[", index_body)
-    if flat is None:
-        raise error_type("UV flat-index configuration is unsupported")
-    flat_body, _ = balanced(index_body, index_body.index("[", flat.start()), "[", "]")
-    if flat_body.strip():
-        raise error_type("flat-index dependencies cannot prove artifact upload age")
-    non_registry = settings[:indexes[0].start()] + settings[indexes_end:]
-    if remote_reference.search(non_registry):
-        raise error_type("direct remote dependencies lack release-age evidence")
-    matches = list(re.finditer(r"(?m)^\s*exclude_newer: ExcludeNewer \{", settings))
-    if len(matches) != 1:
-        raise error_type("UV does not expose an unambiguous seasoning configuration")
-    match = matches[0]
-    body, end = balanced(settings, settings.index("{", match.start()), "{", "}")
-    # Per-index dates can synthesize age for artifacts with unknown timestamps.
-    remaining = settings[:match.start()] + settings[end:]
-    index_values = re.findall(r"(?m)^\s*exclude_newer:\s*([^\n]+)", remaining)
-    if any(value.strip().rstrip(",") != "None" for value in index_values):
-        raise error_type("index-specific exclude-newer cannot prove artifact upload age")
-    global_match = re.match(r"\s*global:\s*(None|Some\()", body)
-    if global_match is None:
-        raise error_type("UV global cutoff settings are unsupported")
-    position = global_match.end()
-    if global_match[1] == "Some(":
-        global_body, position = balanced(body, position - 1, "(", ")")
-        floor = min(floor, cutoff_value(global_body, now, error_type=error_type))
-    package_match = re.fullmatch(
-        r",?\s*package:\s*ExcludeNewerPackage\(\s*\{(.*)\},?\s*\),?\s*",
-        body[position:], re.DOTALL,
-    )
-    if package_match is None:
-        raise error_type("UV package cutoff settings are unsupported")
-    package_arguments = []
-    for name, value in package_cutoffs(package_match[1], balanced=balanced, error_type=error_type):
-        cutoff = cutoff_value(value, now, error_type=error_type)
-        if cutoff > floor:
-            raise error_type(f"package-specific cutoff weakens seasoning: {name}")
-        package_arguments.extend(["--exclude-newer-package", f"{name}={cutoff.isoformat().replace('+00:00', 'Z')}"])
-    result = ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), *package_arguments]
-    return [*result, "--reinstall"] if operation == "install" else result
-
-
-def source_compile_packages(projects, *, toml, identity, error_type):
+def source_compile_packages(
+    projects: Iterable[Path], *, toml: _Toml, identity: Callable[[str], str], error_type: _Error,
+) -> tuple[str, ...]:
     names = []
     omissions = set()
     for path in projects:
-        data = toml(path / "pyproject.toml")
+        data = cast(_ProjectDocument, toml(path / "pyproject.toml"))
         project = data["project"]
         names.append(identity(project["name"]))
         required = {
@@ -661,10 +718,11 @@ def source_compile_packages(projects, *, toml, identity, error_type):
 
 
 def source_compile_arguments(
-    arguments, environment, cwd, roots, operation, *,
-    source_inputs, toml, identity, argument_pairs, error_type,
-):
-    packages = ()
+    arguments: list[str], environment: dict[str, str], cwd: Path | None,
+    roots: tuple[Path, ...], operation: str, *, source_inputs: _InspectSources,
+    toml: _Toml, identity: Callable[[str], str], argument_pairs: _Pairs, error_type: _Error,
+) -> list[str]:
+    packages: tuple[str, ...] = ()
     if operation == "source-compile":
         _, projects, _, _ = source_inputs(
             arguments, environment, cwd, roots, operation=operation,
@@ -676,7 +734,10 @@ def source_compile_arguments(
     )
 
 
-def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=(), source_graph=False):
+def compile_arguments(
+    arguments: list[str], *, argument_pairs: _Pairs, error_type: _Error,
+    source_packages: tuple[str, ...] = (), source_graph: bool = False,
+) -> list[str]:
     """Bounded requirements export, never an implicit incremental lock update."""
     values = {
         "--constraints", "-c", "--overrides", "--excludes", "--build-constraints", "-b",
@@ -726,63 +787,13 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
-def check_compile_projection(
-    projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False, native_target=False,
-):
-    """Output policy is effective configuration, not merely a CLI intention."""
-    if dict(argument_pairs(arguments)).get("--format") == "pylock.toml" and not re.search(
-        r"(?m)^\s*format:\s*Some\(\s*PylockToml,\s*\),\s*$", projection,
-    ):
-        raise error_type("UV wheel-lock format differs from the selected output")
-    for field, expected in (
-        ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
-        ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),
-    ):
-        if not re.search(r"(?m)^\s*" + field + r":\s*" + expected + r",\s*$", projection):
-            raise error_type("UV lock export output configuration is unsupported")
-    omissions = re.search(r"(?m)^\s*no_emit_package:\s*\[", projection)
-    if omissions is None:
-        raise error_type("UV lock export output omissions are unsupported")
-    body, _ = balanced(projection, omissions.end() - 1, "[", "]")
-    names = []
-    while body.strip():
-        match = re.match(r'\s*PackageName\(\s*("(?:[^"\\]|\\.)*")\s*,?\s*\)\s*,\s*', body)
-        if match is None:
-            raise error_type("UV lock export output omissions are unsupported")
-        try:
-            names.append(json.loads(match[1]))
-        except ValueError as exc:
-            raise error_type("UV lock export output omissions are unsupported") from exc
-        body = body[match.end():]
-    expected = [value for option, value in argument_pairs(arguments) if option == "--no-emit-package"]
-    if names != expected:
-        raise error_type("UV lock export output omissions differ from the retained source graph")
-    if source_graph and not re.search(r"(?m)^\s*sources:\s*None,\s*$", projection):
-        raise error_type("source lock export cannot disable its retained source mappings")
-    if native_target and (
-        not re.search(r"(?m)^\s*python_platform:\s*None,\s*$", projection)
-        or not re.search(r"(?m)^\s*universal:\s*false,\s*$", projection)
-    ):
-        raise error_type("native source lock export cannot override its selected target")
-    outputs = [value for option, value in argument_pairs(arguments) if option in ("-o", "--output-file")]
-    output = re.search(r"(?m)^\s*output_file:\s*(None,|Some\()", projection)
-    if output is None:
-        raise error_type("UV lock export output configuration is unsupported")
-    selected = None
-    if output[1] == "Some(":
-        body, _ = balanced(projection, output.end() - 1, "(", ")")
-        try:
-            selected = json.loads(body.strip().rstrip(","))
-        except ValueError as exc:
-            raise error_type("UV lock export output path is unsupported") from exc
-    if selected != (outputs[-1] if outputs else None):
-        raise error_type("UV lock export output must be selected explicitly by the caller")
-
-
 def check_requirements_sources(
-    path, seen, roots, base, projects, files, editables, *,
-    check_project, check_requirement, error_type,
-):
+    path: Path, seen: set[Path], roots: tuple[Path, ...], base: Path,
+    projects: set[Path] | None, files: set[Path] | None, editables: set[Path] | None, *,
+    check_project: Callable[[Path, tuple[Path, ...], set[Path]], None],
+    check_requirement: Callable[[str, Path, tuple[Path, ...], set[Path]], Path | None],
+    error_type: _Error,
+) -> None:
     projects = set() if projects is None else projects
     if path.suffix == ".toml":
         if path.name != "pyproject.toml":
@@ -821,7 +832,9 @@ def check_requirements_sources(
             check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, projects)
 
 
-def compile_requirement_includes(text, source, mirror, remap=None):
+def compile_requirement_includes(
+    text: str, source: Path, mirror: _Mirror, remap: Callable[[str], str] | None = None,
+) -> str:
     """Retain include targets by identity, not by lexical path replacement."""
     lines = []
     for line in re.sub(r"\\\r?\n", " ", text).splitlines():
@@ -835,7 +848,7 @@ def compile_requirement_includes(text, source, mirror, remap=None):
     return "\n".join(lines) + "\n"
 
 
-def _toml_value(value, error_type):
+def _toml_value(value: object, error_type: _Error) -> str:
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=True)
     if isinstance(value, bool):
@@ -845,15 +858,16 @@ def _toml_value(value, error_type):
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, list):
-        return "[" + ", ".join(_toml_value(item, error_type) for item in value) + "]"
+        return "[" + ", ".join(_toml_value(item, error_type) for item in cast(list[object], value)) + "]"
     if isinstance(value, dict):
         return "{" + ", ".join(
-            json.dumps(key) + " = " + _toml_value(item, error_type) for key, item in value.items()
+            json.dumps(key) + " = " + _toml_value(item, error_type)
+            for key, item in cast(dict[str, object], value).items()
         ) + "}"
     raise error_type("dependency input TOML value cannot be retained")
 
 
-def write_toml(path, data, *, error_type):
+def write_toml(path: Path, data: Mapping[str, object], *, error_type: _Error) -> None:
     text = "\n".join(
         json.dumps(key) + " = " + _toml_value(value, error_type) for key, value in data.items()
     )
@@ -865,7 +879,7 @@ def write_toml(path, data, *, error_type):
         stream.write(text + "\n")
 
 
-def private_retained_root(parent, *, error_type, name="inputs"):
+def private_retained_root(parent: Path, *, error_type: _Error, name: str = "inputs") -> Path:
     if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) is None:
         raise error_type("private dependency-input directory requires one ordinary name")
     root = parent / name
@@ -881,8 +895,8 @@ def private_retained_root(parent, *, error_type, name="inputs"):
             ("inherit", wintypes.BOOL),
         ]
 
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("advapi32", use_last_error=True)
+    kernel = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("kernel32", use_last_error=True)
     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
     convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID), wintypes.LPVOID]
     convert.restype = wintypes.BOOL
@@ -904,82 +918,14 @@ def private_retained_root(parent, *, error_type, name="inputs"):
     return root
 
 
-def merge_config(high, low):
+def merge_config(high: Mapping[str, object], low: Mapping[str, object]) -> dict[str, object]:
     result = dict(low)
     for key, value in high.items():
         previous = result.get(key)
         if isinstance(value, dict) and isinstance(previous, dict):
-            result[key] = merge_config(value, previous)
+            result[key] = merge_config(cast(dict[str, object], value), cast(dict[str, object], previous))
         elif isinstance(value, list) and isinstance(previous, list):
-            result[key] = [*value, *previous]
+            result[key] = [*cast(list[object], value), *cast(list[object], previous)]
         else:
             result[key] = value
     return result
-
-
-def resolver_configuration(
-    projection, remapper=None, *, balanced, error_type, now=None, freeze_package_cutoffs=False,
-):
-    now = datetime.now(timezone.utc) if now is None else now
-    match = re.search(r"\bsettings: PipSettings \{", projection)
-    if match is None:
-        raise error_type("UV resolver configuration cannot be compared")
-    body, _ = balanced(projection, projection.index("{", match.start()), "{", "}")
-    cutoff = re.search(r"(?m)^\s*exclude_newer: ExcludeNewer \{", body)
-    if cutoff is None:
-        raise error_type("UV resolver cutoff cannot be compared")
-    cutoff_body, end = balanced(body, body.index("{", cutoff.start()), "{", "}")
-    package = re.search(r"\bpackage:\s*ExcludeNewerPackage\(", cutoff_body)
-    if package is None:
-        raise error_type("UV package cutoffs cannot be compared")
-    package_body, _ = balanced(cutoff_body, package.end() - 1, "(", ")")
-    package_entries = re.fullmatch(r"\s*\{(.*)\},?\s*", package_body, re.DOTALL)
-    if package_entries is None:
-        raise error_type("UV package cutoff settings are unsupported")
-    keys = []
-    for name, value in package_cutoffs(package_entries[1], balanced=balanced, error_type=error_type):
-        timestamp = cutoff_value(value, now, error_type=error_type)
-        span = re.search(r"\bExcludeNewerSpan\(\s*([^,\s]+)", value)
-        keys.append((name, timestamp.isoformat(), span[1] if span and not freeze_package_cutoffs else None))
-    body = body[:cutoff.start()] + "package_cutoffs:" + repr(sorted(keys)) + "\n" + body[end:]
-    if remapper is not None:
-        for field in ("dependency_metadata", "extra_build_dependencies", "sources"):
-            match = re.search(r"(?m)^\s*" + field + r":\s*[^\n({\[]*([({\[])", body)
-            if match:
-                start = match.start(1)
-                opening = body[start]
-                _, end = balanced(body, start, opening, {"(": ")", "{": "}", "[": "]"}[opening])
-                body = body[:start] + remapper(body[start:end]) + body[end:]
-    # Execution always reinstalls the full closure, which also subsumes an
-    # admitted package-specific refresh. Neither changes dependency resolution.
-    reinstall = re.search(r"(?m)^\s*reinstall: Packages\(", body)
-    if reinstall:
-        _, end = balanced(body, reinstall.end() - 1, "(", ")")
-        if body[end:end + 1] == ",":
-            end += 1
-        body = body[:reinstall.start()] + body[end:]
-    body = re.sub(r"(?m)^\s*reinstall: (?:None|All),", "", body)
-    # Discovery provenance changes to explicit-file provenance; index identity,
-    # order, authentication and every resolver option must remain identical.
-    while origin := re.search(r"(?m)^\s*origin: (?:None,|Some\()", body):
-        end = origin.end()
-        if body[end - 1] == "(":
-            _, end = balanced(body, end - 1, "(", ")")
-            if body[end:end + 1] == ",":
-                end += 1
-        body = body[:origin.start()] + body[end:]
-    for field in (
-        "constraints_from_workspace", "overrides_from_workspace",
-        "excludes_from_workspace", "build_constraints_from_workspace",
-    ):
-        match = re.search(r"\b" + field + r":\s*\[", projection)
-        if match:
-            value, _ = balanced(projection, projection.index("[", match.start()), "[", "]")
-            if remapper is not None:
-                value = remapper(value)
-            body += field + ":[" + value + "]"
-    global_settings = re.search(r"(?m)^GlobalSettings \{", projection)
-    if global_settings:
-        value, _ = balanced(projection, projection.index("{", global_settings.start()), "{", "}")
-        body += value
-    return "\n".join(line.strip() for line in body.splitlines() if line.strip())

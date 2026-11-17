@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .db_core import (
     LIVE_SESSION_PURGE_SECONDS,
@@ -20,6 +20,9 @@ from .db_live_session_aliases import (
 )
 from .db_live_controls import LiveControlsMixin
 from .runtime_custody import RuntimeAdmission, RuntimeCustodyError, admission_document
+
+if TYPE_CHECKING:
+    from .db import Database
 
 LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
 
@@ -246,7 +249,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                     conn.rollback()
                     return False
                 conn.execute(
-                    "DELETE FROM live_messages WHERE session_id=? "
+                    "DELETE FROM live_messages WHERE session_id=? AND disposition_json IS NULL "
                     "AND runtime_custody_json IS NULL AND handoff_json IS NULL", (session_id,),
                 )
                 conn.execute("DELETE FROM live_session_aliases WHERE alias_session_id=? "
@@ -300,7 +303,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         n = cur.rowcount
         if n:
             self.execute_write(
-                "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
+                "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
@@ -397,7 +400,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             )
             demoted += cur.rowcount
             self.execute_write(
-                f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
+                f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND session_id IN ({_in(expire_from_live)})",
                 tuple(expire_from_live),
@@ -423,7 +426,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 membership=True,
             )
             self.execute_write(
-                f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
+                f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND session_id IN ({_in(expire_from_wedged)})",
                 tuple(expire_from_wedged),
@@ -440,7 +443,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         if dead:
             dead_ids = [r["session_id"] for r in dead]
             self.execute_write(
-                f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)}) "
+                f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)}) AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
                 tuple(dead_ids),
             )
@@ -695,7 +698,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             return exact
         address = LivePeerAddress.parse(handle)
         if address is not None:
-            return resolve_qualified_peer(self, address, now=now, stale_seconds=stale_seconds)
+            return resolve_qualified_peer(cast("Database", self), address, now=now, stale_seconds=stale_seconds)
         if qualified_peer:
             raise ValueError("peer address must be live:<machine>:<project>:<worktree>")
         cutoff = now - stale_seconds
@@ -719,7 +722,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         """Current fresh live incarnation, optionally scoped by machine/project."""
         from .live_peer_address import current_worktree_session
         return current_worktree_session(
-            self, worktree_id, now=now, stale_seconds=stale_seconds,
+            cast("Database", self), worktree_id, now=now, stale_seconds=stale_seconds,
             machine=machine, project=project,
         )
 
@@ -738,7 +741,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         """
         from .live_peer_address import current_worktree_session
         return current_worktree_session(
-            self, worktree_id, now=now, stale_seconds=stale_seconds, include_wedged=True,
+            cast("Database", self), worktree_id, now=now, stale_seconds=stale_seconds, include_wedged=True,
         )
 
     def enqueue_live_message(
@@ -748,6 +751,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         idempotency_key: str | None = None,
         *,
         runtime_admission: RuntimeAdmission | None = None,
+        message_version: int | None = None,
+        message_requires: tuple[str, ...] = (),
     ) -> int:
         """Enqueue a message for delivery into a live session; return its id.
 
@@ -758,12 +763,15 @@ class _LiveSessionsMixin(LiveControlsMixin):
         """
         delivery = _validate_live_message_delivery(delivery)
         association = _live_message_association(kind, runtime_admission)
+        from .message_contracts import producer_contract
+
+        contract = producer_contract(kind, type_version=message_version, requires=message_requires)
         cur = self._execute_runtime_admitted_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "kind, delivery, idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            "kind, delivery, idempotency_key, created_at, consumption_tracked, runtime_custody_json, message_contract_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
             (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now,
-             association),
+             association, contract),
             runtime_admission,
         )
         return int(cur.lastrowid or 0)
@@ -787,6 +795,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         enrolled_inbox: bool = False,
         inbox_refusal: str | None = None,
         exact_session: bool = False,
+        message_version: int | None = None,
+        message_requires: tuple[str, ...] = (),
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -822,10 +832,10 @@ class _LiveSessionsMixin(LiveControlsMixin):
         delivery = _validate_live_message_delivery(delivery)
         if not enrolled_inbox:
             _live_message_association(kind, runtime_admission)
-        return enqueue_fresh(self, LiveMessageEnqueue(
+        return enqueue_fresh(cast("Database", self), LiveMessageEnqueue(
             session_id, sender, body, now, reply_to, kind, delivery,
             expected_session_id, idempotency_key, stale_seconds, report_duplicate, require_idle,
-            exact_session,
+            exact_session, message_version, message_requires,
         ), runtime_admission, enrolled_inbox=enrolled_inbox, inbox_refusal=inbox_refusal)
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
@@ -839,9 +849,11 @@ class _LiveSessionsMixin(LiveControlsMixin):
         rows = self.execute_read(
             "SELECT * FROM live_messages "
             f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+            "AND disposition_json IS NULL "
             "AND (exact_session=0 OR NOT EXISTS (SELECT 1 FROM live_session_aliases "
             "WHERE alias_session_id=live_messages.session_id)) "
             "AND consumed_at IS NULL AND handoff_json IS NULL "
+            "AND disposition_json IS NULL "
             "AND runtime_custody_json IS NULL ORDER BY id ASC",
             (session_id, session_id, session_id),
         )
@@ -877,6 +889,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=?, outcome=? "
                 f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind LIKE 'control:%' "
+                "AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND {question_filter} AND claimed_at IS NOT NULL AND id IN ({placeholders})",
                 (now, outcome or "applied", session_id, session_id, session_id, QUESTION_CONTROL, *ids),

@@ -7,6 +7,7 @@ unset PYTHONPATH PYTHONHOME
 
 PASSIVE_OBSERVATION=0
 CONFIGURATION_ONLY=0
+READINESS_PROBE=0
 SKIP_PROJECT=0
 FIRST_ARGUMENT=1
 for ARGUMENT in "$@"; do
@@ -28,6 +29,7 @@ for ARGUMENT in "$@"; do
             break
             ;;
         telemetry) CONFIGURATION_ONLY=1; break ;;
+        installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
         *) break ;;
     esac
 done
@@ -93,6 +95,9 @@ apply_runtime_env() {
 
 run_runtime() {
     apply_runtime_env
+    if [[ "$READINESS_PROBE" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-bridge --module agent_bridge -- "$@"
+    fi
     exec "$AGENT_RT_PY" -m agent_bridge "$@"
 }
 

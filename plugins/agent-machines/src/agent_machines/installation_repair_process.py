@@ -4,21 +4,29 @@ from __future__ import annotations
 
 import os
 import math
+import re
+import shutil
 import signal
 import subprocess
 import sys
 import threading
-import time
-from collections.abc import Mapping, Sequence
+import time as time
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
+from typing import BinaryIO, cast
 
-from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import (
+    no_window_kwargs,
+    spawn_sync_in_kill_on_close_job as spawn_sync_in_kill_on_close_job,
+)
 from agent_procutil.owned_process import (
-    OutputLimitExceeded, OwnedCleanupError, OwnedExecutionBudget,
+    OutputLimitExceeded, OwnedCleanupError,
     require_contained_worker, run_caller_owned,
 )
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 MAX_OUTPUT = 64 * 1024
 _termination = threading.local()
@@ -27,12 +35,32 @@ _CANCEL_SIGNALS = (
 )
 
 
-def _ignore_cancellation():
+def path_interpreter(name: str) -> str | None:
+    """Resolve host tools without implicit Windows cwd or relative PATH lookup."""
+    names = [name]
+    if os.name == "nt":
+        names = [
+            name + extension
+            for extension in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+            if re.fullmatch(r"\.[a-zA-Z0-9]+", extension)
+        ]
+    for entry in os.get_exec_path():
+        directory = Path(entry)
+        if not directory.is_absolute():
+            continue
+        for candidate in names:
+            selected = shutil.which(str(directory / candidate))
+            if selected:
+                return selected
+    return None
+
+
+def _ignore_cancellation() -> None:
     for signum in _CANCEL_SIGNALS:
         signal.signal(signum, signal.SIG_IGN)
 
 
-def _cancel_signal(signum, frame):
+def _cancel_signal(signum: int, frame: FrameType | None) -> None:
     _termination.pending = True
     if not getattr(_termination, "deferring", False):
         # A second termination request must not interrupt descendant cleanup.
@@ -41,7 +69,7 @@ def _cancel_signal(signum, frame):
 
 
 @contextmanager
-def cancel_on_termination():
+def cancel_on_termination() -> Iterator[None]:
     """Keep CLI termination inside the same cleanup/lock lifetime as cancellation."""
     if threading.current_thread() is not threading.main_thread():
         yield
@@ -66,7 +94,7 @@ def cancel_on_termination():
 
 
 @contextmanager
-def caller_owned_readiness(enabled: bool):
+def caller_owned_readiness(enabled: bool) -> Iterator[None]:
     """Borrow only an explicit caller's native containment, never an installer scope."""
     previous = getattr(_termination, "caller_owned_readiness", False)
     if enabled:
@@ -75,7 +103,7 @@ def caller_owned_readiness(enabled: bool):
                 require_contained_worker()
             except (OSError, RuntimeError) as error:
                 raise ValueError("caller-owned readiness requires an enclosing native Job") from error
-        elif os.getpgrp() != os.getppid() or os.getsid(0) != os.getppid():
+        elif getattr(os, "getpgrp")() != os.getppid() or getattr(os, "getsid")(0) != os.getppid():
             raise ValueError("caller-owned readiness requires its enclosing parent's native group")
     _termination.caller_owned_readiness = enabled
     try:
@@ -93,7 +121,7 @@ class ActionResult:
 
 def _posix_group_alive(pgid: int) -> bool:
     try:
-        os.killpg(pgid, 0)
+        getattr(os, "killpg")(pgid, 0)
     except ProcessLookupError:
         return False
     if not sys.platform.startswith("linux"):
@@ -170,10 +198,10 @@ def run_action(
     overflow = threading.Event()
     chunks: list[bytes] = []
     readers: list[threading.Thread] = []
-    started_streams = []
+    started_streams: list[BinaryIO] = []
     terminated = False
 
-    def drain(stream, *, retain: bool):
+    def drain(stream: BinaryIO, *, retain: bool) -> None:
         size = 0
         try:
             while block := stream.read(4096):
@@ -185,7 +213,7 @@ def run_action(
         finally:
             stream.close()
 
-    def terminate():
+    def terminate() -> None:
         nonlocal terminated
         if terminated:
             return
@@ -193,7 +221,7 @@ def run_action(
             job.terminate_and_wait(5)
         elif os.name != "nt":
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                getattr(os, "killpg")(process.pid, getattr(signal, "SIGKILL"))
             except ProcessLookupError:
                 pass
         elif process.poll() is None:
@@ -218,7 +246,7 @@ def run_action(
                                       daemon=True)
             reader.start()
             readers.append(reader)
-            started_streams.append(stream)
+            started_streams.append(cast(BinaryIO, stream))
         deadline = time.monotonic() + timeout
         while process.poll() is None or any(reader.is_alive() for reader in readers):
             if overflow.is_set():

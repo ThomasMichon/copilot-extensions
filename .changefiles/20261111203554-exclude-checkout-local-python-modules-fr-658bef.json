@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude checkout-local Python modules from selected installed runtime gate execution",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

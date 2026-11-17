@@ -2,11 +2,14 @@
 
 from pathlib import Path
 import os
+import platform
 import subprocess
+from typing import Any
 
 import pytest
 
-from agent_worktrees import mux_creation, pane_lifecycle, sessions
+from agent_remote_driver import mux_creation, windows_mux_version
+from agent_worktrees import activity, pane_lifecycle, sessions
 
 
 @pytest.mark.parametrize("system", ["Windows", "Linux"])
@@ -14,8 +17,9 @@ from agent_worktrees import mux_creation, pane_lifecycle, sessions
 @pytest.mark.parametrize("returncode", [0, 9])
 @pytest.mark.parametrize("directory", ["absolute", "relative", "empty"])
 def test_mux_creation_keeps_process_home_separate_from_pane(
-    monkeypatch, tmp_path, system, kind, returncode, directory,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, system: str, kind: str,
+    returncode: int, directory: str,
+) -> None:
     home = tmp_path / "home with spaces"
     worktree = tmp_path / "selected worktree"
     home.mkdir()
@@ -28,12 +32,13 @@ def test_mux_creation_keeps_process_home_separate_from_pane(
     if system == "Windows":
         selected = str(worktree) if directory != "empty" else str(tmp_path)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    monkeypatch.setattr(mux_creation.platform, "system", lambda: system)
+    monkeypatch.setattr(platform, "system", lambda: system)
     monkeypatch.setattr(mux_creation, "has_session", lambda *args: False)
+    monkeypatch.setattr(windows_mux_version, "require_creation_binary", lambda binary: binary)
     monkeypatch.setattr(
         mux_creation, "run_session", lambda argv, *args: mux_creation.run(argv),
     )
-    monkeypatch.setattr(sessions.activity, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(sessions, "cleanup_mux_pane_args", lambda argv: None)
     monkeypatch.setattr(sessions, "has_mux_session", lambda wt: kind.endswith("window"))
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
@@ -53,17 +58,17 @@ def test_mux_creation_keeps_process_home_separate_from_pane(
         "psmux", "new-window" if kind.endswith("window") else "new-session",
         "-c", selected, "child", "two words",
     ]
-    directories = []
+    directories: list[str] = []
 
-    def build(worktree_id, work_dir, *args, **kwargs):
+    def build(worktree_id: str, work_dir: str, *args: object, **kwargs: object) -> list[str]:
         directories.append(work_dir)
         return list(expected)
 
     monkeypatch.setattr(sessions, "build_mux_new_session_argv", build)
     monkeypatch.setattr(sessions, "build_mux_new_window_argv", build)
-    seen = []
+    seen: list[tuple[list[str], dict[str, Any]]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         seen.append((argv, kwargs))
         return subprocess.CompletedProcess(
             argv, returncode, stdout="%1\n", stderr="refused" if returncode else "",

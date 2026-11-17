@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from collections.abc import Callable
+from typing import NoReturn, Protocol, TypedDict, cast
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -16,13 +20,34 @@ from budget_guidance.posture import build_posture
 from budget_guidance.session_guidance import (
     MAX_GUIDANCE_BYTES, cue, render_guidance, startup_posture, write_session_guidance,
 )
-from test_external_reader import _reading
+from test_external_reader import _reading as _reading_fixture
+
+
+class _ReadingFixture(Protocol):
+    def __call__(self, **overrides: object) -> dict[str, object]: ...
+
+
+_reading = cast(_ReadingFixture, _reading_fixture)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def _config(tmp_path, monkeypatch, *, reading=None, external=False):
+class _CueDataRequired(TypedDict):
+    availability: str
+    fields: dict[str, dict[str, object]]
+    calculated: dict[str, str] | None
+    adapters: list[dict[str, object]]
+
+
+class CueData(_CueDataRequired, total=False):
+    error: str
+
+
+def _config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
+    reading: dict[str, object] | None = None, external: bool = False,
+) -> Path:
     path = tmp_path / "budget.json"
     adapter = (
         {"type": "external-command", "id": "report", "authority": 10, "source": "account-reader"}
@@ -37,22 +62,23 @@ def _config(tmp_path, monkeypatch, *, reading=None, external=False):
     return path
 
 
-def _payload(tmp_path, **overrides):
+def _payload(tmp_path: Path, **overrides: object) -> dict[str, object]:
     return {"sessionId": "test-session", "cwd": str(tmp_path), **overrides}
 
 
-def _data(path):
+def _data(path: Path) -> CueData:
     marker, data = path.read_text().split("\n", 1)
     assert marker.startswith("[owner: budget-guidance@")
-    return json.loads(data)
+    return cast(CueData, json.loads(data))
 
 
-def test_cue_reuses_status_posture_and_attribution(tmp_path, monkeypatch):
+def test_cue_reuses_status_posture_and_attribution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = _config(tmp_path, monkeypatch)
     expected = build_posture(without_reader_grants(parse_config(load_json(path)), AT), AT)
     written = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     data = _data(written)
     assert data == cue(expected)
+    assert data["calculated"] is not None
     assert data["calculated"]["remaining"] == "60"
     assert data["fields"]["consumption"]["selected"] == expected["fields"]["consumption"]["selected"]
     assert data["adapters"][0]["source"] == "account-reader"
@@ -63,7 +89,7 @@ def test_cue_reuses_status_posture_and_attribution(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("source", ["startup", "resume", "acp", "unknown-future-source"])
-def test_resume_and_new_sources_replace_old_values(tmp_path, monkeypatch, source):
+def test_resume_and_new_sources_replace_old_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
     path = _config(tmp_path, monkeypatch)
     written = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     value = json.loads(path.read_text())
@@ -72,12 +98,14 @@ def test_resume_and_new_sources_replace_old_values(tmp_path, monkeypatch, source
     assert write_session_guidance(
         _payload(tmp_path, source=source), home=tmp_path, at=AT,
     ) == written
-    assert _data(written)["calculated"]["remaining"] == "39"
+    calculated = _data(written)["calculated"]
+    assert calculated is not None
+    assert calculated["remaining"] == "39"
     assert not list(written.parent.glob("*.tmp"))
 
 
 @pytest.mark.parametrize("bad", ["", "../other", "/absolute", ".", "..", "x/y", "x\\y", "x" * 129, None])
-def test_invalid_session_identifier_never_creates_state(tmp_path, bad):
+def test_invalid_session_identifier_never_creates_state(tmp_path: Path, bad: str | None) -> None:
     with pytest.raises(ModelError, match="identifier"):
         write_session_guidance(_payload(tmp_path, sessionId=bad), home=tmp_path, at=AT)
     assert not (tmp_path / ".copilot").exists()
@@ -88,7 +116,7 @@ def test_invalid_session_identifier_never_creates_state(tmp_path, bad):
     ".copilot/session-state/test-session/instructions",
     ".copilot/session-state/test-session/instructions/budget-guidance",
 ])
-def test_symlink_directory_refuses_escape(tmp_path, monkeypatch, part):
+def test_symlink_directory_refuses_escape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, part: str) -> None:
     _config(tmp_path, monkeypatch)
     target = tmp_path / part
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -109,18 +137,17 @@ def test_symlink_directory_refuses_escape(tmp_path, monkeypatch, part):
     ".copilot/session-state/test-session/instructions",
     ".copilot/session-state/test-session/instructions/budget-guidance",
 ])
-def test_reparse_directory_refuses_write_without_symlink_privileges(tmp_path, monkeypatch, part):
-    import budget_guidance.session_guidance as module
+def test_reparse_directory_refuses_write_without_symlink_privileges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, part: str) -> None:
 
     _config(tmp_path, monkeypatch)
     written = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     previous = written.read_bytes()
     reparse = tmp_path / part
     original_lstat = Path.lstat
-    monkeypatch.setattr(module.stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
+    monkeypatch.setattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
 
-    def reparse_metadata(path, *args, **kwargs):
-        metadata = original_lstat(path, *args, **kwargs)
+    def reparse_metadata(path: Path, *args: object, **kwargs: object) -> os.stat_result | SimpleNamespace:
+        metadata = cast(Callable[..., os.stat_result], original_lstat)(path, *args, **kwargs)
         if path == reparse:
             return SimpleNamespace(st_mode=metadata.st_mode, st_file_attributes=0x410)
         return metadata
@@ -132,17 +159,16 @@ def test_reparse_directory_refuses_write_without_symlink_privileges(tmp_path, mo
     assert not list(written.parent.glob("*.tmp"))
 
 
-def test_atomic_failure_retains_previous_cue_and_removes_only_owned_temp(tmp_path, monkeypatch):
-    import budget_guidance.session_guidance as module
+def test_atomic_failure_retains_previous_cue_and_removes_only_owned_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     _config(tmp_path, monkeypatch)
     target = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     previous = target.read_bytes()
 
-    def fail_replace(*args):
+    def fail_replace(*args: object) -> NoReturn:
         raise OSError("private-native-detail")
 
-    monkeypatch.setattr(module.os, "replace", fail_replace)
+    monkeypatch.setattr(os, "replace", fail_replace)
     with pytest.raises(OSError):
         write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     assert target.read_bytes() == previous
@@ -153,7 +179,7 @@ def test_atomic_failure_retains_previous_cue_and_removes_only_owned_temp(tmp_pat
     "secret-invalid-json", '{"secret":1e999999999999999999999}',
     '{"schema":1,"schema":2}', "x" * 65537,
 ], ids=["invalid-json", "overflow", "duplicate-key", "oversized"])
-def test_invalid_config_is_explicit_redacted_unavailability(tmp_path, monkeypatch, contents):
+def test_invalid_config_is_explicit_redacted_unavailability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: str) -> None:
     path = _config(tmp_path, monkeypatch)
     path.write_text(contents)
     written = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
@@ -167,7 +193,7 @@ def test_invalid_config_is_explicit_redacted_unavailability(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("availability", [[], {}, ["available"]])
-def test_malformed_reading_state_is_unavailable_not_a_raw_type_error(tmp_path, monkeypatch, availability):
+def test_malformed_reading_state_is_unavailable_not_a_raw_type_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, availability: object) -> None:
     _config(tmp_path, monkeypatch, reading=_reading(availability=availability))
     data = _data(write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT))
     assert data["availability"] == "unavailable"
@@ -175,14 +201,14 @@ def test_malformed_reading_state_is_unavailable_not_a_raw_type_error(tmp_path, m
     assert data["error"] == "configuration could not provide a valid budget posture"
 
 
-def test_unresolvable_operator_home_expression_is_explicit_unavailability(tmp_path, monkeypatch):
+def test_unresolvable_operator_home_expression_is_explicit_unavailability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BUDGET_GUIDANCE_CONFIG", "~nonexistent-budget-test-user/config.json")
     data = _data(write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT))
     assert data["availability"] == "unavailable"
     assert data["calculated"] is None
 
 
-def test_missing_config_and_invalid_cwd_replace_old_posture(tmp_path, monkeypatch):
+def test_missing_config_and_invalid_cwd_replace_old_posture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _config(tmp_path, monkeypatch)
     target = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     monkeypatch.setenv("BUDGET_GUIDANCE_CONFIG", str(tmp_path / "missing-secret.json"))
@@ -193,8 +219,8 @@ def test_missing_config_and_invalid_cwd_replace_old_posture(tmp_path, monkeypatc
     assert _data(target)["error"] == "session directory is unavailable"
 
 
-def test_external_reference_can_never_execute_at_startup(tmp_path, monkeypatch):
-    def forbidden(*args, **kwargs):
+def test_external_reference_can_never_execute_at_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("startup attempted process creation")
 
     _config(tmp_path, monkeypatch, external=True)
@@ -205,13 +231,13 @@ def test_external_reference_can_never_execute_at_startup(tmp_path, monkeypatch):
     assert data["adapters"][0]["availability"] == "unavailable"
 
 
-def test_relative_operator_config_is_relative_to_session_cwd(tmp_path, monkeypatch):
+def test_relative_operator_config_is_relative_to_session_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _config(tmp_path, monkeypatch)
     monkeypatch.setenv("BUDGET_GUIDANCE_CONFIG", "budget.json")
     assert startup_posture(tmp_path, AT)["calculated"]["remaining"] == "60"
 
 
-def test_opaque_adapter_errors_do_not_enter_the_cue(tmp_path, monkeypatch):
+def test_opaque_adapter_errors_do_not_enter_the_cue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _config(tmp_path, monkeypatch, reading=_reading(
         availability="error", error="secret-adapter-detail",
         allowance=None, consumption=None, reset_at=None,
@@ -222,7 +248,7 @@ def test_opaque_adapter_errors_do_not_enter_the_cue(tmp_path, monkeypatch):
 
 
 @pytest.mark.guard
-def test_utf8_and_token_budget_withholds_oversized_evidence_without_truncation(tmp_path, monkeypatch):
+def test_utf8_and_token_budget_withholds_oversized_evidence_without_truncation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _config(tmp_path, monkeypatch, reading=_reading(source="😺" * 2000))
     posture = startup_posture(tmp_path, AT)
     text = render_guidance(posture)
@@ -235,7 +261,7 @@ def test_utf8_and_token_budget_withholds_oversized_evidence_without_truncation(t
 
 
 @pytest.mark.parametrize("state", ["stale", "contradictory"])
-def test_cue_preserves_warning_and_no_optimistic_freshness(tmp_path, monkeypatch, state):
+def test_cue_preserves_warning_and_no_optimistic_freshness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     path = _config(tmp_path, monkeypatch)
     if state == "stale":
         at = datetime(2026, 1, 4, tzinfo=timezone.utc)
@@ -255,7 +281,7 @@ def test_cue_preserves_warning_and_no_optimistic_freshness(tmp_path, monkeypatch
 
 
 @pytest.mark.guard
-def test_projection_and_hook_declarations_are_output_free_and_owner_scoped():
+def test_projection_and_hook_declarations_are_output_free_and_owner_scoped() -> None:
     declarations = json.loads((PLUGIN / "instruction-projections.json").read_text())
     assert {p["id"] for p in declarations["projections"]} == {
         "session-guidance", "posture-boundary",
@@ -272,22 +298,40 @@ def test_projection_and_hook_declarations_are_output_free_and_owner_scoped():
     assert "as authoritative for this session" in pointer
 
 
-@pytest.mark.parametrize("platform", ["python", "posix", "powershell"])
-def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_path, platform):
-    shell = shutil.which("bash" if platform == "posix" else "pwsh")
+@pytest.mark.parametrize("platform", ["python", "posix", "powershell", "powershell.exe"])
+def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_path: Path, platform: str) -> None:
+    shell = shutil.which({
+        "posix": "bash", "powershell": "pwsh", "powershell.exe": "powershell.exe",
+    }.get(platform, "pwsh"))
     if platform != "python" and (not shell or (platform == "posix" and os.name == "nt")):
         pytest.skip(f"{platform} interpreter unavailable")
     env = {**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
-    env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
+    root = tmp_path / "payload"
+    for name in ("scripts", "src"):
+        shutil.copytree(
+            PLUGIN / name, root / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    shutil.copy2(PLUGIN / "plugin.json", root / "plugin.json")
+    env["COPILOT_PLUGIN_ROOT"] = str(root)
     env["BUDGET_GUIDANCE_CONFIG"] = str(tmp_path / "not-configured.json")
     env["PYTHONPATH"] = "invalid-ambient-startup-path"
-    script = PLUGIN / "scripts"
+    script = root / "scripts"
     argv = (
         [sys.executable, "-I", "-S", str(script / "write_session_guidance.py")]
         if platform == "python" else
-        [shell, str(script / "write-session-guidance.sh")] if platform == "posix" else
-        [shell, "-NoProfile", "-File", str(script / "write-session-guidance.ps1")]
+        [cast(str, shell), str(script / "write-session-guidance.sh")] if platform == "posix" else
+        [cast(str, shell), "-NoProfile", "-File", str(script / "write-session-guidance.ps1")]
     )
+
+    def entries() -> dict[str, str | None]:
+        return {
+            str(path.relative_to(root)): (
+                hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+            )
+            for path in root.rglob("*")
+        }
+
+    before = entries()
     for source in ("startup", "resume"):
         result = subprocess.run(
             argv, input=json.dumps(_payload(tmp_path, source=source)),
@@ -298,10 +342,11 @@ def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_p
         assert result.stdout == "{}"
         written = tmp_path / ".copilot/session-state/test-session/instructions/budget-guidance/session-guidance.instructions.md"
         assert _data(written)["error"] == "configuration not found"
+        assert entries() == before
     assert not (tmp_path / ".budget-guidance").exists()
 
 
-def test_writer_failure_envelope_is_single_and_redacted(tmp_path):
+def test_writer_failure_envelope_is_single_and_redacted(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-I", "-S", str(PLUGIN / "scripts/write_session_guidance.py")],
         input="secret-not-json", text=True, capture_output=True, cwd=tmp_path,
@@ -314,7 +359,7 @@ def test_writer_failure_envelope_is_single_and_redacted(tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX one-shot writer deadline")
 @pytest.mark.parametrize("stall", ["import", "main"])
-def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path, stall):
+def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path: Path, stall: str) -> None:
     shell = shutil.which("bash")
     if shell is None:
         pytest.skip("Bash unavailable")
@@ -345,7 +390,7 @@ def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path, stall)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX session wrapper")
-def test_posix_wrapper_missing_writer_emits_one_empty_envelope(tmp_path):
+def test_posix_wrapper_missing_writer_emits_one_empty_envelope(tmp_path: Path) -> None:
     shell = shutil.which("bash")
     if shell is None:
         pytest.skip("Bash unavailable")
@@ -361,10 +406,10 @@ def test_posix_wrapper_missing_writer_emits_one_empty_envelope(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows venv redirector resolution")
-def test_windows_writer_resolves_venv_base_without_launching_redirector(tmp_path):
+def test_windows_writer_resolves_venv_base_without_launching_redirector(tmp_path: Path) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     assert shell, "native Windows writer coverage requires PowerShell"
-    base = Path(sys._base_executable)
+    base = Path(getattr(sys, "_base_executable"))
     assert base.is_file()
     scripts = tmp_path / "venv/Scripts"
     scripts.mkdir(parents=True)
@@ -387,7 +432,7 @@ def test_windows_writer_resolves_venv_base_without_launching_redirector(tmp_path
     assert _data(target)["error"] == "configuration not found"
 
 
-def test_powershell_writer_bounds_maximum_stdin_delivery_to_stalled_child(tmp_path):
+def test_powershell_writer_bounds_maximum_stdin_delivery_to_stalled_child(tmp_path: Path) -> None:
     shell = shutil.which("pwsh") or (shutil.which("powershell.exe") if os.name == "nt" else None)
     if shell is None:
         pytest.skip("PowerShell unavailable")

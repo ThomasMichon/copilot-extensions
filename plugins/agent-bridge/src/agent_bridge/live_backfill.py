@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import time
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 #: The ``live_messages.kind`` of a history replay request (a session control).
 REPLAY_HISTORY_CONTROL = "control:replay-history"
@@ -81,22 +81,27 @@ class HistoryBackfill:
             if pending is not None:
                 pending["held"].append(raw)
                 return 0
-        return store.ingest(session_id, raw, worktree_id=worktree_id)
+        return cast(int, store.ingest(session_id, raw, worktree_id=worktree_id))
 
     def replay(self, store: Any, session_id: str, raw: list[dict[str, Any]], *,
                worktree_id: str | None) -> int:
+        """Return the count for the original count-only Python caller."""
+        return self.replay_with_acceptance(store, session_id, raw, worktree_id=worktree_id)[0]
+
+    def replay_with_acceptance(self, store: Any, session_id: str, raw: list[dict[str, Any]], *,
+                               worktree_id: str | None) -> tuple[int, bool]:
         """Land a replayed history, then the live events held for it. A replay
         nothing awaits (late, or unsolicited) is ignored: it would land out of
-        order after newer events."""
+        order after newer events. Acceptance is independent of the event count."""
         with self._lock:
             pending = self._pending.pop(session_id, None)
             if pending is None:
-                return 0
+                return 0, False
             self._done.add(session_id)
         count = store.ingest(session_id, raw, worktree_id=worktree_id)
         for batch in pending["held"]:
             count += store.ingest(session_id, batch, worktree_id=worktree_id)
-        return count
+        return count, True
 
 
 def backfill(app_state: Any) -> HistoryBackfill:
@@ -124,14 +129,15 @@ def latest_id(store: Any, session_id: str) -> int:
     return log.latest_id if log is not None else 0
 
 
-def ingest(request: Any, registration: dict[str, Any], raw: list[dict[str, Any]], *, replay: bool) -> int:
-    """The ingest route's store write (see the module docstring)."""
+def ingest(request: Any, registration: dict[str, Any], raw: list[dict[str, Any]], *,
+           replay: bool) -> tuple[int, bool | None]:
+    """Return the ingest count and, only for replay, explicit owner acceptance."""
     store = request.app.state.live_event_store
     db = request.app.state.db
     bf, now, sid = backfill(request.app.state), time.time(), registration["session_id"]
     wid = registration.get("worktree_id")
     bf.release_expired(store, now, lambda s: (db.get_live_session(s) or {}).get("worktree_id"))
     if replay:
-        return bf.replay(store, sid, raw, worktree_id=wid)
+        return bf.replay_with_acceptance(store, sid, raw, worktree_id=wid)
     bf.maybe_start(db, store, registration, now)
-    return bf.ingest(store, sid, raw, worktree_id=wid)
+    return bf.ingest(store, sid, raw, worktree_id=wid), None

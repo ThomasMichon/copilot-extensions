@@ -309,6 +309,15 @@ validation with explicit failure ownership. Stable delivery comes first;
 subsequent portfolio improvement replaces lesser-value tests with more valuable
 eligible units within the same or smaller budget, instead of accumulating them.
 
+### assurance-without-repeat-execution
+
+One complete, trustworthy execution should satisfy every compatible obligation
+it proves. Gathering evidence or crossing an orchestration boundary should not
+repeat the same tests solely to produce another status or artifact. Distinct
+platform, generated-consumer, installation and integrity guarantees remain
+explicit, while bounded preflight catches composition mistakes before an
+expensive release cycle.
+
 ## Non-Goals / Boundaries
 
 - No generated-main commit as a second durable release or artifact identity.

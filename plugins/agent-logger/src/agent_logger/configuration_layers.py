@@ -6,14 +6,15 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context
-from configuration_layers import compose
+from configuration_layers import Layer, LayerOwner, compose
 
-from . import _peer_launch
+from . import _peer_launch as _peer_launch
 
 
-def _legacy_owner_prefix():
+def _legacy_owner_prefix() -> list[str]:
     from configuration_context import ready_owner_prefix
 
     from .repo_trust import _default_repos_yaml_root
@@ -31,13 +32,16 @@ def _legacy_owner_prefix():
         path = payload / "scripts" / "versioned_runtime.py"
         if not path.is_file() or path.is_symlink():
             return []
+    from configuration_context.readiness import qualify_resolver
+
+    qualify_resolver(path, "agent-logger", "agent_logger")
     sdk = _peer_launch._load_primitive(path, "_logger_configuration_versioned_runtime")
     return ready_owner_prefix(
         _default_repos_yaml_root().absolute(), "agent_worktrees", resolver=sdk.resolve_python,
     )
 
 
-def worktrees_owner_command(home: Path) -> tuple[list[str], dict[str, str] | None, dict | None]:
+def worktrees_owner_command(home: Path) -> tuple[list[str], dict[str, str] | None, dict[str, Any] | None]:
     """Select the existing optional native owner boundary without provisioning."""
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not raw and (
@@ -46,7 +50,7 @@ def worktrees_owner_command(home: Path) -> tuple[list[str], dict[str, str] | Non
     ):
         raw = str(home / "install.json")
     own = _peer_launch.validate_owner("agent-logger", home, raw) if raw else None
-    if raw:
+    if own is not None:
         receipt = Path(own["cellRoot"]) / "plugins" / "agent-worktrees" / "install.json"
         prefix = _peer_launch.launch_prefix(
             "agent-logger", Path(own["pluginRoot"]), raw, "agent-worktrees",
@@ -62,7 +66,7 @@ def worktrees_owner_command(home: Path) -> tuple[list[str], dict[str, str] | Non
     return prefix, environment, own
 
 
-def _owner_report(root: Path, home: Path):
+def _owner_report(root: Path, home: Path) -> dict[str, Any] | None:
     prefix, environment, own = worktrees_owner_command(home)
     report = delivered_context(repository_root=root)
     if report is not None:
@@ -82,7 +86,7 @@ def _owner_report(root: Path, home: Path):
     return fresh
 
 
-def _organization_file(root: Path):
+def _organization_file(root: Path) -> Path | None:
     from .config import REPO_CONFIG_FILENAMES
     from .repo_trust import has_symlink_ancestor
 
@@ -93,7 +97,10 @@ def _organization_file(root: Path):
     return None
 
 
-def load_organization_layers(root, base_path, base_data, machine_data, home):
+def load_organization_layers(
+    root: Path, base_path: Path | None, base_data: dict[str, Any],
+    machine_data: dict[str, Any], home: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, LayerOwner]]:
     from .config import DEFAULTS, _deep_merge, _load_repo_config
     from .repo_trust import repo_config_is_trusted
 
@@ -105,7 +112,7 @@ def load_organization_layers(root, base_path, base_data, machine_data, home):
     repository_id = context["repository_id"]
     machine = context["execution_machine"]
     cell = context["installation_cell"]
-    layers = [{"id": "defaults", "tier": "defaults", "origin": "defaults", "values": DEFAULTS}]
+    layers: list[Layer] = [{"id": "defaults", "tier": "defaults", "origin": "defaults", "values": DEFAULTS}]
     if base_path is not None:
         layers.append({
             "id": "repository", "tier": "repository", "origin": "base",
@@ -147,7 +154,9 @@ def load_organization_layers(root, base_path, base_data, machine_data, home):
     return result["values"], repository_data, result["provenance"]
 
 
-def validate_organization_local_path(data, repo_data, previous_path):
+def validate_organization_local_path(
+    data: dict[str, Any], repo_data: dict[str, Any], previous_path: str | None,
+) -> None:
     """Retain the deferred native-path guard for the effective organization value.
 
     Every sync_path consumer reads this value. Raise for the local target;
@@ -166,10 +175,13 @@ def validate_organization_local_path(data, repo_data, previous_path):
             data["sync"]["targets"]["local"]["path"] = previous_path
 
 
-def acquire_organization_preferences(data, root, path, machine_data, home, *, include_repo):
+def acquire_organization_preferences(
+    data: dict[str, Any], root: Path | None, path: Path | None,
+    machine_data: dict[str, Any], home: Path, *, include_repo: bool,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, LayerOwner]]:
     from .config import DEFAULTS, _deep_merge, _load_repo_config
 
-    repo_data = {}
+    repo_data: dict[str, Any] = {}
     if path is not None:
         repo_data = _load_repo_config(path)
         data = _deep_merge(_deep_merge(DEFAULTS, repo_data), machine_data)

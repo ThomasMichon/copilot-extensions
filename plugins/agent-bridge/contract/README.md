@@ -4,6 +4,12 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+The registry and `tools/check-agent-bridge-contracts.py` are **not** a CI gate.
+Refresh evidence and run the checker manually (or through the on-demand
+`Installation context full` portfolios) when deliberately working on Bridge
+protocol evidence; ordinary source changes do not require a recapture.
+Statements below about CI or required contract gates are historical.
+
 The H1 prior-runtime corpus also retains the exact `0.4.0-dev150` frontend
 source beside its existing protocol source. Both come from the same immutable
 release commit and retain their original bytes and Git blob identities.
@@ -22,6 +28,16 @@ this is source compatibility, not modern lifetime/authentication support,
 historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
+
+The optional `versioned_messages: 1` expansion separates retained message
+base/type revisions and explicit required semantics from authenticated receiver
+enrollment. The current collector adds focused migration, correlated rejection,
+legacy-reader fencing, schema/CAS race, original sender observation and real
+Node/ASGI controls. The actual extension separately reconstructs represented
+history without invoking prompts or tools. Existing historical captures remain
+unchanged; current source declarations and genuine execution evidence are
+refreshed through the existing capture owner. These controls do not establish
+installed adoption or native Copilot delivery.
 
 The optional `compatible_native_inbox: 1` expansion selects
 `receiving_api: "native-sdk-v1"` on the existing retained endpoints.

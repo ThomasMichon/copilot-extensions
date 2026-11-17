@@ -17,9 +17,29 @@ Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
 
-Bridge remains pending as a project. Its whole-file changed-code checks reuse
-the existing hash-locked service-index checker environment, which includes
-Pydantic's typed models. This supplies validation dependencies without claiming
+An owner may declare `program_roots` for independently loaded, repository-shaped
+payloads that contain same-named physical modules. Each entry supplies its
+repository-relative `root` and an explicit, nonempty `import_roots` list confined
+to that root. Worktrees' retained admission toolkit declares the same ordered
+roots as its runtime inventory. The owner's remaining selected files form the
+ordinary program; no selected file is excluded or reassigned to another owner.
+Each program retains the existing requirements, strictness, Python versions and
+platforms. Failures aggregate across all programs and targets. Ordinary
+single-program checks are unchanged.
+
+Grouped checks capture every selected physical file's bytes and file/directory
+identities before the first program and verify them across program boundaries.
+Each program also retains the existing source-view and declared-import custody
+checks. This is checker isolation, not a new qualification profile, admission
+change or permission to substitute first-party stubs. The actor-free partition
+controls live in `tools/promotion_unit_tests/test_typecheck_new_code.py`; actual
+MyPy duplicate-module, strict-failure, import-precedence and source-replacement
+controls live in `tools/test_typecheck_programs.py`.
+
+Bridge remains pending as a project. Its whole-file changed-code checks use
+a hash-locked extension of the service-index checker environment, adding
+Cryptography for its HTTPS certificate fixtures alongside Pydantic's typed
+models. This supplies validation dependencies without claiming
 that the complete Bridge source or test tree is strict.
 
 Materialized library copies under the strict services' `libs/` directories are
@@ -95,11 +115,11 @@ these files only, without admitting their unchanged project or certifying
 unmodeled emitted programs. `--enforced` remains the independent admitted-cohort
 gate; exact-candidate enforcement of the ratchet is not yet activated.
 
-Bridge's pending project reuses the existing hash-locked service-index checker
-profile for FastAPI, Pydantic and HTTPX declarations. This makes its selected
+Bridge's pending project uses the hash-locked Bridge checker
+profile for FastAPI, Pydantic, HTTPX and Cryptography declarations. This makes its selected
 route and consumer-contract files checkable without admitting the full plugin
 or changing its runtime dependencies.
-Dispatch's pending project uses that same profile for its selected recovery
+Dispatch's pending project uses the service-index profile for its selected recovery
 route, client and test files; the remaining project is not thereby admitted.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies

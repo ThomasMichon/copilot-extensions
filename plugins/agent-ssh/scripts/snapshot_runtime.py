@@ -12,9 +12,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import ModuleType
+from collections.abc import Mapping
+from typing import cast
 
 
-def load(path: Path, name: str):
+def load(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ValueError("Canonical snapshot dispatch support is unavailable")
@@ -24,7 +27,9 @@ def load(path: Path, name: str):
     return module
 
 
-def runtime_command(payload: Path, plugin: str, environment: dict) -> tuple[list[str], dict]:
+def runtime_command(
+    payload: Path, plugin: str, environment: dict[str, str],
+) -> tuple[list[str], dict[str, str]]:
     """Delegate installation decisions and completed-slot selection, never rebuild them."""
     raw = environment.get("COPILOT_EXTENSIONS_CONTEXT") or None
     if not raw:
@@ -120,10 +125,12 @@ def runtime_command(payload: Path, plugin: str, environment: dict) -> tuple[list
     )
     for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE", "VIRTUAL_ENV"):
         selected.pop(key, None)
-    return [str(python), "-I", "-X", "utf8", "-m", plugin.replace("-", "_")], selected
+    return [str(python), "-I", "-X", "utf8", "-B", "-m", plugin.replace("-", "_")], selected
 
 
-def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str], dict]:
+def legacy_worktrees_command(
+    owner: Path, environment: dict[str, str],
+) -> tuple[list[str], dict[str, str]]:
     """Resolve the optional installed owner before loading any of its code."""
     environment = {
         key: value
@@ -147,10 +154,12 @@ def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str],
     if len(relative.parts) == 2 and relative.name == "agent-ssh":
         marketplace = relative.parts[0]
         current = installed_item(f"agent-ssh@{marketplace}", home, cache)
-        current_record = current.get("inventory") or current.get("reference")
+        current_record = cast(
+            dict[str, object], current.get("inventory") or current.get("reference"),
+        )
         registration = current_record.get("registration") or current_record.get("definition")
         if registration:
-            if Path(current_record["payload"]).resolve() != owner.resolve():
+            if Path(cast(str, current_record["payload"])).resolve() != owner.resolve():
                 raise ValueError("Installed inventory selected another caller")
             expected_peer = owner.resolve().parent / "agent-worktrees"
             if (
@@ -160,16 +169,18 @@ def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str],
             ):
                 raise FileNotFoundError("Optional installed peer is absent")
             optional = installed_item(f"agent-worktrees@{marketplace}", home, cache)
-            optional_record = optional.get("inventory") or optional.get("reference")
+            optional_record = cast(
+                dict[str, object], optional.get("inventory") or optional.get("reference"),
+            )
             other_registration = optional_record.get("registration") or optional_record.get(
                 "definition"
             )
             if registration != other_registration or current["catalog"] != optional["catalog"]:
                 raise ValueError("Optional installation source changed during resolution")
-            if Path(optional_record["payload"]).resolve() != expected_peer:
+            if Path(cast(str, optional_record["payload"])).resolve() != expected_peer:
                 raise ValueError("Optional installed payload escaped its qualified installation")
             return runtime_command(
-                Path(optional_record["payload"]), "agent-worktrees", environment
+                Path(cast(str, optional_record["payload"])), "agent-worktrees", environment
             )
     # Compatibility for legacy source/snapshot payloads without native inventory.
     # A rejected inventory/source is never retried against a different owner.
@@ -198,7 +209,9 @@ def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str],
     return runtime_command(payload, "agent-worktrees", environment)
 
 
-def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
+def worktrees_command(
+    owner: Path, own: Mapping[str, object] | None,
+) -> tuple[list[str], dict[str, str]]:
     """Compose existing owners inside the caller-owned request worker."""
     if own is None:
         command, environment = legacy_worktrees_command(owner, dict(os.environ))
@@ -208,9 +221,9 @@ def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
             "_snapshot_owner_peer",
         )
         primitive = sys.modules["_owner_installation_context"]
-        root = Path(own["pluginRoot"])
+        root = Path(cast(str, own["pluginRoot"]))
         durable = root.parents[3]
-        receipt = Path(own["cellRoot"]) / "plugins" / "agent-worktrees" / "install.json"
+        receipt = Path(cast(str, own["cellRoot"])) / "plugins" / "agent-worktrees" / "install.json"
         if not receipt.parent.exists():
             raise FileNotFoundError("Optional peer is absent")
         selected = peer._active_context(
@@ -218,7 +231,7 @@ def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
             receipt,
             durable,
             "agent-worktrees",
-            Path(own["cellRoot"]),
+            Path(cast(str, own["cellRoot"])),
             {},
         )
         environment = peer.peer_environment(selected, dict(os.environ))
@@ -230,10 +243,10 @@ def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
         # The request worker admitted the caller before resolution; fence changes now.
         active = peer._active_context(
             primitive,
-            Path(own["installReceipt"]),
+            Path(cast(str, own["installReceipt"])),
             durable,
             "agent-ssh",
-            Path(own["cellRoot"]),
+            Path(cast(str, own["cellRoot"])),
             dict(os.environ),
         )
         if (
@@ -266,7 +279,7 @@ def main() -> int:
             stdin=sys.stdin,
             stdout=sys.stdout,
             stderr=sys.stderr,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     except FileNotFoundError:
         return 127

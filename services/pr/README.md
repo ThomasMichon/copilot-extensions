@@ -4,6 +4,8 @@ For the explicit independent Unix HTTP repository-cache/continuing-event profile
 see [local operation](LOCAL.md). It uses the same foreground host and writer,
 without requiring Core/Gateway ingress or service credential enrollment.
 The connector profile below retains its existing defaults.
+The optional [cache-only reviewer query](REVIEWER.md) shares that local host and
+requires explicit activity selection; it adds no protected write owner.
 
 For explicitly selected generation-three filtered populations, inert named sets,
 startup sponsorship and owned dynamic subscriptions, see

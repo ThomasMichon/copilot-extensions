@@ -21,12 +21,17 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from agent_procutil import no_window_flags
 from credential_relay.sources.git_credential import GitCredentialSource
 
-from .provision import DOTFILES_DIR
+from .config import DOTFILES_DIR
+
+if TYPE_CHECKING:
+    from .account_binding import AccountBinding
+    from .lifecycle import CodespaceInfo
 
 log = logging.getLogger("agent-codespaces.auth-preflight")
 
@@ -80,12 +85,12 @@ def _timeout_finding(login: str) -> str:
             "GitHub -- retry once GitHub is reachable")
 
 
-def _live_codespaces() -> list | None:
+def _live_codespaces() -> list[CodespaceInfo] | None:
     """The CodeSpaces that still exist, or None when they can't be listed."""
     try:
         from .lifecycle import list_codespaces
 
-        return list(list_codespaces())
+        return list(list_codespaces(concurrent=True))
     except Exception:
         log.debug("could not list CodeSpaces; keeping every account binding", exc_info=True)
         return None
@@ -103,7 +108,7 @@ def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...
     """
     accounts: list[str] = []
     uses_ambient = False
-    bindings: list = []
+    bindings: list[AccountBinding] = []
     try:
         from . import account_binding
 
@@ -115,12 +120,18 @@ def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...
         from .config import load_merged_config
 
         cfg = load_merged_config(include_cwd=False)
-        for repo in cfg.repos.keys():
-            account = gh_account.account_for_repo(repo)
-            if account:
-                accounts.append(account)
-            else:
-                uses_ambient = True
+        repos = list(cfg.repos.keys())
+        if repos:
+            # One routing snapshot serves every configured repo; a per-repo
+            # lookup spawns agent-worktrees once per repo and dominates
+            # readiness time.
+            inventory = gh_account.account_inventory()
+            for repo in repos:
+                account = inventory.account_for(repo) if repo else None
+                if account:
+                    accounts.append(account)
+                else:
+                    uses_ambient = True
     except Exception:
         log.debug("could not resolve configured CodeSpace repo accounts", exc_info=True)
     live = _live_codespaces() if live_only else None
@@ -146,9 +157,9 @@ def _active_scope_findings(
 
     active = gh_account.active_account()
     failure = (failures or {}).get(active.casefold()) if active else None
-    if failure == "timeout":
+    if active and failure == "timeout":
         return [_timeout_finding(active)]
-    if failure == "failed":
+    if active and failure == "failed":
         remedy = account_login_remedy(active) if account_login_remedy else "run: gh auth login"
         return [f"active gh account '{active}' is not logged in -- {remedy}"]
     scopes = lowered.get(active.casefold()) if active else None
@@ -165,7 +176,10 @@ def _active_scope_findings(
     return []
 
 
-def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
+def gh_auth_preflight(
+    status_func: Callable[[], tuple[int, str]],
+    account_login_remedy: Callable[[str], str],
+) -> list[str]:
     """Check gh auth and codespace scope only for CodeSpace-serving accounts."""
     msgs: list[str] = []
     rc, combined = status_func()
@@ -222,9 +236,8 @@ def host_from_url(url: str) -> str | None:
             return host or None
         return None
 
-    parts = urlsplit(url)
-    host = parts.hostname
-    return host or None
+    hostname = urlsplit(url).hostname
+    return hostname or None
 
 
 def parse_remote_hosts(remote_output: str) -> list[str]:

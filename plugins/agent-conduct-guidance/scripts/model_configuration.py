@@ -6,9 +6,31 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
+from collections.abc import Callable, Mapping
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+
+if TYPE_CHECKING:
+    from configuration_layers import Layer, LayerOwner
 
 
-def _load_owned_module(path, name):
+Routing = dict[str, list[dict[str, object]]]
+
+
+class PayloadSource(TypedDict):
+    locator: dict[str, str]
+    sourceFingerprint: str
+    payloadRoot: str
+    marketplaceId: str
+
+
+class RoutingLoader(Protocol):
+    def __call__(
+        self, path: Path, *, kind: str, allowed: bool, diagnostics: list[str],
+    ) -> tuple[str, Routing]: ...
+
+
+def _load_owned_module(path: Path, name: str) -> ModuleType:
     if not path.is_file() or path.is_symlink():
         raise ValueError("qualified owner SDK is unavailable")
     spec = importlib.util.spec_from_file_location(name, path)
@@ -25,14 +47,17 @@ def _load_owned_module(path, name):
     return module
 
 
-def _installation_sdk(payload):
+def _installation_sdk(payload: Path) -> ModuleType:
     return _load_owned_module(
         payload / "scripts" / "installation-context" / "installation_context.py",
         "_conduct_configuration_installation",
     )
 
 
-def _qualified_peer_payload(sdk, own, home, repo, environment):
+def _qualified_peer_payload(
+    sdk: ModuleType, own: PayloadSource, home: Path, repo: Path,
+    environment: Mapping[str, str],
+) -> PayloadSource:
     installed = home / ".copilot" / "installed-plugins"
     locator = own.get("locator") or {}
     keys = (
@@ -40,7 +65,7 @@ def _qualified_peer_payload(sdk, own, home, repo, environment):
         else [path.name for path in installed.iterdir() if path.is_dir()]
         if installed.is_dir() else []
     )
-    matches = []
+    matches: list[PayloadSource] = []
     for key in keys:
         candidate = installed / key / "agent-worktrees"
         if not candidate.is_dir():
@@ -56,21 +81,30 @@ def _qualified_peer_payload(sdk, own, home, repo, environment):
     return matches[0]
 
 
-def _ready_owner_prefix(payload, runtime_root):
+def _ready_owner_prefix(payload: Path, runtime_root: Path) -> list[str]:
     from configuration_context import ready_owner_prefix
+    from configuration_context.readiness import qualify_resolver
 
+    qualify_resolver(payload / "scripts" / "versioned_runtime.py", "agent-worktrees", "agent_worktrees")
     runtime = _load_owned_module(
         payload / "scripts" / "versioned_runtime.py", "_conduct_configuration_versioned_runtime",
     )
     return ready_owner_prefix(runtime_root, "agent_worktrees", resolver=runtime.resolve_python)
 
 
-def qualified_owner_report(repo, payload, home, environment):
+def qualified_owner_report(
+    repo: Path, payload: Path, home: Path, environment: Mapping[str, str],
+) -> dict[str, object]:
     """Reacquire actual owner mode and configuration; placement is not activation."""
     from configuration_context import context_from_owner, read_owner_context
+    from configuration_context.readiness import qualify_payload_code
 
+    qualify_payload_code(
+        payload / "scripts" / "installation-context" / "installation_context.py",
+        payload, "agent-conduct-guidance", "model_configuration", environment=environment,
+    )
     sdk = _installation_sdk(payload)
-    own = sdk.resolve_payload_source(
+    own: PayloadSource = sdk.resolve_payload_source(
         payload_root=payload, plugin_id="agent-conduct-guidance",
         copilot_home=home / ".copilot", project_root=repo, environment=environment,
     )
@@ -78,6 +112,10 @@ def qualified_owner_report(repo, payload, home, environment):
     source_environment.pop("COPILOT_PLUGIN_ROOT", None)
     peer = _qualified_peer_payload(sdk, own, home, repo, source_environment)
     peer_payload = Path(peer["payloadRoot"])
+    qualify_payload_code(
+        peer_payload / "scripts" / "registry_root.py", peer_payload,
+        "agent-worktrees", "agent_worktrees", environment=environment,
+    )
     registry = _load_owned_module(
         peer_payload / "scripts" / "registry_root.py", "_conduct_configuration_registry",
     )
@@ -122,12 +160,14 @@ def qualified_owner_report(repo, payload, home, environment):
     report = read_owner_context(prefix, repo, required=True, environment=child_environment)
     if not sdk.paths_equal(context_from_owner(report)["installation_cell"], expected_cell):
         raise ValueError("configuration owner report belongs to another current cell")
-    return report
+    return cast(dict[str, object], report)
 
 
 def compose_routing(
-    repo, home, repository, operator, operator_status, load, trusted, diagnostics, merge,
-):
+    repo: Path, home: Path, repository: Routing, operator: Routing, operator_status: str,
+    load: RoutingLoader, trusted: Callable[[Path, Path], bool], diagnostics: list[str],
+    merge: Callable[[Routing, Routing], Routing],
+) -> tuple[Routing, dict[str, str], dict[str, LayerOwner]]:
     if not os.environ.get("AGENT_CONFIGURATION_CONTEXT"):
         return merge(repository, operator), {}, {}
     # Parent-owned release materialization places the canonical stdlib library here.
@@ -148,17 +188,21 @@ def compose_routing(
     if original["repository_id"] != context["repository_id"]:
         raise ValueError("configuration projection belongs to another repository")
     context["base_root"] = str(repo)
-    statuses = {}
-    layers = [{"id": "defaults", "tier": "defaults", "origin": "defaults", "values": {}}]
+    statuses: dict[str, str] = {}
+    layers: list[Layer] = [
+        {"id": "defaults", "tier": "defaults", "origin": "defaults", "values": {}},
+    ]
 
-    def append(layer_id, tier, origin, source, path, root):
+    def append(
+        layer_id: str, tier: str, origin: str, source: Routing, path: Path, root: Path,
+    ) -> None:
         # Native routing replaces an entire model entry, never its individual
         # evidence/state fields. Single-element atomic lists encode that rule.
         values = {
             purpose: {entry["model"]: [entry] for entry in entries}
             for purpose, entries in source.items()
         }
-        layer = {
+        layer: Layer = {
             "id": layer_id, "tier": tier, "origin": origin, "values": values,
             "installation_cell": context["installation_cell"],
             "source": {"root": str(root), "path": str(path.relative_to(root))},
@@ -184,7 +228,7 @@ def compose_routing(
         "operator", "machine", "local_machine", operator,
         home / ".copilot" / "model-routing.json", home,
     )
-    local = Path(owner["repository_machine_root"])
+    local = Path(cast(str, owner["repository_machine_root"]))
     status, source = load(
         local / relative, kind="repository-machine", allowed=True, diagnostics=diagnostics,
     )

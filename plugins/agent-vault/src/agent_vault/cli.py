@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import contextlib
+from functools import partial
 import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest
-from .cache_targets import command_entries, status_command as cmd_cache_status
+from .cache_machine_cli import cmd_cache_verify as cmd_cache_verify, register_prepare
+from .cache_targets import command_entries as command_entries, command_plan, status_command as cmd_cache_status
 from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,
@@ -27,7 +29,11 @@ from .terminal_input import (
     _has_controlling_tty as _has_controlling_tty,
     _read_password_from_tty as _read_password_from_tty,
 )
+from .transport_binding import MutationBinding
 from .winpipe import pipe_send
+
+if TYPE_CHECKING:
+    from .command_transport import CommandRoute
 
 _read_cache_manifest = read_cache_manifest
 
@@ -244,125 +250,32 @@ def send_command(
     *,
     strict_endpoint: bool = False,
     require_endpoint: bool = False,
+    binding: MutationBinding | None = None,
+    _context: ResolvedVault | None = None,
+    _route: CommandRoute | None = None,
 ) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
-    context = config.resolve_context()
-    request = dict(request)
-
-    def _tag(result: dict[str, Any] | None, transport: str) -> dict[str, Any] | None:
-        if result is not None:
-            result["_transport"] = transport
-        return result
-
+    from .command_transport import TransportBoundary, send_command as send
     from .extensions import TransportContext, get_registry
 
-    host = os.environ.get("AGENT_VAULT_HOST", "127.0.0.1")
-    port = context.port
-
-    # Discovery-first (backwards-compatible): resolve the daemon's *actual*
-    # endpoint from the rendezvous file, falling back to today's fixed
-    # socket/port when nothing is advertised. A discovered TCP port also feeds
-    # the extension transports (e.g. the WSL->Windows interop relay), so a
-    # dynamic/discovered port is honored end to end.
-    discovery_error: RuntimeError | None = None
-    try:
-        discovered = _discover_endpoint(context, strict=strict_endpoint)
-    except (rendezvous.EndpointUnavailable, rendezvous.EndpointStateError) as error:
-        if not strict_endpoint:
-            raise
-        discovered, discovery_error = None, error
-    discovered_unix: str | None = None
-    discovered_pipe: str | None = None
-    if discovered is not None:
-        # On WSL the daemon's native primary -- a Windows named pipe, or a Unix
-        # socket that isn't this guest's -- can't be dialed. Fall to a TCP
-        # alternate the daemon also advertises so the interop relay gets a real
-        # port instead of the legacy default (#3426). ``usable`` returns the
-        # primary when it's already dialable here, else the first matching alt.
-        if IS_WSL:
-            usable = discovered.usable(lambda t: t == "tcp")
-            if usable is not None:
-                discovered = usable
-        if discovered.transport == "unix":
-            discovered_unix = discovered.address
-        elif discovered.transport == "pipe":
-            discovered_pipe = discovered.address
-        elif discovered.transport == "tcp":
-            try:
-                d_host, d_port = discovered.tcp_host_port
-                port = d_port
-                # A locally-advertised file carries the real host; the WSL
-                # Windows-side file advertises 127.0.0.1, so keep the resolved
-                # host to cross the boundary.
-                if discovered.source != "windows":
-                    host = d_host
-            except ValueError:
-                if strict_endpoint:
-                    raise
-                discovered = None
-
-    # Inject the caller's vault selection for a LOCAL daemon only. A cross-
-    # boundary daemon reached over the WSL->Windows interop (endpoint source
-    # "windows") owns its OWN kpdb/group/vault; forwarding the guest's paths --
-    # which don't exist on the host -- would make the host daemon try to open a
-    # nonexistent database ("KeePass database not found"). Let the host daemon use
-    # its own configuration. See #3426.
-    if not (discovered is not None and discovered.source == "windows"):
-        request.setdefault("kpdb", context.kpdb)
-        request.setdefault("group", context.group)
-        request.setdefault("vault", context.vault_name)
-
-    ext_ctx = TransportContext(
-        kpdb=context.kpdb,
-        group=context.group,
-        vault_name=context.vault_name,
-        port=port,
+    boundary = TransportBoundary(
+        resolve_context=config.resolve_context,
+        discover=_discover_endpoint,
+        socket_send=_send_socket,
+        tcp_send=_send_tcp,
+        pipe_send=pipe_send,
+        registry=get_registry,
+        transport_context=TransportContext,
+        is_windows=IS_WINDOWS,
+        is_wsl=IS_WSL,
+        host=os.environ.get("AGENT_VAULT_HOST", "127.0.0.1"),
+        unavailable=rendezvous.EndpointUnavailable,
+        invalid=rendezvous.EndpointStateError,
     )
-
-    # Extension transports registered before_builtin take precedence over the
-    # local daemon (e.g. an SSH-tunnel that should reach the caller's own vault).
-    result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
-    if result is not None:
-        return result
-
-    if discovery_error is not None:
-        raise discovery_error
-    if require_endpoint and discovered is None:
-        raise rendezvous.EndpointUnavailable("No selected native vault endpoint is advertised")
-
-    if strict_endpoint and discovered is not None and discovered.transport not in (
-        "tcp", "pipe" if IS_WINDOWS else "unix",
-    ):
-        return None
-
-    # Strict selection never falls back to another daemon after a failed dial.
-    if discovered_pipe is not None and IS_WINDOWS:
-        result = pipe_send(discovered_pipe, request, timeout)
-        if result is not None or strict_endpoint:
-            return _tag(result, "discovered-pipe")
-
-    # A discovered Unix socket (native, possibly non-default path) is dialed
-    # ahead of the legacy fixed socket.
-    if discovered_unix is not None and not IS_WINDOWS:
-        result = _send_socket(request, timeout, path=discovered_unix)
-        if result is not None or strict_endpoint:
-            return _tag(result, "discovered-unix")
-
-    if (
-        discovered_unix is None and not IS_WINDOWS
-        and context.sources.get("port") == "default"
-        and not (strict_endpoint and discovered is not None)
-    ):
-        result = _send_socket(request, timeout)
-        if result is not None:
-            return _tag(result, "unix-socket")
-
-    result = _send_tcp(request, host, port, timeout)
-    if result is not None or strict_endpoint and discovered is not None:
-        is_disc_tcp = discovered is not None and discovered.transport == "tcp"
-        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
-
-    return get_registry().try_transports(request, timeout, ext_ctx)
+    return send(
+        boundary, request, timeout, strict_endpoint=strict_endpoint,
+        require_endpoint=require_endpoint, binding=binding, _context=_context, _route=_route,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1041,14 @@ def cmd_git_credential(args: Any) -> int:
 
 
 def cmd_import_key(args: Any) -> int:
+    if getattr(args, "create_only", False):
+        from .attachment_import_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
+        return 1
+
     import base64
 
     key_file = Path(args.key_file)
@@ -1164,6 +1085,14 @@ def cmd_import_key(args: Any) -> int:
 
 
 def cmd_export_key(args: Any) -> int:
+    if getattr(args, "exclusive", False):
+        from .attachment_export_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --exclusive for export-key", file=sys.stderr)
+        return 1
+
     import base64
 
     dest_dir = Path(args.dest_dir)
@@ -1291,14 +1220,19 @@ def cmd_cache_populate(args: Any) -> int:
     ``--manifest`` file, declared targets, and registered cache-source extensions.
     Each entry is fetched so the daemon caches it (and missing entries surface early).
     """
-    pairs = command_entries(args)
-    if pairs is None:
+    plan = command_plan(args)
+    if plan is None:
         return 1
+    pairs = plan.entries
     if not pairs:
         print("No entries to cache (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
+    if plan.service_owned:
+        from .cache_maintenance_client import command
+
+        return command(args, pairs, "populate")
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1335,9 +1269,9 @@ def cmd_cache_populate(args: Any) -> int:
         failure = None
         try:
             with read_lock:
-                resp = send_command(
+                sender = partial(send_command, strict_endpoint=True) if cache._recovery else send_command
+                resp = sender(
                     request, timeout=None if args.prompt else 15.0,
-                    **({"strict_endpoint": True} if cache._recovery else {}),
                 )
                 present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
                 if (
@@ -1394,49 +1328,6 @@ def cmd_cache_clear(args: Any) -> int:
         return 0
     print("Error: could not clear cache", file=sys.stderr)
     return 1
-
-
-def cmd_cache_verify(args: Any) -> int:
-    """Check the persistent cache holds a set of entries without unlocking.
-
-    Entries come from explicit selectors, declared targets and cache-source extensions,
-    exactly like ``cache-populate``. Exits non-zero (2) if any are missing, so a
-    launch-time gate can confirm an unattended box is primed while still locked.
-    """
-    from .cache import get_cache
-    from .credential_fields import attribute_name
-
-    pairs = command_entries(args)
-    if pairs is None:
-        return 1
-    if not pairs:
-        print("No entries to verify (no declared targets, --entry, --manifest, or extension).",
-              file=sys.stderr)
-        return 1
-
-    cache = get_cache()
-    present = 0
-    missing: list[str] = []
-    for entry, field in pairs:
-        cache_entry = config.normalize_entry(entry, config.resolve_context().group)
-        if cache.get(
-            cache_entry, field, readonly=True, legacy_field=attribute_name(field),
-            legacy_entry=legacy_cache_entry(entry, cache_entry),
-        ) is not None:
-            present += 1
-        else:
-            missing.append(f"{entry} [{field}]")
-
-    if getattr(args, "json", False):
-        print(json.dumps(
-            {"present": present, "total": len(pairs), "missing": missing},
-            indent=2,
-        ))
-    else:
-        print(f"Cached: {present}/{len(pairs)}")
-        for m in missing:
-            print(f"  missing: {m}", file=sys.stderr)
-    return 2 if missing else 0
 
 
 def cmd_which(args: Any) -> int:
@@ -1697,12 +1588,20 @@ def _main(argv: list[str] | None = None) -> int | None:
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("key_file", help="Path to private key file (.pub must exist alongside)")
+    p.add_argument("--create-only", action="store_true",
+                   help="Refuse an existing entry and retain partial/unknown creation without retry")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --create-only, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_import_key)
 
     p = sub.add_parser("export-key", help="Export key pair from entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("dest_dir", help="Destination directory")
     p.add_argument("key_name", help="Key filename (e.g. id_ed25519)")
+    p.add_argument("--exclusive", action="store_true",
+                   help="Create both files exclusively in an absolute same-owner private directory")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --exclusive, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_export_key)
 
     p = sub.add_parser("seal",
@@ -1745,6 +1644,7 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.add_argument("--json", action="store_true", help="Print JSON")
     p.set_defaults(func=cmd_cache_status)
 
+    register_prepare(sub)
     p = sub.add_parser("cache-verify",
                        help="Check the persistent cache holds a set of entries "
                             "(no unlock); exit 2 if any missing")
@@ -1753,6 +1653,8 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.add_argument("--manifest", help="File of 'entry | field' lines to check")
     p.add_argument("--machine", help="Machine hint passed to cache-source extensions")
     p.add_argument("--json", action="store_true", help="Print JSON")
+    p.add_argument("--machine-fallback", action="store_true",
+                   help="Verify through the redundant machine copy, without user decryption")
     p.set_defaults(func=cmd_cache_verify)
 
     p = sub.add_parser("vault", help="Manage named vaults")

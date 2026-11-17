@@ -5,6 +5,7 @@ import ast
 import sys
 import argparse
 import hashlib
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 import re
@@ -148,42 +149,42 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
     command_ids = [command["command"] for command in commands]
     if len(command_ids) != len(set(command_ids)):
         raise ValueError(f"{path}: duplicate command id")
-    output_dir = data.get("outputDir", "bin")
+    output_dir = data.setdefault("outputDir", "bin")
     if (
         not isinstance(output_dir, str)
         or not _OUTPUT_DIR.fullmatch(output_dir)
         or ".." in Path(output_dir).parts
     ):
         raise ValueError(f"{path}: invalid outputDir: {output_dir!r}")
-    installer = data.get("installer", "install")
+    installer = data.setdefault("installer", "install")
     if not isinstance(installer, str) or not _INSTALLER.fullmatch(installer):
         raise ValueError(f"{path}: invalid installer: {installer!r}")
-    windows_catalog_shim = data.get("windowsCatalogShim", "powershell")
+    windows_catalog_shim = data.setdefault("windowsCatalogShim", "powershell")
     if windows_catalog_shim not in _WINDOWS_CATALOG_SHIMS:
         raise ValueError(
             f"{path}: invalid windowsCatalogShim: {windows_catalog_shim!r}"
         )
-    posix_catalog_mode = data.get("posixCatalogMode", "python")
+    posix_catalog_mode = data.setdefault("posixCatalogMode", "python")
     if posix_catalog_mode not in _POSIX_CATALOG_MODES:
         raise ValueError(
             f"{path}: invalid posixCatalogMode: {posix_catalog_mode!r}"
         )
     if posix_catalog_mode == "shell" and raw_commands is not None:
         raise ValueError(f"{path}: shell posixCatalogMode supports one command")
-    provision_mode = data.get("provisionMode", "snapshot")
+    provision_mode = data.setdefault("provisionMode", "snapshot")
     if provision_mode not in _PROVISION_MODES:
         raise ValueError(f"{path}: invalid provisionMode: {provision_mode!r}")
-    session_start_bootstrap = data.get("sessionStartBootstrap", True)
+    session_start_bootstrap = data.setdefault("sessionStartBootstrap", True)
     if not isinstance(session_start_bootstrap, bool):
         raise ValueError(
             f"{path}: invalid sessionStartBootstrap: {session_start_bootstrap!r}"
         )
-    payload_root_env = data.get("payloadRootEnv", "")
+    payload_root_env = data.setdefault("payloadRootEnv", "")
     if not isinstance(payload_root_env, str) or (
         payload_root_env and not _ENV.fullmatch(payload_root_env)
     ):
         raise ValueError(f"{path}: invalid payloadRootEnv: {payload_root_env!r}")
-    boot_trace_log_file = data.get("bootTraceLogFile", "logs/boot-trace.jsonl")
+    boot_trace_log_file = data.setdefault("bootTraceLogFile", "logs/boot-trace.jsonl")
     if (
         not isinstance(boot_trace_log_file, str)
         or not _BOOT_TRACE_LOG_FILE.fullmatch(boot_trace_log_file)
@@ -224,12 +225,17 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
         raise ValueError(
             f"{path}: payloadDispatcher must declare both posix and windows"
         )
-    powershell_pipeline_input = data.get("powershellPipelineInput", False)
+    powershell_pipeline_input = data.setdefault("powershellPipelineInput", False)
     if not isinstance(powershell_pipeline_input, bool):
         raise ValueError(f"{path}: powershellPipelineInput must be a boolean")
     if powershell_pipeline_input and not normalized_dispatcher["windows"]:
         raise ValueError(f"{path}: powershellPipelineInput requires a payloadDispatcher")
-    catalog_gate = data.get("catalogGate", "")
+    caller_cwd_env = data.setdefault("callerCwdEnv", "")
+    if not isinstance(caller_cwd_env, str) or caller_cwd_env and not _ENV.fullmatch(caller_cwd_env):
+        raise ValueError(f"{path}: invalid callerCwdEnv: {caller_cwd_env!r}")
+    if caller_cwd_env and not normalized_dispatcher["windows"]:
+        raise ValueError(f"{path}: callerCwdEnv requires a payloadDispatcher")
+    catalog_gate = data.setdefault("catalogGate", "")
     if not isinstance(catalog_gate, str) or (
         catalog_gate
         and (
@@ -254,18 +260,18 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
                 f"{path}: installationContext required needs payloadDispatcher "
                 "for both platforms"
             )
-    catalog_binding = data.get("catalogBinding", False)
+    catalog_binding = data.setdefault("catalogBinding", False)
     if not isinstance(catalog_binding, bool):
         raise ValueError(f"{path}: catalogBinding must be a boolean")
-    in_process_catalog = data.get("inProcessCatalog", False)
+    in_process_catalog = data.setdefault("inProcessCatalog", False)
     if not isinstance(in_process_catalog, bool):
         raise ValueError(f"{path}: inProcessCatalog must be a boolean")
     if in_process_catalog and (catalog_gate or catalog_binding):
         raise ValueError(f"{path}: inProcessCatalog cannot compose catalogGate or catalogBinding")
-    installer_lifecycle = data.get("installerLifecycle", False)
+    installer_lifecycle = data.setdefault("installerLifecycle", False)
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
-    runtime_admission = data.get("runtimeAdmissionToolkit", False)
+    runtime_admission = data.setdefault("runtimeAdmissionToolkit", False)
     if not isinstance(runtime_admission, bool):
         raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
     if runtime_admission and installation_context != "required":
@@ -275,7 +281,7 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
         or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
     ):
         raise ValueError(f"{path}: installerLifecycle requires a vendored installation primitive")
-    binding_module = data.get("catalogBindingModule", "")
+    binding_module = data.setdefault("catalogBindingModule", "")
     if (
         not isinstance(binding_module, str)
         or binding_module and (
@@ -296,22 +302,7 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
         raise ValueError(f"{path}: catalogBinding requires a vendored installation primitive")
     data["runtimeRoot"] = data[runtime_root_field]
     data["installationContext"] = installation_context
-    data["outputDir"] = output_dir
-    data["installer"] = installer
-    data["windowsCatalogShim"] = windows_catalog_shim
-    data["posixCatalogMode"] = posix_catalog_mode
-    data["provisionMode"] = provision_mode
-    data["sessionStartBootstrap"] = session_start_bootstrap
-    data["payloadRootEnv"] = payload_root_env
-    data["bootTraceLogFile"] = boot_trace_log_file
     data["payloadDispatcher"] = normalized_dispatcher
-    data["powershellPipelineInput"] = powershell_pipeline_input
-    data["catalogGate"] = catalog_gate
-    data["catalogBinding"] = catalog_binding
-    data["inProcessCatalog"] = in_process_catalog
-    data["installerLifecycle"] = installer_lifecycle
-    data["runtimeAdmissionToolkit"] = runtime_admission
-    data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
     data["commands"] = commands
     data["multiCommandManifest"] = raw_commands is not None
@@ -469,7 +460,7 @@ def render(
         "PROVISION_POWERSHELL": provision_powershell,
         "CATALOG_GATE_POSIX": (
             f'catalog_gate="$self_root/{data["catalogGate"]}"\n'
-            'if ! "$py" -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
+            'if ! "$py" -B -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
             "    printf '%s\\n' '{}'\n"
             "    exit 0\n"
             "fi\n"
@@ -482,7 +473,7 @@ def render(
             "$python = Get-Command python -ErrorAction SilentlyContinue\n"
             "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
             "if (-not $python) { Write-Output '{}'; exit 0 }\n"
-            "& $python.Source -E -X utf8 $catalogGate --check "
+            "& $python.Source -B -E -X utf8 $catalogGate --check "
             "--cwd (Get-Location).Path *> $null\n"
             "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
             if data["catalogGate"]
@@ -676,6 +667,13 @@ def render(
             if data["payloadDispatcher"]["posix"]
             else ""
         ),
+        "CALLER_CWD_POSIX": (
+            f'export {data["callerCwdEnv"]}="$PWD"\n' if data["callerCwdEnv"] else ""
+        ),
+        "CALLER_CWD_POWERSHELL": (
+            f"$env:{data['callerCwdEnv']} = (Get-Location).ProviderPath\n"
+            if data["callerCwdEnv"] else ""
+        ),
         "PAYLOAD_DISPATCH_POWERSHELL": (
             (
                 f"$env:{data['payloadRootEnv']} = $_payloadRoot\n"
@@ -784,7 +782,16 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
         protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    generated: dict[Path, str | bytes] = {}
+    spec = spec_from_file_location("_payload_runtime_admission", Path(__file__).with_name("runtime_admission.py"))
+    assert spec and spec.loader
+    toolkit = module_from_spec(spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(toolkit)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    generated: dict[Path, str | bytes] = toolkit.bootstrap_files(manifest, data)
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:
@@ -851,19 +858,6 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
                     raise ValueError(f"{manifest}: generated path collision: {asset}")
                 generated[asset] = source.read_text(encoding="utf-8")
     if data["runtimeAdmissionToolkit"]:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "_payload_runtime_admission", Path(__file__).resolve().parent / "runtime_admission.py",
-        )
-        assert spec and spec.loader
-        toolkit = importlib.util.module_from_spec(spec)
-        previous_bytecode = sys.dont_write_bytecode
-        try:
-            sys.dont_write_bytecode = True
-            spec.loader.exec_module(toolkit)
-        finally:
-            sys.dont_write_bytecode = previous_bytecode
         for relative, content in toolkit.expected_files(root).items():
             path = manifest.parent / "scripts" / "_runtime_admission" / relative
             if path in generated or path in protected_paths:

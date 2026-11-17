@@ -1,0 +1,6 @@
+{
+  "schema": "copilot-extensions.readiness-isolation",
+  "version": 1,
+  "plugin": "agent-bridge",
+  "module": "agent_bridge"
+}

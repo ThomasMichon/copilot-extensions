@@ -54,20 +54,36 @@ correct admitted scope rather than substitute `base_ref`. Existing watch
 cursors, transition criteria and merge policy are unchanged; exporting this
 field does not silently add a target-movement transition.
 
-The optional `reviews_complete` reports review-page coverage. Gitea currently
-leaves it unknown (`null`): the body-only traversal cannot prove exhaustion
-because Gitea filters other users' pending drafts after pagination. An empty
-page can precede a later submitted verdict, and a short page can also reflect
-server-clamped page size. Malformed, oversized or overlapping pages still fail
-the whole read rather than yielding successful empty history. Valid team-only
-review requests retain their request state without inventing an individual
-reviewer. Authoritative pagination metadata remains a separate qualification;
-unsupported providers and earlier executables also leave coverage unknown
-(`null` or absent). This is not atomic multi-page evidence, a submitted verdict,
+The optional `reviews_complete` reports review-page coverage. Gitea captures
+`X-Total-Count` through the existing curl response owner, within the unchanged
+capture budget. That count includes raw rows before other users' pending drafts
+are filtered. Empty intermediate pages and server-clamped short pages therefore
+do not establish exhaustion.
+
+When the first count is available and remains unchanged, traversal completes
+after acquiring that many distinct rows or reaching the count's conservative
+last-page bound: a positive raw page size cannot put a row after page N for
+N raw rows. Filtered empty pages are traversed within the existing request
+budget and a 64-page ceiling; reaching a bound fails rather than certifying
+partial history. A changed/lost count, contradictory rows, malformed,
+oversized or overlapping pages also fail. Normal fully visible histories can
+finish without an extra empty-page request.
+
+Missing metadata on the first response leaves coverage unknown (`null`),
+including prior executable/transport forms; an empty body never upgrades it.
+Valid team-only review requests retain their request state without inventing an
+individual reviewer. This is not atomic multi-page evidence, a submitted verdict,
 reviewer-specific completeness or permission to act. The additive `updated_at`
 retains the PR mutation timestamp from the same PR object; it does not identify
-the actor or kind of mutation. Neither field adds a provider request, and older
-version-1 consumers may ignore them.
+the actor or kind of mutation. Count capture adds no separate provider request,
+and older version-1 consumers may ignore the additive fields.
+
+The provider semantics follow Gitea's
+[raw review count](https://github.com/go-gitea/gitea/blob/894a971fab2c93f7018d0bc8139b1e25ec59be96/routers/api/v1/repo/pull_review.go),
+[post-pagination draft filtering](https://github.com/go-gitea/gitea/blob/894a971fab2c93f7018d0bc8139b1e25ec59be96/services/convert/pull_review.go)
+and [page normalization](https://github.com/go-gitea/gitea/blob/894a971fab2c93f7018d0bc8139b1e25ec59be96/routers/api/v1/utils/page.go).
+These describe the API contract, not qualification of an arbitrary server or
+curl binary. An older curl that supplies no usable count leaves it unknown.
 
 On-demand `threads` reads return discussion bodies, stable comment identities and
 comparison-round context; persisted watch snapshots contain metadata only.

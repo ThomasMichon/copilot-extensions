@@ -98,7 +98,7 @@ admission requirements. Current Core omits process diagnostics from new-mode
 requests; optional valid observations from other consumers remain advisory.
 Proxy ingress remains unsupported.
 
-The already-used `@github/copilot-sdk` session must expose `send()`, `getEvents()`
+The already-used `@microsoft/copilot-sdk` session must expose `send()`, `getEvents()`
 and `rpc.metadata.snapshot()`. Its actual `sessionId`, metadata session ID and
 working directory must agree with the registered native context. Metadata alone
 cannot redirect a stale SDK handle's send target. A resume whose SDK handle
@@ -110,9 +110,10 @@ consumer rechecks that selection before and after the final grant; missing,
 disabled or changed inputs remain held without resend.
 With `readonly_plugin_controls: 1`, the extension polls only plugin observations
 through `controls?readiness_only=true`. This filter neither claims nor expires
-mutation controls. Interrupts, mode changes and history replay remain
-unsupported: selected retained delivery never aborts a turn or replays an
-in-flight cache. Pending legacy mutation controls prevent enrollment. Unassociated legacy queue
+mutation controls. Interrupts and mode changes remain unsupported; bounded
+represented-history reconstruction uses the versioned control path below,
+never a model prompt, tool rerun or in-flight send-cache replay. Backlog type
+compatibility never prevents valid enrollment. Unassociated legacy queue
 messages retain their original IDs and receive one immutable handoff before
 delivery. A previously claimed or begun message is never treated as a fresh
 offer, acknowledged or discarded.
@@ -171,7 +172,9 @@ the receipt's original consumer, including after an extension reload; it never
 substitutes the new process or incarnation.
 
 An unbegun original offer can survive a receiver reload and be delivered using
-its original receipt identifier and envelope. A sending, unknown or accepted
+its original receipt identifier and envelope. Versioned final admission must
+name the currently enrolled receiver even when that envelope retains the original
+receipt consumer. A stale receiver cannot start an effect. A sending, unknown or accepted
 handoff is observation-only across that reload: no new receiver obtains a
 second SDK invocation.
 
@@ -184,6 +187,87 @@ in-flight cache is consumption evidence. Lost outcome replies are read back
 from the original receipt, or the same outcome is reported again without
 another SDK effect. Missing historical evidence remains visibly outstanding;
 there is no SDK idempotency guarantee or inferred nonacceptance.
+
+## Message contracts, migration and rejection
+
+The existing negotiation response advertises `message_base: 1` independently of
+authentication, installation and the retained-inbox transport version. A capable
+consumer adds that observation to its request only after negotiation. Payload
+support is not stored inside the original receiver identity or handoff receipt:
+older supported readers can still parse those records after provider rollback.
+Older providers receive the original request form; absent support is not guessed.
+Older consumers can enroll on an upgraded provider without interpreting controls:
+unstarted controls unsupported by that reader receive a terminal `unsupported_reader`
+disposition, not delivery or consumption. Plugin-readiness controls retain their
+separate readonly owner.
+
+Each newly produced row stores a base version, type, type revision and explicit
+`requires` list, independently of package versions. The poll adds trusted original
+message ID, sender, exact session, registered worktree and receiver incarnation.
+Additive optional properties are compatible. Unknown base/type revisions,
+malformed metadata and unknown required semantics are rejected before effects;
+their minimal trusted row correlation remains usable even when metadata is invalid.
+Producers can explicitly specify `message_version` and `message_requires` on
+ordinary admission. Idempotency includes those semantics.
+Before emitting either explicit field, producers must observe
+`versioned_messages: 1` from the actual serving daemon's existing health
+capabilities. The delivery client enforces that selection before POST; raw
+HTTP callers have the same obligation. Older providers may ignore additive
+JSON fields, so blindly sending required semantics to them is unsupported.
+Without an enrolled retained receiver, an explicit request can use only the
+documented equivalent legacy revision with no additional required semantics;
+other requests refuse before admission rather than escaping through legacy SDK
+polling. This adds no enrollment requirement to ordinary legacy baseline input.
+
+Conversion runs inside the existing queue transaction and retains the original
+row, payload, IDs, key, order and admission/effect history. Missing metadata uses
+this explicit legacy policy:
+
+| Stored legacy kind | Migration / retained disposition |
+|---|---|
+| `prompt`, `notify`, `status-check`, `reply`, validated `startup:prompt:<id>` | Revision 1 envelope; existing prompt/startup readiness and one-shot SDK admission |
+| `control:replay-history` with empty body | Revision 1; reconstruct bounded represented transcript tail through the existing history owner |
+| `control:set-mode`, `control:set-mode-ready`, `control:answer-question` | Retain original type/body as revision 1; this consumer explicitly rejects them, never executes or silently converts them to prompts |
+| Other kinds or nonempty legacy replay payload | Unknown revision; terminal correlated rejection, never guessed payload semantics |
+
+`POST .../retained-inbox/disposition` uses the same authenticated local ingress,
+exact current worktree/session and receiver CAS fences as polling. A pre-effect
+`rejected` result includes immutable machine code and bounded human reason.
+Rejected entries leave deliverable, recovery and busy-input projections, but
+remain in original-row receipts/audit. Neither `delivered_at` nor `consumed_at`
+is set. The normal message/keyed receipt owners expose `stage: rejected` and the
+disposition; delivery observation terminates as rejected rather than a timeout.
+Legacy ACK, withdrawal and expiry cannot overwrite that disposition.
+Rollback readers see an existing claimed/handoff association and conservative
+`unknown` outcome fence, never a new offer. That compatibility fence is not
+evidence of SDK invocation: the separate disposition and unchanged null send/
+consumption timestamps record the actual pre-effect rejection.
+Disposition-specific database guards also retain control audit, original input
+and native context, and prohibit false SDK timestamps or terminal rewrites.
+Current pruning and alias-fold queries skip dispositions; older writers cannot
+silently delete or retag them. The original control-custody prohibition remains
+unchanged: a disposition is not an SDK handoff or grant.
+
+History reconstruction separately requests `started`; only that invocation's
+`begin: true` response permits its one effect. Lost/repeated grants never permit
+replay. `completed` means represented history reconstructed, not SDK acceptance
+or agent consumption. The history POST returns `replay_accepted`, atomically
+selected by the existing backfill owner independently of the ingested count.
+An accepted empty or deduplicated batch can ingest zero events. Expired or
+unsolicited history returns false even with HTTP success. The retained callback
+requires explicit true acceptance for its exact native context; missing,
+malformed, refused or lost acknowledgement remains `unknown`, never completed
+or permission to replay. Ordinary non-replay responses retain their prior shape.
+A missing result remains `unknown`/`control_started`.
+Any prior claim, send start, delivery or consumption refuses a new rejection or
+control start; migration cannot certify earlier effects absent or canceled.
+Enrollment and reloading do not replay uncertain work.
+
+Retiring or changing a retained message type requires a documented, tested
+migration or explicit terminal-rejection strategy for every supported stored
+revision. Provider expansion precedes emission of new required semantics;
+supported rollback must preserve receipts and uncertainty, not reenroll a
+retired receiver or send input through a parallel transport.
 
 ## Reproducible source controls
 

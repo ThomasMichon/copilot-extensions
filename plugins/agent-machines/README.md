@@ -251,6 +251,18 @@ agent-machines installation-repair --project-root <project>
 agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module>
 ```
 
+Readiness actions run from the selected project root, even when the caller
+starts elsewhere, so repository-aware owners inspect that project's
+configuration rather than their installed payload directory. The admitted plan
+binds this root, and each probe refuses a missing or indirect project path.
+Manifest action targets remain payload-qualified absolute paths. Installer
+actions retain their payload working directory and existing apply authority.
+Read-only children retain only absolute PATH directories and disable implicit
+Windows current-directory command lookup. An all-relative PATH fails closed;
+it never becomes an empty, current-directory-searching PATH. They also remove
+`BASH_ENV`, so Bash cannot source a project-relative startup file before the
+admitted readiness script. Installer environments remain unchanged.
+
 For an explicit complete required-module selection, use `--required` instead of
 `--module`. It selects every discovered required module and its transitive
 prerequisites, including optional prerequisites, but not unrelated optional

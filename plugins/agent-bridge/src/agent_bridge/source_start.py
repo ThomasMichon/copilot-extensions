@@ -1,4 +1,4 @@
-"""Start the selected source generation without controlling its predecessor."""
+"""Start the selected generation and independently retire its central predecessor."""
 from __future__ import annotations
 
 import asyncio
@@ -8,16 +8,23 @@ from pathlib import Path
 import socket
 import sys
 import time
+from types import ModuleType
+from typing import Any
 
-from zdd import diagnostics
+from fastapi import FastAPI
+
+from zdd import diagnostics, routing
+from zdd.routing import Endpoint
 
 from .serving_reconcile import ServingReconcileError
 
 log = logging.getLogger("agent-bridge")
 
 
-async def complete_source_start(app, published: asyncio.Event, initial_recovery_task) -> None:
-    """Publish only a ready selected frontend, then observe predecessor self-retirement."""
+async def complete_source_start(
+    app: FastAPI, published: asyncio.Event, initial_recovery_task: asyncio.Task[Any] | None,
+) -> None:
+    """Publish a ready frontend, then bound central retirement and adopt resources."""
     from . import __version__, lifecycle_hooks
     from .app import _retire_previous_daemon
     from .app_lifecycle import settled_thread_call
@@ -58,16 +65,21 @@ async def complete_source_start(app, published: asyncio.Event, initial_recovery_
             await _retire_previous_daemon(
                 app, previous, current, initial_recovery_task=initial_recovery_task,
             )
+        table = await settled_thread_call(routing.read_table, config_dir())
+        if not isinstance(table, dict) or table.get("active") != current.to_dict():
+            return
+        if (
+            app.state.cold_recovery_ready and not app.state.shutting_down
+            and app.state.config.enable_credential_relay
+            and not getattr(app.state, "credential_relay_ready", False)
+        ):
+            await app.state.adopt_relay()
+        if previous is not None:
             if app.state.cold_recovery_ready and not app.state.shutting_down:
                 try:
                     await app.state.session_manager.reattach_session_hosts(recover_cold=False)
                 except Exception:
                     log.warning("Post-retirement Session Host reattach deferred", exc_info=True)
-        if (
-            app.state.cold_recovery_ready and not app.state.shutting_down
-            and app.state.config.enable_credential_relay
-        ):
-            await app.state.adopt_relay()
     except asyncio.CancelledError:
         raise
     except ForwardedRouteRefused as exc:
@@ -78,7 +90,7 @@ async def complete_source_start(app, published: asyncio.Event, initial_recovery_
         server.should_exit = True
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -93,8 +105,8 @@ def _check_selection(root: Path, version: str) -> None:
         raise ServingReconcileError("executing source runtime is no longer selected")
 
 
-def _selected_endpoint(core, version: str):
-    endpoint = core._active_endpoint()
+def _selected_endpoint(core: ModuleType, version: str) -> Endpoint | None:
+    endpoint: Endpoint | None = core._active_endpoint()
     if (
         endpoint is None or endpoint.version != version
         or type(endpoint.pid) is not int or endpoint.pid <= 0
@@ -105,9 +117,11 @@ def _selected_endpoint(core, version: str):
     return endpoint
 
 
-def _healthy_selected(core, version: str, *, pid: int | None = None, port: int | None = None) -> bool:
+def _healthy_selected(
+    core: ModuleType, version: str, *, pid: int | None = None, port: int | None = None,
+) -> bool:
     endpoint = _selected_endpoint(core, version)
-    if endpoint is None or (
+    if endpoint is None or endpoint.pid is None or (
         pid is not None and endpoint.pid != pid
         or port is not None and endpoint.port != port
     ):
@@ -144,7 +158,7 @@ def start_selected_source(
         return True
     deadline = time.monotonic() + timeout
 
-    def wait(*, pid=None, port=None) -> bool:
+    def wait(*, pid: int | None = None, port: int | None = None) -> bool:
         while time.monotonic() < deadline:
             _check_selection(root, selected)
             if core._active_endpoint_is_forward():

@@ -1,0 +1,139 @@
+{
+  "source": "936926d76a7066ac6eb5a1b11a83c91716eddf69:.github/workflows/ci.yml",
+  "purpose": "Frozen relevant legacy CI recipe fields; not a current workflow or execution plan.",
+  "run-name": "${{ inputs.promotion_run != '' && format('CI promotion {0} at {1}', inputs.promotion_run, inputs.promotion_sha) || '' }}",
+  "jobs": {
+    "checks": {
+      "steps": [
+        {
+          "name": "Verify the dispatched promotion snapshot before checkout",
+          "if": "github.event_name == 'workflow_dispatch' && (inputs.promotion_sha != '' || inputs.promotion_run != '' || inputs.promotion_phase == 'candidate')",
+          "env": {
+            "EXPECTED_SHA": "${{ inputs.promotion_sha }}",
+            "PROMOTION_RUN": "${{ inputs.promotion_run }}",
+            "RUN_SHA": "${{ github.sha }}",
+            "WORKFLOW_SHA": "${{ github.workflow_sha }}",
+            "RUN_REF": "${{ github.ref }}",
+            "PROMOTION_PHASE": "${{ inputs.promotion_phase }}"
+          },
+          "run": "case \"$PROMOTION_PHASE\" in\n  candidate)\n    ref_pattern='^refs/heads/release/promote-[0-9]+$'\n    [ \"$RUN_REF\" = \"refs/heads/release/promote-${PROMOTION_RUN%-*}\" ] || {\n      echo \"::error::Candidate branch does not belong to the qualifying promotion.\"\n      exit 1\n    }\n    ;;\n  release) ref_pattern='^refs/tags/promote-[0-9]{14}-[0-9a-f]{8}$' ;;\n  *) echo \"::error::Unknown promotion qualification phase.\"; exit 1 ;;\nesac\n[[ \"$EXPECTED_SHA\" =~ ^[0-9a-f]{40}$ ]] &&\n[[ \"$PROMOTION_RUN\" =~ ^[0-9]+-[0-9]+$ ]] &&\n[[ \"$RUN_REF\" =~ $ref_pattern ]] &&\n[ \"$RUN_SHA\" = \"$EXPECTED_SHA\" ] && [ \"$WORKFLOW_SHA\" = \"$EXPECTED_SHA\" ] || {\n  echo \"::error::Promotion dispatch does not execute the exact qualification snapshot.\"\n  exit 1\n}\n"
+        }
+      ]
+    },
+    "promotion-gate": {
+      "name": "Promotion snapshot gate",
+      "if": "always() && github.event_name == 'workflow_dispatch' && inputs.promotion_run != ''",
+      "needs": [
+        "checks",
+        "windows-python-artifact-builder",
+        "promotion-candidate-windows",
+        "promotion-publication-windows",
+        "windows-hooks",
+        "construction-macos",
+        "bootstrap-killswitch-powershell-5-1",
+        "worktree-manager",
+        "repositories-configuration",
+        "agent-dispatch-service",
+        "agent-chat-service-linux",
+        "agent-chat-service-windows",
+        "agent-index-service-linux",
+        "agent-index-service-windows",
+        "test-runner-linux",
+        "test-runner-windows",
+        "installation-context-windows",
+        "command-lifecycle-windows",
+        "vault-snapshot-windows",
+        "fleet-native-linux",
+        "fleet-native-windows",
+        "archive-sources-windows",
+        "discover",
+        "smoke",
+        "worktrees-smoke",
+        "worktrees-windows-launch",
+        "full"
+      ],
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 2,
+      "steps": [
+        {
+          "name": "Require all main-push coverage at the dispatched release snapshot",
+          "env": {
+            "NEEDS_JSON": "${{ toJson(needs) }}",
+            "PROMOTION_PHASE": "${{ inputs.promotion_phase }}"
+          },
+          "run": "python3 - <<'PY'\nimport json\nimport os\n\nresults = json.loads(os.environ[\"NEEDS_JSON\"])\nphase = os.environ[\"PROMOTION_PHASE\"]\nif phase not in (\"candidate\", \"release\"):\n    raise SystemExit(\"Unknown promotion qualification phase.\")\nif phase == \"release\":\n    if results.get(\"full\", {}).get(\"result\") != \"skipped\":\n        raise SystemExit(\"Legacy release verification unexpectedly changed full-suite coverage.\")\n    results.pop(\"full\")\nbad = {name: info[\"result\"] for name, info in results.items()\n       if info[\"result\"] != \"success\"}\nif bad:\n    raise SystemExit(f\"Required promotion snapshot coverage did not succeed: {bad}\")\nprint(\"Every required main-push job succeeded at this release snapshot.\")\nPY\n"
+        }
+      ]
+    },
+    "pr-gate": {
+      "needs": [
+        "checks",
+        "windows-python-artifact-builder",
+        "promotion-candidate-windows",
+        "promotion-publication-windows",
+        "windows-hooks",
+        "construction-macos",
+        "worktree-manager",
+        "repositories-configuration",
+        "agent-dispatch-service",
+        "agent-chat-service-linux",
+        "agent-chat-service-windows",
+        "agent-index-service-linux",
+        "agent-index-service-windows",
+        "test-runner-linux",
+        "test-runner-windows",
+        "installation-context-windows",
+        "command-lifecycle-windows",
+        "vault-snapshot-windows",
+        "fleet-native-linux",
+        "fleet-native-windows",
+        "archive-sources-windows",
+        "discover",
+        "smoke",
+        "worktrees-smoke",
+        "worktrees-windows-launch"
+      ]
+    },
+    "smoke": {
+      "timeout-minutes": "${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}",
+      "strategy": {
+        "fail-fast": false
+      }
+    },
+    "discover": {
+      "if": "(github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && (github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main')"
+    },
+    "full": {
+      "if": "github.event_name == 'workflow_dispatch' && (inputs.promotion_run == '' || inputs.promotion_phase == 'candidate')"
+    },
+    "coverage-guided-selection-integration": {
+      "if": "github.event_name == 'workflow_dispatch' && inputs.promotion_run == ''"
+    },
+    "test-runner-linux": {
+      "steps": [
+        {
+          "name": "Test runner admission and isolation",
+          "if": "steps.runner-contracts.outputs.run == 'true'",
+          "env": {
+            "PYTHONPATH": "libs/single-instance-lease/src",
+            "PYTEST_ADDOPTS": "${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m \"not runner_exhaustive\"' || '' }}"
+          },
+          "run": "python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml \"setuptools>=83.0.0\" wheel && python -m pytest -q libs/single-instance-lease/tests/test_lease.py libs/single-instance-lease/tests/test_operation.py tools/test_environment_admission.py tools/test_run_plugin_tests.py tools/test_ci_plugin_partitions.py tools/test_plugin_test_selection.py tools/test_run_standalone_tests.py tools/test_standalone_materialized_preparation.py tools/test_run_tests_in_devcontainer.py tools/tests/test_komodo_role_fleet.py"
+        }
+      ]
+    },
+    "test-runner-windows": {
+      "steps": [
+        {
+          "name": "Test runner admission and isolation",
+          "if": "steps.runner-contracts.outputs.run == 'true'",
+          "env": {
+            "PYTHONPATH": "libs/single-instance-lease/src",
+            "PYTEST_ADDOPTS": "${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m \"not runner_exhaustive\"' || '' }}"
+          },
+          "run": "python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml \"setuptools>=83.0.0\" wheel && python -m pytest -q libs/single-instance-lease/tests/test_lease.py libs/single-instance-lease/tests/test_operation.py tools/test_environment_admission.py tools/test_run_plugin_tests.py tools/test_ci_plugin_partitions.py tools/test_plugin_test_selection.py tools/test_run_standalone_tests.py tools/test_standalone_materialized_preparation.py"
+        }
+      ]
+    }
+  }
+}

@@ -3,18 +3,22 @@ from __future__ import annotations
 import subprocess
 import sys
 import re
-import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = (ROOT / "tools" / "hooks" / "pre-commit", ROOT / "tools" / "hooks" / "pre-push")
 
 
-def test_pre_push_keeps_only_branch_policy():
+def test_pre_push_keeps_only_branch_policy() -> None:
     hook = HOOKS[1].read_text(encoding="utf-8")
     invoked = set(re.findall(r'"\$ROOT/tools/([^"]+\.py)"', hook))
     assert invoked == set()
@@ -25,7 +29,7 @@ def test_pre_push_keeps_only_branch_policy():
         assert command not in hook + policy
 
 
-def test_branch_only_template_is_self_contained_runtime_package_data():
+def test_branch_only_template_is_self_contained_runtime_package_data() -> None:
     plugin = ROOT / "plugins" / "agent-worktrees"
     package = plugin / "src" / "agent_worktrees"
     manifest = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))
@@ -35,7 +39,7 @@ def test_branch_only_template_is_self_contained_runtime_package_data():
     assert (package / "pre_push.sh").is_file()
 
 
-def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
+def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     steps = yaml.safe_load(ci)["jobs"]["checks"]["steps"]
     covered = ci
@@ -46,7 +50,7 @@ def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
         "check-headless-launch.py", "check-picker-inbox-discipline.py",
         "check-skills.py", "check-docs-consistency.py", "check-runbook-references.py",
         "check-version-consistency.py", "check-effort-vision-structure.py",
-        "check-feed-neutrality.py", "check-agent-bridge-contracts.py",
+        "check-feed-neutrality.py",
         "check-changefile-presence.py", "check-no-agent-machines-packages.py",
         "check-module-size.py",
     ):
@@ -58,7 +62,7 @@ def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
     assert "check-large-files.py" not in pre_commit
 
 
-def test_removed_publication_validators_are_in_the_existing_required_trusted_job():
+def test_removed_publication_validators_are_in_the_existing_required_trusted_job() -> None:
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/workflow-lockdown-guard.yml").read_text(encoding="utf-8")
     )
@@ -80,7 +84,7 @@ def test_removed_publication_validators_are_in_the_existing_required_trusted_job
     assert "secrets.FORBIDDEN_IDS_WORK" in check["env"]["COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"]
 
 
-def test_large_file_ci_checks_final_event_diff_and_full_audit_is_explicit():
+def test_large_file_ci_checks_final_event_diff_and_full_audit_is_explicit() -> None:
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
     steps = [
         step for step in workflow["jobs"]["checks"]["steps"]

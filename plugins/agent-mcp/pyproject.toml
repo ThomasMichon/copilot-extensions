@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=84.0.0"]
+requires = ["setuptools>=84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
@@ -63,6 +63,9 @@ agent-mcp = "agent_mcp.__main__:console_entry"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_mcp" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 "agent_mcp" = ["incoming-contract.json", "owner_section.cs"]
 # The code-mode decorator ships a Node harness alongside the Python package.
@@ -76,7 +79,7 @@ line-length = 99
 headed = ["agent-copilot-driver-core"]
 dev = [
     "agent-copilot-driver-core",
-    "pytest>=9.1.1",
+    "pytest>=9.2.0",
     "pytest-asyncio>=1.4.0",
     # tomllib is stdlib on 3.11+; tomli backports it for 3.10 (this plugin's
     # requires-python floor). Only needed by

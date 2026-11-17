@@ -18,6 +18,8 @@ from ..live_inbox_models import (
     InboxBeginResult, InboxBindingInfo, InboxEnrollRequest, InboxHandoffRequest, InboxPollRequest,
     InboxNegotiateRequest, InboxNegotiationInfo, InboxOutcomeRequest, InboxOutcomeResult,
     InboxPollResult, InboxHandoffReceipt, InboxRecoveryResult, RetainedInboxMessage,
+    InboxDispositionRequest,
+    InboxCurrentRequest,
 )
 from ..live_inbox_runtime import LiveInboxRuntime
 from ..live_message_models import SendMessageRequest
@@ -126,7 +128,7 @@ def _native_receiving(request: Request, body: InboxNegotiateRequest) -> bool:
     )
 
 
-def _compatible_binding(body: InboxEnrollRequest | InboxPollRequest | InboxHandoffRequest) -> None:
+def _compatible_binding(body: InboxCurrentRequest) -> None:
     if body.binding.installation != compatible_inbox.BINDING or body.binding.epoch != 1:
         raise RuntimeCustodyError("Unsupported native SDK inbox binding")
 
@@ -182,6 +184,7 @@ def enqueue_message(
             report_duplicate=True, runtime_admission=admission,
             enrolled_inbox=True, inbox_refusal=refusal,
             exact_session=body.exact_session,
+            message_version=body.message_version, message_requires=tuple(body.message_requires),
         )
 
 
@@ -238,6 +241,7 @@ def enroll(
 @router.post("/poll", response_model=InboxPollResult)
 def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPollResult:
     from .live_startup_controls import startup_readiness
+    from ..message_contracts import project_offer
 
     if _native_receiving(request, body):
         db = _serving_database(request)
@@ -256,9 +260,9 @@ def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPoll
             )
     return InboxPollResult(
         binding=body.binding, consumer=body.consumer,
-        messages=[RetainedInboxMessage.model_validate({
+        messages=[RetainedInboxMessage.model_validate(project_offer({
             **row, "plugin_readiness": startup_readiness(db, session_id, str(row["kind"])),
-        }) for row in rows],
+        })) for row in rows],
     )
 
 
@@ -280,6 +284,38 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
             body.message_id, body.handoff_id, now=time.time(),
         )
     return InboxBeginResult(begin=granted)
+
+
+@router.post("/disposition")
+def disposition(
+    session_id: str, body: InboxDispositionRequest, request: Request,
+) -> dict[str, object]:
+    """Record the current receiver's disposition on the original message."""
+    from ..message_contracts import dispose
+
+    with _refusals():
+        consumer = _consumer(session_id, body)
+        now = time.time()
+        if _native_receiving(request, body):
+            db = _serving_database(request)
+            _compatible_binding(body)
+            with db._runtime_transaction(write=True) as conn:
+                compatible_inbox.require_live(
+                    conn, session_id, now, native_only=body.receiving_api is None,
+                )
+                compatible_inbox.require_current(conn, consumer)
+                return dispose(
+                    conn, consumer, body.message_id, body.state, body.code, body.reason, now=now,
+                )
+        db, governance, runtime = _current_owners(request)
+        installation, admission = runtime._context(db, governance, binding=body.binding.observation())
+        with db._runtime_transaction(write=True) as conn:
+            identity = db._runtime_installation(installation)
+            db._inbox_admission(conn, identity, admission)
+            db._current_inbox_consumer(conn, consumer, now, identity, admission.epoch)
+            return dispose(
+                conn, consumer, body.message_id, body.state, body.code, body.reason, now=now,
+            )
 
 
 @router.post("/outcome", response_model=InboxOutcomeResult)

@@ -67,10 +67,17 @@ if (!config.recoveryOnly) await request("POST", "/api/v1/live-sessions", {
 const consumer = createRetainedInbox({
   session, request, processIdentity: identity, cwd: config.cwd,
   receivingApi: config.receivingApi,
+  ...(config.replays ? { replayHistory: async (sid) => {
+    durable(config.replays, { session_id: sid, reconstruction: true });
+    return true;
+  } } : {}),
   incarnation: () => config.incarnation, now: () => clock,
   log: (message) => emit({ log: message }),
 });
 await consumer.tick(config.sid, { allowSend: !config.recoveryOnly });
+for (let index = 1; index < Math.min(config.ticks || 1, 26); index++) {
+  await consumer.tick(config.sid, { allowSend: !config.recoveryOnly });
+}
 if (config.exitAt === "consumed" || config.retry) {
   clock += 30_000;
   await consumer.tick(config.sid, { allowSend: !!config.retry });

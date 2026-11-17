@@ -11,4 +11,4 @@ if [[ -z "$python" || ! -f "$script" ]]; then
     printf '{}'
     exit 0
 fi
-PYTHONPATH="" "$python" "$script" || printf '{}'
+PYTHONPATH="" "$python" -B "$script" || printf '{}'

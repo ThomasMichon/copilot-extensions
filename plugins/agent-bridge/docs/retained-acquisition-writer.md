@@ -310,6 +310,10 @@ gated.
 
 ### Metadata loss without native conversation loss
 
+For the union of registered sessions and workspace-only targets, and its
+metadata-only head-hydration operation, see
+[target inventory](target-inventory.md).
+
 The optional `retained_native_metadata_adoption: 1` health capability adds
 metadata preparation to the same original keyed-creation owner:
 
@@ -392,6 +396,40 @@ and malformed/lost replies, atomic database rollback/restart, independent-proces
 serialization, configuration retention and prior-schema passive refusal.
 Native same-conversation execution, a new turn and installed rollback remain
 independent qualification gates.
+
+### Ordinary worktree resume after metadata loss
+
+`retained_worktree_resume: 1` advertises composition through the existing
+worktree ACP resume front door. It selects the workspace's unique original
+keyed journal, verifies its discovered owner/project/path and authoritative
+native head through a compatible writer, prepares the control epoch when
+needed, then invokes retained native recovery under its existing launch owner.
+It does not require the caller to reconstruct rows or supply writer facts.
+The metadata and native operations retain their separate exclusion boundaries;
+ordinary resume does not nest a second workspace executor inside preparation.
+
+The response carries `retained_metadata_adoption`, `retained_recovery` and
+`worktree_writer_observation` alongside the ordinary session fields. The
+explicit adopted managed ID is current control identity; the original native
+conversation and missing historical stream remain distinct. A confirmed ready
+control is reusable without another native load or recovery operation; its
+response has no newly executed `retained_recovery`. A known subsequent stopped
+activation obtains current head evidence and a distinct operation ID, not a
+replay of a historical completion or a task-policy reset.
+
+Unknown operations, changed native heads, ambiguous readiness, unavailable
+writers and incompatible workspace ownership hold before another native load.
+Missing keyed metadata is not silently converted to CLI control. Existing
+present birth records and qualified handoff successors retain their ordinary
+paths. Source tests cover lost replies and concurrent retries against the real
+resume front door without a second native load.
+
+This provider integration does not itself implement the complete target union,
+ordinary lazy lookup hydration, Dispatch control-identity migration, assignment
+delivery or affirmative worker task acceptance. Those consumers must negotiate
+their required receiving semantics independently. Neither source controls nor
+a successful resume prove a new native turn, task `STARTED`, closeout or
+installed recovery.
 
 ## Qualification boundary
 
