@@ -287,13 +287,17 @@ if [ -n "${@VARS@:-}" ]; then
   case "$__acs_fte_last" in ''|*[!0-9]*) __acs_fte_last=0 ;; esac
   case "$__acs_fte_every" in ''|*[!0-9]*) __acs_fte_every=@INTERVAL_DEFAULT@ ;; esac
   case "$__acs_fte_wait" in ''|*[!0-9]*) __acs_fte_wait=@TIMEOUT_DEFAULT@ ;; esac
+  # A zero deadline would disable timeout, so treat it as the default.
+  [ "$__acs_fte_wait" -gt 0 ] 2>/dev/null || __acs_fte_wait=@TIMEOUT_DEFAULT@
   if [ "$__acs_fte_now" -eq 0 ] \\
       || [ $(( __acs_fte_now - __acs_fte_last )) -ge "$__acs_fte_every" ] \\
       || [ "$__acs_fte_now" -lt "$__acs_fte_last" ]; then
     # Without timeout the deadline can't be enforced, so keep the previous value.
     __acs_fte_token=""
     if command -v timeout >/dev/null 2>&1; then
-      __acs_fte_token="$(timeout -k 2 "$__acs_fte_wait" "@HELPER@" get-access-token 2>/dev/null || true)"
+      # Only a successful mint replaces the previous value.
+      __acs_fte_token="$(timeout -k 2 "$__acs_fte_wait" "@HELPER@" get-access-token 2>/dev/null)" \\
+        || __acs_fte_token=""
     fi
     if [ -n "$__acs_fte_token" ]; then
       read -r -a __acs_fte_vars <<< "${@VARS@}"

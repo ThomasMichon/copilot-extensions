@@ -375,6 +375,48 @@ def test_refresh_shim_bounds_a_stalled_mint(tmp_path: Path) -> None:
     assert time.monotonic() - started < 15
 
 
+@_needs_mint
+def test_refresh_shim_bounds_a_zero_deadline(tmp_path: Path) -> None:
+    home, real_bin = _helper_and_bin(tmp_path, "sleep 40\necho late\n")
+    _tool(real_bin / "npm", 'echo "token=$FEED_TOKEN"\n')
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "npm --version"
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": f"{real_bin}:/usr/bin:/bin",
+        FEED_TOKEN_REFRESH_TIMEOUT_ENV: "0",
+    }
+    started = time.monotonic()
+    out = _run_bash(script, env)
+    assert out.stdout.splitlines() == ["token=launch"]
+    assert time.monotonic() - started < 30
+
+
+@_needs_mint
+def test_refresh_shim_ignores_output_of_a_failed_mint(tmp_path: Path) -> None:
+    counter = tmp_path / "count"
+    home, real_bin = _helper_and_bin(
+        tmp_path,
+        f'n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 ))\n'
+        f'echo "$n" > "{counter}"\necho "partial-$n"\nexit 1\n',
+    )
+    _tool(real_bin / "rush", 'echo "rush=$FEED_TOKEN"; npm run x\n')
+    _tool(real_bin / "npm", 'echo "npm=$FEED_TOKEN"\n')
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "rush build"
+    )
+    env = {"HOME": str(home), "PATH": f"{real_bin}:/usr/bin:/bin"}
+    out = _run_bash(script, env)
+    assert out.stdout.splitlines() == ["rush=launch", "npm=launch"]
+    # A failed mint is not recorded, so the nested client retries it.
+    assert counter.read_text().strip() == "2"
+
+
 @pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
 def test_refresh_shim_wraps_only_tools_present_at_launch(tmp_path: Path) -> None:
     home, real_bin = _helper_and_bin(tmp_path, "echo fresh\n")

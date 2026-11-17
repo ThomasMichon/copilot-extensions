@@ -489,8 +489,10 @@ session's wrappers). A wrapped invocation re-mints the named vars
 before running the real tool when the last mint in its process tree is older
 than `AGENT_CODESPACES_FEED_TOKEN_REFRESH_INTERVAL` seconds (default 300), so
 nested clients reuse a recent token. Minting is bounded by
-`AGENT_CODESPACES_FEED_TOKEN_REFRESH_TIMEOUT` seconds (default 10); on failure
-or timeout the previous value is kept. If the `timeout` utility is unavailable,
+`AGENT_CODESPACES_FEED_TOKEN_REFRESH_TIMEOUT` seconds (default 10; a
+non-positive value uses the default); on failure or timeout the previous value
+is kept, and any partial helper output is discarded. If the `timeout` utility
+is unavailable,
 the wrapper skips re-minting and keeps the previous value rather than risking
 an unbounded wait.
 
