@@ -36,7 +36,7 @@ function fixture() {
     else if (path.startsWith(`${prefix}/recovery?`)) {
       const query = new URL(path, "http://localhost").searchParams;
       const pending = f.rows.filter((r) => r.id > Number(query.get("after"))
-        && r.handoff_id && r.handoff_stage !== "consumed");
+        && r.handoff_id && !r.disposition && !r.control && r.handoff_stage !== "consumed");
       const page = pending.slice(0, Number(query.get("limit")));
       result = { messages: page.map(f.receipt),
         next_after: pending.length > page.length ? page.at(-1).id : null };
@@ -45,6 +45,7 @@ function fixture() {
     } else if (path === `${prefix}/negotiate`) {
       f.frontendReady = true;
       result = { contract, binding, expected_incarnation: f.current?.incarnation ?? null };
+      if (f.messageBase) result.message_base = 1;
     } else if (path === `${prefix}/enroll`) {
       if (f.current?.incarnation === body.consumer.incarnation) {
         assert.deepEqual(body, f.enrolledRequest);
@@ -58,12 +59,20 @@ function fixture() {
       assert.equal(body.limit, 1);
       assert.deepEqual(body.consumer, f.current);
       assert.deepEqual(body.binding, binding);
-      const row = f.rows.find((r) => body.receiving_api === "native-sdk-v1"
-        ? !r.handoff_stage || r.handoff_stage === "offered" : r.handoff_stage !== "consumed");
-      if (row && !row.handoff_id) {
+      const row = f.rows.find((r) => !r.disposition && (body.receiving_api === "native-sdk-v1"
+        ? !r.handoff_stage || r.handoff_stage === "offered" : r.handoff_stage !== "consumed"));
+      if (row && !row.handoff_id && !row.control) {
         row.handoff_id = `handoff-${row.id}`;
         row.consumer = clone(body.consumer);
         row.handoff_stage = "offered";
+      }
+      if (row && f.messageBase) {
+        row.handoff_stage ??= "offered";
+        row.message_contract = {
+          base_version: 1, type: row.kind, type_version: 1, requires: [],
+          message_id: row.id, session_id: sid, receiver_incarnation: body.consumer.incarnation,
+          sender: row.sender, ...f.contractChanges,
+        };
       }
       if (row && body.receiving_api !== "native-sdk-v1") assert.deepEqual(row.consumer, body.consumer);
       result = { contract, binding, consumer: body.consumer, messages: row ? [clone(row)] : [] };
@@ -75,6 +84,12 @@ function fixture() {
       const begin = row.handoff_stage === "offered";
       if (begin) row.handoff_stage = "sending";
       result = { begin };
+    } else if (path === `${prefix}/disposition`) {
+      const row = f.rows.find((r) => r.id === body.message_id);
+      assert.deepEqual(body.consumer, f.current);
+      const begin = body.state === "started" && !row.disposition;
+      row.disposition = clone(body);
+      result = { ...row.disposition, begin };
     } else if (path === `${prefix}/outcome`) {
       const row = f.rows.find((r) => r.id === body.message_id);
       assert.deepEqual(body.consumer, row.consumer);
@@ -113,6 +128,74 @@ function fixture() {
   });
   return f;
 }
+
+test("versioned retained controls reconstruct bounded history without SDK dispatch", async () => {
+  const f = fixture();
+  f.messageBase = true;
+  f.capabilities.compatible_native_inbox = 1;
+  for (let id = 1; id <= 24; id++) {
+    Object.assign(f.add(id), { kind: "control:replay-history", body: "", control: true });
+  }
+  const replays = [];
+  const inbox = f.consumer("current", {
+    receivingApi: "native-sdk-v1", replayHistory: async (target) => { replays.push(target); return true; },
+  });
+  for (let id = 1; id <= 25; id++) await inbox.tick(sid);
+  assert.equal(replays.length, 24);
+  assert.ok(replays.every((target) => target === sid));
+  assert.equal(f.sends.length, 0);
+  assert.ok(f.rows.every((row) => row.disposition.state === "completed"));
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+});
+
+for (const changes of [
+  { type: "future:message" }, { type_version: 9 }, { base_version: 9 },
+  { requires: ["future-required"] }, { requires: null }, { contract_error: "invalid_contract" },
+]) {
+  test(`versioned rejection precedes SDK dispatch: ${JSON.stringify(changes)}`, async () => {
+    const f = fixture();
+    f.messageBase = true;
+    f.capabilities.compatible_native_inbox = 1;
+    f.contractChanges = changes;
+    const row = f.add();
+    await f.consumer("current", { receivingApi: "native-sdk-v1" }).tick(sid);
+    assert.equal(f.sends.length, 0);
+    assert.equal(row.disposition.state, "rejected");
+    assert.ok(row.disposition.code && row.disposition.reason);
+    assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+  });
+}
+
+test("a lost history start reply never authorizes replay or false rejection", async () => {
+  const f = fixture();
+  f.messageBase = true;
+  f.capabilities.compatible_native_inbox = 1;
+  const row = Object.assign(f.add(), { kind: "control:replay-history", body: "", control: true });
+  f.after = async (_method, route, body) => {
+    if (route.endsWith("/disposition") && body.state === "started") throw new Error("reply lost");
+  };
+  let replays = 0;
+  const inbox = f.consumer("current", {
+    receivingApi: "native-sdk-v1", replayHistory: async () => { replays++; return true; },
+  });
+  await inbox.tick(sid);
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(replays, 0);
+  assert.equal(f.sends.length, 0);
+  assert.equal(row.disposition.state, "started");
+});
+
+test("unknown additive optional envelope properties preserve supported delivery", async () => {
+  const f = fixture();
+  f.messageBase = true;
+  f.capabilities.compatible_native_inbox = 1;
+  f.contractChanges = { future_optional: { ignored: true } };
+  f.add();
+  await f.consumer("current", { receivingApi: "native-sdk-v1" }).tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+});
 
 test("retained mode is explicit and never changes legacy delivery defaults", () => {
   for (const value of [undefined, "", "0", "false", "off", "no", "retained", "maybe"]) {

@@ -7,12 +7,15 @@ import math
 import hashlib
 import platform as host_platform
 import re
-import shutil
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TypedDict, cast
 
+from configuration_context.readiness import (
+    PROBE_CONTRACT, PROBE_ENV as PROBE_ENV, ProbeContractError, payload_contract, unqualified_output,
+)
 from installer_readiness import build_plan, parse_readiness
 from installer_readiness.model import (
     ConfigurationEmpty, DiscoveryReport, Invocation, Module, Platform,
@@ -20,10 +23,56 @@ from installer_readiness.model import (
 )
 
 from .installation_repair_admission import (
-    HostAdmission, OwnerBinding, RepairAdmissionError, admit_host, digest, ordinary,
+    HostAdmission as HostAdmission, OwnerBinding as OwnerBinding,
+    RepairAdmissionError as RepairAdmissionError, admit_host, digest, ordinary,
 )
-from .installation_repair_process import ActionResult, cancel_on_termination, run_action
-from .installation_repair_restarts import RestartJournal
+from .installation_repair_process import (
+    ActionResult as ActionResult, cancel_on_termination,
+    path_interpreter as path_interpreter, run_action,
+)
+from .installation_repair_restarts import RestartJournal as RestartJournal
+
+
+class OutcomeEvidence(TypedDict):
+    module: str
+    classification: str
+    observedBefore: dict[str, str]
+    selected: bool
+    attempted: bool
+    installer: dict[str, str | int | None] | None
+    observedAfter: dict[str, str] | None
+    blockedBy: list[str]
+    restart: str
+    restartRequired: bool
+
+
+class RestartEvidence(TypedDict):
+    pendingDigest: str | None
+    pending: list[dict[str, object]]
+    completion: str
+    automaticRestart: bool
+
+
+class RepairReport(TypedDict, total=False):
+    schema: str
+    version: int
+    status: str
+    interrupted: bool
+    confirmation: str
+    confirmedRestarts: RestartEvidence
+    restarts: RestartEvidence
+    projectRoot: str
+    requiredSelection: bool
+    platform: str
+    apply: bool
+    planDigest: str
+    requiredSatisfied: bool
+    selectionRefusal: str | None
+    selected: list[str]
+    available: list[str]
+    refusedOwners: dict[str, str]
+    discoveryFindings: list[str]
+    outcomes: list[OutcomeEvidence]
 
 
 def current_platform() -> Platform:
@@ -51,7 +100,10 @@ class Observation:
     reason: str
 
     def evidence(self) -> dict[str, str]:
-        return {"state": self.state, "reason": self.reason}
+        result = {"state": self.state, "reason": self.reason}
+        if self.reason == "readiness-isolation-unqualified":
+            result["recovery"] = "update-owning-installation"
+        return result
 
 
 @dataclass
@@ -91,7 +143,7 @@ def _argv(invocation: Invocation, platform: Platform) -> list[str]:
     suffix = invocation.target.suffix.lower()
     if platform is Platform.WINDOWS:
         if suffix == ".ps1":
-            interpreter = shutil.which("pwsh") or shutil.which("powershell")
+            interpreter = path_interpreter("pwsh") or path_interpreter("powershell")
             if not interpreter:
                 raise RepairAdmissionError("repair requires an existing PowerShell interpreter")
             return [interpreter, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
@@ -110,14 +162,14 @@ def _argv(invocation: Invocation, platform: Platform) -> list[str]:
             return [shell, "/d", "/s", "/c", '"' + command + '"']
         raise RepairAdmissionError("repair Windows action has an unsupported target")
     if invocation.kind == "payload-script":
-        interpreter = shutil.which("bash")
+        interpreter = path_interpreter("bash")
         if not interpreter:
             raise RepairAdmissionError("repair requires an existing Bash interpreter")
         return [interpreter, str(invocation.target), *invocation.arguments]
     with invocation.target.open("rb") as stream:
         shebang = stream.readline(256).rstrip(b"\r\n")
     if shebang in (b"#!/usr/bin/env sh", b"#!/usr/bin/env bash"):
-        interpreter = shutil.which(shebang.rsplit(b" ", 1)[1].decode("ascii"))
+        interpreter = path_interpreter(shebang.rsplit(b" ", 1)[1].decode("ascii"))
     elif shebang in (
         b"#!/bin/sh", b"#!/bin/bash", b"#!/usr/bin/sh", b"#!/usr/bin/bash",
     ):
@@ -131,12 +183,22 @@ def _argv(invocation: Invocation, platform: Platform) -> list[str]:
 
 def _environment(owner: OwnerBinding, *, readonly: bool) -> dict[str, str]:
     result = dict(owner.environment)
+    result.pop(PROBE_ENV, None)
     if owner.payload_root_environment:
         result[owner.payload_root_environment] = str(owner.installation.payload_root)
     if readonly and owner.no_self_provision:
         result[owner.no_self_provision] = "1"
     elif owner.no_self_provision:
         result.pop(owner.no_self_provision, None)
+    if readonly:
+        result[PROBE_ENV] = PROBE_CONTRACT
+        paths = [entry for entry in os.get_exec_path(result) if Path(entry).is_absolute()]
+        for key in list(result):
+            if key.upper() in {"PATH", "BASH_ENV"}:
+                result.pop(key)
+        # An empty PATH would re-enable current-directory lookup on POSIX.
+        result["PATH"] = os.pathsep.join(paths) or str(Path(os.devnull).absolute())
+        result["NoDefaultCurrentDirectoryInExePath"] = "1"
     return result
 
 
@@ -171,17 +233,28 @@ def _invoke(
 ) -> ActionResult:
     invocation = (module.readiness if readonly else module.installer)[platform]
     try:
+        if readonly:
+            ordinary(owner.project_root, directory=True)
+        isolation = payload_contract(
+            owner.installation.payload_root, owner.installation.plugin_id,
+        ) if readonly else None
         argv, executable, content_digest, target_digest = _admit_invocation(invocation, platform)
+    except ProbeContractError:
+        return ActionResult("isolation-unqualified", None)
     except (RepairAdmissionError, OSError):
         return ActionResult("invocation-refused", None)
     purpose = "readiness" if readonly else "installer"
-    if owner.execution_bindings.get(module.qualified_id + ":" + purpose) != digest({
+    execution = {
         "argv": argv, "executable": str(executable), "sha256": content_digest,
         "targetSha256": target_digest,
-    }):
+    }
+    if isolation is not None:
+        execution["readinessIsolationSha256"] = isolation.sha256
+    if owner.execution_bindings.get(module.qualified_id + ":" + purpose) != digest(execution):
         return ActionResult("invocation-refused", None)
     return run_action(
-        argv, cwd=owner.installation.payload_root, environment=_environment(owner, readonly=readonly),
+        argv, cwd=owner.project_root if readonly else owner.installation.payload_root,
+        environment=_environment(owner, readonly=readonly),
         timeout=timeout, readonly=readonly,
         cmd=platform is Platform.WINDOWS and invocation.target.suffix.lower() == ".cmd",
     )
@@ -198,6 +271,8 @@ def _observe(module: Module, owner: OwnerBinding, platform: Platform, timeout: f
         return Observation("unknown", "readiness-interrupted")
     if result.status != "exited":
         return Observation("unknown", "readiness-" + result.status)
+    if result.exit_code == 126 and unqualified_output(result.stdout):
+        return Observation("unknown", "readiness-isolation-unqualified")
     try:
         parsed = parse_readiness(result.stdout)
     except ValueError:
@@ -226,7 +301,7 @@ def _closure(host: HostAdmission, requested: Sequence[str], platform: Platform) 
     selected: dict[str, Module] = {}
     visiting: set[str] = set()
 
-    def include(qualified: str):
+    def include(qualified: str) -> None:
         if not 1 <= len(qualified) <= 256:
             raise RepairAdmissionError("selected module identity exceeds its bound")
         if qualified in duplicates or qualified not in by_id:
@@ -269,12 +344,23 @@ def _binding_inputs(
             if host.readiness_only and purpose != "readiness":
                 continue
             try:
+                isolation = payload_contract(
+                    module.owner.payload_root, module.owner.plugin_id,
+                ) if purpose == "readiness" else None
                 argv, executable, content_digest, target_digest = _admit_invocation(
                     actions[platform], platform,
                 )
                 execution[module.qualified_id + ":" + purpose] = {
                     "argv": argv, "executable": str(executable), "sha256": content_digest,
                     "targetSha256": target_digest,
+                }
+                if isolation is not None:
+                    execution[module.qualified_id + ":" + purpose][
+                        "readinessIsolationSha256"
+                    ] = isolation.sha256
+            except ProbeContractError:
+                execution[module.qualified_id + ":" + purpose] = {
+                    "status": "isolation-unqualified",
                 }
             except (RepairAdmissionError, OSError):
                 execution[module.qualified_id + ":" + purpose] = {"status": "invocation-unavailable"}
@@ -353,7 +439,7 @@ def repair(
     confirm_restart: str | None = None,
     on_observation: Callable[[list[dict[str, object]]], None] | None = None,
     readiness_only: bool = False,
-) -> dict[str, object]:
+) -> RepairReport:
     """Serialize apply and explicit restart confirmation against durable obligations."""
     if type(readiness_only) is not bool or (
         readiness_only and (apply or not required or modules or expected_plan_digest or confirm_restart)
@@ -370,8 +456,9 @@ def repair(
             return {
                 "schema": "copilot-extensions.installation-repair", "version": 1,
                 "status": "restart-confirmed", "interrupted": False,
-                "confirmation": "operator-attestation", "confirmedRestarts": confirmed,
-                "restarts": journal.evidence(),
+                "confirmation": "operator-attestation",
+                "confirmedRestarts": cast(RestartEvidence, confirmed),
+                "restarts": cast(RestartEvidence, journal.evidence()),
             }
         if apply:
             with journal.locked():
@@ -405,7 +492,7 @@ def _repair(
     readiness_timeout: float, installer_timeout: float, journal: RestartJournal,
     on_observation: Callable[[list[dict[str, object]]], None] | None = None,
     readiness_only: bool = False,
-) -> dict[str, object]:
+) -> RepairReport:
     """Reconstruct host admission and invoke only the explicit selected closure."""
     if (
         type(apply) is not bool or type(required) is not bool
@@ -568,7 +655,7 @@ def _repair(
         "projectRoot": str(project_root.resolve()), "requiredSelection": required,
         "platform": platform.value, "apply": apply, "planDigest": plan_digest,
         "interrupted": interrupted,
-        "restarts": journal.evidence(),
+        "restarts": cast(RestartEvidence, journal.evidence()),
         "status": ("observed" if selected or required else "discovered") if not apply else (
             "ready" if satisfied else "incomplete" if not required_satisfied else "optional-incomplete"
         ),
@@ -578,5 +665,5 @@ def _repair(
         "available": sorted(module.qualified_id for module in host.report.modules),
         "refusedOwners": dict(host.refused),
         "discoveryFindings": sorted({finding.code for finding in host.report.findings}),
-        "outcomes": [outcome.evidence() for outcome in outcomes.values()],
+        "outcomes": [cast(OutcomeEvidence, outcome.evidence()) for outcome in outcomes.values()],
     }

@@ -4,7 +4,7 @@ A launcher runs inside a kill-on-close Job that forbids breakaway, the shape
 that used to make durable launches fail with ``WinError 5``. It starts one
 durable daemon through :func:`agent_procutil.spawn_daemon` and one ordinary
 bounded child. Closing the Job must end the launcher and the bounded child,
-while the daemon keeps the same PID and creation time and belongs to no Job.
+while the daemon keeps the same PID and creation time outside the caller's Jobs.
 
 Only processes started by this test are terminated: each cleanup handle is
 verified against the creation time the launcher captured through its own
@@ -14,21 +14,21 @@ process handle, so a reused PID is never touched. Windows-only.
 from __future__ import annotations
 
 import json
+import ctypes
+from collections.abc import Callable
+from ctypes import wintypes
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 import agent_procutil as pu
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows Job semantics")
-
-if sys.platform == "win32":
-    import ctypes
-    from ctypes import wintypes
 
 _SYNCHRONIZE = 0x00100000
 _PROCESS_TERMINATE = 0x0001
@@ -71,8 +71,8 @@ time.sleep(120)
 """
 
 
-def _kernel32():
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+def _kernel32() -> Any:
+    kernel32 = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
@@ -85,7 +85,7 @@ def _kernel32():
     return kernel32
 
 
-def _open_verified(kernel32, pid: int, birth: str):
+def _open_verified(kernel32: Any, pid: int, birth: str) -> int | None:
     """Open ``pid`` only if the handle names the process the launcher recorded."""
     from agent_procutil._daemon_instance_identity import _windows_birth
 
@@ -101,10 +101,10 @@ def _open_verified(kernel32, pid: int, birth: str):
     if not matches:
         kernel32.CloseHandle(handle)
         return None
-    return handle
+    return cast(int, handle)
 
 
-def _release(kernel32, handle) -> None:
+def _release(kernel32: Any, handle: int) -> None:
     """Terminate (if still running) and close a verified fixture handle."""
     if kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0:
         kernel32.TerminateProcess(handle, 1)
@@ -112,7 +112,7 @@ def _release(kernel32, handle) -> None:
     kernel32.CloseHandle(handle)
 
 
-def test_cleanup_never_terminates_a_process_with_a_different_identity():
+def test_cleanup_never_terminates_a_process_with_a_different_identity() -> None:
     kernel32 = _kernel32()
     bystander = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
@@ -126,7 +126,9 @@ def test_cleanup_never_terminates_a_process_with_a_different_identity():
         bystander.wait(timeout=10)
 
 
-def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_path, monkeypatch):
+def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_procutil._daemon_instance_identity import birth_identity
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
@@ -165,8 +167,6 @@ def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_p
         in_job = wintypes.BOOL()
         assert kernel32.IsProcessInJob(handles["bounded"], job.handle, ctypes.byref(in_job))
         assert in_job.value, "the bounded child must stay in its caller's Job"
-        # The broker requires a job-free child at creation; afterwards the
-        # leased daemon may own a Job for its own children, never the caller's.
         assert kernel32.IsProcessInJob(handles["daemon"], job.handle, ctypes.byref(in_job))
         assert not in_job.value, "the durable daemon must not be in its caller's Job"
 
@@ -190,7 +190,52 @@ def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(tmp_p
             job.close()
 
 
-def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_path):
+def test_tracked_cleanup_scope_refuses_a_child_outside_the_immediate_caller_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _job_scopes, daemon_broker as broker
+
+    original_process = broker.WindowsDaemonProcess
+    name = _job_scopes.new_name()
+    children: list[broker.WindowsDaemonProcess] = []
+    jobs: list[pu.JobHandle] = []
+    marker = tmp_path / "must-not-start"
+
+    def process(pid: int, args: list[str]) -> broker.WindowsDaemonProcess:
+        child = original_process(pid, args)
+        if children:
+            job = pu._assign_suspended_to_kill_on_close_job(
+                child.pid, allow_breakaway=False, name=name,
+            )
+            assert job is not None
+            jobs.append(job)
+            assert broker._outside_caller_job(child), "the immediate-Job check alone would admit"
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
+    python = getattr(sys, "_base_executable", "") or sys.executable
+    try:
+        with pytest.raises(pu.DaemonSpawnError, match="child-adoption") as caught:
+            broker.spawn_brokered_daemon(
+                [python, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()",
+                 str(marker)],
+                cwd=str(tmp_path), env=dict(os.environ),
+                creationflags=pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB,
+                log_path=str(tmp_path / "refused.log"), stderr_log_path=None,
+                scope_environment={_job_scopes.ENVIRONMENT_KEY: name},
+            )
+        assert caught.value.admission_sent is False
+        assert caught.value.cleanup_confirmed is True
+        assert "launcher-owned cleanup Job" in str(caught.value.__cause__)
+        assert len(children) == 2 and children[-1].returncode is not None
+        assert not marker.exists()
+    finally:
+        for job in jobs:
+            job.terminate_and_wait(5)
+
+
+def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_path: Path) -> None:
     """The handle-transfer path ``spawn_daemon(stdio_fds=...)`` uses for session hosts."""
     import msvcrt
     import threading
@@ -207,7 +252,7 @@ def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_
     process = None
     chunks: list[bytes] = []
 
-    def drain():
+    def drain() -> None:
         # Raw reads hold no buffered-reader lock, so a failing test never
         # blocks on the reader during cleanup.
         while chunk := os.read(read_fd, 4096):
@@ -216,8 +261,10 @@ def test_wmi_launch_transfers_a_pipe_with_output_eof_and_caller_descriptors(tmp_
     reader = threading.Thread(target=drain, daemon=True)
     try:
         with os.fdopen(write_fd, "wb") as output, open(os.devnull, "rb") as null:
-            handles = tuple(
-                msvcrt.get_osfhandle(fd) for fd in (null.fileno(), output.fileno(), output.fileno())
+            get_osfhandle: Callable[[int], int] = getattr(msvcrt, "get_osfhandle")
+            handles = (
+                get_osfhandle(null.fileno()), get_osfhandle(output.fileno()),
+                get_osfhandle(output.fileno()),
             )
             process = broker.spawn_brokered_daemon(
                 [python, "-c", code], cwd=str(tmp_path), env=env,

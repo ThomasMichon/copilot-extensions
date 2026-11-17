@@ -3,6 +3,42 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+
+- [2026-11-17 - Ten source deltas and gate provenance](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
+
+- [2026-11-17 - Ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
+
+- [2026-11-17 - Auth-lifetime receiving and twelve contract discriminators](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
+
+- [2026-11-17 - Cleanup delta and unchanged-source discriminators](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
+
+- [2026-11-17 - Generic-review intake receipt and parked acceptance](journal/2026/11.17-generic-review-intake-receipt.md)
+
+- [2026-11-17 - Conditional cadence guidance and the idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+
+- [2026-11-17 - Build-isolation wiring and retained native acceptance](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+
+- [2026-11-17 - Hygiene engine and Index custody](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+
+- [2026-11-17 - Lifecycle and cache-owner acceptance](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
+
+- [2026-11-17 - SDK release, cache adoption and transport observation](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+
+- [2026-11-17 - Serving convergence and canonical typing boundaries](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+
+- [2026-11-17 - Bootstrap, reporting and daemon-generation contracts](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
+
+- [2026-11-17 - Finite reviewer comparison and provider-first delivery boundaries](journal/2026/11.17-provider-first-delivery-boundaries.md)
+
+- [2026-11-17 - Copy-source delivery, Vault follow-ups and retained custody](journal/2026/11.17-vault-followups-and-custody-gap.md)
+
+- [2026-11-17 - Ordinary Windows test custody and retained compatibility work](journal/2026/11.17-ordinary-windows-test-custody.md)
+
+- [2026-11-17 - Delivery, presentation and native-failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
+
+- [2026-11-17 - Filtered-population source completion](journal/2026/11.17-filtered-population-source-completion.md)
+
 - [2026-11-16 - Resident readiness receiving and current-owner boundaries](journal/2026/11.16-resident-readiness-receiving.md)
 
 - [2026-11-16 - Complete claims-ownership receiving and three tracking retirements](journal/2026/11.16-complete-claims-ownership-receiving.md)

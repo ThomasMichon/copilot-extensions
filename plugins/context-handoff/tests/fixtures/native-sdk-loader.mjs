@@ -1,6 +1,11 @@
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === "@github/copilot-sdk" ||
-      specifier === "@github/copilot-sdk/extension") {
+  const namespace = process.env.FIXTURE_SDK_NAMESPACE || "@microsoft/copilot-sdk";
+  if (namespace === "@github/copilot-sdk" && specifier.startsWith("@microsoft/copilot-sdk")) {
+    const error = new Error("Cannot find package '@microsoft/copilot-sdk' imported from synthetic fixture");
+    error.code = "ERR_MODULE_NOT_FOUND";
+    throw error;
+  }
+  if (specifier === namespace || specifier === `${namespace}/extension`) {
     return { url: "native-test:sdk", shortCircuit: true };
   }
   return nextResolve(specifier, context);
@@ -11,8 +16,21 @@ export async function load(url, context, nextLoad) {
   return {
     format: "module", shortCircuit: true,
     source: `
+      import assert from "node:assert/strict";
       export const approveAll = () => ({kind:"approve"});
       export async function joinSession(config) {
+        const modern = process.env.FIXTURE_SDK_NAMESPACE !== "@github/copilot-sdk";
+        assert.equal(Array.isArray(config.tools), !modern);
+        assert.equal(typeof (modern ? config.permissions.onRequest : config.onPermissionRequest), "function");
+        assert.ok(Array.isArray(modern ? config.interaction.commands : config.commands));
+        if (modern) {
+          assert.ok(Array.isArray(config.tools.definitions));
+          assert.equal(config.commands, undefined);
+          assert.equal(config.onPermissionRequest, undefined);
+        } else {
+          assert.equal(config.permissions, undefined);
+          assert.equal(config.interaction, undefined);
+        }
         const handlers = new Map(), subscribers = new Map(), prompts = [], logs = [], sends = [];
         const session = {
           sessionId: process.env.FIXTURE_BOUND_CWD && !process.env.FIXTURE_DELAYED_ID

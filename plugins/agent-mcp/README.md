@@ -1610,6 +1610,10 @@ the payload's source. It uses the packaged installation driver's
 PID lock or age-based process reaper. Historical reconciliation files are left
 untouched. A healthy selected generation is a read-only no-op; an unrelated
 healthy fallback is not readiness for the selected source.
+Both flat interpreters and the canonical physical `.venv` beneath that same
+completed generation qualify. Missing completion, a different selected
+generation/source, or an unrelated fallback still requests provisioning;
+recognizing the nested layout does not bypass the resolver's link checks.
 
 The hook retains its 15-second budget and emits exactly `{}` on stdout.
 Stderr identifies the launched supervisor and its diagnostics under

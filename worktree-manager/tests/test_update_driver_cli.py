@@ -3,18 +3,31 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Iterator
+import os
+import subprocess
+import sys
 import pytest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from worktree_manager import update_driver_cli as driver
 
 # Include interpreter, observer, worker startup and participant handoff.
 _NATIVE_QUEUE_TIMEOUT = 30
+Queued = tuple[dict[str, Any], SimpleNamespace]
+
+
+def _record_result(values: list[Any], value: Any, result: int) -> int:
+    values.append(value)
+    return result
 
 
 @pytest.fixture
-def short_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
+def short_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Path]:
     from agent_procutil.daemon_instances import REGISTRY_ENV, daemon_test_lifecycle
 
     # Exercise queue ownership, not the platform's AF_UNIX address-length limit.
@@ -22,7 +35,7 @@ def short_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(home / ".worktree-manager"))
     registry = home.parent / "daemon-instances"
-    cleanup = []
+    cleanup: list[Any] = []
     with daemon_test_lifecycle(
         owner="manager-update-cli-tests", registry_root=registry, cleanup_results=cleanup,
     ) as environment:
@@ -33,7 +46,7 @@ def short_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
     assert all(result.status != "held" for result in cleanup), cleanup
 
 
-def test_default_wait_preserves_canonical_update_arguments():
+def test_default_wait_preserves_canonical_update_arguments() -> None:
     flags = ["--force", "--project", "example", "--skip-modules", "agent-bridge"]
     options, forwarded = driver.parse_options(flags)
     assert forwarded == flags
@@ -42,25 +55,25 @@ def test_default_wait_preserves_canonical_update_arguments():
     assert options.request_status is None
 
 
-def test_standalone_controller_override_is_forwarded():
+def test_standalone_controller_override_is_forwarded() -> None:
     flags = ["--no-project-controller", "--force"]
     _options, forwarded = driver.parse_options(flags)
     assert forwarded == flags
 
 
 @pytest.mark.parametrize("observer", [[], ["--detach"], ["--supervised-debug"]])
-def test_bootstrap_repair_prefix_survives_durable_observer_normalization(observer):
+def test_bootstrap_repair_prefix_survives_durable_observer_normalization(observer: list[str]) -> None:
     arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]
     _options, forwarded = driver.parse_options([*observer, *arguments])
     assert forwarded == arguments
 
 
-def test_bootstrap_repair_cannot_hide_after_ordinary_arguments():
+def test_bootstrap_repair_cannot_hide_after_ordinary_arguments() -> None:
     with pytest.raises(SystemExit):
         driver.parse_options(["--force", "--repair-engine", "/fresh/source"])
 
 
-def test_detach_json_is_an_observer_option_not_an_installer_argument():
+def test_detach_json_is_an_observer_option_not_an_installer_argument() -> None:
     options, forwarded = driver.parse_options(["--detach", "--json", "--force"])
     assert options.detach and options.json
     assert forwarded == ["--force"]
@@ -71,7 +84,9 @@ def test_detach_json_is_an_observer_option_not_an_installer_argument():
     (["--force"], True), (["--force-runtime", "agent-bridge"], True),
     (["--recreate-venv"], True), (["--repair-engine", "/fresh/source"], True),
 ])
-def test_operator_repair_classification_is_persisted(queued, flags, repair):
+def test_operator_repair_classification_is_persisted(
+    queued: Queued, flags: list[str], repair: bool,
+) -> None:
     seen, _request = queued
     assert driver.cmd_update_request(flags) == 6
     assert seen["spec"].repair is repair
@@ -85,12 +100,14 @@ def test_operator_repair_classification_is_persisted(queued, flags, repair):
     ["--recover-for-repair", "--auth-report"],
     ["--recover-for-repair", "--detach"],
 ])
-def test_operator_recovery_rejects_unrelated_modes(flags):
+def test_operator_recovery_rejects_unrelated_modes(flags: list[str]) -> None:
     with pytest.raises(SystemExit):
         driver.parse_options(flags)
 
 
-def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, monkeypatch, capsys):
+def test_explicit_operator_recovery_reports_authority_not_native_proof(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     import json
     import update_driver
 
@@ -99,7 +116,7 @@ def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, m
     request.recovery_authority, request.released_at = "operator_repair", 2.0
     request.settled_at = request.settlement_kind = None
 
-    def recover(*, authorized):
+    def recover(*, authorized: bool) -> tuple[SimpleNamespace, ...]:
         assert authorized is True
         return (request,)
 
@@ -128,13 +145,13 @@ def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, m
     ["--recovery-status", "--engine-acquisition-timeout", "600"],
     ["--auth-report", "--engine-acquisition-timeout", "600"],
 ])
-def test_invalid_observer_combinations_refuse(flags):
+def test_invalid_observer_combinations_refuse(flags: list[str]) -> None:
     with pytest.raises(SystemExit) as error:
         driver.parse_options(flags)
     assert error.value.code == 2
 
 
-def test_request_context_never_persists_credentials(monkeypatch):
+def test_request_context_never_persists_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GH_TOKEN", "synthetic-secret")
     monkeypatch.setenv("GITHUB_TOKEN", "other-synthetic-secret")
     monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", "example-context")
@@ -145,8 +162,8 @@ def test_request_context_never_persists_credentials(monkeypatch):
 
 
 def test_relative_home_is_captured_from_execution_directory_not_source_anchor(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager.source_config import SOURCE_ANCHOR_ENV
 
     caller, anchor = tmp_path / "caller", tmp_path / "anchor"
@@ -163,7 +180,7 @@ def test_relative_home_is_captured_from_execution_directory_not_source_anchor(
         assert driver.request_context()["AGENT_HOME"] == str(caller / "state")
 
 
-def test_cold_bootstrap_context_requires_no_uninstalled_manager_dependencies():
+def test_cold_bootstrap_context_requires_no_uninstalled_manager_dependencies() -> None:
     import os
     import subprocess
     import sys
@@ -182,12 +199,14 @@ assert 'worktree_identity' not in sys.modules
         [sys.executable, "-I", "-S", "-B", "-c", program,
          str(Path(__file__).resolve().parents[1] / "src")],
         capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_queue_captures_consumed_provider_without_restoring_ambient_transport(queued, monkeypatch):
+def test_queue_captures_consumed_provider_without_restoring_ambient_transport(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import json
     from worktree_manager import engine_client
 
@@ -198,12 +217,15 @@ def test_queue_captures_consumed_provider_without_restoring_ambient_transport(qu
     assert driver.cmd_update_request([]) == 6
     assert json.loads(dict(seen["spec"].context)[engine_client.ENGINE_ARGV_ENV]) == provider
     assert engine_client.ENGINE_ARGV_ENV in seen["runner"].context_keys
-    assert engine_client.ENGINE_ARGV_ENV not in driver.os.environ
+    assert engine_client.ENGINE_ARGV_ENV not in os.environ
 
 
 @pytest.mark.parametrize("flags", [[], ["--detach"]], ids=["wait", "detach"])
 @pytest.mark.parametrize("context", ["", "relative", "missing", "file"])
-def test_invalid_context_refuses_before_submission(queued, monkeypatch, tmp_path, capsys, flags, context):
+def test_invalid_context_refuses_before_submission(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str], flags: list[str], context: str,
+) -> None:
     seen, _request = queued
     path = tmp_path / context
     if context == "file":
@@ -216,7 +238,9 @@ def test_invalid_context_refuses_before_submission(queued, monkeypatch, tmp_path
     assert "existing absolute directory" in capsys.readouterr().err
 
 
-def test_source_identity_preserves_explicit_selection(tmp_path, monkeypatch):
+def test_source_identity_preserves_explicit_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager.runtime_source_config import RuntimeSource
     from worktree_manager import self_install
 
@@ -231,7 +255,9 @@ def test_source_identity_preserves_explicit_selection(tmp_path, monkeypatch):
     }
 
 
-def test_relative_source_is_anchored_before_worker_changes_directory(tmp_path, monkeypatch):
+def test_relative_source_is_anchored_before_worker_changes_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import self_install
 
     monkeypatch.chdir(tmp_path)
@@ -244,8 +270,8 @@ def test_relative_source_is_anchored_before_worker_changes_directory(tmp_path, m
 
 
 def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cwd(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
     from update_driver.authority import UpdateAuthority
     from worktree_manager import engine_client, source_config
@@ -260,9 +286,9 @@ def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cw
     source_config.set_source(repo="selected-source", ref="dev", root=root)
     monkeypatch.chdir(caller)
     admitted = driver._source_key()
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def enqueue(spec, *, runner):
+    def enqueue(spec: update_driver.RequestSpec, *, runner: update_driver.TrustedRunner) -> SimpleNamespace:
         seen.update(spec=spec, runner=runner)
         return SimpleNamespace(
             id="anchored-request", state="pending", exit_code=None, error=None,
@@ -288,10 +314,12 @@ def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cw
         assert driver.source_identity()["repo"] == str(anchor / "selected-source")
         source_config.set_source(repo="changed-source", root=root)
         assert driver._source_key() != admitted
-    assert driver.os.environ[source_config.SOURCE_ANCHOR_ENV] == str(worker)
+    assert os.environ[source_config.SOURCE_ANCHOR_ENV] == str(worker)
 
 
-def test_installed_cli_refuses_relative_inherited_source_anchor_before_enqueue(queued, monkeypatch):
+def test_installed_cli_refuses_relative_inherited_source_anchor_before_enqueue(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager.source_config import SOURCE_ANCHOR_ENV
 
     seen, _request = queued
@@ -300,7 +328,9 @@ def test_installed_cli_refuses_relative_inherited_source_anchor_before_enqueue(q
     assert seen == {}
 
 
-def test_credential_bearing_source_is_not_written_to_queue(tmp_path, monkeypatch):
+def test_credential_bearing_source_is_not_written_to_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import self_install
 
     monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
@@ -310,28 +340,28 @@ def test_credential_bearing_source_is_not_written_to_queue(tmp_path, monkeypatch
 
 
 @pytest.fixture
-def queued(monkeypatch, tmp_path):
+def queued(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Queued:
     import update_driver
     from worktree_manager import __main__ as manager
     from worktree_manager import engine_client
     from update_driver.authority import UpdateAuthority
 
-    seen = {}
+    seen: dict[str, Any] = {}
     request = SimpleNamespace(
         id="synthetic-request", state="pending", exit_code=None, error=None,
         log_path=tmp_path / "update.log",
     )
 
-    def enqueue(spec, *, runner):
+    def enqueue(spec: update_driver.RequestSpec, *, runner: update_driver.TrustedRunner) -> SimpleNamespace:
         seen["spec"], seen["runner"] = spec, runner
         request.spec = spec
         return request
 
-    def wait(request_id, **kwargs):
+    def wait(request_id: str, **kwargs: Any) -> SimpleNamespace:
         seen["wait"] = request_id
         return SimpleNamespace(**{**vars(request), "state": "completed", "exit_code": 6})
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> None:
         pytest.fail("ordinary caller executed the installer")
 
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
@@ -348,7 +378,9 @@ def queued(monkeypatch, tmp_path):
     return seen, request
 
 
-def test_standalone_authority_skips_controller_before_manager_enqueue(queued, monkeypatch):
+def test_standalone_authority_skips_controller_before_manager_enqueue(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import engine_client
@@ -364,7 +396,10 @@ def test_standalone_authority_skips_controller_before_manager_enqueue(queued, mo
     assert "--no-project-controller" in seen["runner"].argv
 
 
-def test_public_submission_and_status_report_superseded_request(queued, monkeypatch, tmp_path, capsys):
+def test_public_submission_and_status_report_superseded_request(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import json
     import update_driver
     from update_driver import core
@@ -381,10 +416,13 @@ def test_public_submission_and_status_report_superseded_request(queued, monkeypa
     result = json.loads(capsys.readouterr().out)
     assert result["state"] == "completed" and result["exit_code"] == 125
     assert second in result["error"] and "nothing ran" in result["error"]
-    assert core.status(second).state == "pending"
+    pending = core.status(second)
+    assert not isinstance(pending, tuple) and pending.state == "pending"
 
 
-def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
+def test_downlevel_driver_refuses_cleanly_without_queueing(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     import update_driver
 
     seen, _request = queued
@@ -394,13 +432,15 @@ def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, 
     assert "lacks authority support" in capsys.readouterr().err
 
 
-def test_project_authority_hands_manager_updates_to_its_selected_project(queued, monkeypatch):
+def test_project_authority_hands_manager_updates_to_its_selected_project(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import engine_client
 
     seen, _request = queued
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(
         update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
     )
@@ -412,7 +452,7 @@ def test_project_authority_hands_manager_updates_to_its_selected_project(queued,
     )
     monkeypatch.setattr(
         engine_client, "run_engine_passthrough",
-        lambda project, args, **kwargs: calls.append((project, args, kwargs)) or 47,
+        lambda project, args, **kwargs: _record_result(calls, (project, args, kwargs), 47),
     )
     assert driver.cmd_update_request(["--project", "different", "--force"]) == 47
     assert calls == [("harness", ["update", "--force"], {})]
@@ -420,7 +460,9 @@ def test_project_authority_hands_manager_updates_to_its_selected_project(queued,
 
 
 @pytest.mark.parametrize("flags", [[], ["--no-project-controller"], ["--target", "worktree-manager"]])
-def test_project_authority_never_falls_back_to_manager(queued, monkeypatch, flags):
+def test_project_authority_never_falls_back_to_manager(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, flags: list[str],
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import engine_client
@@ -438,10 +480,12 @@ def test_project_authority_never_falls_back_to_manager(queued, monkeypatch, flag
     [], ["--detach", "--json"], ["--wait"], ["--supervised-debug"],
 ])
 @pytest.mark.parametrize("project", [["--project", "example"], ["--project=example"]])
-def test_project_controller_routes_before_manager_source(queued, monkeypatch, observer, project):
+def test_project_controller_routes_before_manager_source(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, observer: list[str], project: list[str],
+) -> None:
     from worktree_manager import engine_client
 
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(
         engine_client, "get_value",
         lambda project, key: "tools/update.py" if (project, key) == (
@@ -450,7 +494,7 @@ def test_project_controller_routes_before_manager_source(queued, monkeypatch, ob
     )
     monkeypatch.setattr(
         engine_client, "run_engine_passthrough",
-        lambda project, args, **kwargs: calls.append((project, args, kwargs)) or 47,
+        lambda project, args, **kwargs: _record_result(calls, (project, args, kwargs), 47),
     )
     monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
     assert driver.cmd_update_request([*project, "--force", *observer]) == 47
@@ -462,8 +506,8 @@ def test_project_controller_routes_before_manager_source(queued, monkeypatch, ob
 
 @pytest.mark.parametrize("root_form", ["default", "relative"])
 def test_project_controller_handoff_freezes_manager_policy_root(
-    queued, monkeypatch, tmp_path, root_form,
-):
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, root_form: str,
+) -> None:
     import os
     from update_driver import RequestSpec
     from update_driver.core import automatic_update_refusal
@@ -486,10 +530,10 @@ def test_project_controller_handoff_freezes_manager_policy_root(
         monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
     else:
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
-    seen = []
+    seen: list[tuple[dict[str, str], str | None]] = []
     monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
 
-    def execute(_project, arguments, **_kwargs):
+    def execute(_project: str, arguments: list[str], **_kwargs: Any) -> int:
         context = {
             "WORKTREE_MANAGER_ROOT": os.environ.get("WORKTREE_MANAGER_ROOT", ""),
             "COPILOT_EXTENSIONS_CONTEXT": os.environ["COPILOT_EXTENSIONS_CONTEXT"],
@@ -504,30 +548,34 @@ def test_project_controller_handoff_freezes_manager_policy_root(
     monkeypatch.setattr(engine_client, "run_engine_passthrough", execute)
     assert driver.cmd_update_request(["--project", "example", "--auto"]) == 0
     assert seen[0][0]["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
-    assert "maintenance.automatic is false" in seen[0][1]
+    assert seen[0][1] is not None and "maintenance.automatic is false" in seen[0][1]
     assert os.environ.get("WORKTREE_MANAGER_ROOT") == (
         None if root_form == "default" else "manager"
     )
 
 
-def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch):
+def test_project_controller_preserves_explicit_manager_skip(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import engine_client
 
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
     monkeypatch.setattr(
         engine_client, "run_engine_passthrough",
-        lambda project, args, **kwargs: calls.append((project, args)) or 0,
+        lambda project, args, **kwargs: _record_result(calls, (project, args), 0),
     )
     assert driver.cmd_update_request(["--project", "example", "--no-manager", "--force"]) == 0
     assert calls == [("example", ["update", "--no-manager", "--force"])]
 
 
 @pytest.mark.parametrize("project", [None, "missing"])
-def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypatch, project):
+def test_neutral_controller_probe_does_not_block_manager_update(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, project: str | None,
+) -> None:
     from worktree_manager import engine_client, project_update_controller
 
-    def missing_project(*_args):
+    def missing_project(*_args: Any) -> str:
         raise project_update_controller._NoProjectResolved("Could not resolve a project for 'get'.")
 
     seen, _request = queued
@@ -538,8 +586,8 @@ def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypa
 
 
 def test_project_controller_routes_borrowed_request_before_manager_source(
-    queued, monkeypatch, tmp_path,
-):
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import update_driver
     from worktree_manager import engine_client
 
@@ -547,10 +595,10 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
         request_id = "synthetic-request"
         root = tmp_path
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: Any) -> None:
             pass
 
     request = SimpleNamespace(
@@ -559,20 +607,22 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
             backend="manager", context=(), killswitch_path=None, cwd=str(tmp_path),
         ),
     )
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
     monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
     monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
     monkeypatch.setattr(
         engine_client, "run_engine_passthrough",
-        lambda project, args, **kwargs: calls.append((project, args)) or 47,
+        lambda project, args, **kwargs: _record_result(calls, (project, args), 47),
     )
     monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
     assert driver.cmd_update_request(["--project", "example", "--force"]) == 47
     assert calls == [("example", ["update", "--force"])]
 
 
-def test_legacy_project_request_reaches_manager_controller_under_real_custody(tmp_path, monkeypatch):
+def test_legacy_project_request_reaches_manager_controller_under_real_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import sqlite3
     import sys
     import update_driver
@@ -592,15 +642,15 @@ def test_legacy_project_request_reaches_manager_controller_under_real_custody(tm
     )
     with sqlite3.connect(root / "queue.sqlite3") as db:
         db.execute("PRAGMA user_version=5")
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
     monkeypatch.setattr(
         engine_client, "run_engine_passthrough",
-        lambda project, args, **_kwargs: calls.append((project, args)) or 0,
+        lambda project, args, **_kwargs: _record_result(calls, (project, args), 0),
     )
     borrow = update_driver.borrowed_custody
 
-    def execute(transaction):
+    def execute(transaction: Any) -> int:
         monkeypatch.setattr(
             update_driver, "borrowed_custody",
             lambda: borrow(root=root, environ=transaction.participant_env()),
@@ -608,11 +658,14 @@ def test_legacy_project_request_reaches_manager_controller_under_real_custody(tm
         return driver.cmd_update_request(["--project", "example", "--force"])
 
     assert update_driver.drain(root=root, executor=execute) == 0
-    assert update_driver.status(request.id, root=root).exit_code == 0
+    completed = update_driver.status(request.id, root=root)
+    assert not isinstance(completed, tuple) and completed.exit_code == 0
     assert calls == [("example", ["update", "--force"])]
 
 
-def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp_path):
+def test_borrowed_standalone_authority_stays_standalone(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import __main__ as manager, engine_client
@@ -621,13 +674,13 @@ def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp
         request_id = "synthetic-request"
         root = tmp_path
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: Any) -> None:
             pass
 
-        def assert_owned(self):
+        def assert_owned(self) -> None:
             pass
 
     request = SimpleNamespace(
@@ -637,7 +690,7 @@ def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp
             authority="standalone",
         ),
     )
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
     monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
     monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
@@ -646,7 +699,7 @@ def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp
         lambda *_args: pytest.fail("standalone authority probed a project controller"),
     )
     monkeypatch.setattr(driver, "_source_key", lambda: "selected")
-    monkeypatch.setattr(manager, "_cmd_update", lambda flags: calls.append(flags) or 8)
+    monkeypatch.setattr(manager, "_cmd_update", lambda flags: _record_result(calls, flags, 8))
     assert driver.cmd_update_request(["--project", "example"]) == 8
     assert "--no-project-controller" in calls[0]
 
@@ -659,8 +712,9 @@ def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp
     (("--target", "agent-bridge"), ("--target", "agent-bridge"), 1),
 ])
 def test_borrowed_project_authority_allows_controller_delegation(
-    queued, monkeypatch, tmp_path, parent_flags, child_flags, expected,
-):
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    parent_flags: tuple[str, ...], child_flags: tuple[str, ...], expected: int,
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import __main__ as manager, engine_client
@@ -669,13 +723,13 @@ def test_borrowed_project_authority_allows_controller_delegation(
         request_id = "synthetic-request"
         root = tmp_path
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: Any) -> None:
             pass
 
-        def assert_owned(self):
+        def assert_owned(self) -> None:
             pass
 
     request = SimpleNamespace(
@@ -684,7 +738,7 @@ def test_borrowed_project_authority_allows_controller_delegation(
             "engine", parent_flags, project="example", cwd=str(tmp_path), authority="project",
         ),
     )
-    calls = []
+    calls: list[Any] = []
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
     monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
     monkeypatch.setattr(
@@ -694,7 +748,7 @@ def test_borrowed_project_authority_allows_controller_delegation(
         engine_client, "get_value",
         lambda *_args: pytest.fail("delegated bypass re-entered the controller"),
     )
-    monkeypatch.setattr(manager, "_cmd_update", lambda flags: calls.append(flags) or 8)
+    monkeypatch.setattr(manager, "_cmd_update", lambda flags: _record_result(calls, flags, 8))
     assert driver.cmd_update_request(["--project", "example", *child_flags]) == expected
     if expected == 8:
         assert all(flag in calls[0] for flag in child_flags)
@@ -702,7 +756,7 @@ def test_borrowed_project_authority_allows_controller_delegation(
         assert not calls
 
 
-def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
+def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued: Queued) -> None:
     seen, request = queued
     assert driver.cmd_update_request(["--force", "--project", "example"]) == 6
     assert seen["spec"].argv == ("--force", "--project", "example")
@@ -715,7 +769,7 @@ def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
 @pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
 @pytest.mark.parametrize("enabled", [False, True])
 def test_submission_keeps_selected_policy_for_automatic_and_manual_updates(
-    queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, root_form: str, enabled: bool,
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, root_form: str, enabled: bool,
 ) -> None:
     import update_driver
     from update_driver.core import automatic_update_refusal
@@ -740,7 +794,9 @@ def test_submission_keeps_selected_policy_for_automatic_and_manual_updates(
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent-hold.json"))
     enqueue = update_driver.enqueue
 
-    def admit(spec: update_driver.RequestSpec, *, runner: update_driver.TrustedRunner):
+    def admit(
+        spec: update_driver.RequestSpec, *, runner: update_driver.TrustedRunner,
+    ) -> update_driver.Request:
         assert dict(spec.context)["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
         assert spec.cwd == str(caller.resolve())
         if reason := automatic_update_refusal(spec):
@@ -752,7 +808,7 @@ def test_submission_keeps_selected_policy_for_automatic_and_manual_updates(
     assert ("spec" in seen) is enabled
     assert driver.cmd_update_request([]) == 6
     assert seen["spec"].argv == ()
-    assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == selected[root_form]
+    assert os.environ["WORKTREE_MANAGER_ROOT"] == selected[root_form]
     assert not (caller / "~").exists()
 
 
@@ -769,7 +825,7 @@ def test_source_identity_expands_home_before_freezing_selection(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "~/manager")
     selected = home / "manager"
-    roots = []
+    roots: list[Path] = []
 
     def repo(root: Path) -> str:
         roots.append(root)
@@ -786,8 +842,8 @@ def test_source_identity_expands_home_before_freezing_selection(
 
 @pytest.mark.parametrize("configured", [False, True])
 def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(
-    queued, monkeypatch, tmp_path, configured,
-):
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, configured: bool,
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import runtime_identity, self_install
@@ -797,7 +853,7 @@ def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(
     slot.mkdir(parents=True)
 
     @contextmanager
-    def no_custody():
+    def no_custody() -> Iterator[None]:
         yield None
 
     monkeypatch.setattr(
@@ -813,7 +869,7 @@ def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(
     if configured:
         monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
     assert driver.self_install_request(lambda: pytest.fail("observer executed install")) == 6
-    assert seen["spec"].cwd == str(slot) and seen["runner"].cwd == str(slot)
+    assert seen["spec"].cwd == str(slot) and seen["runner"].cwd == str(slot.parent.parent)
     assert seen["spec"].project == str(slot.parent.parent)
     assert dict(seen["spec"].context)["WORKTREE_MANAGER_ROOT"] == str(slot.parent.parent)
     assert seen["runner"].argv[-2:] == ("self-install", "--apply")
@@ -821,16 +877,19 @@ def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(
     assert seen["drained"]
 
 
-def test_self_install_reports_project_authority_refusal(queued, monkeypatch, tmp_path, capsys):
+def test_self_install_reports_project_authority_refusal(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import update_driver
     from update_driver.authority import selection
     from worktree_manager import runtime_identity, self_install
 
     @contextmanager
-    def no_custody():
+    def no_custody() -> Iterator[None]:
         yield None
 
-    def refuse(*_args, **_kwargs):
+    def refuse(*_args: Any, **_kwargs: Any) -> None:
         raise update_driver.StateError("authority refusal")
 
     monkeypatch.setattr(
@@ -844,7 +903,9 @@ def test_self_install_reports_project_authority_refusal(queued, monkeypatch, tmp
     assert "authority refusal" in capsys.readouterr().err
 
 
-def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypatch):
+def test_fresh_repair_is_queued_without_running_in_the_observer(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen, _request = queued
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "/registered/native/payload")
     arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]
@@ -856,7 +917,9 @@ def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypa
     assert seen["runner"].argv[-len(arguments) - 1:] == ("update", *arguments)
 
 
-def test_engine_acquisition_budget_is_captured_by_the_durable_request(queued, monkeypatch):
+def test_engine_acquisition_budget_is_captured_by_the_durable_request(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen, _request = queued
     key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
     monkeypatch.setenv(key, "600")
@@ -870,14 +933,14 @@ def test_engine_acquisition_budget_is_captured_by_the_durable_request(queued, mo
     with driver._request_environment(seen["spec"].context), driver._acquisition_environment(
         options.engine_acquisition_timeout,
     ):
-        assert driver.os.environ[key] == "600.0"
-    assert driver.os.environ[key] == "180"
+        assert os.environ[key] == "600.0"
+    assert os.environ[key] == "180"
     with driver._acquisition_environment(None):
-        assert key not in driver.os.environ
-    assert driver.os.environ[key] == "180"
+        assert key not in os.environ
+    assert os.environ[key] == "180"
 
 
-def test_manager_budget_is_consumed_before_engine_argument_forwarding():
+def test_manager_budget_is_consumed_before_engine_argument_forwarding() -> None:
     options, forwarded = driver.parse_options([
         "--repair-engine", "/fresh/source", "--engine-acquisition-timeout", "600",
         "--no-anchor-sync",
@@ -886,14 +949,18 @@ def test_manager_budget_is_consumed_before_engine_argument_forwarding():
     assert forwarded == ["--repair-engine", "/fresh/source", "--no-anchor-sync"]
 
 
-def test_invalid_engine_acquisition_budget_is_not_enqueued(queued, monkeypatch):
+def test_invalid_engine_acquisition_budget_is_not_enqueued(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen, _request = queued
     monkeypatch.setenv("WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC", "inf")
     assert driver.cmd_update_request([]) == 1
     assert "spec" not in seen
 
 
-def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypatch, tmp_path):
+def test_borrowed_execution_passes_repair_to_the_canonical_body(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import update_driver
     from worktree_manager import __main__ as manager
 
@@ -909,13 +976,13 @@ def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypa
         root = tmp_path
         request_id = request.id
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: Any) -> None:
             pass
 
-        def assert_owned(self):
+        def assert_owned(self) -> None:
             seen["custody"] = True
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
@@ -932,8 +999,9 @@ def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypa
 @pytest.mark.parametrize("backend", ["manager", "engine"])
 @pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
 def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
-    queued, monkeypatch, tmp_path, backend, root_form,
-):
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    backend: str, root_form: str,
+) -> None:
     import update_driver
     from worktree_manager import __main__ as manager, maintenance_policy
 
@@ -962,13 +1030,13 @@ def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
         root = tmp_path
         request_id = request.id
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: Any) -> None:
             pass
 
-        def assert_owned(self):
+        def assert_owned(self) -> None:
             seen["custody"] = True
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
@@ -991,12 +1059,14 @@ def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
 
         assert (automatic_update_refusal(request.spec) is not None) is (expected == 3)
         assert driver.cmd_update_request(arguments) == expected
-        assert driver.os.environ["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(held)
-        assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == "worker-original"
+        assert os.environ["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(held)
+        assert os.environ["WORKTREE_MANAGER_ROOT"] == "worker-original"
     assert "spec" not in seen
 
 
-def test_detached_receipt_does_not_wait_or_claim_completion(queued, capsys):
+def test_detached_receipt_does_not_wait_or_claim_completion(
+    queued: Queued, capsys: pytest.CaptureFixture[str],
+) -> None:
     import json
 
     seen, request = queued
@@ -1008,12 +1078,14 @@ def test_detached_receipt_does_not_wait_or_claim_completion(queued, capsys):
     assert "wait" not in seen
 
 
-def test_failed_worker_launch_is_not_foreground_fallback(queued, monkeypatch):
+def test_failed_worker_launch_is_not_foreground_fallback(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
 
     seen, _request = queued
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> None:
         raise update_driver.SpawnError("fixture launch denied")
 
     monkeypatch.setattr(update_driver, "ensure_worker", fail)
@@ -1022,12 +1094,14 @@ def test_failed_worker_launch_is_not_foreground_fallback(queued, monkeypatch):
     assert "wait" not in seen
 
 
-def test_invalid_witness_cannot_become_an_ordinary_request(queued, monkeypatch):
+def test_invalid_witness_cannot_become_an_ordinary_request(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
 
     seen, _request = queued
 
-    def fail():
+    def fail() -> None:
         raise update_driver.ParticipantError("stale custody")
 
     monkeypatch.setattr(update_driver, "borrowed_custody", fail)
@@ -1035,7 +1109,9 @@ def test_invalid_witness_cannot_become_an_ordinary_request(queued, monkeypatch):
     assert "spec" not in seen
 
 
-def test_source_change_refuses_before_checked_participant_executes(queued, monkeypatch, tmp_path):
+def test_source_change_refuses_before_checked_participant_executes(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import update_driver
 
     seen, request = queued
@@ -1048,13 +1124,13 @@ def test_source_change_refuses_before_checked_participant_executes(queued, monke
         root = tmp_path
         request_id = request.id
 
-        def __enter__(self):
+        def __enter__(self) -> Custody:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: Any) -> None:
             pass
 
-        def assert_owned(self):
+        def assert_owned(self) -> None:
             seen["custody"] = True
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
@@ -1064,17 +1140,19 @@ def test_source_change_refuses_before_checked_participant_executes(queued, monke
     assert "custody" not in seen
 
 
-def test_public_manager_route_uses_request_boundary(monkeypatch):
+def test_public_manager_route_uses_request_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager import __main__ as manager
 
-    seen = []
-    monkeypatch.setattr(driver, "cmd_update_request", lambda rest: seen.append(rest) or 17)
+    seen: list[Any] = []
+    monkeypatch.setattr(driver, "cmd_update_request", lambda rest: _record_result(seen, rest, 17))
     assert manager.main(["update", "--wait"]) == 17
     assert seen == [["--wait"]]
 
 
 @pytest.mark.timeout(2 * _NATIVE_QUEUE_TIMEOUT)
-def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monkeypatch, short_home):
+def test_real_cli_worker_preserves_exit_and_serializes_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, short_home: Path,
+) -> None:
     import json
     import sys
     from concurrent.futures import ThreadPoolExecutor
@@ -1110,6 +1188,7 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
         assert records[index + 1]["phase"] == "end"
         assert records[index]["pid"] == records[index + 1]["pid"]
     requests = update_driver.status()
+    assert isinstance(requests, tuple)
     assert len(requests) in (1, 2)
     assert all(request.state == "completed" and request.exit_code == 6 for request in requests)
 
@@ -1117,8 +1196,9 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
 @pytest.mark.parametrize("automatic,held", [(False, True), (True, True), (True, False)])
 @pytest.mark.timeout(_NATIVE_QUEUE_TIMEOUT)
 def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
-    tmp_path, monkeypatch, short_home, automatic, held,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, short_home: Path,
+    automatic: bool, held: bool,
+) -> None:
     import json
     import sys
     from agent_procutil.owned_process import run_installation_owned
@@ -1140,7 +1220,9 @@ def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
     )
     skipped = automatic and held
     assert result.returncode == (3 if skipped else 6), result.stderr
-    request, = update_driver.status()
+    requests = update_driver.status()
+    assert isinstance(requests, tuple)
+    request, = requests
     assert request.spec.repair is not automatic
     assert dict(request.spec.context)["WORKTREE_MANAGER_ROOT"] == str(short_home / ".worktree-manager")
     assert ("--auto" in request.runner.argv) is automatic
@@ -1158,8 +1240,8 @@ def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
 @pytest.mark.parametrize("fresh_repair", [False, True], ids=["ordinary", "fresh-repair"])
 @pytest.mark.timeout(2 * _NATIVE_QUEUE_TIMEOUT)
 def test_actual_queued_manager_keeps_consumed_provider(
-    tmp_path, monkeypatch, short_home, fresh_repair,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, short_home: Path, fresh_repair: bool,
+) -> None:
     import json
     import sys
     from pathlib import Path
@@ -1189,8 +1271,8 @@ def test_actual_queued_manager_keeps_consumed_provider(
 
 @pytest.mark.timeout(7 * _NATIVE_QUEUE_TIMEOUT)
 def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
-    tmp_path, monkeypatch, short_home,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, short_home: Path,
+) -> None:
     import json
     import sys
     from pathlib import Path
@@ -1221,6 +1303,7 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
         assert result.returncode == 0, result.stderr
     root = home / ".copilot-extensions" / "update-driver"
     requests = update_driver.status(root=root)
+    assert isinstance(requests, tuple)
     assert len(requests) == 3
     assert [request.state for request in requests] == ["completed", "completed", "pending"]
     assert all(request.exit_code == 125 and request.started_at is None for request in requests[:-1])
@@ -1239,8 +1322,8 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
 
 @pytest.mark.timeout(4 * _NATIVE_QUEUE_TIMEOUT)
 def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
-    tmp_path, monkeypatch, short_home,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, short_home: Path,
+) -> None:
     import json
     import sys
     import update_driver
@@ -1268,11 +1351,14 @@ def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
     assert engine["no_manager"] is True and key not in engine["context_keys"]
     assert manager["pid"] != engine["pid"]
     requests = update_driver.status(root=short_home / ".copilot-extensions" / "update-driver")
+    assert isinstance(requests, tuple)
     assert len(requests) == 1 and requests[0].state == "completed"
     assert requests[0].exit_code == 6
 
 
-def test_recovery_inspection_and_settlement_never_start_an_updater(queued, monkeypatch, capsys):
+def test_recovery_inspection_and_settlement_never_start_an_updater(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     import json
     import update_driver
 
@@ -1288,13 +1374,15 @@ def test_recovery_inspection_and_settlement_never_start_an_updater(queued, monke
     assert seen == {}
 
 
-def test_same_boot_recovery_refusal_is_structured_and_does_not_enqueue(queued, monkeypatch, capsys):
+def test_same_boot_recovery_refusal_is_structured_and_does_not_enqueue(
+    queued: Queued, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     import json
     import update_driver
 
     seen, _request = queued
 
-    def refuse():
+    def refuse() -> None:
         raise update_driver.RecoveryError("same_kernel_boot")
 
     monkeypatch.setattr(update_driver, "recover_after_restart", refuse)
@@ -1311,33 +1399,35 @@ def test_same_boot_recovery_refusal_is_structured_and_does_not_enqueue(queued, m
     (["stage-update", "--indicator-state"], False),
     (["doctor"], False),
 ])
-def test_engine_handoff_is_explicit_only_for_mutating_update_commands(args, carries_witness, monkeypatch):
+def test_engine_handoff_is_explicit_only_for_mutating_update_commands(
+    args: list[str], carries_witness: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
     from worktree_manager import engine_client
 
-    seen = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "fixture"})
     monkeypatch.setattr(engine_client, "_engine_environment", lambda: {"SAFE": "fixture"})
     monkeypatch.setattr(engine_client, "engine_base_command", lambda: ["fixture-engine"])
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         seen.update(kwargs)
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(engine_client.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert engine_client.run_engine_passthrough(None, args) == 0
     assert ("UPDATE_DRIVER_WITNESS" in seen["env"]) == carries_witness
-    if carries_witness and engine_client.os.name == "nt":
-        assert seen["creationflags"] & engine_client.subprocess.CREATE_NO_WINDOW
-        assert seen["stdout"] is driver.sys.stdout
-        assert seen["stderr"] is driver.sys.stderr
+    if carries_witness and os.name == "nt":
+        assert seen["creationflags"] & getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        assert seen["stdout"] is sys.stdout
+        assert seen["stderr"] is sys.stderr
     elif not carries_witness:
         assert "creationflags" not in seen
         assert "stdout" not in seen and "stderr" not in seen
 
 
-@pytest.mark.skipif(driver.os.name != "nt", reason="native Windows no-window stream inheritance")
-def test_scoped_engine_passthrough_retains_both_channels_and_native_exit():
+@pytest.mark.skipif(os.name != "nt", reason="native Windows no-window stream inheritance")
+def test_scoped_engine_passthrough_retains_both_channels_and_native_exit() -> None:
     import subprocess
     import sys
     from agent_procutil import no_window_kwargs

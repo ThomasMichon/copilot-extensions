@@ -8,17 +8,30 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from collections.abc import Mapping
+from typing import cast
 
-from ._peer_launch import ContextRefused, validate_owner
+from ._peer_launch import ContextRefused as ContextRefused, validate_owner
 
 
-def run_caller_owned(*args, **kwargs):
+def run_caller_owned(
+    argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float,
+    max_stdout_bytes: int, max_stderr_bytes: int, input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     from agent_procutil.owned_process import run_caller_owned as run
 
-    return run(*args, **kwargs)
+    if input_text is not None:
+        return run(
+            argv, cwd=cwd, env=env, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes, input_text=input_text,
+        )
+    return run(
+        argv, cwd=cwd, env=env, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+        max_stderr_bytes=max_stderr_bytes,
+    )
 
 
-def validate_context() -> dict | None:
+def validate_context() -> dict[str, object] | None:
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
     implicit_root = Path(os.environ.get("AGENT_RT_ROOT") or (Path.home() / ".agent-ssh"))
     if not raw and (
@@ -38,12 +51,12 @@ def validate_context() -> dict | None:
         raise ContextRefused("agent-ssh installation context refused") from exc
 
 
-def state_root(cwd: Path, own: dict | None) -> tuple[Path | None, str]:
+def state_root(cwd: Path, own: Mapping[str, object] | None) -> tuple[Path | None, str]:
     payload = (own.get("payloadRoot") if own else os.environ.get("AGENT_SSH_PAYLOAD_ROOT")) or None
     python = Path(sys.executable)
     if python.name.casefold() == "pythonw.exe":
         python = python.with_name("python.exe")
-    argv = [str(python), "-I", "-X", "utf8", "-m", "agent_ssh._worktrees", "state-root", "--json"]
+    argv = [str(python), "-I", "-X", "utf8", "-B", "-m", "agent_ssh._worktrees", "state-root", "--json"]
     environment = os.environ.copy()
     environment["AGENT_WORKTREES_NO_SELFPROVISION"] = "1"
     environment["AGENT_SSH_NO_SELFPROVISION"] = "1"
@@ -58,7 +71,11 @@ def state_root(cwd: Path, own: dict | None) -> tuple[Path | None, str]:
     )
 
 
-def _read_state_root(argv, environment, cwd, own, *, timeout=5, append_args=True, input_text=None):
+def _read_state_root(
+    argv: list[str], environment: dict[str, str], cwd: Path,
+    own: Mapping[str, object] | None, *, timeout: float = 5, append_args: bool = True,
+    input_text: str | None = None,
+) -> tuple[Path | None, str]:
     try:
         result = run_caller_owned(
             [*argv, "state-root", "--json"] if append_args else argv,
@@ -123,7 +140,7 @@ def main() -> int:
         ):
             raise ContextRefused("Captured caller installation changed")
         if own is not None:
-            payload = Path(own["payloadRoot"])
+            payload = Path(cast(str, own["payloadRoot"]))
         else:
             from .host_restore import payload_root
 
@@ -160,7 +177,7 @@ def main() -> int:
         )
     except FileNotFoundError:
         if own is not None:
-            peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+            peer = Path(cast(str, own["cellRoot"])) / "plugins" / "agent-worktrees"
             if peer.exists() or peer.is_symlink():
                 return 126
         return 127

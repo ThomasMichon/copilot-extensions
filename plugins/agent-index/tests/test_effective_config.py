@@ -4,17 +4,20 @@ import base64
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+from agent_index import _knowledge_overlay
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPT = PLUGIN / "scripts" / "resolve_effective_config.py"
 
 
-def _module():
+def _module() -> ModuleType:
     spec = importlib.util.spec_from_file_location("effective_config", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -32,6 +35,28 @@ def _repo(path: Path, *, requires_external: bool = False) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+@pytest.mark.parametrize("relative", ("", ".", "tools"))
+def test_repository_probe_never_executes_checkout_local_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repo = _repo(tmp_path / "repo")
+    marker = tmp_path / "checkout-git-executed"
+    local = repo / relative if relative else repo
+    local.mkdir(exist_ok=True)
+    shadow = local / ("git.cmd" if os.name == "nt" else "git")
+    shadow.write_text(
+        f'@echo shadow>"{marker}"\r\n@exit /b 99\r\n' if os.name == "nt" else
+        f'#!/bin/sh\nprintf shadow > "{marker}"\nexit 99\n',
+        encoding="utf-8",
+    )
+    shadow.chmod(0o755)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("PATH", relative + os.pathsep + str(Path(git).parent))
+    module = _module()
+    assert module._git_root(repo) == repo
+    assert not marker.exists()
 
 
 def _write_active(path: Path) -> Path:
@@ -56,7 +81,7 @@ def _write_active(path: Path) -> Path:
 
 
 @pytest.mark.parametrize("state_policy", ["absent", "false", "invalid"])
-def test_base_interpreter_resolves_explicit_host_overlay_without_runtime_packages(tmp_path, state_policy):
+def test_base_interpreter_resolves_explicit_host_overlay_without_runtime_packages(tmp_path: Path, state_policy: str) -> None:
     from agent_procutil import no_window_kwargs
 
     repo = _repo(tmp_path / "repo")
@@ -93,7 +118,7 @@ def test_base_interpreter_resolves_explicit_host_overlay_without_runtime_package
     assert not (home / ".agent-worktrees").exists()
 
 
-def _deliver_configuration(monkeypatch, repo: Path, knowledge: Path):
+def _deliver_configuration(monkeypatch: pytest.MonkeyPatch, repo: Path, knowledge: Path) -> None:
     local = repo.parent / "configuration-local"
     local.mkdir(exist_ok=True)
     monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
@@ -108,7 +133,7 @@ def _deliver_configuration(monkeypatch, repo: Path, knowledge: Path):
 
 
 @pytest.fixture(autouse=True)
-def _clean_activation_env(monkeypatch):
+def _clean_activation_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_INDEX_CONFIG_DATA_B64", raising=False)
     monkeypatch.delenv("AGENT_INDEX_REPO", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_COMMAND", raising=False)
@@ -118,8 +143,8 @@ def _clean_activation_env(monkeypatch):
 
 @pytest.mark.parametrize("level", range(4))
 def test_native_runtime_consumer_four_tiers_and_source_identity(
-    tmp_path, monkeypatch, level, qualified_owner_reply,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, level: int, qualified_owner_reply: None,
+) -> None:
     from agent_index import config as runtime
 
     repo = _repo(tmp_path / "repo")
@@ -172,7 +197,7 @@ def test_native_runtime_consumer_four_tiers_and_source_identity(
     assert any(source["name"] == "git:base-only" for source in sources)
 
 
-def test_native_runtime_consumer_invalid_projection_is_not_absence(tmp_path, monkeypatch):
+def test_native_runtime_consumer_invalid_projection_is_not_absence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from configuration_layers import ConfigurationError
 
     from agent_index import config as runtime
@@ -184,7 +209,7 @@ def test_native_runtime_consumer_invalid_projection_is_not_absence(tmp_path, mon
         runtime.read_indexers(tmp_path)
 
 
-def test_native_standalone_unbound_index_never_bootstraps_owner(tmp_path, monkeypatch):
+def test_native_standalone_unbound_index_never_bootstraps_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_index import config as runtime
 
     root = _repo(tmp_path / "repo")
@@ -205,8 +230,8 @@ def test_native_standalone_unbound_index_never_bootstraps_owner(tmp_path, monkey
     "value, expected", [("true", ("ready", True)), ("nope", ("invalid", False))],
 )
 def test_native_canonical_state_policy_is_not_hidden_by_legacy_alias(
-    tmp_path, monkeypatch, value, expected,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str, expected: tuple[str, bool],
+) -> None:
     from agent_index import config as runtime
 
     root = _repo(tmp_path / "repo")
@@ -218,7 +243,7 @@ def test_native_canonical_state_policy_is_not_hidden_by_legacy_alias(
 
 
 @pytest.mark.parametrize("foreign_cell", [False, True])
-def test_native_projection_never_bypasses_installation_owner(tmp_path, monkeypatch, foreign_cell):
+def test_native_projection_never_bypasses_installation_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_cell: bool) -> None:
     from agent_index import config as runtime
 
     root = _repo(tmp_path / "repo")
@@ -229,7 +254,7 @@ def test_native_projection_never_bypasses_installation_owner(tmp_path, monkeypat
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId": "unqualified"}')
     if foreign_cell:
         monkeypatch.setattr(
-            runtime._knowledge_overlay, "_validate_index_owner_or_refuse",
+            _knowledge_overlay, "_validate_index_owner_or_refuse",
             lambda *args: {"cellRoot": str(tmp_path / "other-cell"), "pluginRoot": str(tmp_path)},
         )
         with pytest.raises(ValueError, match="another installation cell"):
@@ -241,8 +266,8 @@ def test_native_projection_never_bypasses_installation_owner(tmp_path, monkeypat
 
 @pytest.mark.parametrize("matching_cell", [True, False])
 def test_native_implicit_index_cell_checked_before_projection(
-    tmp_path, monkeypatch, matching_cell, qualified_owner_reply,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, matching_cell: bool, qualified_owner_reply: None,
+) -> None:
     from agent_index import config as runtime
 
     base = _repo(tmp_path / "base")
@@ -251,9 +276,9 @@ def test_native_implicit_index_cell_checked_before_projection(
     own.mkdir(parents=True)
     cell = own.parent.parent
     calls = []
-    peer = runtime._knowledge_overlay._load_peer_launch()
+    peer = _knowledge_overlay._load_peer_launch()
 
-    def validate(owner, root, pointer):
+    def validate(owner: str, root: Path, pointer: str) -> dict[str, str]:
         calls.append((owner, root, pointer))
         return {"cellRoot": str(cell), "pluginRoot": str(own)}
 
@@ -277,7 +302,7 @@ def test_native_implicit_index_cell_checked_before_projection(
 
 
 @pytest.fixture
-def qualified_owner_reply(monkeypatch):
+def qualified_owner_reply(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_index import configuration_layers
 
     monkeypatch.setattr(
@@ -289,8 +314,8 @@ def qualified_owner_reply(monkeypatch):
 @pytest.mark.parametrize("peer", ["absent", "old", "refused"])
 @pytest.mark.parametrize("delivered", [False, True])
 def test_native_optional_namespaced_index_owner_compatibility(
-    tmp_path, monkeypatch, peer, delivered,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, peer: str, delivered: bool,
+) -> None:
     from configuration_layers import ConfigurationError
 
     from agent_index import config as runtime
@@ -300,7 +325,7 @@ def test_native_optional_namespaced_index_owner_compatibility(
     own = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-index"
     own.mkdir(parents=True)
     cell = own.parent.parent
-    boundary = runtime._knowledge_overlay._load_peer_launch()
+    boundary = _knowledge_overlay._load_peer_launch()
     monkeypatch.setenv("AGENT_INDEX_HOME", str(own))
     monkeypatch.setattr(boundary, "validate_owner", lambda *args: {
         "cellRoot": str(cell), "pluginRoot": str(own),
@@ -479,7 +504,7 @@ def test_unsafe_ssh_alias_is_inactive(tmp_path: Path, ssh: str) -> None:
 
 
 def test_present_unsafe_local_config_blocks_external_fallback(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -499,7 +524,7 @@ def test_present_unsafe_local_config_blocks_external_fallback(
 
 
 def test_bound_external_state_config_is_effective(
-    tmp_path: Path, monkeypatch, qualified_owner_reply,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qualified_owner_reply: None,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -521,7 +546,7 @@ def test_bound_external_state_config_is_effective(
 
 @pytest.mark.parametrize("state", ["unavailable", "invalid"])
 def test_required_external_state_resolution_fails_closed(
-    tmp_path: Path, monkeypatch, state: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -536,7 +561,7 @@ def test_required_external_state_resolution_fails_closed(
 
 
 def test_required_external_state_without_config_is_inactive(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -553,7 +578,7 @@ def test_required_external_state_without_config_is_inactive(
 
 
 def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A bare anchor checkout (agent-worktrees' own anchor, deliberately
     # work-tree-less) can't be discovered by cwd, but it IS a known,
@@ -575,7 +600,7 @@ def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
     monkeypatch.setattr(module, "_worktrees_command", lambda: "agent-worktrees")
     calls: list[list[str]] = []
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if "--project" not in argv:
             return subprocess.CompletedProcess(
@@ -609,7 +634,7 @@ def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
 
 
 def test_external_state_root_suppresses_console_for_resolved_command(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # `_worktrees_command` can resolve to the PATH `.cmd` binstub (shutil.which
     # prefers .cmd over .ps1 on Windows), which Windows must interpret through
@@ -620,9 +645,9 @@ def test_external_state_root_suppresses_console_for_resolved_command(
         module, "_worktrees_command", lambda: r"C:\bin\agent-worktrees.CMD"
     )
     monkeypatch.setattr(module.os, "name", "nt")
-    captured: dict = {}
+    captured: dict[str, dict[str, object] | list[str]] = {}
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         captured.update(argv=argv, kwargs=kwargs)
         return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
 
@@ -631,7 +656,9 @@ def test_external_state_root_suppresses_console_for_resolved_command(
 
     assert state == "invalid"  # {} has neither stateless nor requires_external key
     assert path is None
-    assert captured["kwargs"].get("creationflags") == 0x08000000
+    captured_kwargs = captured["kwargs"]
+    assert isinstance(captured_kwargs, dict)
+    assert captured_kwargs.get("creationflags") == 0x08000000
 
 
 class _FakePeerLaunch:
@@ -641,15 +668,15 @@ class _FakePeerLaunch:
         pass
 
     @staticmethod
-    def launch_prefix(owner, own_root, raw_context, peer):
+    def launch_prefix(owner: str, own_root: Path, raw_context: str, peer: str) -> list[str]:
         return ["fake-python", "-I", "-X", "utf8", "fake-peer-launch.py", owner, str(own_root), raw_context, peer]
 
     @staticmethod
-    def no_window_kwargs():
+    def no_window_kwargs() -> dict[str, int]:
         return {}
 
 
-def _fake_own(tmp_path: Path) -> dict:
+def _fake_own(tmp_path: Path) -> dict[str, str]:
     cell = tmp_path / "cell"
     (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
     plugin_root = cell / "plugins" / "agent-index"
@@ -658,7 +685,7 @@ def _fake_own(tmp_path: Path) -> dict:
 
 
 def test_external_state_root_same_cell_never_touches_ambient_path(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
@@ -671,7 +698,7 @@ def test_external_state_root_same_cell_never_touches_ambient_path(
     )
     seen = {}
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         seen["argv"] = argv
         assert "agent-worktrees" in argv
         assert "state-root" in argv and "--json" in argv
@@ -695,7 +722,7 @@ def test_external_state_root_same_cell_never_touches_ambient_path(
 
 
 def test_external_state_root_same_cell_refusal_is_not_swallowed_to_unavailable(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # An explicit context that fails to validate at the peer boundary (exit
     # 126) must propagate as a refusal, never silently degrade to
@@ -718,8 +745,60 @@ def test_external_state_root_same_cell_refusal_is_not_swallowed_to_unavailable(
         module._external_state_root(tmp_path)
 
 
+def test_readonly_legacy_state_root_refuses_before_raw_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_READONLY_PROBE", "isolated-imports-v1")
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("unqualified legacy command executed"),
+    )
+    readiness = module._readiness_support()
+    with pytest.raises(readiness.ProbeContractError, match="no qualified probe provenance"):
+        module._run_state_root("legacy-worktrees", dict(os.environ), cwd=tmp_path, project=None)
+
+
+def test_readonly_index_resolver_refuses_before_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_index import configuration_layers
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+
+    payload = tmp_path / "payload"
+    resolver = payload / "scripts" / "versioned_runtime.py"
+    resolver.parent.mkdir(parents=True)
+    resolver.write_text("raise AssertionError('unqualified resolver imported')\n", encoding="utf-8")
+    (payload / "plugin.json").write_text('{"name":"agent-index"}', encoding="utf-8")
+    monkeypatch.setattr(configuration_layers, "__file__", str(payload / "src" / "agent_index" / "configuration_layers.py"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "non-retained"))
+    monkeypatch.setenv(PROBE_ENV, PROBE_CONTRACT)
+    with pytest.raises(ProbeContractError, match="unqualified"):
+        configuration_layers._legacy_owner_prefix(
+            lambda *args, **kwargs: pytest.fail("unqualified resolver selected"),
+        )
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_readonly_same_cell_state_root_preserves_compatibility_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: bool,
+) -> None:
+    module = _module()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_READONLY_PROBE", "isolated-imports-v1")
+    readiness = module._readiness_support()
+    monkeypatch.setattr(module, "_load_peer_launch", lambda: _FakePeerLaunch)
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 126, stdout=json.dumps(readiness.REFUSAL) if typed else "",
+            stderr="peer context refused",
+        ),
+    )
+    expected = readiness.ProbeContractError if typed else _FakePeerLaunch.ContextRefused
+    with pytest.raises(expected):
+        module._run_state_root_same_cell(
+            {"pluginRoot": str(tmp_path)}, "explicit", cwd=tmp_path, project=None,
+        )
+
+
 def test_worktrees_command_override_still_wins_over_explicit_context(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A test-only AGENT_WORKTREES_COMMAND override must still take priority,
     # matching _worktrees_command's own explicit-wins precedence.
@@ -731,7 +810,7 @@ def test_worktrees_command_override_still_wins_over_explicit_context(
         lambda _ctx: pytest.fail("same-cell path selected despite command override"),
     )
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             argv, 0,
             stdout=json.dumps({
@@ -764,7 +843,7 @@ def test_packaged_peer_launch_bytes_are_canonical() -> None:
 
 
 def test_invalid_local_config_never_falls_through(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -776,7 +855,7 @@ def test_invalid_local_config_never_falls_through(
     _write_active(knowledge)
     called = False
 
-    def external(_root):
+    def external(_root: Path) -> tuple[str, Path]:
         nonlocal called
         called = True
         return "ready", knowledge
@@ -791,7 +870,7 @@ def test_invalid_local_config_never_falls_through(
 
 
 def test_agent_index_repo_override_selects_repository(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
@@ -807,7 +886,7 @@ def test_agent_index_repo_override_selects_repository(
 
 
 def test_invalid_agent_index_repo_override_never_uses_cwd(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
@@ -820,7 +899,7 @@ def test_invalid_agent_index_repo_override_never_uses_cwd(
     assert result["reason"] == "repository-override-unavailable"
 
 
-def test_valid_forwarded_config_preserves_remote_activation(monkeypatch) -> None:
+def test_valid_forwarded_config_preserves_remote_activation(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _module()
     raw = json.dumps({"indexers": [{"machine": "primary"}]}).encode("utf-8")
     monkeypatch.setenv(
@@ -950,7 +1029,7 @@ def test_duplicate_source_name_uses_higher_precedence_machine_local_layer(
 
 
 def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
-    tmp_path: Path, monkeypatch, qualified_owner_reply,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qualified_owner_reply: None,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -991,7 +1070,7 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
 
 
 def test_knowledge_grafts_over_canonical_repository_namespace_for_duplicate_names(
-    tmp_path: Path, monkeypatch, qualified_owner_reply,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qualified_owner_reply: None,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -1036,10 +1115,9 @@ def test_knowledge_grafts_over_canonical_repository_namespace_for_duplicate_name
 
 
 def test_marketplace_overlay_merges_on_top_of_base(
-    tmp_path: Path, monkeypatch, qualified_owner_reply,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qualified_owner_reply: None,
 ) -> None:
     module = _module()
-    from agent_index import config as runtime
     repo = _repo(tmp_path / "repo")
     config = _write_active(repo)
     overlay = (
@@ -1066,7 +1144,7 @@ def test_marketplace_overlay_merges_on_top_of_base(
     )
     cell = tmp_path / "cell"
     monkeypatch.setattr(
-        runtime._knowledge_overlay, "_validate_index_owner_or_refuse",
+        _knowledge_overlay, "_validate_index_owner_or_refuse",
         lambda *args: {"cellRoot": str(cell), "pluginRoot": str(cell / "plugins" / "agent-index")},
     )
     monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
@@ -1087,7 +1165,7 @@ def test_marketplace_overlay_merges_on_top_of_base(
 
 
 def test_invalid_forwarded_config_never_falls_back(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")

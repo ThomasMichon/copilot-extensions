@@ -203,7 +203,26 @@ try {
             # ...and only when it names the CURRENT payload version: the marker is
             # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
             # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+            if ($cv -and $cv -eq $current) {
+                if ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or
+                    (Test-Path (Join-Path $InstallDir "versions\$cv\bin\python"))) {
+                    $provisioned = $true
+                } else {
+                    $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
+                    if ([IO.File]::Exists($resolver)) {
+                        $previousRoot = $env:AGENT_RT_ROOT
+                        try {
+                            $env:AGENT_RT_ROOT = $InstallDir
+                            . $resolver -TraceMode read-only
+                            $provisioned = $AgentRtPy -and (
+                                $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\.venv\Scripts\python.exe") -or
+                                $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\.venv\bin\python"))
+                        } finally {
+                            $env:AGENT_RT_ROOT = $previousRoot
+                        }
+                    }
+                }
+            }
         }
     }
     if (-not $wheelGeneration -and $provisioned -and $deployed -eq $current) { Exit-SessionStart }

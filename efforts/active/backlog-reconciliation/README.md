@@ -3421,6 +3421,116 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+  retain ten whole outcomes while prospectively correcting the actual
+  #4163 citation-classifier barrier without releasing linked-source custody.
+  The [ten source deltas and gate-provenance checkpoint](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
+  preserves actual source conditions without inventing operator vetoes,
+  distinguishes partial receiving and records independently owned inflow.
+  The [ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
+  distinguish four changed source deltas, unchanged independent obligations
+  and the expanded #3761 contract without claiming whole-ROOT receiving.
+  The [auth-lifetime and twelve-contract checkpoint](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
+  records reviewed complete #3442 receiving through venue-parity and its
+  separate redundant-tracking retirement, not technical completion.
+  Its subsequent #3444/#3556 receiving checks retain the full independent
+  contracts: existing recovery and worker-handoff plans are partial homes,
+  not accepted whole-contract transfers.
+  The [cleanup and unchanged-source discriminator](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
+  credits #3179's finite checkpoint/guard changes while retaining its whole
+  incident and stops #1742/#3115 at unchanged decisive sources.
+  The [generic-review intake receipt](journal/2026/11.17-generic-review-intake-receipt.md)
+  records #2887's already-reviewed Phase 11 route without resuming its parked
+  owner, closing the canonical issue or repeating #2899's historical retirement.
+  The [cadence and idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+  distinguishes #2908's conditional cadence from existing merge guidance and
+  stops #2879 research at unchanged decisive entrypoints without closure credit.
+  The [build-isolation and native-acceptance checkpoint](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+  establishes the retained #1838 case's actual current installer/policy wiring
+  and credits #13074/#13096 source delivery without claiming native acceptance.
+  The [hygiene-engine and Index-custody checkpoint](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+  distinguishes #1544's engine from current privacy adapters and verifies
+  #1843's complete planned receiving without releasing its assigned coordination.
+  The [lifecycle and cache-owner checkpoint](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
+  preserves #78's finite source gap, #84's complete accepted canonical and new
+  #9532/#12900 owner deltas without equating source delivery with adoption.
+  The [SDK, cache and transport delta](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+  credits new source deliveries while retaining actual release, adoption and
+  unclassified transport-observation boundaries.
+  The [serving and typing checkpoint](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+  preserves #6389's complete canonical acceptance, credits delivered slices
+  and separates #10931's canonical-source and consumer-fixture qualification.
+  The [bootstrap, reporting and generation checkpoint](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
+  retains three complete canonical contracts without mistaking partial owner
+  evidence, eventual transport or consolidated tracking for whole acceptance.
+  The [provider-first delivery reconciliation](journal/2026/11.17-provider-first-delivery-boundaries.md)
+  maps #12947's complete contract against the finite comparison client and
+  retains independent storage, native, provider and operational acceptance.
+  The [copy-source and custody continuation](journal/2026/11.17-vault-followups-and-custody-gap.md)
+  records three distinct Vault follow-ups and the public #12717 gap notice;
+  source delivery is not completion of their remaining acceptance.
+  The [ordinary Windows test-custody reconciliation](journal/2026/11.17-ordinary-windows-test-custody.md)
+  preserves partial delivery and the remaining admitted-controller custody gap;
+  #12717, #12111 and #12696 remain open.
+  The [delivery, presentation and native failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
+  record actual #13073 delivery and six complete-original judgments, retaining
+  Draft user-output delivery, installed presentation acceptance, distinct
+  post-identity teardown versus pre-preparation context failures, controller
+  activation and removed relocation-fence obligations. The complete census
+  observes 878 whole open, 149 above fixed 729, following two arrivals and no
+  departures or new campaign closure credit. All incumbent checkbox states,
+  explicit holds and custody remain unchanged.
+  The [filtered-population source reconciliation](journal/2026/11.17-filtered-population-source-completion.md)
+  records actual #13067/#13072 delivery, the complete #12159 source-only
+  original-to-merged-delivery crosswalk and its audited COMPLETED closure,
+  while retaining #12175's claimed bounded-batching repair and all broader
+  parent, release and resource gates. The complete post-closure census is
+  876 whole open, 147 above fixed 729, with one verified campaign departure
+  and no arrivals or external departures.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
+  The [complete workflow, delivery and native-consumer contracts](journal/2026/11.17-complete-workflow-delivery-and-native-consumer-contracts.md)
+  record actual #13064 delivery and twenty-three complete-original judgments,
+  retaining disabled native prototypes, keyed-creation replay distinctions,
+  design-only role/observation proposals and the original OPEN delivery claim.
+  The complete census remains 877 whole open, 148 above fixed 729, with no
+  arrivals, departures or new campaign closure credit. All incumbent checkbox
+  states, explicit holds and custody remain unchanged.
+  The [complete typing, guidance and observation contracts](journal/2026/11.17-complete-typing-guidance-and-observation-contracts.md)
+  record actual #13053 delivery and fourteen complete-original judgments,
+  preserving nonexpiring claims, stopped failed-version retries, separately
+  tracked timeout observations and passive per-project freshness acceptance.
+  The publication-time complete census is 877 whole open, 148 above fixed 729:
+  an excluded metadata-only arrival and no departures since the previous
+  876-open observation yield no new campaign closure credit.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
+  The [complete qualification and recovery boundaries](journal/2026/11.16-complete-qualification-and-recovery-boundaries.md)
+  record actual #13049 delivery and twenty complete-original judgments,
+  retaining original native/recovery acceptance, actual OPEN delivery PRs,
+  configuration-before-authentication failure and current source ownership.
+  The complete census is 874 whole open, 145 above fixed 729: two metadata-only
+  arrivals and one external departure yield no campaign closure credit.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
+  The [complete recovery, placement and publication contracts](journal/2026/11.16-complete-recovery-placement-and-publication-contracts.md)
+  record actual #13045 delivery and thirteen complete-original judgments,
+  correcting stale topical labels against current strict-typing and guided-skill
+  originals while preserving keyed-creation, task-placement, native-census and
+  asynchronous-retirement acceptance. The complete census is 873 whole open,
+  144 above fixed 729, following two external inflow departures and no new
+  campaign credit. All incumbent checkbox states and custody remain.
+  The [complete hook, wheel and qualification contracts](journal/2026/11.16-complete-hook-wheel-and-qualification-contracts.md)
+  record actual #13036 delivery and thirteen complete-original judgments,
+  retaining current replacement intent, corrective reopening, later source
+  preservation and distinct native failure causes without accepting incomplete
+  installed qualification. The complete census is 875 whole open, 146 above
+  fixed 729, with two metadata-only arrivals and no new closure credit.
+  All incumbent checkbox states, owners and operational holds remain.
+  The [complete producer and admission contracts](journal/2026/11.16-complete-producer-and-admission-contracts.md)
+  record actual #13032 delivery and twenty-one whole-original judgments,
+  correcting historical Draft #8143 state with its actual unwired-foundation
+  merge while retaining production integration and existing owners.
+  The complete post-merge census is 873 whole open, 144 above fixed 729,
+  following one excluded metadata-only arrival. No new closure credit,
+  resource transfer or parent checkbox change is claimed.
   The [complete qualification and operational holds](journal/2026/11.16-complete-qualification-and-operational-holds.md)
   record actual #13028 delivery and twenty whole-original judgments, preserving
   completed finite source/Linux work versus broader native, installed and

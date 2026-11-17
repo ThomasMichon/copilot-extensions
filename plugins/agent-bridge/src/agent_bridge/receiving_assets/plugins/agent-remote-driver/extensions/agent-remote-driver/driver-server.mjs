@@ -6,7 +6,7 @@
 // the bearer token recorded in this session's discovery descriptor
 // (see discovery.mjs).
 //
-// Deliberately decoupled from @github/copilot-sdk: this module takes a plain
+// Deliberately decoupled from @microsoft/copilot-sdk: this module takes a plain
 // `driver` object (see createDriverServer's JSDoc below) rather than an SDK
 // session, so it can be unit tested with a fake driver and no SDK/runtime
 // dependency at all. extension.mjs supplies the real SDK-backed driver.

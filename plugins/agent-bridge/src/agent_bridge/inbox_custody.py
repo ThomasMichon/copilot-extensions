@@ -7,6 +7,7 @@ import json
 import math
 import sqlite3
 import uuid
+from typing import Any, TypedDict, cast
 
 from .runtime_custody import (
     RuntimeCustodyError, _normalized_schema, nonblank, operation_triggers, positive,
@@ -34,6 +35,7 @@ class InboxConsumer:
     pid: int | None = None
     process_started_at: float | None = None
     portable_launch: str | None = None
+    message_base: int | None = None
 
     def __post_init__(self) -> None:
         nonblank(self.session_id)
@@ -42,6 +44,8 @@ class InboxConsumer:
             positive(self.pid)
         if self.process_started_at is not None:
             observed_time(self.process_started_at)
+        if self.message_base is not None and (type(self.message_base) is not int or self.message_base != 1):
+            raise RuntimeCustodyError("Unsupported retained message base")
         if self.portable_launch is not None:
             try:
                 if str(uuid.UUID(self.portable_launch)) != self.portable_launch:
@@ -53,13 +57,23 @@ class InboxConsumer:
         result = asdict(self)
         if self.portable_launch is None:
             result.pop("portable_launch")
+        # Payload support is per request, not part of durable receiver identity.
+        result.pop("message_base")
         return result
 
 
-def decode_handoff(raw: str) -> dict[str, object]:
+class InboxHandoff(TypedDict):
+    version: int
+    id: str
+    message_id: int
+    consumer: dict[str, Any]
+    admission: str | None
+
+
+def decode_handoff(raw: str) -> InboxHandoff:
     """Reject unknown or ambiguous retained handoff formats rather than retry."""
-    def unique(pairs):
-        result = {}
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         for key, value in pairs:
             if key in result:
                 raise RuntimeCustodyError("Duplicate inbox handoff field")
@@ -79,12 +93,12 @@ def decode_handoff(raw: str) -> dict[str, object]:
         ):
             raise RuntimeCustodyError("Unsupported inbox handoff observations")
         InboxConsumer(**value["consumer"])
-        return value
+        return cast(InboxHandoff, value)
     except (TypeError, ValueError, KeyError) as exc:
         raise RuntimeCustodyError("Malformed retained inbox handoff") from exc
 
 
-def original_handoff(row: sqlite3.Row | dict) -> dict[str, object]:
+def original_handoff(row: sqlite3.Row | dict[str, Any]) -> InboxHandoff:
     """Validate retained row association without acquiring final-send authority."""
     retained = decode_handoff(row["handoff_json"])
     consumer = retained["consumer"]
@@ -97,7 +111,7 @@ def original_handoff(row: sqlite3.Row | dict) -> dict[str, object]:
     return retained
 
 
-def handoff_stage(row: sqlite3.Row | dict) -> str:
+def handoff_stage(row: sqlite3.Row | dict[str, Any]) -> str:
     """SDK acceptance, observed consumption and unknown send outcome stay distinct."""
     if row["consumed_at"] is not None:
         return "consumed"

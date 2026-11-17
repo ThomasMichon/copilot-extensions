@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import HTTPException, Request
@@ -26,14 +27,14 @@ class ReceiptBinding(BaseModel):
     body: str = Field(min_length=1)
 
 
-def observe(session_id: str, body: ReceiptBinding, request: Request) -> dict:
+def observe(session_id: str, body: ReceiptBinding, request: Request) -> dict[str, Any]:
     """Inspect the exact original row without liveness, aliases or cursor effects."""
     if session_id != body.expected_session_id:
         raise HTTPException(409, detail="live receipt requires its exact original session")
     db = request.app.state.db
     rows = db.execute_read(
         "SELECT session_id,id AS message_id,created_at AS admitted_at,"
-        "delivered_at AS sdk_accepted_at,consumed_at,sender,body,kind,delivery,exact_session"
+        "delivered_at AS sdk_accepted_at,consumed_at,sender,body,kind,delivery,exact_session,disposition_json"
         " FROM live_messages WHERE session_id=? AND idempotency_key=?",
         (session_id, body.idempotency_key),
     )
@@ -53,6 +54,9 @@ def observe(session_id: str, body: ReceiptBinding, request: Request) -> dict:
             "consumed" if row["consumed_at"] is not None
             else "sdk_accepted" if row["sdk_accepted_at"] is not None else "admitted"
         )
+        from .message_contracts import receipt_disposition
+
+        receipt_disposition(receipt, row["disposition_json"])
     return {"protocol": PROTOCOL, "version": 1, "binding": body.model_dump(), "receipt": receipt}
 
 
@@ -79,10 +83,16 @@ def send(args: argparse.Namespace) -> None:
     ):
         raise SendRefused("refused_invalid", reason="invalid_live_receipt_options",
                           retryable=False, target=args.target, error="exact live receipt options required")
+    prompt = _resolve_prompt(args, required=True)
+    if prompt is None:
+        raise SendRefused(
+            "refused_invalid", reason="invalid_live_receipt_options",
+            retryable=False, target=args.target, error="exact live receipt requires a message body",
+        )
     body = ReceiptBinding(
         version=1, expected_session_id=args.expected_session_id,
         idempotency_key=args.idempotency_key, sender=args.sender,
-        body=_resolve_prompt(args, required=True),
+        body=prompt,
     )
     client = core._get_client(ensure=False)
     read = protocol_floored_request(

@@ -4,6 +4,18 @@ set -euo pipefail
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 
+READINESS_PROBE=0
+SKIP_LOG_LEVEL=0
+for ARGUMENT in "$@"; do
+    if [[ "$SKIP_LOG_LEVEL" == 1 ]]; then SKIP_LOG_LEVEL=0; continue; fi
+    case "$ARGUMENT" in
+        --l|--lo|--log|--log-|--log-l|--log-le|--log-lev|--log-leve|--log-level) SKIP_LOG_LEVEL=1 ;;
+        --l=*|--lo=*|--log=*|--log-=*|--log-l=*|--log-le=*|--log-lev=*|--log-leve=*|--log-level=*) ;;
+        installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
+        *) break ;;
+    esac
+done
+
 PAYLOAD_ROOT="${AGENT_MCP_PAYLOAD_ROOT:-}"
 [[ "$PAYLOAD_ROOT" == /* && -d "$PAYLOAD_ROOT" ]] || {
     printf '[agent-mcp] owning payload root is unavailable.\n' >&2
@@ -50,6 +62,9 @@ run_runtime() {
         export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
     else
         unset COPILOT_EXTENSIONS_CONTEXT
+    fi
+    if [[ "$READINESS_PROBE" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-mcp --module agent_mcp -- "$@"
     fi
     exec "$AGENT_RT_PY" -m agent_mcp "$@"
 }

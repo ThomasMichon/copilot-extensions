@@ -90,7 +90,7 @@ def remove_fixture(root: Path) -> None:
 
 
 def read_registry(root: Path) -> dict[str, Any]:
-    return cast(dict[str, Any], registry_codec.load(root).materialized)
+    return registry_codec.load(root).materialized
 
 
 def write_registry(root: Path, registry: dict[str, Any]) -> None:
@@ -102,7 +102,8 @@ def write_registry(root: Path, registry: dict[str, Any]) -> None:
 
 
 def fixture_git(root: Path, *args: str) -> str:
-    return evidence.git(root, *args).decode("utf-8").strip()
+    options = ("-c", "core.longpaths=true") if os.name == "nt" else ()
+    return evidence.git(root, *options, *args).decode("utf-8").strip()
 
 
 def copy_fixture_source(destination: Path, path: str, registry: dict[str, Any]) -> None:
@@ -273,14 +274,30 @@ def output_bytes(root: Path, paths: set[str] | None = None) -> dict[str, bytes |
 
 
 def test_http47_generated_registry_is_lossless_and_bounded(
-    repository: tuple[Path, str],
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, commit = repository
     original = evidence.baseline(root, commit)
     proof = evidence.source_snapshot(root, commit, original)
-    outputs = evidence.build_outputs(
-        root, commit, original, proof, capture.expected_input(root)["expected"],
-    )
+    historical = {
+        root / item["path"] for contract in original["contracts"]
+        if contract["id"] == "agent-bridge.http-wire"
+        for item in contract["fixtures"] if item["generation"] < 47
+    }
+    reads: dict[Path, int] = {}
+    read_bytes = Path.read_bytes
+
+    def recorded(path: Path) -> bytes:
+        if path in historical:
+            reads[path] = reads.get(path, 0) + 1
+        return read_bytes(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", recorded)
+        outputs = evidence.build_outputs(
+            root, commit, original, proof, capture.expected_input(root)["expected"],
+        )
+    assert reads and all(count == 1 for count in reads.values())
     data = outputs[evidence.REGISTRY]
     assert len(data) <= 1024 * 1024
     generated = registry_codec.load(
@@ -383,16 +400,21 @@ def test_http47_capture_reproducible_real_commit_preserves_history(
     assert output_bytes(root) == bytes_before
     assert times_before == {path: (root / path).stat().st_mtime_ns for path in outputs}
     assert len(calls) == 2
-    for path in outputs:
-        if path == evidence.REGISTRY or path.startswith(registry_codec.PROVENANCE):
-            continue
-        packet = json.loads(outputs[path])
+    packets = [
+        json.loads(data) for path, data in outputs.items()
+        if path != evidence.REGISTRY and not path.startswith(registry_codec.PROVENANCE)
+    ]
+    committed = git_evidence.read_files(
+        root, commit, [packet["captured_from"]["source_path"] for packet in packets],
+    )
+    for packet in packets:
         proof = packet["captured_from"]
         assert proof["commit"] == commit and proof["protocol_generation"] == 47
-        assert (
-            fixture_git(root, "rev-parse", commit + ":" + proof["source_path"])
-            == proof["source_git_blob"]
-        )
+        data = committed[proof["source_path"]]
+        assert hashlib.sha1(
+            b"blob " + str(len(data)).encode() + b"\0" + data,
+            usedforsecurity=False,
+        ).hexdigest() == proof["source_git_blob"]
     updated = read_registry(root)
     old = evidence.baseline(root, initial_commit)
     current = next(c for c in updated["contracts"] if c["id"] == "agent-bridge.http-wire")

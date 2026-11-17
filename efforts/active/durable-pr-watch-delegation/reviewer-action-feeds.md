@@ -102,7 +102,8 @@ erase existing CI/follow-up/merge distinctions.
   `next_actions` page through the actual service and local client. This is the
   first independently testable runtime slice, not an optional factory alone.
   Keep status and PR-list semantics compatible.
-- [ ] **Stream the same views.** Implement SSE over the existing local ingress
+- [x] **Stream the same views.** Source implementation merged in #13038.
+  Implement SSE over the existing local ingress
   as the initial one-way transport, covering status, PR-list and next-action
   changes. Preserve exact registration/cursor scope, reconnect/resume, explicit
   gaps and bounded slow-consumer behavior. Any separately hosted realization
@@ -111,11 +112,21 @@ erase existing CI/follow-up/merge distinctions.
   and Dispatch adapter against the same feed/identities without activating
   either. Associate existing/suspended work through the actual task owner;
   enqueue/steer/nudge only when separately authorized and materially justified.
+  The shared [consumer contract](../../../services/pr/CONSUMERS.md) identifies
+  the actual task/recipe/steering owners. The bounded source reference and five
+  cache-backed controls merged in #13055; actual task-owner adapter and durable
+  request-owner interoperability remain separate qualification.
 - [ ] **Qualify observational comparison.** Supply a bounded evaluator path
   comparing current state and causes with independently admitted provider
   reads, distinguishing disagreement from stale/unavailable evidence. Runtime
   source, release, installation, running proof and real-provider agreement
   remain separate exits.
+  The [finite local comparison CLI and pure reference](../../../services/pr/EVALUATION.md) keep
+  current-fact differences, stale/unavailable evidence and unproven causal
+  ordering distinct. The local client reads one PR and first action page under
+  one finite deadline, using an independently supplied native envelope; it
+  performs no provider acquisition, subscription, ACK or automatic retry.
+  Actual admitted reference acquisition and provider agreement remain open.
 
 ## Streaming and consumer boundaries
 
@@ -150,8 +161,10 @@ observations remain NoOp rather than repeated nudges.
 - [ ] Exercise the actual service/client query with one shared observation
   owner, target/account isolation, bounded pages and no query-triggered forge
   reads or protected-write prerequisite.
-- [ ] Exercise all three feeds, resume/reconnect, duplicate delivery, gaps,
+- [x] Exercise all three feeds, resume/reconnect, duplicate delivery, gaps,
   cancellation, original expiry, slow-consumer backpressure and graceful drain.
+  Local Linux source controls merged in #13038; release, installation and
+  actual provider qualification remain separate exits.
 - [ ] Prove consumer examples are inert, use existing task association and
   genuine feedback/activity, and neither duplicate tasks nor wake unchanged
   suspended work.

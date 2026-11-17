@@ -707,9 +707,9 @@ async def list_worktrees(
     that have been deleted from disk are not returned (the binstub only
     reports what physically exists).
 
-    Each worktree is decorated with linkage to its most recent bridge
-    session (if any) so consumers can load history, resume, or detect a
-    session that is still live:
+    Each worktree prefers a live qualified bridge record over an inactive
+    predecessor, retaining recency within each class, so consumers can load
+    history, resume, or detect a session that is still live:
 
     - ``session_id``: latest bridge session for this worktree, or None
     - ``acp_session_id``: that session's ACP-sourced id (durable identity),
@@ -757,19 +757,30 @@ async def list_worktrees(
             if wt_id:
                 sessions_by_wt.setdefault(wt_id, []).append(session)
 
+    from ..workspace_transport_identity import identity as transport_identity
+
+    owner_targets: dict[str, tuple[str, str | None] | None] = {}
+
     def _decorate(owner: str, wt: _WorktreeEntry) -> dict[str, Any]:
         entry = wt.to_dict()
         config = getattr(resolver, "agents", {}).get(owner)
-        session = next((
+        candidates = [
             candidate for candidate in sessions_by_wt.get(wt.id, [])
             if config is not None and isinstance(config.project, str)
             and candidate.agent_name == owner
             and candidate.target.project == config.project and candidate.target.cwd == wt.path
-            and (
-                candidate.target.type == "local" and not config.host and not candidate.target.host
-                or candidate.target.type == "ssh" and config.host
-                and candidate.target.host == config.host
-            )
+        ]
+        candidates.sort(
+            key=lambda candidate: candidate.status.value in {"created", "starting", "running", "idle"},
+            reverse=True,
+        )
+        if resolver is not None and candidates and owner not in owner_targets:
+            owner_targets[owner] = transport_identity(resolver, owner)
+        expected = owner_targets.get(owner)
+        session = next((
+            candidate for candidate in candidates
+            if expected is not None
+            and (candidate.target.type, candidate.target.host) == expected
         ), None)
         if session is not None:
             public_status, at_rest, _liveness = session.public_state()

@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-bridge"
-version = "0.9.473-dev1"
+version = "0.9.474-dev1"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -127,6 +127,9 @@ agent-bridge = "agent_bridge.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_bridge" = ["readiness-isolation.json"]
 
 [tool.setuptools.package-data]
 # The /ui control surface's page, scripts, and stylesheet (routes/ui.py).

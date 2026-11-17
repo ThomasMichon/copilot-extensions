@@ -1,5 +1,6 @@
 """Identity of the running interpreter, independent of mutable selectors."""
 
+from collections.abc import Callable
 import sys
 from pathlib import Path
 
@@ -20,7 +21,15 @@ def running_generation() -> str | None:
 
 def running_application_slot() -> Path | None:
     slot = running_slot()
-    return slot if slot is not None and (slot / "application.json").is_file() else None
+    return slot if slot is not None and is_application_slot(slot) else None
+
+
+def is_application_slot(slot: Path) -> bool:
+    """Keep application routing when only its install declaration needs repair."""
+    return (slot / "application.json").is_file() or (
+        (slot / "uv.lock").is_file()
+        and all((slot / "bin" / name).is_file() for name in ("setup.ps1", "setup.sh"))
+    )
 
 
 def running_payload_dir() -> Path:
@@ -33,7 +42,7 @@ def running_payload_dir() -> Path:
     return package.parents[2]
 
 
-def runtime_scripts(package: Path, payload_dir) -> Path:
+def runtime_scripts(package: Path, payload_dir: Callable[[], Path]) -> Path:
     """Locate retained runtime resources or their source-layout counterpart."""
     resources = package / "_runtime_assets" / "scripts"
     if resources.is_dir():

@@ -7,7 +7,7 @@ import stat
 import sys
 
 
-def _ordinary(path: Path, root: Path) -> None:
+def _ordinary(path: Path, root: Path, *, allow_hardlinks: bool = False) -> None:
     if ".." in path.parts or ".." in root.parts or not path.is_relative_to(root):
         raise ValueError(f"Invocation path escapes its declared root: {path}")
     for component in (path, *path.parents):
@@ -17,7 +17,7 @@ def _ordinary(path: Path, root: Path) -> None:
                 raise ValueError(f"Invocation path is redirected: {component}")
             if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
                 raise ValueError(f"Invocation path is not ordinary: {component}")
-            if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+            if not allow_hardlinks and stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
                 raise ValueError(f"Invocation path has foreign hard-link custody: {component}")
         if component == root:
             break
@@ -74,7 +74,8 @@ def materialize(
             _ordinary(source, canonical_root)
         tooling_root = Path(__file__).resolve().parents[1]
         producer = tooling_root / "libs/payload-invocation/generate.py"
-        _ordinary(producer, tooling_root)
+        # uv may hard-link this read-only installed producer to its cache.
+        _ordinary(producer, tooling_root, allow_hardlinks=True)
         spec = importlib.util.spec_from_file_location(
             "_promotion_payload_invocation",
             Path(__file__).resolve().parents[1] / "libs" / "payload-invocation" / "generate.py",

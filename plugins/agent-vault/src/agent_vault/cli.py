@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from functools import partial
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest
+from .cache_machine_cli import cmd_cache_verify as cmd_cache_verify, register_prepare
 from .cache_targets import command_entries as command_entries, command_plan, status_command as cmd_cache_status
 from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
@@ -1083,6 +1085,14 @@ def cmd_import_key(args: Any) -> int:
 
 
 def cmd_export_key(args: Any) -> int:
+    if getattr(args, "exclusive", False):
+        from .attachment_export_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --exclusive for export-key", file=sys.stderr)
+        return 1
+
     import base64
 
     dest_dir = Path(args.dest_dir)
@@ -1259,9 +1269,9 @@ def cmd_cache_populate(args: Any) -> int:
         failure = None
         try:
             with read_lock:
-                resp = send_command(
+                sender = partial(send_command, strict_endpoint=True) if cache._recovery else send_command
+                resp = sender(
                     request, timeout=None if args.prompt else 15.0,
-                    **({"strict_endpoint": True} if cache._recovery else {}),
                 )
                 present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
                 if (
@@ -1318,54 +1328,6 @@ def cmd_cache_clear(args: Any) -> int:
         return 0
     print("Error: could not clear cache", file=sys.stderr)
     return 1
-
-
-def cmd_cache_verify(args: Any) -> int:
-    """Check the persistent cache holds a set of entries without unlocking.
-
-    Entries come from explicit selectors, declared targets and cache-source extensions,
-    exactly like ``cache-populate``. Exits non-zero (2) if any are missing, so a
-    launch-time gate can confirm an unattended box is primed while still locked.
-    """
-    from .cache import get_cache
-    from .credential_fields import attribute_name
-
-    plan = command_plan(args)
-    if plan is None:
-        return 1
-    pairs = plan.entries
-    if not pairs:
-        print("No entries to verify (no declared targets, --entry, --manifest, or extension).",
-              file=sys.stderr)
-        return 1
-
-    if plan.service_owned:
-        from .cache_maintenance_client import command
-
-        return command(args, pairs, "verify")
-    cache = get_cache()
-    present = 0
-    missing: list[str] = []
-    for entry, field in pairs:
-        cache_entry = config.normalize_entry(entry, config.resolve_context().group)
-        if cache.get(
-            cache_entry, field, readonly=True, legacy_field=attribute_name(field),
-            legacy_entry=legacy_cache_entry(entry, cache_entry),
-        ) is not None:
-            present += 1
-        else:
-            missing.append(f"{entry} [{field}]")
-
-    if getattr(args, "json", False):
-        print(json.dumps(
-            {"present": present, "total": len(pairs), "missing": missing},
-            indent=2,
-        ))
-    else:
-        print(f"Cached: {present}/{len(pairs)}")
-        for m in missing:
-            print(f"  missing: {m}", file=sys.stderr)
-    return 2 if missing else 0
 
 
 def cmd_which(args: Any) -> int:
@@ -1618,6 +1580,10 @@ def _main(argv: list[str] | None = None) -> int | None:
                    help="Allow moving an entry outside the vault group")
     p.set_defaults(func=cmd_move)
 
+    from .copy_command import add_copy_parser
+
+    add_copy_parser(sub)
+
     p = sub.add_parser("git-credential",
                        help="git credential helper (delegates allowlisted hosts to GCM)")
     p.add_argument("op", choices=["get", "store", "erase"], help="git credential operation")
@@ -1636,6 +1602,10 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.add_argument("entry", help="Entry path")
     p.add_argument("dest_dir", help="Destination directory")
     p.add_argument("key_name", help="Key filename (e.g. id_ed25519)")
+    p.add_argument("--exclusive", action="store_true",
+                   help="Create both files exclusively in an absolute same-owner private directory")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --exclusive, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_export_key)
 
     p = sub.add_parser("seal",
@@ -1678,6 +1648,7 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.add_argument("--json", action="store_true", help="Print JSON")
     p.set_defaults(func=cmd_cache_status)
 
+    register_prepare(sub)
     p = sub.add_parser("cache-verify",
                        help="Check the persistent cache holds a set of entries "
                             "(no unlock); exit 2 if any missing")
@@ -1686,6 +1657,8 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.add_argument("--manifest", help="File of 'entry | field' lines to check")
     p.add_argument("--machine", help="Machine hint passed to cache-source extensions")
     p.add_argument("--json", action="store_true", help="Print JSON")
+    p.add_argument("--machine-fallback", action="store_true",
+                   help="Verify through the redundant machine copy, without user decryption")
     p.set_defaults(func=cmd_cache_verify)
 
     p = sub.add_parser("vault", help="Manage named vaults")

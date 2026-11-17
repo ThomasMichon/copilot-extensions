@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -25,7 +26,7 @@ class DeliverySend(DeliveryWait):
     message: SendMessageRequest
 
     @model_validator(mode="after")
-    def no_reply_wait(self):
+    def no_reply_wait(self) -> DeliverySend:
         if self.message.wait:
             raise ValueError("delivery waiting and reply waiting are separate operations")
         if self.message.plugin_readiness is not None:
@@ -33,8 +34,8 @@ class DeliverySend(DeliveryWait):
         return self
 
 
-def _exact(request: Request, session_id: str) -> dict:
-    row = request.app.state.db.get_live_session(session_id)
+def _exact(request: Request, session_id: str) -> dict[str, Any]:
+    row: dict[str, Any] | None = request.app.state.db.get_live_session(session_id)
     if row is None:
         raise HTTPException(404, "live session not found")
     if row["session_id"] != session_id:
@@ -45,7 +46,7 @@ def _exact(request: Request, session_id: str) -> dict:
 @router.post("/{session_id}/delivery-state")
 async def publish_state(
     session_id: str, body: DeliveryStateObservation, request: Request,
-) -> dict:
+) -> dict[str, Any]:
     row = _exact(request, session_id)
     if row.get("pid") != body.pid or row.get("process_started_at") != body.process_started_at:
         raise HTTPException(409, "native extension incarnation changed")
@@ -58,8 +59,8 @@ async def publish_state(
 
 async def _observe(
     session_id: str, message_id: int, timeout: float, request: Request,
-    *, admitted: dict | None = None, admission_known: bool = False,
-) -> dict:
+    *, admitted: dict[str, Any] | None = None, admission_known: bool = False,
+) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -74,6 +75,9 @@ async def _observe(
             }
         row = request.app.state.db.get_live_session(session_id)
         attention = request.app.state.live_delivery_state.inspect(row)
+        if fact["stage"] == "rejected":
+            return {"receipt": fact, "outcome": "rejected", "attention": attention,
+                    "evidence": "pre_effect_receiver_rejection"}
         if fact["stage"] == "consumed":
             return {"receipt": fact, "outcome": "consumed", "attention": attention,
                     "evidence": "attributed_root_user_message"}
@@ -89,14 +93,14 @@ async def _observe(
 @router.post("/{session_id}/messages/{message_id}/delivery")
 async def observe_delivery(
     session_id: str, message_id: int, body: DeliveryWait, request: Request,
-) -> dict:
+) -> dict[str, Any]:
     return await _observe(session_id, message_id, body.timeout, request)
 
 
 @router.post("/{session_id}/delivery")
 async def send_and_observe(
     session_id: str, body: DeliverySend, request: Request,
-) -> dict:
+) -> dict[str, Any]:
     from .live_sessions import post_live_message
 
     admitted = await post_live_message(session_id, body.message, request)

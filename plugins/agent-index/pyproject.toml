@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-index"
-version = "0.10.309-dev1"
+version = "0.10.310-dev1"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -117,6 +117,9 @@ agent-index = "agent_index.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_index" = ["readiness-isolation.json"]
 
 [tool.ruff]
 target-version = "py310"

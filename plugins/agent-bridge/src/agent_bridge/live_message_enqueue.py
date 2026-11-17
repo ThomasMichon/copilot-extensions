@@ -35,6 +35,8 @@ class LiveMessageEnqueue:
     report_duplicate: bool
     require_idle: bool
     exact_session: bool = False
+    message_version: int | None = None
+    message_requires: tuple[str, ...] = ()
 
 
 def _requires_retained_admission(request: LiveMessageEnqueue) -> bool:
@@ -92,7 +94,7 @@ def _duplicate(
         "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
     )
     existing = db.execute_read(
-        "SELECT id, session_id, sender, body, reply_to, kind, delivery, exact_session, runtime_custody_json, handoff_json, "
+        "SELECT id, session_id, sender, body, reply_to, kind, delivery, exact_session, runtime_custody_json, handoff_json, message_contract_json, disposition_json, "
         f"{msg_canon} = {_CANON} AS same_target, "
         f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
         "FROM live_messages WHERE idempotency_key = ?",
@@ -103,7 +105,20 @@ def _duplicate(
     if not existing:
         return None
     row = existing[0]
-    retained = bool(row["exact_session"]) or row["runtime_custody_json"] is not None or row["handoff_json"] is not None
+    from .message_contracts import producer_contract
+
+    contract = producer_contract(request.kind, type_version=request.message_version, requires=request.message_requires)
+    try:
+        original_contract = json.loads(row["message_contract_json"]) if row["message_contract_json"] else None
+    except (ValueError, TypeError):
+        original_contract = {}
+    legacy_contract = original_contract is None or (
+        isinstance(original_contract, dict) and original_contract.get("legacy") is True
+    )
+    retained = (
+        bool(row["exact_session"]) or row["runtime_custody_json"] is not None
+        or row["handoff_json"] is not None or row["disposition_json"] is not None
+    )
     same_target = row["session_id"] == request.session_id if retained or request.exact_session else bool(row["same_target"])
     same_expected = (
         request.expected_session_id is None or request.expected_session_id == row["session_id"]
@@ -115,6 +130,10 @@ def _duplicate(
         and row["delivery"] == request.delivery
         and bool(row["exact_session"]) == request.exact_session
         and (original_association or row["runtime_custody_json"] == association)
+        and (row["message_contract_json"] == contract or (
+            legacy_contract
+            and request.message_version is None and not request.message_requires
+        ))
     ):
         return int(row["id"]), ("duplicate" if request.report_duplicate else None)
     return None, "idempotency_conflict"
@@ -150,6 +169,17 @@ def _enrolled_admission(
                 venue = None
             if isinstance(venue, dict) and venue.get("mux_endpoint") is not None:
                 raise RuntimeCustodyError("Portable inbox requires its enrolled launch consumer")
+        if request.message_version is not None or request.message_requires:
+            from .message_contracts import producer_contract, require_supported
+
+            try:
+                require_supported(json.loads(producer_contract(
+                    request.kind, type_version=request.message_version, requires=request.message_requires,
+                )), request.kind)
+            except RuntimeCustodyError as exc:
+                raise RuntimeCustodyError(
+                    "Legacy receiving cannot enforce these message semantics before retained enrollment",
+                ) from exc
         history = conn.execute(
             f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON} LIMIT 1",
             (request.session_id, request.session_id, request.session_id),
@@ -213,12 +243,15 @@ def _insert(
     *, verified_startup: bool = False,
 ) -> tuple[int | None, str | None]:
     association = admission_document(admission)
+    from .message_contracts import producer_contract
+
+    contract = producer_contract(request.kind, type_version=request.message_version, requires=request.message_requires)
     cutoff = request.now - request.stale_seconds
     cur = execute(
         "INSERT OR IGNORE INTO live_messages "
         "(session_id, sender, body, reply_to, kind, delivery, "
-        "idempotency_key, created_at, consumption_tracked, exact_session, runtime_custody_json) "
-        f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1, ?, ? "
+        "idempotency_key, created_at, consumption_tracked, exact_session, runtime_custody_json, message_contract_json) "
+        f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ? "
         "WHERE EXISTS ("
         "  SELECT 1 FROM live_sessions ls "
         f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
@@ -238,6 +271,7 @@ def _insert(
         "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
         "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
         "        WHERE pending.session_id=ls.session_id AND pending.consumed_at IS NULL "
+        "        AND pending.disposition_json IS NULL "
         "        AND (pending.delivered_at IS NULL OR pending.consumption_tracked=1) "
         "        AND pending.kind NOT LIKE 'control:%')))"
         ") AND (? = 0 OR ? IS NOT NULL OR NOT EXISTS ("
@@ -245,7 +279,7 @@ def _insert(
         (
             request.session_id, request.session_id, request.sender, request.body,
             request.reply_to, request.kind, request.delivery, request.idempotency_key,
-            request.now, request.exact_session, association, request.session_id, request.session_id, cutoff, cutoff,
+            request.now, request.exact_session, association, contract, request.session_id, request.session_id, cutoff, cutoff,
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
             request.exact_session, request.session_id, request.expected_session_id,
             request.require_idle,

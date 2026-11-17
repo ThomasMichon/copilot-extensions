@@ -16,7 +16,9 @@ from .status_monitor_idle import (
     _TRACKING_WRITE_SHUTDOWN_GRACE_S as _TRACKING_WRITE_SHUTDOWN_GRACE_S,
     _wait_for_tracking_write_idle as _wait_for_tracking_write_idle,
 )
-from .status_monitor_presentation import run_monitor_sweep
+from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
+from .status_monitor_roster_demand import scheduled_roster_projects
+from .status_monitor_content import refresh_monitor_content
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
 
 if TYPE_CHECKING:
@@ -243,6 +245,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         return session
 
     segment_cache = status_segment_cache_type(cache_ttl)
+    presentation_progress = PresentationProgress(interval) if mux == "psmux" else None
     wake_event = threading.Event()
     installation_context = registry_paths.installation_context()
     repositories_runtime = repository_map.RepositoryMapRuntime(
@@ -852,15 +855,22 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     allocation_linker.discover()
                 allocation_linker.tick()
-                picker_projects = monitor_roots.live_picker_projects()
-                demand_projects = core.list_cache.recent_demand_projects()
-                external_projects = picker_projects | demand_projects | worktrees_runtime.demand_projects()
+                external_projects = scheduled_roster_projects(
+                    monitor_roots.live_picker_projects(), core.list_cache.recent_demand_projects(),
+                    worktrees_runtime.demand_projects(), managed_mux_runtime.cache,
+                )
+                registered_content: dict[str, str | None] = {}
                 served = run_monitor_sweep(
                     core._monitor_sweep,
                     mux_bin,
                     token,
                     my_prefix,
                     ctx_done,
+                    progress=presentation_progress,
+                    content_paths=registered_content,
+                    state_snapshot=lambda project: worktrees_runtime.handle({
+                        "contract_version": 1, "project": project, "passive": True,
+                    }),
                     interval=interval,
                     picker_projects=external_projects | worktrees_runtime.take_changed_projects(
                         resident_push.project_resolver(session_projects, segment_cache)),
@@ -878,9 +888,21 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     roster_publisher=lambda: publish_active_project(
                         worktrees_runtime, observe_records=allocation_linker.observe,
                         managed_mux_cache=managed_mux_runtime.cache,
+                        on_progress=presentation_progress,
+                        content_cache=segment_cache,
+                        content_admitted=lambda: not lifecycle_priority.is_set(),
+                        content_recheck=lambda: core._status_monitor_recheck(
+                            governance, "pre-mutation:render-status",
+                        ),
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,
+                )
+                refresh_monitor_content(
+                    registered_content, segment_cache, project_lock=state_lock,
+                    lifecycle_priority=lifecycle_priority, governance=governance,
+                    recheck=core._status_monitor_recheck, governance_deferred=status_monitor_governance_deferred,
+                    config_cache_for_project=_config_cache_for_project,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:

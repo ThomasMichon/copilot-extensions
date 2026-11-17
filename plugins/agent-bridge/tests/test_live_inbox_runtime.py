@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
 import json
 import os
+import sqlite3
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
+from fastapi import FastAPI
 import pytest
+from zdd.diagnostics import process_start_time
 
 from agent_bridge import live_inbox_runtime
 from agent_bridge.app_routes import configure_serving_app
@@ -19,14 +24,163 @@ from agent_bridge.inbox_custody import InboxConsumer
 from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.models import ServiceConfig
 from agent_bridge.runtime_custody import RuntimeCustodyError, encode
+from agent_bridge.message_contracts import disposition_guards
 from test_loop_governance_custody import installation as installation
 
 CONTRACT = "retained-inbox-v1"
 PREFIX = "/api/v1/live-sessions/native-a/retained-inbox"
+Serving = tuple[FastAPI, TestClient, Database, InboxConsumer]
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_versioned_enrollment_migrates_24_legacy_replays_without_effects(serving: Serving, native: bool) -> None:
+    _, client, db, consumer = serving
+    ids = [
+        db.enqueue_live_message(consumer.session_id, "bridge", "", time.time(), kind="control:replay-history")
+        for _ in range(24)
+    ]
+    db.execute_write("UPDATE live_messages SET message_contract_json=NULL")
+    consumer = replace(consumer, message_base=1)
+    body = (native_enroll if native else enroll)(client, consumer)
+    response = client.post(PREFIX + "/poll", json=current(body))
+    assert response.status_code == 200, response.text
+    rows = response.json()["messages"]
+    assert [row["id"] for row in rows] == ids
+    for row in rows:
+        assert row["message_contract"]["type_version"] == 1
+        assert row["message_contract"]["legacy"] is True
+        assert row["control"] is True
+    assert all(row["claimed_at"] is None for row in db.execute_read("SELECT * FROM live_messages"))
+    assert client.post(PREFIX + "/poll", json=current(body)).json() == response.json()
+
+
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize("kind,version,requires", [
+    ("future:unknown", 1, ()), ("prompt", 9, ()), ("prompt", 1, ("future-required",)),
+])
+def test_versioned_rejection_is_terminal_and_sender_correlated(
+    serving: Serving, native: bool, kind: str, version: int, requires: tuple[str, ...],
+) -> None:
+    app, client, db, consumer = serving
+    consumer = replace(consumer, message_base=1)
+    body = (native_enroll if native else enroll)(client, consumer)
+    options = {} if native else {"runtime_admission": app.state.live_inbox_runtime._admission}
+    message_id = db.enqueue_live_message(
+        consumer.session_id, "original-sender", "never execute", time.time(),
+        kind=kind, message_version=version, message_requires=requires, **options,
+    )
+    row = poll(client, body)
+    assert row["message_contract"]["sender"] == "original-sender"
+    payload = {
+        **current(body), "message_id": message_id, "state": "rejected",
+        "code": "unsupported_message", "reason": "The receiver cannot enforce this contract.",
+    }
+    rejected = client.post(PREFIX + "/disposition", json=payload)
+    assert rejected.status_code == 200, rejected.text
+    assert client.post(PREFIX + "/disposition", json=payload).json() == rejected.json()
+    assert client.post(PREFIX + "/poll", json=current(body)).json()["messages"] == []
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None
+    assert receipt["stage"] == "rejected"
+    assert receipt["disposition"]["code"] == "unsupported_message"
+    assert receipt["disposition"]["message"]["message_id"] == message_id
+    assert receipt["sdk_accepted_at"] is None and receipt["consumed_at"] is None
+    assert db.list_pending_live_messages(consumer.session_id) == []
+    assert db.inspect_live_inbox(consumer.session_id, 10) == []
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).status_code == 409
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_versioned_control_start_is_one_shot_and_unknown_cannot_be_rejected(serving: Serving, native: bool) -> None:
+    _, client, db, consumer = serving
+    message_id = db.enqueue_live_message(
+        consumer.session_id, "bridge", "", time.time(), kind="control:replay-history",
+    )
+    consumer = replace(consumer, message_base=1)
+    body = (native_enroll if native else enroll)(client, consumer)
+    payload = {
+        **current(body), "message_id": message_id, "state": "started",
+        "code": "history_replay_started", "reason": "Bounded reconstruction admitted.",
+    }
+    first = client.post(PREFIX + "/disposition", json=payload)
+    assert first.status_code == 200, first.text
+    assert first.json()["begin"] is True
+    assert client.post(PREFIX + "/disposition", json=payload).json()["begin"] is False
+    rejected = {**payload, "state": "rejected", "code": "unsupported", "reason": "Do not replay."}
+    assert client.post(PREFIX + "/disposition", json=rejected).status_code == 409
+    unknown = {**payload, "state": "unknown", "code": "history_unknown", "reason": "Effect not observed."}
+    assert client.post(PREFIX + "/disposition", json=unknown).status_code == 200
+    assert client.post(PREFIX + "/poll", json=current(body)).json()["messages"] == []
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None
+    assert receipt["stage"] == "unknown" and receipt["sdk_accepted_at"] is None
+    successor = (native_enroll if native else enroll)(client, replace(consumer, incarnation="new-reader"))
+    assert client.post(PREFIX + "/disposition", json=payload).status_code == 409
+    assert client.post(PREFIX + "/poll", json=current(successor)).json()["messages"] == []
+
+
+def test_versioned_old_database_first_touch_and_original_key_survive_rejection(serving: Serving) -> None:
+    app, client, db, consumer = serving
+    message_id = db.enqueue_live_message(
+        consumer.session_id, "sender", "body", time.time(),
+        idempotency_key="original-operation", kind="future:message",
+    )
+    path = db.db_path
+    db.close()
+    with sqlite3.connect(path) as old:
+        for name in disposition_guards():
+            old.execute(f"DROP TRIGGER {name}")
+        old.execute("ALTER TABLE live_messages DROP COLUMN message_contract_json")
+        old.execute("ALTER TABLE live_messages DROP COLUMN disposition_json")
+    reopened = Database(path)
+    app.state.db = reopened
+    try:
+        consumer = replace(consumer, message_base=1)
+        body = native_enroll(client, consumer)
+        row = poll(client, body)
+        assert row["id"] == message_id and row["message_contract"]["legacy"] is True
+        payload = {
+            **current(body), "message_id": message_id, "state": "rejected",
+            "code": "unsupported_message", "reason": "Unknown stored type.",
+        }
+        assert client.post(PREFIX + "/disposition", json=payload).status_code == 200
+        retry = client.post("/api/v1/live-sessions/native-a/messages", json={
+            "sender": "sender", "body": "body", "kind": "future:message", "delivery": "queue",
+            "idempotency_key": "original-operation",
+        })
+        assert retry.status_code == 200, retry.text
+        assert retry.json()["message_id"] == message_id
+        assert retry.json()["receipt"]["stage"] == "rejected"
+        assert reopened.ack_live_messages(consumer.session_id, [message_id], time.time()) == 0
+        reopened.deregister_live_session(consumer.session_id)
+        retained = reopened.live_message_receipt(consumer.session_id, message_id)
+        assert retained is not None and retained["stage"] == "rejected"
+    finally:
+        reopened.close()
+
+
+def test_versioned_control_begin_race_and_authentication_preserve_one_effect_grant(serving: Serving) -> None:
+    _, client, db, consumer = serving
+    message_id = db.enqueue_live_message(
+        consumer.session_id, "sender", "", time.time(), kind="control:replay-history",
+    )
+    body = native_enroll(client, replace(consumer, message_base=1))
+    payload = {
+        **current(body), "message_id": message_id, "state": "started",
+        "code": "history_replay_started", "reason": "Bounded reconstruction admitted.",
+    }
+    unauthorized = client.post(PREFIX + "/disposition", json=payload, headers={"Authorization": "invalid"})
+    assert unauthorized.status_code == 401
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: client.post(PREFIX + "/disposition", json=payload), range(2)))
+    assert all(result.status_code == 200 for result in results)
+    assert sorted(result.json()["begin"] for result in results) == [False, True]
+    retained = db.live_message_receipt(consumer.session_id, message_id)
+    assert retained is not None and retained["stage"] == "control_started"
 
 
 @pytest.fixture
-def serving(installation: dict[str, Any], tmp_db: Database):
+def serving(installation: dict[str, Any], tmp_db: Database) -> Iterator[Serving]:
     app = configure_serving_app(
         ServiceConfig(db_path=str(tmp_db.db_path), bind="127.0.0.1"),
         "synthetic-secret", lifespan=None,
@@ -50,7 +204,10 @@ def serving(installation: dict[str, Any], tmp_db: Database):
 
 
 def request(consumer: InboxConsumer) -> dict[str, object]:
-    return {"contract": CONTRACT, "consumer": consumer.document()}
+    return {"contract": CONTRACT, "consumer": {
+        **consumer.document(),
+        **({"message_base": consumer.message_base} if consumer.message_base is not None else {}),
+    }}
 
 
 def test_legacy_request_serialization_does_not_send_a_new_selector() -> None:
@@ -73,7 +230,7 @@ def current(body: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in body.items() if key != "expected_incarnation"}
 
 
-def message(app, db: Database, consumer: InboxConsumer, **kwargs) -> int:
+def message(app: FastAPI, db: Database, consumer: InboxConsumer, **kwargs: Any) -> int:
     admission = app.state.live_inbox_runtime._admission
     assert admission is not None
     return db.enqueue_live_message(
@@ -86,7 +243,7 @@ def poll(client: TestClient, body: dict[str, Any]) -> dict[str, Any]:
     response = client.post(PREFIX + "/poll", json=current(body))
     assert response.status_code == 200, response.text
     row, = response.json()["messages"]
-    return row
+    return cast(dict[str, Any], row)
 
 
 def attempt(body: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
@@ -109,7 +266,7 @@ def native_enroll(client: TestClient, consumer: InboxConsumer) -> dict[str, Any]
     return body
 
 
-def test_native_sdk_receiving_needs_no_installation_or_process_custody(serving) -> None:
+def test_native_sdk_receiving_needs_no_installation_or_process_custody(serving: Serving) -> None:
     app, client, db, consumer = serving
     app.state.loop_governance = None
     app.state.live_inbox_runtime = None
@@ -128,7 +285,7 @@ def test_native_sdk_receiving_needs_no_installation_or_process_custody(serving) 
     successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
     assert client.post(PREFIX + "/poll", json=current(successor)).json()["messages"] == []
     assert client.get(PREFIX + f"/recovery/{original}").json()["stage"] == "unknown"
-    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": False}
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).status_code == 409
     assert client.post(PREFIX + "/outcome", json=report(body, row, "consumed")).json() == {
         "stage": "consumed",
     }
@@ -141,22 +298,27 @@ def test_native_sdk_receiving_needs_no_installation_or_process_custody(serving) 
     assert db.execute_read("SELECT * FROM bridge_runtime_producers") == []
 
 
-def test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work(serving) -> None:
+def test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_work(serving: Serving) -> None:
     _, client, db, consumer = serving
+    consumer = replace(consumer, message_base=1)
     first = native_enroll(client, consumer)
     message_id = db.enqueue_live_message(consumer.session_id, "peer", "retained", time.time())
     offered = poll(client, first)
     successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
-    assert poll(client, successor) == offered
-    original = {**attempt(successor, offered), "consumer": offered["consumer"]}
+    migrated = poll(client, successor)
+    assert migrated["handoff_id"] == offered["handoff_id"]
+    assert migrated["consumer"] == offered["consumer"]
+    assert migrated["message_contract"]["receiver_incarnation"] == "reloaded"
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).status_code == 409
+    original = attempt(successor, offered)
     assert client.post(PREFIX + "/begin", json=original).json() == {"begin": True}
     assert client.post(PREFIX + "/begin", json=original).json() == {"begin": False}
     assert offered["id"] == message_id
-    assert client.post(PREFIX + "/begin", json=attempt(successor, offered)).status_code == 409
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).status_code == 409
 
 
 @pytest.mark.parametrize("change", ["no-auth", "proxy", "dormant", "wrong-session", "read-only"])
-def test_native_inbox_preserves_real_target_and_ingress_boundaries(serving, change) -> None:
+def test_native_inbox_preserves_real_target_and_ingress_boundaries(serving: Serving, change: str) -> None:
     app, client, db, consumer = serving
     other = None
     if change == "no-auth":
@@ -184,7 +346,7 @@ def test_native_inbox_preserves_real_target_and_ingress_boundaries(serving, chan
             other.close()
 
 
-def test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade(serving) -> None:
+def test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade(serving: Serving) -> None:
     app, client, _, consumer = serving
     app.state.loop_governance = None
     assert client.post(PREFIX + "/negotiate", json=request(consumer)).status_code == 503
@@ -196,7 +358,7 @@ def test_native_mode_is_explicit_and_unknown_selectors_cannot_downgrade(serving)
     )).status_code == 422
 
 
-def test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls(serving) -> None:
+def test_native_inbox_survives_closed_installation_epoch_without_relaxing_controls(serving: Serving) -> None:
     app, client, db, consumer = serving
     enroll(client, consumer)
     runtime = app.state.live_inbox_runtime
@@ -233,7 +395,7 @@ def test_native_inbox_survives_closed_installation_epoch_without_relaxing_contro
     }).status_code == 503
 
 
-def test_native_poll_does_not_promote_unverified_legacy_startup_input(serving) -> None:
+def test_native_poll_does_not_promote_unverified_legacy_startup_input(serving: Serving) -> None:
     _, client, db, consumer = serving
     db.enqueue_live_message(
         consumer.session_id, "peer", "unverified startup", time.time(),
@@ -245,7 +407,7 @@ def test_native_poll_does_not_promote_unverified_legacy_startup_input(serving) -
 
 
 @pytest.mark.parametrize("old_state", ["claimed", "unknown", "begun"])
-def test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work(serving, old_state) -> None:
+def test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work(serving: Serving, old_state: str) -> None:
     _, client, db, consumer = serving
     old = db.enqueue_live_message(consumer.session_id, "peer", "old input", time.time())
     if old_state in ("claimed", "unknown"):
@@ -269,7 +431,9 @@ def test_native_receiving_does_not_replay_or_block_on_older_unconfirmed_work(ser
 @pytest.mark.parametrize("metadata", [
     {"pid": 300}, {"process_started_at": 2.0}, {"machine": "renamed-host"},
 ])
-def test_native_receiving_does_not_reacquire_custody_after_metadata_refresh(serving, metadata) -> None:
+def test_native_receiving_does_not_reacquire_custody_after_metadata_refresh(
+    serving: Serving, metadata: dict[str, Any],
+) -> None:
     _, client, db, consumer = serving
     body = native_enroll(client, consumer)
     refreshed = client.post("/api/v1/live-sessions", json={
@@ -295,7 +459,7 @@ def test_native_receiving_does_not_reacquire_custody_after_metadata_refresh(serv
     assert offered["consumer"] == consumer.document()
 
 
-def test_explicit_negotiation_only_enrolls_actual_frontend_and_cas_consumer(serving) -> None:
+def test_explicit_negotiation_only_enrolls_actual_frontend_and_cas_consumer(serving: Serving) -> None:
     app, client, db, consumer = serving
     assert db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
     assert db.execute_read("SELECT * FROM bridge_inbox_consumers") == []
@@ -306,7 +470,7 @@ def test_explicit_negotiation_only_enrolls_actual_frontend_and_cas_consumer(serv
     producer, = db.execute_read("SELECT * FROM bridge_runtime_producers")
     observed = json.loads(producer["producer_json"])
     assert observed == {
-        "pid": os.getpid(), "process_start": live_inbox_runtime.process_start_time(os.getpid()),
+        "pid": os.getpid(), "process_start": process_start_time(os.getpid()),
         "incarnation": app.state.live_inbox_runtime._producer.incarnation, "role": "frontend",
     }
     before = db.runtime_epoch(installation)
@@ -319,7 +483,7 @@ def test_explicit_negotiation_only_enrolls_actual_frontend_and_cas_consumer(serv
     assert client.post(PREFIX + "/enroll", json=changed_retry).status_code == 409
 
 
-def test_poll_reply_loss_preserves_original_and_final_admission_is_one_shot(serving) -> None:
+def test_poll_reply_loss_preserves_original_and_final_admission_is_one_shot(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     mid = message(app, db, consumer)
@@ -339,7 +503,7 @@ def test_poll_reply_loss_preserves_original_and_final_admission_is_one_shot(serv
     assert retained["body"] == "original body" and retained["consumed_at"] is None
 
 
-def test_distinct_outcomes_survive_closure_retirement_cleanup_and_lost_reply(serving) -> None:
+def test_distinct_outcomes_survive_closure_retirement_cleanup_and_lost_reply(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     message(app, db, consumer)
@@ -370,7 +534,7 @@ def test_distinct_outcomes_survive_closure_retirement_cleanup_and_lost_reply(ser
     assert client.post(PREFIX + "/begin", json=attempt(body, row)).status_code == 503
 
 
-def test_reload_cas_never_rewrites_original_handoff_or_inherits_final_permission(serving) -> None:
+def test_reload_cas_never_rewrites_original_handoff_or_inherits_final_permission(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     message(app, db, consumer)
@@ -388,7 +552,7 @@ def test_reload_cas_never_rewrites_original_handoff_or_inherits_final_permission
 
 
 @pytest.mark.parametrize("change", ["installation", "epoch", "session", "pid", "birth", "incarnation"])
-def test_wrong_observations_refuse_before_body_or_final_admission(serving, change: str) -> None:
+def test_wrong_observations_refuse_before_body_or_final_admission(serving: Serving, change: str) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     message(app, db, consumer)
@@ -404,7 +568,7 @@ def test_wrong_observations_refuse_before_body_or_final_admission(serving, chang
 
 
 @pytest.mark.parametrize("exposure", ["remote", "proxy", "forwarded-prefix", "public-bind", "no-auth"])
-def test_unsupported_ingress_never_initializes_or_exposes_inbox(serving, exposure: str) -> None:
+def test_unsupported_ingress_never_initializes_or_exposes_inbox(serving: Serving, exposure: str) -> None:
     app, client, db, consumer = serving
     if exposure == "public-bind":
         app.state.config.bind = "0.0.0.0"
@@ -429,7 +593,7 @@ def test_unsupported_ingress_never_initializes_or_exposes_inbox(serving, exposur
 
 
 @pytest.mark.parametrize("problem", ["missing", "expired", "remote-venue", "different-pid"])
-def test_unqualified_registry_cannot_enroll_consumer(serving, problem: str) -> None:
+def test_unqualified_registry_cannot_enroll_consumer(serving: Serving, problem: str) -> None:
     app, client, db, consumer = serving
     if problem == "missing":
         db.deregister_live_session(consumer.session_id)
@@ -444,7 +608,9 @@ def test_unqualified_registry_cannot_enroll_consumer(serving, problem: str) -> N
 
 
 @pytest.mark.parametrize("change", ["process", "database", "governance", "draining", "readonly"])
-def test_current_owner_change_refuses_fresh_effects(serving, monkeypatch, change: str) -> None:
+def test_current_owner_change_refuses_fresh_effects(
+    serving: Serving, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     message(app, db, consumer)
@@ -473,7 +639,7 @@ def test_current_owner_change_refuses_fresh_effects(serving, monkeypatch, change
 
 @pytest.mark.parametrize("message_kind", ["legacy", "interrupt"])
 def test_unsupported_message_rolls_back_entire_poll_without_partial_handoffs(
-    serving, message_kind: str,
+    serving: Serving, message_kind: str,
 ) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
@@ -486,7 +652,7 @@ def test_unsupported_message_rolls_back_entire_poll_without_partial_handoffs(
     assert all(row[0] is None for row in db.execute_read("SELECT handoff_json FROM live_messages"))
 
 
-def test_historical_interrupt_cannot_gain_final_admission(serving) -> None:
+def test_historical_interrupt_cannot_gain_final_admission(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     mid = message(app, db, consumer, delivery="interrupt")
@@ -503,7 +669,7 @@ def test_historical_interrupt_cannot_gain_final_admission(serving) -> None:
     assert db.execute_read("SELECT handoff_started_at FROM live_messages")[0][0] is None
 
 
-def test_reopened_database_retains_lost_final_reply_and_original_outcome_identity(serving) -> None:
+def test_reopened_database_retains_lost_final_reply_and_original_outcome_identity(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     message(app, db, consumer)
@@ -541,7 +707,7 @@ def test_reopened_database_retains_lost_final_reply_and_original_outcome_identit
 
 
 @pytest.mark.parametrize("change", ["session", "consumer", "message", "handoff"])
-def test_outcome_cannot_settle_another_original_handoff(serving, change: str) -> None:
+def test_outcome_cannot_settle_another_original_handoff(serving: Serving, change: str) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     message(app, db, consumer)
@@ -560,7 +726,7 @@ def test_outcome_cannot_settle_another_original_handoff(serving, change: str) ->
 
 
 @pytest.mark.parametrize("problem", ["contract", "extra-owner", "coerced-pid", "nan-birth"])
-def test_malformed_negotiation_refuses_without_epoch_mutation(serving, problem: str) -> None:
+def test_malformed_negotiation_refuses_without_epoch_mutation(serving: Serving, problem: str) -> None:
     app, client, db, consumer = serving
     payload = request(consumer)
     if problem == "contract":
@@ -569,14 +735,14 @@ def test_malformed_negotiation_refuses_without_epoch_mutation(serving, problem: 
         payload["database"] = "/untrusted/client-selected.db"
     else:
         payload["consumer"] = {
-            **payload["consumer"],
+            **consumer.document(),
             **({"pid": "102"} if problem == "coerced-pid" else {"process_started_at": "NaN"}),
         }
     assert client.post(PREFIX + "/negotiate", json=payload).status_code == 422
     assert db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
 
 
-def test_current_operations_do_not_implicitly_initialize_or_report_before_final_begin(serving) -> None:
+def test_current_operations_do_not_implicitly_initialize_or_report_before_final_begin(serving: Serving) -> None:
     app, client, db, consumer = serving
     owner = app.state.loop_governance.runtime_installation(db)
     payload = {**request(consumer), "binding": {"installation": owner.document(), "epoch": 1}}

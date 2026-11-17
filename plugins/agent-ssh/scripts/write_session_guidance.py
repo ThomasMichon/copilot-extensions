@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
@@ -55,7 +56,7 @@ def _contributor_argv(root: Path, stem: str) -> list[str] | None:
             python = Path(sys.executable)
             if python.name.casefold() == "pythonw.exe":
                 python = python.with_name("python.exe")
-            return [str(python), "-I", "-X", "utf8", str(script), "snapshot"]
+            return [str(python), "-I", "-X", "utf8", "-B", str(script), "snapshot"]
     if os.name == "nt":
         script = root / "scripts" / f"{stem}.ps1"
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -107,7 +108,7 @@ def _run_contributor(
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
             cwd=cwd,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     except (OSError, RuntimeError, subprocess.SubprocessError):
         return ""
@@ -116,7 +117,9 @@ def _run_contributor(
     return _additional_context(completed.stdout)
 
 
-def _run_owned_contributor(root: Path, argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+def _run_owned_contributor(
+    root: Path, argv: list[str], **kwargs: Any,
+) -> subprocess.CompletedProcess[bytes]:
     """Own descendants through the timeout, without requiring an installed runtime."""
     timeout = kwargs.pop("timeout")
     payload = kwargs.pop("input")
@@ -149,7 +152,7 @@ def _run_owned_contributor(root: Path, argv: list[str], **kwargs) -> subprocess.
                 job.terminate_and_wait(2.0)
             else:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    getattr(os, "killpg")(process.pid, getattr(signal, "SIGKILL"))
                 except ProcessLookupError:
                     pass
             process.communicate(timeout=2.0)
@@ -177,7 +180,7 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
-def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
+def write_session_guidance(payload: dict[str, object], *, home: Path | None = None) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
     if (

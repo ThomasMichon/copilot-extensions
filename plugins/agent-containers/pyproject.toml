@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-containers"
-version = "0.2.284-dev1"
+version = "0.2.285-dev1"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -101,6 +101,9 @@ agent-containers = "agent_containers.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_containers" = ["readiness-isolation.json"]
 
 [tool.ruff]
 target-version = "py310"

@@ -20,6 +20,7 @@ def process_start_time(pid: int) -> str | None:
 
 import os
 import sys
+from collections.abc import Callable
 
 from agent_procutil import no_window_kwargs
 
@@ -163,7 +164,7 @@ def set_pdeathsig(sig: int | None = None) -> None:
         os._exit(1)
 
 
-def child_preexec():
+def child_preexec() -> Callable[[], None] | None:
     """Return a ``preexec_fn`` that arms :func:`set_pdeathsig` (POSIX only).
 
     ``None`` on Windows, where ``preexec_fn`` is unsupported (the host's

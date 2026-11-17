@@ -95,6 +95,35 @@ action-time native reader described below can establish stopped mux state.
 
 ### Preserve first when discovery is unavailable
 
+New installations and provider selection require PSMux 3.4.0 or newer; 3.4.0 is
+the preferred installer version. This does not revoke observation or attachment
+of existing 3.3.5 sessions. The native observation path below retains legacy
+registration support, and installation refuses provider replacement while any
+provider process is present or its absence is unconfirmed. Legacy binaries
+without version metadata are not executed merely to discover their version
+while provider activity may be live. Upgrade only through the normal owner
+after its live-session gate is satisfied; changing this source policy neither
+updates a running provider nor migrates its sessions.
+
+The canonical Windows creation owner checks the selected executable's native
+file-version resource before preparing a pane. An old or unknown version
+refuses new creation; a PATH fallback cannot bypass the 3.4.0 floor. This read
+starts no provider process. An existing-session join returns before that check,
+so legacy reattachment does not acquire a new creation-version requirement.
+Manager checks the same passive metadata after the join decision and before
+selecting a creation owner, preserving that floor even with an older Core or
+the legacy creation path. Existing joins bypass both checks.
+Native qualification pins and its exact-version validator must agree; the
+workflow/validator consistency control checks both prerequisite release URLs.
+
+For an existing worktree, the interactive resolver carries a fresh positive mux
+observation as the boolean `mux_join_existing` launch-plan hint. Manager consumes
+it only to join that exact worktree's session, without starting observation or
+creation helpers again. An attachment failure exits without falling through to
+creation. Missing, false or non-boolean hints retain normal native observation;
+unknown presence never authorizes creation. This hint is not an absence proof,
+a persisted liveness cache or permission to replay a cold-start prompt.
+
 A missing listing is not proof of process death or a safe replacement target.
 PSMux can run registration cleanup on startup even for nominal reads such as
 `has-session`, `list-sessions` and version queries. Public reports
@@ -129,9 +158,10 @@ PSMux CLI fallback. Explicit foreground attach/create and provider writes still
 run PSMux and retain its startup-cleanup risk. This mitigation does not repair
 lost registrations or authorize provider restart, recovery or a host update.
 Fresh observations do not reactivate automatic pane discovery/status-bar
-repainting through the PSMux CLI. Worktrees publishes current roster facts;
-Manager's periodic status-option writes remain refused. Cached in-pane bar
-text is not fresh listing evidence.
+repainting through the PSMux CLI. The elected Worktrees monitor publishes
+managed session options through Manager's native status transport, with its
+normal mapping/incarnation fences and readback. Cached in-pane bar text is not
+fresh listing evidence.
 Legacy `status-updater` entrypoints also skip PSMux rather than restarting that
 CLI polling loop when monitor registration is unavailable. Manager's warm
 Picker observes presence and incarnation natively; an unknown observation
@@ -166,8 +196,8 @@ and mux-live controls become unavailable along with the badge; preserved raw
 client counts and Git facts do not remain current control evidence. A fresh
 publication restores the normal controls.
 
-This mitigation retains automatic PSMux status-painting restrictions while
-restoring fresh listings and client-count refresh. It does **not** make explicit
+This mitigation retains the automatic PSMux CLI restrictions while
+restoring native status publication, fresh listings and client-count refresh. It does **not** make explicit
 creation, attachment, recovery or shutdown commands harmless, upgrade PSMux,
 repair a running server, or qualify another executable with the same protocol.
 Strict action-time Windows checks retain the bounded native reader, now
@@ -195,9 +225,59 @@ incomplete reply or changing inventory remains unknown.
 `PSMUX_DATA_DIR` must be absolute when set; live
 servers whose registrations are outside that selected directory also prevent
 a complete result. This conservative action-time support does not re-enable
-periodic discovery or change cleanup authority. A silent failed PSMux CLI
+periodic PSMux CLI discovery or change cleanup authority. A silent failed PSMux CLI
 presence query still cannot authorize a cold replacement, and failed
 reachability does not make a mux-homed process reclaimable.
+
+### Resident state-only status projection
+
+The elected monitor projects already-computed Worktrees state, not Git work.
+One completed native inventory batch supplies session membership, incarnation
+and attached-client counts for the pass; it does not probe each worktree with
+`has-session`. Unknown inventory is not an empty catalog, and a cached live
+mapping absent from the current batch does not authorize a status write.
+
+Each presentation batch reads each project's passive current-roster snapshot
+once. Current content-disposition closure descriptors take precedence over completed
+segment-cache values. Otherwise the monitor retains a completed segment or
+marks advisory/pending state explicitly; projection never invokes the
+compute-on-miss segment getter, Git classification or a refresh request.
+The normal TMux monitor path also uses this read-only segment view. Explicit
+status commands and the existing Git sweep, lifecycle and watcher owners retain
+their own refresh behavior.
+Managed live mux projects remain enrolled in that scheduled roster computation
+even without a Picker, list request or runtime demand. Passive roster reads do
+not enroll runtime demand or request refreshes. Path lookup uses one per-project index
+and refuses ambiguous paths; current CONVO descriptors retain their computed
+conversation turn count, while advisory counts stay suppressed.
+Path identity follows the segment cache's normalized real-path rule, including
+trailing separators and symlink aliases.
+
+Roster `ACTIVE` is a liveness disposition, not a content status. For observed
+mux worktrees in that state, the scheduled computation owner also refreshes the
+separate content-segment cache after releasing the roster observation ticket.
+The cache retains its existing TTL, invalidation and cleanup ownership.
+Every content observation rechecks lifecycle admission and governance; pending
+priority ends the batch rather than waiting under the shared lock. A stored
+empty project remains a known POSIX cache owner, avoiding repeated path scans
+without weakening cleanup fences.
+Presentation reads only completed fresh content bytes and never substitutes
+`ACTIVE` for DIRTY, WIP or CONVO; unavailable content remains pending rather
+than triggering Git work in the projection path.
+Registered standalone TMux paths also enter a separate content pass after the
+scheduled served-session projection, even when no adopted project or tracking
+record exists. This pass uses the same content cache and restores each
+captured project context under the existing lock, skipping work when lifecycle
+priority is pending. A cold read can remain pending for one pass; subsequent
+projection reads completed content without invoking Git.
+
+Native presentation runs before bulk roster collection. During that same
+owner's roster pass, moderated cooperative progress between record observations
+and serialization can project another batch without waiting for the whole
+project's Git roster. It creates no thread, daemon or second publisher, preserves
+the active project and observation/cleanup ownership, and skips publication
+when lifecycle priority is pending rather than waiting inside the roster lock.
+Publication duration does not consume an individual Git observation's deadline.
 
 For an affected host:
 

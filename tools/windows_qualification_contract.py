@@ -110,7 +110,7 @@ DESKTOP_FILES = (
     )),
 )
 PACKETS = ("bridge-http52", MCP_LIFETIME_PACKET, DESKTOP_PACKET, SOURCE_PACKET, *NATIVE_PACKETS)
-NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
+NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.4.0"}
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")

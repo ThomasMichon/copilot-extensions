@@ -37,7 +37,7 @@ def launch_state(
         raise
 
 
-def observe_exit(phase: dict[str, bool], process) -> None:
+def observe_exit(phase: dict[str, bool], process: object) -> None:
     """Settle an exited Host's exact registry record before removing its root."""
     phase["cleanup_safe"] = False
     receipt = getattr(process, "instance_receipt", None)

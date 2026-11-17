@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 from dataclasses import asdict, replace
 import json
 import os
 from pathlib import Path
 import re
 import socket
-import threading
 import time
 
 from agent_remote_driver.mux_observation_types import Observation, ObservationUnavailable, Pane
@@ -37,7 +35,7 @@ def _data_dir() -> Path:
         import ctypes
 
         buffer = ctypes.create_unicode_buffer(32768)
-        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x28, None, 0, buffer) == 0:
+        if getattr(ctypes, "windll").shell32.SHGetFolderPathW(None, 0x28, None, 0, buffer) == 0:
             home = buffer.value
     if not home:
         drive, tail = os.environ.get("HOMEDRIVE", ""), os.environ.get("HOMEPATH", "")
@@ -149,7 +147,8 @@ def _settled_inventory(root: Path, deadline: float) -> dict[str, tuple[str, int]
 
 def observe_psmux(
     session: str, *, timeout: float = 1.0, data_dir: Path | None = None,
-    namespace: str | None = None, _inventory=None,
+    namespace: str | None = None,
+    _inventory: Callable[[], dict[str, tuple[str, int]]] | None = None,
 ) -> Observation:
     """Read native rendezvous hints, then require an authenticated live response.
 
@@ -206,10 +205,13 @@ def observe_psmux(
 def observe_psmux_many(sessions: list[str], *, timeout: float = 1.0) -> dict[str, Observation]:
     """Share one finite budget across a listing, including unresponsive rows."""
     deadline = time.monotonic() + timeout
-    lock = threading.Lock()
-    snapshot = []
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
 
-    def inventory():
+    lock = threading.Lock()
+    snapshot: list[dict[str, tuple[str, int]] | None] = []
+
+    def inventory() -> dict[str, tuple[str, int]]:
         from agent_remote_driver import mux_inventory
 
         with lock:
@@ -220,15 +222,20 @@ def observe_psmux_many(sessions: list[str], *, timeout: float = 1.0) -> dict[str
                     ))
                 except (OSError, ValueError, ObservationUnavailable):
                     snapshot.append(None)
-            if snapshot[0] is None:
+            known = snapshot[0]
+            if known is None:
                 raise ObservationUnavailable("Native coverage unavailable")
-            return snapshot[0]
+            return known
 
-    def observe(session):
+    def observe(session: str) -> Observation:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return Observation("unknown", "listing-budget")
-        return observe_psmux(session, timeout=min(remaining, 5), _inventory=inventory)
+        observed = observe_psmux(session, timeout=min(remaining, 5), _inventory=inventory)
+        if observed.status == "absent" and not _namespace():
+            if any(name == session for name, _clients in inventory().values()):
+                return Observation("unknown", "other-namespace")
+        return observed
 
     names = list(dict.fromkeys(sessions))
     if not names:
@@ -271,8 +278,8 @@ def list_psmux() -> dict[str, Observation] | None:
         return None
 
 
-def _unique_object(pairs):
-    value = {}
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
     for key, item in pairs:
         if key in value:
             raise ValueError("Duplicate observation property")
@@ -280,23 +287,26 @@ def _unique_object(pairs):
     return value
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--describe-contract", action="store_true")
-    mode.add_argument("--observe", action="store_true")
-    args = parser.parse_args(argv)
-    if args.describe_contract:
-        import sys
+def main(argv: list[str] | None = None) -> int:
+    import sys
 
+    arguments = sys.argv[1:] if argv is None else argv
+    describe = arguments == ["--describe-contract"]
+    if arguments != ["--observe"] and not describe:
+        import argparse
+
+        parser = argparse.ArgumentParser(description=__doc__)
+        mode = parser.add_mutually_exclusive_group(required=True)
+        mode.add_argument("--describe-contract", action="store_true")
+        mode.add_argument("--observe", action="store_true")
+        describe = parser.parse_args(arguments).describe_contract
+    if describe:
         print(json.dumps({
             "contract": CONTRACT, "version": VERSION, "operations": ["psmux-observe"],
             "python": str(Path(sys.executable).absolute()),
             "entrypoint": str(Path(__file__).resolve()),
         }))
         return 0
-    import sys
-
     try:
         raw = sys.stdin.read(4097)
         if len(raw) > 4096:

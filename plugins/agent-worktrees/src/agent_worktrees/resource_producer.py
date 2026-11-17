@@ -9,11 +9,16 @@ import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator, TYPE_CHECKING, TypeGuard
+
+if TYPE_CHECKING:
+    from .tracking import WorktreeRecord
+    from .tracking_claims import ResourceClaim
 
 SCHEMA = "copilot-extensions.resource-producer"
 VERSION = 1
 ARTIFACT_LIFETIME = "artifact-owned"
+USER_OUTPUT_LIFETIME = "user-deliverable"
 MAX_REF_BYTES = 4096
 MAX_INPUT_BYTES = 16384
 FROZEN_OWNER_STATUSES = frozenset({
@@ -52,7 +57,7 @@ def canonical_json(value: object) -> str:
     return encoded
 
 
-def claim_ref(metadata: dict) -> str:
+def claim_ref(metadata: dict[str, Any]) -> str:
     """Encode an opaque callback envelope; terminal receipts retain its subject."""
     if metadata.get("lifetime") == "owned-worktree":
         from .owned_worktree import claim_ref as worktree_ref
@@ -61,8 +66,8 @@ def claim_ref(metadata: dict) -> str:
         from .resource_relationship import claim_ref as relationship_ref
         return relationship_ref(metadata)
     envelope = {key: metadata[key] for key in ("version", "token", "creator", "recovery")}
-    if metadata.get("lifetime") == ARTIFACT_LIFETIME:
-        envelope["lifetime"] = ARTIFACT_LIFETIME
+    if metadata.get("lifetime") in {ARTIFACT_LIFETIME, USER_OUTPUT_LIFETIME}:
+        envelope["lifetime"] = metadata["lifetime"]
     envelope["phase"] = "allocating" if metadata["phase"] == "allocating" else (
         "bound" if "identity" in metadata else "pending"
     )
@@ -77,7 +82,7 @@ def claim_ref(metadata: dict) -> str:
     return ref
 
 
-def decode_ref(ref: str) -> dict:
+def decode_ref(ref: str) -> dict[str, Any]:
     """Decode a canonical version-1 callback ref, validating only generic types."""
     from . import claim_providers
 
@@ -92,17 +97,19 @@ def decode_ref(ref: str) -> dict:
         data = json.loads(base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True))
     except (ValueError, UnicodeError) as exc:
         raise ValueError("invalid producer callback envelope") from exc
+    if not isinstance(data, dict):
+        raise ValueError("invalid producer callback envelope")
     metadata = {
         **data, "namespace": namespace, "lifetime": data.get("lifetime", "disposable-owned"),
-    } if isinstance(data, dict) else {}
+    }
     if not valid_metadata(metadata) or claim_ref(metadata) != ref:
         raise ValueError("invalid or noncanonical producer callback envelope")
-    return data
+    return dict(data)
 
 
-def valid_metadata(value: object) -> bool:
+def valid_metadata(value: object) -> TypeGuard[dict[str, Any]]:
     """Unknown/malformed metadata is never interpreted as safely discharged."""
-    from . import claim_providers, producer_allocation, tracking
+    from . import claim_providers, producer_allocation
 
     if not isinstance(value, dict):
         return False
@@ -112,6 +119,8 @@ def valid_metadata(value: object) -> bool:
     if value.get("lifetime") == "retained-relationship":
         from .resource_relationship import valid_metadata as valid_relationship
         return valid_relationship(value)
+    from .tracking_claims import parse_claim_ref
+
     required = {"version", "lifetime", "token", "namespace", "phase", "creator", "recovery"}
     if not required.issubset(value) or set(value) - (
         required | {"identity", "closeout", "transfer", "allocation_epoch", "allocation_completion"}
@@ -119,7 +128,7 @@ def valid_metadata(value: object) -> bool:
         return False
     if (
         type(value["version"]) is not int or value["version"] != VERSION
-        or value["lifetime"] not in ("disposable-owned", ARTIFACT_LIFETIME)
+        or value["lifetime"] not in ("disposable-owned", ARTIFACT_LIFETIME, USER_OUTPUT_LIFETIME)
     ):
         return False
     if not is_valid_token(value["token"]):
@@ -130,13 +139,13 @@ def valid_metadata(value: object) -> bool:
     creator = value["creator"]
     if not isinstance(creator, str):
         return False
-    parsed = tracking.parse_claim_ref(creator)
+    parsed = parse_claim_ref(creator)
     if parsed is None or not parsed.is_qualified or parsed.session or parsed.canonical() != creator:
         return False
     phase = value["phase"]
-    if phase not in ("pending", "allocating", "bound", "retained", "closed", "transferred") or not isinstance(value["recovery"], dict):
+    if phase not in ("pending", "allocating", "bound", "retained", "closed", "transferred", "delivered") or not isinstance(value["recovery"], dict):
         return False
-    if phase in ("bound", "retained", "transferred") and not isinstance(value.get("identity"), dict):
+    if phase in ("bound", "retained", "transferred", "delivered") and not isinstance(value.get("identity"), dict):
         return False
     if phase in {"pending", "allocating"} and "identity" in value:
         return False
@@ -153,7 +162,14 @@ def valid_metadata(value: object) -> bool:
             return False
     except (ValueError, TypeError, UnicodeError, RecursionError):
         return False
-    if phase == "retained":
+    if phase == "delivered":
+        if value["lifetime"] != USER_OUTPUT_LIFETIME or not verified_delivery(
+            value.get("closeout"), ref, value["identity"],
+        ):
+            return False
+    elif value["lifetime"] == USER_OUTPUT_LIFETIME and phase in {"retained", "closed", "transferred"}:
+        return False
+    elif phase == "retained":
         if value["lifetime"] != ARTIFACT_LIFETIME or not verified_retention(
             value.get("closeout"), ref, value["identity"],
         ):
@@ -171,7 +187,7 @@ def valid_metadata(value: object) -> bool:
         if transfer["accepted"] is not True or not all(isinstance(transfer[key], str) and transfer[key] for key in ("bundle", "source", "consumer")):
             return False
         for key in ("source", "consumer"):
-            target = tracking.parse_claim_ref(transfer[key])
+            target = parse_claim_ref(transfer[key])
             if target is None or not target.is_qualified or target.session:
                 return False
     elif "transfer" in value:
@@ -191,7 +207,7 @@ def verified_absence(result: object, ref: str) -> bool:
     )
 
 
-def verified_retention(result: object, ref: str, identity: dict) -> bool:
+def verified_retention(result: object, ref: str, identity: dict[str, Any]) -> bool:
     """Only the registered artifact provider can attest quiescent retained bytes."""
     if not isinstance(result, dict) or result.get("available") is not True or result.get("exists") is not True:
         return False
@@ -210,19 +226,26 @@ def verified_retention(result: object, ref: str, identity: dict) -> bool:
     )
 
 
-def wire_metadata(value: object) -> dict:
+def verified_delivery(result: object, ref: str, identity: dict[str, Any]) -> bool:
+    """Load optional delivery validation only for its selected lifetime."""
+    from .resource_delivery import verified_delivery as verify
+
+    return verify(result, ref, identity)
+
+
+def wire_metadata(value: object) -> dict[str, Any]:
     """Expose invalid raw YAML as an explicit error, never as wire authority."""
     if isinstance(value, dict) and valid_metadata(value):
         return copy.deepcopy(value)
     return {"error": "invalid-producer-metadata"}
 
 
-def unsettled(claim) -> bool:
+def unsettled(claim: ResourceClaim) -> bool:
     """A producer's phase, never its generic state, controls finalization."""
     value = claim.producer
     return (
         not valid_metadata(value)
-        or value["phase"] not in ("closed", "transferred", "retained")
+        or value["phase"] not in ("closed", "transferred", "retained", "delivered")
         or claim_ref(value) != claim.ref
     )
 
@@ -237,7 +260,7 @@ def transaction(*paths: Path) -> Iterator[None]:
         _write_paths.reset(token)
 
 
-def preserve_claims(record, current, path: Path) -> None:
+def preserve_claims(record: WorktreeRecord, current: WorktreeRecord | None, path: Path) -> None:
     """Fence generic full-record writers, including stale saves and repairs."""
     sides = (record.resources, current.resources if current is not None else [])
     if not any(claim.has_producer for claims in sides for claim in claims):
@@ -287,7 +310,7 @@ def preserve_claims(record, current, path: Path) -> None:
         prior = authoritative.pop(claim.ref, None)
         if prior is None and claim.has_producer and isinstance(claim.producer, dict):
             ref = by_token.get(claim.producer.get("token"))
-            prior = authoritative.pop(ref, None)
+            prior = authoritative.pop(ref, None) if ref is not None else None
         if prior is not None:
             retained = copy.deepcopy(prior)
             retained.note = claim.note
@@ -301,7 +324,7 @@ def preserve_claims(record, current, path: Path) -> None:
     record.resources = merged
 
 
-def preserve_incarnation(record, current) -> None:
+def preserve_incarnation(record: WorktreeRecord, current: WorktreeRecord | None) -> None:
     """Keep a lazy nonce backfill and refuse a different record incarnation."""
     if current is not None and current.creation_nonce:
         if record.creation_nonce and record.creation_nonce != current.creation_nonce:

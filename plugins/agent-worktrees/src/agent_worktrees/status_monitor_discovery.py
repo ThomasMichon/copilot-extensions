@@ -9,11 +9,15 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from collections.abc import Callable, Iterator
+from typing import Any
 
 from agent_procutil import no_window_kwargs
+from agent_remote_driver.mux_creation import is_psmux
 
 from . import config as cfg
 from . import installer, mux_link, mux_status_link, sessions, tracking
+from .observation_progress import capture_inventory
 
 LOG = logging.getLogger(__name__)
 _last_session: str | None = None
@@ -21,18 +25,21 @@ _retry_after: dict[tuple[str, str, str], float] = {}
 _now = time.monotonic
 
 
+@capture_inventory
 def list_sessions(mux_bin: str) -> dict[str, tuple[int, str]] | None:
     from .mux_list_result import is_empty_tmux_listing, parse_monitor_sessions
 
-    if sessions._is_psmux(mux_bin):
+    if is_psmux(mux_bin):
         from agent_remote_driver.mux_observation import list_psmux
 
         observed = list_psmux()
         if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
             return None
+        if any(o.status == "present" and o.clients is None for o in observed.values()):
+            return None
         return {
             name: (o.clients, o.incarnation)
-            for name, o in observed.items() if o.status == "present"
+            for name, o in observed.items() if o.status == "present" and o.clients is not None
         }
     try:
         result = subprocess.run(
@@ -52,7 +59,7 @@ def list_sessions(mux_bin: str) -> dict[str, tuple[int, str]] | None:
         return None
 
 
-def _valid_native_incarnation(value) -> bool:
+def _valid_native_incarnation(value: object) -> bool:
     if not isinstance(value, str):
         return False
     session_id, separator, created = value.partition(":")
@@ -99,7 +106,9 @@ def write_standalone_registration(
                 LOG.warning("Standalone mux temporary cleanup failed for %s: %s", name, exc)
 
 
-def _standalone_identity_current(registry_dir, name, path, incarnation) -> bool:
+def _standalone_identity_current(
+    registry_dir: Path | None, name: str, path: str, incarnation: str,
+) -> bool:
     if not _valid_native_incarnation(incarnation):
         LOG.warning("Refusing malformed native mux identity for %s", name)
         return False
@@ -126,7 +135,7 @@ def _standalone_identity_current(registry_dir, name, path, incarnation) -> bool:
         return False
 
 
-def _tracked_worktrees():
+def _tracked_worktrees() -> Iterator[tuple[str, tracking.WorktreeRecord]]:
     projects = installer.read_projects_registry().get("projects", {})
     if not isinstance(projects, dict):
         return
@@ -136,12 +145,14 @@ def _tracked_worktrees():
                 yield project, record
 
 
-def discover_via_manager(payload: dict) -> dict | None:
+def discover_via_manager(payload: dict[str, Any]) -> dict[str, Any] | None:
     """None means Manager is not configured, not a failed admission."""
     return mux_status_link.push_discovery_via_daemon(payload)
 
 
-def _register_standalone(name: str, path: str, incarnation: str, registry_dir) -> bool:
+def _register_standalone(
+    name: str, path: str, incarnation: str, registry_dir: Path | None,
+) -> bool:
     from .status_monitor_runtime import _register_session_for_monitor
 
     return _register_session_for_monitor(
@@ -179,17 +190,18 @@ def _session_path_matches(mux_bin: str, name: str, path: str) -> bool:
     )
 
 
-def _observed_incarnation(observation) -> str:
+def _observed_incarnation(observation: object) -> str:
     if (
         isinstance(observation, tuple) and len(observation) == 2
-        and _valid_native_incarnation(observation[1])
+        and isinstance(observation[1], str) and _valid_native_incarnation(observation[1])
     ):
         return observation[1]
     return ""
 
 
 def _current_mapping_names(
-    observations, cache, registered_paths, registry_dir,
+    observations: dict[str, tuple[int, str]], cache: mux_link.ManagedMuxCache | None,
+    registered_paths: dict[str, str] | None, registry_dir: Path | None,
 ) -> tuple[set[str], set[str]]:
     entries = cache.snapshot().values() if cache is not None else []
     live_names = cache.live_session_names() if cache is not None else set()
@@ -236,11 +248,11 @@ def _current_mapping_names(
 def discover_connected_worktrees(
     live: dict[str, tuple[int, str]] | None,
     mux_bin: str,
-    managed_mux_cache,
+    managed_mux_cache: mux_link.ManagedMuxCache | None,
     *,
     registered_paths: dict[str, str] | None = None,
     registration_dir: Path | None = None,
-    before_discover=None,
+    before_discover: Callable[[], None] | None = None,
 ) -> dict[str, str]:
     """Return newly attributable paths, retaining unknown and incumbent fences.
 
@@ -269,8 +281,8 @@ def discover_connected_worktrees(
             connected[name] = (count, incarnation)
     for key in list(_retry_after):
         binary, name, incarnation = key
-        observation = live.get(name)
-        observed = _observed_incarnation(observation)
+        current_observation = live.get(name)
+        observed = _observed_incarnation(current_observation)
         changed = observed and observed != incarnation
         if binary == mux_bin and (name not in live or changed):
             _retry_after.pop(key)
@@ -287,10 +299,10 @@ def discover_connected_worktrees(
         return {}
     candidates: dict[str, list[tuple[str | None, str, str]]] = {}
     try:
-        for project, record in _tracked_worktrees():
+        for tracked_project, record in _tracked_worktrees():
             name = sessions.mux_session_name(record.worktree_id)
             if name in eligible:
-                candidates.setdefault(name, []).append((project, record.worktree_id, record.worktree_path))
+                candidates.setdefault(name, []).append((tracked_project, record.worktree_id, record.worktree_path))
     except (OSError, ValueError, TypeError) as exc:
         LOG.warning("Connected mux attribution unavailable: %s", exc)
         for name, (_, incarnation) in eligible.items():

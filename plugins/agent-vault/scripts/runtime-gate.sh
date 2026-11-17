@@ -103,14 +103,29 @@ run_runtime() {
     apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
     if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
         local validated_cache
+        local validator_args=(-I "$SCRIPT_DIR/validate_identity_cache_context.py")
+        case "${command_arguments[0]:-}" in
+            installer-readiness|invocation-contract)
+                validator_args=(-I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py"
+                    --plugin agent-vault --module agent_vault
+                    --script "$SCRIPT_DIR/validate_identity_cache_context.py" --) ;;
+        esac
         validated_cache="$(
-            "$AGENT_RT_PY" -I "$SCRIPT_DIR/validate_identity_cache_context.py" \
+            "$AGENT_RT_PY" "${validator_args[@]}" \
                 "--runtime-root=$RUNTIME_ROOT" "--installation-id=$INSTALLATION_ID" \
                 "--source-home=$IDENTITY_SOURCE_HOME" "--source-id=$IDENTITY_SOURCE_ID" \
                 "--cache-dir=$IDENTITY_CACHE_DIR"
-        )" || exit 126
+        )" || {
+            case "${command_arguments[0]:-}" in
+                installer-readiness|invocation-contract) printf '%s\n' "$validated_cache" ;;
+            esac
+            exit 126
+        }
         export AGENT_VAULT_CACHE_DIR="$validated_cache"
     fi
+    case "${command_arguments[0]:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py" --plugin agent-vault --module agent_vault -- "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -I -X utf8 -m agent_vault "$@"
 }
 
@@ -225,6 +240,10 @@ if [[ -z "$CONTEXT" ]]; then
     fi
 fi
 
+case "${command_arguments[0]:-}" in
+    installer-readiness|invocation-contract)
+        export COPILOT_EXTENSIONS_READONLY_PROBE=isolated-imports-v1 ;;
+esac
 resolve_runtime
 if [[ "${command_arguments[0]:-}" == invocation-contract ]]; then
     if [[ "$command_argument_count" != 2 || "${command_arguments[1]:-}" != --json ]]; then
@@ -238,7 +257,11 @@ fi
 if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     . "$SCRIPT_DIR/runtime-activation.sh"
     activation_code=0
-    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector)" || activation_code=$?
+    activation_scope=()
+    if [[ "$has_configuration_root" == true ]]; then
+        activation_scope+=(--explicit-configuration-root)
+    fi
+    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector "${activation_scope[@]}")" || activation_code=$?
     if [[ "$activation_code" == 2 ]]; then
         if [[ "${command_arguments[0]:-}" == installer-readiness ]]; then
             printf '%s\n' "$activation"
@@ -250,6 +273,9 @@ if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
             printf '%s\n' "$activation" >&2
             exit 2
         fi
+    elif [[ "$activation_code" == 126 ]]; then
+        printf '%s\n' "$activation"
+        exit 126
     elif [[ "$activation_code" != 0 ]]; then
         if [[ "$(json_get "$activation" "$(json_path reason)" 2>/dev/null || true)" == repository-context-missing ]]; then
             printf "%s\n" "[agent-vault] repository context is missing. Run from an adopted repository or use '<repo> vault unlock' from any directory." >&2
@@ -322,7 +348,14 @@ if [[ -n "$NATIVE_SELECTOR" ]]; then
 fi
 printf '[agent-vault] submitting first-use provisioning to the installation driver: %s\n' "$EXECUTION_ROOT" >&2
 apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
-bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait || exit "$?"
+(
+    if [[ "$has_configuration_root" == true ]]; then
+        export _AGENT_VAULT_FIRST_USE_ROOT="$PROJECT_ROOT"
+    else
+        unset _AGENT_VAULT_FIRST_USE_ROOT
+    fi
+    bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait
+) || exit "$?"
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"

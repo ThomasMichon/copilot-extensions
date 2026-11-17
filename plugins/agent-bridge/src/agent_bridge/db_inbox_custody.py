@@ -5,10 +5,12 @@ from __future__ import annotations
 import sqlite3
 import uuid
 import json
+from typing import cast
 
 from venue_copilot.portable_mux import MuxEndpoint
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
+from .db_operations import DatabaseOperations
 from .db_live_session_aliases import PROCESS_START_TOLERANCE_SECONDS
 from .inbox_custody import InboxConsumer, decode_handoff, handoff_stage, observed_time, original_handoff
 from .runtime_custody import (
@@ -16,7 +18,7 @@ from .runtime_custody import (
 )
 
 
-class _InboxCustodyMixin:
+class _InboxCustodyMixin(DatabaseOperations):
     @staticmethod
     def _inbox_consumer(consumer: InboxConsumer) -> None:
         if type(consumer) is not InboxConsumer:
@@ -32,6 +34,8 @@ class _InboxCustodyMixin:
         conn: sqlite3.Connection, consumer: InboxConsumer, now: float, *,
         require_portable_admission: bool = False,
     ) -> None:
+        from .compatible_inbox import require_live
+
         # Exact native id, not alias resolution: a renamed conversation cannot
         # inherit a send capability even when the OS process did not change.
         row = conn.execute(
@@ -50,6 +54,7 @@ class _InboxCustodyMixin:
             ).fetchone() is not None
         ):
             raise RuntimeCustodyError("Inbox consumer registration changed or is unqualified")
+        require_live(conn, consumer.session_id, now)
         if row["venue"] is None:
             if consumer.portable_launch is not None:
                 raise RuntimeCustodyError("Portable inbox consumer has no reserved venue")
@@ -77,6 +82,7 @@ class _InboxCustodyMixin:
                 if (
                     predecessor.portable_launch == consumer.portable_launch
                     and predecessor.pid == consumer.pid
+                    and predecessor.process_started_at is not None
                     and abs(predecessor.process_started_at - consumer.process_started_at)
                     < PROCESS_START_TOLERANCE_SECONDS
                 ):
@@ -108,12 +114,6 @@ class _InboxCustodyMixin:
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
             self._registered_inbox_consumer(conn, consumer, now, require_portable_admission=True)
-            if conn.execute(
-                "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
-                "AND kind != 'control:plugin-readiness' "
-                "AND delivered_at IS NULL LIMIT 1", (consumer.session_id,),
-            ).fetchone() is not None:
-                raise RuntimeCustodyError("Pending legacy controls prevent retained inbox enrollment")
             original = conn.execute(
                 "SELECT * FROM bridge_inbox_consumers WHERE incarnation=?",
                 (consumer.incarnation,),
@@ -207,7 +207,7 @@ class _InboxCustodyMixin:
             or not matches
         ):
             raise RuntimeCustodyError("Original inbox handoff observations changed")
-        return row
+        return cast(sqlite3.Row, row)
 
     def poll_live_message_handoffs(
         self, installation: RuntimeInstallation, admission: RuntimeAdmission,
@@ -228,19 +228,44 @@ class _InboxCustodyMixin:
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
             self._current_inbox_consumer(conn, consumer, now, identity, admission.epoch)
+            from .message_contracts import envelope, pending_controls
+
+            controls = pending_controls(conn, consumer, limit or 100, now=now)
             rows = conn.execute(
                 "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
+                "AND disposition_json IS NULL "
                 "AND kind NOT LIKE 'control:%' ORDER BY id" + (" LIMIT ?" if limit is not None else ""),
                 (consumer.session_id, limit) if limit is not None else (consumer.session_id,),
             ).fetchall()
             result = []
             for row in rows:
                 if row["runtime_custody_json"] is None:
+                    if consumer.message_base == 1 and all(row[name] is None for name in (
+                        "claimed_at", "handoff_started_at", "delivered_at", "consumed_at", "outcome",
+                    )):
+                        result.append({
+                            **dict(row), "handoff_stage": "offered", "consumer": consumer.document(),
+                            "message_contract": {
+                                **envelope(conn, row, consumer), "contract_error": "unsupported_admission",
+                            },
+                        })
+                        continue
                     raise RuntimeCustodyError("Legacy or foreign inbox admission remains unqualified")
-                if row["delivery"] not in ("steer", "queue"):
+                if row["delivery"] not in ("steer", "queue") and consumer.message_base != 1:
                     raise RuntimeCustodyError("Retained inbox interrupt delivery remains unsupported")
                 original_admission = RuntimeAdmission.parse(row["runtime_custody_json"])
                 self._inbox_admission(conn, identity, original_admission)
+                if consumer.message_base is None:
+                    from .message_contracts import dispose, require_supported as require_contract
+
+                    try:
+                        require_contract(envelope(conn, row, consumer), row["kind"])
+                    except RuntimeCustodyError:
+                        dispose(
+                            conn, consumer, row["id"], "rejected", "unsupported_reader",
+                            "This reader cannot enforce the stored message contract.", now=now,
+                        )
+                        continue
                 raw = row["handoff_json"]
                 if raw is None:
                     if row["delivered_at"] is not None or row["claimed_at"] is not None:
@@ -252,10 +277,18 @@ class _InboxCustodyMixin:
                     conn.execute("UPDATE live_messages SET handoff_json=? WHERE id=?",
                                  (raw, row["id"]))
                 retained = decode_handoff(raw)
-                original = self._original_handoff(conn, row["id"], consumer, retained["id"])
+                retained_consumer = InboxConsumer(**retained["consumer"])
+                original = self._original_handoff(
+                    conn, row["id"], retained_consumer if consumer.message_base == 1 else consumer,
+                    retained["id"],
+                )
                 result.append({**dict(original), "handoff": retained,
-                               "handoff_stage": handoff_stage(original)})
-            return result
+                               "handoff_stage": handoff_stage(original),
+                               **({
+                                   "consumer": retained["consumer"],
+                                   "message_contract": envelope(conn, original, consumer),
+                               } if consumer.message_base == 1 else {})})
+            return sorted([*controls, *result], key=lambda row: row["id"])[:limit or 100]
 
     def begin_live_message_handoff(
         self, installation: RuntimeInstallation, admission: RuntimeAdmission,
@@ -272,7 +305,22 @@ class _InboxCustodyMixin:
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
             self._current_inbox_consumer(conn, consumer, now, identity, admission.epoch)
-            row = self._original_handoff(conn, message_id, consumer, handoff_id)
+            original = conn.execute(
+                "SELECT * FROM live_messages WHERE id=? AND session_id=?",
+                (message_id, consumer.session_id),
+            ).fetchone()
+            if original is None:
+                raise RuntimeCustodyError("Original inbox handoff is absent")
+            retained_consumer = InboxConsumer(**original_handoff(original)["consumer"])
+            row = self._original_handoff(
+                conn, message_id, retained_consumer if consumer.message_base == 1 else consumer,
+                handoff_id,
+            )
+            from .message_contracts import envelope, require_supported
+
+            require_supported(envelope(conn, row, consumer), row["kind"])
+            if row["disposition_json"] is not None:
+                raise RuntimeCustodyError("Original message already has a disposition")
             self._inbox_admission(conn, identity, RuntimeAdmission.parse(row["runtime_custody_json"]))
             if row["session_id"] != consumer.session_id:
                 raise RuntimeCustodyError("Inbox handoff cannot move to another native context")

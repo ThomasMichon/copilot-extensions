@@ -230,12 +230,13 @@ def test_admission_reports_native_preparation_only_for_known_packets(
 
 @pytest.mark.parametrize("require_feed", [True, False])
 @pytest.mark.parametrize("mismatch,mux_output,failure", [
-    (False, "tmux 3.3.8\r\npsmux 3.3.8 (66cf613 2026-08-18)\r\n", None),
-    (True, "psmux 3.3.8", "copilot"),
-    (False, "tmux 3.3.8\npsmux 3.3.9", "psmux"),
+    (False, "tmux 3.3.8\r\npsmux 3.4.0 (fixture-build)\r\n", None),
+    (True, "psmux 3.4.0", "copilot"),
+    (False, "tmux 3.3.8\npsmux 3.3.8", "psmux"),
+    (False, "tmux 3.3.8\npsmux 3.4.1", "psmux"),
     (False, "tmux 3.3.8", "psmux"),
-    (False, "psmux 3.3.8\npsmux 3.3.8", "psmux"),
-    (False, "psmux 3.3.8-1", "psmux"),
+    (False, "psmux 3.4.0\npsmux 3.4.0", "psmux"),
+    (False, "psmux 3.4.0-1", "psmux"),
 ])
 def test_native_prerequisites_check_disposable_binaries_and_actual_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mismatch: bool,
@@ -432,7 +433,8 @@ def test_foreign_partial_empty_and_skipped_results_never_qualify(mutation: dict[
                 "name": "test_public_embody", "outcome": "passed"}]},
     {"tests": [{"class": "native.test_native_seed_application",
                 "name": "test_public_embody", "outcome": "passed"}] * 2},
-    {"native_prerequisites": {"copilot": "1.0.106", "psmux": "3.3.8"}},
+    {"native_prerequisites": {"copilot": "1.0.106", "psmux": "3.4.0"}},
+    {"native_prerequisites": {"copilot": "1.0.105", "psmux": "3.3.8"}},
     {"phases": []},
 ])
 def test_native_result_requires_actual_caller_and_pinned_prerequisites(
@@ -1258,6 +1260,26 @@ def test_actual_tool_consumer_enforces_explicit_tiers(
     assert {case["outcome"] for case in cases} == {"passed" if explicit else "skipped"}
     assert (tools / "t3-ran").exists() is explicit
     assert (tools / "t4-ran").exists() is explicit
+
+
+def test_native_workflow_pins_match_the_executing_version_validator() -> None:
+    value = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/windows-qualification.yml").read_text("utf-8"),
+    )
+    native = next(step for step in value["jobs"]["windows"]["steps"] if step.get("id") == "native")
+    pins = re.findall(r"Name = '([^']+)';.*?Url = '([^']+)'", native["run"], re.S)
+    assert len(pins) == len(contract.NATIVE_VERSIONS)
+    assert dict(pins) == {
+        "copilot": (
+            "https://github.com/github/copilot-cli/releases/download/v"
+            + contract.NATIVE_VERSIONS["copilot"] + "/copilot-win32-x64.zip"
+        ),
+        "psmux": (
+            "https://github.com/psmux/psmux/releases/download/v"
+            + contract.NATIVE_VERSIONS["psmux"] + "/psmux-v"
+            + contract.NATIVE_VERSIONS["psmux"] + "-windows-x64.zip"
+        ),
+    }
 
 
 def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials() -> None:

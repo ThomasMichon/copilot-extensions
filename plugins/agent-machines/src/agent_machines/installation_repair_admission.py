@@ -104,6 +104,7 @@ def ordinary_environment(
 @dataclass(frozen=True)
 class OwnerBinding:
     installation: PluginInstallation
+    project_root: Path
     source: str
     mode: str
     version: str
@@ -121,13 +122,13 @@ class OwnerBinding:
         return {
             "owner": self.installation.owner_id,
             "source": self.source,
+            "projectRoot": str(self.project_root),
             "sourceFingerprint": self.installation.provenance.source_fingerprint,
             "mode": self.mode,
             "payloadVersion": self.version,
             ("readinessDeclarationDigest" if self.readiness_only else "payloadDigest"): self.content_digest,
             "modeDigest": self.mode_binding,
             "refusal": self.refusal,
-            "projectRoot": self.environment.get("COPILOT_PROJECT_DIR"),
         }
 
 
@@ -223,19 +224,24 @@ def _binding(
     if not isinstance(version, str) or not version or len(version) > 128:
         raise RepairAdmissionError("repair payload version is missing or invalid")
     clean = ordinary_environment(environment, home=home, payload=root)
-    no_provision = payload_environment = None
+    no_provision: str | None = None
+    payload_environment: str | None = None
     invocation = _runtime_declaration(root, manifest)
-    mode, refusal, mode_data = "ordinary", "owner-readonly-protocol-not-declared", {}
+    mode = "ordinary"
+    refusal: str | None = "owner-readonly-protocol-not-declared"
+    mode_data: dict[str, object] = {}
     legacy_root = None
     if invocation is not None:
-        no_provision = invocation.get("noSelfProvisionEnv")
-        payload_environment = invocation.get("payloadRootEnv")
-        if not isinstance(no_provision, str) or not _ENVIRONMENT.fullmatch(no_provision):
+        declared_no_provision = invocation.get("noSelfProvisionEnv")
+        declared_payload_environment = invocation.get("payloadRootEnv")
+        if not isinstance(declared_no_provision, str) or not _ENVIRONMENT.fullmatch(declared_no_provision):
             raise RepairAdmissionError("repair owner has no declared no-self-provision protocol")
-        if payload_environment is not None and (
-            not isinstance(payload_environment, str) or not _ENVIRONMENT.fullmatch(payload_environment)
+        if declared_payload_environment is not None and (
+            not isinstance(declared_payload_environment, str) or not _ENVIRONMENT.fullmatch(declared_payload_environment)
         ):
             raise RepairAdmissionError("repair owner payload-root environment is invalid")
+        no_provision = declared_no_provision
+        payload_environment = declared_payload_environment
         legacy_root = _legacy_root(invocation, home)
         mode_data = context.probe_legacy_entrypoint(
             legacy_root=legacy_root, payload_root=root, plugin_id=installation.plugin_id,
@@ -270,7 +276,7 @@ def _binding(
         if "installerRuntime" in manifest:
             content_digest = digest({"payload": content_digest, "installerRuntime": invocation})
     return OwnerBinding(
-        installation=installation, source=source, mode=mode, version=version,
+        installation=installation, project_root=project_root, source=source, mode=mode, version=version,
         content_digest=content_digest,
         mode_binding=digest(mode_data),
         no_self_provision=no_provision, payload_root_environment=payload_environment,

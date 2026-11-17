@@ -1,15 +1,17 @@
 """Atomic claiming, withdrawal and inspection of extension controls."""
 
 from __future__ import annotations
+import json
 from .owner_membership_signal import commit as commit_membership
 
 from typing import Any
 
-from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON
+from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON, MESSAGE_TARGET_SQL
 from .runtime_custody import RuntimeCustodyError
+from .db_operations import DatabaseOperations
 
 
-class LiveControlsMixin:
+class LiveControlsMixin(DatabaseOperations):
     def claim_live_controls(
         self, session_id: str, now: float, max_age: float, *, readiness_only: bool = False,
         questions_only: bool = False,
@@ -39,6 +41,7 @@ class LiveControlsMixin:
                 ).fetchone()[0]
                 if conn.execute(
                     f"SELECT 1 FROM live_messages WHERE session_id=? AND {selected} "
+                    "AND disposition_json IS NULL "
                     "AND (runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL) LIMIT 1",
                     (session_id,),
                 ).fetchone() is not None:
@@ -48,12 +51,14 @@ class LiveControlsMixin:
                 conn.execute(
                     "UPDATE live_messages SET delivered_at=?, outcome='expired' "
                     f"WHERE session_id=? AND {selected} "
+                    "AND disposition_json IS NULL "
                     "AND delivered_at IS NULL AND claimed_at IS NULL AND created_at < ?",
                     (now, session_id, now - max_age),
                 )
                 rows = [dict(r) for r in conn.execute(
                     "SELECT * FROM live_messages WHERE session_id=? "
                     f"AND {selected} AND delivered_at IS NULL "
+                    "AND disposition_json IS NULL "
                     "AND claimed_at IS NULL ORDER BY id ASC",
                     (session_id,),
                 ).fetchall()]
@@ -80,6 +85,7 @@ class LiveControlsMixin:
             "UPDATE live_messages SET delivered_at=?, outcome='withdrawn' "
             f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%' "
             "AND delivered_at IS NULL AND claimed_at IS NULL "
+            "AND disposition_json IS NULL "
             "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
             (now, session_id, session_id, control_id),
         )
@@ -89,10 +95,17 @@ class LiveControlsMixin:
         self, session_id: str, control_id: int, *, include_body: bool = False,
     ) -> dict[str, Any] | None:
         """A control's ``claimed_at`` and ``outcome`` (``None`` if unknown)."""
-        columns = "claimed_at, outcome, kind, body" if include_body else "claimed_at, outcome"
+        columns = "claimed_at, outcome, disposition_json, kind, body" if include_body else "claimed_at, outcome, disposition_json"
         rows = self.execute_read(
             f"SELECT {columns} FROM live_messages "
-            f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%'",
-            (session_id, session_id, control_id),
+            f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=? AND kind LIKE 'control:%'",
+            (session_id, session_id, session_id, control_id),
         )
-        return dict(rows[0]) if rows else None
+        if not rows:
+            return None
+        result = dict(rows[0])
+        if result.get("disposition_json") is None:
+            result.pop("disposition_json", None)
+        elif json.loads(result["disposition_json"])["state"] == "rejected":
+            result["outcome"] = "rejected"
+        return result

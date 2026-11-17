@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 import copy
 import json
 import multiprocessing
@@ -17,14 +18,15 @@ from agent_dispatch import bridge, embody, ordinary_assignment, ordinary_bridge
 from agent_dispatch.acquisition_receipts import validate_start
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.ordinary_agent_storage import reservation_native_facts
-from agent_dispatch.queue import TaskError, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_records import TaskError
 
 pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
 
 
 @pytest.fixture
-def assigned(tmp_path, monkeypatch, request):
-    queue = TaskQueue(tmp_path / "tasks.db")
+def assigned(tmp_path: Any, monkeypatch: Any, request: Any) -> Any:
+    queue: Any = TaskQueue(tmp_path / "tasks.db")
     task = queue.create("review", repo="queue-lane", exclusive_key="review-slot",
                         **getattr(request, "param", {}))
     reservation, _ = queue.reserve_spawn(task.id, reserved_by="supervisor", driver="ordinary-bridge")
@@ -61,34 +63,34 @@ def assigned(tmp_path, monkeypatch, request):
     calls = []
 
     class Client:
-        def pool_placement_contract(self):
+        def pool_placement_contract(self: Any) -> Any:
             from agent_dispatch.queue_pool_placement import pool_placement_contract
             return pool_placement_contract()
 
-        def get(self, task_id):
+        def get(self: Any, task_id: Any) -> Any:
             return asdict(queue.get(task_id))
 
-        def get_reservation(self, key):
+        def get_reservation(self: Any, key: Any) -> Any:
             return {
                 **asdict(queue.get_reservation(key)),
                 "legacy_acquisition": ordinary_bridge.legacy_bound(queue, task.id, "worktree-a"),
                 **reservation_native_facts(queue, key),
             }
 
-        def record_spawn_allocation(self, key, project, **kwargs):
+        def record_spawn_allocation(self: Any, key: Any, project: Any, **kwargs: Any) -> Any:
             if kwargs:
                 calls.append("writer-intent")
             return asdict(queue.record_spawn_allocation(key, project, **kwargs))
 
-        def record_created_agent(self, key, **facts):
+        def record_created_agent(self: Any, key: Any, **facts: Any) -> Any:
             calls.append("created-store")
             return asdict(ordinary_bridge.record_created_agent(queue, key, **facts))
 
-        def record_resumed_agent(self, key, **facts):
+        def record_resumed_agent(self: Any, key: Any, **facts: Any) -> Any:
             calls.append("resumed-store")
             return asdict(ordinary_bridge.record_resumed_agent(queue, key, **facts))
 
-    def run(argv, **kwargs):
+    def run(argv: Any, **kwargs: Any) -> Any:
         if argv[0] == "ground":
             assert argv == [
                 "ground", "--project", "execution-project", "record",
@@ -102,7 +104,7 @@ def assigned(tmp_path, monkeypatch, request):
         assert argv[0] == "bridge" and argv[1] == "--json"
         command = argv[2]
         calls.append("receipt" if "--receipt-only" in argv else command)
-        requirement = snapshot.get("_writer_requirement")
+        requirement: Any = snapshot.get("_writer_requirement")
         if command == "version":
             assert argv == ["bridge", "--json", "version", "--contracts-json"]
             return subprocess.CompletedProcess(argv, 0, json.dumps({
@@ -203,7 +205,7 @@ def assigned(tmp_path, monkeypatch, request):
     monkeypatch.setattr(ordinary_assignment, "agent_worktrees_launch_prefix", lambda: ["ground"])
     projects = {"execution-project": worktree_path, "changed-routing": worktree_path}
 
-    def resolve_workspace(worktree_id, *, project=None, timeout=None):
+    def resolve_workspace(worktree_id: Any, *, project: Any=None, timeout: Any=None) -> Any:
         assert worktree_id == "worktree-a"
         return {"path": projects[project]}
 
@@ -216,7 +218,7 @@ def assigned(tmp_path, monkeypatch, request):
     return queue, snapshot, Client(), record, response, calls
 
 
-def _qualified_start(assigned, *, explicit=True):
+def _qualified_start(assigned: Any, *, explicit: Any=True) -> Any:
     _, task, client, _, _, _ = assigned
     return ordinary_bridge.start(
         task, client=client, agent="local", project="execution-project", prompt="assigned work",
@@ -225,12 +227,12 @@ def _qualified_start(assigned, *, explicit=True):
 
 
 @pytest.mark.parametrize("support", [None, []])
-def test_qualified_create_requires_executing_cli_resume_support(assigned, monkeypatch, support):
+def test_qualified_create_requires_executing_cli_resume_support(assigned: Any, monkeypatch: Any, support: Any) -> None:
     queue, task, _, _, _, calls = assigned
     _required_writer(assigned)
     original = ordinary_bridge.subprocess.run
 
-    def unsupported(argv, **kwargs):
+    def unsupported(argv: Any, **kwargs: Any) -> Any:
         result = original(argv, **kwargs)
         if argv[0] == "bridge" and argv[2] == "version":
             value = json.loads(result.stdout)
@@ -248,7 +250,7 @@ def test_qualified_create_requires_executing_cli_resume_support(assigned, monkey
     assert queue.get_reservation(task["spawn_reservation_key"]).agent_info is None
 
 
-def _required_writer(assigned):
+def _required_writer(assigned: Any) -> Any:
     _, task, _, record, _, _ = assigned
     record.update(last_session_id=None, session_count=0)
     task["_writer_requirement"] = {
@@ -257,7 +259,9 @@ def _required_writer(assigned):
     }
 
 
-def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_journal(assigned):
+def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_journal(
+    assigned: Any, monkeypatch: Any,
+) -> None:
     queue, task, _, _, response, calls = assigned
     _required_writer(assigned)
     first = _qualified_start(assigned)
@@ -270,13 +274,13 @@ def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_jou
     response["status"] = "stopped"
     original = ordinary_bridge.subprocess.run
 
-    def resume(argv, **kwargs):
+    def resume(argv: Any, **kwargs: Any) -> Any:
         result = original(argv, **kwargs)
         if argv[0] == "bridge" and argv[2] == "resume":
             response["status"] = "idle"
         return result
 
-    ordinary_bridge.subprocess.run = resume
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", resume)
     _qualified_start(assigned, explicit=False)
     assert "create" not in calls and "version" not in calls
     assert calls.count("resume") == 1 and calls.count("send") == 1
@@ -286,7 +290,7 @@ def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_jou
 
 
 @pytest.mark.parametrize("change", ["drop", "replace", "nonce"])
-def test_qualified_ordinary_storage_cannot_drop_or_replace_requirement(assigned, change):
+def test_qualified_ordinary_storage_cannot_drop_or_replace_requirement(assigned: Any, change: Any) -> None:
     from agent_dispatch.ordinary_agent_storage import record_created_agent
     queue, task, _, record, _, _ = assigned
     _required_writer(assigned)
@@ -308,26 +312,26 @@ def test_qualified_ordinary_storage_cannot_drop_or_replace_requirement(assigned,
     assert asdict(queue.get_reservation(key)) == before
 
 
-def test_qualified_ordinary_does_not_resume_a_journalless_head(assigned):
+def test_qualified_ordinary_does_not_resume_a_journalless_head(assigned: Any, monkeypatch: Any) -> None:
     _, _, _, record, _, calls = assigned
     _required_writer(assigned)
     record.update(last_session_id="native-a", session_count=1)
     original = ordinary_bridge.subprocess.run
 
-    def missing(argv, **kwargs):
+    def missing(argv: Any, **kwargs: Any) -> Any:
         if argv[0] == "bridge" and argv[2] == "create":
             calls.append("refused-create")
             return subprocess.CompletedProcess(argv, 1, "", "original keyed writer unavailable")
         return original(argv, **kwargs)
 
-    ordinary_bridge.subprocess.run = missing
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", missing)
     with pytest.raises(bridge.BridgeCarriedSessionBusy, match="original keyed writer unavailable"):
         _qualified_start(assigned)
     assert "refused-create" in calls and "resume" not in calls and "send" not in calls
 
 
 @pytest.mark.parametrize("versions", [None, [], [True], [0]])
-def test_qualified_ordinary_refuses_older_coordinator_before_owner_or_native_effects(assigned, versions):
+def test_qualified_ordinary_refuses_older_coordinator_before_owner_or_native_effects(assigned: Any, versions: Any) -> None:
     queue, task, client, _, _, calls = assigned
     _required_writer(assigned)
     before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
@@ -340,14 +344,14 @@ def test_qualified_ordinary_refuses_older_coordinator_before_owner_or_native_eff
 @pytest.mark.parametrize("explicit", [False, True])
 @pytest.mark.parametrize("selector_changed", [False, True])
 def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_resume(
-    assigned, explicit, selector_changed,
-):
+    assigned: Any, explicit: Any, selector_changed: Any, monkeypatch: Any,
+) -> None:
     queue, task, _, record, _, calls = assigned
     _required_writer(assigned)
     original = ordinary_bridge.subprocess.run
     keys = []
 
-    def interrupted(argv, **kwargs):
+    def interrupted(argv: Any, **kwargs: Any) -> Any:
         result = original(argv, **kwargs)
         if argv[0] == "bridge" and argv[2] == "create":
             keys.append(argv[argv.index("--creation-key") + 1])
@@ -355,7 +359,7 @@ def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_
                 raise subprocess.TimeoutExpired(argv, 1)
         return result
 
-    ordinary_bridge.subprocess.run = interrupted
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", interrupted)
     with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
         _qualified_start(assigned)
     retained = queue.get_reservation(task["spawn_reservation_key"])
@@ -372,7 +376,7 @@ def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_
 
 
 @pytest.mark.parametrize("change", ["identity", "nonce", "drop"])
-def test_allocation_writer_intent_survives_omission_and_refuses_replacement(assigned, change):
+def test_allocation_writer_intent_survives_omission_and_refuses_replacement(assigned: Any, change: Any) -> None:
     queue, task, client, _, _, _ = assigned
     _required_writer(assigned)
     requirement = task["_writer_requirement"]
@@ -393,7 +397,7 @@ def test_allocation_writer_intent_survives_omission_and_refuses_replacement(assi
         assert asdict(queue.get_reservation(key)) == before
 
 
-def test_original_allocation_retry_carries_requirement_before_agent_facts_exist(assigned):
+def test_original_allocation_retry_carries_requirement_before_agent_facts_exist(assigned: Any) -> None:
     queue, task, client, _, _, _ = assigned
     _required_writer(assigned)
     key = task["spawn_reservation_key"]
@@ -408,7 +412,7 @@ def test_original_allocation_retry_carries_requirement_before_agent_facts_exist(
     assert retry.agent_info is None
 
 
-def test_qualified_ordinary_refuses_retrofit_of_historical_unpinned_agent(assigned):
+def test_qualified_ordinary_refuses_retrofit_of_historical_unpinned_agent(assigned: Any) -> None:
     queue, task, _, _, _, calls = assigned
     _start(assigned)
     before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
@@ -422,7 +426,7 @@ def test_qualified_ordinary_refuses_retrofit_of_historical_unpinned_agent(assign
     assert not calls and asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
 
 
-def test_governed_ordinary_storage_refuses_older_unqualified_caller(assigned):
+def test_governed_ordinary_storage_refuses_older_unqualified_caller(assigned: Any) -> None:
     from agent_dispatch.ordinary_agent_storage import record_resumed_agent
     queue, task, _, record, _, _ = assigned
     _start(assigned)
@@ -439,7 +443,9 @@ def test_governed_ordinary_storage_refuses_older_unqualified_caller(assigned):
 
 
 @pytest.mark.parametrize("change", ["journal", "native", "instance", "nonce"])
-def test_qualified_ordinary_refusal_retains_created_handle_without_resume_or_send(assigned, change):
+def test_qualified_ordinary_refusal_retains_created_handle_without_resume_or_send(
+    assigned: Any, change: Any, monkeypatch: Any,
+) -> None:
     queue, task, _, _, _, calls = assigned
     _required_writer(assigned)
     _qualified_start(assigned)
@@ -447,7 +453,7 @@ def test_qualified_ordinary_refusal_retains_created_handle_without_resume_or_sen
     calls.clear()
     original = ordinary_bridge.subprocess.run
 
-    def changed(argv, **kwargs):
+    def changed(argv: Any, **kwargs: Any) -> Any:
         result = original(argv, **kwargs)
         if "--worktree-writer" not in argv:
             return result
@@ -463,14 +469,14 @@ def test_qualified_ordinary_refusal_retains_created_handle_without_resume_or_sen
             observed["worktree_writer"]["creation_nonce"] = "changed"
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
-    ordinary_bridge.subprocess.run = changed
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", changed)
     with pytest.raises(bridge.BridgeCarriedSessionBusy, match="resume failed"):
         _qualified_start(assigned, explicit=False)
     assert "create" not in calls and "resume" not in calls and "send" not in calls
     assert asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
 
 
-def _legacy(queue, task, *, native="native-a", handle="legacy-bridge"):
+def _legacy(queue: Any, task: Any, *, native: Any="native-a", handle: Any="legacy-bridge") -> Any:
     key = task["spawn_reservation_key"]
     with queue._connect() as conn:
         conn.execute("UPDATE spawn_reservations SET session_handle=? WHERE key=?",
@@ -483,7 +489,7 @@ def _legacy(queue, task, *, native="native-a", handle="legacy-bridge"):
         )
 
 
-def _start(assigned):
+def _start(assigned: Any) -> Any:
     _, task, client, _, _, _ = assigned
     return ordinary_bridge.start(
         task, client=client, agent="local", project="changed-routing", prompt="assigned work",
@@ -491,7 +497,7 @@ def _start(assigned):
 
 
 @pytest.mark.parametrize("change", ["prompt", "omitted", "unknown-history", "selection"])
-def test_resumed_storage_cannot_replace_or_erase_frozen_intent(assigned, change):
+def test_resumed_storage_cannot_replace_or_erase_frozen_intent(assigned: Any, change: Any) -> None:
     from agent_dispatch.ordinary_agent_storage import record_resumed_agent
     queue, task, _, record, _, _ = assigned
     _start(assigned)
@@ -519,7 +525,7 @@ def test_resumed_storage_cannot_replace_or_erase_frozen_intent(assigned, change)
     assert asdict(queue.get_reservation(key)) == before
 
 
-def test_resumed_storage_refreshes_only_mutable_session_info_with_same_intent(assigned):
+def test_resumed_storage_refreshes_only_mutable_session_info_with_same_intent(assigned: Any) -> None:
     from agent_dispatch.ordinary_agent_storage import record_resumed_agent
     queue, task, _, record, _, _ = assigned
     _start(assigned)
@@ -530,12 +536,13 @@ def test_resumed_storage_refreshes_only_mutable_session_info_with_same_intent(as
         queue, key, task_generation=0, session_info=info, worktree_record=record,
         startup_invocation=before.agent_info["startup_invocation"],
     )
+    assert refreshed.agent_info is not None
     assert refreshed.agent_info["startup_invocation"] == before.agent_info["startup_invocation"]
     assert refreshed.agent_info["liveness"] == "active"
     assert refreshed.agent_info["turn_count"] == 1
 
 
-def test_resumed_g0_receipt_read_survives_real_g1_claim_without_owner_or_ready_writes(assigned, monkeypatch):
+def test_resumed_g0_receipt_read_survives_real_g1_claim_without_owner_or_ready_writes(assigned: Any, monkeypatch: Any) -> None:
     queue, task, client, _, _, calls = assigned
     first = _start(assigned)
     claimed = queue.claim_one("worker", task_id=task["id"])
@@ -543,13 +550,13 @@ def test_resumed_g0_receipt_read_survives_real_g1_claim_without_owner_or_ready_w
     before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
     calls.clear()
 
-    def forbidden(*_args, **_kwargs):
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("historical receipt read may not refresh ownership/readiness")
 
     monkeypatch.setattr(client, "record_resumed_agent", forbidden)
     monkeypatch.setattr(client, "record_spawn_allocation", forbidden)
 
-    def receipt(argv, **kwargs):
+    def receipt(argv: Any, **kwargs: Any) -> Any:
         assert argv[0] == "bridge" and "--receipt-only" in argv
         assert json.loads(kwargs["input"])["binding"]["admission_generation"] == 0
         calls.append("receipt")
@@ -566,7 +573,7 @@ def test_resumed_g0_receipt_read_survives_real_g1_claim_without_owner_or_ready_w
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-def test_ordinary_assignment_resumes_same_native_before_one_send(assigned, legacy):
+def test_ordinary_assignment_resumes_same_native_before_one_send(assigned: Any, legacy: Any) -> None:
     queue, task, _, _, response, calls = assigned
     if legacy:
         _legacy(queue, task)
@@ -592,7 +599,7 @@ def test_ordinary_assignment_resumes_same_native_before_one_send(assigned, legac
             validate_start(conn, queue.get(task["id"]), "wrong-native", None)
 
 
-def test_ordinary_assignment_same_legacy_bridge_handle_is_retained(assigned):
+def test_ordinary_assignment_same_legacy_bridge_handle_is_retained(assigned: Any) -> None:
     queue, task, _, _, _, calls = assigned
     _legacy(queue, task, handle="bridge-a")
     with pytest.raises(bridge.BridgeCarriedSessionBusy, match="immutable ordinary invocation"):
@@ -601,7 +608,7 @@ def test_ordinary_assignment_same_legacy_bridge_handle_is_retained(assigned):
     assert queue.get_reservation(task["spawn_reservation_key"]).session_handle == "local-body:bridge-a"
 
 
-def test_ordinary_assignment_positive_sessionless_creation_keeps_original_key(assigned):
+def test_ordinary_assignment_positive_sessionless_creation_keeps_original_key(assigned: Any) -> None:
     queue, task, _, record, _, calls = assigned
     record.update(last_session_id=None, session_count=0)
     with queue._connect() as conn:
@@ -621,7 +628,7 @@ def test_ordinary_assignment_positive_sessionless_creation_keeps_original_key(as
     {"repo": "foreign-project"}, {"id": "other-worktree"},
     {"dispatch_attempt": {"task_id": "foreign-task"}},
 ])
-def test_ordinary_assignment_unproven_owner_never_resumes_or_creates(assigned, change):
+def test_ordinary_assignment_unproven_owner_never_resumes_or_creates(assigned: Any, change: Any) -> None:
     _, _, _, record, _, calls = assigned
     record.update(change)
     with pytest.raises(bridge.BridgeCarriedSessionBusy):
@@ -629,7 +636,7 @@ def test_ordinary_assignment_unproven_owner_never_resumes_or_creates(assigned, c
     assert calls == ["record"]
 
 
-def test_ordinary_assignment_legacy_native_mismatch_refuses_before_resume(assigned):
+def test_ordinary_assignment_legacy_native_mismatch_refuses_before_resume(assigned: Any) -> None:
     queue, task, _, _, _, calls = assigned
     _legacy(queue, task, native="another-native")
     with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
@@ -639,8 +646,8 @@ def test_ordinary_assignment_legacy_native_mismatch_refuses_before_resume(assign
 
 @pytest.mark.parametrize("retirement_requested", [False, True])
 def test_ordinary_assignment_distinguishes_released_exclusivity_from_native_retirement(
-    assigned, retirement_requested,
-):
+    assigned: Any, retirement_requested: Any,
+) -> None:
     queue, task, _, _, _, calls = assigned
     _start(assigned)
     calls.clear()
@@ -667,8 +674,8 @@ def test_ordinary_assignment_distinguishes_released_exclusivity_from_native_reti
 
 @pytest.mark.parametrize("old_retired", [False, True])
 def test_ordinary_assignment_current_head_respects_unretired_not_retired_old_natives(
-    assigned, old_retired,
-):
+    assigned: Any, old_retired: Any,
+) -> None:
     queue, task, _, record, response, calls = assigned
     _legacy(queue, task)
     with queue._connect() as conn:
@@ -703,12 +710,12 @@ def test_ordinary_assignment_current_head_respects_unretired_not_retired_old_nat
 
 @pytest.mark.parametrize("version", [True, 1.0, None, "1", 2])
 def test_ordinary_assignment_rejects_incompatible_exact_owner_envelope(
-    assigned, monkeypatch, version,
-):
+    assigned: Any, monkeypatch: Any, version: Any,
+) -> None:
     queue, task, _, record, _, calls = assigned
     original = ordinary_bridge.subprocess.run
 
-    def incompatible(argv, **kwargs):
+    def incompatible(argv: Any, **kwargs: Any) -> Any:
         if argv[0] == "ground":
             calls.append("record")
             return subprocess.CompletedProcess(
@@ -725,8 +732,8 @@ def test_ordinary_assignment_rejects_incompatible_exact_owner_envelope(
 
 @pytest.mark.parametrize("missing_project", [False, True])
 def test_ordinary_assignment_reconciles_missing_metadata_from_exact_current_owner(
-    assigned, monkeypatch, missing_project,
-):
+    assigned: Any, monkeypatch: Any, missing_project: Any,
+) -> None:
     queue, task, _, record, _, calls = assigned
     _legacy(queue, task)
     with queue._connect() as conn:
@@ -745,7 +752,7 @@ def test_ordinary_assignment_reconciles_missing_metadata_from_exact_current_owne
 
 
 @pytest.mark.parametrize("flag", ["sessions_indexed", "execution_leg_opaque", "session_backend_opaque"])
-def test_ordinary_assignment_unknown_history_flags_never_create(assigned, flag):
+def test_ordinary_assignment_unknown_history_flags_never_create(assigned: Any, flag: Any) -> None:
     _, _, _, record, _, calls = assigned
     record.update(last_session_id=None, session_count=0)
     record[flag] = False if flag == "sessions_indexed" else True
@@ -755,8 +762,8 @@ def test_ordinary_assignment_unknown_history_flags_never_create(assigned, flag):
 
 
 def test_ordinary_assignment_failed_namespace_lookup_does_not_bind_missing_history(
-    assigned, monkeypatch,
-):
+    assigned: Any, monkeypatch: Any,
+) -> None:
     queue, task, _, _, _, calls = assigned
     with queue._connect() as conn:
         conn.execute(
@@ -764,7 +771,7 @@ def test_ordinary_assignment_failed_namespace_lookup_does_not_bind_missing_histo
             (task["spawn_reservation_key"],),
         )
 
-    def missing_owner(argv, **kwargs):
+    def missing_owner(argv: Any, **kwargs: Any) -> Any:
         assert argv[0] == "ground"
         calls.append("record")
         return subprocess.CompletedProcess(argv, 1, "", "exact record unavailable")
@@ -779,7 +786,7 @@ def test_ordinary_assignment_failed_namespace_lookup_does_not_bind_missing_histo
 
 
 @pytest.mark.parametrize("ownership", ["created", "reused", "targeted"])
-def test_ordinary_assignment_preserves_original_workspace_ownership(assigned, ownership):
+def test_ordinary_assignment_preserves_original_workspace_ownership(assigned: Any, ownership: Any) -> None:
     queue, task, _, _, _, _ = assigned
     with queue._connect() as conn:
         conn.execute(
@@ -790,7 +797,7 @@ def test_ordinary_assignment_preserves_original_workspace_ownership(assigned, ow
     assert queue.get_reservation(task["spawn_reservation_key"]).worktree_ownership == ownership
 
 
-def test_ordinary_fresh_creation_does_not_claim_bridge_workspace_ownership(assigned):
+def test_ordinary_fresh_creation_does_not_claim_bridge_workspace_ownership(assigned: Any) -> None:
     queue, _, _, record, _, _ = assigned
     task = queue.create("new assignment", repo="queue-lane")
     reservation, _ = queue.reserve_spawn(task.id, driver="ordinary-bridge")
@@ -813,7 +820,7 @@ def test_ordinary_fresh_creation_does_not_claim_bridge_workspace_ownership(assig
     {"status": "running"}, {"read_only": True}, {"at_rest": None}, {"liveness": "unknown"},
     {"ready": True},
 ])
-def test_ordinary_assignment_resume_facts_must_be_actual_and_exact(assigned, change):
+def test_ordinary_assignment_resume_facts_must_be_actual_and_exact(assigned: Any, change: Any) -> None:
     queue, task, _, _, response, calls = assigned
     response.update(change)
     with pytest.raises(bridge.BridgeCarriedSessionBusy):
@@ -822,11 +829,11 @@ def test_ordinary_assignment_resume_facts_must_be_actual_and_exact(assigned, cha
     assert queue.get_reservation(task["spawn_reservation_key"]).agent_info is None
 
 
-def test_ordinary_assignment_resume_failure_never_falls_back_to_create(assigned, monkeypatch):
+def test_ordinary_assignment_resume_failure_never_falls_back_to_create(assigned: Any, monkeypatch: Any) -> None:
     _, _, _, _, _, calls = assigned
     original = ordinary_bridge.subprocess.run
 
-    def failed(argv, **kwargs):
+    def failed(argv: Any, **kwargs: Any) -> Any:
         if argv[0] == "bridge":
             calls.append("resume")
             return subprocess.CompletedProcess(argv, 69, "", "native history is unproven")
@@ -839,11 +846,11 @@ def test_ordinary_assignment_resume_failure_never_falls_back_to_create(assigned,
 
 
 @pytest.mark.parametrize("change", ["hold", "owner", "generation", "release", "retirement", "exclusive"])
-def test_ordinary_assignment_rechecks_fences_before_first_prompt(assigned, monkeypatch, change):
+def test_ordinary_assignment_rechecks_fences_before_first_prompt(assigned: Any, monkeypatch: Any, change: Any) -> None:
     queue, task, _, _, _, calls = assigned
     original = ordinary_bridge.subprocess.run
 
-    def changed(argv, **kwargs):
+    def changed(argv: Any, **kwargs: Any) -> Any:
         result = original(argv, **kwargs)
         if argv[0] == "bridge" and argv[2] == "resume":
             if change == "hold":
@@ -867,7 +874,7 @@ def test_ordinary_assignment_rechecks_fences_before_first_prompt(assigned, monke
     assert "send" not in calls and "create" not in calls
 
 
-def test_ordinary_assignment_foreign_reservation_refuses_before_native_effects(assigned):
+def test_ordinary_assignment_foreign_reservation_refuses_before_native_effects(assigned: Any) -> None:
     queue, _, _, _, _, calls = assigned
     other = queue.create("other", repo="queue-lane")
     reservation, _ = queue.reserve_spawn(other.id, driver="ordinary-bridge")
@@ -877,7 +884,7 @@ def test_ordinary_assignment_foreign_reservation_refuses_before_native_effects(a
     assert not calls
 
 
-def test_ordinary_assignment_held_task_refuses_before_native_effects(assigned):
+def test_ordinary_assignment_held_task_refuses_before_native_effects(assigned: Any) -> None:
     queue, task, _, _, _, calls = assigned
     queue.set_hold(task["id"], reason="operator", actor="operator")
     with pytest.raises(bridge.BridgeCarriedSessionBusy, match="admission fence"):
@@ -885,7 +892,7 @@ def test_ordinary_assignment_held_task_refuses_before_native_effects(assigned):
     assert not calls
 
 
-def _record_same_agent(db_path, key, generation, info, record, barrier, results):
+def _record_same_agent(db_path: Any, key: Any, generation: Any, info: Any, record: Any, barrier: Any, results: Any) -> Any:
     queue = TaskQueue(db_path)
     barrier.wait(timeout=15)
     result = ordinary_bridge.record_resumed_agent(
@@ -894,7 +901,7 @@ def _record_same_agent(db_path, key, generation, info, record, barrier, results)
     results.put((result.session_handle, result.agent_info))
 
 
-def test_ordinary_assignment_concurrent_native_recording_is_idempotent(assigned):
+def test_ordinary_assignment_concurrent_native_recording_is_idempotent(assigned: Any) -> None:
     queue, task, _, record, response, _ = assigned
     ctx = multiprocessing.get_context("spawn")
     barrier, results = ctx.Barrier(3), ctx.Queue()
@@ -922,11 +929,11 @@ def test_ordinary_assignment_concurrent_native_recording_is_idempotent(assigned)
         results.join_thread()
 
 
-def test_ordinary_assignment_resumed_client_route_and_raw_facts(assigned):
+def test_ordinary_assignment_resumed_client_route_and_raw_facts(assigned: Any) -> None:
     queue, task, _, record, response, _ = assigned
     api = TestClient(create_app_for(queue))
 
-    def exchange(request):
+    def exchange(request: Any) -> Any:
         result = api.request(request.method, str(request.url), content=request.content,
                              headers=dict(request.headers))
         return httpx.Response(result.status_code, json=result.json())
@@ -944,13 +951,13 @@ def test_ordinary_assignment_resumed_client_route_and_raw_facts(assigned):
         api.close()
 
 
-def test_qualified_allocation_requirement_uses_actual_client_and_provider_before_create(assigned):
-    from agent_dispatch.client import DispatchError
+def test_qualified_allocation_requirement_uses_actual_client_and_provider_before_create(assigned: Any) -> None:
+    from agent_dispatch.client_errors import DispatchError
     queue, task, _, _, _, _ = assigned
     _required_writer(assigned)
     api = TestClient(create_app_for(queue))
 
-    def exchange(request):
+    def exchange(request: Any) -> Any:
         result = api.request(request.method, str(request.url), content=request.content,
                              headers=dict(request.headers))
         return httpx.Response(result.status_code, json=result.json())
@@ -979,6 +986,6 @@ def test_qualified_allocation_requirement_uses_actual_client_and_provider_before
         api.close()
 
 
-def create_app_for(queue):
+def create_app_for(queue: Any) -> Any:
     from agent_dispatch.coordinator import create_app
     return create_app(queue, enable_mcp=False)

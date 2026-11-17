@@ -5,25 +5,47 @@ import argparse
 import json
 import os
 from pathlib import Path
+from collections.abc import Callable
+from types import ModuleType
+from typing import Protocol, cast
 
 import bridge_http52_evidence as evidence
 import capture_bridge_http48 as common
+from bridge_capture_progress import observe
 
 
-def run_probes(root: Path, proof: dict, vector: dict) -> dict:
-    return common.run_probes(
-        root, proof, vector, evidence=evidence,
-        expected_roles=frozenset({"cli", "record-writer", "roster-source"}),
-        isolated_probes=frozenset({
-            "test_retained_acquisition_and_later_lineage_use_actual_owner_processes",
-            "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim",
-        }),
-        aggregate_timeout=1200 if os.name == "nt" else 240,
-    )
+class ProbeRunner(Protocol):
+    def __call__(
+        self, root: Path, proof: dict[str, object], vector: dict[str, object], *,
+        evidence: ModuleType, expected_roles: frozenset[str],
+        isolated_probes: frozenset[str], aggregate_timeout: float,
+    ) -> dict[str, object]: ...
+
+
+class CaptureRunner(Protocol):
+    def __call__(
+        self, root: Path, commit: str, *, write: bool, evidence: ModuleType,
+        probe_runner: Callable[[Path, dict[str, object], dict[str, object]], dict[str, object]],
+    ) -> dict[str, bytes]: ...
+
+
+def run_probes(root: Path, proof: dict[str, object], vector: dict[str, object]) -> dict[str, object]:
+    with observe(root):
+        return cast(ProbeRunner, common.run_probes)(
+            root, proof, vector, evidence=evidence,
+            expected_roles=frozenset({"cli", "record-writer", "roster-source"}),
+            isolated_probes=frozenset({
+                "test_retained_acquisition_and_later_lineage_use_actual_owner_processes",
+                "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim",
+            }),
+            aggregate_timeout=1200 if os.name == "nt" else 240,
+        )
 
 
 def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]:
-    return common.capture(root, commit, write=write, evidence=evidence, probe_runner=run_probes)
+    return cast(CaptureRunner, common.capture)(
+        root, commit, write=write, evidence=evidence, probe_runner=run_probes,
+    )
 
 
 if __name__ == "__main__":

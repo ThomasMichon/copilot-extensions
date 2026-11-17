@@ -1,5 +1,5 @@
 import { createConnection } from "node:net";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { existsSync } from "node:fs";
 import { createHeadedAdapter } from "./acp-adapter.mjs";
 
 const binding = JSON.parse(process.env.COPILOT_DRIVER_HEADED_BINDING || "null");
@@ -12,6 +12,12 @@ if (!binding || binding.version !== 1 || !Number.isInteger(binding.port) ||
 }
 
 // No tools, permission callback, hooks or environment-access declarations.
+const { loadExtensionSdk } = await import(
+  existsSync(new URL("./sdk-compat.mjs", import.meta.url))
+    ? new URL("./sdk-compat.mjs", import.meta.url).href
+    : new URL("../bridge_extension/sdk-compat.mjs", import.meta.url).href
+);
+const { joinSession } = await loadExtensionSdk();
 const session = await joinSession();
 if (session.sessionId !== binding.sessionId) throw new Error("Native session binding changed");
 const socket = createConnection({ host: "127.0.0.1", port: binding.port });

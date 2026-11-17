@@ -69,6 +69,17 @@ details.
 
 ### Send a Prompt to an Agent
 
+Use `targets --json` to list the union of active Session Host/extension
+registrations and discovered workspaces, including workspaces without a
+Bridge row. `targets --refresh` refreshes workspace discovery; `sessions`
+remains the legacy managed-session list. Source availability is retained in
+the target response. Workspace-handle reads hydrate missing metadata without
+starting a native conversation. Raw sends to a dormant managed target require
+an explicit `resume <worktree-id>` first; they return `resume_required` rather
+than silently resuming it. See
+[metadata-only target lookup](../../../docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup)
+for compatibility and held-owner outcomes.
+
 ```bash
 # Reuse this caller's session for the agent (resumes it if stopped),
 # or start one if none exists, then send a prompt (streams response)

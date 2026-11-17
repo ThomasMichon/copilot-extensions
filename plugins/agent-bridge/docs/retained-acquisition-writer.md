@@ -424,12 +424,95 @@ present birth records and qualified handoff successors retain their ordinary
 paths. Source tests cover lost replies and concurrent retries against the real
 resume front door without a second native load.
 
-This provider integration does not itself implement the complete target union,
-ordinary lazy lookup hydration, Dispatch control-identity migration, assignment
-delivery or affirmative worker task acceptance. Those consumers must negotiate
-their required receiving semantics independently. Neither source controls nor
-a successful resume prove a new native turn, task `STARTED`, closeout or
-installed recovery.
+The executing CLI advertises `exact-session-absence` for full JSON status.
+An exact session's 404 returns a typed `refused_unavailable` result naming
+`native_session_unavailable` and the target, retaining exit status 1. Other
+failures and compact status keep their existing behavior; transport failure is
+not session absence.
+
+`retained_keyed_native_admission: 1` advertises that a later keyed prompt
+re-enters the original creation writer through its existing continuation owner.
+The exact resumed workspace/head check and prompt admission share that compatible
+writer context; they do not substitute the currently selected default writer.
+Receipt-only observation and an already-retained receipt remain non-mutating
+and do not need to reconstruct the writer. This capability admits no old key
+into an adopted epoch and does not replace the caller's current task admission.
+
+The additional continuation scope applies to fresh **resumed** keyed admissions,
+not initial created-session admissions. Each such send selects/qualifies its
+compatible writer once and verifies the exact workspace/head; it adds one
+capability read and one workspace record/head pair to the existing resumed
+admission checks. These are bounded owner commands, not repository/history
+scans or per-token callbacks. A completed receipt and receipt-only observation
+perform no writer selection or native load. Writer evidence is requalified for
+each new mutation rather than cached across possible owner replacement.
+
+Required actor-free work-count controls cover created versus resumed admission,
+receipt misses, retained receipts and accepted-send replay. The selected
+`tests/test_dispatch_retained_resume.py` composition additionally checks that
+lost resume replies and failed pre-commit storage reuse the same native load,
+and that receipt observation does not select a writer again. For reproducible
+model-free cold/retry comparisons, run that file through the repository's
+container runner with `--junit-dir <owned-output-directory>` and compare its
+three named cases on the same source and runner configuration. Those case
+durations include fixture setup and are not native-launch measurements.
+
+Native cold/warm latency is unqualified here. In an authorized retained-native
+pilot, time the ordinary exact-workspace resume command once from stopped state,
+then repeat against the resulting ready control; compare wall time and the
+existing startup diagnostic stages under the same runtime/workspace. Observe
+the persisted current invocation's receipt separately, without resending or
+stopping a live worker to manufacture a cold case. Preserve the pilot's original
+deadline and cleanup owner; a pending/unknown operation is not another sample.
+
+### Target inventory and metadata-only lookup
+
+`agent-bridge targets --json` consumes `target_inventory: 1` and returns the
+typed union of active managed records, live Session Host and extension
+registrations, and every discovered workspace. It retains each source's
+availability and discovery completeness rather than treating an unavailable
+source as empty. `--refresh` requests the existing workspace refresh.
+Legacy `sessions` and its HTTP response remain managed-record listings.
+
+Ordinary workspace-handle `read`, `wait` and raw `send` select this inventory
+before falling through to profile matching. A workspace without a managed
+record uses `worktree_metadata_hydration: 1` to read its authoritative head
+and persist metadata through the original keyed adoption or native-import owner.
+Listing and hydration never load the native conversation, submit a prompt,
+claim a launch gate or accept a task. A dormant managed target refuses raw
+send with `resume_required`; explicitly resume the workspace first. Lost
+hydration responses terminate the CLI, including enclosing handoff-follow
+reconnect loops, with `workspace_hydration_unconfirmed`; they are not replayed.
+Structured owner refusals retain their actual reason rather than becoming an
+inferred missing target.
+
+An unqualified workspace handle requires complete workspace discovery, including
+on the metadata receiver. Once the projection identifies a qualified managed
+record, the CLI reuses that record while it exists. Reading existing history
+does not depend on a new head probe or the absence of a pending handoff.
+Only a missing managed record enters metadata hydration.
+Workspace projections prefer live qualified records over inactive predecessors.
+Handoff following excludes its predecessor and can select another live managed
+record in the same owner/project/path/transport scope without probing a head;
+it never falls backward to older inactive history.
+
+Conflicting workspace owners, unavailable discovery and unresolved registered
+transports refuse instead of creating a replacement profile session. A known
+workspace on an older receiver reports the missing inventory/hydration contract
+before effects. Existing legacy managed-session reads remain supported.
+Explicit provider and venue forms retain their own resolution/admission path
+when an unrelated workspace source is incomplete, on current and older
+receivers. A known unresolved registration still refuses rather than being
+reinterpreted as a provider creation request.
+Owner qualification compares the resolver's actual transport, including local
+loopback and resolved SSH aliases, not the profile's raw host spelling. Cached
+rendering projects that identity from topology without synchronous launch-plugin
+or repository-settings discovery.
+
+Dispatch control-identity migration, assignment delivery and affirmative worker
+task acceptance remain separate consumers. Neither these source controls nor a
+successful resume prove a new native turn, task `STARTED`, closeout or installed
+recovery.
 
 ## Qualification boundary
 

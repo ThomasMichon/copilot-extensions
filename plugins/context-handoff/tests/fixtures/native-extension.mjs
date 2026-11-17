@@ -4,6 +4,8 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
+const tools = session.config.tools.definitions ?? session.config.tools;
+const onPermissionRequest = session.config.permissions?.onRequest ?? session.config.onPermissionRequest;
 const emit = async (type, data = {}, agentId) =>
   session.handlers.get(type)?.({ data, agentId });
 const pressure = {
@@ -15,7 +17,7 @@ assert.equal(session.prompts.length, 1);
 assert.match(session.prompts[0], /Context Handoff -- native/);
 assert.match(session.prompts[0], /offered tools unknown/);
 assert.doesNotMatch(session.logs.join("\n"), /Auto-generating and triggering/);
-assert.equal((await session.config.onPermissionRequest({ kind: "write" })).kind, "approve");
+assert.equal((await onPermissionRequest({ kind: "write" })).kind, "approve");
 await emit("session.context_cleared", { messagesCleared: 8 }, "child");
 await emit("session.usage_info", pressure);
 await emit("session.idle");
@@ -53,7 +55,7 @@ assert.equal(warningCount(), firstWarnings);
 await emit("session.context_cleared", { messagesCleared: 8 });
 await emit("session.usage_info", { ...pressure, currentTokens: 710 });
 assert.equal(warningCount(), firstWarnings + 1);
-const generate = session.config.tools.find((tool) => tool.name === "generate_handoff_prompt");
+const generate = tools.find((tool) => tool.name === "generate_handoff_prompt");
 await generate.handler({}, {});
 await emit("session.context_cleared", { messagesCleared: 8 });
 const beforeManualReset = session.prompts.length;
@@ -119,7 +121,8 @@ const cleared = await generate.handler({ authorization_evidence: "" }, {});
 assert.match(cleared.textResultForLlm, /Not captured -- recover the original/);
 await generate.handler({ authorization_evidence: evidence }, {});
 await import(`${pathToFileURL(process.argv[2]).href}?authorization-reimport`);
-const reimported = globalThis.nativeTestSession.config.tools.find(
+const reimportedConfig = globalThis.nativeTestSession.config;
+const reimported = (reimportedConfig.tools.definitions ?? reimportedConfig.tools).find(
   (tool) => tool.name === "generate_handoff_prompt",
 );
 const afterReimport = await reimported.handler({}, {});

@@ -87,9 +87,13 @@ Legacy `on_output` callbacks share captured storage and run only through
 `deliver()` after `finish()` and producer settlement; they are no longer live
 stdio adapters. This helper does not create keepalive output
 or change the existing generic owned-process timeout policy.
-After retiring its writers, a POSIX caller may use `finish(stop_at_idle=True)`
+After retiring its writers, a caller may use `finish(stop_at_idle=True)`
 to drain available bytes without waiting for EOF from an escaped daemon that
-retained an otherwise idle pipe. This never authorizes killing that daemon.
+retained an otherwise idle pipe. Windows readers use native pipe availability
+before bounded reads, so idle retirement joins the reader without changing
+descriptor flags or waiting for unrelated write handles to close. An idle pipe
+is never process-tree settlement evidence; the Windows installer first confirms
+its strict Job empty. This never authorizes killing an unrelated process.
 
 Importing the synchronous package and portable daemon registry does not load
 `ctypes` or a native library. Platform operations load their native bindings
@@ -213,6 +217,10 @@ access can reach independently granted children below a private directory,
 the provider additionally checks existing bytecode descendants' ownership and
 DACLs. This metadata-only admission stops at 256 entries or 50 ms between
 filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Cache roots and metadata retain exact user ownership. Interpreter-created
+bytecode descendants may also use the current process's TokenOwner when that
+SID is already a trusted privileged writer; this handles elevated Windows
+launchers without admitting a foreign owner or relaxing any DACL check.
 Large Windows caches therefore currently lose reuse rather than bypass
 protection. POSIX private traversal needs no descendant walk.
 macOS additionally reads extended
@@ -1596,7 +1604,8 @@ It composes the helpers above, so its flags never drift from them:
   venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
 - **Escapes caller cleanup.** On Windows, a resident durable daemon
   (`breakaway=True`, the default, outside contained test mode) starts through
-  the WMI durable launch: `Win32_Process.Create` runs a hidden no-Job bootstrap
+  the WMI durable launch: `Win32_Process.Create` runs a hidden bootstrap outside
+  the caller's Jobs
   with the explicit environment block, cwd and log destinations (WMI inherits
   nothing), which creates the daemon suspended, pins PID and creation time,
   hands a process handle back and resumes it. The daemon is in none of the
@@ -1613,6 +1622,7 @@ It composes the helpers above, so its flags never drift from them:
   raises `DaemonSpawnError` naming that cause. See
   `docs/patterns/windows-background-process-launch.md`.
   Finite workers keep native breakaway and start the Windows child suspended.
+  Both paths use the canonical cleanup-scope checks before admission.
   Canonical Job producers
   assign fresh `Local\ce-owned-job-<uuid>` names and propagate the complete
   semicolon-separated chain in `COPILOT_EXTENSIONS_OWNED_JOB_SCOPES`, including

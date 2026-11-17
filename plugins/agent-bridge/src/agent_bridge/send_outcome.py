@@ -18,6 +18,8 @@ path's existing keys and exit 0:
   durably excluded that original key. This is not a new prompt or retry permit.
 - ``admitted`` / ``sdk_accepted`` / ``consumed``: current live receipt evidence,
   independent of requested urgency or whether a bounded reply wait settled.
+- ``rejected``: terminal receiver refusal with original correlation and reason;
+  neither SDK delivery nor consumption.
 
 Refusals print ``{"outcome", "target", "retryable", "reason", "error"}`` and
 exit with a distinct code, so a caller never parses text:
@@ -83,7 +85,10 @@ def live_outcome(result: dict[str, Any], delivery: str, *, duplicate_known: bool
     if not duplicate_known:
         return "accepted"
     receipt = result.get("receipt") or {}
-    if receipt.get("stage") in {"admitted", "sdk_accepted", "consumed"}:
+    if receipt.get("stage") in {
+        "admitted", "sdk_accepted", "consumed", "rejected",
+        "control_started", "control_completed", "unknown",
+    }:
         return cast(str, receipt["stage"])
     return _LIVE_DELIVERY_OUTCOMES.get(delivery, "queued")
 

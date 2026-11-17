@@ -103,8 +103,45 @@ in the existing lease payload. Callers must discover support before opting a
 resource into that contract; legacy receivers refuse opted-in state on rollback.
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
-configured remote and chooses the fetched remote default branch as the start
-point when available. A clean anchor checked out on its default branch is also
+configured remote default branch explicitly, even when the remote's ordinary
+fetch refspec excludes it. The committed reader's recorded `origin/HEAD`
+policy bootstrap and its declared policy branch are related refresh inputs,
+including when the configured creation remote is not `origin`. Each required
+source/destination ref is attempted once within one shared fetch deadline.
+That deadline includes remote and credential lookup and is checked again
+immediately before each subprocess. The entire preparation operation, including
+base selection and anchor advancement, isolates inherited repository selectors
+to the supplied anchor. Existing command-scoped credential settings survive
+that isolation, without restoring repository selectors or remote URL overrides.
+The update-auth owner may still replace them with its authorized overlay.
+Policy tracking aliases retain their configured source. Equivalent source names
+use Git's remote resolution order and exclusions apply to resolved names before
+ambiguity is assessed; an already
+refreshed matching base can be reused despite its ordinary fetch exclusion.
+An explicitly configured short source can require a narrow advertisement lookup
+of its possible full names, cached only for this operation within the same
+deadline. An explicitly configured HEAD uses a narrow symbolic-target lookup
+for source identity and fetch selection; exclusions still match its native HEAD
+name. Fully qualified names and object IDs need no such lookup. Authenticated
+probe timeouts report credential-free diagnostics rather than command arguments.
+Before a potentially shared base/policy destination is written, conflicting
+remote/source identities are detected using actual destination refs, including
+overlapping remote names. Conflicting or unavailable preflight mappings leave
+refs and the anchor untouched. Creation then selects a verified local default
+branch or refuses if none exists; it never selects the unusable tracking ref,
+an unrelated HEAD or a tag instead.
+A missing base or policy branch does not prevent refreshing surviving refs;
+failures and unavailable policy reads still report degraded freshness. A
+policy-only failure reports a refreshed base rather than calling it last-known.
+A failed HEAD fetch can still use its available last-known bootstrap to refresh
+the first declared policy hop, retaining the degradation warning. Non-symbolic
+optional policy HEAD does not block the configured base. The policy reader
+itself remains offline.
+Only preparation's explicit tracking destinations ignore configured refmaps;
+unrelated tracking refs and unchecked-out local branches are not refreshed.
+Ordinary explicit-branch fetch callers retain their configured policy mappings.
+It chooses the fetched configured default branch as the start point when
+available. A clean anchor checked out on its default branch is also
 fast-forwarded opportunistically. Dirty, detached, non-default, ahead, and
 diverged anchors are never rewritten; creation still uses the fetched remote
 ref, or a last-known local fallback when the fetch is unavailable.

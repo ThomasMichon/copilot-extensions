@@ -5,34 +5,33 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Mapping
+from typing import cast
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
-from configuration_layers import ConfigurationError, compose, read_source
+from configuration_layers import Composition, ConfigurationError, Layer, compose, read_source
 
-from . import _peer_launch
+from . import _peer_launch as _peer_launch
 from .invocation import CACHE_MAINTENANCE_FIELD, CACHE_TARGET_FIELDS
-
-if TYPE_CHECKING:
-    from configuration_layers import Composition
 
 FIELDS = {"vault", "group", "enabled", CACHE_MAINTENANCE_FIELD, *CACHE_TARGET_FIELDS}
 
 
 def service_configuration_root(cwd: str | None = None) -> str:
     """Qualify the native discovery directory before a resident changes cwd."""
-    from .config import configuration_root
+    from .config import configuration_selection
 
-    root = Path(configuration_root(cwd))
+    selected, native_default = configuration_selection(cwd, strict=True)
+    root = Path(selected or os.getcwd())
     if not root.is_absolute() or not root.is_dir():
         raise ConfigurationError("service configuration root must be an existing absolute directory")
-    report = owner_report(root)
+    report = owner_report(root, native_default=True) if native_default else owner_report(root)
     if report is not None:
         context_from_owner(report)
-    selected = str(root)
-    if any(ord(character) < 32 for character in selected):
+    root_text = str(root)
+    if any(ord(character) < 32 for character in root_text):
         raise ConfigurationError("service configuration root contains control characters")
-    return selected
+    return root_text
 
 
 def service_configuration_snapshot(cwd: str | None = None) -> dict[str, str]:
@@ -43,10 +42,15 @@ def service_configuration_snapshot(cwd: str | None = None) -> dict[str, str]:
     path = str(Path(root, selected).absolute())
     if any(ord(character) < 32 for character in path):
         raise ConfigurationError("service configuration path contains control characters")
-    return {"root": root, "config": path}
+    from .config import configuration_selection
+
+    snapshot = {"root": root, "config": path}
+    if configuration_selection(cwd, strict=True)[1]:
+        snapshot["native_default_owner"] = "1"
+    return snapshot
 
 
-def _legacy_report(root: Path) -> dict[str, Any] | None:
+def _legacy_report(root: Path) -> dict[str, object] | None:
     from .config import home_dir
 
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
@@ -71,6 +75,9 @@ def _legacy_report(root: Path) -> dict[str, Any] | None:
     environment = _peer_launch.legacy_peer_environment(dict(os.environ))
     environment.pop("AGENT_CONFIGURATION_CONTEXT", None)
     if path.is_file():
+        from configuration_context.readiness import qualify_resolver
+
+        qualify_resolver(path, "agent-vault", "agent_vault")
         resolver = _peer_launch._load_primitive(path, "_vault_configuration_runtime")
         prefix = ready_owner_prefix(peer, "agent_worktrees", resolver=resolver.resolve_python)
     else:
@@ -89,14 +96,14 @@ def _legacy_report(root: Path) -> dict[str, Any] | None:
     if not prefix:
         return None
     return read_owner_context(
-        [prefix[0], "-I", "-B", "-X", "utf8", *prefix[1:]], root,
+        prefix, root,
         environment=environment,
     )
 
 
 def _checked_report(
-    report: dict[str, Any] | None, own: dict[str, Any] | None,
-) -> dict[str, Any] | None:
+    report: dict[str, object] | None, own: Mapping[str, str] | None,
+) -> dict[str, object] | None:
     if report is not None and own is not None and (
         context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
     ):
@@ -104,7 +111,7 @@ def _checked_report(
     return report
 
 
-def owner_report(root: Path) -> dict[str, Any] | None:
+def owner_report(root: Path, *, native_default: bool = False) -> dict[str, object] | None:
     from .config import home_dir
 
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
@@ -120,6 +127,8 @@ def owner_report(root: Path) -> dict[str, Any] | None:
             "agent-vault", own_root, raw,
         )
     report = delivered_context(repository_root=root)
+    if report is None and native_default:
+        return None
     if report is not None:
         _checked_report(report, own)
         if own is not None:
@@ -146,7 +155,7 @@ def owner_report(root: Path) -> dict[str, Any] | None:
     ), own)
 
 
-def _ordinary(raw: dict[str, Any], directory: Path | None = None) -> dict[str, Any]:
+def _ordinary(raw: Mapping[str, object], directory: Path | None = None) -> dict[str, object]:
     from .config import _validate_config_data
 
     values = {key: value for key, value in raw.items() if key in FIELDS}
@@ -159,18 +168,19 @@ def _ordinary(raw: dict[str, Any], directory: Path | None = None) -> dict[str, A
 
 
 def compose_preferences(
-    cwd: str | None, repo_data: dict[str, Any],
-    global_data: dict[str, Any], ext_data: dict[str, Any],
-    *, repository_directory: Path | None = None,
+    cwd: str | None, repo_data: Mapping[str, object],
+    global_data: Mapping[str, object], ext_data: Mapping[str, object],
+    *, repository_directory: Path | None = None, strict: bool = False,
 ) -> Composition | None:
-    from .config import _global_config_path, configuration_root
+    from .config import _global_config_path, configuration_selection
 
-    root = Path(configuration_root(cwd)).resolve()
-    report = owner_report(root)
+    selected, native_default = configuration_selection(cwd, strict=strict)
+    root = Path(selected or os.getcwd()).resolve()
+    report = owner_report(root, native_default=True) if native_default else owner_report(root)
     if report is None:
         return None
     context = context_from_owner(report)
-    layers = [{
+    layers: list[Layer] = [{
         "id": "vault-defaults", "tier": "defaults", "origin": "defaults",
         "values": {
             "vault": None, "group": None, "enabled": False,
@@ -187,8 +197,9 @@ def compose_preferences(
     sources = [(context["base_root"], "repository", "base")]
     if context["binding"] == "bound":
         sources.append((context["knowledge_root"], "repository", "knowledge"))
-    if report.get("repository_machine_root"):
-        sources.append((report["repository_machine_root"], "repository_machine", "repository_machine"))
+    machine_root = report.get("repository_machine_root")
+    if isinstance(machine_root, str) and machine_root:
+        sources.append((machine_root, "repository_machine", "repository_machine"))
     for root, tier, origin in sources:
         if not Path(root).exists():
             continue
@@ -198,7 +209,7 @@ def compose_preferences(
         raw = document["values"]
         if origin != "base" and set(raw) - FIELDS:
             raise ValueError("portable vault selection cannot change database or runtime custody")
-        layer = {
+        layer: Layer = {
             "id": f"vault-{origin}", "tier": tier, "origin": origin,
             "repository_id": context["repository_id"],
             "values": _ordinary(raw, Path(root)), "source": document["source"],
@@ -225,16 +236,15 @@ def compose_preferences(
 
 def runtime_enabled(cwd: str | None = None) -> bool:
     """Resolve explicit runtime opt-in without loading extensions or a backend."""
-    from .config import _discover_repo_config, _validate_config_data, configuration_root, load_global_config
+    from .config import _discover_repo_config, _validate_config_data, load_global_config
 
-    cwd = configuration_root(cwd)
     path, repository = _discover_repo_config(cwd, strict=True)
     machine = load_global_config(strict=True)
     _validate_config_data(repository, "repository vault configuration")
     _validate_config_data(machine, "global vault configuration")
     result = compose_preferences(
         cwd, repository, machine, {},
-        repository_directory=path.parent if path is not None else None,
+        repository_directory=path.parent if path is not None else None, strict=True,
     )
     if result is not None:
         return cast(bool, result["values"]["enabled"])

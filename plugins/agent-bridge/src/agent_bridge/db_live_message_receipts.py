@@ -8,26 +8,31 @@ from typing import Any
 from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON, MESSAGE_TARGET_SQL
 from .inbox_custody import handoff_stage, original_handoff
 from .runtime_custody import RuntimeCustodyError, nonblank, positive
+from .db_operations import DatabaseOperations
 
 _HANDOFF_COLUMNS = (
     "id,session_id,created_at,delivered_at,consumed_at,handoff_json,"
-    "runtime_custody_json,handoff_started_at,outcome"
+    "runtime_custody_json,handoff_started_at,outcome,disposition_json"
 )
 MAX_RECOVERY_MESSAGE_ID = (1 << 63) - 1
 
 
 def _handoff_receipt(row: sqlite3.Row) -> dict[str, Any]:
     retained = original_handoff(row)
-    return {
+    result = {
         "session_id": row["session_id"], "message_id": row["id"],
         "handoff_id": retained["id"], "consumer": retained["consumer"],
         "stage": handoff_stage(row), "admitted_at": row["created_at"],
         "handoff_started_at": row["handoff_started_at"],
         "sdk_accepted_at": row["delivered_at"], "consumed_at": row["consumed_at"],
     }
+    from .message_contracts import receipt_disposition
+
+    receipt_disposition(result, row["disposition_json"])
+    return result
 
 
-class _LiveMessageReceiptsMixin:
+class _LiveMessageReceiptsMixin(DatabaseOperations):
     def live_message_handoff_receipt(
         self, session_id: str, message_id: int,
     ) -> dict[str, Any] | None:
@@ -55,7 +60,7 @@ class _LiveMessageReceiptsMixin:
             raise RuntimeCustodyError("Inbox recovery requires bounded integer page arguments")
         rows = self.execute_read(
             f"SELECT {_HANDOFF_COLUMNS} FROM live_messages WHERE session_id=? AND id>? "
-            "AND handoff_json IS NOT NULL AND consumed_at IS NULL "
+            "AND handoff_json IS NOT NULL AND consumed_at IS NULL AND disposition_json IS NULL "
             "AND kind NOT LIKE 'control:%' ORDER BY id LIMIT ?",
             (session_id, after, limit + 1),
         )
@@ -68,8 +73,8 @@ class _LiveMessageReceiptsMixin:
         """Return the retained admission and delivery evidence for one message."""
         rows = self.execute_read(
             "SELECT session_id, id AS message_id, created_at AS admitted_at, "
-            "delivered_at AS sdk_accepted_at, consumed_at FROM live_messages "
-            f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=? AND kind NOT LIKE 'control:%'",
+            "delivered_at AS sdk_accepted_at, consumed_at, disposition_json FROM live_messages "
+            f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=?",
             (session_id, session_id, session_id, message_id),
         )
         if not rows:
@@ -79,6 +84,10 @@ class _LiveMessageReceiptsMixin:
             "consumed" if row["consumed_at"] is not None else
             "sdk_accepted" if row["sdk_accepted_at"] is not None else "admitted"
         )
+        raw = row.pop("disposition_json")
+        from .message_contracts import receipt_disposition
+
+        receipt_disposition(row, raw)
         return row
 
     def consume_live_message(self, session_id: str, message_id: int, now: float) -> int:
@@ -87,6 +96,7 @@ class _LiveMessageReceiptsMixin:
             "UPDATE live_messages SET consumed_at=? "
             f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=? AND consumed_at IS NULL "
             "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
+            "AND disposition_json IS NULL "
             "AND kind NOT LIKE 'control:%'",
             (now, session_id, session_id, session_id, message_id),
         )
@@ -103,6 +113,7 @@ class _LiveMessageReceiptsMixin:
             f"WHERE session_id={_CANON} AND EXISTS ("
             "SELECT 1 FROM live_messages WHERE session_id=live_sessions.session_id "
             f"AND id IN ({placeholders}) AND delivered_at=? AND consumed_at IS NULL "
+            "AND disposition_json IS NULL "
             "AND kind NOT LIKE 'control:%')",
             (now, session_id, session_id, *ids, now),
         )
@@ -115,6 +126,7 @@ class _LiveMessageReceiptsMixin:
             "delivered_at AS sdk_accepted_at FROM live_messages "
             f"WHERE session_id IN (?, {_CANON}) AND session_id={MESSAGE_TARGET_SQL} "
             "AND consumed_at IS NULL "
+            "AND disposition_json IS NULL "
             "AND (delivered_at IS NULL OR consumption_tracked=1) "
             "AND kind NOT LIKE 'control:%' ORDER BY id ASC LIMIT ?",
             (session_id, session_id, session_id, session_id, session_id, session_id, limit),

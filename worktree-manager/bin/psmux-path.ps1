@@ -34,14 +34,22 @@ function Get-AwPsmuxBinaryVersion {
         $output = if ($VersionProbe) {
             & $VersionProbe $Path
         } else {
-            & $Path --help 2>&1 | Select-Object -First 1
+            $metadata = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+            if ($metadata.ProductName -eq 'psmux' -and
+                $metadata.FileVersion -match '^[0-9]+(?:\.[0-9]+){1,3}$') {
+                $metadata.FileVersion
+            } else {
+                $state = Get-AwPsmuxSessionState -Path $Path
+                if (-not $state.Known -or $state.Sessions.Count -gt 0) { return $null }
+                & $Path --help 2>&1 | Select-Object -First 1
+            }
         }
         $text = $output | Out-String
-        if ($text -match '(?im)\bpsmux\s+v?([0-9]+(?:\.[0-9]+)+)\b') {
-            return $Matches[1]
-        }
-        if ($text -match '^\s*([0-9]+(?:\.[0-9]+)+)\s*$') {
-            return $Matches[1]
+        if ($text -match '(?im)\bpsmux\s+v?([0-9]+(?:\.[0-9]+)+)\b' -or
+            $text -match '^\s*([0-9]+(?:\.[0-9]+)+)\s*$') {
+            $version = [version]$Matches[1]
+            if ($version.Revision -eq 0) { return $version.ToString(3) }
+            return $version.ToString()
         }
     } catch {}
     return $null
@@ -50,7 +58,7 @@ function Get-AwPsmuxBinaryVersion {
 function Test-AwPsmuxVersionCompatible {
     param(
         [AllowNull()][AllowEmptyString()][string]$Version,
-        [string]$MinimumVersion = '3.3.5',
+        [string]$MinimumVersion = '3.4.0',
         [string[]]$BlockedVersions = @('3.3.6')
     )
     if ([string]::IsNullOrWhiteSpace($Version)) { return $false }
@@ -85,14 +93,26 @@ function Get-AwPsmuxSessionState {
         [scriptblock]$SessionProbe
     )
     try {
-        if ($SessionProbe) {
-            $probe = & $SessionProbe $Path
-            $returnCode = [int]$probe.ReturnCode
-            $output = @($probe.Output)
-        } else {
-            $output = @(& $Path ls 2>$null)
-            $returnCode = $LASTEXITCODE
+        if (-not $SessionProbe) {
+            # Legacy CLI reads can remove live registrations. Only native absence
+            # permits replacement; any provider process keeps its sessions held.
+            $names = @('psmux', 'pmux', 'tmux', [IO.Path]::GetFileNameWithoutExtension($Path)) |
+                Sort-Object -Unique
+            foreach ($name in $names) {
+                $processes = [Diagnostics.Process]::GetProcessesByName($name)
+                try {
+                    if ($processes.Count -gt 0) {
+                        return [pscustomobject]@{ Known = $false; Sessions = @() }
+                    }
+                } finally {
+                    foreach ($process in $processes) { $process.Dispose() }
+                }
+            }
+            return [pscustomobject]@{ Known = $true; Sessions = @() }
         }
+        $probe = & $SessionProbe $Path
+        $returnCode = [int]$probe.ReturnCode
+        $output = @($probe.Output)
         if ($returnCode -ne 0) {
             return [pscustomobject]@{ Known = $false; Sessions = @() }
         }
@@ -106,7 +126,7 @@ function Get-AwPsmuxSessionState {
 function Find-AwCompatiblePsmuxPackageBinary {
     param(
         [Parameter(Mandatory)][string]$PackageRoot,
-        [string]$MinimumVersion = '3.3.5',
+        [string]$MinimumVersion = '3.4.0',
         [string[]]$BlockedVersions = @('3.3.6'),
         [scriptblock]$VersionProbe
     )

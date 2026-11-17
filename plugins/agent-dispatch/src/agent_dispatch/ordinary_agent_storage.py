@@ -16,7 +16,7 @@ from .ordinary_native_bindings import (
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
 
-def reservation_native_facts(queue: Any, key: str) -> dict:
+def reservation_native_facts(queue: Any, key: str) -> dict[str, Any]:
     with queue._connect() as conn:
         conn.execute("BEGIN")
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
@@ -114,8 +114,8 @@ def _admission_error(
 
 
 def _bridge_created_host(
-    row: Any, task: Any, actual: Any, agent_info: dict, *, resumed: bool,
-    worktree_record: dict | None, startup_invocation: dict | None,
+    row: Any, task: Any, actual: Any, agent_info: dict[str, Any], *, resumed: bool,
+    worktree_record: dict[str, Any] | None, startup_invocation: dict[str, Any] | None,
     execution_machine: str | None,
 ) -> str | None:
     """Return the creating host only when Bridge provably created this worktree."""
@@ -127,6 +127,8 @@ def _bridge_created_host(
         return None
     binding = startup_invocation.get("binding") or {}
     creation = agent_info.get("creation")
+    if not isinstance(creation, dict):
+        return None
     created = creation.get("worktree") if isinstance(creation, dict) else None
     if (
         binding.get("origin_kind") != "created" or not isinstance(created, dict)
@@ -142,8 +144,8 @@ def _bridge_created_host(
 
 
 def _record_agent(
-    queue: Any, key: str, *, task_generation: int, agent_info: dict,
-    resumed: bool, worktree_record: dict | None, startup_invocation: dict | None = None,
+    queue: Any, key: str, *, task_generation: int, agent_info: dict[str, Any],
+    resumed: bool, worktree_record: dict[str, Any] | None, startup_invocation: dict[str, Any] | None = None,
     execution_machine: str | None = None,
 ) -> SpawnReservation:
     actual = identity(agent_info)
@@ -216,7 +218,11 @@ def _record_agent(
         ):
             raise TaskError("ordinary agent does not match retained allocation provenance")
         if worktree_record is not None:
-            record = owner_record(worktree_record, dict(row), task.id)
+            from .ordinary_control_invocation import CONTROL
+            record = owner_record(
+                worktree_record, dict(row), task.id,
+                **({"allow_native": actual.native} if resumed and CONTROL in agent_info else {}),
+            )
             if (startup_invocation is not None and startup_invocation["binding"]["creation_nonce"]
                     != record["creation_nonce"]):
                 raise TaskError("ordinary invocation incarnation changed")
@@ -242,11 +248,21 @@ def _record_agent(
         ).fetchone():
             raise TaskError("legacy acquisition has no proven current native/history facts")
         handle = f"local-body:{actual.bridge}"
-        if row["agent_info"]:
-            previous = identity(json.loads(row["agent_info"]))
-            if previous != actual:
-                raise TaskError("ordinary agent identity is already bound")
-        elif row["session_handle"] and row["session_handle"] != handle:
+        from .ordinary_control_adoption import HISTORY, protect_history, retain_control
+        retain_control(
+            json.loads(row["agent_info"]) if row["agent_info"] else None,
+            agent_info, dict(row), resumed=resumed,
+        )
+        from .ordinary_control_invocation import CONTROL, protect, retain
+        retain(
+            json.loads(row["agent_info"]) if row["agent_info"] else None,
+            agent_info, dict(row), task_generation,
+        )
+        if CONTROL in agent_info:
+            protect(conn)
+        if HISTORY in agent_info:
+            protect_history(conn)
+        if not row["agent_info"] and row["session_handle"] and row["session_handle"] != handle:
             if not resumed:
                 raise TaskError("ordinary agent does not match retained reservation identity")
         if conn.execute(
@@ -264,7 +280,7 @@ def _record_agent(
         recorded = {**agent_info, "task_generation": task_generation}
         if startup_invocation is not None:
             recorded["startup_invocation"] = startup_invocation
-        if resumed and row["agent_info"]:
+        if resumed and row["agent_info"] and HISTORY not in recorded:
             previous_info = json.loads(row["agent_info"])
             if "last_send" in previous_info:
                 recorded.setdefault("last_send", previous_info["last_send"])
@@ -292,8 +308,8 @@ def _record_agent(
 
 
 def record_created_agent(
-    queue: Any, key: str, *, task_generation: int, agent_info: dict,
-    worktree_record: dict | None = None, startup_invocation: dict | None = None,
+    queue: Any, key: str, *, task_generation: int, agent_info: dict[str, Any],
+    worktree_record: dict[str, Any] | None = None, startup_invocation: dict[str, Any] | None = None,
     execution_machine: str | None = None,
 ) -> SpawnReservation:
     validate_created(agent_info)
@@ -305,8 +321,8 @@ def record_created_agent(
 
 
 def record_resumed_agent(
-    queue: Any, key: str, *, task_generation: int, session_info: dict,
-    worktree_record: dict, startup_invocation: dict | None = None,
+    queue: Any, key: str, *, task_generation: int, session_info: dict[str, Any],
+    worktree_record: dict[str, Any], startup_invocation: dict[str, Any] | None = None,
     execution_machine: str | None = None,
 ) -> SpawnReservation:
     validate_resumed(session_info)

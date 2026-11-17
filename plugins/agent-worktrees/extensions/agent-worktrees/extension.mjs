@@ -25,12 +25,17 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
-import { joinSession } from "@github/copilot-sdk/extension";
 import { fileURLToPath } from "node:url";
 import { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } from "./resident-pre-tool.mjs";
 import { createManagedSessionAdmission } from "./managed-session.mjs";
 import { notifyWorktreeChanged } from "./worktree-changed.mjs";
+
+const { loadExtensionSdk } = await import(
+  existsSync(new URL("./sdk-compat.mjs", import.meta.url))
+    ? new URL("./sdk-compat.mjs", import.meta.url).href
+    : new URL("../../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs", import.meta.url).href
+);
+const { joinSession, approveAll } = await loadExtensionSdk();
 
 // Coalesce bursts of intent updates: flush at most once per this interval.
 // A long turn re-reports intent repeatedly; the trailing-edge flush keeps the

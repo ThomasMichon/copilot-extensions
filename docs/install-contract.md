@@ -3664,6 +3664,14 @@ The existing format fixes *what the binstub is*. Each Windows entry point in
   bare `CreateProcess`/`PATHEXT` spawn, `cmd /c` Windows Terminal profiles, ssh
   launchers) that cannot resolve a `.ps1`. Forwards with `%*`.
 
+Standalone application front doors render ordinary Windows file-root aliases
+consistently: extended drive and `UNC` spellings become their ordinary drive
+and UNC forms before quoting only when their components retain ordinary Win32
+semantics. Trailing-dot/space names, reserved devices, traversal and alternate
+streams retain their extended spelling; other device namespaces stay unchanged.
+This is launcher presentation, not a relaxation of physical-root or ownership
+checks; explicit environment root overrides retain their existing precedence.
+
 ### Why `.ps1` is primary, not `.cmd`
 
 A `.cmd` forwarding `%*` **re-tokenizes** the command line through cmd.exe's
@@ -3869,6 +3877,16 @@ at `extensions/<name>/extension.{mjs,cjs,js}` in the plugin; the CLI scans an
 **enabled** plugin's `extensions/` dir at session startup and loads it as a
 `plugin`-source extension. The canonical example is **context-handoff**
 (`plugins/context-handoff/extensions/context-handoff/extension.mjs`).
+
+Prefer `@microsoft/copilot-sdk/extension` for `joinSession` and
+`@microsoft/copilot-sdk` for shared SDK exports such as `approveAll`. Copilot
+CLI 1.0.113 resolves these names to its bundled SDK; older CLI loaders resolve
+only `@github/copilot-sdk`. Keep extension entrypoints self-contained and use
+dynamic imports with a legacy fallback only when the Microsoft SDK package
+itself is missing (`ERR_MODULE_NOT_FOUND`). Missing dependencies inside a
+resolved SDK, missing exports and other initialization failures must propagate,
+not select a different SDK. Do not install a separate SDK package into extension
+payloads to mask a namespace mismatch.
 
 Such a plugin ships **no `scripts/install.*`**, no deploy manifest, and copies
 nothing to `~/.copilot/extensions/`. `copilot plugin update <name>` (or repo
