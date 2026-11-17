@@ -8128,10 +8128,12 @@ Replacing only the original file prefix maps each unit to its packet identity.
 All three files are hash-bound, and each unit must contribute actual
 peer-boundary call coverage under the unchanged observer and budget.
 The Windows launch units cover short DOS, long DOS/UNC and already-extended
-executable selection for dynamic and pinned calls without creating a process.
+executable selection, supplementary-character paths and unpaired surrogates
+for dynamic and pinned calls without creating a process.
 The separate explicit Dispatch `tests/native/test_peer_long_paths.py` uses the
 existing real-venv peer fixtures for both routes. It requires actual Windows
-execution beyond `MAX_PATH` and checks exact argv, inherited streams and exit
+execution beyond `MAX_PATH`, including paths below 260 Python code points that
+exceed the UTF-16-unit limit, and checks exact argv, inherited streams and exit
 status; it is not part of the actor-free promotion packet.
 The eleven separate packaging tests remain unqualified; this cohort does not
 prove native peer launch, vendor synchronization or the complete library census.

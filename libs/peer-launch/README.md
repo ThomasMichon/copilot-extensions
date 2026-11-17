@@ -211,7 +211,9 @@ readiness. Actual Vault/SSH, logon and enrollment qualification remain separate.
 On Windows the final peer child receives its selected interpreter as an explicit
 executable. Paths beyond `MAX_PATH` use the corresponding extended DOS or UNC
 spelling without rewriting argv, changing the selected runtime, adding a shell,
-or detaching the child. Existing short-path spellings remain unchanged.
+or detaching the child. The length check counts UTF-16 code units, including
+supplementary characters and unpaired surrogates, rather than Python code points.
+Existing short-path spellings remain unchanged.
 
 Bridge uses this boundary for `handoff-check`'s `agent-worktrees
 handoffs-check` call. Because `--execute` mutates predecessor state, a
