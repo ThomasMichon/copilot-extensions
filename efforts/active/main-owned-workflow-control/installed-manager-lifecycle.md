@@ -3905,3 +3905,23 @@ renewed dependency on the unavailable Bash route or whole Manager acceptance.
 The existing hosted capture route must supply current evidence before that
 gate can pass; previous captures remain qualified only for their original
 inputs. Current provider review and CI remain separate pre-merge gates.
+
+The next Dev reconciliation reaches
+`6ba99aefb7efab66e35a8eb571eab129cfa02245`, including #12995's deliberate
+retirement of that registry command from CI. The earlier failed command is
+not relabelled as passing, but it no longer requires a new capture to merge.
+The operator's completion order therefore defers recapture again. The manual
+tools, historical receipts and unperformed parent qualifications remain intact.
+This PR does not restore the retired CI gate.
+
+The rebase preserves upstream test behavior and the strict annotations in the
+overlapping checker tests. Manager's new ordinary import roots are retained
+without duplicate JSON fields. Canonical registry planning retains the entire
+upstream active cohort and appends the two immutable owned provenance histories
+without splicing observations. All 5,255 unit nodes, 341 coverage targets and
+821 source hashes still pass canonical admission and both no-drop comparisons.
+The changed upstream Bridge checker lock requires explicit preparation before
+the new exact-base strict pass; the initial unprepared invocation is not a pass.
+After preparation, the complete 172-file, 24-owner strict ratchet passes every
+declared target again. All 56 cases in the overlapping checker-test file pass
+in 120.03 seconds within the unchanged 180-second contained packet limit.
