@@ -356,6 +356,31 @@ def test_bound_default_is_revalidated_before_each_read(
         configuration.runtime_enabled()
 
 
+@pytest.mark.parametrize("protected", ["kpdb", "port"])
+def test_native_discovery_validates_replacement_after_root_qualification(
+    owners: Owners,
+    monkeypatch: pytest.MonkeyPatch,
+    protected: str,
+) -> None:
+    base = owners[1]
+    original = default_owner.configured_root
+
+    def replace_after_qualification(*, strict: bool = True) -> Path | None:
+        root = original(strict=strict)
+        assert root is not None
+        (root / ".agent-vault.json").write_text(json.dumps({
+            "enabled": True,
+            "vault": "first",
+            protected: "unregistered.kdbx" if protected == "kpdb" else 23456,
+        }), encoding="utf-8")
+        return root
+
+    monkeypatch.setattr(default_owner, "configured_root", replace_after_qualification)
+    with use_configuration_root(str(base), native_default=True):
+        with pytest.raises(ConfigurationError, match="native custody"):
+            config._discover_repo_config(None, strict=True)
+
+
 def test_malformed_native_json_keeps_tolerant_context_resolution(
     owners: Owners,
     monkeypatch: pytest.MonkeyPatch,

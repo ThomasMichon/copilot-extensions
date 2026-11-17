@@ -4,10 +4,22 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from configuration_layers import ConfigurationError, read_source
 
 FIELD = "default_configuration_root"
+
+
+def read_selection(root: Path) -> dict[str, Any]:
+    """Validate the values being consumed, not just an earlier source probe."""
+    source = read_source(str(root), ".agent-vault.json")
+    if source is None:
+        raise ConfigurationError("default configuration owner requires .agent-vault.json")
+    values = source["values"]
+    if set(values) - {"enabled", "vault", "group"}:
+        raise ConfigurationError("default configuration owner cannot replace native custody")
+    return values
 
 
 def configured_root(*, strict: bool = True) -> Path | None:
@@ -25,11 +37,7 @@ def configured_root(*, strict: bool = True) -> Path | None:
         raise ConfigurationError(
             "default configuration root must be an existing absolute directory"
         )
-    source = read_source(str(root), ".agent-vault.json")
-    if source is None:
-        raise ConfigurationError("default configuration owner requires .agent-vault.json")
-    if set(source["values"]) - {"enabled", "vault", "group"}:
-        raise ConfigurationError("default configuration owner cannot replace native custody")
+    read_selection(root)
     return root.resolve()
 
 

@@ -343,12 +343,9 @@ def _discover_repo_config(
     selected, native_default = configuration_selection(cwd, strict=strict)
     start = Path(selected or os.getcwd()).resolve()
     if native_default:
-        from configuration_layers import read_source
+        from .default_owner import read_selection
 
-        document = read_source(str(start), REPO_CONFIG_NAME, optional=False)
-        if document is None:
-            raise ValueError("native default configuration is unavailable")
-        return start / REPO_CONFIG_NAME, document["values"]
+        return start / REPO_CONFIG_NAME, read_selection(start)
     if start.is_file():
         start = start.parent
     for directory in (start, *start.parents):
