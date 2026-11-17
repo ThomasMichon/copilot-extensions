@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [ten source deltas and gate-provenance checkpoint](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
+  preserves actual source conditions without inventing operator vetoes,
+  distinguishes partial receiving and records independently owned inflow.
   The [ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
   distinguish four changed source deltas, unchanged independent obligations
   and the expanded #3761 contract without claiming whole-ROOT receiving.
