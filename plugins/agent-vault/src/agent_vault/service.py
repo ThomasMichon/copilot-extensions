@@ -57,7 +57,7 @@ from .rendezvous import write_endpoint as write_endpoint
 from .service_endpoints import advertised_endpoint as advertised_endpoint
 from .service_connections import Closable as PipeServer, VaultConnections, settle_owned
 from .service_runtime import serve as _serve
-from . import service_cache
+from . import cache_maintenance, service_cache
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration as ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
@@ -657,6 +657,7 @@ class VaultService:
                 "daemon_persistent": self.ttl_override == 0,
                 "password_lifetime": describe_password_lifetime(self, kpdb),
                 "cache_warm": self._cache_warm.status(kpdb, group),
+                "cache_maintenance": cache_maintenance.describe(),
                 "federated_relay": (
                     relay.status() if relay else {"state": "disabled", "channel_attached": False}
                 ),
@@ -689,6 +690,9 @@ class VaultService:
             from .ssh_key import handle_prepare_request
 
             return handle_prepare_request(self, kpdb, group, request)
+
+        if action == "cache-maintenance":
+            return cache_maintenance.handle(self, get_cache(), kpdb, group, request)
 
         if action == "get":
             entry = request.get("entry", "")
