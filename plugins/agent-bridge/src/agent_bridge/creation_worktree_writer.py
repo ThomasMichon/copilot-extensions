@@ -228,6 +228,13 @@ def observe_native(db: Any, session: Any) -> None:
                 (session.acp_session_id, scope.key_digest),
             )
         else:
+            from .retained_metadata_lineage import adoption, native_for
+
+            boundary = adoption(dict(row))
+            if boundary is not None and boundary["session_id"] == session.session_id:
+                if native_for(dict(row), session.session_id) != session.acp_session_id:
+                    raise _refuse("adopted native identity changed")
+                return
             handoffs = json.loads(row["creation_handoffs_json"] or "{}")
             matches = [item for item in handoffs.values() if item["successor_id"] == session.session_id]
             if len(matches) != 1 or matches[0].get("native_session_id") not in (None, session.acp_session_id):
@@ -250,8 +257,9 @@ async def continue_session(
         if requirement is not None:
             raise _refuse("required native continuation has no original keyed creation writer")
         rows = manager._db.execute_read(
-            "SELECT 1 FROM workspace_embodiments WHERE session_id=? AND creation_writer_json IS NOT NULL",
-            (session_id,),
+            "SELECT 1 FROM workspace_embodiments WHERE creation_writer_json IS NOT NULL AND "
+            "(session_id=? OR json_extract(creation_adoption_json,'$.session_id')=?)",
+            (session_id, session_id),
         )
         if rows:
             raise _refuse("native continuation lost its keyed creation pointer")
@@ -261,22 +269,9 @@ async def continue_session(
         raise _refuse("native continuation lost its keyed creation journal")
     if requirement is not None and _binding(original)[0].worktree_writer != requirement:
         raise _refuse("native continuation changed its required creation writer")
-    if original["session_id"] == session.session_id:
-        native = original["native_session_id"]
-    else:
-        try:
-            handoffs = json.loads(original["creation_handoffs_json"] or "{}")
-            if not isinstance(handoffs, dict):
-                raise ValueError("invalid handoffs")
-            matches = [
-                value for value in handoffs.values()
-                if value["successor_id"] == session.session_id
-            ]
-            if len(matches) != 1:
-                raise ValueError("unretained successor")
-            native = matches[0].get("native_session_id")
-        except (ValueError, TypeError, KeyError) as exc:
-            raise _refuse("native continuation changed its original creation lineage") from exc
+    from .retained_metadata_lineage import native_for
+
+    native = native_for(original, session.session_id)
     if requirement is not None and not native:
         raise _refuse("required native continuation has no original native identity")
     if native is not None and native != session.acp_session_id:

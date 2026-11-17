@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
-import json
 from typing import Any
 
 from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
@@ -35,19 +34,9 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
         or original["state"] not in {"allocated", "preparing", "launching", "delivering", "complete", "terminal"}
     ):
         raise _refuse("exact session changed its original keyed workspace")
-    if session.session_id == original["session_id"]:
-        expected_native = original["native_session_id"]
-    else:
-        try:
-            handoffs = json.loads(original["creation_handoffs_json"] or "{}")
-            if not isinstance(handoffs, dict):
-                raise ValueError("invalid handoffs")
-            matches = [item for item in handoffs.values() if item["successor_id"] == session.session_id]
-        except (ValueError, TypeError, KeyError) as exc:
-            raise _refuse("exact session lost its original keyed lineage") from exc
-        if len(matches) != 1:
-            raise _refuse("exact session lost its original keyed lineage")
-        expected_native = matches[0].get("native_session_id")
+    from .retained_metadata_lineage import native_for
+
+    expected_native = native_for(original, session.session_id)
     if not expected_native or expected_native != native:
         raise _refuse("exact native identity is not retained by its keyed creation")
     try:

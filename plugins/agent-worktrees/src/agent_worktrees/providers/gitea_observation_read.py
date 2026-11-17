@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import time
+import subprocess
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 from .base import ProviderError
-from .observation_credentials import ObservationCredentialError
+from .observation_credentials import ObservationCredentialError, ObservationCredentials
 
 
-def read(method, url, credentials, *, invoke, payload=None, deadline=None):
+def read(
+    method: str, url: str, credentials: ObservationCredentials, *,
+    invoke: Callable[..., subprocess.CompletedProcess[str]],
+    payload: dict[str, Any] | None = None, deadline: float | None = None,
+) -> tuple[int, str]:
     if method != "GET" or payload is not None:
         raise ProviderError("observation credentials permit only native reads")
     if getattr(credentials, "http_profile", "legacy") == "direct-v1":

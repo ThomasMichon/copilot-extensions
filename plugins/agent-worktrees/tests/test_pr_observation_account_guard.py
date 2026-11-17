@@ -6,8 +6,12 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -19,7 +23,7 @@ from agent_worktrees.providers.observation_credentials import (
 
 
 @pytest.fixture
-def native(tmp_path, monkeypatch):
+def native(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     endpoint = "https://forge.example"
     config = tmp_path / "native.json"
     config.write_text(json.dumps({"repos": {"target": {"anchor": str(tmp_path), "pr": {
@@ -31,9 +35,9 @@ def native(tmp_path, monkeypatch):
         after_read=lambda: None, config=config,
     )
 
-    def acquire(argv, **kwargs):
+    def acquire(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         state.acquisitions.append((argv, kwargs))
-        value = {
+        value: dict[str, Any] | None = {
             "schema": "fleet-manager.forge-credential", "version": 1,
             "token": "synthetic-private-material", "expires_at": time.time() + 60,
             "forge": {"provider": "gitea", "api_base": endpoint, "repository": "owner/repo",
@@ -44,7 +48,7 @@ def native(tmp_path, monkeypatch):
             return subprocess.CompletedProcess(argv, 1, "", "synthetic-private-diagnostic")
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
-    def send(argv, **kwargs):
+    def send(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         state.requests.append((argv, kwargs))
         assert argv[0] == "curl" and "--retry" in argv and "--max-redirs" in argv
         assert kwargs["max_stdout_bytes"] <= 1_048_584
@@ -58,8 +62,10 @@ def native(tmp_path, monkeypatch):
             body = json.dumps([{"number": page, "state": "open"}]
                               if page <= state.inventory_pages else [])
         elif "/reviews?" in url:
+            page = int(parse_qs(urlsplit(url).query)["page"][0])
             body = json.dumps([{"id": index, "state": "APPROVED", "user": {"login": "r"}}
-                               for index in range(50)] if state.review_forever else [])
+                               for index in range((page - 1) * 50 + 1, page * 50 + 1)]
+                              if state.review_forever else [])
         elif url.endswith("/status"):
             body = '{"statuses":[],"state":"pending"}'
         else:
@@ -70,7 +76,9 @@ def native(tmp_path, monkeypatch):
     monkeypatch.setattr(pr_credential_command, "run_caller_owned", acquire)
     monkeypatch.setattr(gitea, "run_cli", send)
 
-    def invoke(operation="inventory", *, guarded=True, extra=()):
+    def invoke(
+        operation: str = "inventory", *, guarded: bool = True, extra: Sequence[str] = (),
+    ) -> int:
         args = [operation, "owner/repo"]
         if operation == "snapshot":
             args.append("7")
@@ -84,7 +92,7 @@ def native(tmp_path, monkeypatch):
     return state
 
 
-def assert_refused_output(capsys) -> None:
+def assert_refused_output(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert '"schema"' not in captured.out
     assert "synthetic-" not in captured.out + captured.err
@@ -92,7 +100,9 @@ def assert_refused_output(capsys) -> None:
 
 @pytest.mark.parametrize("operation", ["inventory", "snapshot"])
 @pytest.mark.parametrize("guarded", [True, False])
-def test_native_parser_executes_opt_in_actor_get_without_changing_results(native, capsys, operation, guarded):
+def test_native_parser_executes_opt_in_actor_get_without_changing_results(
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str], operation: str, guarded: bool,
+) -> None:
     assert native.invoke(operation, guarded=guarded) == 0
     result = json.loads(capsys.readouterr().out)
     assert "expected_account" not in result and "observation_account_guard" not in result
@@ -118,8 +128,9 @@ def test_native_parser_executes_opt_in_actor_get_without_changing_results(native
 ])
 @pytest.mark.parametrize("operation", ["inventory", "snapshot"])
 def test_actor_denial_refuses_entire_operation_before_repository_reads(
-    native, capsys, actor, status, operation,
-):
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str], actor: str, status: int,
+    operation: str,
+) -> None:
     native.actor, native.status = actor, status
     assert native.invoke(operation) == (3 if operation == "snapshot" else 2)
     assert len(native.acquisitions) == len(native.requests) == 1
@@ -129,9 +140,9 @@ def test_actor_denial_refuses_entire_operation_before_repository_reads(
 @pytest.mark.parametrize("kind", ["token", "binding", "withdraw", "expired"])
 @pytest.mark.parametrize("operation", ["inventory", "snapshot"])
 def test_changed_material_with_same_selected_binding_never_reaches_repository(
-    native, capsys, kind, operation,
-):
-    def change(value, count):
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str], kind: str, operation: str,
+) -> None:
+    def change(value: dict[str, Any], count: int) -> dict[str, Any] | None:
         if count == 2:
             if kind == "token":
                 value["token"] = "synthetic-other-account"
@@ -149,8 +160,10 @@ def test_changed_material_with_same_selected_binding_never_reaches_repository(
     assert_refused_output(capsys)
 
 
-def test_inventory_does_not_report_partial_success_after_later_account_switch(native, capsys):
-    def change(value, count):
+def test_inventory_does_not_report_partial_success_after_later_account_switch(
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    def change(value: dict[str, Any], count: int) -> dict[str, Any]:
         if count == 3:
             value["token"] = "synthetic-other-account"
         return value
@@ -162,20 +175,26 @@ def test_inventory_does_not_report_partial_success_after_later_account_switch(na
 
 
 @pytest.mark.parametrize("limit", [1, 2, 3])
-def test_actor_get_is_inside_lower_snapshot_credential_ceiling(native, capsys, limit):
+def test_actor_get_is_inside_lower_snapshot_credential_ceiling(
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str], limit: int,
+) -> None:
     assert native.invoke("snapshot", extra=("--max-credential-requests", str(limit))) == 3
     assert len(native.acquisitions) == len(native.requests) == limit
     assert_refused_output(capsys)
 
 
-def test_actor_get_is_inside_existing_snapshot_ceiling(native, capsys):
+def test_actor_get_is_inside_existing_snapshot_ceiling(
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
     native.review_forever = True
     assert native.invoke("snapshot") == 3
     assert len(native.acquisitions) == len(native.requests) == 64
     assert_refused_output(capsys)
 
 
-def test_guarded_inventory_adds_one_request_not_one_page(native, capsys):
+def test_guarded_inventory_adds_one_request_not_one_page(
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
     native.inventory_pages = 10
     assert native.invoke(extra=("--max-pages", "4")) == 0
     result = json.loads(capsys.readouterr().out)
@@ -184,7 +203,9 @@ def test_guarded_inventory_adds_one_request_not_one_page(native, capsys):
 
 
 @pytest.mark.parametrize("later_expiry", [1001, 1100])
-def test_later_acquisition_cannot_extend_original_verified_deadline(monkeypatch, later_expiry):
+def test_later_acquisition_cannot_extend_original_verified_deadline(
+    monkeypatch: pytest.MonkeyPatch, later_expiry: int,
+) -> None:
     now = [1000]
     monkeypatch.setattr(time, "time", lambda: now[0])
     value = SimpleNamespace(
@@ -203,7 +224,9 @@ def test_later_acquisition_cannot_extend_original_verified_deadline(monkeypatch,
         selected.acquire()
 
 
-def test_shorter_reported_deadline_is_retained_and_mutable_material_is_copied(monkeypatch):
+def test_shorter_reported_deadline_is_retained_and_mutable_material_is_copied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [1000]
     monkeypatch.setattr(time, "time", lambda: now[0])
     value = SimpleNamespace(
@@ -229,7 +252,9 @@ def test_shorter_reported_deadline_is_retained_and_mutable_material_is_copied(mo
 @pytest.mark.parametrize("extra", [
     [], ["--token", "synthetic"], ["--credential-command", json.dumps([sys.executable])],
 ])
-def test_missing_typed_direct_inputs_refuse_before_acquisition(monkeypatch, operation, extra):
+def test_missing_typed_direct_inputs_refuse_before_acquisition(
+    monkeypatch: pytest.MonkeyPatch, operation: str, extra: list[str],
+) -> None:
     monkeypatch.setattr(pr_credential_command, "run_caller_owned",
                         lambda *_a, **_kw: pytest.fail("invalid guard acquired material"))
     args = [operation, "owner/repo", *(["7"] if operation == "snapshot" else []),
@@ -238,8 +263,8 @@ def test_missing_typed_direct_inputs_refuse_before_acquisition(monkeypatch, oper
 
 
 @pytest.mark.parametrize("provider", ["github", "azure-devops"])
-def test_unsupported_provider_guard_refuses_without_acquisition(provider):
-    def acquire():
+def test_unsupported_provider_guard_refuses_without_acquisition(provider: str) -> None:
+    def acquire() -> Any:
         pytest.fail("unsupported guard acquired material")
     source = with_http_profile(acquire, "direct-v1", expected_account="reader")
     with pytest.raises(ObservationCredentialError, match="unsupported"):
@@ -250,8 +275,8 @@ def test_unsupported_provider_guard_refuses_without_acquisition(provider):
 @pytest.mark.parametrize("operation", ["inventory", "snapshot"])
 @pytest.mark.parametrize("provider", ["github", "azure-devops"])
 def test_native_parser_unsupported_provider_refuses_without_acquisition(
-    native, capsys, operation, provider,
-):
+    native: SimpleNamespace, capsys: pytest.CaptureFixture[str], operation: str, provider: str,
+) -> None:
     value = json.loads(native.config.read_text(encoding="utf-8"))
     value["repos"]["target"]["pr"]["provider"] = provider
     native.config.write_text(json.dumps(value), encoding="utf-8")
@@ -260,7 +285,9 @@ def test_native_parser_unsupported_provider_refuses_without_acquisition(
     assert_refused_output(capsys)
 
 
-def test_guarded_inventory_keeps_absolute_deadline_after_actor_read(native, monkeypatch, capsys):
+def test_guarded_inventory_keeps_absolute_deadline_after_actor_read(
+    native: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     now = [1000.0]
     monkeypatch.setattr(time, "monotonic", lambda: now[0])
     native.after_read = lambda: now.__setitem__(0, 1061.0)
@@ -274,8 +301,8 @@ def test_guarded_inventory_keeps_absolute_deadline_after_actor_read(native, monk
 @pytest.mark.parametrize("operation", ["inventory", "snapshot"])
 @pytest.mark.parametrize("rotate", [False, True])
 def test_real_native_and_credential_children_keep_verified_material(
-    tmp_path, operation, rotate,
-):
+    tmp_path: Path, operation: str, rotate: bool,
+) -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     count, sent = tmp_path / "count", tmp_path / "sent"
@@ -329,7 +356,9 @@ def test_real_native_and_credential_children_keep_verified_material(
     assert "synthetic-fixture" not in result.stdout + result.stderr
 
 
-def test_contract_discovery_is_passive_and_rejects_account_selection(monkeypatch, capsys):
+def test_contract_discovery_is_passive_and_rejects_account_selection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(pr_credential_command, "run_caller_owned",
                         lambda *_a, **_kw: pytest.fail("discovery acquired material"))
     assert pr_inventory_cli.dispatch(["--contract"]) == 0

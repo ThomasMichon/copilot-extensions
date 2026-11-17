@@ -46,6 +46,41 @@ records the read-only default, new app-root selection and failure boundaries.
 This initial consumer is not complete promotion/Manager-reference adoption;
 the receiving effort retains those pending gates.
 
+**Preparing the Manager footprint.**
+
+The repository tooling entry `tools/application_footprint.py` prepares the
+Manager reference through the existing promotion/composition, wheel and
+application-profile owners, then exports the complete locked project into
+`<output>/footprint/apps/worktree-manager`. Its `footprint.json` is directly
+consumable by `worktree-manager-install`. The output contains relative wheel
+inputs, declared Python and generated `bin/setup.{ps1,cmd,sh}` forwards to the
+canonical slot-local install entries; it contains no copied environment or state.
+The exported footprint can move independently of the preparation tree.
+Manager's setup/runtime resources, lifecycle archive and launcher generator
+come from its verified first-party wheel, not mutable tooling-checkout helpers
+or helper bytes in a reused profile. Output paths are normalized before
+preparation/export receipts are returned.
+
+Run the entry with the repository's prepared tooling Python and PATH `uv`,
+supplying `--source-checkout`, `--source-commit`, `--main-head`, `--branch`,
+and a new `--output` outside the selected checkout. `--branch main` or `dev`
+retains the existing preparer's clean standalone-checkout and fetched-branch
+admission. `--branch wip --dev-head <full-commit>` explicitly selects a frozen
+commit descended from that fetched Dev seed. It supports a managed worktree as
+an object source, but never includes its uncommitted or untracked bytes.
+Commit intended WIP inputs first; neither the selected commit nor the Main/Dev
+seeds can be abbreviated or implicit. The canonical local composition/version
+owner assigns output versions without changing tracked source declarations.
+
+`--timeout` supplies one finite preparation/export deadline, defaulting to 600
+seconds and capped at 7200. Existing package/feed, interpreter and process
+policies remain in force. Output JSON names the exported `footprint`; preparation
+diagnostics go to stderr. Preparation performs no installation, active selection,
+registration, global-command change or service startup. Failed attempts retain
+their owned output rather than replacing a previous result. This repository-tool
+adapter does not yet make release promotion publish `apps/` automatically or
+convert bootstrap/default update callers; #12905 retains those boundaries.
+
 The canonical intent is
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
 This section is its normative installer contract, not a declaration that all

@@ -1537,6 +1537,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-16 - Reviewer-action feed contract reviewed](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md)
 - [2026-11-09 - First integrated cache/event milestone selected](journal/2026/11.09%20Repository%20cache%20events%20milestone.md)
 - [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
 - [2026-11-09 - Selected native reopening source implementation](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
