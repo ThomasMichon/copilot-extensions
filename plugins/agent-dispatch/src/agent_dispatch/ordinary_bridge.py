@@ -124,11 +124,12 @@ def record_session_info(queue: Any, key: str, session_info: dict[str, Any]) -> S
             raise TaskError("ordinary send result requires stored created-agent facts")
         info = json.loads(row["agent_info"])
         from .ordinary_control_adoption import HISTORY
-        if HISTORY in info:
+        from .ordinary_control_invocation import CONTROL
+        if HISTORY in info and CONTROL not in info:
             raise TaskError("original ordinary send belongs to the retained predecessor control epoch")
         if session_info.get("session_id") != info["session_id"]:
             raise TaskError("ordinary send result does not match retained agent")
-        invocation = info.get("startup_invocation")
+        invocation = info[CONTROL]["invocation"] if CONTROL in info else info.get("startup_invocation")
         if invocation is not None and (
             session_info.get("version") != 1
             or session_info.get("invocation_key") != invocation["invocation_key"]
@@ -391,9 +392,15 @@ def start(
         return {**response, "fact_kind": "resumed"}
 
     from .ordinary_assignment import current_task, read_owner
-    def assignment_record() -> dict[str, Any]:
+    def assignment_record(*, allow_native: str | None = None) -> dict[str, Any]:
         current_task(client, task)
-        record = read_owner(reservation, task["id"], timeout=timeout)
+        from .ordinary_control_invocation import CONTROL
+        if allow_native is None and info and CONTROL in info:
+            allow_native = identity(info).native
+        record = read_owner(
+            reservation, task["id"], timeout=timeout,
+            **({"allow_native": allow_native} if allow_native is not None else {}),
+        )
         if writer_admission is not None:
             writer_admission.check_record(record)
         if reservation.get("worktree_path") is None:
@@ -441,6 +448,10 @@ def start(
         from .bridge_remote import normalize_host
         if (
             not isinstance(readback, dict) or not same_facts(readback.get("startup_invocation"), invocation)
+            or "current_control_invocation" in info and (
+                not same_facts(readback.get("current_control_invocation"), info["current_control_invocation"])
+                or "retained_control_history" not in readback
+            )
             or writer_admission is not None and (
                 writer_requirement(readback.get(REQUIREMENT)) != writer_admission.requirement
             )
@@ -456,13 +467,43 @@ def start(
         with diagnostics.stage("ordinary_store_readback"):
             _store_info()
 
+    def restore_control() -> dict[str, Any]:
+        nonlocal info, assigned
+        from .ordinary_resume_control import deliver, resume
+        from .ordinary_control_invocation import CONTROL, prepare
+
+        try:
+            if writer_admission is None:
+                raise TaskError("ordinary control recovery requires its original writer")
+            if CONTROL in info:
+                observed = deliver(run, client, task, reservation, info, observe_only=True)
+                if observed is not None:
+                    return observed
+            original_info = info
+            current_task(client, task)
+            current = resume(
+                run, client, reservation, original_info, writer_admission,
+                read_record=lambda: assignment_record(allow_native=identity(original_info).native),
+            )
+            current["startup_invocation"] = original_info["startup_invocation"]
+            if CONTROL in original_info:
+                current[CONTROL] = original_info[CONTROL]
+            else:
+                current[CONTROL] = prepare(task, reservation, current)
+            info, assigned = current, True
+            store_info()
+            delivered = deliver(run, client, task, reservation, info)
+            if delivered is None:
+                raise TaskError("ordinary current-control delivery is unconfirmed")
+            return delivered
+        except (TaskError, DispatchError, TypeError, OSError, subprocess.TimeoutExpired,
+                BridgeCarriedSessionBusy) as exc:
+            raise CreatedAgentUnrecorded(f"ordinary control recovery retained: {exc}") from exc
+
     if info:
         from .ordinary_control_adoption import HISTORY
         if HISTORY in info:
-            raise BridgeCarriedSessionBusy(
-                "original ordinary startup is excluded after control adoption; "
-                "use the current owner's fenced same-native continuation"
-            )
+            return restore_control()
         try:
             actual = identity(info)
             if actual.project != project:
@@ -505,7 +546,7 @@ def start(
             return {"session": f"local-body:{session_id}", "worktree": actual.worktree,
                     "native_session_id": actual.native, "mode": "acp", "session_info": response}
         if response.get("reason") != "native_receipt_missing":
-            raise BridgeCarriedSessionBusy("ordinary receipt history is unavailable")
+            return restore_control()
         if reservation.get("conversation_retired") is not False:
             raise BridgeUnavailable("retained ordinary agent has retired or unknown conversation authority")
         try:

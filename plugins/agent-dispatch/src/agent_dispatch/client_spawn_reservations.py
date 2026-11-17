@@ -141,6 +141,12 @@ class SpawnReservationClientMixin:
             versions = self.pool_placement_contract().get("ordinary_control_adoption_versions")
             if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
                 raise DispatchError(426, "coordinator lacks ordinary control adoption version 1")
+        from .ordinary_control_invocation import CONTROL
+        if CONTROL in session_info:
+            from .client_errors import DispatchError
+            versions = self.pool_placement_contract().get("ordinary_control_delivery_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise DispatchError(426, "coordinator lacks ordinary control delivery version 1")
         return cast("dict[str, Any]", self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/resumed-agent",
             json={"task_generation": task_generation, "session_info": session_info,

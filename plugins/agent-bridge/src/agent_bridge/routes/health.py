@@ -92,6 +92,7 @@ async def health(request: Request) -> dict[str, Any]:
             "retained_native_session_recovery": 1,
             "retained_native_metadata_adoption": 1,
             "retained_worktree_resume": 1,
+            "retained_keyed_native_admission": 1,
             "target_inventory": 1,
             "worktree_metadata_hydration": 1,
             LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
