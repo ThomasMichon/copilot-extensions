@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 import copy
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .claim_handoffs import ClaimBundle
@@ -21,7 +21,7 @@ def bundle_state(bundle: ClaimBundle, state: str, *, reason: str | None = None) 
 
 
 def parse_source_owner_refs(
-    raw: object, claims: Sequence[dict], source: ClaimRef, *,
+    raw: object, claims: Sequence[dict[str, Any]], source: ClaimRef, *,
     error_type: type[Exception],
 ) -> tuple[tuple[str, str], ...]:
     from .tracking_claims import parse_claim_ref
@@ -40,7 +40,7 @@ def parse_source_owner_refs(
     return tuple(raw.items())
 
 
-def snapshot_claim(claim: ResourceClaim) -> dict:
+def snapshot_claim(claim: ResourceClaim) -> dict[str, Any]:
     snapshot = claim.to_dict()
     snapshot.pop("handoff_bundle", None)
     snapshot["state"] = claim.state or "active"
@@ -48,7 +48,7 @@ def snapshot_claim(claim: ResourceClaim) -> dict:
 
 
 def validate_producer_uniqueness(
-    claims: Sequence[dict], *, error_type: type[Exception],
+    claims: Sequence[dict[str, Any]], *, error_type: type[Exception],
 ) -> None:
     """Reject ambiguous producer references and tokens without collapsing claims."""
     refs: dict[str, bool] = {}
@@ -83,6 +83,8 @@ def validate_producer_offer(
         return
     if len(producers) != len(claims):
         raise error_type("offer disposable producer claims in a separate bundle")
+    if any(isinstance(c.producer, dict) and c.producer.get("lifetime") == resource_producer.USER_OUTPUT_LIFETIME for c in producers):
+        raise error_type("user-output handoff requires receiving delivery support; not available")
     if any(isinstance(c.producer, dict) and c.producer.get("namespace") == "worktree-scratch" for c in producers):
         raise error_type("native scratch handoff requires receiving settlement support; not available")
     if any(isinstance(claim.producer, dict) and claim.producer.get("lifetime") == "retained-relationship" for claim in producers):
@@ -127,6 +129,8 @@ def validate_supported_claims(
     if producer_claims:
         if len(producer_claims) != len(bundle.claims):
             raise error_type("offer disposable producer claims in a separate bundle")
+        if any(isinstance(c["producer"], dict) and c["producer"].get("lifetime") == resource_producer.USER_OUTPUT_LIFETIME for c in producer_claims):
+            raise error_type("user-output handoff requires receiving delivery support; not available")
         if any(isinstance(c["producer"], dict) and c["producer"].get("namespace") == "worktree-scratch" for c in producer_claims):
             raise error_type("native scratch handoff requires receiving settlement support; not available")
         if any(isinstance(c["producer"], dict) and c["producer"].get("lifetime") == "retained-relationship" for c in producer_claims):
