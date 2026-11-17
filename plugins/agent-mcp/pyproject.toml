@@ -77,7 +77,7 @@ headed = ["agent-copilot-driver-core"]
 dev = [
     "agent-copilot-driver-core",
     "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
+    "pytest-asyncio>=1.4.1.post1",
     # tomllib is stdlib on 3.11+; tomli backports it for 3.10 (this plugin's
     # requires-python floor). Only needed by
     # tests/test_shutdown_exit.py's packaging-level console-script assertion.
