@@ -1,15 +1,16 @@
 """Pure native-selection joins; process capture belongs to the native portfolio."""
 import json
 import time
+from typing import Any
 
 import pytest
 
 from runtime_profile import ProfileError
 from runtime_source_capture import capture
-from runtime_source_lock import _retain_source_lock, _wheel_pins
+from runtime_source_lock import SourceWheelPin, _retain_source_lock, _wheel_pins
 
 
-def lock(*, filename="demo-1.0-py3-none-any.whl", digest="a" * 64):
+def lock(*, filename: str = "demo-1.0-py3-none-any.whl", digest: str = "a" * 64) -> bytes:
     return (
         'lock-version="1.0"\ncreated-by="uv"\nrequires-python=">=3.10"\n'
         '[[packages]]\nname="demo"\nversion="1.0"\n'
@@ -18,11 +19,11 @@ def lock(*, filename="demo-1.0-py3-none-any.whl", digest="a" * 64):
     ).encode()
 
 
-def diagnostic(filename="demo-1.0-py3-none-any.whl", version="1.0"):
+def diagnostic(filename: str = "demo-1.0-py3-none-any.whl", version: str = "1.0") -> bytes:
     return f"DEBUG Selecting: demo=={version} [compatible] ({filename})\n".encode()
 
 
-def parse(content, trace):
+def parse(content: bytes, trace: bytes) -> list[SourceWheelPin]:
     return _wheel_pins(
         content, {"environment": {"python_full_version": "3.11.0"}, "tags": ["py3-none-any"]},
         time.monotonic() + 5, diagnostic=trace,
@@ -30,7 +31,7 @@ def parse(content, trace):
 
 
 @pytest.mark.parametrize("alternatives", [False, True])
-def test_witness_uses_native_choice_and_excludes_urls_and_unselected_versions(alternatives):
+def test_witness_uses_native_choice_and_excludes_urls_and_unselected_versions(alternatives: bool) -> None:
     content = lock()
     if alternatives:
         content = content.replace(
@@ -46,7 +47,7 @@ def test_witness_uses_native_choice_and_excludes_urls_and_unselected_versions(al
 @pytest.mark.parametrize("fault", [
     "missing", "version", "invalid-version", "ambiguous", "hash", "filename", "traversal", "directory", "duplicate",
 ])
-def test_missing_ambiguous_or_nonwheel_witness_refuses(fault):
+def test_missing_ambiguous_or_nonwheel_witness_refuses(fault: str) -> None:
     content, trace = lock(), diagnostic()
     if fault == "missing":
         trace = b""
@@ -77,16 +78,19 @@ def test_missing_ambiguous_or_nonwheel_witness_refuses(fault):
 
 
 @pytest.mark.parametrize("wheel_witness,budget", [(True, 0), (True, -1), (True, True), (False, 1)])
-def test_diagnostic_budget_refuses_before_source_configuration(wheel_witness, budget):
+def test_diagnostic_budget_refuses_before_source_configuration(wheel_witness: bool, budget: int) -> None:
+    invalid_plan: Any = None
     with pytest.raises(ProfileError, match="diagnostic byte budget"):
         with _retain_source_lock(
-            None, max_lock_bytes=1, deadline=time.monotonic() + 5,
+            invalid_plan, max_lock_bytes=1, deadline=time.monotonic() + 5,
             wheel_witness=wheel_witness, max_diagnostic_bytes=budget,
         ):
             pytest.fail("invalid capture policy reached source configuration")
 
 
 @pytest.mark.parametrize("stdout,stderr", [(0, 1), (True, 1), (1, None)])
-def test_capture_budget_refuses_before_worker_inputs(stdout, stderr):
+def test_capture_budget_refuses_before_worker_inputs(stdout: int, stderr: int | None) -> None:
+    invalid: Any = None
     with pytest.raises(ProfileError, match="stream byte budgets"):
-        capture(None, None, max_stdout=stdout, max_stderr=stderr, deadline=time.monotonic() + 5)
+        capture(invalid, invalid, max_stdout=stdout, max_stderr=stderr if stderr is not None else invalid,
+                deadline=time.monotonic() + 5)

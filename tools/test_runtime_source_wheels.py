@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping
 import hashlib
 import json
 import os
@@ -11,25 +12,64 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import time
+from typing import Any, NoReturn, Protocol
 import venv
 import zipfile
 
 from packaging.markers import default_environment
+from packaging.utils import canonicalize_name
 import pytest
 
 import runtime_source_wheels as completion
+import versioned_runtime as runtime
 from build_toolchain_lock import ToolchainLock
 from runtime_profile import ProfileError
 from installer_dependency_policy import _write_toml
 from installer_wheel_inputs import WheelError
+from installer_engine import ReadyCandidate
 from runtime_source_lock import SourceLockCandidate
-from test_installer_dependency_policy import source_project
 from test_runtime_source_lock import (
+    Adopter, Source, Target, source_project,
     _selected_identity, candidate as source_lock, plan,
     adopter as adopter,
 )
-from wheel_input_fixture import wheel_bytes
+from wheel_input_fixture import wheel_bytes as _wheel_bytes
+from test_installer_wheel_acquisition import _running as _untyped_running
+from promotion_unit_tests.test_runtime_profile_wheels import _encoded as _untyped_encoded
+
+_CREATION_FLAGS = 0
+if sys.platform == "win32":
+    _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
+
+
+class FixtureBuilder(Protocol):
+    def __call__(self, project: Path, output: Path, **options: Any) -> Path: ...
+
+
+class WheelBytes(Protocol):
+    def __call__(
+        self, *, metadata: bytes | None = None, wheel: bytes | None = None,
+        extra: dict[str, bytes] | None = None,
+        record_mutator: Callable[[list[list[str]]], None] | None = None,
+        compression: int = zipfile.ZIP_DEFLATED,
+        prefix: str = "demo_pkg-1.0.dist-info/", name: str = "demo_pkg",
+    ) -> bytes: ...
+
+
+class EncodedWheel(Protocol):
+    def __call__(
+        self, wheel: dict[str, Any], *, metadata: str | None = None,
+        wheel_header: str | None = None, extra: dict[str, bytes] | None = None,
+        bad_record: bool = False, record_algorithm: str = "sha256",
+        member_comment: bytes | None = None,
+    ) -> bytes: ...
+
+
+wheel_bytes: WheelBytes = _wheel_bytes
+_running: Callable[[int], bool] = _untyped_running
+_encoded: EncodedWheel = _untyped_encoded
 
 BACKEND = """
 import base64, csv, hashlib, io, pathlib, tomllib, zipfile
@@ -74,7 +114,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
 
 @pytest.fixture
-def source(tmp_path):
+def source(tmp_path: Path) -> Source:
     payload = source_project(
         tmp_path / "payload", dependencies='"fixture-helper[metrics]==1.0", "agent-procutil"',
     )
@@ -112,12 +152,12 @@ def source(tmp_path):
 
 
 @pytest.fixture
-def target():
+def target() -> Target:
     return {"environment": default_environment(), "tags": ["py3-none-any"], "device": "cpu"}
 
 
 @pytest.fixture
-def toolchain():
+def toolchain() -> ToolchainLock:
     # The fixture backend is stdlib-only; no tool installation or feed access.
     return ToolchainLock(
         Path(sys.executable), {"setuptools": "0", "wheel": "0", "packaging": "0"},
@@ -127,8 +167,8 @@ def toolchain():
 
 
 @pytest.fixture
-def built_wheels(monkeypatch):
-    def build(project, output, **_options):
+def built_wheels(monkeypatch: pytest.MonkeyPatch) -> FixtureBuilder:
+    def build(project: Path, output: Path, **_options: Any) -> Path:
         data = completion._toml(project / "pyproject.toml")["project"]
         name, version = data["name"].replace("-", "_"), data["version"].replace("-", ".")
         metadata = f"Metadata-Version: 2.3\nName: {data['name']}\nVersion: {version}\n"
@@ -153,7 +193,7 @@ def built_wheels(monkeypatch):
     return build
 
 
-def arguments(toolchain, **changes):
+def arguments(toolchain: ToolchainLock, **changes: Any) -> dict[str, Any]:
     return dict(
         uv=shutil.which("uv"), toolchain=toolchain,
         limits=completion.WheelLimits(1 << 20, 1 << 22, 1 << 20, 1 << 18, 1000, 100, 1 << 16),
@@ -162,7 +202,7 @@ def arguments(toolchain, **changes):
     ) | changes
 
 
-def selected_source(source, target, adopter):
+def selected_source(source: Source, target: Target, adopter: Adopter) -> SourceLockCandidate:
     roots = completion._package_roots(source[0])
     record = {
         "schema": "copilot-extensions.source-lock-candidate", "version": 1,
@@ -170,7 +210,7 @@ def selected_source(source, target, adopter):
         "policy": plan(adopter).policy(), "target": target, "component": "fixture",
         "python": str(Path(sys.executable).resolve()),
         "extras": [], "pins": [], "requirements_sha256": "sha256:" + hashlib.sha256(b"").hexdigest(),
-        "retained_source_sha256": "sha256:" + completion.runtime.fingerprint_source(
+        "retained_source_sha256": "sha256:" + runtime.fingerprint_source(
             completion._source_files(roots),
         ),
     }
@@ -181,15 +221,16 @@ def selected_source(source, target, adopter):
 
 @pytest.mark.parametrize("failure", [None, "missing", "wrong-project"])
 def test_associated_wheels_complete_real_source_profile_without_backend_work(
-    adopter, source, target, toolchain, tmp_path, monkeypatch, built_wheels, failure,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_wheels: FixtureBuilder, failure: str | None,
+) -> None:
     candidate = selected_source(source, target, adopter)
     projects = completion._selected_projects(
         completion._package_roots(source[0]), "fixture-source", (),
         target["environment"], time.monotonic() + 60,
     )
-    associated = {
-        completion.canonicalize_name(completion._toml(path / "pyproject.toml")["project"]["name"]):
+    associated: dict[str, Path] = {
+        canonicalize_name(completion._toml(path / "pyproject.toml")["project"]["name"]):
             built_wheels(path, tmp_path / "associated")
         for path in projects
     }
@@ -201,7 +242,7 @@ def test_associated_wheels_complete_real_source_profile_without_backend_work(
         "an associated-wheel installation must not execute a backend",
     ))
 
-    def consume():
+    def consume() -> None:
         with completion.retain_source_profile(
             candidate, third_party={}, first_party=associated, **arguments(toolchain),
         ) as prepared:
@@ -219,8 +260,9 @@ def test_associated_wheels_complete_real_source_profile_without_backend_work(
 
 @pytest.mark.parametrize("uv_selection", ["absolute", "path"])
 def test_native_source_lock_completes_helpers_extras_before_existing_offline_constructor(
-    adopter, source, target, toolchain, tmp_path, monkeypatch, uv_selection,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uv_selection: str,
+) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] /
                                     "plugins" / "agent-worktrees" / "scripts"))
     deadline = time.monotonic() + 180
@@ -231,14 +273,14 @@ def test_native_source_lock_completes_helpers_extras_before_existing_offline_con
         builder = completion.build_wheel
         build_executables = []
 
-        def observed_build(*args, **options):
+        def observed_build(*args: Any, **options: Any) -> Path:
             build_executables.append(options["uv"])
             return builder(*args, **options)
 
         monkeypatch.setattr(completion, "build_wheel", observed_build)
 
         @contextmanager
-        def observed(*args, **kwargs):
+        def observed(*args: Any, **kwargs: Any) -> Iterator[ReadyCandidate]:
             binding = kwargs["wheel_inputs"].receipt()["binding"]
             record = binding["profile"]
             assert record["mode"] == "source" and record["artifact"] is None
@@ -262,13 +304,13 @@ def test_native_source_lock_completes_helpers_extras_before_existing_offline_con
                         uv="uv" if uv_selection == "path" else shutil.which("uv")),
         ) as built:
             assert not built.reused
-            assert completion.runtime.is_complete(root, version, expect_hash=built.payload_hash)
-            assert completion.runtime.current_version(root) is None
+            assert runtime.is_complete(root, version, expect_hash=built.payload_hash)
+            assert runtime.current_version(root) is None
             python = built.slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             proof = subprocess.run(
                 [str(python), "-I", "-c", "from fixture_source import VALUE; print(VALUE)"],
                 capture_output=True, text=True, timeout=15,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=_CREATION_FLAGS,
             )
             assert proof.returncode == 0, proof.stderr
             assert proof.stdout.strip() == "42"
@@ -278,8 +320,9 @@ def test_native_source_lock_completes_helpers_extras_before_existing_offline_con
 
 @pytest.mark.parametrize("change", ["requirements", "source", "missing-pin", "wrong-hash", "wrong-filename", "extra-wheel"])
 def test_incomplete_or_changed_source_lock_refuses_before_build(
-    adopter, source, target, toolchain, tmp_path, monkeypatch, change,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     candidate = selected_source(source, target, adopter)
     paths = {}
     if change == "requirements":
@@ -312,8 +355,9 @@ def test_incomplete_or_changed_source_lock_refuses_before_build(
 
 
 def test_exact_file_record_accepts_equivalent_version_before_build(
-    adopter, source, target, toolchain, tmp_path, monkeypatch,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     candidate = selected_source(source, target, adopter)
     path = tmp_path / "fixture_registry-1.0-py3-none-any.whl"
     path.write_bytes(wheel_bytes(
@@ -328,7 +372,7 @@ def test_exact_file_record_accepts_equivalent_version_before_build(
     }]
     candidate = replace(candidate, canonical=json.dumps(record).encode())
 
-    def build(*_args, **_options):
+    def build(*_args: object, **_options: object) -> NoReturn:
         raise RuntimeError("reached selected build")
 
     monkeypatch.setattr(completion, "build_wheel", build)
@@ -340,12 +384,16 @@ def test_exact_file_record_accepts_equivalent_version_before_build(
 
 
 def test_actual_metadata_cannot_drop_selected_helper_extra(
-    adopter, source, target, toolchain, tmp_path, monkeypatch, built_wheels,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_wheels: FixtureBuilder,
+) -> None:
     candidate = selected_source(source, target, adopter)
     original = completion._extras
 
-    def drop(wheels, roots, environment, deadline):
+    def drop(
+        wheels: dict[str, dict[str, Any]], roots: list[str],
+        environment: Mapping[str, str], deadline: float,
+    ) -> dict[str, set[str]]:
         result = original(wheels, roots, environment, deadline)
         result["fixture-helper"] = set()
         return result
@@ -357,11 +405,12 @@ def test_actual_metadata_cannot_drop_selected_helper_extra(
 
 
 def test_built_metadata_cannot_drop_source_declared_dependency_extra(
-    adopter, source, target, toolchain, monkeypatch, built_wheels,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    monkeypatch: pytest.MonkeyPatch, built_wheels: FixtureBuilder,
+) -> None:
     candidate = selected_source(source, target, adopter)
 
-    def altered(project, output, **options):
+    def altered(project: Path, output: Path, **options: Any) -> Path:
         path = built_wheels(project, output, **options)
         if project == source[0]:
             with zipfile.ZipFile(path) as archive:
@@ -383,8 +432,9 @@ def test_built_metadata_cannot_drop_source_declared_dependency_extra(
 
 @pytest.mark.parametrize("origin", ["third-party", "built"])
 def test_source_wheel_ingestion_bounds_filename_before_open_or_expansion(
-    adopter, source, target, toolchain, monkeypatch, tmp_path, origin,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, origin: str,
+) -> None:
     candidate = selected_source(source, target, adopter)
     tags = ".".join("t" + str(index) for index in range(8))
     path = tmp_path / f"fixture_source-1.0.0-{tags}-{tags}-{tags}.whl"
@@ -398,7 +448,9 @@ def test_source_wheel_ingestion_bounds_filename_before_open_or_expansion(
             pytest.fail("excessive filename tags reached construction")
 
 
-def test_source_digest_rejects_actual_fifo_without_opening(tmp_path, monkeypatch):
+def test_source_digest_rejects_actual_fifo_without_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     if not hasattr(os, "mkfifo"):
         pytest.skip("native FIFO creation is POSIX-only")
     path = tmp_path / "fifo-1.0-py3-none-any.whl"
@@ -409,13 +461,14 @@ def test_source_digest_rejects_actual_fifo_without_opening(tmp_path, monkeypatch
 
 
 def test_source_generator_is_read_only_after_bounded_metadata_inspection(
-    adopter, source, target, toolchain, monkeypatch, built_wheels,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    monkeypatch: pytest.MonkeyPatch, built_wheels: FixtureBuilder,
+) -> None:
     candidate = selected_source(source, target, adopter)
     original_read = zipfile.ZipFile.read
     budget = arguments(toolchain)["limits"].max_metadata_member_bytes
 
-    def altered(project, output, **options):
+    def altered(project: Path, output: Path, **options: Any) -> Path:
         path = built_wheels(project, output, **options)
         data = completion._toml(project / "pyproject.toml")["project"]
         name, version = data["name"].replace("-", "_"), data["version"].replace("-", ".")
@@ -428,7 +481,9 @@ def test_source_generator_is_read_only_after_bounded_metadata_inspection(
         ))
         return path
 
-    def guarded_read(archive, name, *args, **options):
+    def guarded_read(
+        archive: zipfile.ZipFile, name: str, *args: Any, **options: Any,
+    ) -> bytes:
         if archive.getinfo(name).file_size > budget:
             pytest.fail("oversized metadata decompressed before bounded inspection")
         return original_read(archive, name, *args, **options)
@@ -441,10 +496,9 @@ def test_source_generator_is_read_only_after_bounded_metadata_inspection(
 
 
 def test_build_deadline_settles_backend_descendants_before_staging_cleanup(
-    tmp_path, toolchain, monkeypatch,
-):
+    tmp_path: Path, toolchain: ToolchainLock, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import build_python_artifacts as builder
-    from test_installer_wheel_acquisition import _running
 
     payload = source_project(tmp_path / "source")
     pid_file, late_write = tmp_path / "descendant.pid", tmp_path / "late-write"
@@ -461,11 +515,11 @@ def test_build_deadline_settles_backend_descendants_before_staging_cleanup(
         "    time.sleep(60)\n",
         encoding="utf-8",
     )
-    temporary = builder.tempfile.TemporaryDirectory
+    temporary = tempfile.TemporaryDirectory
     staged = []
 
     @contextmanager
-    def observed_temporary(*args, **options):
+    def observed_temporary(*args: Any, **options: Any) -> Iterator[str]:
         with temporary(*args, **options) as path:
             staged.append(Path(path))
             try:
@@ -474,11 +528,13 @@ def test_build_deadline_settles_backend_descendants_before_staging_cleanup(
                 if pid_file.is_file():
                     assert not _running(int(pid_file.read_text())), "custody released before descendant exit"
 
-    monkeypatch.setattr(builder.tempfile, "TemporaryDirectory", observed_temporary)
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", observed_temporary)
+    uv = shutil.which("uv")
+    assert uv is not None
     with pytest.raises(subprocess.TimeoutExpired):
         builder.build_wheel(
             payload, tmp_path / "built", toolchain=toolchain,
-            uv=shutil.which("uv"), deadline=time.monotonic() + 15,
+            uv=uv, deadline=time.monotonic() + 15,
         )
     assert pid_file.is_file(), "the real backend must spawn its delayed writer"
     assert not _running(int(pid_file.read_text()))
@@ -487,12 +543,13 @@ def test_build_deadline_settles_backend_descendants_before_staging_cleanup(
 
 
 def test_source_mutation_during_build_cannot_relabel_wheels(
-    adopter, source, target, toolchain, monkeypatch, built_wheels,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    monkeypatch: pytest.MonkeyPatch, built_wheels: FixtureBuilder,
+) -> None:
     candidate = selected_source(source, target, adopter)
     original = completion.build_wheel
 
-    def mutate(*args, **kwargs):
+    def mutate(*args: Any, **kwargs: Any) -> Path:
         result = original(*args, **kwargs)
         (source[0] / "module.py").write_text("changed")
         return result
@@ -505,9 +562,9 @@ def test_source_mutation_during_build_cannot_relabel_wheels(
 
 @pytest.mark.parametrize("record_algorithm", ["sha256", "sha384", "sha512"])
 def test_complete_source_profile_includes_exact_pinned_third_party_and_transitive_extra(
-    adopter, source, target, toolchain, tmp_path, built_wheels, record_algorithm,
-):
-    from promotion_unit_tests.test_runtime_profile_wheels import _encoded
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, built_wheels: FixtureBuilder, record_algorithm: str,
+) -> None:
     manifest = source[0] / "libs" / "helper" / "pyproject.toml"
     manifest.write_text(manifest.read_text().replace('metrics=[]', 'metrics=["fixture-registry>=1"]'))
     source = _selected_identity(source[0])
@@ -534,13 +591,13 @@ def test_complete_source_profile_includes_exact_pinned_third_party_and_transitiv
 
 @pytest.mark.parametrize("record_algorithm", ["sha384", "sha512"])
 def test_built_first_party_wheels_keep_sha256_record_policy(
-    adopter, source, target, toolchain, monkeypatch, built_wheels, record_algorithm,
-):
-    from promotion_unit_tests.test_runtime_profile_wheels import _encoded
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    monkeypatch: pytest.MonkeyPatch, built_wheels: FixtureBuilder, record_algorithm: str,
+) -> None:
 
     candidate = selected_source(source, target, adopter)
 
-    def altered(project, output, **options):
+    def altered(project: Path, output: Path, **options: Any) -> Path:
         path = built_wheels(project, output, **options)
         with zipfile.ZipFile(path) as archive:
             prefix = path.name.split("-py3-")[0] + ".dist-info/"
@@ -559,14 +616,15 @@ def test_built_first_party_wheels_keep_sha256_record_policy(
 
 
 def test_installed_target_mismatch_refuses_before_completion_marker(
-    adopter, source, target, toolchain, monkeypatch,
-):
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     candidate = selected_source(source, target, adopter)
     root = Path(candidate.record()["policy"]["owner"]["runtimeRoot"])
     version = candidate.record()["source"]["runtime_version"]
     probes = []
 
-    def environment(python, **_options):
+    def environment(python: Path, **_options: object) -> dict[str, str]:
         probes.append(python)
         return dict(target["environment"]) if len(probes) == 1 else {}
 
@@ -578,12 +636,12 @@ def test_installed_target_mismatch_refuses_before_completion_marker(
         ):
             pytest.fail("incompatible installed target reached a ready candidate")
     assert len(probes) == 2
-    assert not completion.runtime.marker_path(root, version).exists()
-    assert not completion.runtime.is_complete(root, version)
-    assert completion.runtime.current_version(root) is None
+    assert not runtime.marker_path(root, version).exists()
+    assert not runtime.is_complete(root, version)
+    assert runtime.current_version(root) is None
 
 
-def test_real_marker_probe_cannot_run_installed_startup_hooks(tmp_path):
+def test_real_marker_probe_cannot_run_installed_startup_hooks(tmp_path: Path) -> None:
     root = tmp_path / "venv"
     venv.EnvBuilder(with_pip=False).create(root)
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -596,7 +654,7 @@ def test_real_marker_probe_cannot_run_installed_startup_hooks(tmp_path):
     )
     control = subprocess.run(
         [str(python), "-I", "-c", "pass"], capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_CREATION_FLAGS,
     )
     assert control.returncode == 0, control.stderr
     assert marker.is_file(), "the control must prove site initialization executes this hook"
@@ -605,7 +663,7 @@ def test_real_marker_probe_cannot_run_installed_startup_hooks(tmp_path):
     assert not marker.exists()
 
 
-def test_clean_source_profile_import_never_loads_native_governance():
+def test_clean_source_profile_import_never_loads_native_governance() -> None:
     script = """
 import sys
 sys.path[:0] = [sys.argv[1], sys.argv[2]]
@@ -624,7 +682,7 @@ print("source-profile-clean-import-ok")
         [sys.executable, "-I", "-S", "-B", "-c", script, str(Path(__file__).resolve().parent),
          sysconfig.get_paths()["purelib"]],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_CREATION_FLAGS,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "source-profile-clean-import-ok"

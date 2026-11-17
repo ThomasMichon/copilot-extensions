@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import ExitStack
+from collections.abc import Mapping, Sequence
 import json
 import os
 from pathlib import Path
@@ -10,9 +11,42 @@ import subprocess
 import sys
 import threading
 import time
+from typing import BinaryIO, Protocol, TypedDict
+
+_CREATION_FLAGS = 0
+if sys.platform == "win32":
+    _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
 
 
-def capture(transaction, root, *, max_stdout, max_stderr, deadline):
+class CaptureTransaction(Protocol):
+    @property
+    def argv(self) -> Sequence[str]: ...
+
+    @property
+    def cwd(self) -> Path: ...
+
+    @property
+    def environment(self) -> Mapping[str, str]: ...
+
+
+class CaptureRequest(TypedDict):
+    argv: list[str]
+    cwd: str
+    max_stdout: int
+    max_stderr: int
+    deadline: float
+
+
+class CaptureResponse(TypedDict):
+    status: str
+    stdout: str
+    stderr: str
+
+
+def capture(
+    transaction: CaptureTransaction, root: Path, *,
+    max_stdout: int, max_stderr: int, deadline: float,
+) -> tuple[bytes, bytes]:
     from installer_engine_process import run_owned
     from installer_wheel_inputs import _check_deadline, _ordinary
     from installer_wheel_snapshot import _open, _unchanged
@@ -75,12 +109,12 @@ def capture(transaction, root, *, max_stdout, max_stderr, deadline):
         raise ProfileError("source compile capture failed") from None
 
 
-def _capture(request):
+def _capture(request: CaptureRequest) -> CaptureResponse | dict[str, str]:
     buffers = [bytearray(), bytearray()]
     limits = [request["max_stdout"], request["max_stderr"]]
     refused = threading.Event()
 
-    def read(stream, index):
+    def read(stream: BinaryIO, index: int) -> None:
         try:
             with stream:
                 while True:
@@ -98,8 +132,9 @@ def _capture(request):
     process = subprocess.Popen(
         request["argv"], cwd=request["cwd"], stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_CREATION_FLAGS,
     )
+    assert process.stdout is not None and process.stderr is not None
     threads = [threading.Thread(target=read, args=(stream, index), daemon=True)
                for index, stream in enumerate((process.stdout, process.stderr))]
     for thread in threads:
