@@ -220,3 +220,11 @@ the production census refusal for unrelated live servers outside its private
 root. Those three cold/reattach cases are not claimed qualified locally, and
 the fresh-runner native promotion gate remains required. No live sessions were
 changed to manufacture a passing result.
+
+The overlapping fixture correction landed independently in #13059 while the
+follow-up was awaiting its required checks. Rebase preserves that complete
+implementation and its typed native fixture. The remaining follow-up adds a
+separate real-executable refusal control that does not require the global
+absence census, plus these source/release records; it does not reapply or
+replace the already merged correction. Fresh native release qualification
+remains open.
