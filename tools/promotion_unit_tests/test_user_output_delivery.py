@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from tools.promotion_unit_tests.test_owned_worktree import api as api
+from promotion_unit_tests.test_owned_worktree import api as api
 
 
 def receipt() -> tuple[dict[str, Any], str, dict[str, Any]]:
