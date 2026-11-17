@@ -4,9 +4,9 @@ Part of [Task Relevance Reconciliation](README.md), continuing
 [#9532](https://github.com/ThomasMichon/copilot-extensions/issues/9532)
 at the retained-task boundary of
 [#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
-**Status: plan reviewed in #12929; provider implementation passes bounded source
-controls, with publication and runtime qualification still open.** Source
-acceptance is not runtime recovery authority.
+**Status: plan reviewed in #12929; provider source implementation accepted in
+#12953; runtime qualification and ordinary caller integration remain open.**
+Source acceptance is not runtime recovery authority.
 
 ## Existing boundary
 
@@ -159,3 +159,63 @@ probes and their independent execution. Canonical source/preimage validation
 admits the generated outputs without refreshing historical generations. The
 contract guard accepts both contracts and all 1,141 registered fixtures. This
 adds controlled source qualification, not native or installed acceptance.
+
+## Next consumer slice: ordinary supervised resume
+
+The normal caller should remain the existing supervisor-to-Bridge resume path.
+Dispatch retains the current assignment and reservation before launch, Bridge
+restores the assigned workspace's original native conversation, Dispatch records
+the observed resumed-agent facts, and the worker explicitly accepts the current
+task through its negotiated start operation. A live process or successful resume
+does not itself authorize a supervisor to mark that task `STARTED`.
+
+The receiver merged in #12953 is deliberately provider-first. Two current
+consumer assumptions still prevent this ordinary composition after metadata
+loss: generic worktree resume refuses a retained journal rather than importing
+an unassociated session, and ordinary Dispatch startup requires its historical
+managed handle, receipt stream and stored identity to remain unchanged.
+Neither assumption may be removed by treating missing receipts as non-delivery.
+
+Implement the remaining migration within those existing owners:
+
+1. Make the ordinary Bridge resume boundary select the original keyed journal,
+   native head and workspace incarnation. Internally compose metadata adoption
+   and retained native recovery when needed; do not make a supervisor or operator
+   reconstruct rows, invent writer facts or drive a second repair workflow.
+2. Keep the existing original-journal and native launch owners authoritative.
+   Concurrent calls, restart and response loss discover the same adoption and
+   pending operation. An uncertain native effect is inspected, not relaunched;
+   a valid current ready session remains reusable without another native load.
+3. Return truthful resumed-session facts, including the adopted managed identity
+   and explicit historical gap when applicable. Preserve the native conversation,
+   immutable birth record, original exclusions and historical outcomes. The
+   missing predecessor's old namespace never becomes a send alias.
+4. Let the existing reservation storage accept that owner-qualified control
+   adoption without confusing it with a different native conversation. Preserve
+   old allocation/invocation history and current task-generation, reservation,
+   pool and writer checks. An old missing receipt or failed startup cannot be
+   relabeled successful; a settled excluded send remains excluded.
+5. Continue through ordinary task delivery and the worker's explicit acceptance.
+   Preserve current policy clocks, retry limits, holds and task identity. No new
+   task episode, unrelated reservation release or supervisor-authored acceptance
+   is part of this migration.
+6. Negotiate the actual receiving support before enabling the caller. An older
+   provider must refuse this recovery rather than silently dropping keyed
+   custody. Keep ordinary present-record/unassociated resume behavior and
+   supported rollback intact; no build-equality requirement or new service is
+   introduced.
+
+The discriminating source composition must exercise the real resume front door,
+reservation recorder and worker start boundary: surviving original native with
+missing managed metadata; already-present stopped and live records; simultaneous
+resume and lost replies; explicit prior-history gaps and settled/unknown sends;
+changed workspace/native/task/reservation evidence; and an older unsupported
+receiver. Prove that resume alone leaves task acceptance unchanged, while the
+same worker's affirmative start records `STARTED` once. Preserve all existing
+unit nodes and source/coverage bindings; put process and native cases in the
+existing selected integration portfolio.
+
+This is the next source integration and qualification slice of the existing
+plan. It grants no installed Bridge mutation, prompt, deployment, task reset,
+termination, deletion or production activation. Actual original-flow recovery
+and authorized rollout remain separately reported.
