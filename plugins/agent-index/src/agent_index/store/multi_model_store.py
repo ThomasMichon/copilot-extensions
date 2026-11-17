@@ -242,11 +242,10 @@ class MultiModelStore(_ItemRepresentationMixin):
         return self.upsert_vectors(model_id, chunks, vectors)
 
     @source_write
-    def delete_by_source(self, source: str) -> None:
-        """Remove all data for a source from content and all vector tables."""
+    def delete_by_source(self, source: str) -> int | None:
+        """Remove source data; source-aware stores return the deleted content count."""
         if self._source_domain is not None:
-            self._content.delete_by_source(source)
-            return
+            return cast(int, self._content.delete_by_source(source))
         # Get chunk_ids before deleting content
         chunk_ids = self._get_chunk_ids_for_source(source)
         self._content.delete_by_source(source)
@@ -254,6 +253,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
+        return None
 
     @source_write
     def delete_by_source_exact(self, source: str) -> int:

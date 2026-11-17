@@ -32,6 +32,30 @@ def catalog_repo_matches(source: str, repo: str) -> bool:
     return bool(repo) and source.endswith(f":{repo}")
 
 
+@pytest.mark.parametrize("source_aware", [True, False])
+def test_facade_preserves_source_delete_return_and_remaining_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_aware: bool,
+) -> None:
+    profile = ModelProfile("test", "test", table_name="vectors_test", dim=2)
+    if source_aware:
+        monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+        initialize: Callable[[IndexConfig], MultiModelStore] = initialize_source_store
+        store = initialize(IndexConfig(data_dir=tmp_path, model_profiles={"test": profile}))
+    else:
+        monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+        store = MultiModelStore(tmp_path / "lance")
+        store.register_model(profile)
+    chunks = [
+        Chunk(f"document {index}", f"{index}.md", "text", "markdown", 1, 1, source=source)
+        for index, source in enumerate(("git:alpha", "git:alpha:commits", "git:alphabet"))
+    ]
+    vectors = np.array([[1.0, 0.0]] * len(chunks), dtype=np.float32)
+    store.upsert("test", chunks, vectors)
+    assert store.delete_by_source("git:alpha") == (2 if source_aware else None)
+    assert store.delete_by_source("git:alpha") == (0 if source_aware else None)
+    assert [hit.chunk_id for hit in store.search("test", vectors[0])] == [chunks[2].chunk_id]
+
+
 @pytest.mark.parametrize("repo", ["owner/repo_under", "owner/repo'quoted"])
 def test_consumer_policy_scopes_authorized_native_queries_before_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: str,
@@ -124,15 +148,34 @@ def test_multi_model_consumer_policy_scopes_all_retrieval_paths(
         "repo": repo, "source": "catalog:issues", "language": "python",
         "file_path_glob": "docs/item-*.py", "labels": ["kept"],
     }
+    fusion = Mock(wraps=multi_model_store._reciprocal_rank_fusion)
+    multi_fusion = Mock(wraps=multi_model_store._multi_list_rrf)
+    monkeypatch.setattr(multi_model_store, "_reciprocal_rank_fusion", fusion)
+    monkeypatch.setattr(multi_model_store, "_multi_list_rrf", multi_fusion)
     assert {hit.chunk_id for hit in store.search("test", vectors[0], **filters)} == expected
     for query in ("searchable phrase", "absentlexicaltoken"):
+        fusion.reset_mock()
+        multi_fusion.reset_mock()
+        has_fts_hits = with_fts and query == "searchable phrase"
         assert {
             hit.chunk_id for hit in store.hybrid_search("test", vectors[0], query, **filters)
         } == expected
+        if has_fts_hits:
+            fusion.assert_called_once()
+            assert fusion.call_args is not None
+            assert {hit.chunk_id for hit in fusion.call_args.args[1]} == expected
+        else:
+            fusion.assert_not_called()
         assert {
             hit.chunk_id
             for hit in store.search_all({"test": vectors[0], "other": vectors[0]}, query, **filters)
         } == expected
+        multi_fusion.assert_called_once()
+        assert multi_fusion.call_args is not None
+        lists = multi_fusion.call_args.args[0]
+        assert len(lists) == (3 if has_fts_hits else 2)
+        if has_fts_hits:
+            assert {hit.chunk_id for hit in lists[-1]} == expected
     assert {
         hit.chunk_id for hit in store.find_similar(chunks[0].chunk_id, limit=1, **filters)
     } == {chunks[1].chunk_id}
