@@ -108,8 +108,13 @@ fetch refspec excludes it. The committed reader's recorded `origin/HEAD`
 policy bootstrap and its declared policy branch are related refresh inputs,
 including when the configured creation remote is not `origin`. Each required
 source/destination ref is attempted once within one shared fetch deadline.
+That deadline includes remote and credential lookup and is checked again
+immediately before each subprocess. Policy tracking aliases retain their
+configured source ref without applying unrelated fetch mappings.
 A missing base or policy branch does not prevent refreshing surviving refs;
-failures still report degraded freshness. Non-symbolic optional policy HEAD
+failures and unavailable policy reads still report degraded freshness. A
+policy-only failure reports a refreshed base rather than calling it last-known.
+Non-symbolic optional policy HEAD
 does not block the configured base. The policy reader itself remains offline.
 These explicit
 tracking destinations ignore configured refmaps; unrelated tracking refs and

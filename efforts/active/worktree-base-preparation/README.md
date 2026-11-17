@@ -19,8 +19,9 @@ and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
 **Now:** resolve the next final-head review's deadline, unavailable-read,
-tracking-alias and freshness-diagnostic findings with measured negatives,
-then repeat impacted qualification and exact-source review/CI.
+tracking-alias and freshness-diagnostic findings locally while retaining the
+unchanged-runtime negative candidate. Both negative and positive consumer
+qualification, followed by exact-source review/CI, remain publication gates.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -316,6 +317,48 @@ typing exemption or pending-project admission.
   policy remote, timed-out HEAD/bootstrap probes, an aliased recorded HEAD
   with a real decoy branch, and the actual caller's deleted-policy warning.
   Runtime remains unchanged pending meaningful fail-first results.
+- Those controls pass whole-file strict typing and lint and are retained at
+  immutable source `9796a1ab84` against unchanged production behavior. The
+  qualification client's read-only preflight then timed out before creating
+  a request: twice on repository metadata and once on owner identity.
+  An explicit native project selector made the metadata read work, but did
+  not clear the later identity timeout. No request or behavioral result is
+  claimed, no timeout/containment was widened, and no host repair was attempted.
+  Continue local source work while preserving that negative source; actual
+  negative and positive qualification still precede publication of the next
+  runtime correction. A preflight failure is not a test result.
+
+### 2026-11-17 - Remaining boundaries reproduced and corrected locally
+
+- The same pinned negative source `9796a1ab84151faf8303dbed268e0e34c4aeb466`
+  reached the disposable Windows consumer in
+  [run 44074796247](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44074796247).
+  It produced the expected five behavior failures and ten passing controls:
+  delayed authentication launched a late policy fetch, aliased policy HEAD
+  consumed the decoy branch, unavailable HEAD/bootstrap reads hid degradation,
+  and a policy-only failure marked the fresh base unfetched. No skip or
+  preparation failure is counted as a behavioral negative.
+- The native result lookup initially timed out. A scoped read subsequently
+  confirmed the same request completed; the original qualification client
+  then validated its bound result. No request was replayed, journal rewritten,
+  timeout widened or containment relaxed.
+- Local corrections share one transient absolute deadline through Git and
+  credential acquisition, recomputing its remainder at each child launch.
+  Preserve the selected base's successful refresh separately from policy
+  failures. Use the existing committed batch/parser observations to report
+  unavailable policy, and invert only the selected tracking destination's
+  configured source mapping. Ambiguous mappings or collisions cannot overwrite
+  the refreshed creation base.
+- The actual caller now distinguishes policy degradation with a refreshed base
+  from the unchanged literal base-fetch/last-known warning. Necessary whole-file
+  typing retains its live module/facade replacement seams and omitted optional
+  keywords; no project admission or suppression is introduced. Neither #7178
+  nor #11828 has a current hunk in this caller file.
+- Positive controls now also cover wildcard aliases, valid source-only fetch
+  mappings, ambiguity and a collision with the creation base. Strict checking
+  has passed all eight changed Python files on Linux and Windows/Python3.10;
+  final exact-source gates and the expanded positive consumer packet remain
+  pending. The implementation is not yet republished or accepted.
 
 ### 2026-11-17 - Finite correction validated locally
 

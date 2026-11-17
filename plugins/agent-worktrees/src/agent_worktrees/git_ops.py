@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import cast, overload
 
 
-from . import env_scrub, git_tree_diff, push_timeout
+from . import env_scrub, git_acquisition_budget, git_tree_diff, push_timeout
 from .checkout_data import preservation_reason
 from .git_repository_environment import (
     _NO_HOOKS_PATH as _NO_HOOKS_PATH,
@@ -32,8 +32,8 @@ from .git_repository_environment import (
     identity_scoped,
 )
 from .git_errors import GitError, _redact_args as _redact_args
+from .git_fetch import _fetch_refspecs as _fetch_refspecs
 from .git_state_types import (
-    _GitHookOptions,
     _GitProbeOptions,
     _GitStateFields,
     FastForwardResult as FastForwardResult,
@@ -207,6 +207,7 @@ def git(
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
 
     def execute() -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        timeout = git_acquisition_budget.remaining_timeout(requested_timeout)
         if observation_deadline is not None:
             if input_data is not None:
                 return push_timeout.run_bounded(
@@ -240,6 +241,7 @@ def git(
             **no_window_kwargs(),
         )
 
+    requested_timeout = timeout
     result = (
         cast(
             subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
@@ -663,21 +665,11 @@ def _fetch_branches(
     tracking_remote: str | None = None,
 ) -> None:
     destination = remote if tracking_remote is None else tracking_remote
-    refspec = [f"+refs/heads/{branch}:refs/remotes/{destination}/{branch}" for branch in branches]
-    refmap = ["--refmap="] if branches else []
-    hook_options: _GitHookOptions = {"no_hooks": True} if no_hooks else {}
-    try:
-        git(
-            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", *refmap, *refspec,
-            cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
-            auth_acquisition=True, **hook_options,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GitError(
-            ["git", "fetch", remote, "--quiet", *refmap, *refspec], 124,
-            f"fetch from '{remote}' timed out after {timeout}s "
-            "(remote unreachable?)",
-        ) from exc
+    _fetch_refspecs(
+        remote, cwd=cwd,
+        refspec=tuple(f"+refs/heads/{branch}:refs/remotes/{destination}/{branch}" for branch in branches),
+        timeout=timeout, isolated_repository=isolated_repository, no_hooks=no_hooks,
+    )
 
 
 def rebase(onto: str, *, cwd: str | Path) -> bool:
@@ -1036,9 +1028,11 @@ def _gh_token_for_owner(owner: str) -> str | None:
     try:
         result = subprocess.run(
             [executable, "auth", "token", "--user", owner],
-            capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+            capture_output=True, text=True, timeout=git_acquisition_budget.remaining_timeout(60),
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
+        git_acquisition_budget.remaining_timeout(None)
         return None
     if result.returncode != 0:
         return None
@@ -1251,9 +1245,10 @@ def _active_gh_account() -> str | None:
     try:
         result = subprocess.run(
             ["gh", "auth", "status"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=git_acquisition_budget.remaining_timeout(10),
         )
     except Exception:
+        git_acquisition_budget.remaining_timeout(None)
         return None
     # `gh auth status` prints per-account blocks; the active one carries a
     # following "Active account: true" line. Track the most recent
@@ -1450,14 +1445,12 @@ def prepare_worktree_base(
     anchor_path = Path(anchor)
     fetched = False
     fetch_error: str | None = None
-    if has_remote(remote, cwd=anchor_path):
-        try:
-            from .worktree_base_preparation import _fetch_worktree_base
+    try:
+        from .worktree_base_preparation import _fetch_worktree_base
 
-            _fetch_worktree_base(anchor_path, remote, default_branch)
-            fetched = True
-        except Exception as exc:
-            fetch_error = str(exc)
+        fetched, fetch_error = _fetch_worktree_base(anchor_path, remote, default_branch)
+    except Exception as exc:
+        fetch_error = str(exc)
 
     start_point = resolve_start_point(
         remote,
