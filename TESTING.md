@@ -676,6 +676,10 @@ Actor-free routing/exit-status controls live in
 `worktree-manager/tests/test_resume_fixture_contract.py` in the normal Manager
 suite, outside the production-coverage packet; the native packet also checks an
 actual absent-session observation through that executable.
+The private-routing executable mirrors readable file-version metadata from its
+selected PSMux provider and verifies the compiled result before selecting it.
+Missing or older provider metadata is never replaced with a supported version;
+the production creation guards remain authoritative.
 JUnit retains consumer timing properties. `resume-pane` retains its
 PSMux 3.3.8 compatibility packet; neither lane authorizes shared-host probes
 or installation. Dispatch at the exact published candidate ref and retain
