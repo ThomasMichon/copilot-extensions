@@ -413,3 +413,19 @@ to reviewing this complete plan. All incumbent #954 and inherited acceptance,
 P3442, #3507's literal OR condition and source/resource owners remain.
 The twelve new technical rows stay unchecked. Ledger publication alone is
 neither domain acceptance, tracker retirement nor implementation completion.
+
+## Complete shared-core reviewed receipt (2026-11-17 UTC)
+
+#13126 merged the complete direct venue-parity domain amendment after
+current-head approval and required CI. Complete current ROOT and source/
+custody readback confirms all eight Plan, three local Validation and one
+actual global Validation clauses; the proposed route is now accepted
+through the existing contract. This appends its outcome without rewriting
+the proposed-route row or any earlier pass.
+
+The separate audited judgment retired #4227 `NOT_PLANNED` as redundant
+tracking. Its original and three earlier discussions remain unchanged;
+#954 stays OPEN. All twelve technical rows and actual affected-P3
+reconciliation before dependent implementation remain unfinished.
+The original reservation, inherited acceptance and every source/resource
+owner remain; no new issue, executor, implementation or operational effect.
