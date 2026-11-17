@@ -3421,6 +3421,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete hook, wheel and qualification contracts](journal/2026/11.16-complete-hook-wheel-and-qualification-contracts.md)
+  record actual #13036 delivery and thirteen complete-original judgments,
+  retaining current replacement intent, corrective reopening, later source
+  preservation and distinct native failure causes without accepting incomplete
+  installed qualification. The complete census is 875 whole open, 146 above
+  fixed 729, with two metadata-only arrivals and no new closure credit.
+  All incumbent checkbox states, owners and operational holds remain.
   The [complete producer and admission contracts](journal/2026/11.16-complete-producer-and-admission-contracts.md)
   record actual #13032 delivery and twenty-one whole-original judgments,
   correcting historical Draft #8143 state with its actual unwired-foundation
