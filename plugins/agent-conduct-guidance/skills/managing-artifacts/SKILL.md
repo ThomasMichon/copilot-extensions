@@ -23,5 +23,8 @@ custody/disposition, user-delivery receipts and finalization versus cleanup.
    owner/retention/live-use checks still govern any removal.
 
 For disposable working files, read the [scratch procedure](../using-scratch-space/SKILL.md).
+For a selected native user-output producer, follow its
+[capability, destination and verified-handover contract](https://github.com/ThomasMichon/copilot-extensions/blob/main/plugins/agent-worktrees/docs/artifact-output.md);
+missing support is not permission to fall back to scratch or generic release.
 This skill does not install a runtime, enable collection, migrate existing files
 or authorize deletion.

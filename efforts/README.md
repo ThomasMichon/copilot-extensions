@@ -32,7 +32,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Verified User-Output Delivery](active/verified-user-output-delivery/README.md) | Draft; source-only destination and verified handover proposal before implementation | #13040 under #10968; existing configuration, resource-ledger and storage owners retained; no real user-file operation or rollout |
+| [Verified User-Output Delivery](active/verified-user-output-delivery/README.md) | Active; complete source flow qualified on Windows and Linux, review and delivery open | #13040 under #10968; existing configuration, resource-ledger and storage owners retained; no real user-file operation or rollout |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Configured Worktree Base Preparation](active/worktree-base-preparation/README.md) | Draft; finite explicit-default-branch preparation proposal before implementation | #13013; preserves #4093 fallback, #4303 resume and #7178/#11828 contributor scopes; no rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |

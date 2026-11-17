@@ -12,15 +12,15 @@ responsibility with a bounded historical receipt.
 **Finalization criterion:** source delivery is merged, all scoped validation is
 resolved and the source workspace's obligations are settled. This does not
 require deleting user output or retained history.
-**Now:** review this source intent before behavioral implementation.
-**Return:** implement the first complete source consumer after this plan clears
-review; preserve the broader lifecycle, installed and operational owners.
+**Now:** deliver the qualified source through review and required CI.
+**Return:** finish source checks and PR delivery; preserve the broader lifecycle,
+installed and operational owners.
 
 - **Slug:** `verified-user-output-delivery`
 - **Repo:** copilot-extensions
 - **Branch(es):** one managed source worktree; sequential plan and implementation PRs
 - **Created:** 2026-11-17
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** extends [artifact disposition](../../../visions/plugins/agent-worktrees/README.md#artifact-disposition)
 - **Umbrella issue:** #13040; part of #10968
 
@@ -90,22 +90,22 @@ eviction and other owners' resources.
 
 ### U0 - Review the intent
 
-- [ ] Reconcile the new disposition intent and this plan through source review.
+- [x] Reconcile the new disposition intent and this plan through source review.
 
 ### U1 - Resolve and produce the complete flow
 
-- [ ] Extend the existing storage owner with portable user-output preferences
+- [x] Extend the existing storage owner with portable user-output preferences
   and exact machine-root overrides. Keep resolution inert.
-- [ ] Add an explicitly negotiated Worktrees user-output allocator and delivery
+- [x] Add an explicitly negotiated Worktrees user-output allocator and delivery
   operation over the existing producer ledger. Register before returning a
   writable destination and complete one real producer flow.
-- [ ] Keep failed, interrupted and unknown handover under the same obligation.
+- [x] Keep failed, interrupted and unknown handover under the same obligation.
   Successful exact retries return the stored historical result without
   rescanning or repairing files the user may have moved later.
 
 ### U2 - Qualify the source consumers
 
-- [ ] Prove the controls in UV1-UV5 using private synthetic Windows/Linux roots
+- [x] Prove the controls in UV1-UV5 using private synthetic Windows/Linux roots
   and the normal contained test owners. Record actual platform coverage.
 
 ### U3 - Deliver and close the bounded source work
@@ -117,20 +117,20 @@ eviction and other owners' resources.
 
 ## Validation Plan
 
-- [ ] UV1. Prove precedence, portable organization templates, exact machine
+- [x] UV1. Prove precedence, portable organization templates, exact machine
   roots and explicit destination behavior. Missing or invalid required
   OneDrive selection never silently becomes Downloads, scratch or source.
-- [ ] UV2. Prove exclusive folder creation, portable topic/member names,
+- [x] UV2. Prove exclusive folder creation, portable topic/member names,
   collision handling, no link/reparse traversal, protected-home refusal and
   reserve-before-writable ordering through the real allocator.
-- [ ] UV3. Prove success and actual finalization with a retained deliverable;
+- [x] UV3. Prove success and actual finalization with a retained deliverable;
   also prove incomplete, changed, unreadable and over-budget content cannot
   close the producing obligation.
-- [ ] UV4. Fault the allocation, provider verification and ledger-publication
+- [x] UV4. Fault the allocation, provider verification and ledger-publication
   boundaries. Preserve the same identity and responsibility across unknown
   replies; exact completed retries must not require a destination to remain
   present or recreate a user-moved folder.
-- [ ] UV5. Prove old/new capability refusal and unchanged disposable/retained
+- [x] UV5. Prove old/new capability refusal and unchanged disposable/retained
   scratch semantics. Use focused unit controls and opt-in real-process/native
   qualification rather than enlarging required CI into an exhaustive matrix.
 
@@ -199,6 +199,57 @@ Source tests use newly created private fixture roots only; installed and actual
 user-storage adoption remain outside this finite effort.
 
 ## Journal
+
+### 2026-11-17 - Windows and Linux source qualification
+
+The rebased source `33e7dc699679cfff29c504adcc996fe9821d2bdf` passed
+426 Linux controls across 14 files. Six Windows-only cases skipped there;
+they are not Linux evidence. The
+[source-pinned hosted Windows run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44080296833)
+qualified all 323 selected cases on Windows Server 2025, AMD64, Python 3.12.10.
+Its selection excludes only three explicitly POSIX-only root cases, which
+passed in the Linux packet. The Windows flow covers actual CLI execution,
+exclusive allocation, file integrity, native access checks, timestamp semantics,
+unknown replies, retained receipts and finalization. Neither platform result
+qualifies actual user storage or installed adoption.
+
+The initial Windows file check compared two different meanings of `st_ctime`.
+The correction compares creation time across APIs and keeps change-time
+stability checks within the held descriptor. Identity, size, modification-time
+and content checks remain required. Positive collision fixtures now use the
+existing private-directory owner.
+
+The complete admitted packet passed 5,272 actor-free units with coverage and
+effect checks in 125.119 seconds. Nine new proof-decision cases reuse its
+existing reference-owner fixture; native and filesystem cases remain outside
+required unit CI. Whole-file strict MyPy passed 21 changed Python files on
+both analysis platforms. Review, required CI, source merge and closure remain
+open; this effort is not Done.
+
+### 2026-11-17 - First complete source flow
+
+Implemented inert target/template/root composition and a separate
+`user-deliverable` lifetime over the existing producer ledger. The native
+consumer writes directly into its exclusive final compartment. Real reads
+verify exact membership and integrity before terminal handover. Completed
+retries use the saved original request and receipt, without current policy or
+destination access. The first complete Linux flow, actual finalization and
+the opt-in child-process consumer passed focused source controls.
+
+The whole-file strict ratchet passed all 18 changed Python files on both
+declared analysis platforms. The wider compatibility packet found a changed
+scratch error message; restored the original private-root diagnostic.
+Native Windows first-touch testing rejected the ordinary inherited test-folder
+ACL. Corrected the positive fixtures to create private roots through the existing
+owner instead of weakening admission. Windows and complete compatibility
+qualification remain open; an intermediate pass is not the final delivery gate.
+
+### 2026-11-17 - Reviewed intent
+
+#13042 merged after Copilot approved the exact source head and required CI
+passed. The source worktree synchronized onto the reviewed `dev` state.
+U0 is complete. U1 now owns inert resolution and the complete producing flow.
+No installed runtime or real user-storage effect is admitted.
 
 ### 2026-11-17 - Source intent
 

@@ -15,7 +15,7 @@ from configuration_layers import ConfigurationError, compose, read_source
 POLICY_VERSION = 1
 DEFAULT_DIAGNOSTIC_FILES = 16
 DEFAULT_DIAGNOSTIC_BYTES = 8 * 1024 * 1024
-_POLICY_KEYS = {"scratch_root", "failure_evidence"}
+_POLICY_KEYS = {"scratch_root", "failure_evidence", "user_output"}
 _EVIDENCE_KEYS = {"max_files", "max_bytes"}
 DOCUMENT = ".copilot-extensions/artifact-storage.json"
 
@@ -24,6 +24,9 @@ def validate_values(values: object, *, machine_paths: bool, native_paths: bool =
     """Validate each contributing policy, not just its surviving merged fields."""
     if not isinstance(values, dict) or set(values) - _POLICY_KEYS:
         raise ConfigurationError("unknown artifact storage policy field")
+    if "user_output" in values:
+        from .artifact_output_policy import validate_policy
+        validate_policy(values["user_output"], machine_paths=machine_paths, native_paths=native_paths)
     if "scratch_root" in values:
         root = values["scratch_root"]
         if not machine_paths:
@@ -107,7 +110,7 @@ def resolve_storage(
     for owner_root in forbidden:
         if path.is_relative_to(owner_root.absolute()) or path.resolve().is_relative_to(owner_root.resolve()):
             raise ConfigurationError("scratch root must be outside source and session-state homes")
-    return {
+    result_policy = {
         "schema": "copilot-extensions.artifact-storage", "version": POLICY_VERSION,
         "scratch_root": str(path),
         "failure_evidence": copy.deepcopy(values["failure_evidence"]),
@@ -116,6 +119,9 @@ def resolve_storage(
         "layers": list(result["layers"]),
         "root_admitted": False,
     }
+    if "user_output" in values:
+        result_policy["user_output"] = copy.deepcopy(values["user_output"])
+    return result_policy
 
 
 def load_storage(report: dict[str, Any], **options: Any) -> dict[str, Any]:

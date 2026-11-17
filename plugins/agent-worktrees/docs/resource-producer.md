@@ -135,6 +135,41 @@ This extension supplies the ledger contract, not an allocator or automatic
 runner adoption. Provider/caller integration must separately prove root
 admission, allocation identity, quiescence and the bounded diagnostic policy.
 
+## Verified user delivery
+
+Negotiate `user_output_delivery: 1` and `optional_lifetimes` containing
+`user-deliverable`. This is a separate optional lifetime, not a new meaning for
+scratch retention or absence closeout. Default envelopes remain unchanged.
+The [native user-output producer](artifact-output.md) supplies a complete
+opt-in consumer through the `output-*` operations on this same CLI.
+
+An explicitly reserved `user-deliverable` follows reserve/begin/create/bind.
+This optional lifetime also accepts `expected_creation_nonce` on reserve.
+The owner compares it under the same ledger lock before creating the pending
+claim; a stale incarnation is refused before allocation. The native producer
+uses this field and rechecks its binding before returning writable storage.
+`deliver` accepts only its token. It calls the registered provider outside
+the record lock, then validates the same subject and immutable identity under
+the lock. Its exact version-1 proof requires `available`, `exists`,
+`allocation_finished` and `work_settled` to be literal true, plus a bounded
+`delivery` object with destination, timezone-qualified `delivered_at`,
+`content` (file count, byte count and SHA-256 manifest summary), and
+`result: verified-local`.
+
+The saved `delivered` phase is terminal and uses generic `released` state.
+The producing worktree may finalize with the deliverable retained. Ownership
+views expose the receipt as history with no current owner, not a destination
+custody registry. Failed or unavailable verification preserves the original
+obligation. `retain`, absence-based `close` and cross-owner handoff cannot
+settle this lifetime.
+
+An exact completed `deliver` returns the stored receipt, including its original
+time, without another provider call. It remains available on a terminal owner
+and does not require the user-managed destination to remain in place.
+No later user move, deletion, sync failure or organization change reopens this
+historical result or authorizes repair. Native handover proves local verified
+delivery only, not remote cloud acknowledgment.
+
 ## Read-only ownership views
 
 ```bash
