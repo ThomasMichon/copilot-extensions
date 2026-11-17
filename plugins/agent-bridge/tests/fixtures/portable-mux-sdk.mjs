@@ -91,15 +91,21 @@ const session = {
 };
 async function load(path, tail = "") {
   const source = readFileSync(path, "utf8");
-  const dependencies = {};
+  const dependencies = {
+    "@microsoft/copilot-sdk": { approveAll: () => {} },
+    "@microsoft/copilot-sdk/extension": { joinSession: async () => session },
+  };
   const imports = [...source.matchAll(/^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm)];
   for (const [, , name] of imports) {
-    dependencies[name] = name === "@github/copilot-sdk" ? { approveAll: () => {} }
-      : name === "@github/copilot-sdk/extension" ? { joinSession: async () => session }
+    dependencies[name] = name === "@microsoft/copilot-sdk" ? { approveAll: () => {} }
+      : name === "@microsoft/copilot-sdk/extension" ? { joinSession: async () => session }
         : await import(name.startsWith(".")
           ? pathToFileURL(join(dirname(path), name)).href : name);
   }
-  const linked = source.replace("export async function activateBridgeExtension", "async function activateBridgeExtension").replace(
+  const linked = source.replaceAll(
+    "import(`@microsoft/copilot-sdk${subpath}`)",
+    "Promise.resolve(__dependencies[`@microsoft/copilot-sdk${subpath}`])",
+  ).replace("export async function activateBridgeExtension", "async function activateBridgeExtension").replace(
     /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm,
     (_statement, names, name) => {
       for (const binding of names.split(",").map((part) => part.trim()).filter(Boolean)) {

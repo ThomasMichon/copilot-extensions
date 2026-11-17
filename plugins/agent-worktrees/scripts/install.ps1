@@ -3665,16 +3665,33 @@ function Resolve-AwPsmuxBin {
 }
 
 function Ensure-Psmux {
-    <# Ensure a compatible psmux version. Versions 3.3.5 and 3.3.7+ are
-       accepted; 3.3.6 is blocked. Missing or incompatible versions are
+    <# Ensure psmux 3.4.0 or newer for new launches. Legacy providers remain
+       observable while their sessions are live. Missing or incompatible versions are
        installed/upgraded to the preferred version. The
        installer deliberately does not own the machine's winget pin -- an
        adopting machine-state package may pin an exact validated version.
        Replacement happens only when no live sessions exist, because refreshing
        the portable package
        tears down the running psmux server and every attached session. #>
-    $installVersion = '3.3.8'
+    $installVersion = '3.4.0'
+    $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
+    if (-not (Test-Path -LiteralPath $helper)) {
+        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is missing -- not replacing it"
+        return
+    }
+    . $helper
+    if (-not (Get-Command Get-AwPsmuxBinaryVersion -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Get-AwPsmuxSessionState -ErrorAction SilentlyContinue)) {
+        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is unavailable -- not replacing it"
+        return
+    }
     if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+        $sessionState = Get-AwPsmuxSessionState -Path 'psmux.exe'
+        if (-not $sessionState.Known -or $sessionState.Sessions.Count -gt 0) {
+            Write-ServiceWarn "psmux is unavailable on PATH, but provider activity is present or unknown -- not installing or repairing paths"
+            return
+        }
         Write-Host "  Installing psmux $installVersion (terminal multiplexer)..."
         & winget install --id marlocarlo.psmux --version $installVersion --exact `
             --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
@@ -3687,17 +3704,6 @@ function Ensure-Psmux {
         return
     }
     $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
-    $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
-    if (-not (Test-Path -LiteralPath $helper)) {
-        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is missing -- not replacing it"
-        return
-    }
-    . $helper
-    if (-not (Get-Command Get-AwPsmuxBinaryVersion -ErrorAction SilentlyContinue) -or
-        -not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue)) {
-        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is unavailable -- not replacing it"
-        return
-    }
     $psmuxVer = Get-AwPsmuxBinaryVersion -Path $muxBin
     $psmuxDisplay = if ($psmuxVer) { $psmuxVer } else { '<unknown>' }
     $compatible = Test-AwPsmuxVersionCompatible -Version $psmuxVer
@@ -3705,8 +3711,10 @@ function Ensure-Psmux {
         $sessionState = Get-AwPsmuxSessionState -Path $muxBin
         if (-not $sessionState.Known) {
             Write-ServiceWarn "psmux $psmuxDisplay is incompatible, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
+            return
         } elseif ($sessionState.Sessions.Count -gt 0) {
             Write-ServiceWarn "psmux $psmuxDisplay is incompatible. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to upgrade."
+            return
         } else {
             Write-ServiceChanged "psmux $psmuxDisplay is incompatible -- refreshing the portable package"
             & winget install --id marlocarlo.psmux --version $installVersion --exact `
@@ -4595,7 +4603,7 @@ switch ($Action) {
         }
 
         # Optional: psmux terminal multiplexer for session persistence. New
-        # installs use 3.3.8; existing compatible versions remain supported.
+        # installs use 3.4.0; live legacy providers are never replaced here.
         # See Ensure-Psmux (shared with 'update' so existing boxes self-heal).
         if (-not $ContextualInstall) {
             Ensure-Psmux

@@ -1,5 +1,5 @@
 // Emergency crash diagnostics: an isolated module with no
-// `@github/copilot-sdk` dependency, so it can be exercised directly by
+// `@microsoft/copilot-sdk` dependency, so it can be exercised directly by
 // subprocess tests without mocking `joinSession()`.
 //
 // `extension.mjs` has been observed, on at least one host, reaching the

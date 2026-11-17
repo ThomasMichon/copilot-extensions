@@ -7024,6 +7024,23 @@ do not report its installation cases as passing preparation evidence.
 
 ## Unit-only promotion packet
 
+The exclusive attachment-export consumer packet executes the real export
+entrypoint, health-selected command transport, extension registry, provider
+dispatch and descriptor-pinned writer with an in-memory filesystem and
+substituted credential/IPC edges. It covers unchanged ordinary export,
+capability loss, context/incarnation binding, post-read response loss without
+fallback, initial private custody, collision/substitution, short/failed writes,
+sync/close failure and interruption. It starts no service or child and reads no
+real credential or key.
+
+`plugins/agent-vault/tests/test_attachment_export_files.py` separately exercises
+the actual POSIX filesystem owner using synthetic bytes in pytest-owned
+temporary directories: exclusive pair creation, pre-existing files/links,
+unsafe ancestry, a racing second collision, namespace replacement and
+descriptor settlement after failures. These filesystem controls are outside
+the required actor-free unit admission; they do not qualify Windows ACLs,
+privileged execution, an installed Vault owner or real key material.
+
 The actor-free health composition packet also admits installed Windows
 enrollment preview/installation binding, native default normalization,
 GUI-environment binding, collection support loss, finite-root result/timeout/
@@ -7128,13 +7145,20 @@ on unconfigured paths. These actor-free models do not qualify real filesystem,
 registration, pairing or lifecycle effects; the opt-in native reader portfolio
 retains those separate boundaries.
 
-Six actor-free `test_vault_cache_targets.py` controls admit the original Vault
+Seven actor-free `test_vault_cache_targets.py` controls admit the original Vault
 allowlist validator, declaring-directory path projection, root/group distinction
 and fail-closed manifest collection, raw-row accounting, deadline and cancellation
-using memory-only streams. They perform no
+using memory-only streams, plus strict maintenance-owner projection. They perform no
 native cache/protection, backend, service or process work. The selected Vault
 plugin packet separately exercises real files, CLI wiring and bounded warming;
 real Windows DPAPI and installed-client/service qualification remain distinct.
+
+Four additional `test_vault_transport_order.py` controls enter the original
+CLI wrapper, transport component and extension-owner method with logical
+dependencies. Lost or declined replies cannot re-enter selection, misleading
+transport labels cannot replace the captured callable, and maintenance omits
+only an unselected default database rather than rewriting explicit null.
+These controls perform no native I/O, entry-point discovery or process work.
 
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
@@ -10599,6 +10623,12 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+Each group's own pytest directory, `t/g<index>` beneath that parent, is also
+created with mode `0700` before launch; the short names keep Windows fixture
+paths within path limits. Outside qualification runs the monitor checks the
+sub-suite wall clock before observing exit, so an exited command cannot hide an
+already-exceeded deadline. On POSIX the test command inherits neither the
+controller's status/owner descriptors nor their environment variables.
 The runner resolves its temporary parent before allocating that owned sandbox,
 so Windows short TEMP aliases do not look like redirected daemon registries.
 Daemon-registry redirection and ownership refusals remain unchanged.
@@ -11193,6 +11223,17 @@ moving tests between files didn't silently drop or duplicate a contract's
 coverage. When splitting an existing oversized test module, assign one
 contract per resulting file as you go; retrofitting the marker onto
 already-small, single-contract files is not required.
+
+Agent-worktrees' Git PR fixtures build immutable topologies once per contained
+run in the sandbox's `s/` seed cache, published behind a lock and readiness
+record that other groups reuse but never rebuild after a failed build.
+Uncontained runs fall back to per-session directories. Each case copies the
+seed into its own directory and repairs the relocated worktree links, so
+mutations never reach the seed; `tests/test_pr_seed_cache.py` and
+`tests/test_pr_repo_fixture.py` check those guarantees. Published, refspec,
+rebased, recovered and legacy fork-rerun cases use derived seeds; the fork seed
+keeps an independent fork store, a pruned origin feature ref and an unpushed
+feedback commit.
 
 ## Optional devcontainer-based isolation (Linux)
 

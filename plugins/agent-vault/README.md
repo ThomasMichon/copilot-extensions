@@ -312,7 +312,7 @@ Supported built-in command groups:
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
 | Git HTTPS credentials | `git-credential get|store|erase` (delegates allowlisted hosts to local Git Credential Manager) |
-| Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
+| Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify`, `cache-machine-prepare` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
 
@@ -373,6 +373,84 @@ partial state. Backend temporary-file and privileged-consumer custody require
 their own qualification; failed temporary-file cleanup cannot produce a
 successful create-only receipt. Ordinary `import-key` and `export-key` keep their
 existing activation and overwrite behavior.
+
+## Non-activating attachment export provider
+
+The running service's health reply advertises `key_attachment_export_versions`
+containing integer `1` when its existing backend supports bounded attachment
+reads. `key_attachment_export_owner` identifies the same service incarnation
+as the import owner. The exclusive-file consumer below binds this owner;
+advertisement alone does not establish destination or privileged custody.
+
+The additive `export-key-nonactivating` action takes `entry`, `key_name`,
+the selected database/group context and `expected_export_owner`. A mismatched
+incarnation refuses before backend access; the reply echoes the actual owner.
+The existing service admission refuses a draining owner. An already-locked
+owner returns `needs_unlock` without starting a service, resolving an unlock
+provider or prompting; `allow_prompt: true` refuses. Absent or empty group
+selects root explicitly instead of loading the daemon's ambient group.
+Names follow the create-only import's validation.
+
+Both opaque attachments (`key_name` and its `.pub` companion) must be nonempty
+and at most 16 KiB each. Backend reads stop at the bound plus one byte; failed
+reads, oversized material and failed temporary-file cleanup cannot produce
+success or a partial-material response. The successful response contains
+base64 `key_data` and `pub_data`, without key generation or pair validation.
+This bounds returned material and read allocation, not KeePass's temporary
+file size while its existing ten-second export subprocess runs.
+
+Consumers must discover this contract from their selected running
+owner, bind its context and incarnation, and refuse missing/withdrawn support
+without falling back to ordinary export. New destination creation and
+privileged temporary-file/materializer custody remain separate contracts;
+this provider does not qualify them. Ordinary `export-key` and backend
+`export_attachment` defaults retain their activation/overwrite and cleanup
+behavior. No existing form is deprecated or removed.
+
+## Exclusive attachment export
+
+The opt-in POSIX form creates a new pair without activating or unlocking a
+service:
+
+```bash
+agent-vault export-key Example/item /absolute/private-directory example.key --exclusive --require-running
+```
+
+The executing CLI advertises `key-attachment-exclusive-export-v1` on POSIX.
+The selected running owner must advertise the export provider above, accept
+work and match the selected database/group context. The health-selected,
+single-attempt connector and service incarnation are retained for the private
+read; missing support, owner changes, lost replies and legacy transports cannot
+fall back to ordinary export, another endpoint or another read attempt.
+
+The destination must already be an absolute directory owned by the executing
+UID with mode `0700`. Symlink traversal, `..`, foreign-owned ancestors and
+group/world-writable ancestors refuse; a root-owned sticky ancestor such as
+the system temporary directory is allowed. The directory chain is opened
+component-by-component without following links and verified through retained
+descriptors. Both destination names must be absent before the private read.
+Any existing file, directory, symlink or hard link refuses without overwrite.
+
+Both returned opaque attachments are validated and bounded before creation.
+Both files are then opened with exclusive, no-follow creation **before either
+attachment is written**. Both start and remain at mode `0600`, including the
+public companion; no post-write chmod is used to establish private custody.
+Identity, owner, mode, size, link count and the pinned namespace are checked
+through completion. Success follows both file syncs, directory sync, final
+namespace checks and successful descriptor closure. This is same-owner file
+materialization, not key generation, pair validation, root execution or a
+privileged installation boundary.
+
+Success prints only `{"version": 1, "status": "created"}`. Errors contain closed,
+secret-free codes. `effect_status` is conservatively `unknown` after an attempted
+private read or file creation; `file_effect_status` separately reports whether
+destination-file creation may have begun. A racing second-file collision can
+leave an empty first file. Write, sync, interruption, substitution and close
+failures retain created files and never report success, retry, unlink or choose
+alternate names. Inspect retained owner/destination custody before a new attempt.
+Unsupported platforms refuse before a private read or destination creation.
+Ordinary export keeps its existing behavior; `--require-running` without
+`--exclusive` refuses rather than silently using that ordinary path.
 
 ## Batch reads
 
@@ -795,6 +873,63 @@ runtime. Without it, POSIX caches are inert and KEK commands return a clear
 error. New Windows caches can use native per-user DPAPI without a third-party
 package. Existing Fernet caches require the backend; unreadable originals are
 never overwritten. Existing DPAPI caches keep their format after installation.
+
+### Optional Windows machine-protected fallback
+
+An SSH/NETWORK logon can run as the cache owner without access to that account's
+DPAPI master key. The optional redundant machine copy avoids this dependency.
+**Any local user who obtains machine-scope ciphertext can decrypt it.**
+Owner-and-SYSTEM-only protected DACLs guard its directory, final file and every
+temporary file from creation. Administrators can take ownership; same-user code
+and SYSTEM remain trusted. This is not TPM-backed or portable to another machine.
+
+Check `invocation-contract --json` on the selected executing owner for
+`windows-machine-cache-v1`, then explicitly accept that tradeoff:
+
+```powershell
+agent-vault cache-machine-prepare --accept-machine-scope
+agent-vault cache-verify --machine-fallback --entry API/OpenAI --json
+```
+
+Preparation reads the selected existing primary and creates only its redundant
+copy under `machine-fallback/`; it never unlocks, contacts a service, re-keys or
+rewrites the user cache. An empty store can opt in before ordinary population.
+No new environment variable selects this policy: the private directory retains
+the explicit opt-in for that selected store.
+
+These machine-copy commands require local cache-maintenance ownership.
+Ordinary `cache-verify` retains configured `selected-service` routing;
+machine preparation and forced machine verification refuse that policy rather
+than reading or changing an unrelated caller-side store.
+
+Capable writers update the machine copy through the shared protected-store
+writer, including explicit population, unlock warming, service records,
+rotation journals and invalidation. Readers prefer the primary; only a
+user-DPAPI decryption-unavailable failure permits ordinary fallback. Machine
+reads never migrate keys or write through to the unreadable primary.
+If a valid machine copy has no usable value, or its file has not yet been
+populated, ordinary reads retain the user-decryption-unavailable state for the
+existing selected-service fallback. They do not attempt cache writeback;
+cache-only refusal and explicit-refresh reconciliation requirements remain.
+`cache-verify --machine-fallback` deliberately exercises the machine read path
+without changing the primary, exposing only verification counts/missing subjects.
+
+Each encrypted machine envelope binds the selected store path and exact primary
+ciphertext/key digests. A candidate is published before primary replacement.
+Interrupted writes and older writers therefore make a copy unavailable rather
+than serving stale credentials. Missing primary bytes, unsafe ACLs, corruption
+and selection/recovery errors remain refusals. Source and machine ciphertexts
+are bounded to 16 MiB; an oversized opted-in write fails before primary replacement.
+`cache-clear` removes both
+ciphertexts while retaining the opt-in directory. Keep both bytes and ACLs under
+the same approved custody; do not copy this machine-bound artifact between hosts.
+
+Old runtimes retain their original behavior and reject the new syntax. They do
+not maintain redundant copies; after an old writer changes primary bytes, use a
+capable owner to prepare/populate the copy again. A new CLI does not make an old
+running service capable: unlock warming requires the authorized service upgrade.
+Reboot/relock availability and other-user denial require qualification on the
+target context, not inference from an interactive DPAPI roundtrip.
 
 `cache-populate` bounds old-cache adoption through a contained helper: ten
 seconds for reading/decoding, with two seconds reserved separately for native

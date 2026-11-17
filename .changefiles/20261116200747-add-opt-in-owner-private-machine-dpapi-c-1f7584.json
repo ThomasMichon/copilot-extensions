@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in owner-private machine-DPAPI credential-cache fallback for noninteractive Windows logons",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -3421,6 +3421,40 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete qualification and recovery boundaries](journal/2026/11.16-complete-qualification-and-recovery-boundaries.md)
+  record actual #13049 delivery and twenty complete-original judgments,
+  retaining original native/recovery acceptance, actual OPEN delivery PRs,
+  configuration-before-authentication failure and current source ownership.
+  The complete census is 874 whole open, 145 above fixed 729: two metadata-only
+  arrivals and one external departure yield no campaign closure credit.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
+  The [complete recovery, placement and publication contracts](journal/2026/11.16-complete-recovery-placement-and-publication-contracts.md)
+  record actual #13045 delivery and thirteen complete-original judgments,
+  correcting stale topical labels against current strict-typing and guided-skill
+  originals while preserving keyed-creation, task-placement, native-census and
+  asynchronous-retirement acceptance. The complete census is 873 whole open,
+  144 above fixed 729, following two external inflow departures and no new
+  campaign credit. All incumbent checkbox states and custody remain.
+  The [complete hook, wheel and qualification contracts](journal/2026/11.16-complete-hook-wheel-and-qualification-contracts.md)
+  record actual #13036 delivery and thirteen complete-original judgments,
+  retaining current replacement intent, corrective reopening, later source
+  preservation and distinct native failure causes without accepting incomplete
+  installed qualification. The complete census is 875 whole open, 146 above
+  fixed 729, with two metadata-only arrivals and no new closure credit.
+  All incumbent checkbox states, owners and operational holds remain.
+  The [complete producer and admission contracts](journal/2026/11.16-complete-producer-and-admission-contracts.md)
+  record actual #13032 delivery and twenty-one whole-original judgments,
+  correcting historical Draft #8143 state with its actual unwired-foundation
+  merge while retaining production integration and existing owners.
+  The complete post-merge census is 873 whole open, 144 above fixed 729,
+  following one excluded metadata-only arrival. No new closure credit,
+  resource transfer or parent checkbox change is claimed.
+  The [complete qualification and operational holds](journal/2026/11.16-complete-qualification-and-operational-holds.md)
+  record actual #13028 delivery and twenty whole-original judgments, preserving
+  completed finite source/Linux work versus broader native, installed and
+  operational acceptance. The complete post-merge census remains 872 whole
+  open, 143 above fixed 729, with no new campaign credit. Existing parent
+  checkbox states, explicit operation claims and source/resource holds remain.
   The [complete acceptance and interrupted-control judgments](journal/2026/11.16-complete-acceptance-and-interrupted-control.md)
   record actual #13016 delivery, both reviewed documentary corrections and
   thirty-seven whole-original decisions without repeated implementation

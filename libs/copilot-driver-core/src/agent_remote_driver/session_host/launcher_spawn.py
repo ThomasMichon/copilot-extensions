@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import os
+import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 
 from agent_procutil import spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 
 from .launcher_scratch import observe_exit
 
+if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
 
-def spawn_host(argv, *, cwd, environment, state_dir: Path, phase):
+
+def spawn_host(
+    argv: Sequence[str | os.PathLike[str]], *, cwd: str | os.PathLike[str] | None,
+    environment: Mapping[str, str] | None, state_dir: Path, phase: dict[str, bool],
+) -> tuple[subprocess.Popen[bytes] | WindowsDaemonProcess, BinaryIO]:
     """Return an admitted Host and its borrowed, bounded startup-output stream."""
     read_fd, write_fd = os.pipe()
     stream = os.fdopen(read_fd, "rb")

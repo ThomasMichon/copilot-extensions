@@ -26,10 +26,11 @@ from .repository_contract import RepositoryIdentity
 from .repository_projection import RepositoryProjection
 from .filtered_projection import FilteredProjection
 from .filtered_state import Checkpoint, Document
+from .repository_stream import LocalStreamResponse
 
-PATH = re.compile(r"/v1/(repositories|populations)/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
+PATH = re.compile(r"/v1/(repositories|populations)/([a-z0-9][a-z0-9-]{0,63})/([a-z]+(?:-[a-z]+)*)")
 _Projection = RepositoryProjection | FilteredProjection
-_Response = ServiceResponse | BoundedServiceResponse
+_Response = ServiceResponse | BoundedServiceResponse | LocalStreamResponse
 _T = TypeVar("_T")
 
 
@@ -63,7 +64,9 @@ def profile(owner: RepositoryGatewayOwner) -> tuple[
         return "populations", filtered_subscriptions.OPERATIONS, (
             cast(_SubscriptionFactory, filtered_subscriptions.FilteredSubscriptions)
         ), filtered_subscriptions.contract
-    return "repositories", OPERATIONS, cast(_SubscriptionFactory, RepositorySubscriptions), contract
+    return "repositories", OPERATIONS, cast(_SubscriptionFactory, RepositorySubscriptions), (
+        lambda: contract(reviewer_actions=owner.store.repository_activity)
+    )
 
 
 def response(status: int, value: Document) -> BoundedServiceResponse:
@@ -110,8 +113,12 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
         extra = {"driver": cast(FilteredProjection, owner.repositories).capabilities[identity.key]} if (
             owner.store.repository_filtered
         ) else {}
+        if owner.store.repository_activity and not owner.store.repository_filtered:
+            from .repository_stream import capability
+            extra["stream"] = capability()
         return response(200, {**binding, **declaration(), "identity": identity.document(), **extra})
-    if operation not in operations or request.method != "POST":
+    streaming = operation == "stream" and owner.store.repository_activity and not owner.store.repository_filtered
+    if (operation not in operations and not streaming) or request.method != "POST":
         return response(405, {"error": "repository_operation_refused"})
     if len(request.body) > BODY_BYTES:
         return response(413, {"error": "repository_request_limit"})
@@ -130,12 +137,29 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
     if len(owner._tasks) >= 8:
         return response(503, {"error": "repository_service_busy"})
 
+    stream = None
+    if streaming:
+        from .repository_stream import RepositoryStream
+        try:
+            stream = RepositoryStream(
+                subscriptions(owner.repositories), identity.key, scope.consumer,
+                value["request"], dict(request.headers).get("last-event-id"),
+            )
+        except RepositoryRequestConflict:
+            return response(409, {"error": "repository_stream_binding_mismatch"})
+        except ValueError:
+            return response(400, {"error": "invalid_repository_stream"})
+
     def execute() -> Document:
         def checkpoint() -> None:
             owner._check(request)
             if request.context.namespace != owner.store.namespace:
                 raise RequestDisconnected()
         checkpoint()
+        if stream is not None:
+            return admitted_operation(owner, request, lambda: stream.sample(
+                expires_at=request.context.expires_at, checkpoint=checkpoint,
+            ))
         return admitted_operation(owner, request, lambda: (
             subscriptions(cast(_Projection, owner.repositories)).execute(
                 identity.key, scope.consumer, operation, value["request"],
@@ -147,6 +171,9 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
         try:
             result = await asyncio.to_thread(execute)
             owner._check(request)
+            if stream is not None:
+                from .repository_stream import chunks
+                return LocalStreamResponse(chunks(stream, result, execute, lambda: owner._check(request)))
             selected = response(200, {**binding, "result": result})
             if len(selected.body) > request.response_limit:
                 return response(413, {"error": "repository_response_limit", "outcome": "uncertain"})

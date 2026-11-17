@@ -2,7 +2,7 @@
 //
 // extension.mjs's bounded listen-retry, signal-cleanup-then-reraise, and
 // heartbeat-timer wiring are all plain process/timer logic with no
-// @github/copilot-sdk dependency -- extracted here (rather than left inline
+// @microsoft/copilot-sdk dependency -- extracted here (rather than left inline
 // in the SDK-coupled top-level module) specifically so they are directly
 // unit-testable without loading joinSession() or a real SDK session at all.
 // Every dependency (the retried function, the process-like object, the

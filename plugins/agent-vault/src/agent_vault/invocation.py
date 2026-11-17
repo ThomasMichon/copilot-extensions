@@ -14,6 +14,14 @@ from typing import Any
 _ROOT: ContextVar[str | None] = ContextVar("vault_configuration_root", default=None)
 CACHE_TARGET_CAPABILITY = "repository-cache-targets-v1"
 CACHE_TARGET_FIELDS = frozenset({"cache_entries", "cache_manifests"})
+CACHE_MAINTENANCE_FIELD = "cache_maintenance"
+
+
+def cache_maintenance_owner(data: dict[str, Any], label: str = "vault configuration") -> str:
+    value = data.get(CACHE_MAINTENANCE_FIELD, "local")
+    if not isinstance(value, str) or value not in ("local", "selected-service"):
+        raise RuntimeError(f"{label}: cache_maintenance must be local or selected-service")
+    return value
 
 
 def configuration_root(cwd: str | None = None) -> str | None:
@@ -66,8 +74,11 @@ def invocation_contract() -> dict[str, Any]:
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
+            "windows-machine-cache-v1",
             CACHE_TARGET_CAPABILITY,
             *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            *(["key-attachment-exclusive-export-v1"] if os.name == "posix" else []),
+            "service-cache-maintenance-v1",
         ],
     }
 

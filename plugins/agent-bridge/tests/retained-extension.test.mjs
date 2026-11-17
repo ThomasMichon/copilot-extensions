@@ -93,8 +93,8 @@ async function load(selected, version = 50, {
     "node:fs/promises": { open: () => { throw new Error("real transcript reads forbidden"); } },
     "node:path": path,
     "node:os": { homedir: () => "/synthetic-home" },
-    "@github/copilot-sdk": { approveAll: () => {} },
-    "@github/copilot-sdk/extension": { joinSession: async (config) => { joined = config; return session; } },
+    "@microsoft/copilot-sdk": { approveAll: () => {} },
+    "@microsoft/copilot-sdk/extension": { joinSession: async (config) => { joined = config; return session; } },
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
     "./questions.mjs": questions,
@@ -154,7 +154,7 @@ async function load(selected, version = 50, {
   );
   assert.doesNotMatch(linked, /^import\s/m, "unsupported extension import syntax");
   await new vm.Script(`(async () => {\n${linked}\nawait activateBridgeExtension({
-    joinSession: __dependencies["@github/copilot-sdk/extension"].joinSession,
+    joinSession: __dependencies["@microsoft/copilot-sdk/extension"].joinSession,
     pluginRoot: process.cwd(),
   });\n})()`).runInContext(context);
   await settle();

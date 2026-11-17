@@ -9,6 +9,8 @@ This document describes the implementation as it exists today. It intentionally 
 | CLI | `src/agent_vault/cli.py` | Parses `agent-vault` commands, resolves the active vault on each call, cold-starts the service, performs persistent-cache tier-0 reads, and sends newline-framed JSON requests to the daemon. |
 | Credential reader | `src/agent_vault/credential_reads.py` | Owns the cache-first `get` handler, pinned read-only behavior and authoritative cache reconciliation; the CLI retains its existing handler export and IPC/lifecycle seams. |
 | Protected maintenance | `src/agent_vault/cache_maintenance.py` | Provides metadata-only population and verification through the selected service's existing protected-cache owner; [contract and provider-first rollout](cache-maintenance.md). |
+| Maintenance caller | `src/agent_vault/cache_maintenance_client.py` | Qualifies the running provider and uses its metadata-only records when ordinary policy opts in, without local protected-cache access; otherwise the original CLI path remains. |
+| Command transport | `src/agent_vault/command_transport.py` | Owns priority/discovery orchestration through explicit native dependencies and retains a command's qualified sender without fallback or rediscovery. The CLI keeps its public/native helper boundary. |
 | Service | `src/agent_vault/service.py` | Owns the in-memory KeePass master-password cache and credential-value cache, verifies/unlocks databases, handles entry operations, GCM delegation, KEK operations, endpoint advertisement, and shutdown. |
 | Accepted requests | `src/agent_vault/service_connections.py` | Retains accepted connections and native request futures until server shutdown actually settles them. |
 | KeePassXC backend | `src/agent_vault/keepassxc.py` | Locates `keepassxc-cli` and maps service actions to `keepassxc-cli` commands. KeePassXC is the only secret-store backend today. |
@@ -334,6 +336,18 @@ It is Linux/WSL-only and has no default entry.
 ## Extensions and optional core delegation
 
 Extensions are discovered from Python entry points in the `agent_vault.extensions` group and from `AGENT_VAULT_EXTENSIONS` (`module` or `module:callable`, comma-separated). Loading is idempotent and fail-open.
+
+A separately packaged provider can be another explicit root in an admitted
+[complete native wheel profile](../../../docs/install-contract.md#native-closed-wheel-inputs).
+The [contained construction case](../tests/native/test_runtime_extension_package.py)
+builds and reuses an immutable candidate, then discovers its installed entry point
+without activating a service, invoking the provider or publishing commands.
+An independent negative-control child deliberately invokes the synthetic provider
+through the registry to verify that its nonzero exit cannot be swallowed.
+This qualifies construction and discovery, not feed/release approval, Source
+association, persistent adopter selection across updates, or live adoption.
+Those remain the existing installation and lifecycle owners' responsibilities;
+do not modify a completed slot or add an ambient import-path override.
 
 Hook categories implemented in `src/agent_vault/extensions.py`:
 

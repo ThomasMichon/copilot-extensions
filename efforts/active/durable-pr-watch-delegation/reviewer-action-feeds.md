@@ -94,8 +94,7 @@ erase existing CI/follow-up/merge distinctions.
 
 ## Serial plan and exits
 
-- [x] **Review the contract.** Merged in #12958 (`a11c70f0c2`) after
-  current-head Copilot approval and successful required CI;
+- [x] **Review the contract.** Completed;
   [review and next-slice record](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md).
   Retain all broader M1/Author/Reviewer/provider/client/fleet outcomes.
 - [ ] **Qualify activity evidence and the cache read.** Select the minimal
@@ -103,7 +102,8 @@ erase existing CI/follow-up/merge distinctions.
   `next_actions` page through the actual service and local client. This is the
   first independently testable runtime slice, not an optional factory alone.
   Keep status and PR-list semantics compatible.
-- [ ] **Stream the same views.** Implement SSE over the existing local ingress
+- [x] **Stream the same views.** Source implementation merged in #13038.
+  Implement SSE over the existing local ingress
   as the initial one-way transport, covering status, PR-list and next-action
   changes. Preserve exact registration/cursor scope, reconnect/resume, explicit
   gaps and bounded slow-consumer behavior. Any separately hosted realization
@@ -112,6 +112,8 @@ erase existing CI/follow-up/merge distinctions.
   and Dispatch adapter against the same feed/identities without activating
   either. Associate existing/suspended work through the actual task owner;
   enqueue/steer/nudge only when separately authorized and materially justified.
+  The shared [consumer contract](../../../services/pr/CONSUMERS.md) identifies
+  the actual task/recipe/steering owners; executable inert controls remain open.
 - [ ] **Qualify observational comparison.** Supply a bounded evaluator path
   comparing current state and causes with independently admitted provider
   reads, distinguishing disagreement from stale/unavailable evidence. Runtime
