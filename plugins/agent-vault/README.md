@@ -337,6 +337,11 @@ The import uses the connector and context selected by that health request,
 once, with `expected_import_owner`; the service checks it before backend access
 and echoes its incarnation on the result. A lost, owner-mismatched or legacy
 reply remains unknown, without rediscovery, transport failover or replay.
+The mutation cannot supply a different database, group or named vault. Its raw
+entry is normalized by the service with the captured group. This opt-in form
+refuses a Windows-source endpoint that omits the guest's selection, or a context
+that changes between strict resolution and health, before sending private bytes;
+implicit host-profile attachment import is not supported.
 Missing/withdrawn support refuses without mutation; rollback between discovery
 and execution still cannot invoke the older mutating action.
 Preferred extension transports keep their priority. To carry this mutation,

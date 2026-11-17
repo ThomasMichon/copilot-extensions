@@ -81,7 +81,7 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     config.__dict__.update(
         normalize_entry=lambda entry, group: f"{group}/{entry}" if group else entry,
         resolve_context=lambda **_kwargs: SimpleNamespace(
-            kpdb="synthetic-db", group="Example"
+            kpdb="synthetic-db", group="Example", vault_name=None,
         ),
     )
     monkeypatch.setitem(sys.modules, config.__name__, config)
@@ -138,7 +138,8 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         calls.append(request)
         assert request["action"] == "ping"
         options["binding"].select(
-            mutate, single_attempt=True, defaults={},
+            mutate, single_attempt=True,
+            defaults={"kpdb": "synthetic-db", "group": "Example", "vault": None},
         )
         return {
             "ok": state.running,
@@ -401,7 +402,8 @@ def test_create_only_cli_uses_additive_action_and_truthful_custody(
     )
     if mode in ("created", "rolled-back", "partial", "collision"):
         assert owner.calls[-1]["allow_prompt"] is False
-        assert owner.calls[-1]["entry"] == "Example/new-key"
+        assert owner.calls[-1]["entry"] == "new-key"
+        assert owner.calls[-1]["group"] == "Example"
     if mode != "created":
         assert ('"effect_status": "unknown"' in output.err) == (
             mode in ("rolled-back", "partial")
@@ -815,3 +817,60 @@ def test_selected_connector_and_context_survive_rebinding_and_loss(
     with pytest.raises(ValueError, match="unused mutation-capable"):
         binding.send_once({"action": "import-key-create-only"}, 1.0)
     assert len(observed) == 2
+
+
+@pytest.mark.parametrize("selection", ["windows-native", "windows-extension", "changed-group"])
+def test_import_command_refuses_cross_boundary_or_changed_context_before_private_payload(
+    routed_owner: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], selection: str,
+) -> None:
+    route = routed_owner
+    observed: list[dict[str, Any]] = []
+
+    def selected(request: dict[str, Any], *_args: object) -> dict[str, Any]:
+        observed.append(request)
+        assert request["action"] == "ping"
+        assert "key_data" not in request
+        return {
+            "ok": True, "accepting_work": True,
+            "key_attachment_import_versions": [1],
+            "key_attachment_import_owner": "synthetic-owner",
+        }
+
+    route.namespace["_send_tcp"] = selected
+    if selection.startswith("windows-"):
+        route.state.endpoint.source = "windows"
+    else:
+        context = vars(route.context) | {"group": "other-group"}
+        config = sys.modules[route.owner.package + ".config"]
+        monkeypatch.setitem(
+            config.__dict__, "resolve_context",
+            lambda **options: route.context if options.get("strict") else SimpleNamespace(**context),
+        )
+    if selection == "windows-extension":
+        route.registry.register_transport(
+            selected, before_builtin=True, single_attempt=True,
+        )
+    assert route.owner.client.command(SimpleNamespace(
+        require_running=True, entry="new-key", key_file="/synthetic/example.key",
+    )) == 1
+    assert len(observed) == 1
+    output = capsys.readouterr()
+    assert '"error": "mutation_transport_unsupported"' in output.err
+    assert '"effect_status": "not_started"' in output.err
+
+
+@pytest.mark.parametrize("field", ["kpdb", "group", "vault"])
+def test_bound_mutation_cannot_override_health_context(
+    routed_owner: SimpleNamespace, field: str,
+) -> None:
+    route = routed_owner
+    binding = route.owner.binding.MutationBinding()
+    health = route.owner.cli.send_command(
+        {"action": "ping", "health_only": True},
+        strict_endpoint=True, require_endpoint=True, binding=binding,
+    )
+    binding.accept_health(health)
+    with pytest.raises(ValueError, match="cannot override"):
+        binding.send_once({"action": "import-key-create-only", field: "other"}, 1.0)
+    assert route.events == [("native", "ping")]

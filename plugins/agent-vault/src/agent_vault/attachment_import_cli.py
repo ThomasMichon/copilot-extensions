@@ -97,7 +97,7 @@ def command(args: Any) -> int:
         context = config.resolve_context(strict=True)
         if not context.kpdb:
             raise AttachmentImportError("database_unconfigured")
-        entry, key_name = validate_names(
+        _, key_name = validate_names(
             config.normalize_entry(args.entry, context.group),
             private_path.name,
         )
@@ -121,15 +121,15 @@ def command(args: Any) -> int:
         ):
             raise AttachmentImportError("create_only_unsupported")
         binding.accept_health(response)
-        if not binding.ready:
+        if not binding.ready or not binding.matches_context({
+            "kpdb": context.kpdb, "group": context.group, "vault": context.vault_name,
+        }):
             raise AttachmentImportError("mutation_transport_unsupported")
         effect_possible = True
         response = binding.send_once(
             {
                 "action": "import-key-create-only",
-                "entry": entry,
-                "group": "",
-                "kpdb": context.kpdb,
+                "entry": args.entry,
                 "key_name": key_name,
                 "key_data": base64.b64encode(private).decode("ascii"),
                 "pub_data": base64.b64encode(public).decode("ascii"),

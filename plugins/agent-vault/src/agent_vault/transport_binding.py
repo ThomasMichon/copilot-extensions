@@ -40,6 +40,9 @@ class MutationBinding:
         if isinstance(owner, str) and owner and self._sender is not None:
             self._owner = owner
 
+    def matches_context(self, context: dict[str, Any]) -> bool:
+        return self._selected and self._defaults == context
+
     @property
     def ready(self) -> bool:
         return self._sender is not None and self._owner is not None and not self._used
@@ -49,6 +52,8 @@ class MutationBinding:
     ) -> dict[str, Any] | None:
         if not self.ready or self._sender is None:
             raise ValueError("No unused mutation-capable transport binding")
+        if {"kpdb", "group", "vault"} & request.keys():
+            raise ValueError("Mutation cannot override the health-selected context")
         self._used = True
         outgoing = dict(self._defaults)
         outgoing.update(request)

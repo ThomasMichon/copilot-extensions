@@ -7514,6 +7514,8 @@ payload, owner changes/rollback cannot hide unknown outcomes, and selected
 native/extension connectors survive rebinding without reuse or rediscovery.
 Service dispatch separately refuses missing/mismatched incarnation bindings
 before backend access.
+Command-to-sender controls also refuse Windows-source/changed selection before
+private payloads and reject database/group/vault overrides at the bound sender.
 The plugin's separate `test_attachment_import_files.py` source packet exercises
 POSIX ordinary-file custody using synthetic non-key bytes. Neither packet
 qualifies a live credential owner, native key pair or privileged materializer.
