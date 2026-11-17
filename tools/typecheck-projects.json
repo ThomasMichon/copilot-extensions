@@ -457,7 +457,8 @@
         "plugins/agent-logger"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-machines",
