@@ -645,6 +645,17 @@ composition prerequisites, and review/validation rules.
 
 ## Journal
 
+### 2026-11-17 - First Driver Core annotation wave
+
+- #12989 merged the three-file receipt, original-owner callback and mux
+  collection annotation cohort after exact-head approval and required CI.
+  Both whole-file strict targets, eight existing pure controls and the
+  filesystem consumer smoke pass with executable syntax unchanged.
+- The complete 44-file project remains pending: the subsequent declared
+  Linux and win32 analyses report 156 and 152 errors respectively, each in
+  twenty files. This is diagnostic progress, not persistent admission;
+  Phase 1a and all existing native, SDK and consumer gates remain open.
+
 - [2026-11-16 - Chat preparation merged and native qualification](journal/2026/11.16%20Chat%20preparation%20and%20qualification.md)
 
 ### 2026-11-15 - Strict sweep direction and execution transfer
