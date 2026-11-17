@@ -487,6 +487,12 @@ remains an independent input. The adapter includes the Windows native-read
 helper while keeping compiled filenames in their original lexical spelling;
 the helper itself remains in the checked source.
 
+Changed generated consumer copies use the same composition for both
+`installation_context.py` and `_installation_context.py` entrypoints. A changed
+loader or shared-namespace fragment selects its complete local fragment group,
+not unrelated consumer files or the independent worker. Each view retains its
+own physical membership, source bytes and diagnostic mapping.
+
 When that canonical loader is in the physical inventory, every project also
 receives the faithful view as an import root. A consumer can therefore import
 the public flat `installation_context` module without selecting its loader or
