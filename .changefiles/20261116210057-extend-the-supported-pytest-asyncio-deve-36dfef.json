@@ -1,0 +1,9 @@
+{
+  "comment": "Extend the supported pytest-asyncio development dependency range.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
