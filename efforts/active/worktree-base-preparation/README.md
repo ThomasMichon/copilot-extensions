@@ -178,6 +178,22 @@ and assertions locale-independent. This refinement remains subject to the
 implementation PR's genuine review and required CI; the initial plan approval
 does not claim these newly exposed cases already passed.
 
+### Subsequent refinement - independent required refs
+
+The later review supersedes the one-fetch assumption, not the related-ref
+boundary. Attempt each required source/destination ref once within one shared
+existing fetch deadline, continuing surviving inputs after a failure and
+retaining the first literal error for the accepted fallback.
+
+The configured creation remote keeps its own tracking namespace. Committed
+policy still uses the reader's `origin` namespace: fetch from `origin` when
+configured, otherwise from the configured creation remote into that namespace.
+Refresh the recorded bootstrap and its first declared policy branch, without
+following additional declarations or invoking a broad configured refmap.
+Keep the reader offline and its candidate precedence unchanged; capture its
+bootstrap parse and refresh the declared source before the caller's next
+ordinary policy read. An optional non-symbolic HEAD cannot block base refresh.
+
 ## Journal
 
 ### 2026-11-17 - Initial review and expanded fail-first controls
@@ -224,7 +240,7 @@ does not claim these newly exposed cases already passed.
 - Added focused real-Git negatives for direct/non-symbolic optional remote
   HEAD, deleted bootstrap, deleted configured base, a non-origin creation
   remote whose policy tracking namespace remains `origin`, and an already
-  tracked but stale newly declared policy source. Runtime is still unchanged;
+  tracked but stale newly declared policy source. Runtime was unchanged;
   [run 44045519307](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44045519307)
   executed all11 cases: the original six passed and four new cases failed
   at their intended behavior assertions. The non-origin case instead selected
@@ -241,6 +257,21 @@ does not claim these newly exposed cases already passed.
   before consuming an already tracked stale copy; do not duplicate policy
   resolution or discover remote HEAD over the network. A non-symbolic optional
   bootstrap must not prevent the configured base's refresh.
+- The corrected selector reached a policy assertion, but that assertion
+  incorrectly expected bootstrap metadata after the reader's final hop.
+  Corrected it to inspect the actual bootstrap Git blob. Only then did
+  [run 44048586294](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44048586294)
+  prove the non-origin namespace regression at source
+  `5f7d60c7d980cc941917728011d83cb0251dc23e`: the new bootstrap marker was
+  absent from `origin/trunk`. Neither fixture mistake is counted as a valid
+  negative. Together with the four earlier negatives, all new cases now have
+  meaningful fail-first evidence.
+- Implemented the narrow refresh owner only after those negatives. It shares
+  the existing authenticated explicit fetch, deduplicates required refs,
+  shares the existing deadline, and preserves failures without blocking
+  surviving refs. The reader remains unchanged and offline. Whole-file strict
+  checking passes all four changed Python files on Linux and Windows/Python3.10.
+  Positive consumer qualification and exact-source review/CI remain required.
 
 ### 2026-11-17 - Finite correction validated locally
 

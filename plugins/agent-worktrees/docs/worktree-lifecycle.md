@@ -104,9 +104,14 @@ resource into that contract; legacy receivers refuse opted-in state on rollback.
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
 configured remote default branch explicitly, even when the remote's ordinary
-fetch refspec excludes it. The recorded remote-HEAD policy bootstrap branch,
-when distinct, is refreshed in the same fetch so offline committed-policy
-discovery can observe later default-branch declarations. These explicit
+fetch refspec excludes it. The committed reader's recorded `origin/HEAD`
+policy bootstrap and its declared policy branch are related refresh inputs,
+including when the configured creation remote is not `origin`. Each required
+source/destination ref is attempted once within one shared fetch deadline.
+A missing base or policy branch does not prevent refreshing surviving refs;
+failures still report degraded freshness. Non-symbolic optional policy HEAD
+does not block the configured base. The policy reader itself remains offline.
+These explicit
 tracking destinations ignore configured refmaps; unrelated tracking refs and
 unchecked-out local branches are not refreshed for this preparation.
 It chooses the fetched configured default branch as the start point when
