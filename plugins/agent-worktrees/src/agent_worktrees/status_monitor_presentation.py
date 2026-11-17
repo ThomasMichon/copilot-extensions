@@ -94,7 +94,8 @@ def _native_entry(
 def run_monitor_sweep(
     sweep: Callable[..., int], mux_bin: str | None, token: str, prefix: str,
     ctx_done: set[str], *, progress: PresentationProgress | None = None,
-    state_snapshot: Callable[[str], dict[str, Any]] | None = None, **options: Any,
+    state_snapshot: Callable[[str], dict[str, Any]] | None = None,
+    content_paths: dict[str, str | None] | None = None, **options: Any,
 ) -> int:
     """Keep native presentation progressing during the original roster pass."""
     from . import __main__ as core
@@ -154,9 +155,16 @@ def run_monitor_sweep(
 
     if not is_psmux(mux_bin) or cache is None:
         snapshots: dict[str, _ComputedProject] = {}
+
+        def read_registered(path: str) -> str:
+            project = cfg.active_project()
+            if content_paths is not None:
+                content_paths[path] = project
+            return computed_segment(project, path, None, snapshots)
+
         return sweep(
             mux_bin, token, prefix, ctx_done, **dict(options, segment_cache=ProjectedSegments(
-                segments, lambda path: computed_segment(cfg.active_project(), path, None, snapshots),
+                segments, read_registered,
             )),
         )
     progress = progress if progress is not None else PresentationProgress(

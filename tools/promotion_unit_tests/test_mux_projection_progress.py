@@ -159,6 +159,8 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
 
 def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) -> None:
     segments = CompletedSegments()
+    registered: dict[str, str | None] = {}
+    api.package.config.set_active_project(None)
 
     def sweep(*args: Any, **options: Any) -> int:
         view = options["segment_cache"]
@@ -169,7 +171,10 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
 
     assert api.presentation.run_monitor_sweep(
         sweep, "tmux", "monitor", "fixture", set(), segment_cache=segments,
+        content_paths=registered,
     ) == 1
+    assert registered == {"/synthetic/one": None}
+    api.package.config.set_active_project("project")
     path_reads: list[str] = []
     snapshots: list[str] = []
 
@@ -239,11 +244,16 @@ def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleN
     )
     assert attempted == ["cleanup", "pending", "ready"]
     assert retained == [("project", "cleanup", error)]
+    api.content.refresh_registered_content(
+        {"untracked": None}, owner, governance_deferred=governance, admitted=lambda: False,
+    )
+    assert attempted == ["cleanup", "pending", "ready"]
     with pytest.raises(governance):
-        api.content.refresh_content_segments(
-            "project", {"governance", "later"}, owner, governance_deferred=governance,
+        api.content.refresh_registered_content(
+            {"governance": None, "later": None}, owner, governance_deferred=governance,
         )
     assert attempted == ["cleanup", "pending", "ready", "governance"]
+    assert api.package.config.active_project() == "project"
 
 
 def test_cooperative_progress_uses_completion_based_cadence_and_no_reentry(api: SimpleNamespace) -> None:

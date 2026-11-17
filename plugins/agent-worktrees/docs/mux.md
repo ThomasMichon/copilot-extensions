@@ -246,8 +246,8 @@ The normal TMux monitor path also uses this read-only segment view. Explicit
 status commands and the existing Git sweep, lifecycle and watcher owners retain
 their own refresh behavior.
 Managed live mux projects remain enrolled in that scheduled roster computation
-even without a Picker, list request or runtime demand. Projection itself does
-not enroll demand or request refreshes. Path lookup uses one per-project index
+even without a Picker, list request or runtime demand. Passive roster reads do
+not enroll runtime demand or request refreshes. Path lookup uses one per-project index
 and refuses ambiguous paths; current CONVO descriptors retain their computed
 conversation turn count, while advisory counts stay suppressed.
 Path identity follows the segment cache's normalized real-path rule, including
@@ -260,6 +260,12 @@ The cache retains its existing TTL, invalidation and cleanup ownership.
 Presentation reads only completed fresh content bytes and never substitutes
 `ACTIVE` for DIRTY, WIP or CONVO; unavailable content remains pending rather
 than triggering Git work in the projection path.
+Registered standalone TMux paths also enter a separate content pass after the
+scheduled served-session projection, even when no adopted project or tracking
+record exists. This pass uses the same content cache and restores each
+captured project context under the existing lock, skipping work when lifecycle
+priority is pending. A cold read can remain pending for one pass; subsequent
+projection reads completed content without invoking Git.
 
 Native presentation runs before bulk roster collection. During that same
 owner's roster pass, moderated cooperative progress between record observations
