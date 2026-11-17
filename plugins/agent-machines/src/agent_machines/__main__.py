@@ -24,9 +24,11 @@ Verbs:
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 from . import cli_fleet_update
 from . import cli_git_config
@@ -44,6 +46,10 @@ from . import self_update_state as _self_update_state
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
 from .surfaces._common import SurfaceStateError
+from .self_update_tasks import ScheduledTaskReconcileResult
+from .cli_version import LazyVersionAction as _LazyVersionAction
+
+__all__ = ["_discover", "_layout", "_reconcile", "_validator", "main"]
 
 
 def _collect_all_packages(
@@ -100,22 +106,22 @@ def _collect_native_reconcile_packages(
             project_anchor=repo_anchor,
         )
         if project_repos is not None:
-            packages: list[RequirementPackage] = []
-            for index, candidate in enumerate(project_repos):
-                if not candidate.path.is_dir():
-                    owners = ", ".join(candidate.required_by) or repo_name
+            packages = []
+            for index, project_repo in enumerate(project_repos):
+                if not project_repo.path.is_dir():
+                    owners = ", ".join(project_repo.required_by) or repo_name
                     raise ManifestError(
                         f"project {owners!r} requires supplemental repo "
-                        f"{candidate.name!r}, but it is unavailable at "
-                        f"{candidate.path}; pass --repo {str(repo_path)!r} to "
+                        f"{project_repo.name!r}, but it is unavailable at "
+                        f"{project_repo.path}; pass --repo {str(repo_path)!r} to "
                         "reconcile only the current repository"
                     )
                 packages.extend(
                     _discover.packages_in_repo(
-                        candidate.path,
-                        candidate.name,
+                        project_repo.path,
+                        project_repo.name,
                         machine,
-                        source_anchor=repo_anchor if index == 0 else candidate.path,
+                        source_anchor=repo_anchor if index == 0 else project_repo.path,
                         accepted_machines=accepted_machines,
                     )
                 )
@@ -141,7 +147,11 @@ def _collect_reconcile_packages(
     from .configuration import prepare_defaults
 
     packages, scope = _collect_native_reconcile_packages(args, machine, accepted_machines)
-    return prepare_defaults(packages, machine, accepted_machines), scope
+    prepare = cast(
+        Callable[[list[RequirementPackage], str, tuple[str, ...] | None], list[RequirementPackage]],
+        prepare_defaults,
+    )
+    return prepare(packages, machine, accepted_machines), scope
 
 
 def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIdentity:
@@ -399,7 +409,7 @@ def _fmt_val(v: object) -> str:
     return s if len(s) <= 80 else s[:77] + "..."
 
 
-def _print_authority_decisions(decisions: list[dict[str, object]]) -> None:
+def _print_authority_decisions(decisions: list[dict[str, Any]]) -> None:
     for decision in decisions:
         identity = decision["identity"]
         if isinstance(identity, dict):
@@ -532,24 +542,30 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     # A dry-run *is* a preview, so surface each module's captured output by
     # default; for --apply keep it terse unless --verbose (or a failure).
     show_output = getattr(args, "verbose", False) or dry_run
-    for r in result.module_results:
-        if r.ran:
-            status = "ok" if r.returncode == 0 else f"FAILED rc={r.returncode}"
-            owner = f"{r.source_repo}:{r.package}" if r.package else r.source_repo
-            print(
-                f"  module {r.name} <- {owner}: {status} "
-                f"[authority {r.authority}; {r.authority_mode}]"
+    for module_result in result.module_results:
+        if module_result.ran:
+            status = "ok" if module_result.returncode == 0 else f"FAILED rc={module_result.returncode}"
+            owner = (
+                f"{module_result.source_repo}:{module_result.package}"
+                if module_result.package else module_result.source_repo
             )
-            if show_output and r.stdout_tail:
-                for line in r.stdout_tail.rstrip().splitlines():
-                    print(f"      {line}")
-            if r.returncode not in (0, None) and r.stderr_tail:
-                print(f"      {r.stderr_tail.strip().splitlines()[-1]}", file=sys.stderr)
-        else:
-            owner = f"{r.source_repo}:{r.package}" if r.package else r.source_repo
             print(
-                f"  module {r.name} <- {owner}: skipped ({r.skipped_reason}) "
-                f"[authority {r.authority}; {r.authority_mode}]"
+                f"  module {module_result.name} <- {owner}: {status} "
+                f"[authority {module_result.authority}; {module_result.authority_mode}]"
+            )
+            if show_output and module_result.stdout_tail:
+                for line in module_result.stdout_tail.rstrip().splitlines():
+                    print(f"      {line}")
+            if module_result.returncode not in (0, None) and module_result.stderr_tail:
+                print(f"      {module_result.stderr_tail.strip().splitlines()[-1]}", file=sys.stderr)
+        else:
+            owner = (
+                f"{module_result.source_repo}:{module_result.package}"
+                if module_result.package else module_result.source_repo
+            )
+            print(
+                f"  module {module_result.name} <- {owner}: skipped ({module_result.skipped_reason}) "
+                f"[authority {module_result.authority}; {module_result.authority_mode}]"
             )
     return 0 if result.ok else 2
 
@@ -607,7 +623,7 @@ def _resolve_self_update_resources(
 def _selected_self_update_tiers(args: argparse.Namespace) -> list[str]:
     selected = getattr(args, "tier", None)
     if not selected:
-        return sorted(_self_update.TIER_SPECS)
+        return sorted(_self_update_state.TIER_SPECS)
     return list(dict.fromkeys(selected))
 
 
@@ -647,7 +663,7 @@ def _cmd_self_update_install(args: argparse.Namespace) -> int:
         resource = selected_resources.get(tier)
         if not _self_update_state.tier_enabled(resource):
             results.append(
-                _self_update.ScheduledTaskReconcileResult(
+                ScheduledTaskReconcileResult(
                     tier=tier,
                     desired_state="absent",
                     status="skipped",
@@ -774,27 +790,6 @@ def _cmd_provision_playwright_cli(args: argparse.Namespace) -> int:
     return 0
 
 
-class _LazyVersionAction(argparse.Action):
-    """Defer ``__version__`` resolution until ``--version`` is actually
-    passed, instead of eagerly formatting it into every parser build
-    (argparse's own ``action="version"`` requires the finished string up
-    front, forcing the ``importlib.metadata`` lookup on every invocation
-    regardless of subcommand)."""
-
-    def __init__(self, option_strings, dest=argparse.SUPPRESS,
-                 default=argparse.SUPPRESS, help=None):
-        super().__init__(
-            option_strings=option_strings, dest=dest, default=default,
-            nargs=0, help=help,
-        )
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        from . import __version__
-
-        parser._print_message(f"agent-machines {__version__}\n", sys.stdout)
-        parser.exit()
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-machines", description=__doc__)
     parser.add_argument(
@@ -804,7 +799,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    def add(name: str, func) -> argparse.ArgumentParser:
+    def add(name: str, func: Callable[[argparse.Namespace], int]) -> argparse.ArgumentParser:
         p = sub.add_parser(name)
         p.add_argument("--machine", help="override the target machine name")
         p.add_argument("--json", action="store_true", help="emit JSON")
@@ -925,7 +920,7 @@ def _build_parser() -> argparse.ArgumentParser:
     self_update_run.add_argument(
         "--tier",
         required=True,
-        choices=sorted(_self_update.TIER_SPECS),
+        choices=sorted(_self_update_state.TIER_SPECS),
         help="the unattended self-update tier to run",
     )
     self_update_run.add_argument("--machine", help="override the target machine name")
@@ -948,7 +943,7 @@ def _build_parser() -> argparse.ArgumentParser:
         current.add_argument(
             "--tier",
             action="append",
-            choices=sorted(_self_update.TIER_SPECS),
+            choices=sorted(_self_update_state.TIER_SPECS),
             help="restrict to one unattended self-update tier (repeatable)",
         )
         current.add_argument("--machine", help="override the target machine name")
@@ -985,7 +980,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        return args.func(args)
+        command = cast(Callable[[argparse.Namespace], int], args.func)
+        return command(args)
     except ManifestError as exc:
         if getattr(args, "json", False):
             print(json.dumps({"ok": False, "error": str(exc)}, indent=2))

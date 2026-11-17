@@ -26,6 +26,7 @@ from . import reconcile as _reconcile
 from . import resources as _resources
 from . import validator as _validator
 from .manifest import RequirementPackage
+from .fleet_update_tasks import ScheduledTaskReconcileResult
 
 
 def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIdentity:
@@ -116,7 +117,7 @@ def _resolve_fleet_update_resources(
 def _selected_fleet_update_tiers(args: argparse.Namespace) -> list[str]:
     selected = getattr(args, "tier", None)
     if not selected:
-        return sorted(_fleet_update.TIER_SPECS)
+        return sorted(_fleet_update_state.TIER_SPECS)
     return list(dict.fromkeys(selected))
 
 
@@ -147,7 +148,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         resource = selected_resources.get(tier)
         if not _fleet_update_state.tier_enabled(resource):
             results.append(
-                _fleet_update.ScheduledTaskReconcileResult(
+                ScheduledTaskReconcileResult(
                     tier=tier,
                     desired_state="absent",
                     status="skipped",
@@ -236,7 +237,7 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0 if all(result.ok or result.status == "skipped" for result in results) else 2
 
 
-def register_parser(sub: argparse._SubParsersAction) -> None:
+def register_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Wire the ``fleet-update`` subcommand tree onto agent-machines' parser."""
     fleet_update = sub.add_parser(
         "fleet-update",
@@ -252,7 +253,7 @@ def register_parser(sub: argparse._SubParsersAction) -> None:
     fleet_update_run.add_argument(
         "--tier",
         required=True,
-        choices=sorted(_fleet_update.TIER_SPECS),
+        choices=sorted(_fleet_update_state.TIER_SPECS),
         help="the unattended fleet-update tier to run",
     )
     fleet_update_run.add_argument("--machine", help="override the target machine name")
@@ -267,7 +268,7 @@ def register_parser(sub: argparse._SubParsersAction) -> None:
         current.add_argument(
             "--tier",
             action="append",
-            choices=sorted(_fleet_update.TIER_SPECS),
+            choices=sorted(_fleet_update_state.TIER_SPECS),
             help="restrict to one unattended fleet-update tier (repeatable)",
         )
         current.add_argument("--machine", help="override the target machine name")
