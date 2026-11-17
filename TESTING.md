@@ -7098,6 +7098,14 @@ on unconfigured paths. These actor-free models do not qualify real filesystem,
 registration, pairing or lifecycle effects; the opt-in native reader portfolio
 retains those separate boundaries.
 
+Six actor-free `test_vault_cache_targets.py` controls admit the original Vault
+allowlist validator, declaring-directory path projection, root/group distinction
+and fail-closed manifest collection, raw-row accounting, deadline and cancellation
+using memory-only streams. They perform no
+native cache/protection, backend, service or process work. The selected Vault
+plugin packet separately exercises real files, CLI wiring and bounded warming;
+real Windows DPAPI and installed-client/service qualification remain distinct.
+
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
 
@@ -7478,6 +7486,13 @@ test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. One pytest directory collector visits only admitted
 files, once each in manifest order, without repeated sibling-directory scans.
+Thirteen retained-metadata epoch controls in `test_retained_metadata_epoch.py`
+exercise same-native adoption, excluded predecessor namespaces and historical
+recovery receipts, corrupt lineage refusal, unchanged birth/handoff resolution
+and qualified import inputs. They load the data-only lineage/import owners
+without process, database or native actors. Real HTTP, database commit/restart
+and independent-process controls remain in the selected Bridge integration
+portfolio; unit success does not qualify native execution or installed adoption.
 The catalog correspondence controls also bind the canonical catalog declaration
 and eleven templates as exact, hashed data inputs. These registered data paths
 cannot be selected as test nodes or Python coverage targets; an unregistered

@@ -359,7 +359,9 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary: Any, monkey
         assert finish(pending) is session
         assert effects == [(manager, "original-session", False)]
     assert len(queries) == 2
-    assert "workspace_embodiments" in queries[0][0] and queries[0][1] == ("original-session",)
+    assert "workspace_embodiments" in queries[0][0]
+    assert "json_extract(creation_adoption_json,'$.session_id')" in queries[0][0]
+    assert queries[0][1] == ("original-session", "original-session")
     assert "LEFT JOIN acquisition_effects" in queries[1][0] and queries[1][1] == (delivery,)
     assert not b.calls
     assert b.writer.current() is None

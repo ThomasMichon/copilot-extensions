@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 import logging
 import time
 
+from .cache_targets import CacheTargetError
+from .cache_limits import WorkBudget
+
 log = logging.getLogger(__name__)
 CacheSource = Callable[[str | None], Iterable[object] | None]
 
@@ -26,6 +29,8 @@ def collect(
     max_items: int | None = None,
     max_sources: int | None = None,
     deadline: float | None = None,
+    budget: WorkBudget | None = None,
+    metered_sources: tuple[CacheSource, ...] = (),
 ) -> CacheTargets:
     result = CacheTargets()
     if any(bound is not None and bound <= 0 for bound in (max_entries, max_items, max_sources)):
@@ -35,8 +40,8 @@ def collect(
     inspected = 0
     for index, source in enumerate(sources):
         if (
-            max_sources is not None
-            and index >= max_sources
+            budget is not None and not budget.available()
+            or max_sources is not None and index >= max_sources
             or deadline is not None
             and time.monotonic() >= deadline
         ):
@@ -46,8 +51,8 @@ def collect(
             items = iter(source(machine) or ())
             while True:
                 if (
-                    max_items is not None
-                    and inspected >= max_items
+                    budget is not None and not budget.available()
+                    or max_items is not None and inspected >= max_items
                     or deadline is not None
                     and time.monotonic() >= deadline
                 ):
@@ -57,6 +62,13 @@ def collect(
                     item = next(items)
                 except StopIteration:
                     break
+                if (
+                    budget is not None
+                    and not any(source is metered for metered in metered_sources)
+                    and not budget.consume()
+                ):
+                    result.truncated = True
+                    return result
                 inspected += 1
                 if isinstance(item, str):
                     pair = (item, "password")
@@ -73,7 +85,11 @@ def collect(
                     if max_entries is not None and len(result.entries) >= max_entries:
                         result.truncated = True
                         return result
+        except CacheTargetError:
+            raise
         except Exception as exc:
             result.failed_sources += 1
             log.warning("Configured cache source failed (%s)", type(exc).__name__)
+    if budget is not None and budget.stopped:
+        result.truncated = True
     return result

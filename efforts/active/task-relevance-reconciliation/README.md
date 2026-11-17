@@ -139,7 +139,7 @@ merged plan does not establish running adoption.
       existing build-bound records without replaying unknown operations.
       Source accepted in #12892; the distinct runtime, concurrent-adoption
       and rollback qualifications below remain open.
-      Already-missing managed metadata additionally follows the proposed
+      Already-missing managed metadata additionally follows the reviewed
       [retained metadata recovery slice](retained-metadata-recovery.md);
       preserving source cleanup is not recovery of deleted history.
 

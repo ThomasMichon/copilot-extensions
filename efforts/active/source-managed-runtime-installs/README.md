@@ -903,6 +903,9 @@ onto one branch.
 
 ## Journal
 
+- 2026-11-17: [Finite Manager-owned application consumer](journal/2026/11.17%20manager-footprint-consumer.md)
+  merged in #12930; F1-F3 and the complete Manager reference remain open.
+
 ### 2026-11-16 - Manager reference and clean-break state boundaries
 
 The operator selected Worktree Manager itself for complete new-flow install and

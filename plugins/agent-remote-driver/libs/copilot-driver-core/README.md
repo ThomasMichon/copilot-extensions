@@ -208,8 +208,62 @@ client count and pane observations when present. Confirmed present/absent
 exits zero; unknown/unsupported exits 3. Duplicate/unknown properties and
 unknown options are refused. Older independently installed providers without
 the declaration stay unsupported; callers must not downgrade to passive
-PSMux CLI reads. Foreground attach/create and explicit provider writes still
-launch PSMux and retain its startup-cleanup risk.
+PSMux CLI reads. Foreground attach/create and other explicit provider writes
+still launch PSMux and retain its startup-cleanup risk.
+
+### Finite PSMux presentation
+
+`agent_remote_driver.mux_status.apply_psmux_status` publishes only the harness
+status fields and their status-bar formats through the native authenticated
+loopback endpoint. Manager uses this Core-owned operation instead of starting
+the cleanup-bearing PSMux CLI. TMux retains its existing writer.
+
+The caller supplies the current native session incarnation. The operation
+rechecks that identity and unchanged port/key hints before each option write,
+reads each value back, and checks the target again before reporting success.
+Rendezvous hints must also remain unchanged after each identity response.
+All requests share a bounded deadline. Unsupported options, control characters,
+oversized values, changed targets, failed authentication and incomplete readback
+return false, including after partial publication. No process, pane, input,
+session, provider registration or new background updater is created. This
+in-process seam ships with Manager's declared Core dependency; it adds no
+independently deployed CLI or service contract and does not change observation
+or launch authority.
+
+Worktrees' native sweep retains its existing read-only observation and roster
+pass, then publishes cached presentation for fresh Manager-owned mappings that
+the native pass actually observed. It does not enter legacy PSMux CLI writes,
+handoff or pruning paths. Legacy non-native mapping identities use the existing
+Manager discovery operation with fresh native observations; unknown observations
+do not manufacture an incarnation or authorize a publication.
+Ordinary rendering failures stay local to their session, allowing other sessions
+and later sweeps to proceed. Governance deferrals still propagate, and unsettled
+native cleanup remains with its existing cache owner rather than being discarded.
+
+Manager recognizes the legacy `@aw_updater`/`@aw_updater_prefix` bookkeeping
+fields without forwarding them as native ownership changes. An ownership-only
+delta requires no native write. Other unknown fields remain refused. Context
+publication initializes the canonical status formats, including for older
+mapping records, while ordinary segment refreshes retain existing coalescing.
+
+The presentation pass compares every cached incarnation with a fresh native
+observation, including a replacement under the same session name. Context and
+delta caches are cleared only after Manager admits the new mapping. A live
+legacy opaque mapping can be reconciled by Manager's existing CAS registration
+owner after matching its session name, executable and worktree path and
+reconfirming the connected native target. Tombstones, foreign mappings, unknown
+observations and concurrent registry changes remain refusals. Ordinary discovery
+retains its incumbent guard; reconciliation does not retire any process or pane.
+Only identity fields enter that CAS registration; the registry allocates its
+next revision and fresh render state rather than accepting caller overrides.
+
+Expand the Manager writer before updating Worktrees' monitor. The unchanged
+request contract permits either older peer to remain installed during that
+sequence: an older monitor retains its observation-only PSMux behavior, and an
+older Manager refuses publication without a CLI fallback or a false success.
+Rolling either peer back likewise leaves cached presentation or an explicit
+failed publication, rather than authorizing a different transport. Service
+replacement and actual refresh verification remain with their existing owners.
 
 The explicit headed coordinator now runs in the original caller-owned pane.
 It stages the launch-bound SDK extension, retains the native child handle and

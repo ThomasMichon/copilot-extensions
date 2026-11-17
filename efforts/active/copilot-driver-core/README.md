@@ -11,13 +11,33 @@
 
 ## Goal
 
-Operator root goal, verbatim:
+**Root goal (operator-defined, verbatim):**
 
 > Factor out session-host, mux logic, and agent-bridge's internal extension into a forward-deployable core, so that a machine or container lacking suite service can still have Copilot launched via ACP or Mux in an ACP-controllable Copilot session that can be picked up by a local or calling agent-bridge. This core should be uses by agent-worktrees and agent-bridge, and it should not depend on those services being installed into the target space.
 
 Source: operator direction of 2026-11-14 00:27Z, relayed through existing
 coordination. The complete intake reference is retained privately by the
 effort owner, not published with transport or session identifiers.
+
+- **Kind:** completion; a finite standalone-core and complete caller-convergence
+  outcome, not an indefinite maintenance role.
+- **Acceptance:** the complete
+  [outcome acceptance](#outcome-acceptance-and-finalization), all continuing Plan
+  and Validation Plan items, and their real artifact/provider/consumer evidence.
+  A source slice, review or transport canary is partial evidence only.
+- **Finalization criterion:** every remaining item is resolved or explicitly
+  transferred to a named tracked objective, required publication is accepted,
+  owned obligations are settled, and this effort is Done and archived.
+- **Now:** finish the prioritized native mux status-publication correction and
+  its source review/CI, then qualify continuous refresh through the existing
+  selected owners without disrupting original sessions.
+- **Return:** complete the queued Bridge registration and retained-inbox
+  corrections, then resume the remaining Driver caller, lifetime, receiving,
+  supported-skew, recovery and publication gates.
+
+These current slices preserve the root outcome and existing source/resource
+custodians. The charter records work; it does not grant deployment, access,
+cleanup or other effects, or clear any current hold.
 
 ### Continuing acceptance obligations
 

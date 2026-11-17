@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -12,14 +13,16 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
+from .retained_metadata import router as metadata_router
 
 router = APIRouter()
+router.include_router(metadata_router)
 
 
 @router.post("/{session_id}/resume", response_model=SessionInfo)
 async def resume_session(
     session_id: str, request: Request, body: ResumeSessionRequest | None = Body(default=None),
-):
+) -> SessionInfo | JSONResponse:
     """Resume a stopped session by spawning a new agent process."""
     from .sessions import _session_info
 
@@ -59,7 +62,7 @@ async def resume_session(
 
 
 @router.get("/{session_id}/retained-recovery/{operation_id:path}")
-def inspect_retained_recovery(session_id: str, operation_id: str, request: Request):
+def inspect_retained_recovery(session_id: str, operation_id: str, request: Request) -> dict[str, Any]:
     from ..retained_session_recovery import inspect
 
     try:

@@ -9,7 +9,7 @@ from .pr_contract import Baseline
 from .pr_snapshot import PRSnapshot
 
 
-def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str, api_base: str) -> dict:
+def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str, api_base: str) -> dict[str, object]:
     return {
         "schema": "agent-worktrees.pr-snapshot", "version": 1,
         "provider": provider, "api_base": api_base, "repo": repo, "pr": number,
@@ -25,6 +25,8 @@ def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str
         "check_failures": [asdict(failure) for failure in snapshot.check_failures],
         "title": snapshot.title, "draft": snapshot.draft, "author": snapshot.author,
         "reviews": [asdict(review) for review in snapshot.reviews],
+        "reviews_complete": snapshot.reviews_complete,
+        "updated_at": snapshot.updated_at,
         "cursor": Baseline.from_snapshot(snapshot).to_cursor(),
         "observation": snapshot.observation.to_dict() if snapshot.observation is not None else None,
     }

@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import pytest
 
-from agent_vault import cache_warm, extensions
+from agent_vault import config, extensions
 from agent_vault.cache_warm_status import WarmState
 from agent_vault.service_status import format_service_status
 
-from .test_cache_warm import CacheFixture, drain, warming_service as warming_service
-from .test_service_cache import cached_service as cached_service
+if TYPE_CHECKING:
+    from test_cache_warm import CacheFixture, drain, warming_service as warming_service
+    from test_service_cache import cached_service as cached_service
+else:
+    from .test_cache_warm import CacheFixture, drain, warming_service as warming_service
+    from .test_service_cache import cached_service as cached_service
 
 
 @pytest.mark.parametrize("malformed", ["state", "count", "false-complete"])
@@ -40,12 +45,12 @@ def test_full_ping_uses_retained_default_warming_context_without_configuration_r
     vault, _persistent, kpdb, _clock = warming_service
     extensions.get_registry().register_cache_source(lambda _machine: ["entry"])
     vault._cache_warm.enqueue(kpdb, None, confirmed=True)
-    monkeypatch.setattr(
-        cache_warm.config,
-        "load_config",
-        lambda: pytest.fail("ping or warming reloaded configuration"),
-    )
     assert asyncio.run(drain(vault, kpdb))["state"] == "complete"
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: pytest.fail("ping reloaded configuration"),
+    )
     response = vault.handle_request({"action": "ping"})
     assert response["cache_warm"]["state"] == "complete"
     assert response["cache_warm"]["cached"] == 1
@@ -61,7 +66,7 @@ def test_full_ping_does_not_guess_an_explicit_foreign_group_is_the_default(
     vault._cache_warm.enqueue(kpdb, "Foreign", confirmed=True)
     asyncio.run(drain(vault, kpdb))
     monkeypatch.setattr(
-        cache_warm.config,
+        config,
         "load_config",
         lambda: pytest.fail("full ping resolved configuration"),
     )

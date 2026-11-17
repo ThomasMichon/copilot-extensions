@@ -19,11 +19,13 @@
 
 ## Goal
 
-Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
+**Kind:** completion.
+
+**Root goal:** Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
 
 > All Python code in copilot-extensions passing string type-checking, with strict type-checkng enforced first for all new code, and then all existing code.
 
-Acceptance evidence must prove both stages, not merely a completed activity:
+**Acceptance:** Evidence must prove both stages, not merely a completed activity:
 
 - Required source CI rejects new first-party Python that lacks strict coverage,
   including additions inside pending owners, with real negative controls and
@@ -52,6 +54,19 @@ The repository-wide strict-new-code gate remains required. The sweep and
 low-risk annotation waves proceed without waiting for that separate gate;
 diagnostic passes do not constitute persistent admission or waive any
 project's existing acceptance criteria.
+
+**Now:** Strict diagnostic and annotation waves. The initial 152-cell
+diagnostic catalog below distinguishes completed analyses from blocked scope.
+Reconcile changed inputs and existing ownership, prepare bounded low-risk
+typing cohorts and resweep affected inputs. Phase 1a remains required before
+further persistent legacy admission; diagnostics and annotation preparation
+may proceed independently.
+
+**Return:** After a prerequisite, publication or guidance refresh, return to
+the next unmet Plan or Validation Plan criterion. Reuse preserved exact-input
+evidence and recheck current ownership and holds; rerun only changed or
+unresolved checks. No slice, transfer or refresh completes the parent or
+renews a spent qualification clock.
 
 ## Guiding Intent
 
@@ -87,9 +102,10 @@ definition of success.
 - **Transfer checkpoint:** #12679 is merged and its PR claim is released;
   no owned open PR, review thread, test process or scheduled run remains.
   The latest merged inventory is 43/74 strict projects and 481/9,392 strict
-  physical files; 31 pending projects own 8,911 files. The new sweep has not
-  run. Next, inspect the successor's actual prepared checker environments,
-  run the complete diagnostic matrix and retain every failure before edits.
+  physical files; 31 pending projects own 8,911 files. At that transfer the
+  sweep had not run. The subsequent initial diagnostic catalog is recorded
+  under Strict diagnostic and annotation waves below; its blocked cells and
+  changed-input reconciliation remain open before selecting typing edits.
   Prior one-shot qualification budgets remain spent, retained allocations
   stay protected, and all native/minimum-runtime, original-corpus,
   emitted/copy/candidate, provider, publication and deployment holds remain.
@@ -340,6 +356,16 @@ rewrite.
 
 Agent-recommended realization of the subsequent operator direction:
 
+The initial catalog at source `06ac2991` covers all 152 declared cells:
+88 completed without diagnostics, 42 completed with strict diagnostics and
+22 blocked. Blockers comprise fourteen fatal module/analysis cells, two
+checker assertions, two source-view refusals, two unprepared-environment
+cells and two absent scopes. Complete matrices exist for 63 projects;
+incomplete matrices have no clean-file fraction. Full raw output and
+per-cell source, lock and input identities are retained outside Git.
+This is diagnostic evidence, not admission, and must be reconciled against
+subsequent source and manifest changes before selecting the next wave.
+
 - [ ] Run every declared project's complete interpreter/platform matrix with
   temporary strict opt-in. Catalog full diagnostics, setup/module/composition
   blockers, absent scopes and exact source inputs without changing admission.
@@ -347,8 +373,10 @@ Agent-recommended realization of the subsequent operator direction:
   waves; preserve behavior, assertions, source ownership and typed boundaries.
 - [ ] Resweep after each wave and rerank pending projects by measured clean-file
   fraction, distinguishing complete analyses from blocked or unexecuted scope.
-- [ ] Finish the nearest-complete projects first through their existing
-  acceptance, review and CI gates; record only merged persistent strict coverage.
+- [ ] After Phase 1a's strict-new-code gate is established, finish the
+  nearest-complete projects first through their existing acceptance, review
+  and CI gates; record only merged persistent strict coverage. Diagnostics
+  and annotation preparation do not depend on that admission gate.
 
 ### Phase 2 - Source and platform qualification
 
@@ -625,7 +653,9 @@ composition prerequisites, and review/validation rules.
   low-risk-wave and nearest-completion ordering direction above. The
   persistent new-code, emitted-program and exact-candidate gaps remain open.
 - Prepared a clean documentation-only continuation checkpoint after #12679;
-  no new sweep, typing fix, qualification run or admission is claimed.
+  no new sweep, typing fix, qualification run or admission was claimed at
+  that transfer. The subsequent initial diagnostic catalog appears in the
+  Strict diagnostic and annotation waves section above.
   Documentation validation checks the exact request capture and Git whitespace.
 - The successor must resume the pushed branch, accept the same active effort,
   preserve the original scope approvals and individual holds, and start with
