@@ -227,6 +227,9 @@ def data_file_sources(source_dir: Path, settings: dict[str, Any]) -> dict[str, P
     declarations = settings.get("data-files", {})
     if not isinstance(declarations, dict):
         raise PromotionArtifactError("invalid static data-files declarations")
+    if not declarations:
+        return {}
+    from build_python_artifacts import _PAYLOAD_IGNORE_DIR_NAMES, _PAYLOAD_IGNORE_SUFFIXES
 
     def relative(value: object) -> PurePosixPath:
         if not isinstance(value, str) or not value or any(
@@ -236,7 +239,7 @@ def data_file_sources(source_dir: Path, settings: dict[str, Any]) -> dict[str, P
         path = PurePosixPath(value)
         if (
             path.is_absolute() or not path.parts or path.as_posix() != value
-            or any(part in (".", "..") for part in path.parts)
+            or any(part in (".", "..") or part.endswith((".", " ")) for part in path.parts)
         ):
             raise PromotionArtifactError("data-files require explicit canonical paths")
         return path
@@ -251,6 +254,13 @@ def data_file_sources(source_dir: Path, settings: dict[str, Any]) -> dict[str, P
             raise PromotionArtifactError("unsupported static share-data layout")
         for value in files:
             declared = relative(value)
+            if (
+                ".test-runs" in declared.parts
+                or any(part in _PAYLOAD_IGNORE_DIR_NAMES for part in declared.parts[:-1])
+                or any(part.endswith(".egg-info") for part in declared.parts)
+                or declared.suffix in _PAYLOAD_IGNORE_SUFFIXES
+            ):
+                raise PromotionArtifactError("data-file source is outside the hashed source closure")
             if declared.name.casefold().endswith(".pth"):
                 raise PromotionArtifactError("data-files cannot install Python startup hooks")
             source = source_dir.joinpath(*declared.parts)

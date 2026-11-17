@@ -5976,7 +5976,7 @@
         "tools/accumulate_bumps.py": "dde78170a5af9fb10a4fa46cffa4d5272cacd45379aa51be222e52e477d997c3",
         "tools/artifact_builder_cli.py": "876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
         "tools/artifact_attestation.py": "5c273bf9f33b1102fa8be739ce7fa0de32c148eff67be0fd9e96d3f3b219a88a",
-        "tools/artifact_source_build.py": "b7ecd6f70f2907eed0aa2f6e017d4acb1d72d369221b2ac7feb77e8b8de8a795",
+        "tools/artifact_source_build.py": "797e3408beae3dc63d54916c42915a4910054c2651150b9255ad0cfad505df61",
         "tools/build_python_artifacts.py": "ad82a65cd7dbfcc1ad69d0d3d121e06fdcd2352c02d8852d17f538de06485102",
         "tools/build_toolchain_lock.py": "e162c14a7ad3eea5c88ef9c3574867ee3a3038df1e8cc92e7b18642d9f8127bb",
         "tools/build_toolchain_queries.py": "ac229f3bc95292b885a0f0b2b5832fd5350a42504aaf00c04db74e6ac41a5f2b",

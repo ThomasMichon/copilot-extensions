@@ -157,6 +157,9 @@ def test_declared_share_data_files_require_exact_installed_members(
     "source-escape", "destination-escape", "absolute-destination", "script-destination",
     "glob", "collision", "case-collision", "ancestor", "descendant",
     "case-ancestor", "case-descendant", "symlink", "linked-parent", "pth",
+    "destination-dot", "destination-space", "source-dot", "source-space",
+    "source-build", "source-cache", "source-egg-info", "source-pyc", "source-pyo",
+    "source-test-runs",
 ])
 def test_unsafe_data_file_layouts_refuse_before_toolchain_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
@@ -181,6 +184,27 @@ def test_unsafe_data_file_layouts_refuse_before_toolchain_resolution(
         declarations = {destination: ["config/policy.json"]}
     elif case == "glob":
         declarations = {"share/example": ["config/*.json"]}
+    elif case in ("destination-dot", "destination-space"):
+        suffix = "." if case == "destination-dot" else " "
+        declarations = {"share/example" + suffix + "/nested": ["config/policy.json"]}
+    elif case in (
+        "source-dot", "source-space", "source-build", "source-cache", "source-egg-info",
+        "source-pyc", "source-pyo", "source-test-runs",
+    ):
+        name = {
+            "source-dot": "config/policy.json.",
+            "source-space": "config/policy.json ",
+            "source-build": "build/policy.json",
+            "source-cache": "config/.venv/policy.json",
+            "source-egg-info": "config/demo.egg-info/policy.json",
+            "source-pyc": "config/policy.pyc",
+            "source-pyo": "config/policy.pyo",
+            "source-test-runs": ".test-runs",
+        }[case]
+        excluded = source / name
+        excluded.parent.mkdir(parents=True, exist_ok=True)
+        excluded.write_bytes(b"declared\n")
+        declarations = {"share/example": [name]}
     elif case == "collision":
         other = source / "other" / resource.name
         other.parent.mkdir()
@@ -224,6 +248,23 @@ def test_unsafe_data_file_layouts_refuse_before_toolchain_resolution(
             tmp_path, output, source_policy="seasoned-public", min_age_days=7,
         )
     assert not calls and not list(output.iterdir())
+
+
+@pytest.mark.parametrize("name", ["config/policy.json", "config/policy.py", "config/policy.PYC", "build"])
+def test_admitted_share_resource_changes_payload_identity(tmp_path: Path, name: str) -> None:
+    import build_python_artifacts as builder
+    from artifact_source_build import data_file_sources
+
+    source = tmp_path / "demo"
+    resource = source / name
+    resource.parent.mkdir(parents=True)
+    resource.write_bytes(b"original\n")
+    assert data_file_sources(source, {"data-files": {"share/example": [name]}}) == {
+        "share/example/" + resource.name: resource,
+    }
+    original = builder.directory_content_hash(source)
+    resource.write_bytes(b"changed\n")
+    assert builder.directory_content_hash(source) != original
 
 
 def test_self_consistent_injected_wheel_fails_before_publication(

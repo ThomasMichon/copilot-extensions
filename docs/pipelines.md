@@ -603,8 +603,9 @@ static `data-files`, with matching bytes. Static data files may target only
 canonical relative `share/` destinations. Each installed `.data/data/share/`
 member binds to its explicitly listed regular, unlinked project source file;
 missing, altered or additional members fail closed. Build admission rejects
-absolute/parent paths, globbed source selectors, linked sources, ambiguous
-flattened destinations, Python startup hooks and non-share install layouts
+absolute/parent paths, globbed source selectors, linked sources, source-hash
+exclusions (including build/cache paths and bytecode), trailing dots/spaces,
+ambiguous flattened file/directory destinations, Python startup hooks and non-share install layouts
 before toolchain resolution. Undeclared data, `.pth` files, script schemes and
 unsupported exclusion layouts still do not receive signatures.
 Both preparation and release-authorized promotion compose candidate data
