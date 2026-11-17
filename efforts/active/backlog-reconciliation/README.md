@@ -3421,6 +3421,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [delivery, presentation and native failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
+  record actual #13073 delivery and six complete-original judgments, retaining
+  Draft user-output delivery, installed presentation acceptance, distinct
+  post-identity teardown versus pre-preparation context failures, controller
+  activation and removed relocation-fence obligations. The complete census
+  observes 878 whole open, 149 above fixed 729, following two arrivals and no
+  departures or new campaign closure credit. All incumbent checkbox states,
+  explicit holds and custody remain unchanged.
   The [filtered-population source reconciliation](journal/2026/11.17-filtered-population-source-completion.md)
   records actual #13067/#13072 delivery, the complete #12159 source-only
   original-to-merged-delivery crosswalk and its audited COMPLETED closure,
