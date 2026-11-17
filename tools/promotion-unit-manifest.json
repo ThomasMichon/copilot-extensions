@@ -5059,7 +5059,10 @@
         "tools/promotion_unit_tests/test_retained_conversation_cleanup.py::test_terminal_observation_cannot_authorize_a_later_reopened_task",
         "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_cache_policy_refuses_malformed_allowlist_references",
         "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_cache_policy_preserves_anchors_and_manifest_owners",
-        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_invalid_manifest_aborts_collection_without_substitute_targets"
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_invalid_manifest_aborts_collection_without_substitute_targets",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_raw_lines_share_the_warming_budget",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_scanning_observes_deadline_and_cancellation[deadline]",
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_scanning_observes_deadline_and_cancellation[cancelled]"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/cli.py",
@@ -5384,10 +5387,12 @@
         "plugins/agent-vault/src/agent_vault/cache_targets.py",
         "plugins/agent-vault/src/agent_vault/cache_sources.py",
         "plugins/agent-vault/src/agent_vault/cache_manifests.py",
-        "plugins/agent-vault/src/agent_vault/credential_fields.py"
+        "plugins/agent-vault/src/agent_vault/credential_fields.py",
+        "plugins/agent-vault/src/agent_vault/cache_limits.py",
+        "plugins/agent-vault/src/agent_vault/invocation.py"
     ],
     "sources": {
-        "plugins/agent-vault/src/agent_vault/cli.py": "f425a4de48470f965e28ddadca9fc5251f017e7b7163ea08e86d23b31507081e",
+        "plugins/agent-vault/src/agent_vault/cli.py": "a7547c6174c7e94fafb16a49ff78022ab4057b281977e08386fe50b2cd6ecbe7",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
         "tools/promotion_unit_tests/test_vault_transport_order.py": "303bf33bcd030779bc24bbf5340783e76a5198646d062f0276f951db2c89fc7a",
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
@@ -6175,10 +6180,12 @@
         "plugins/agent-dispatch/src/agent_dispatch/queue_records.py": "cdc7ba97d1b52a3460e00770afa728d5838b60829237ac35345ca0b064238e73",
         "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py": "266dfef299089318b384dbebef622cdb1a99ef997483a2b95b55e00f68e64ac6",
         "tools/promotion_unit_tests/test_retained_conversation_cleanup.py": "68de298c2f78faccb7767dad3bf5c7af15e18eb0a1a9fd374eb6cb93bfc0836b",
-        "plugins/agent-vault/src/agent_vault/cache_targets.py": "f4c48c2fa4b5a90c543cf375218ac694b6d0ce4aa20c1020c17a04027e827625",
-        "plugins/agent-vault/src/agent_vault/cache_sources.py": "ce5804d0558bb44626174b71ac98d9f47c03f12de737f625725cbaecf7bdd278",
-        "plugins/agent-vault/src/agent_vault/cache_manifests.py": "40df9c3eeb2ed784486e99b8653f1de2d67481b12df996c692b620a63b957882",
+        "plugins/agent-vault/src/agent_vault/cache_targets.py": "933d90fef5814065bc2e93cd2986bd21c1a9d391cf71edaab534bb2feb391eaf",
+        "plugins/agent-vault/src/agent_vault/cache_sources.py": "fd4dc05410e8df581e523f6bb655662308b505af787d4d6834e0be2153704427",
+        "plugins/agent-vault/src/agent_vault/cache_manifests.py": "89eed2ee1dcd2c3e31b5447850ac64ed7b912b11f9df187154d9b1e4cf639ba8",
         "plugins/agent-vault/src/agent_vault/credential_fields.py": "ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
-        "tools/promotion_unit_tests/test_vault_cache_targets.py": "d567a039ae03530db2e40990dfb2345cd9b1170ec57380f6c12138edc1cc4c77"
+        "tools/promotion_unit_tests/test_vault_cache_targets.py": "32a8a510fbf14b0082d9c32d02b5ac17be8d1d9a92462d6f4cd3cc49835f6574",
+        "plugins/agent-vault/src/agent_vault/cache_limits.py": "6212c5d44d0c9505987bb6dd7c9d46de248011debd2e46b1ea051979315c0264",
+        "plugins/agent-vault/src/agent_vault/invocation.py": "0881b9e3cc4281889a2ee4a9009791f065d5689e0f21f2d1a1532195e2a1f581"
     }
 }

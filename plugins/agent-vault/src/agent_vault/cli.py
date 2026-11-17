@@ -15,8 +15,7 @@ from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
 from .cache_manifests import read_cache_manifest
-from .cache_recovery import status_command as cmd_cache_status
-from .cache_targets import command_entries
+from .cache_targets import command_entries, status_command as cmd_cache_status
 from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,

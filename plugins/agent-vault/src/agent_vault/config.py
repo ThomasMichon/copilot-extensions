@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .invocation import configuration_root as invocation_configuration_root
+from .invocation import CACHE_TARGET_FIELDS
 from .configuration_scope import (
     REPO_CONFIG_NAME,
     bind_service_configuration as bind_service_configuration,
@@ -215,9 +216,13 @@ def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _validate_config_data(data: dict[str, Any], label: str) -> None:
-    from .cache_targets import validate_configuration
+    if any(
+        key in data and not (isinstance(data[key], list) and not data[key])
+        for key in CACHE_TARGET_FIELDS
+    ):
+        from .cache_targets import validate_configuration
 
-    validate_configuration(data, label)
+        validate_configuration(data, label)
     if "windows_scheduled_task" in data and data["windows_scheduled_task"] not in (
         "preserve", "enabled", "absent",
     ):

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
-from .cache_targets import CAPABILITY as CACHE_TARGET_CAPABILITY
+from .invocation import CACHE_TARGET_CAPABILITY
 
 CONTRACT = "agent-vault.cache-warm"
 VERSION = 1
@@ -78,7 +79,7 @@ def format_cache_warm(value: object) -> str:
     ]
     if any(type(number) is not int or number < 0 for number in counts):
         return "unknown"
-    selected, cached, failed, remaining, sources = counts
+    selected, cached, failed, remaining, sources = cast(list[int], counts)
     truncated = value.get("truncated")
     if type(truncated) is not bool or selected != cached + failed + remaining:
         return "unknown"

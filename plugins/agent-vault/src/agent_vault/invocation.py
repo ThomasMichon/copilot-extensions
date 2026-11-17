@@ -11,9 +11,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .cache_targets import CAPABILITY as CACHE_TARGET_CAPABILITY
-
 _ROOT: ContextVar[str | None] = ContextVar("vault_configuration_root", default=None)
+CACHE_TARGET_CAPABILITY = "repository-cache-targets-v1"
+CACHE_TARGET_FIELDS = frozenset({"cache_entries", "cache_manifests"})
 
 
 def configuration_root(cwd: str | None = None) -> str | None:

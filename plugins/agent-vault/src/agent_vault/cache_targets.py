@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import Callable, Iterator
@@ -9,11 +10,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .cache_limits import WorkBudget
 from .cache_manifests import iter_cache_manifest
 from .credential_fields import canonical_field
-
-FIELDS = {"cache_entries", "cache_manifests"}
-CAPABILITY = "repository-cache-targets-v1"
+from .invocation import CACHE_TARGET_FIELDS as FIELDS
 
 
 class CacheTargetError(ValueError):
@@ -27,6 +27,10 @@ def _text(value: object) -> bool:
     )
 
 
+def _entry(value: object) -> bool:
+    return isinstance(value, str) and _text(value) and bool(value.strip().lstrip("/"))
+
+
 def validate_configuration(data: dict[str, Any], label: str) -> None:
     """Validate target references without reading manifests or credentials."""
     for key in FIELDS & data.keys():
@@ -34,11 +38,12 @@ def validate_configuration(data: dict[str, Any], label: str) -> None:
         if not isinstance(items, list):
             raise CacheTargetError(f"{label}: {key} must be an array")
         for item in items:
-            if _text(item):
+            valid = _entry(item) if key == "cache_entries" else _text(item)
+            if valid:
                 continue
             if (
                 key == "cache_entries" and isinstance(item, list) and len(item) == 2
-                and all(_text(part) for part in item)
+                and _entry(item[0]) and _text(item[1])
             ):
                 continue
             raise CacheTargetError(f"{label}: invalid {key} reference")
@@ -95,26 +100,39 @@ def manifest_path(value: str, cwd: str | None = None) -> Path:
     return base / path
 
 
-def _declared(policy: dict[str, Any]) -> Iterator[tuple[str, str]]:
+def _declared(
+    policy: dict[str, Any], budget: WorkBudget | None = None,
+) -> Iterator[tuple[str, str]]:
     for item in policy["cache_entries"]:
+        if budget is not None and not budget.consume():
+            return
         entry, field = (item, "password") if isinstance(item, str) else item
         yield entry.strip(), canonical_field(field.strip())
     try:
         for path in policy["cache_manifests"]:
-            yield from _manifest_entries(Path(path))
+            if budget is not None and not budget.available():
+                return
+            yield from _manifest_entries(Path(path), budget)
     except (OSError, UnicodeError, ValueError) as exc:
         raise CacheTargetError("configured cache manifest could not be read") from exc
 
 
-def _manifest_entries(path: Path) -> Iterator[tuple[str, str]]:
-    for entry, field in iter_cache_manifest(path):
-        if not _text(entry) or not _text(field):
+def _manifest_entries(
+    path: Path, budget: WorkBudget | None = None,
+) -> Iterator[tuple[str, str]]:
+    entries = (
+        iter_cache_manifest(path) if budget is None
+        else iter_cache_manifest(path, budget=budget)
+    )
+    for entry, field in entries:
+        if not _entry(entry) or not _text(field):
             raise CacheTargetError("invalid cache manifest reference")
         yield entry, canonical_field(field)
 
 
 def configured_source(
     cwd: str | None = None,
+    *, budget: WorkBudget | None = None,
 ) -> Callable[[str | None], Iterator[tuple[str, str]]] | None:
     """Snapshot declared policy for bounded service-owned unlock warming."""
     policy = deepcopy(configured(cwd))
@@ -122,7 +140,7 @@ def configured_source(
         return None
 
     def source(_machine: str | None) -> Iterator[tuple[str, str]]:
-        return _declared(policy)
+        return _declared(policy, budget)
 
     return source
 
@@ -155,3 +173,22 @@ def command_entries(args: Any) -> list[tuple[str, str]] | None:
             file=sys.stderr,
         )
         return None
+
+
+def status_command(args: Any) -> int:
+    """Augment the native cache owner's status with declared-policy metadata."""
+    from .cache import get_cache
+    from .cache_recovery import status_command as native_status
+
+    targets = command_entries(args)
+    if targets is None:
+        return 1
+    if getattr(args, "json", False):
+        status = get_cache().status()
+        status["configured_target_count"] = len(targets)
+        print(json.dumps(status, indent=2, sort_keys=True))
+        return 0
+    result = native_status(args)
+    if result == 0:
+        print(f"configured targets: {len(targets)}")
+    return result

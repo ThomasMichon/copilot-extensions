@@ -848,11 +848,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path: Pat
         (slot.parent.parent / "current-version").write_text("1.0.0", encoding="utf-8")
     installed = packages["agent-vault"] / "agent_vault"
     installed.mkdir()
-    for name in (
-        "__init__.py", "config.py", "configuration.py", "configuration_scope.py",
-        "invocation.py", "_peer_launch.py", "cache_targets.py", "cache_manifests.py",
-        "credential_fields.py",
-    ):
+    for name in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "invocation.py", "_peer_launch.py"):
         shutil.copyfile(PLUGIN / "src" / "agent_vault" / name, installed / name)
     if layout == "service-cwd":
         shutil.copytree(
@@ -944,8 +940,8 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path: Pat
             " selected = config.resolve_context(strict=True)\n"
             " print(json.dumps({'enabled':configuration.runtime_enabled(), 'group':selected.group}))\n"
             "service._run_resident = probe\n"
-            "tail = captured['argv'].index(str(Path(launch.__file__).resolve().parent.parent)) + 1\n"
-            "sys.argv = ['agent_vault.service', *captured['argv'][tail:]]\n"
+            "service_args = captured['argv'][captured['argv'].index('--foreground'):]\n"
+            "sys.argv = ['agent_vault.service', *service_args]\n"
             "service.main()\n"
         )
     for enabled in (True, False, None, "invalid"):
@@ -1041,11 +1037,8 @@ def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path: Path, l
                 bootstrap.mkdir()
                 for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
                     shutil.copyfile(source, bootstrap / source.name)
-            for filename in (
-                "__init__.py", "config.py", "configuration.py", "configuration_scope.py",
-                "invocation.py", "_peer_launch.py", "cache_targets.py", "cache_manifests.py",
-                "credential_fields.py",
-            ):
+            for filename in ("__init__.py", "config.py", "configuration.py",
+                             "configuration_scope.py", "invocation.py", "_peer_launch.py"):
                 shutil.copyfile(PLUGIN / "src" / name / filename, package / filename)
             for source in (PLUGIN / "src" / name).glob("_installation_context*.py"):
                 shutil.copyfile(source, package / source.name)

@@ -11,16 +11,19 @@ ordinary optional machine hint as `None`; each source remains responsible for
 returning the targets appropriate to that service. Warming never lists or scans
 the database, starts a session ceremony, or adds a timer. Manual population
 retains its existing uncapped collection behavior through the same collector.
-Declared configuration is snapshotted at enqueue with owner-anchored manifest
-references; manifest contents are streamed when the worker collects targets.
-Invalid declarations refuse enqueue. An unreadable/invalid declared manifest
-fails that work before credential reads rather than falling through to extensions.
-The declared source counts toward the unchanged source/item/target budgets.
+Enqueue captures only the discovery root and unlock identity. Coalescing precedes
+policy discovery; the existing worker resolves fresh policy and default groups
+outside credential-lock custody, then snapshots the sources for that work.
+Invalid declarations or manifests fail queued work before credential reads rather
+than falling through to extensions. Non-comment rows need a nonempty entry.
+Declared entries, every raw manifest row (including comments and blanks), and
+extension items share the unchanged raw-work budget. Scanning checks the deadline
+and cancellation between rows. Manual collection remains uncapped.
 
 ## Work and lifetime
 
 Verified unlocks enqueue a database/group context without waiting for backend
-reads. Repeated already-unlocked requests coalesce with that unlock's work,
+reads or configuration-owner discovery. Repeated already-unlocked requests coalesce with that unlock's work,
 including completed or partial work; they do not retry failed targets or renew
 the master password. A genuinely new verified unlock gets a new identity even
 when the wall-clock timestamp is unchanged.
@@ -30,6 +33,8 @@ It admits at most 32 pending/retained contexts, 256 configured targets, 1024 raw
 source items and 32 sources per context. The 60-second work deadline starts at
 enqueue, including queue wait. Reaching a bound is a truthful partial outcome,
 not evidence that unexamined targets were cached.
+Default-group scope remains unresolved until the worker binds it; status never
+guesses that an explicitly requested foreign group is the native default.
 
 Source callbacks and their iterators run off the event loop and must return
 cooperatively. The deadline prevents further admission; it does not forcibly

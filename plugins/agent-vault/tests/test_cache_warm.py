@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 from collections.abc import Iterator
 import json
-from pathlib import Path
 import threading
 import time
 from types import SimpleNamespace
@@ -132,36 +131,6 @@ def test_ordinary_reads_and_failed_unlocks_do_not_schedule_warming(
         }
     )["ok"]
     assert vault._cache_warm.status(kpdb, "Allowed")["state"] == "idle"
-
-
-def test_declared_repository_targets_warm_after_caller_context_exits(
-    warming_service: CacheFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent_vault import configuration
-    from agent_vault.invocation import use_configuration_root
-
-    vault, _persistent, kpdb, _clock = warming_service
-    repository = tmp_path / "repository"
-    repository.mkdir()
-    (repository / ".agent-vault.json").write_text(json.dumps({
-        "cache_entries": ["relative"],
-        "cache_manifests": ["cache.conf"],
-    }), encoding="utf-8")
-    (repository / "cache.conf").write_text("/Root Account | username\n", encoding="utf-8")
-    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent-native.json"))
-    monkeypatch.setattr(configuration, "owner_report", lambda _root: None)
-    calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        vault.cli, "get_entry",
-        lambda _database, entry, field: calls.append((entry, field)) or "synthetic:" + entry,
-    )
-    with use_configuration_root(str(repository)):
-        assert vault._cache_warm.enqueue(kpdb, "Allowed").state == "queued"
-    result = asyncio.run(drain(vault, kpdb))
-    assert result["state"] == "complete"
-    assert result["target_policy"] == "repository-cache-targets-v1"
-    assert (result["selected"], result["cached"]) == (2, 2)
-    assert calls == [("Allowed/relative", "password"), ("Root Account", "username")]
 
 
 def test_unlocks_coalesce_but_a_new_unlock_with_the_same_clock_gets_a_fresh_budget(

@@ -329,6 +329,8 @@ These are references only. `/Root Account` means an entry at the database root;
 its group. Standard field aliases use the existing credential-field owner.
 Collection preserves root anchors until the backend/cache identity boundary;
 it never merges a root subject with its default-group namesake.
+Absent or empty declarations do not load cache-command or manifest helpers during
+cold activation. Declared policy is validated when present, not silently ignored.
 
 Each manifest uses the existing `entry | field` format. Configured manifest
 paths expand native `~`/environment references and resolve against the declaring
@@ -348,6 +350,8 @@ keeps its native path. No other relative input/output selector changes meaning.
 Malformed declarations and unreadable manifests fail without substituting
 extension targets or selecting another context. `cache-status --json` adds
 `configured_target_count`; this count is not proof that those targets are cached.
+Status composes this policy metadata with the existing native cache owner's
+status; it does not change recovery or protected-store behavior.
 
 Resolving declarations does not enable cache, unlock a database or change
 protected-storage custody. No-argument population/verification use those

@@ -5,14 +5,18 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
 from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch
-from . import cache_targets
+from .invocation import CACHE_TARGET_FIELDS
 
-FIELDS = {"vault", "group", "enabled", *cache_targets.FIELDS}
+if TYPE_CHECKING:
+    from configuration_layers import Composition
+
+FIELDS = {"vault", "group", "enabled", *CACHE_TARGET_FIELDS}
 
 
 def service_configuration_root(cwd: str | None = None) -> str:
@@ -42,7 +46,7 @@ def service_configuration_snapshot(cwd: str | None = None) -> dict[str, str]:
     return {"root": root, "config": path}
 
 
-def _legacy_report(root: Path) -> dict | None:
+def _legacy_report(root: Path) -> dict[str, Any] | None:
     from .config import home_dir
 
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
@@ -90,7 +94,9 @@ def _legacy_report(root: Path) -> dict | None:
     )
 
 
-def _checked_report(report, own):
+def _checked_report(
+    report: dict[str, Any] | None, own: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if report is not None and own is not None and (
         context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
     ):
@@ -98,7 +104,7 @@ def _checked_report(report, own):
     return report
 
 
-def owner_report(root: Path) -> dict | None:
+def owner_report(root: Path) -> dict[str, Any] | None:
     from .config import home_dir
 
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
@@ -140,20 +146,23 @@ def owner_report(root: Path) -> dict | None:
     ), own)
 
 
-def _ordinary(raw: dict, directory: Path | None = None) -> dict:
+def _ordinary(raw: dict[str, Any], directory: Path | None = None) -> dict[str, Any]:
     from .config import _validate_config_data
 
     values = {key: value for key, value in raw.items() if key in FIELDS}
     _validate_config_data(values, "ordinary vault selection")
-    if directory is not None:
-        values.update(cache_targets.preferences(values, directory))
+    if directory is not None and any(values.get(key) for key in CACHE_TARGET_FIELDS):
+        from .cache_targets import preferences
+
+        values.update(preferences(values, directory))
     return values
 
 
 def compose_preferences(
-    cwd, repo_data: dict, global_data: dict, ext_data: dict,
+    cwd: str | None, repo_data: dict[str, Any],
+    global_data: dict[str, Any], ext_data: dict[str, Any],
     *, repository_directory: Path | None = None,
-) -> dict | None:
+) -> Composition | None:
     from .config import _global_config_path, configuration_root
 
     root = Path(configuration_root(cwd)).resolve()
@@ -228,5 +237,5 @@ def runtime_enabled(cwd: str | None = None) -> bool:
         repository_directory=path.parent if path is not None else None,
     )
     if result is not None:
-        return result["values"]["enabled"]
-    return machine.get("enabled", repository.get("enabled", False))
+        return cast(bool, result["values"]["enabled"])
+    return cast(bool, machine.get("enabled", repository.get("enabled", False)))

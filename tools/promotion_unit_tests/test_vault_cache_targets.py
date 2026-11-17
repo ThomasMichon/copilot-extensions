@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import importlib
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, nullcontext
+from io import StringIO
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 
@@ -17,6 +20,18 @@ package.__path__ = [str(ROOT / "plugins/agent-vault/src/agent_vault")]
 sys.modules[PACKAGE] = package
 targets = importlib.import_module(f"{PACKAGE}.cache_targets")
 sources = importlib.import_module(f"{PACKAGE}.cache_sources")
+manifests = importlib.import_module(f"{PACKAGE}.cache_manifests")
+limits = importlib.import_module(f"{PACKAGE}.cache_limits")
+read_manifest = cast(Callable[..., Iterator[tuple[str, str]]], manifests.iter_cache_manifest)
+
+
+def memory_manifest(stream: StringIO) -> Path:
+    class Manifest:
+        def open(self, *, encoding: str) -> AbstractContextManager[StringIO]:
+            assert encoding == "utf-8"
+            return nullcontext(stream)
+
+    return cast(Path, Manifest())
 
 
 def test_vault_cache_policy_refuses_malformed_allowlist_references() -> None:
@@ -52,9 +67,10 @@ def test_vault_invalid_manifest_aborts_collection_without_substitute_targets(
 ) -> None:
     calls: list[bool] = []
 
+    path = memory_manifest(StringIO("/first | password\n | password\n"))
+
     def broken(_path: Path) -> Iterator[tuple[str, str]]:
-        yield "/first", "password"
-        raise OSError("private diagnostic must not become a target or log")
+        return read_manifest(path)
 
     def fallback(_machine: str | None) -> list[str]:
         calls.append(True)
@@ -65,3 +81,43 @@ def test_vault_invalid_manifest_aborts_collection_without_substitute_targets(
     with pytest.raises(targets.CacheTargetError, match="configured cache manifest could not be read"):
         sources.collect([lambda _machine: targets._declared(policy), fallback], None)
     assert calls == []
+
+
+def test_vault_manifest_raw_lines_share_the_warming_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = StringIO("# one\n\n# two\n\nentry | password\n")
+    path = memory_manifest(stream)
+
+    def manifest(_path: Path, *, budget: object = None) -> Iterator[tuple[str, str]]:
+        return read_manifest(path, budget=budget)
+
+    monkeypatch.setattr(targets, "iter_cache_manifest", manifest)
+    budget = limits.WorkBudget(4, 100.0, lambda: False, clock=lambda: 0.0)
+    source = lambda _machine: targets._declared(
+        {"cache_entries": [], "cache_manifests": ["logical.conf"]}, budget,
+    )
+    result = sources.collect([source], None, budget=budget, metered_sources=(source,))
+    assert result.entries == [] and result.truncated
+    assert stream.readline() == "entry | password\n"
+
+
+@pytest.mark.parametrize("reason", ["deadline", "cancelled"])
+def test_vault_manifest_scanning_observes_deadline_and_cancellation(reason: str) -> None:
+    clock = [0.0]
+    cancelled = [False]
+
+    class Stream(StringIO):
+        reads = 0
+
+        def readline(self, size: int | None = -1) -> str:
+            self.reads += 1
+            if reason == "deadline":
+                clock[0] += 1.0
+            else:
+                cancelled[0] = True
+            return super().readline(size)
+
+    stream = Stream("# first\n# second\nentry | password\n")
+    budget = limits.WorkBudget(1024, 2.0, lambda: cancelled[0], clock=lambda: clock[0])
+    assert list(read_manifest(memory_manifest(stream), budget=budget)) == []
+    assert budget.stopped
+    assert stream.reads == (2 if reason == "deadline" else 1)
