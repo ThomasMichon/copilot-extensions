@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded supplied-owner reverse-listener admission, generation publication and original-correlation uncertainty without a production SSH adapter",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

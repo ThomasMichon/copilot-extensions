@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve Manager profile-refresh startup diagnostics and resolve one uv application for native runtime construction",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

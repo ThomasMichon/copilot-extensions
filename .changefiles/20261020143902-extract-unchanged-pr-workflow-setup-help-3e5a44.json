@@ -1,9 +1,0 @@
-{
-  "comment": "Extract unchanged PR workflow setup helpers for independent bounded test partitions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
