@@ -18,11 +18,11 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** reproduce the current unusable-ref fallback, overlapping namespace,
-scoped-credential and native short-source findings before correcting their
-owning paths. The published 177-case source resolves all eight preceding
-findings but is not accepted while these four new findings remain open. No
-production authority or another contributor's seed-delivery files are changed.
+**Now:** publish the consumer-qualified correction and obtain final-head review
+and CI. The causal negative packet executes eight meaningful failures; exact
+source `5b346b759f` qualifies all 189 controls, including operation-local failure
+caching. Source acceptance remains open until actual merge and finite closeout.
+No production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -119,7 +119,7 @@ custody remain independent.
   aliased-tracking-source and truthful caller-warning findings.
 - [x] Resolve current repository custody, pre-write policy conflicts, effective
   refspecs and cached-bootstrap findings while preserving existing fetch callers.
-- [ ] Resolve unusable-ref fallback, overlapping remote namespaces,
+- [x] Resolve unusable-ref fallback, overlapping remote namespaces,
   command-scoped credentials and native short-source resolution.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
@@ -157,7 +157,7 @@ custody remain independent.
 - [x] **Effective refs:** normalize equivalent sources, apply exclusions before
   ambiguity, reuse a matching refreshed base, refresh a surviving cached-bootstrap
   hop, and preserve the public fetch/reload consumer.
-- [ ] **Native inputs and fallback:** an unusable tracking ref is never selected;
+- [x] **Native inputs and fallback:** an unusable tracking ref is never selected;
   overlapping namespaces cannot overwrite either source; authorized scoped
   credentials survive without repository selectors; HEAD/tag short sources
   retain Git's actual resolution.
