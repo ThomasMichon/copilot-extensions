@@ -660,8 +660,10 @@ def _fetch_branches(
     remote: str, *, cwd: str | Path, branches: tuple[str, ...],
     timeout: float | None = DEFAULT_FETCH_TIMEOUT,
     isolated_repository: bool = False, no_hooks: bool = False,
+    tracking_remote: str | None = None,
 ) -> None:
-    refspec = [f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}" for branch in branches]
+    destination = remote if tracking_remote is None else tracking_remote
+    refspec = [f"+refs/heads/{branch}:refs/remotes/{destination}/{branch}" for branch in branches]
     refmap = ["--refmap="] if branches else []
     hook_options: _GitHookOptions = {"no_hooks": True} if no_hooks else {}
     try:
@@ -1450,15 +1452,9 @@ def prepare_worktree_base(
     fetch_error: str | None = None
     if has_remote(remote, cwd=anchor_path):
         try:
-            from .inrepo_config_source import _offline_remote_head_branch
+            from .worktree_base_preparation import _fetch_worktree_base
 
-            policy_branch = _offline_remote_head_branch(
-                anchor_path, remote, time.monotonic() + DEFAULT_FETCH_TIMEOUT, strict=True,
-            )
-            branches: tuple[str, ...] = (default_branch,)
-            if policy_branch and policy_branch != default_branch:
-                branches += (policy_branch,)
-            _fetch_branches(remote, cwd=anchor_path, branches=branches)
+            _fetch_worktree_base(anchor_path, remote, default_branch)
             fetched = True
         except Exception as exc:
             fetch_error = str(exc)
