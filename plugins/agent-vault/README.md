@@ -306,7 +306,7 @@ Supported built-in command groups:
 
 | Area | Commands |
 |------|----------|
-| Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv`, `copy`/`cp` |
 | Authenticated HTTP | `curl -- <supported curl arguments>` (explicit URL binding, no caller-visible credential) |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
@@ -315,6 +315,19 @@ Supported built-in command groups:
 | Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify`, `cache-machine-prepare` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
+
+`copy`/`cp` duplicates an entry to a destination group (an existing group, or
+a path ending in `/`), keeping its title, or to a full destination entry path.
+Missing parent groups are created, and an existing destination entry is
+refused. The copy is staged under a temporary title and renamed to the
+destination title only after every field and attachment is in place. `copy` duplicates
+username, password and attachments; custom attributes, TOTP, tags, expiry and
+history are not copied. Because the backend command line only accepts notes
+and URLs as process arguments, `copy` refuses a source with notes or a URL
+unless `--skip-notes` / `--skip-url` asks to copy without them, and it refuses
+a username or password containing a line break or carriage return, which
+cannot be passed through intact. If a failed copy cannot confirm that its
+staged temporary entry was removed, the error names that entry.
 
 ## Create-only attachment import
 
