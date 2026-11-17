@@ -1300,7 +1300,7 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         admission = next(step for step in job["steps"] if step.get("name", "").startswith("Real authenticated source,"))
         assert admission["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
         assert shlex.split(admission["run"]) == [
-            "python", "-m", "pytest", "-q",
+            "python", "-m", "pytest", "-q", "--durations=15",
             "tools/test_runtime_source_build.py", "tools/test_runtime_source_wheel_cache.py",
             "-k", "${{ matrix.expression }}",
         ]
@@ -1308,6 +1308,8 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         assert toolkit["if"] == "${{ matrix.suite == 'toolkit' }}"
         assert shlex.split(toolkit["run"]) == [
             "python", "-m", "pytest", "-q", "tools/test_runtime_admission_toolkit.py",
+            "tools/test_runtime_packaged_artifacts.py",
+            "tools/test_local_install_source.py::test_native_archive_writes_owned_file_without_captured_binary",
             "libs/payload-invocation/tests/test_runtime_admission.py",
         ]
         overlap = next(step for step in job["steps"] if step.get("name") == "Bounded library overlap and serial application construction")
@@ -1334,7 +1336,7 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         refusal = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructor profiles"))
         assert refusal["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
         assert shlex.split(refusal["run"]) == [
-            "python", "-m", "pytest", "-q", "tools/test_installer_source_build.py",
+            "python", "-m", "pytest", "-q", "--durations=15", "tools/test_installer_source_build.py",
             "-k", "${{ matrix.constructor_expression }}",
         ]
         backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
@@ -2443,7 +2445,9 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert job["runs-on"] == runner and job["timeout-minutes"] == 10
         assert not job.get("strategy") and not job.get("continue-on-error")
         commands = [step for step in job["steps"] if "run" in step]
-        assert len(commands) == 2 and not any(step.get("env") for step in commands)
+        assert len(commands) == 3 and not commands[0].get("env")
+        assert commands[1]["env"] == {"PYTEST_ADDOPTS": "-k filtered"}
+        assert commands[2]["env"] == {"PYTEST_ADDOPTS": "-k 'not filtered'"}
         assert commands[0]["run"].split() == [
             "python", "tools/run-plugin-tests.py", "agent-pull-requests",
             "--test-file", "tests/test_watch_replay_store.py",
@@ -2459,6 +2463,10 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert commands[1]["run"].split() == [
             "python", "tools/run-standalone-tests.py", "services/pr",
             "--prepare", "--timeout", "180", "--admission-wait", "30",
+        ]
+        assert commands[2]["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/pr",
+            "--timeout", "420", "--admission-wait", "30",
         ]
 
 

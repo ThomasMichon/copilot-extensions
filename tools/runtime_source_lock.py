@@ -16,7 +16,7 @@ import re
 import subprocess as subprocess
 import sys
 import time
-from typing import Any, Protocol, TypedDict, cast
+from typing import Any, Protocol, TypedDict
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
@@ -34,8 +34,8 @@ from runtime_profile_policy import InstallationProfilePlan
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
-import installer_dependency_policy as dependencies
-installer_dependency_policy = dependencies
+import installer_dependency_policy as installer_dependency_policy
+dependencies = installer_dependency_policy
 from installer_dependency_policy import RetainedUVInstall
 from installer_engine import _package_roots, _source_files, runtime as runtime
 from installer_wheel_inputs import _check_deadline
@@ -302,7 +302,7 @@ def _source(payload: Path, expected: SourceIdentity) -> dict[str, Any]:
          and canonicalize_name(project["name"]) != canonicalize_name(expected.plugin))
             or project["version"] != expected.package_version):
         raise ProfileError("source candidate project differs from its selected identity")
-    return cast(dict[str, Any], project)
+    return project
 
 
 def _retained_source(transaction: RetainedUVInstall, payload: Path, deadline: float) -> None:

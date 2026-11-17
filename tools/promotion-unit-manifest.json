@@ -5470,7 +5470,9 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_independent_setup_view_refuses_changed_bound_program[output]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[installation_context.py]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[_installation_context.py]",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_pr_ratchet_uses_the_feature_head_and_merge_base"
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_pr_ratchet_uses_the_feature_head_and_merge_base",
+        "tools/promotion_unit_tests/test_source_witness.py::test_source_build_lock_preserves_native_witness_or_target_inference[False]",
+        "tools/promotion_unit_tests/test_source_witness.py::test_source_build_lock_preserves_native_witness_or_target_inference[True]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5848,7 +5850,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
         "tools/promotion_unit_tests/test_git_launch_composition.py": "13cc8825da50b3d667d10ef7d38dedd9d52d98bcbef961535c9cc53834e76531",
-        "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
+        "tools/promotion_unit_tests/test_source_witness.py": "f14b229099ec9dc9308173f9f9dff4a28d793655e34b34647a2f83e02c91df29",
         "tools/runtime_source_capture.py": "c545dab67530724e69de6137e0f63e7b0508fd139b95c486a4aba863a416717a",
         "plugins/agent-vault/src/agent_vault/attachment_import.py": "0343d59d5f46b7ee3ab8085bf01d6d553ce89886a14f406144af39f048f0b0c6",
         "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
@@ -6380,7 +6382,7 @@
         "tools/runtime_profile_policy.py": "ef1944259265bee935757cea91da9b9e5355dc6e3647a1e9c0fb4945c62ec9e6",
         "tools/runtime_profile_release.py": "6594b51eb16c33ee6fe84b79582ea26f9d6d730b8b2f3c7e34a20cba4d0daee4",
         "tools/runtime_profile_wheels.py": "b90c14aee458d10a00aa4dbf98e72f07d299f7a079eb3b6747d62d1accb98547",
-        "tools/runtime_source_lock.py": "57d8f72b3b95e147b286c46773667e0a0e252fb00abf44080f1faa5d75473c5c",
+        "tools/runtime_source_lock.py": "0123fe3cc3d1934ce43ee8d37025699e4942279aa2832aa01f325d17492dd071",
         "tools/runtime_source_wheels.py": "e2210909d6978e22aede23f955b9d4a6826e9d896d41d64aa1c155006ca99536",
         "tools/runtime_wheel_inspection.py": "403031eea565b4f96c2e5a13e24044206096e77962454fb55619c50c106fd8ad",
         "tools/seasoned_public_feed.py": "83364e638595e1da1b82e843a236ad0d7cf81b76a02b7a192bf1ff407a234bdc",
