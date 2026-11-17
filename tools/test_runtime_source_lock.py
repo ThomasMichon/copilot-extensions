@@ -35,8 +35,9 @@ from test_installer_dependency_policy import (
     offline_environment as _offline_environment, source_project as _source_project,
 )
 from test_runtime_profile_policy_plan import adopter as adopter
+from test_runtime_profile_policy import _Adopter
 
-Adopter = tuple[object, dict[str, Any], Path]
+Adopter = _Adopter
 Source = tuple[Path, SourceIdentity]
 Target = dict[str, Any]
 offline_environment: Callable[[Path], dict[str, str]] = _offline_environment

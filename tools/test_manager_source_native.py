@@ -96,7 +96,8 @@ def manager_source(adopter: _Adopter, configured_source: tuple[Path, Path, str, 
         "    shutil.copytree(data['frozen_plugin'], pathlib.Path(sys.prefix) / 'payload')\n"
         "def verify_runtime_candidate():\n"
         "    import worktree_manager\n"
-        "    assert any(parent.samefile(sys.prefix) for parent in pathlib.Path(worktree_manager.__file__).parents)\n"
+        "    assert any(parent.samefile(sys.prefix)\n"
+        "               for parent in pathlib.Path(worktree_manager.__file__).resolve().parents)\n"
         "    assert importlib.metadata.version('copilot-extensions-worktree-manager') == '1.2.3.dev1'\n",
         encoding="utf-8",
     )
@@ -352,7 +353,8 @@ def test_manager_closed_native(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         "    shutil.copytree(data['frozen_plugin'], pathlib.Path(sys.prefix) / 'payload')\n"
         "def verify_runtime_candidate():\n"
         "    import worktree_manager\n"
-        "    assert any(parent.samefile(sys.prefix) for parent in pathlib.Path(worktree_manager.__file__).parents)\n"
+        "    assert any(parent.samefile(sys.prefix)\n"
+        "               for parent in pathlib.Path(worktree_manager.__file__).resolve().parents)\n"
         "    assert importlib.metadata.version('copilot-extensions-worktree-manager') == '1.2.3.dev1'\n",
         encoding="utf-8",
     )
