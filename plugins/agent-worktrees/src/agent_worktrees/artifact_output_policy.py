@@ -27,7 +27,11 @@ def member_name(value: object) -> str:
     if (
         not isinstance(value, str) or not value or len(value) > 120
         or value in {".", ".."} or value.endswith((" ", "."))
-        or any(ord(char) < 32 or ord(char) == 127 or char in '<>:"/\\|?*' for char in value)
+        or any(
+            ord(char) < 32 or ord(char) == 127 or 0xD800 <= ord(char) <= 0xDFFF
+            or char in '<>:"/\\|?*' for char in value
+        )
+        or len(value.encode("utf-8")) > 255
         or _RESERVED.match(value)
     ):
         raise ConfigurationError("user-output member must be a portable plain name")

@@ -56,7 +56,8 @@ operation ID before sending. The producer selects at most 16 regular, singly
 linked files totaling at most 64 MiB. The JSON CLI is further bounded by its
 16 KiB request; the Python `artifact_output.produce_files` API accepts byte
 content within the same file/byte limits. Member names are portable, bounded,
-case-insensitively unique plain components. Directories, streams, links and
+case-insensitively unique plain components, at most 120 characters and 255 UTF-8
+bytes each. Rendered destination components use the same bounds. Directories, streams, links and
 reserved device/control names are not deliverable members in this first producer.
 
 ## Allocation and handover

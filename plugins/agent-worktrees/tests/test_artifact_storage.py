@@ -259,10 +259,31 @@ def test_invalid_user_output_layer_is_not_hidden(context: Context, policy: dict[
 
 @pytest.mark.parametrize("topic", [
     "../outside", "stream:name", "NUL.txt", "CONIN$", "COM\u00b9", "trailing.", "line\nbreak",
+    "\u5831" * 82, "\U0001f600" * 64, "\ud800",
 ])
 def test_user_output_rejects_nonportable_topic(tmp_path: Path, topic: str) -> None:
     with pytest.raises(ConfigurationError):
         resolve_user_output({}, topic=topic, owner_roots={"downloads": str(tmp_path / "output")})
+
+
+@pytest.mark.parametrize("source", ["template", "explicit"])
+def test_user_output_destination_components_obey_utf8_byte_limit(tmp_path: Path, source: str) -> None:
+    bounded = "\u5831" * 83 + ".txtaa"
+    root = tmp_path / "output"
+    for member in (bounded, bounded + "a"):
+        policy = {"user_output": {"templates": {"downloads": member}}} if source == "template" else {}
+        destination = str(root / member) if source == "explicit" else None
+        if member == bounded:
+            selected = resolve_user_output(
+                policy, topic="Example", owner_roots={"downloads": str(root)}, destination=destination,
+            )
+            assert selected["members"][-1] == member
+        else:
+            with pytest.raises(ConfigurationError):
+                resolve_user_output(
+                    policy, topic="Example", owner_roots={"downloads": str(root)}, destination=destination,
+                )
+    assert not root.exists()
 
 
 def test_user_output_foreign_machine_paths_remain_inert(context: Context, tmp_path: Path) -> None:

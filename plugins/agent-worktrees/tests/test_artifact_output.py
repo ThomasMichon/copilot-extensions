@@ -104,6 +104,18 @@ def test_reservation_and_binding_precede_writable_return(
     assert not finalize._assert_obligations_settled(tracking.load_record(path), "owner", abandon=False)
 
 
+def test_utf8_filename_limit_is_checked_before_reservation(destination: Destination) -> None:
+    path, selection, _ = destination
+    member = "\u5831" * 83 + ".txtaa"
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="portable plain name"):
+        produce(destination, {member + "a": b"fixture"})
+    assert path.read_bytes() == before and not Path(selection["destination"]).exists()
+    result = produce(destination, {member: b"fixture"})
+    assert result["phase"] == "delivered"
+    assert (Path(selection["destination"]) / member).read_bytes() == b"fixture"
+
+
 def test_existing_destination_is_never_overwritten_or_adopted(destination: Destination) -> None:
     path, selection, _ = destination
     existing = Path(selection["destination"])
