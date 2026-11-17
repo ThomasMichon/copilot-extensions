@@ -1,0 +1,3 @@
+-r typecheck-requirements.txt
+# A newer checker interpreter still analyzes the Python 3.10 backport branch.
+tomli==2.5.0

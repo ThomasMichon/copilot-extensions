@@ -39,24 +39,25 @@ production, execution custody and all operational holds.
 
 ## Validation plan
 
-- [ ] Review the receiving contract before shared caller changes.
-- [ ] A missing association is an explicit unassociated observation and creates
+- [x] Review the receiving contract before shared caller changes; #12987 merged
+  with exact-head approval and passing required checks.
+- [x] A missing association is an explicit unassociated observation and creates
   no configuration, lock or repository.
-- [ ] Inspection ignores ambient cwd and repository configuration there, reads
+- [x] Inspection ignores ambient cwd and repository configuration there, reads
   only the selected Manager configuration, and neither parses adopter YAML nor
   starts Git, a daemon or setup.
-- [ ] Invalid TOML, unknown association versions/fields and malformed roots
+- [x] Invalid TOML, unknown association versions/fields and malformed roots
   refuse without becoming an absent association or overwriting data.
-- [ ] Apply changes only the owned association table through the existing
+- [x] Apply changes only the owned association table through the existing
   configuration writer. Manager self-source, runtime-source policy and all
   unrelated values survive.
-- [ ] An initial binding, repeat request, explicit replacement and clear work
+- [x] An initial binding, repeat request, explicit replacement and clear work
   through the real module boundary. A stale expected root refuses without
   changing the association.
-- [ ] Equivalent native path spellings do not create an accidental retarget.
+- [x] Equivalent native path spellings do not create an accidental retarget.
   Inspection of the stored identity does not require the adopter to remain
   available; consuming its declaration retains the existing path checks.
-- [ ] Cold invocation with the trusted source/tool dependency closure works
+- [x] Cold invocation with the trusted source/tool dependency closure works
   without an installed Manager, registry or running daemon.
 - [ ] Old consumers do not gain association support merely because they ignore
   the new TOML table. Unsupported module/schema discovery remains explicit.
@@ -65,7 +66,33 @@ production, execution custody and all operational holds.
 
 ## Current boundary
 
-This is the receiving design only. Schema-2 recovery remains preview-only.
-There is no production association, new bootstrap request version, installed
-pin, migration, repository write or rollout in this change. The parent effort
-and all installation/adoption gates remain open.
+The receiving contract is reviewed; the isolated Manager module/API and its
+explicit association operations merged in #13012 as
+`59077d83c93c750a8ad4af5cbb1bd83b11199ac4` after exact-head approval and
+passing required CI. The native Windows packet
+passes 23 controls, including actual cold-module inspect/propose/apply/replace/
+clear, expected-root revalidation under the shared lock, failed publication,
+input bounds and unrelated-policy retention. The two changed Python files pass
+whole-file strict analysis for Linux and Windows Python 3.10 targets. The
+Manager checker uses a scoped hash-locked TOML backport environment; this does
+not change the whole project's pending admission.
+Both mutation operations also reject abbreviated apply flags before any
+configuration effect; the parent parser's strictness is set on each subparser.
+
+Schema-2 recovery remains preview-only. No ordinary caller consumes this
+association yet, and no operator installation was configured by the source
+tests. There is no new bootstrap request version, installed pin, migration,
+repository write or rollout. Old-caller negotiation, actual source convergence
+and native installation/adoption gates remain open in the parent.
+
+The separate read-only `repository_suite_declaration` module now connects the
+addressed association to the existing declaration reader and native
+source-locator validation. Its independent capability/schema prevents an
+old association-only provider from advertising declaration support. Nine native
+controls cover actual current/changed intent, unavailable-adopter identity,
+malformed policy, secret-free rejection and a cold first-party package with
+explicitly available or absent parser dependencies. Both changed Python files
+pass whole-file strict analysis on Linux/Windows Python 3.10 targets.
+These are source controls, not actual Python 3.10 execution or an installed
+consumer. Ordinary callers and the native immutable preparation owners remain
+unchanged; no source is acquired by declaration observation.

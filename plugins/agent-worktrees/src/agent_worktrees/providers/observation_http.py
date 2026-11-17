@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .observation_credentials import ObservationCredentialError, ObservationCredentials
+from .gitea_pagination import COUNT_WRITE_OUT, counted_response
 
 MAX_BODY = 1_048_576
 MAX_CAPTURE = MAX_BODY + 8
@@ -34,6 +35,7 @@ def read_get(
     url: str, authorization: str, *, invoke: Callable[..., Any],
     deadline: float | None = None, github: bool = False,
     max_body_bytes: int = MAX_BODY,
+    capture_count: bool = False,
 ) -> tuple[int, str]:
     """Use one fixed GET command; authentication was admitted by the caller."""
     address = urlsplit(url)
@@ -55,7 +57,8 @@ def read_get(
                    "-H", "X-GitHub-Api-Version: 2022-11-28"]
     result = invoke(
         ["curl", *_ARGUMENTS, "-sS", "--max-time", str(remaining),
-         "-X", "GET", url, "-H", "@-", *headers, "-w", "\n%{http_code}"],
+         "-X", "GET", url, "-H", "@-", *headers, "-w",
+         COUNT_WRITE_OUT if capture_count else "\n%{http_code}"],
         input_text="Authorization: " + authorization + "\n",
         timeout=max(1, int(remaining)), max_stdout_bytes=max_body_bytes + 8,
         max_stderr_bytes=8192,
@@ -71,7 +74,7 @@ def read_get(
         raise ObservationCredentialError("invalid direct observation response", transient=True)
     if status in (401, 403):
         raise ObservationCredentialError("observation authorization lost", transient=True)
-    return status, body
+    return counted_response(status, body) if capture_count else (status, body)
 
 
 def github_environment(credentials: ObservationCredentials) -> dict[str, str]:

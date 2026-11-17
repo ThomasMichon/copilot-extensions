@@ -230,6 +230,11 @@ class WatchService:
                 raise ValueError("native and replay state roots must be separate")
             self._check()
             def validate_storage() -> None:
+                if self.store.repository_activity:
+                    self.store.adopt_repository_activity(
+                        lifecycle_checkpoint=self._check,
+                        expires_at=self._authority(), checkpoint=self._check,
+                    )
                 self.store.observation_targets(
                     expires_at=self._authority(), checkpoint=self._check,
                 )

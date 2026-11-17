@@ -7,6 +7,7 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,13 @@ from .cache_limits import WorkBudget
 from .cache_manifests import iter_cache_manifest
 from .credential_fields import canonical_field
 from .invocation import CACHE_TARGET_FIELDS as FIELDS
+from .invocation import CACHE_MAINTENANCE_FIELD, cache_maintenance_owner
+
+
+@dataclass(frozen=True)
+class CommandTargets:
+    entries: list[tuple[str, str]]
+    service_owned: bool
 
 
 class CacheTargetError(ValueError):
@@ -52,7 +60,8 @@ def validate_configuration(data: dict[str, Any], label: str) -> None:
 def preferences(data: dict[str, Any], base: Path) -> dict[str, Any]:
     """Anchor a declaring layer's manifests before composing ordinary policy."""
     validate_configuration(data, "cache target configuration")
-    values = {key: data[key] for key in FIELDS & data.keys()}
+    cache_maintenance_owner(data)
+    values = {key: data[key] for key in (FIELDS | {CACHE_MAINTENANCE_FIELD}) & data.keys()}
     if "cache_manifests" in values:
         paths = []
         for value in values["cache_manifests"]:
@@ -79,9 +88,12 @@ def configured(cwd: str | None = None) -> dict[str, Any]:
         cwd, repository, machine, extension, repository_directory=directory,
     )
     if composed is not None:
-        return {key: composed["values"][key] for key in FIELDS}
+        return {
+            **{key: composed["values"][key] for key in FIELDS},
+            CACHE_MAINTENANCE_FIELD: cache_maintenance_owner(composed["values"]),
+        }
     return {
-        "cache_entries": [], "cache_manifests": [],
+        "cache_entries": [], "cache_manifests": [], CACHE_MAINTENANCE_FIELD: "local",
         **preferences(machine, config._global_config_path().parent),
         **preferences(extension, root),
         **preferences(repository, directory),
@@ -136,7 +148,7 @@ def configured_source(
 ) -> Callable[[str | None], Iterator[tuple[str, str]]] | None:
     """Snapshot declared policy for bounded service-owned unlock warming."""
     policy = deepcopy(configured(cwd))
-    if not any(policy.values()):
+    if not any(policy[key] for key in FIELDS):
         return None
 
     def source(_machine: str | None) -> Iterator[tuple[str, str]]:
@@ -145,8 +157,8 @@ def configured_source(
     return source
 
 
-def command_entries(args: Any) -> list[tuple[str, str]] | None:
-    """Collect every CLI target without normalizing away root-entry anchors."""
+def command_plan(args: Any) -> CommandTargets | None:
+    """Snapshot targets and their access policy through the same configuration owner."""
     from configuration_context import RepositoryContextRequired
 
     from .extensions import get_registry
@@ -162,9 +174,10 @@ def command_entries(args: Any) -> list[tuple[str, str]] | None:
             pairs.extend(_manifest_entries(manifest_path(manifest)))
         pairs.extend(_declared(policy))
         pairs.extend(get_registry().collect_cache_entries(getattr(args, "machine", None)))
-        return list(dict.fromkeys(
+        entries = list(dict.fromkeys(
             (entry, canonical_field(field or "password")) for entry, field in pairs if entry
         ))
+        return CommandTargets(entries, cache_maintenance_owner(policy) == "selected-service")
     except RepositoryContextRequired:
         raise
     except (OSError, RuntimeError, ValueError):
@@ -175,14 +188,25 @@ def command_entries(args: Any) -> list[tuple[str, str]] | None:
         return None
 
 
+def command_entries(args: Any) -> list[tuple[str, str]] | None:
+    """Collect every CLI target without normalizing away root-entry anchors."""
+    plan = command_plan(args)
+    return plan.entries if plan is not None else None
+
+
 def status_command(args: Any) -> int:
     """Augment the native cache owner's status with declared-policy metadata."""
+    plan = command_plan(args)
+    if plan is None:
+        return 1
+    if plan.service_owned:
+        from .cache_maintenance_client import command
+
+        return command(args, plan.entries, "status")
     from .cache import get_cache
     from .cache_recovery import status_command as native_status
 
-    targets = command_entries(args)
-    if targets is None:
-        return 1
+    targets = plan.entries
     if getattr(args, "json", False):
         status = get_cache().status()
         status["configured_target_count"] = len(targets)

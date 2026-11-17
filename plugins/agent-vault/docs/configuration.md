@@ -295,6 +295,7 @@ database, credential, installation, cache, KEK, or rendezvous custody.
 | `enabled` | Optional strict boolean, default false; runtime participation opt-in. Allowed in portable repository/knowledge and native machine configuration. Not inferred from database configuration. |
 | `cache_entries` | Optional array, default empty. Each item is a nonempty entry string (password field) or a two-string `[entry, field]` pair. Portable allowlist references, not credential values or cache placement. |
 | `cache_manifests` | Optional array of nonempty manifest-path strings, default empty. Paths belong to their declaring configuration layer. |
+| `cache_maintenance` | Optional strict `local` or `selected-service`, default `local`. Selects the maintenance access owner, not database, cache/key, service or endpoint placement. Uses ordinary preference precedence. |
 | `vaults` | Optional global object keyed by nonempty vault names; each value is an object with required nonempty `kpdb`. Registry records are machine-local custody, not ordinary portable preferences. |
 | `default_vault` | Optional nonempty string naming a member of that file's `vaults`; strict validation refuses a missing registration. |
 | `vault` | Optional nonempty string selecting a registered vault in repository/extension settings; `AGENT_VAULT` wins. |
@@ -308,7 +309,7 @@ database, credential, installation, cache, KEK, or rendezvous custody.
 `_pick_vault_name` and `resolve_context` are the canonical schema/selection
 sections. Known optional null values behave as absent in this **native selector**;
 this is not a generic deep-map merge. Cache-reference arrays have the separate
-strict schema below; null is not an empty allowlist. Unknown fields
+strict schema below; null is not an empty allowlist or maintenance-owner choice. Unknown fields
 are retained in loaded JSON but do not affect this selector. There is no schema
 version field or automatic file rewrite on read. `save_global_config` is a
 separate explicit writer.
@@ -350,7 +351,7 @@ keeps its native path. No other relative input/output selector changes meaning.
 Malformed declarations and unreadable manifests fail without substituting
 extension targets or selecting another context. `cache-status --json` adds
 `configured_target_count`; this count is not proof that those targets are cached.
-Status composes this policy metadata with the existing native cache owner's
+In default `local` mode, status composes this policy metadata with the native cache owner's
 status; it does not change recovery or protected-store behavior.
 
 Resolving declarations does not enable cache, unlock a database or change
@@ -365,6 +366,15 @@ An older reader may ignore new configuration keys: that is not enforcement.
 Adopters requiring declared-target semantics must qualify both selected CLI and
 resident support before activation or after rollback; no matching package version
 or installed capability substitutes for the running service's evidence.
+
+Set `cache_maintenance: "selected-service"` to use the existing running service's
+protected records for population, verification and status without reading or
+writing the caller's cache/key. The selected CLI must advertise
+`service-cache-maintenance-v1`, and the running service must advertise the
+[maintenance contract](cache-maintenance.md). An old reader ignoring this
+preference does not enforce it. Qualify both executing sides before activation
+and after rollback. This preference neither starts a service nor unlocks a vault;
+absent or explicit `local` preserves the previous CLI behavior.
 
 Database paths expand environment variables and `~`; relative repository paths
 use the declaring `.agent-vault.json` directory, global/named paths use the
@@ -413,14 +423,14 @@ validation regardless of ordinary preference composition.
 ### Ordinary selection composition
 
 For an admitted configuration context, the real `resolve_context` consumer
-composes `vault`, `group`, boolean `enabled` and cache-reference arrays:
+composes `vault`, `group`, boolean `enabled`, the maintenance access owner and cache-reference arrays:
 built-in unset selections and
 inactive runtime default → native extension
 and selected repository data plus base then bound knowledge `.agent-vault.json`
 → existing global `default_vault`/`group` (`vault_group` compatibility alias)
 → `.agent-vault.json` beneath the owner's exact `repository_machine_root`.
-Knowledge and repository+machine files may contain selection, activation and
-cache-reference fields only; database, port, registry, cache placement/protection,
+Knowledge and repository+machine files may contain selection, activation,
+maintenance-access and cache-reference fields only; database, port, registry, cache placement/protection,
 endpoint and KEK fields refuse portable override.
 Source documents retain physical-root and JSON-pointer provenance.
 

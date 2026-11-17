@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .invocation import configuration_root as invocation_configuration_root
-from .invocation import CACHE_TARGET_FIELDS
+from .invocation import CACHE_TARGET_FIELDS, cache_maintenance_owner
 from .configuration_scope import (
     REPO_CONFIG_NAME,
     bind_service_configuration as bind_service_configuration,
@@ -216,6 +216,7 @@ def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _validate_config_data(data: dict[str, Any], label: str) -> None:
+    cache_maintenance_owner(data, label)
     if any(
         key in data and not (isinstance(data[key], list) and not data[key])
         for key in CACHE_TARGET_FIELDS

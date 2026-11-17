@@ -316,6 +316,97 @@ Supported built-in command groups:
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
 
+## Create-only attachment import
+
+On POSIX, the opt-in form requires an already-running, unlocked selected owner:
+
+```text
+agent-vault import-key Example/new-key /path/to/private.key --create-only --require-running
+```
+
+The executing CLI advertises `key-attachment-create-only-v1`. Within an already
+prepared runtime, this form uses an additive daemon action that older services
+refuse; it never falls back to ordinary import, starts a service, invokes an
+unlock provider or prompts. Prevent cold payload self-provisioning independently
+with `AGENT_VAULT_NO_SELFPROVISION=1`; the flag does not authorize or suppress an
+installer that ran before CLI dispatch.
+The existing health reply must advertise `key_attachment_import_versions`
+containing integer `1`, a nonempty `key_attachment_import_owner` identifying
+that service incarnation, and acceptance of work before private bytes are sent.
+The import uses the connector and context selected by that health request,
+once, with `expected_import_owner`; the service checks it before backend access
+and echoes its incarnation on the result. A lost, owner-mismatched or legacy
+reply remains unknown, without rediscovery, transport failover or replay.
+The mutation cannot supply a different database, group or named vault. Its raw
+entry is normalized by the service with the captured group. An absent captured
+group means explicit root selection, never a request to reload the daemon's
+ambient group. This opt-in form refuses a Windows-source endpoint that omits the
+guest's selection, or a context
+that changes between strict resolution and health, before sending private bytes;
+implicit host-profile attachment import is not supported.
+Missing/withdrawn support refuses without mutation; rollback between discovery
+and execution still cannot invoke the older mutating action.
+Preferred extension transports keep their priority. To carry this mutation,
+their existing `register_transport` call must opt into `single_attempt=True`,
+promising one pinned route/owner and at most one send per callback invocation,
+without internal retry or post-send fallback. Legacy callbacks remain usable
+for ordinary reads but refuse this import before receiving private bytes.
+The entry and all parent groups must be unambiguous, the parents must already
+exist, and any existing entry or group at the destination refuses before an add.
+The existing local database creation lock serializes cooperating local writers;
+it is not a distributed lock across synchronized copies.
+
+Private input must already be an owned ordinary `0600` file, without links or
+special-file ancestry. Its public companion is `<private filename>.pub`.
+Both inputs are bounded to 16 KiB and checked for changes during reading.
+Option-looking root entries and nonportable or oversized attachment filenames
+refuse before a backend mutation.
+These are opaque attachment bytes: this operation neither generates keys nor
+proves that they form a cryptographic pair. Windows refuses this opt-in form
+until its native input-custody contract is supported; ordinary import is unchanged.
+
+The new entry and its two non-overwriting attachment writes are not one atomic
+database transaction. Secret-free errors distinguish `not_started` from an
+`unknown` effect. Retain the operation and inspect the authoritative owner after
+an unknown/partial result; never blindly retry, pick another entry or delete
+partial state. Backend temporary-file and privileged-consumer custody require
+their own qualification; failed temporary-file cleanup cannot produce a
+successful create-only receipt. Ordinary `import-key` and `export-key` keep their
+existing activation and overwrite behavior.
+
+## Non-activating attachment export provider
+
+The running service's health reply advertises `key_attachment_export_versions`
+containing integer `1` when its existing backend supports bounded attachment
+reads. `key_attachment_export_owner` identifies the same service incarnation
+as the import owner. This is provider expansion only: no exclusive-file CLI
+mode or executing-CLI capability is enabled yet.
+
+The additive `export-key-nonactivating` action takes `entry`, `key_name`,
+the selected database/group context and `expected_export_owner`. A mismatched
+incarnation refuses before backend access; the reply echoes the actual owner.
+The existing service admission refuses a draining owner. An already-locked
+owner returns `needs_unlock` without starting a service, resolving an unlock
+provider or prompting; `allow_prompt: true` refuses. Absent or empty group
+selects root explicitly instead of loading the daemon's ambient group.
+Names follow the create-only import's validation.
+
+Both opaque attachments (`key_name` and its `.pub` companion) must be nonempty
+and at most 16 KiB each. Backend reads stop at the bound plus one byte; failed
+reads, oversized material and failed temporary-file cleanup cannot produce
+success or a partial-material response. The successful response contains
+base64 `key_data` and `pub_data`, without key generation or pair validation.
+This bounds returned material and read allocation, not KeePass's temporary
+file size while its existing ten-second export subprocess runs.
+
+Future consumers must discover this contract from their selected running
+owner, bind its context and incarnation, and refuse missing/withdrawn support
+without falling back to ordinary export. New destination creation and
+privileged temporary-file/materializer custody remain separate contracts;
+this provider does not qualify them. Ordinary `export-key` and backend
+`export_attachment` defaults retain their activation/overwrite and cleanup
+behavior. No existing form is deprecated or removed.
+
 ## Batch reads
 
 `agent-vault batch-get` reads an array of entry/field objects from JSON stdin

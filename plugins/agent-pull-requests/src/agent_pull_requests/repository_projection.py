@@ -5,9 +5,18 @@ from __future__ import annotations
 import copy
 import json
 import uuid
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .repository_contract import MAX_EVENTS, MAX_PULLS, RepositoryBackpressure, RepositoryIdentity
+from .watch_contract import PRSnapshot
 from .watch_replay import ObservationTarget
+
+if TYPE_CHECKING:
+    from .watch_replay_store import ReplayStore
+
+_T = TypeVar("_T")
+ObservationKey = tuple[str, str, int]
 
 FACTS = (
     "provider", "pr_state", "merged", "head_sha", "base_ref", "base_sha", "mergeable",
@@ -15,7 +24,9 @@ FACTS = (
 )
 
 
-def validate_identity(snapshot, identity, number):
+def validate_identity(
+    snapshot: PRSnapshot, identity: RepositoryIdentity, number: int,
+) -> dict[str, Any]:
     """Fence the selected backend before either replay or projection consumes evidence."""
     native = snapshot.native_snapshot
     if not isinstance(native, dict) or (
@@ -25,12 +36,17 @@ def validate_identity(snapshot, identity, number):
     return native
 
 
-def normalized(snapshot, identity, number):
+def normalized(
+    snapshot: PRSnapshot, identity: RepositoryIdentity, number: int, *, activity: bool = False,
+) -> dict[str, Any]:
     """Keep bounded current facts without volatile timestamps or cursors."""
     native = validate_identity(snapshot, identity, number)
     facts = {name: copy.deepcopy(native.get(name)) for name in FACTS}
     facts["reviews"] = sorted([{
-        name: review.get(name) for name in ("id", "state", "user", "commit_id", "dismissed")
+        name: review.get(name) for name in (
+            "id", "state", "user", "commit_id", "dismissed",
+            *(("submitted_at",) if activity else ()),
+        )
     } for review in native.get("reviews", [])], key=lambda review: (
         str(review["id"]), str(review["user"]), str(review["commit_id"]),
     ))
@@ -40,19 +56,26 @@ def normalized(snapshot, identity, number):
         str(failure["name"]), str(failure["source"]), str(failure["url"]),
     ))
     facts["fingerprints"] = copy.deepcopy((native.get("observation") or {}).get("fingerprints"))
+    if activity:
+        facts.update(
+            reviews_complete=native.get("reviews_complete"), updated_at=native.get("updated_at"),
+        )
     from .repository_state import facts as validate_facts
-    validate_facts(facts)
+    validate_facts(facts, activity=activity)
     return facts
 
 
-def _active(state, now):
+def _active(state: dict[str, Any], now: int) -> list[dict[str, Any]]:
     return [row for row in state["registrations"] if (
         not row["cancelled"] and row["expires_at"] > now
         or row.get("delivered", row["acknowledged"]) > row["acknowledged"]
     )]
 
 
-def _event(state, target, number, kind, facts, now):
+def _event(
+    state: dict[str, Any], target: str, number: int | None, kind: str,
+    facts: dict[str, Any] | None, now: int,
+) -> str:
     if len(state["events"]) == MAX_EVENTS:
         first = state["events"][0]
         if any(row["target"] == first["target"] and row["acknowledged"] < first["sequence"] and (
@@ -62,14 +85,16 @@ def _event(state, target, number, kind, facts, now):
                for row in _active(state, now)):
             raise RepositoryBackpressure("repository event backpressure; unresolved delivery retained")
         state["events"].pop(0)
+    event_id = uuid.uuid4().hex
     state["events"].append({
-        "sequence": state["next_sequence"], "event_id": uuid.uuid4().hex,
+        "sequence": state["next_sequence"], "event_id": event_id,
         "target": target, "number": number, "kind": kind, "facts": copy.deepcopy(facts),
     })
     state["next_sequence"] += 1
+    return event_id
 
 
-def _trim_bytes(state, now, first_new, version):
+def _trim_bytes(state: dict[str, Any], now: int, first_new: int, version: int) -> None:
     from .repository_state import encoded_sizes, sizes_fit
     total, payload = encoded_sizes(state)
     events, removed = state["events"], 0
@@ -95,7 +120,7 @@ def _trim_bytes(state, now, first_new, version):
         state["events"] = events[removed:]
 
 
-def _new_repository(identity):
+def _new_repository(identity: RepositoryIdentity) -> dict[str, Any]:
     return {
         "identity": identity.document(), "pulls": [],
         "inventory": {"outcome": "unknown", "observed_at": None, "last_complete_at": None,
@@ -106,7 +131,7 @@ def _new_repository(identity):
 class RepositoryProjection:
     """One selected namespace's current-state/event view over ReplayStore custody."""
 
-    def __init__(self, store, identities):
+    def __init__(self, store: ReplayStore, identities: Iterable[RepositoryIdentity]) -> None:
         self.store = store
         self.identities = {identity.key: identity for identity in identities}
         if not store.repository_cache or any(
@@ -114,17 +139,22 @@ class RepositoryProjection:
         ):
             raise ValueError("repository projection requires its selected namespace owner")
 
-    def _transaction(self, operation, *, expires_at, checkpoint=None, persist=False):
-        def selected(document):
+    def _transaction(
+        self, operation: Callable[[dict[str, Any]], _T], *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None, persist: bool = False,
+    ) -> _T:
+        def selected(document: dict[str, Any]) -> _T:
             return operation(document["repository_cache"])
         return self.store._review_transaction(
             selected, expires_at=expires_at, checkpoint=checkpoint, persist=persist,
         )
 
-    def plans(self, inventories, **authority):
+    def plans(
+        self, inventories: dict[str, dict[str, Any]], **authority: Any,
+    ) -> dict[ObservationKey, ObservationTarget]:
         """Plan members and unresolved departures without acquiring forge evidence."""
-        def plan(state):
-            targets = {}
+        def plan(state: dict[str, Any]) -> dict[ObservationKey, ObservationTarget]:
+            targets: dict[ObservationKey, ObservationTarget] = {}
             for key, identity in self.identities.items():
                 previous = next((row for row in state["repositories"]
                                  if RepositoryIdentity.parse(row["identity"]).key == key), None)
@@ -141,25 +171,35 @@ class RepositoryProjection:
             return targets
         return self._transaction(plan, **authority)
 
-    def apply(self, inventories, snapshots, **authority):
+    def apply(
+        self, inventories: dict[str, dict[str, Any]],
+        snapshots: dict[ObservationKey, PRSnapshot | None], **authority: Any,
+    ) -> dict[str, Any]:
         """Commit current facts and their durable events in one owner replacement."""
-        prepared = {}
+        prepared: dict[ObservationKey, dict[str, Any] | None] = {}
         for key, snapshot in snapshots.items():
             try:
-                prepared[key] = normalized(snapshot, self.identities[key[0]], key[2]) if (
+                prepared[key] = normalized(
+                    snapshot, self.identities[key[0]], key[2],
+                    activity=self.store.repository_activity,
+                ) if (
                     snapshot is not None
                 ) else None
             except (ValueError, TypeError):
                 prepared[key] = None
         return self.apply_facts(inventories, prepared, **authority)
 
-    def apply_facts(self, inventories, snapshots, *, observed_at=None, **authority):
+    def apply_facts(
+        self, inventories: dict[str, dict[str, Any]],
+        snapshots: dict[ObservationKey, dict[str, Any] | None], *,
+        observed_at: int | None = None, **authority: Any,
+    ) -> dict[str, Any]:
         """Publish a bounded prepared batch, retaining atomic state/event pairs."""
         from .repository_state import facts as validate_facts
         observed_at = int(self.store.clock()) if observed_at is None else observed_at
         if type(observed_at) is not int or not 0 <= observed_at <= self.store.clock():
             raise ValueError("invalid observation cycle timestamp")
-        def apply(state):
+        def apply(state: dict[str, Any]) -> dict[str, Any]:
             now = int(self.store.clock())
             first_new = state["next_sequence"]
             for key, identity in self.identities.items():
@@ -188,8 +228,10 @@ class RepositoryProjection:
                     if number not in known:
                         if len(row["pulls"]) >= MAX_PULLS * 2:
                             raise RepositoryBackpressure("retained repository summary capacity reached")
-                        pull = {"number": number, "member": True, "departed_at": None,
+                        pull: dict[str, Any] = {"number": number, "member": True, "departed_at": None,
                                 "observed_at": None, "error": "", "facts": None}
+                        if self.store.repository_activity:
+                            pull["activity"] = None
                         row["pulls"].append(pull)
                         known[number] = pull
                         _event(state, key, number, "baseline" if initial else "entry", None, now)
@@ -208,7 +250,7 @@ class RepositoryProjection:
                     facts = copy.deepcopy(snapshots[selected])
                     try:
                         if facts is not None:
-                            validate_facts(facts)
+                            validate_facts(facts, activity=self.store.repository_activity)
                             if facts["provider"] != identity.provider:
                                 raise ValueError("normalized provider binding mismatch")
                     except (ValueError, TypeError):
@@ -217,23 +259,32 @@ class RepositoryProjection:
                         pull["error"] = "snapshot_unavailable"
                         continue
                     previous = pull["facts"]
-                    if previous != facts:
+                    event_id = None
+                    if previous != facts or self.store.repository_activity and pull["activity"] is None:
                         kind = "baseline" if previous is None else (
                             "terminal" if facts["pr_state"] == "closed" or facts["merged"] else "change"
                         )
-                        _event(state, key, number, kind, facts, now)
+                        event_id = _event(state, key, number, kind, facts, now)
+                    if self.store.repository_activity:
+                        from .repository_activity import advance
+                        pull["activity"] = advance(
+                            previous, facts, pull["activity"], event_id, observed_at,
+                        )
                     pull.update(facts=facts, observed_at=observed_at, error="")
             _trim_bytes(state, now, first_new, 2 if self.store.repository_continuing else 1)
             return {"status": "projected", "cursor": state["next_sequence"] - 1}
         return self._transaction(apply, persist=True, **authority)
 
-    def query(self, key, *, after=0, limit=16, number=None, **authority):
+    def query(
+        self, key: str, *, after: int = 0, limit: int = 16, number: int | None = None,
+        **authority: Any,
+    ) -> dict[str, Any]:
         """Read a bounded current-state page without triggering provider acquisition."""
         if key not in self.identities or type(after) is not int or after < 0 or (
             type(limit) is not int or not 1 <= limit <= 16
         ) or number is not None and (type(number) is not int or number < 1):
             raise ValueError("invalid bounded repository query")
-        def query(state):
+        def query(state: dict[str, Any]) -> dict[str, Any]:
             from .repository_subscriptions import _page
             return _page(state, self.identities[key], after, limit, number, int(self.store.clock()))
         return self._transaction(query, **authority)

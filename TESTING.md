@@ -7128,13 +7128,20 @@ on unconfigured paths. These actor-free models do not qualify real filesystem,
 registration, pairing or lifecycle effects; the opt-in native reader portfolio
 retains those separate boundaries.
 
-Six actor-free `test_vault_cache_targets.py` controls admit the original Vault
+Seven actor-free `test_vault_cache_targets.py` controls admit the original Vault
 allowlist validator, declaring-directory path projection, root/group distinction
 and fail-closed manifest collection, raw-row accounting, deadline and cancellation
-using memory-only streams. They perform no
+using memory-only streams, plus strict maintenance-owner projection. They perform no
 native cache/protection, backend, service or process work. The selected Vault
 plugin packet separately exercises real files, CLI wiring and bounded warming;
 real Windows DPAPI and installed-client/service qualification remain distinct.
+
+Four additional `test_vault_transport_order.py` controls enter the original
+CLI wrapper, transport component and extension-owner method with logical
+dependencies. Lost or declined replies cannot re-enter selection, misleading
+transport labels cannot replace the captured callable, and maintenance omits
+only an unselected default database rather than rewriting explicit null.
+These controls perform no native I/O, entry-point discovery or process work.
 
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
@@ -7502,6 +7509,23 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The create-only attachment controls in `test_vault_attachment_import.py` execute
+the actual import-owner, CLI-dispatch and backend bodies with inert storage,
+lock, transport and temporary-file owners. Collision, failed/unknown creation,
+partial attachment outcomes, old-service refusal and unchanged legacy force
+behavior remain distinct; no database, key, service or process is created.
+The same packet composes the actual sender and extension registry to verify
+health-selected single-attempt mutation routing: lost replies and exceptions
+never reach another transport, unsafe legacy callbacks receive no private
+payload, owner changes/rollback cannot hide unknown outcomes, and selected
+native/extension connectors survive rebinding without reuse or rediscovery.
+Service dispatch separately refuses missing/mismatched incarnation bindings
+before backend access.
+Command-to-sender controls also refuse Windows-source/changed selection before
+private payloads and reject database/group/vault overrides at the bound sender.
+The plugin's separate `test_attachment_import_files.py` source packet exercises
+POSIX ordinary-file custody using synthetic non-key bytes. Neither packet
+qualifies a live credential owner, native key pair or privileged materializer.
 Seven Vault read/transport units execute the actual `read_credential` and
 `send_command` bodies with substituted context, discovery, extension and native
 owners. Preferred extensions retain authority even with invalid endpoint state;
