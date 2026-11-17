@@ -1195,6 +1195,11 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
     if getattr(request, "param", None) == "long-asset":
         member = "/".join(["fixture_assets", *["nested-resources" * 2] * 5, "operational.txt"])
         files[member] = b"retained operational asset\n"
+    if getattr(request, "param", None) == "wheel-data":
+        for scheme in ("data", "purelib", "platlib"):
+            files[f"{wheel_prefix}.data/{scheme}/share/fixture-app/{scheme}.txt"] = (
+                f"retained {scheme} asset\n".encode()
+            )
     if getattr(request, "param", None) == "selector-lock":
         files["fixture_app.py"] = files["fixture_app.py"].replace(
             b"def cli():\n",
@@ -1502,6 +1507,91 @@ def test_regular_install_runs_setup_publishes_then_starts(application: tuple[Pat
     assert json.loads(followup.stdout)["args"] == ["--fail", "", "\u03b1", "100% ready!"]
     alias = invoke(globals_root / ("fixture-alias" + extension), ["--fail"], caller, environment)
     assert alias.returncode == 17, alias.stderr
+
+
+@pytest.mark.parametrize("application", ["wheel-data"], indirect=True)
+def test_generated_install_verifies_relocated_wheel_data(
+    application: tuple[Path, Path, Path, dict[str, str]],
+) -> None:
+    root, slot, caller, environment = application
+    result = invoke(slot / ("install.ps1" if os.name == "nt" else "install.sh"),
+                    [], caller, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["state"] == "installed"
+    assert (root / "current-version").read_text().strip() == slot.name
+    assert (slot / "install-success.json").is_file()
+    receipt = json.loads((slot / ".runtime-input-origins.json").read_text())
+    wheels = engine.WheelReuseInputs(
+        slot.name, json.dumps(receipt["wheel_inputs"], sort_keys=True, separators=(",", ":")),
+        time.monotonic() + 60,
+    )
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def run(arguments: list[str]) -> None:
+        subprocess.run(
+            arguments, cwd=caller, env=environment, capture_output=True, text=True,
+            timeout=30, check=True,
+            creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
+        )
+
+    def verify() -> None:
+        engine.verify_installed_inputs(
+            slot, python, "fixture_app", origins=receipt["packages"], extras=(),
+            local_packages=tuple(receipt["local_packages"]), excluded_packages=[],
+            wheel_inputs=wheels, require_frozen_origin=False, run=run,
+        )
+
+    verify()
+    for scheme in ("data", "purelib", "platlib"):
+        asset = next((slot / ".venv").rglob(f"{scheme}.txt"))
+        contents = asset.read_bytes()
+        assert contents == f"retained {scheme} asset\n".encode()
+        asset.write_bytes(b"X" + contents[1:])
+        with pytest.raises(engine.DependencyPolicyError, match="input evidence differs"):
+            verify()
+        asset.write_bytes(contents)
+        retained = asset.with_suffix(".missing")
+        asset.rename(retained)
+        with pytest.raises(engine.DependencyPolicyError, match="input evidence differs"):
+            verify()
+        retained.rename(asset)
+    verify()
+
+
+@pytest.mark.parametrize("application", ["wheel-data"], indirect=True)
+@pytest.mark.parametrize("damage", [
+    "tamper", "missing",
+    pytest.param("escape", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX symlink control")),
+])
+def test_relocated_wheel_data_damage_blocks_completion(
+    application: tuple[Path, Path, Path, dict[str, str]], damage: str,
+) -> None:
+    root, slot, caller, environment = application
+    entry = slot / ("install.ps1" if os.name == "nt" else "install.sh")
+    staged = invoke(entry, ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    asset = slot / ".venv/share/fixture-app/data.txt"
+    if damage == "tamper":
+        contents = asset.read_bytes()
+        asset.write_bytes(b"X" + contents[1:])
+    else:
+        outside = caller / "outside.txt"
+        asset.rename(outside)
+        if damage == "escape":
+            asset.symlink_to(outside)
+    result = invoke(entry, [], caller, environment)
+    assert result.returncode != 0, result.stdout + result.stderr
+    expected = {
+        "tamper": "installed content differs from its wheel",
+        "missing": "FileNotFoundError",
+        "escape": "installed member differs from its wheel",
+    }
+    assert expected[damage] in result.stderr
+    assert not (root / "current-version").exists()
+    assert not (root / "setup.json").exists()
+    assert not (root / "started.json").exists()
+    assert not (slot / "install-success.json").exists()
+    assert not (slot / engine.runtime.COMPLETE_MARKER).exists()
 
 
 @pytest.mark.parametrize("application", ["selector-lock"], indirect=True)
