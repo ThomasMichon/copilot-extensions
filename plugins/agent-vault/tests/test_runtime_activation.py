@@ -43,13 +43,7 @@ else:
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("package", [False, True])
-@pytest.mark.parametrize("command", ["installer-readiness", "--help"])
-def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, package: bool, command: str) -> None:
-    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
-    project = tmp_path / "selected repository"
-    project.mkdir()
-    (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
+def _prepare_qualified_runtime(runtime: Path, payload: Path) -> None:
     prepare_runtime(runtime, payload)
     for directory in (
         payload,
@@ -57,6 +51,16 @@ def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, pa
     ):
         directory.mkdir(parents=True, exist_ok=True)
         shutil.copy2(PLUGIN / "readiness-isolation.json", directory / "readiness-isolation.json")
+
+
+@pytest.mark.parametrize("package", [False, True])
+@pytest.mark.parametrize("command", ["installer-readiness", "--help"])
+def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, package: bool, command: str) -> None:
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    project = tmp_path / "selected repository"
+    project.mkdir()
+    (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
+    _prepare_qualified_runtime(runtime, payload)
     marker = tmp_path / "shadow-executed"
     target = project / "agent_vault.py"
     if package:
@@ -163,7 +167,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, en
     (project / "native.json").write_text(
         json.dumps({"enabled": False}), encoding="utf-8",
     )
-    prepare_runtime(runtime, payload)
+    _prepare_qualified_runtime(runtime, payload)
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
         "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
@@ -377,7 +381,10 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     assert built.returncode == 0, built.stdout + built.stderr
     (runtime / "payload-dir").write_text(str(payload), encoding="utf-8")
     if prepared:
-        prepare_runtime(runtime, payload)
+        if operation == "contract":
+            _prepare_qualified_runtime(runtime, payload)
+        else:
+            prepare_runtime(runtime, payload)
         (project / ".agent-vault.json").write_text(
             '{"enabled": true, "group": "selected"}', encoding="utf-8",
         )

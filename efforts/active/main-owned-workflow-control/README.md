@@ -104,22 +104,31 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** drive #12013's qualified source through its remaining CI, review and
-native acceptance gates. Ubuntu run `44028815333` at `7ab79f8cfb` passes all
+**Now:** requalify #12013 after reconciliation onto exact Dev `376675dea4`,
+then drive its remaining CI, review and native acceptance gates. Ubuntu run
+`44028815333` at the prior checkpoint `7ab79f8cfb` passes all
 638 controlled cases in both write and independent no-write modes, then all
 122 historical-publication controls under the original limits. Its 218
 exported outputs are independently receipt-verified, canonically materialized
 and validated against both contracts and all 1,141 fixtures. This qualifies
-the current source, not native Copilot or installed Manager behavior.
+that checkpoint, not later changed inputs, native Copilot or installed Manager
+behavior.
 
-The owned branch is reconciled onto exact Dev `59077d83c9`. All 56
-contract-checker controls and all 173 selected physical Python files in 25
-owners pass their declared targets. The optional publication-proof lane is
-Ubuntu; local Windows diagnostics retain their original-limit failures and
-supply no native or installed acceptance.
+The rebase preserves Dev's active current packet cohort and both owned capture
+histories rather than splicing observations. Twelve prior execution inputs
+genuinely change; every original probe remains selected at 229 functions and
+638 cases. The canonical checker identifies the still-required fresh
+`_peer_launch.py` evidence. All 172 currently selected physical Python files
+in 24 owners pass their declared targets; the former compact-core hunk is now
+byte-identical to Dev, not excluded. The complete 5,219-node, 339-target,
+817-input unit manifest preserves both prior inventories and its original
+budget. A positive Vault fixture is corrected without qualifying older
+runtimes: 16 focused controls, 69 configuration controls and seven related
+reader controls pass under unchanged limits.
 
-Current `7ab79f8cfb` provider checks, including Windows publication and both
-Borrowed Budget platforms, succeed. The prior `00831b44a4` Windows cleanup
+The prior `7ab79f8cfb` provider checks, including Windows publication and both
+Borrowed Budget platforms, succeed; they are not current-head gates for the
+reconciled source. The earlier `00831b44a4` Windows cleanup
 failure and its exact finished/reused-instance hold remain reported on #6237;
 a later green job is not record deletion, custody release or relabelling of
 that failure. The retained Index cleanup hold, native POSIX proof, current-head

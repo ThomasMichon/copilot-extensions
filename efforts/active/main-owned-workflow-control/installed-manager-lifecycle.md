@@ -3785,3 +3785,58 @@ The prior failed capture, Windows diagnostics and exact finished/reused-instance
 holds remain failed or held. Their source and resource owners are not released.
 Publication of these generated outputs must still clear its own current-head
 checks and review; no merge or larger lifecycle acceptance is claimed here.
+
+### November 17: preserve qualified history across the next Dev conflict
+
+The verified outputs are committed and published at
+`c51a07694c9a1d1a295fb8e9ec916d13a803b562`. GitHub then confirms a conflict
+with newer Dev. The entire qualified snapshot and downloaded artifact are
+preserved before reconciling all owned commits onto exact Dev
+`376675dea478a51c508d085938ab442f3726a4ce`.
+
+The Vault import conflict retains the new cache-maintenance field alongside
+the strict source annotations. Unit-manifest conflicts retain every upstream
+and owned node, target and source. Generated HTTP-52 conflicts retain Dev's
+complete active current-generation cohort, not a mixture of observation
+packets. Canonical registry planning appends both owned 217-record provenance
+increments without changing an immutable prefix, historical fixture or policy
+field. The compact-core declaration is hashed from the actual reconciled
+ordinary source. Earlier capture success remains attached to its original
+checkpoint, not relabelled as proof of this new tree.
+
+Canonical source comparison finds 12 changed prior execution inputs and none
+absent. Probe preservation remains exactly 229 functions and 638 cases.
+Declaration preparation produces no changed index. The current checker still
+requires fresh `_peer_launch.py` semantic evidence, as expected after keeping
+the upstream active cohort. This is an open qualification gate, not a passing
+corpus result or permission to waive changed inputs.
+
+Whole-file strict checking passes 172 physical files in 24 owners on every
+declared target, including both Worktrees programs. The one-file/owner
+difference is the compact bundle's already-upstream, byte-identical fix, not
+an exclusion. Manifest admission and exact hashes pass for 5,219 nodes,
+339 coverage targets and 817 sources, with no dropped member relative to
+either fresh Dev or the prior qualified snapshot and the original 300-second
+budget. No full actor-free unit packet is replayed.
+
+A combined local Vault selection fails its unchanged 180-second aggregate
+after reporting activation failures; it is retained as failed. A bounded
+read-only diagnostic identifies a synthetic prepared-runtime fixture whose
+metadata query lacks the new isolation declaration. Returning unknown before
+that query is correct. Only current-shape positive metadata fixtures receive
+the ordinary declaration; the common older-runtime builder, missing-declaration
+negatives and ordinary-command fixtures remain unqualified and unchanged.
+The focused 16-case packet passes in 130.40 seconds, 162.44 including preparation
+and cleanup. Separate configuration and related reader selections pass all
+69 and seven cases respectively. All retain their 30-second item and
+180-second packet limits. They are source fixture controls, not authentic
+baseline admission or a pass of the incomplete full activation selection.
+
+The affected Vault owner is checked again after that fixture-only correction:
+all 11 selected files pass both declared platforms. Ruff, the 13-plugin
+installation contract and final unit source hashes pass. The documentation
+impact remains this effort's current evidence and the existing testing
+reference; production commands, qualification floors, profiles, deadlines,
+rollout and release authority are unchanged. Fresh source capture, current CI,
+native Bash and installed Manager acceptance, review and retained custody
+remain open.
