@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+
 - [2026-11-17 - Complete attention receiving and seven retained contracts](journal/2026/11.17-attention-receiving-and-seven-contracts.md)
 
 - [2026-11-17 - Hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)

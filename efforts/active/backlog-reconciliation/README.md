@@ -3421,6 +3421,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+  record reviewed complete #4681 receiving and separate redundant-tracking
+  retirement, reconcile the omitted-five receipt, and propose whole #4756
+  and #4959 domain contracts without technical completion or new custody.
   The [hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)
   record reviewed complete #4229 receiving, its separate redundant-tracking
   retirement, ten retained outcomes and prospective #4477 cause reconciliation.
@@ -4634,6 +4638,12 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [whole fork/composition receiving proposal](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+preserves every existing domain/campaign check state, actual original
+consent/publish and RC1..4/RCV1..3 obligation, completed source reservation
+and independent owner. Reviewed delivery, full current ROOT/source/custody
+readback and separate source-specific judgment remain distinct gates.
 
 The [cold-bootstrap completion audit](journal/2026/11.16-cold-bootstrap-source-completion.md#12824---completed-narrow-recovery-bootstrap-correction)
 retains the complete original-to-delivery crosswalk, qualified description

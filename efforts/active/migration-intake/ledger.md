@@ -479,3 +479,34 @@ with their existing owners. No new ACK, implementation claimant, AHP or
 all-parent prerequisite, session operation or live wait is introduced.
 The seven direct technical rows remain unchecked. Ledger publication is
 neither domain acceptance, tracker retirement nor wait-channel completion.
+
+## Complete attention-wait reviewed receipt (2026-11-17 UTC)
+
+#13136 merged the complete direct delegation-domain amendment after
+current-head Copilot approval and required CI. Complete current ROOT and
+source/custody readback confirms all three Plan, three local Validation and
+one actual global Validation clauses. The proposed route is now accepted
+through the existing contract; this receipt appends without rewriting it.
+
+The separate audited judgment retired #4681 `NOT_PLANNED` as redundant
+tracking. Its original and earlier discussion remain unchanged. The seven
+technical rows remain unchecked, and all 92 incumbent checkbox lines,
+completed Phase 1B/archived Done credit and actual terminal/live-registry/
+compatibility/source/resource owners remain. No wait-channel repair,
+session operation, live subscription or service/native/rollout effect.
+
+## Whole fork-consent and recipe-composition preservation intake (2026-11-17 UTC)
+
+These are proposed routes, effective only after normal reviewed direct
+domain Plan acceptance. Earlier whole-OPEN/history rows remain retained.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Whole private durable fork target/account/remote consent and reuse, prior-existence/reauthorization before POST, automatic exact remote repair and persistence failure | Public #4756 original and both complete eligible discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [account-aware-operations](../account-aware-operations/README.md), separate FC4756-P1..3/LV1..3/global G | Keep #4756 until reviewed WHOLE receiving, current entire ROOT/source/custody readback and separate judgment; Draft, temporary token, #5791 separation and #5904/#1043 independence remain |
+| Whole RC1..4/RCV1..3 recursive/direct typed-engine composition, every defining-hop path field and single-producer taxonomy/reference authority | Public #4959 expanded original, inherited #5174/#5732/#4691 and all three eligible discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-dispatch-recipe-composability](../agent-dispatch-recipe-composability/README.md), existing P4959/V4959 plus T4959-P1/P2/local Validation and WHOLE4959-G | Keep #4959 until reviewed complete union, current entire ROOT/source/custody readback and separate judgment; #8300 completed claim and actual registrar/base/provider/resource owners remain |
+
+Neither route appoints an executor or runs credentials, fork/provider/script,
+queue/task/lease/native operations. All twelve new technical rows remain
+unchecked. The old taxonomy scope exclusion is prospectively reconciled to
+the already-incorporated whole source, not a reversal of historical credit.
+Ledger publication alone is neither domain acceptance nor source retirement.
