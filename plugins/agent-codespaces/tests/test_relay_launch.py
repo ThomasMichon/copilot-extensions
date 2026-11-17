@@ -406,6 +406,22 @@ def test_refresh_shim_later_launch_keeps_earlier_wrappers(tmp_path: Path) -> Non
 
 
 @pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_nested_launch_reaches_real_tool(tmp_path: Path) -> None:
+    home, real_bin = _helper_and_bin(tmp_path, "echo fresh\n")
+    _tool(real_bin / "rush", 'echo "rush=$FEED_TOKEN"\n')
+    shim = build_feed_token_refresh_shim(["FEED_TOKEN"])
+    # The nested launch inherits the earlier wrapper directory on PATH.
+    script = "export FEED_TOKEN=a; " + shim + "(" + shim + "timeout 20 rush)"
+    env = {
+        "HOME": str(home),
+        "PATH": f"{real_bin}:/usr/bin:/bin",
+        FEED_TOKEN_REFRESH_INTERVAL_ENV: "0",
+    }
+    out = _run_bash(script, env).stdout.splitlines()
+    assert out == ["rush=fresh"]
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
 def test_refresh_shim_skips_mint_without_timeout(tmp_path: Path) -> None:
     counter = tmp_path / "count"
     home, real_bin = _helper_and_bin(

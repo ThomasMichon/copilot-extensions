@@ -272,10 +272,11 @@ _FEED_TOKEN_RESERVED_PREFIXES = ("__acs_fte_", "AGENT_CODESPACES_FEED_TOKEN_")
 # the last successful mint in this process tree is older than the refresh
 # interval, it re-mints the bearer under a hard deadline (keeping the previous
 # value on failure, or when no deadline can be enforced), then execs the next
-# same-named binary on PATH, skipping its own directory.
+# same-named binary on PATH, skipping every launch's wrapper directory.
 _FEED_TOKEN_REFRESH_SCRIPT = (
     """#!/usr/bin/env bash
 __acs_fte_self="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)"
+__acs_fte_root="${__acs_fte_self%/*}"
 __acs_fte_name="$(basename "$0")"
 if [ -n "${@VARS@:-}" ]; then
   __acs_fte_now="$(date +%s 2>/dev/null)"
@@ -313,7 +314,14 @@ while [ -n "$__acs_fte_rest" ]; do
   __acs_fte_dir="${__acs_fte_rest%%:*}"
   __acs_fte_rest="${__acs_fte_rest#*:}"
   [ -n "$__acs_fte_dir" ] || __acs_fte_dir=.
-  [ "$(cd "$__acs_fte_dir" 2>/dev/null && pwd -P)" = "$__acs_fte_self" ] && continue
+  __acs_fte_phys="$(cd "$__acs_fte_dir" 2>/dev/null && pwd -P)"
+  # Skip every launch's wrapper directory (and the legacy shared one), so an
+  # inherited earlier wrapper never dispatches back into this one.
+  if [ -n "$__acs_fte_root" ]; then
+    [ "$__acs_fte_phys" = "$__acs_fte_root" ] && continue
+    [ "${__acs_fte_phys%/*}" = "$__acs_fte_root" ] && continue
+  fi
+  [ "$__acs_fte_phys" = "$__acs_fte_self" ] && continue
   if [ -x "$__acs_fte_dir/$__acs_fte_name" ] && [ ! -d "$__acs_fte_dir/$__acs_fte_name" ]; then
     __acs_fte_real="$__acs_fte_dir/$__acs_fte_name"
     break
