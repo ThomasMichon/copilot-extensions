@@ -237,7 +237,14 @@ def _posix_bash() -> str | None:
     return shutil.which("bash")
 
 
-@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+# Re-minting needs a deadline, so the wrapper skips it without `timeout`.
+_needs_mint = pytest.mark.skipif(
+    _posix_bash() is None or shutil.which("timeout") is None,
+    reason="needs a POSIX bash with timeout",
+)
+
+
+@_needs_mint
 def test_refresh_shim_remints_token_per_invocation(tmp_path: Path) -> None:
     home = tmp_path / "home"
     helper = home / ".local" / "bin" / "ado-auth-helper"
@@ -327,7 +334,7 @@ def _run_bash(script: str, env: dict[str, str], cwd: Path | None = None) -> Any:
     )
 
 
-@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+@_needs_mint
 def test_refresh_shim_skips_nested_remint_within_interval(tmp_path: Path) -> None:
     counter = tmp_path / "count"
     home, real_bin = _helper_and_bin(
@@ -348,10 +355,8 @@ def test_refresh_shim_skips_nested_remint_within_interval(tmp_path: Path) -> Non
     assert counter.read_text().strip() == "1"
 
 
-@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+@_needs_mint
 def test_refresh_shim_bounds_a_stalled_mint(tmp_path: Path) -> None:
-    if shutil.which("timeout") is None:
-        pytest.skip("needs coreutils timeout")
     home, real_bin = _helper_and_bin(tmp_path, "sleep 30\necho late\n")
     _tool(real_bin / "npm", 'echo "token=$FEED_TOKEN"\n')
     script = (
@@ -385,7 +390,7 @@ def test_refresh_shim_wraps_only_tools_present_at_launch(tmp_path: Path) -> None
     assert out[1] == "pnpm missing"
 
 
-@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+@_needs_mint
 def test_refresh_shim_later_launch_keeps_earlier_wrappers(tmp_path: Path) -> None:
     home, real_bin = _helper_and_bin(tmp_path, "echo fresh\n")
     _tool(real_bin / "rush", 'echo "rush=$FEED_TOKEN"\n')
@@ -405,13 +410,13 @@ def test_refresh_shim_later_launch_keeps_earlier_wrappers(tmp_path: Path) -> Non
     assert out == ["none", "rush=fresh"]
 
 
-@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+@_needs_mint
 def test_refresh_shim_nested_launch_reaches_real_tool(tmp_path: Path) -> None:
     home, real_bin = _helper_and_bin(tmp_path, "echo fresh\n")
     _tool(real_bin / "rush", 'echo "rush=$FEED_TOKEN"\n')
     shim = build_feed_token_refresh_shim(["FEED_TOKEN"])
     # The nested launch inherits the earlier wrapper directory on PATH.
-    script = "export FEED_TOKEN=a; " + shim + "(" + shim + "timeout 20 rush)"
+    script = "export FEED_TOKEN=a; " + shim + "(" + shim + "rush)"
     env = {
         "HOME": str(home),
         "PATH": f"{real_bin}:/usr/bin:/bin",
@@ -445,7 +450,7 @@ def test_refresh_shim_skips_mint_without_timeout(tmp_path: Path) -> None:
     assert not counter.exists()
 
 
-@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+@_needs_mint
 def test_refresh_shim_walks_path_literally(tmp_path: Path) -> None:
     home, _ = _helper_and_bin(tmp_path, "echo fresh\n")
     bracket = tmp_path / "tools[1]"
