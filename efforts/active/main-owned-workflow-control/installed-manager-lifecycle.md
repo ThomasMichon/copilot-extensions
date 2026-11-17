@@ -3757,3 +3757,31 @@ is not exercised for this source-evidence-only tooling change; no installer
 behavior changes. Live Ubuntu proof must still run against the newly published
 source through the existing owner. The Windows cleanup and all broader
 qualification, review, release and custody gates remain unresolved.
+
+### November 17: current-source capture and historical guards qualified
+
+The sole changed-input Ubuntu run `44028815333`, attempt one, succeeds at
+published source `7ab79f8cfb7f53a5436729f915dc05dd2512b251`. Both write and
+independent no-write passes execute all 638 controlled cases. The original
+240-second aggregate, interpreter roles, isolation and complete probe inventory
+are unchanged. The five historical-publication cohorts then report 6, 38, 26,
+26 and 26 passing controls, with no changed item/group/plugin limit or omitted
+case. Canonical validation reports two contracts and 1,141 fixtures.
+
+Qualified artifact `14304992455` exports exactly 218 outputs. Its manifest
+receipt, `688ddaf7b24c823a79841da51f709b9f9ce0b33ab60d35412aa2349b68efccc7`,
+is independently hashed after download. The source pin, generation 52,
+638-case count and complete output inventory match before canonical
+materialization. Native publication validates its exact preimages, immutable
+chunks and complete output plan. The independently invoked canonical checker
+then passes both contracts and all 1,141 fixtures locally. No source changes,
+duplicate capture or cancellation occur during the frozen run.
+
+Current-source provider checks at that same head succeed: Linux, Windows
+publication, Borrowed Budget Linux/macOS, trusted metadata and source
+attribution. These are their named contracts, not actual installed Manager,
+native Copilot or the still-unaccepted Bash readiness-prefix selection.
+The prior failed capture, Windows diagnostics and exact finished/reused-instance
+holds remain failed or held. Their source and resource owners are not released.
+Publication of these generated outputs must still clear its own current-head
+checks and review; no merge or larger lifecycle acceptance is claimed here.
