@@ -385,6 +385,16 @@ async def test_completed_metadata_recovery_admits_its_journaled_handoff_successo
     assert successor.acp_session_id == "native-successor"
     assert successor.target.venue[creation.JOURNAL_KEY] == request.journal_key
     seed.assert_awaited_once()
+    assert manager.get_session(successor.acp_session_id) is successor
+    assert manager.get_session(request.native_session_id) is None
+    resync = AsyncMock(return_value=0)
+    monkeypatch.setattr(manager, "_resync_session_admitted", resync)
+    assert await manager.resync_session(successor.acp_session_id) == 0
+    assert resync.await_args is not None
+    assert resync.await_args.args == (successor.session_id,)
+    with pytest.raises(ValueError, match="predecessor event stream"):
+        await manager.resync_session(adopted.session_id)
+    resync.assert_awaited_once()
     row = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
     assert json.loads(row[metadata.COLUMN]) == boundary
     handoff = json.loads(row["creation_handoffs_json"])[adopted.session_id]

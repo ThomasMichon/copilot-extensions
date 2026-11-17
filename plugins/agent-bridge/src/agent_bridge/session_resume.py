@@ -834,7 +834,7 @@ class _SessionResumeMixin:
             raise KeyError(f"Session {session_id} not found")
         from .retained_metadata_lineage import EPOCH_KEY
 
-        if (session.target.venue or {}).get(EPOCH_KEY):
+        if (session.target.venue or {}).get(EPOCH_KEY) == session.session_id:
             raise ValueError("Adopted metadata cannot reconstruct its missing predecessor event stream")
         from .acquisition_launch_owner import require_unassociated_session
         from .hosting_policy import require_session_hosting

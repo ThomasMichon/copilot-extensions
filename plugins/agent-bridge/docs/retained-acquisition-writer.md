@@ -368,6 +368,9 @@ journaled successor without allowing an unrelated import or reusing an excluded
 control ID. The epoch marker remains internal ownership metadata during
 provider classification and refresh; genuine provider targets still require
 their original override provenance.
+Only the adopted control's own marker denotes missing history. A handoff
+successor's fresh native conversation retains normal native-ID resolution and
+transcript resync, even when its target carries the predecessor's lineage marker.
 This preparation does not prove a new turn, native acceptance, original-task
 attachment or installed-provider qualification.
 

@@ -970,7 +970,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         matches = [
             sid for sid, session in self._sessions.items()
             if session.acp_session_id == ref
-            and not (session.target.venue or {}).get("_agent_bridge_metadata_epoch")
+            and (session.target.venue or {}).get("_agent_bridge_metadata_epoch") != session.session_id
         ]
         if len(matches) > 1 and any(
             self._sessions[sid].target.type == "remote-acp" for sid in matches
