@@ -81,11 +81,21 @@ Success in this mode proves runtime preparation, not serving or whole-update rea
 
 Omitting the flag preserves normal startup and disabled-task/configuration holds.
 The adjacent `scripts/installer-contract.json` declares
-`agent-codespaces.native-installer` version 1 and capability `runtime-only-v1`,
-including actions, entrypoint, required wheel inputs and incompatible options.
+`agent-codespaces.native-installer` version 2 and capability `runtime-only-v1`,
+including actions, entrypoint, required wheel inputs, incompatible options and
+`source_qualified_payloads: false`.
 Before stopping the Owner, callers must inspect that descriptor from the exact
 incoming installer payload they will execute, not a newer payload or a package
-version. A missing descriptor, unknown contract version or missing capability
+version. This closed-wheel mode requires the selected payload to have no
+`runtime-source.json` entry. Source-qualified payloads require their
+installation-source association, which these four wheel inputs do not supply;
+refuse them before stopping the Owner. Do not remove or ignore source metadata
+to make a payload appear supported.
+
+Version 2 makes this payload-form restriction mandatory. Version 1 cannot
+establish that admission, and older readers must reject the unknown version
+rather than trial an invocation. A missing descriptor, unknown contract version
+or missing capability
 does not establish the required hold: refuse runtime-only work before lifecycle
 effects and obtain a capable released provider. Legacy ordinary invocations
 without the flag retain their existing behavior; they are not a fallback for

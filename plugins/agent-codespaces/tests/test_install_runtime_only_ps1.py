@@ -231,8 +231,9 @@ def test_declared_runtime_only_capability_reaches_the_native_parser(
     descriptor = json.loads(
         (installer.PLUGIN / "scripts" / "installer-contract.json").read_text(encoding="utf-8"),
     )
-    assert descriptor["schema"] == "agent-codespaces.native-installer" and descriptor["version"] == 1
+    assert descriptor["schema"] == "agent-codespaces.native-installer" and descriptor["version"] == 2
     capability = descriptor["capabilities"]["runtime-only-v1"]
+    assert capability["source_qualified_payloads"] is False
     assert action in capability["actions"]
     entry = str(_admission_entry(tmp_path, "[bool]$NoService | ConvertTo-Json")).replace("'", "''")
     options = " ".join(f"{name} fixture" for name in capability["required_options"])

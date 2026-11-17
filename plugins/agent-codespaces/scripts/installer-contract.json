@@ -1,6 +1,6 @@
 {
   "schema": "agent-codespaces.native-installer",
-  "version": 1,
+  "version": 2,
   "capabilities": {
     "runtime-only-v1": {
       "actions": ["install", "update"],
@@ -13,6 +13,7 @@
         "-WheelPython",
         "-WheelUv"
       ],
+      "source_qualified_payloads": false,
       "incompatible_options": ["-DryRun"],
       "unsupported_provider": "refuse-runtime-only-before-effects"
     }
