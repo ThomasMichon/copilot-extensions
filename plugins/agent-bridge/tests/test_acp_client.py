@@ -3,19 +3,72 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from importlib.metadata import version
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from acp.schema import ContentToolCallContent, TextContentBlock, ToolCallProgress, ToolCallStart
+from packaging.version import Version
+from pydantic import ValidationError
 
 from agent_bridge.acp_client import AcpClient, resolve_acp_model_config
+from agent_bridge.native_turn_transport import NativeTurnAttempt
 
 
 def _client_with_recorder() -> tuple[AcpClient, list[tuple[str, dict]]]:
     events: list[tuple[str, dict]] = []
     client = AcpClient(on_event=lambda t, d: events.append((t, d)))
     return client, events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("lost", [False, True])
+async def test_sdk_compatibility_prompt_wire_and_outcome(native: bool, lost: bool) -> None:
+    client, _ = _client_with_recorder()
+    text = "Original prompt \u03bb\nsecond line"
+    result = SimpleNamespace(stop_reason="end_turn")
+    prompt = AsyncMock(return_value=result)
+    if lost:
+        prompt.side_effect = ConnectionResetError("synthetic transport loss")
+    client._connection = SimpleNamespace(prompt=prompt)
+    client._acp_session_id = "sdk-compat"
+    attempt = None
+    owner = SimpleNamespace(
+        client=client, connection=client._connection, require_current=MagicMock(),
+        consumer=SimpleNamespace(native_session_id="sdk-compat"),
+        installation=object(), admission=object(),
+        db=SimpleNamespace(
+            prepare_native_turn_handoff=MagicMock(return_value={"id": "handoff"}),
+            begin_native_turn_handoff=MagicMock(return_value=True),
+            record_native_turn_handoff=MagicMock(),
+        ),
+    )
+    if native:
+        attempt = NativeTurnAttempt(owner, 0, text)
+    if lost:
+        with pytest.raises(ConnectionResetError, match="synthetic transport loss"):
+            await client._prompt_or_transport_lost(text, native_attempt=attempt)
+    else:
+        assert await client._prompt_or_transport_lost(text, native_attempt=attempt) is result
+    prompt.assert_awaited_once()
+    assert prompt.await_args.kwargs["session_id"] == "sdk-compat"
+    blocks = prompt.await_args.kwargs["prompt"]
+    assert len(blocks) == 1 and isinstance(blocks[0], TextContentBlock)
+    assert blocks[0].model_dump(mode="json", by_alias=True, exclude_none=True) == {
+        "type": "text", "text": text,
+    }
+    if native:
+        owner.db.begin_native_turn_handoff.assert_called_once()
+        owner.db.record_native_turn_handoff.assert_called_once()
+        assert owner.db.record_native_turn_handoff.call_args.kwargs["outcome"] == (
+            "unknown" if lost else "native_accepted"
+        )
+    else:
+        owner.db.prepare_native_turn_handoff.assert_not_called()
 
 
 def test_tool_call_start_emits_raw_input() -> None:
@@ -564,6 +617,41 @@ def _form_session_mode(tool_call_id: str, schema: dict):
         tool_call_id=tool_call_id,
         requested_schema=ElicitationSchema.model_validate(schema),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("content", "invalid"), [
+    ({"text": "1", "integer": 1, "number": 1.5, "boolean": False, "choices": ["1", "two"]}, False),
+    ({"answer": {"nested": "value"}}, True),
+    ({"answer": None}, True),
+    ({"answer": [1, 2]}, True),
+])
+async def test_sdk_compatibility_elicitation_value_boundary(
+    content: dict[str, Any], invalid: bool,
+) -> None:
+    client, _ = _client_with_recorder()
+    client._acp_session_id = "acp-1"
+    mode = _form_session_mode("tc-compat", {"type": "object", "properties": {}})
+    task = asyncio.create_task(client._handle_elicitation("Synthetic question", mode))
+    try:
+        await asyncio.sleep(0)
+        assert not task.done() and client.has_pending_elicitation("tc-compat")
+        restricted = Version(version("agent-client-protocol")) >= Version("1")
+        if restricted and invalid:
+            with pytest.raises(ValidationError):
+                client.resolve_elicitation("tc-compat", content)
+            assert not task.done() and client.has_pending_elicitation("tc-compat")
+            content = {"answer": "explicit replacement"}
+        assert client.resolve_elicitation("tc-compat", content)
+        result = await asyncio.wait_for(task, 1)
+        assert result.content == content
+        assert all(type(result.content[key]) is type(value) for key, value in content.items())
+        assert not client.has_pending_elicitation("tc-compat")
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 def test_ask_user_elicitation_emits_request_and_parks() -> None:
