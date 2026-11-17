@@ -8,6 +8,7 @@ constructor while both contexts remain open through installed health.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -15,24 +16,33 @@ from pathlib import Path
 import shutil
 import stat
 import time
+from types import ModuleType
+from typing import Any, TypedDict
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from artifact_source_build import PromotionArtifactError, validate_runtime_metadata
-from build_python_artifacts import build_wheel
+from build_python_artifacts import build_wheel as build_wheel
 from build_toolchain_lock import (
-    ToolchainLock, _query_marker_environment,
-    sanitize_subprocess_env, strip_package_source_env_vars,
+    ToolchainLock, _query_marker_environment as _query_marker_environment,
+    sanitize_subprocess_env,
 )
+from governed_feed_trust import strip_package_source_env_vars
 from runtime_profile import SCHEMA, ProfileError, RuntimeProfile, _wheel_filename, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import SourceLockCandidate
 from installer_source_wheel_cache import cached_source_wheel
-from installer_engine import _package_roots, _source_files, freeze_inputs, numbered_candidate, runtime
-from installer_dependency_policy import _private_retained_root, _select_uv_executable, _temporary_inputs, _toml
-from installer_wheel_inputs import WheelLimits, _check_deadline, _ordinary, inspect_archive
+from installer_engine import (
+    _package_roots as _package_roots, _source_files as _source_files,
+    ReadyCandidate, freeze_inputs, numbered_candidate as numbered_candidate,
+)
+import versioned_runtime as runtime
+from installer_dependency_policy import (
+    _private_retained_root, _select_uv_executable, _temporary_inputs, _toml as _toml,
+)
+from installer_wheel_inputs import WheelFacts, WheelLimits as WheelLimits, _check_deadline, _ordinary, inspect_archive
 from installer_wheel_snapshot import (
     WheelInstallInputs, _digest as snapshot_digest, _open, _unchanged, retain_wheel_inputs,
 )
@@ -45,11 +55,21 @@ class SourceProfileInputs:
     local_packages: tuple[str, ...]
 
 
-def _selected_projects(projects, root, extras, environment, deadline):
-    manifests = {canonicalize_name(_toml(path / "pyproject.toml")["project"]["name"]):
+class _BuildOptions(TypedDict, total=False):
+    offline: bool
+    procutil: ModuleType | None
+    construction_fd: int | None
+    retained_runtime: tuple[Path, str, Path] | None
+
+
+def _selected_projects(
+    projects: Sequence[Path], root: str, extras: Sequence[str],
+    environment: Mapping[str, str], deadline: float,
+) -> tuple[Path, ...]:
+    manifests: dict[str, tuple[Path, dict[str, Any]]] = {canonicalize_name(_toml(path / "pyproject.toml")["project"]["name"]):
                  (path, _toml(path / "pyproject.toml")["project"]) for path in projects}
     pending = [Requirement(root + ("[" + ",".join(extras) + "]" if extras else ""))]
-    selected = {}
+    selected: dict[str, set[str]] = {}
     while pending:
         _check_deadline(deadline)
         requirement = pending.pop()
@@ -61,7 +81,7 @@ def _selected_projects(projects, root, extras, environment, deadline):
             continue
         selected[name] = selected.get(name, set()) | requested
         _path, project = manifests[name]
-        optional = {canonicalize_name(key): value for key, value in
+        optional: dict[str, Any] = {canonicalize_name(key): value for key, value in
                     project.get("optional-dependencies", {}).items()}
         if not requested <= optional.keys():
             raise ProfileError("source dependency requests an undeclared extra")
@@ -91,7 +111,7 @@ def _digest(path: Path, limit: int, deadline: float) -> str:
     return digest
 
 
-def _build_environment_identity(opaque_identity) -> str:
+def _build_environment_identity(opaque_identity: Callable[[str], str]) -> str:
     environment = sanitize_subprocess_env()
     strip_package_source_env_vars(environment, strip_credentials=True)
     return opaque_identity(json.dumps(
@@ -99,7 +119,10 @@ def _build_environment_identity(opaque_identity) -> str:
     ))
 
 
-def _build_cache_binding(record, build_record, toolchain, uv, *, deadline, opaque_identity):
+def _build_cache_binding(
+    record: dict[str, Any], build_record: dict[str, Any], toolchain: ToolchainLock,
+    uv: str, *, deadline: float, opaque_identity: Callable[[str], str],
+) -> dict[str, Any]:
     """Only the admitted offline lane has exact backend archive identities."""
     tools = Path(__file__).parent
     files = [
@@ -126,7 +149,10 @@ def _build_cache_binding(record, build_record, toolchain, uv, *, deadline, opaqu
     }
 
 
-def _validate_local_metadata(facts, declaration, toolchain, *, admitted_build):
+def _validate_local_metadata(
+    facts: WheelFacts, declaration: dict[str, Any], toolchain: ToolchainLock, *,
+    admitted_build: bool,
+) -> None:
     generators = facts.wheel_metadata.get_all("Generator", [])
     if len(generators) != 1 or (not admitted_build and generators != [toolchain.generator]):
         raise ProfileError("built first-party wheel differs from its selected toolchain")
@@ -136,7 +162,10 @@ def _validate_local_metadata(facts, declaration, toolchain, *, admitted_build):
         raise ProfileError("built first-party wheel differs from retained source: " + str(error)) from error
 
 
-def _extras(wheels: dict[str, dict], roots: list[str], environment: dict, deadline: float) -> dict:
+def _extras(
+    wheels: dict[str, dict[str, Any]], roots: list[str],
+    environment: Mapping[str, str], deadline: float,
+) -> dict[str, set[str]]:
     wanted: dict[str, set[str]] = {}
     pending = [(Requirement(text), {""}) for text in roots]
     while pending:
@@ -167,11 +196,11 @@ def retain_source_profile(
     uv: str, toolchain: ToolchainLock, limits: WheelLimits,
     max_wheels: int, max_total_bytes: int, max_snapshot_bytes: int, deadline: float,
     build_profile: RuntimeProfile | None = None, offline: bool = False,
-    procutil=None, construction_fd: int | None = None,
+    procutil: ModuleType | None = None, construction_fd: int | None = None,
     retained_runtime: tuple[Path, str, Path] | None = None,
-    opaque_identity=None,
+    opaque_identity: Callable[[str], str] | None = None,
     first_party: dict[str, Path] | None = None,
-):
+) -> Iterator[SourceProfileInputs]:
     """Complete the source closure with associated wheels or an owned build.
 
     Third-party inputs must already be acquired under the candidate's retained
@@ -232,18 +261,38 @@ def retain_source_profile(
         if build_profile is not None or offline:
             raise ProfileError("associated first-party wheels cannot request backend construction")
     pins = {entry["name"]: entry for entry in record["pins"]}
+    selected_files = record.get("files")
+    if selected_files is not None:
+        if not isinstance(selected_files, list) or any(
+            not isinstance(entry, dict)
+            or entry.keys() != {"name", "version", "filename", "sha256"}
+            for entry in selected_files
+        ):
+            raise ProfileError("exact third-party files do not complete the source lock")
+        exact_files = {entry["name"]: entry for entry in selected_files}
+        if len(exact_files) != len(selected_files) or exact_files.keys() != pins.keys():
+            raise ProfileError("exact third-party files do not complete the source lock")
+    else:
+        exact_files = None
     if len(selected_projects) + len(pins) > max_wheels:
         raise ProfileError("source closure exceeds the wheel count budget")
     third_party = dict(third_party)
-    archives, expected, third_names = {}, {}, set()
+    archives: dict[str, Path] = {}
+    expected: dict[str, str] = {}
+    third_names: set[str] = set()
     for filename, path in third_party.items():
         _check_deadline(deadline)
         name, version, _, _ = _wheel_filename(filename, limits.max_tags, deadline)
         digest = _digest(path, limits.max_archive_bytes, deadline)
         pin = pins.get(name)
+        exact = exact_files.get(name) if exact_files is not None else None
         if (
             path.name != filename or name in third_names or pin is None
             or Version(pin["version"]) != version or digest not in pin["hashes"]
+            or (exact_files is not None and (
+                exact is None or exact["filename"] != filename or exact["sha256"] != digest
+                or Version(exact["version"]) != version
+            ))
         ):
             raise ProfileError("third-party wheel differs from the selected source lock")
         third_names.add(name)
@@ -260,12 +309,12 @@ def retain_source_profile(
         raise ProfileError("build-only closure differs from the retained source selection")
     if build_record is not None and not callable(opaque_identity):
         raise ProfileError("source wheel caching requires the installation owner's opaque identity provider")
-    cache_binding = (
-        _build_cache_binding(
+    cache_binding = None
+    if build_record is not None:
+        assert opaque_identity is not None
+        cache_binding = _build_cache_binding(
             record, build_record, toolchain, uv, deadline=deadline, opaque_identity=opaque_identity,
         )
-        if build_record is not None else None
-    )
     with _temporary_inputs(None) as temporary:
         workspace = _private_retained_root(Path(temporary)).resolve(strict=True)
         output = workspace / "built"
@@ -281,7 +330,7 @@ def retain_source_profile(
             if frozen is not None else ()
         )
 
-        def verify_compact_source():
+        def verify_compact_source() -> None:
             if frozen is not None:
                 files = _source_files(frozen.packages)
                 modes = tuple((path, stat.S_IMODE(path.stat().st_mode)) for path in files)
@@ -294,17 +343,18 @@ def retain_source_profile(
             verify_compact_source()
             declaration = _toml(project_path / "pyproject.toml")["project"]
 
-            def build(destination):
+            def build(destination: Path) -> Path:
+                options: _BuildOptions = {
+                    "offline": True, "procutil": procutil,
+                    "construction_fd": construction_fd, "retained_runtime": retained_runtime,
+                }
                 return build_wheel(
                     project_path, destination, toolchain=toolchain, reserved_names=set(archives),
                     uv=uv, deadline=deadline,
-                    **({
-                        "offline": True, "procutil": procutil,
-                        "construction_fd": construction_fd, "retained_runtime": retained_runtime,
-                    } if offline else {}),
+                    **(options if offline else {}),
                 )
 
-            def validate(wheel):
+            def validate(wheel: Path) -> None:
                 with _open(wheel) as stream:
                     facts = inspect_archive(
                         stream, limits=limits, deadline=deadline,
@@ -314,6 +364,7 @@ def retain_source_profile(
                 name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
                 if name != canonicalize_name(declaration["name"]) or version != Version(declaration["version"]):
                     raise ProfileError("built first-party wheel filename differs from retained source")
+                assert opaque_identity is not None and cache_binding is not None
                 if _build_environment_identity(opaque_identity) != cache_binding["environment"]:
                     raise ProfileError("source build environment changed during construction")
                 verify_compact_source()
@@ -346,7 +397,8 @@ def retain_source_profile(
         if before != runtime.fingerprint_source(_source_files(projects)):
             raise ProfileError("source changed while building the exact wheel closure")
         verify_compact_source()
-        observed_toolchain = toolchain.record if build_record is None else {
+        assert build_record is None or build_profile is not None
+        observed_toolchain = toolchain.record if build_profile is None else {
             "packages": toolchain.packages, "admitted_profile": build_profile.record(),
         }
         if observed_toolchain != toolchain_record:
@@ -356,7 +408,7 @@ def retain_source_profile(
             max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_total_bytes,
             max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
         ) as snapshot:
-            wheels = {}
+            wheels: dict[str, dict[str, Any]] = {}
             expanded = 0
             for filename, stream in snapshot.archives.items():
                 _check_deadline(deadline)
@@ -430,7 +482,7 @@ def source_candidate(
     candidate: SourceLockCandidate, *, third_party: dict[str, Path],
     uv: str, toolchain: ToolchainLock, health_module: str, limits: WheelLimits,
     max_wheels: int, max_total_bytes: int, max_snapshot_bytes: int, deadline: float,
-):
+) -> Iterator[ReadyCandidate]:
     """Realize the frozen closure through the existing immutable constructor.
 
     This does not select a current generation or register/start a service.
@@ -456,9 +508,10 @@ def source_candidate(
         _check_deadline(deadline)
         remaining = deadline - time.monotonic()
 
-        def validate_candidate(slot):
+        def validate_candidate(slot: Path) -> None:
             candidate.verify(deadline=deadline)
             installed_python = runtime.slot_python(root, slot.name)
+            assert installed_python is not None
             if _query_marker_environment(installed_python, deadline=deadline) != record["target"]["environment"]:
                 raise ProfileError("installed interpreter differs from the selected target")
 

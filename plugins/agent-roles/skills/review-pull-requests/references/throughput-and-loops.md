@@ -25,6 +25,16 @@ an approved PR waiting only on consent or a check, before starting fresh full
 reviews. A zero actionable queue in continuous mode means idle and observing,
 not complete.
 
+Prioritize returned-result acceptance and eligible lane refill before optional
+dashboard work. Reuse applicable retained source and findings when their
+revision, completeness and scope remain valid; reacquire invalidated inputs,
+not the entire review by default. Keep acquisition, judgment, effect attempt,
+readback and parent-acceptance times distinct, with uninstrumented intervals
+explicitly unknown. Retain original eligible/reviewable and failure clocks
+across waits, correction, replacement and delta rounds. A status snapshot or
+elapsed wall time alone cannot identify the bottleneck; report measured phases
+and unknown intervals rather than inventing a latency diagnosis.
+
 ## Start a round only on a qualifying trigger
 
 A new review round requires new input: a new head revision; an author reply,
@@ -55,8 +65,15 @@ once to the scope owner and keep the PR handed back until a qualifying trigger.
 
 Set a per-PR review time budget. A decisive result inside the budget includes
 "blocked" with the named missing input. When a tool or environment failure
-blocks a review, diagnose the cause once, retry once, then record the blocker
-and refill the lane rather than holding capacity on one PR.
+blocks a review, classify the failed boundary before any retry using
+[setup and adapters](setup-and-adapters.md#diagnose-the-failed-boundary-not-the-whole-role).
+Diagnose once and permit at most one retry within that classification and the
+original budget, then record the blocker and refill the lane rather than holding
+capacity on one PR.
+There is no unconditional retry for a provider refusal or unknown write:
+unchanged errors stop the affected operation, and uncertain effects need
+reconciliation before replay. A bounded local assembly correction is not
+permission to reset the original attempt window.
 
 ## Bounded watches and idle backoff
 

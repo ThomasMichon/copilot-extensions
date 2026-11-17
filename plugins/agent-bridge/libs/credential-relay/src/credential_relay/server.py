@@ -350,7 +350,7 @@ class CredentialRelayServer:
     def running(self) -> bool:
         return self._server is not None and self._server.is_serving()
 
-    async def start(self) -> None:
+    async def start(self, *, reclaim: bool = True) -> None:
         """Start the TCP relay server, reclaiming the port from a stale holder.
 
         The relay binds ``self.port``. When that is **0** (the dynamic default --
@@ -368,7 +368,13 @@ class CredentialRelayServer:
         **actually-bound** port is read back into ``self.port`` after the bind,
         and consumers discover it via ``relay_state`` (which reads ``server.port``
         after start), so auth works regardless of which port we ended up on.
+
+        ``reclaim=False`` disables eviction and ephemeral fallback on a pinned
+        port conflict. The caller retains the original bind error and must
+        resolve process retirement through its own authority.
         """
+        if type(reclaim) is not bool:
+            raise ValueError("relay reclaim policy must be a boolean")
         try:
             self._server = await asyncio.start_server(
                 self._handle_client,
@@ -376,7 +382,7 @@ class CredentialRelayServer:
                 port=self.port,
             )
         except OSError as exc:
-            if not self.port or not _addr_in_use(exc):
+            if not reclaim or not self.port or not _addr_in_use(exc):
                 raise
             if _reclaim_port(self.port):
                 await asyncio.sleep(0.5)

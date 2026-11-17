@@ -196,6 +196,21 @@ verbatim with its ordered manifest and closure criteria in
 [Promotion burndown](promotion-burndown.md#operator-request--verbatim).
 This policy replaces the earlier full/native test-gating decomposition.
 
+**2026-10-19 release-turnaround clarification (verbatim):**
+
+> You definitely need to focus on making the turnaround for resolution shorter
+
+> 2 hours is also way too long; we can't get the release take that long. We need to cut down on what runs there.
+
+> 1 hour max, ideally 30 minutes
+
+Recorded for provenance; it was captured on 2026-10-19 but not landed until
+now. Its sixty-minute ceiling is superseded by the stricter under-thirty-minute
+promotion gate in the Plan and the release-pipeline vision. Its lasting
+direction remains in force: reduce repeated executions using complete
+equivalent evidence, not by dropping distinct source, generated, native,
+installation, baseline or integrity checks.
+
 **2026-10-18 promotion lifecycle clarification (verbatim):**
 
 > Close those old ones then to keep them out of the PR queue. We sitll need to fix the dev-to-main promotion flow to include waiting and drving the PR to merge before marking complete, so new runs can't trigger while the previous PR is still active. We also need (as part of this agent's charter) a way to ensure those PRs always go through, and aren't dependent on running redundant checks which may fail due to flakiness.

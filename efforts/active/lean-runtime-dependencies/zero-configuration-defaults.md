@@ -39,8 +39,10 @@ Runtime enabling and production rollout retain their existing gates.
   owner, with no new policy file. It does not approve an exact record or
   independently verify source bytes. Release authentication (#8568) and the
   policy/release planner (#8586) now supply repository-only composition. Actual
-  invocation-bound source authorization, governed source closure and the native
-  constructor remain required before checking this item.
+  invocation-bound source authorization, governed acquisition/admitted reuse
+  and native engine acceptance remain required before checking this item.
+  Repository-only retained-source/profile construction merged in #8791; it
+  does not authenticate the input source or authorize a production closure.
   Bind source-mode authorization to the actual invoked setup and its selected
   configuration through the existing installation/custody owner. The read-only
   intent reader is not itself evidence of an authorized setup operation.
@@ -61,6 +63,10 @@ Runtime enabling and production rollout retain their existing gates.
 - [ ] Apply the seam through the existing immutable constructor under #6737.
   Persist actual mode, lock and explicit capability only with successful
   selection. Do not run default installation followed by a Torch replacement.
+  The source/profile fixture path (#8791) now uses that constructor and checks
+  the installed target before completion, with Linux/Windows/macOS evidence.
+  Actual authority, governed source acquisition, admitted reuse and engine
+  adoption still gate this item.
 - [ ] Adopt the released mechanism in the consuming harness's shared baseline,
   with generic policy in the harness, optional private overrides outside it and
   no baked-in feed identities or credentials. Source behavior may not wait for

@@ -1023,6 +1023,782 @@ CI, baseline, source investigation or test was executed by this intake.
   every group within 240 seconds, exactly two Worktrees workers and the
   original coverage/resource limits.
 
+_The four Phase 6 entries from 2026-10-08 to 2026-10-12 below were recovered on
+2026-11-16 from an unlanded Windows worktree branch (tip `75f133e5bf`) during
+worktree landing cleanup. They are kept verbatim as history. Most of that
+branch's code later landed through other PRs; its own fixture-recovery runner
+changes and `TESTING.md` text did not, and current behavior is described by
+the newer entries above._
+
+### 2026-10-12 — Phase 6: isolated source reconciliation remains acceptance-blocked
+- Normal hosted run38300992971 on `b16a8e079` completed with failure,
+  exhausting the unchanged900-second aggregate during group10 of14 at
+  905.25 seconds including cleanup. It is no longer running and does not
+  satisfy acceptance; no repeat or diagnostic result replaces that failure.
+- Reconciled the fixture split with current `dev`, retaining both the
+  canonical runtime-retention guard and the bounded PowerShell scanner.
+  Moved the upstream pinned-destination publication race correction into
+  the split module rather than retaining a duplicate obsolete test module.
+  Kept the private POSIX temporary parent and pre-created each group so
+  failed containment preserves its namespace before pytest initialization.
+  Test comments describe their durable safety boundaries.
+- Native Windows runner/scan/rotation contracts pass117 cases with5 valid
+  platform skips in26.10 seconds under an owned four-core supervisor.
+  Twelve fixture-copy, CLI and pinned-destination cases pass with two
+  workers in84.55 seconds including cleanup under normal limits.
+  A longer repository-relative sandbox failed Git's path-length limit;
+  those failures are excluded, and the successful fixture check uses a
+  shorter owned root without changing Git settings.
+- The focused finalize family is not passing: two-worker execution lost
+  workers and exhausted its300-second group bound at300.55 seconds.
+  An isolated serial finalize race case also hit the unchanged30-second
+  per-test deadline, with the captured stack in the real landed-content
+  precondition's Git ref-existence probe, before process termination.
+  Its total was58.26 seconds including collection and cleanup. These
+  observations do not establish the cause of every historical native
+  worker loss, and no failure is waived or budget extended.
+- The native full-portfolio attempt on `4fe0277a4` used exactly two
+  workers, verified same-version packaged Git and explicit unchanged
+  30/300/900-second,128-process,4096-MiB memory and2048-MiB storage bounds.
+  Group1 of14 hit its300-second wall limit after an ordinary failure
+  and worker loss; total elapsed was301.18 seconds including cleanup.
+  The run is rejected and supplies no complete matrix or repeated
+  acceptance. The four-core affinity limit applied only to the owned
+  runner and inherited descendants, not machine settings.
+- Repeated complete final-head Windows matrices, all groups below240
+  seconds with unchanged30/300/900 limits, and the existing review,
+  required-check, merge and promotion gates remain open. This is local
+  preparation, not a published repair or completed Phase6.
+
+### 2026-10-12 — Phase 6: isolate raw pane fallback and retain failed budget evidence
+- Complete local normal validation reached group3, surfaced an environment-
+  dependent fallback test and then exceeded300 before printing its summary.
+  Focused bounded fail-fast evidence identified the raw psmux builder case:
+  it unintentionally discovered an installed manager wrapper while asserting
+  wrapper-absent behavior. Pinned a genuinely absent fixture path instead of
+  changing production discovery; all four builder contracts pass.
+  The local full run remains a failure, not hosted budget acceptance.
+- Normal hosted run38236277611 also exhausted the unchanged aggregate ceiling,
+  at911.91 seconds including cleanup after eight completed groups. Its
+  pull-request and index portfolios passed. Run38238620168 was cancelled
+  before jobs started; exact-head run38239800303 remains queued. None of
+  these observations proves the required repeatable final-head margin.
+- Run38239800303 subsequently failed its normal900-second aggregate limit
+  at912.36 seconds including cleanup, again during group9. The completed
+  pull-request and index portfolios passed. Earlier passes are not final-head
+  acceptance and this failure remains an acceptance blocker.
+- Removed repeated setup-only publication and rebase from20 generic recovery
+  items. They now receive independent copies of one genuinely recovered-plan
+  topology per worker; each confirmation, transport, race, hook, audit and CLI
+  operation remains real and per-case. Provider-specific preview and frozen
+  attribution setup stays fresh. Successful publication additionally proves
+  the seed's tracking bytes and remote refs are unchanged. All49 recovery
+  cases pass in a targeted contained group,134.64 seconds including cleanup,
+  with two workers and unchanged deadlines. This is focused behavioral proof,
+  not full-portfolio performance acceptance.
+- An earlier all-module `-k` baseline timed out at300 seconds and ultimately
+  reported5341.84 seconds including cleanup. It did not complete the recovery
+  portfolio and is not comparable timing evidence for the targeted group.
+  Fresh complete hosted execution remains necessary.
+- Published recovery consolidation at8e03ad486. Dispatch38255992672 used
+  the wrong rotation date and selected bridge, codespaces and handoff, not
+  worktrees; it provides no worktrees budget evidence. Verified the selector
+  before dispatch38257654861 with2026-10-08, which correctly selects worktrees,
+  index and pull-request portfolios. Its latter two portfolios pass; worktrees
+  remains in progress.
+- The mistaken extra matrix exposed25 launch-policy test failures and one
+  native owner-response failure. Policy tests registered under their temporary
+  directory but still checked the separate runner profile; isolated the test
+  profile instead of weakening the production ownership fence. The native
+  Windows owner trampoline had not explicitly inherited its parent's redirected
+  stdio, so the real command exited successfully without returning its JSON.
+  Explicitly forward stdin/stdout/stderr while retaining windowless flags and
+  exit status. A direct flag/stream/exit regression and the actual installed-peer
+  integration pass. All15 owner-launch cases and50 policy cases pass locally,
+  with5 legitimate platform skips; mandatory patch changefiles record both
+  encountered fixes. Complete external verification remains outstanding.
+- Final65d2dcfcb run38259035124 failed the real pane launch's15-second bound
+  before receipt or child argv existed; the last trace stopped at Add-Type
+  compiling the Job ownership type. Same-head retry38262166277 passed that
+  portion but lost a pytest worker in the native background-prune observer,
+  failing at554.81 seconds with the portfolio incomplete. Both index and
+  pull-request jobs passed. Neither worker death nor the compiler stall has an
+  established root cause or accepted-flake waiver.
+- The native observer passes locally alone and within its original25-file
+  group; no crash fix is claimed. That complete group exposed two genuine
+  renderer-fixture failures instead: copying unrelated host-generated bytecode
+  exceeded Windows path limits. Excluded only Python bytecode caches, retaining
+  all source scripts and real subprocess discovery/rendering. A separate stale
+  local dependency wheel lacked the source's include_projects parameter;
+  rebuilding that one owned test-venv package from its actual local source
+  without global cache deletion restored the correct ABI. All47 renderer
+  contracts pass. This is not an upstream dependency-API workaround.
+- Twenty-five post-rebase refspec ownership and legacy-refusal items now copy
+  a real published/rebased seed independently instead of repeating setup-only
+  creation and rebase. Their actual guarded rewrite, metadata persistence,
+  subprocess races and refusal assertions remain unchanged. Public rebase,
+  snapshot, changed-creation-identity and destination-change scenarios stay
+  fresh. Actual configured-project publication also proves seed tracking bytes
+  and remote refs unchanged. Both complete rewrite modules pass55 cases in
+  167.42 seconds including cleanup with two workers and normal ceilings.
+  Fresh complete hosted budget and reliability evidence remains required.
+- Normal exact737523424 run38266750151 completed all14 Windows groups:
+  8,484 passed and64 legitimate skips,776.19 seconds including cleanup.
+  Every group stayed below240 seconds; the slowest pytest portion was133.29.
+  Index and pull-request jobs also passed. This is the first passing candidate
+  result, not repeated final-head acceptance or proof that prior native stalls
+  are fixed. The PR subsequently became conflicting after40 newdev commits;
+  preserved an explicit local backup before authorized private-branch
+  reconciliation. Fresh reconciled-head full repeats and review/check gates
+  remain required; the effort and original objective stay open.
+- Reconciled the backed-up private PR onto1703cc42b after40 interveningdev
+  commits, preserving the two new revised-legacy test bodies exactly by AST.
+  Canonical revised legacy records may now rewrite with exact live authority;
+  removed only the obsolete corrected-record refusal parameter, retained
+  every other refusal and the new acceptance/authority cases. All61 rewrite
+  cases pass after reconciliation. Combined the new canonical adopter-navigation
+  guard/tests with the bounded Markdown walker, retaining canonical directory
+  diagnostics and exclusions;73 guard/runner/rotation cases pass.
+- Current review correctly identified tracing as extra work inside a timed
+  production-wrapper regression. Normal mode now copies the wrapper byte-for-
+  byte; only the existing explicit diagnostic profile enables tracing.
+  A focused regression proves both paths; all5 prompt/diagnostic cases pass
+  with the unchanged15-second bound. This corrects instrumentation fidelity,
+  not a claimed root-cause fix for every earlier hosted native failure.
+- Reconciled-head normal38270806820 passed the native cases and all completed
+  behavioral groups, but exhausted900 seconds during group10 at903.75 seconds
+  including cleanup. Group9 completed711 passing cases/16 skips in233.90
+  seconds. This is failed aggregate acceptance, not a successful repeat of the
+  earlier776.19-second candidate.
+- Removed nine more setup-only publication/rebase sequences by extending
+  independent prepared state to both head schemes for moved-remote leases,
+  fork/repoint refusal, hook/dry-run and legacy one-command migration. Each
+  actual operation and assertion remains; both public real-rebase cases,
+  new revised-legacy cases, creation-identity and changed-destination cases
+  retain fresh setup. Complete rewrite families pass61 cases in176.73 seconds
+  including cleanup under two workers and unchanged limits. Snapshot and
+  refspec actual legacy publication additionally verify immutable seed
+  tracking bytes and remote refs stay unchanged.
+- Normal a974d959e run38275068702 again exhausted900 seconds during group9,
+  at913.41 seconds including cleanup, so the planned second run was not
+  dispatched. All completed groups passed behavior; repeated aggregate
+  acceptance remains unmet.
+- Consolidated four lease disposition items into two short real workflows,
+  preserving explicit acquisition context, default active context, plain renew
+  retention, changed disposition and durable inspection assertions while
+  removing repeated setup acquisitions. All7 lease CLI cases pass; longest
+  call7.31 seconds. Thirteen provider-live status/thread items now use real
+  persisted records rather than unrelated Git initialization; actual pushed-head
+  identity and locking cases keep Git. All37 status cases pass. No backend
+  transport or safety assertion was replaced by a stub.
+- Complete diagnostic73dec5005 run38281140520 attempted all14 groups:
+  8,571 passed/66 legitimate skips in1149.95 seconds including cleanup.
+  Extended diagnostic ceilings and tracing were explicit, so this result is
+  NOT normal acceptance. The complete timing profile identifies cumulative
+  lease-store67.25 seconds and registry/repository74.77 seconds, among other
+  expensive real-Git families; phase costs overlap across two workers.
+- Scoped implementation delegates consolidated lease preview/apply/idempotence
+  without repeating acquisition/renewal/release setup, retaining all original
+  assertions and adding ref/OID immutability checks. Registry receipt refusal
+  now precedes successful registration in the same real scenario. Nine
+  credential fixtures retain real Git config but omit unrelated history;
+  four refusal branches need only directories. Clone/classification/sync and
+  concurrency still use real histories. Parent reviewed the actual confined
+  diffs and independently verified all172 combined lease/registry/repository
+  cases under normal limits in117.69 seconds including cleanup; the longest
+  combined lease call15.30 seconds remains below30. Delegates made no
+  production, manifest, deadline, worker, or Git-history mutations. Two more
+  redundant test items are deliberately consolidated, not silently skipped.
+- Normal exact c56193d8d run38285765285 completed the entire worktrees
+  portfolio:8,569 passed/66 valid skips in816.73 seconds including cleanup,
+  slowest pytest group172.94 seconds and all wall-clock groups below240.
+  The matrix still failed because index's two-cell integration did not stop
+  one service gracefully; the repeat sequence correctly stopped. This is
+  a first current worktrees pass, not repeated final-head acceptance.
+- Index cleanup now reuses control identities already observed during the
+  real isolation checks rather than querying health again at teardown, and
+  skips already-exited owned children. It preserves ownership-mismatch,
+  distinct OS-assigned ports, independent liveness and the existing15-second
+  graceful wait; verifies zero exit and retains any actual control error in
+  a failed-stop diagnostic. Complete installation-cell family passes101 cases
+  with7 platform skips; the strengthened actual two-service case passes again.
+  The original failure lacked its swallowed control error, so this is a
+  cleanup fidelity/reliability improvement, not an established root-cause
+  claim for every historical native failure. A mandatory index patch
+  changefile records the bounded test-only change.
+- Normal4d2893221 run38290387827 passed index and pull-request portfolios
+  but again exhausted the worktrees900-second aggregate, at902.88 seconds
+  including cleanup during group10. All completed behavioral groups passed;
+  repeated final-head margin remains open.
+- Four lease compaction/preview/filter/race cases now receive independently
+  copied bare remotes and deep-copied observations from one genuinely
+  acquired/renewed/released seed per worker. Actual compaction, unchanged
+  preview, kind filtering and concurrent reacquisition CAS remain per-case
+  and real; compaction proves the seed ref unchanged. Every other actual
+  lease lifecycle remains fresh. All18 lease-store cases pass under normal
+  limits; longest call18.72 seconds and first seed setup11.57 seconds.
+  No timeout, source transport, tier or mutable-state sharing changed.
+- Normal693afb682 run38295666963 again exhausted900 seconds at911.64
+  including cleanup; all completed behavioral groups and both companion
+  portfolios passed. No repeat was dispatched and the candidate is not
+  accepted.
+- Public rewrite CLI's two head schemes and seven revised-legacy
+  acceptance/authority inputs now reuse already-real rebased state as well,
+  removing only setup creation/rebase. Actual CLI parser/squash/rewrite,
+  provider observation, exact authority, generation and ref assertions remain
+  unchanged. AST comparison proves canonical revised-legacy decorators and
+  every operation/assertion after the input assignment remain exact.
+  Fresh creation, ownership refresh, changed-creation/destination and actual
+  synchronization/rebase families remain. All61 rewrite cases pass under
+  original limits in164.81 seconds including cleanup; no production change
+  or added timeout exception is involved.
+
+### 2026-10-09 — Phase 6: exact-head repeat exposes a bounded pane-wrapper stall
+- Reconciled head 78b44a061 passed normal hosted run 37894850444 in
+  865.27 seconds including cleanup (maximum group 161.49 seconds).
+  Repeat 37897693769 failed the real initial-prompt wrapper integration
+  test's existing 15-second subprocess bound, not the plugin deadline.
+  The failed group completed in 154.81 seconds; total elapsed before
+  failure was 331.08 seconds including cleanup. This is unresolved
+  evidence, not a pass or an accepted flake.
+- The same real Windows launch passes locally with two workers in
+  1.82, 2.09, and 2.03 seconds. No root cause is established from these
+  isolated successes. Added bounded failure diagnostics for the receipt,
+  captured child argv, and the last executed PowerShell wrapper statement
+  so another hosted failure identifies startup, child, or teardown stage.
+  Three diagnostic regressions and the real launch pass. The wrapper,
+  owner Job Object, launch transport, assertions, and every timeout remain
+  unchanged. Fresh hosted evidence and diagnosis remain required.
+- Diagnostic-enabled normal run 37995292958 passed all 7,433 cases with
+  42 legitimate skips in 695.47 seconds including cleanup; the slowest
+  group took 124.73 seconds and the real wrapper took 4.26 seconds.
+  The earlier isolated stall remains unproven, not silently reclassified
+  as harmless. Current review also caught an omitted `os.walk` error
+  callback in the docs-consistency guard; enumeration now raises the
+  original error and a denied-subtree regression proves it fails closed.
+  All eight docs-scan regressions pass with unchanged exclusions.
+- Reconciled again onto current `dev` after the PR became conflicting.
+  All 308 upstream PR test methods survive in the split modules; all seven
+  newly changed upstream contracts are AST-identical after relocation,
+  including the new six-case stale-reassignment regression. Retained the
+  already-merged file-based pane launcher rather than resurrecting the old
+  encoded-command transport; receipt/child diagnostics remain, while the
+  encoded-script-only trace prefix is no longer applicable. The underlying
+  original stall's cause remains unknown.
+- The stronger upstream PR identity merge exposed a real seed-copy bug:
+  relocation changed a published record's repository identity without
+  advancing its revision, so an equal-revision on-disk record correctly
+  restored the seed's old identity. The fixture now marks its intentional
+  relocation as a new revision. No production merge protection is weakened.
+  The reconciled contract run passed 85 cases and exposed exactly these
+  two seed-isolation failures; after the fixture correction all eight
+  seed/real-launch/diagnostic cases pass, and touched Python lint is clean.
+- Normal current-head runs 37998223104 and 37998284414 both exposed
+  the same new incoming real pre-push rejection test: template-free seed
+  initialization had also omitted the conventional empty `hooks` directories.
+  Restored only those empty directories in the immutable seed (no sample
+  hooks or repeated Git initialization), with independent-copy hook-state
+  assertions. The real refspec pre-push rejection and all four Git-copy
+  regressions now pass. All 139 directly affected guard/runner/rotation
+  regressions pass. No ceiling or behavioral assertion was relaxed.
+- The corrected head (`3bee91142`) is now published. Standard per-PR CI
+  passes in full on this exact commit, including the Windows-latest jobs.
+  Re-dispatching this effort's own "Windows coverage rotation" workflow
+  against this exact head -- the established practice for the runs above
+  -- is no longer possible: that workflow's `select` job now hard-gates on
+  `github.ref == 'refs/heads/dev'` and every checkout step pins
+  `ref: dev`, a restriction added later in this same effort's Phase 6 to
+  mirror `validate-and-promote.yml`'s dev-only promotion gate. It was not
+  dev-restricted when the runs above were dispatched against this PR
+  branch directly. Re-litigating that restriction to unblock one PR is out
+  of scope here; tracked as a separate, narrow follow-up (add an optional
+  `ref` input honored only on `workflow_dispatch`, leaving the `schedule`
+  trigger pinned to `dev`). Evidence for this exact fix therefore shifts
+  from a pre-merge hosted dispatch to the next scheduled daily rotation
+  against `dev` post-merge -- which is in fact how the original hooks-dir
+  regression was caught in the first place, so this is a real evidentiary
+  path, not a waiver. If that rotation surfaces a new failure specific to
+  this fix, it reopens as a tracked regression like any other rotation
+  finding.
+- The next reviewer identified a POSIX ownership gap: polling could reap
+  the group leader before teardown, allowing its numeric PID to be reused.
+  POSIX exit observation now uses `waitid(WNOWAIT)` so the controller's
+  zombie pins its group/session identity until teardown completes; capture
+  and revalidate that identity immediately before both TERM and KILL.
+  Stale/reused identities fail explicitly and retain the sandbox. Windows
+  Job teardown is unchanged. All 35 runner/containment regressions pass,
+  including mismatch-before-each-signal and non-reaping observation.
+  Native Linux checks prove both normal-controller-exit and timeout reap
+  real file-holding descendants, and an exited controller remains
+  observable without releasing its PID. The Linux pytest module was not
+  installed in that lane; these real checks use only the standard library.
+- Both normal runs on 86a74d3a0 exhausted the unchanged aggregate budget
+  (900.77 and 901.08 seconds including cleanup) after new upstream
+  recovery/rebase contracts expanded the real call work. Completed groups
+  stayed below 240 seconds, but that is not aggregate acceptance. Reuse
+  independently copied real published state for these setup-only initial
+  publications, retaining every actual recovery, rebase, guarded push,
+  concurrency, backup, and ref-retention operation under test. Legacy and
+  explicit snapshot publication still execute their real setup path.
+  Recovery passes all 17 cases; default rebase passes 13 with its existing
+  16 explicit-tier skips. Both snapshot/refspec seed copies have explicit
+  real commit/push/tracking isolation coverage. Local concurrent seed
+  checks also hit per-item timeouts, so local success is not claimed as
+  repeat performance acceptance; the same refspec check passes alone.
+- Run 38083381384 still exhausted the aggregate ceiling (902.28
+  seconds including cleanup), despite all completed groups staying below
+  240 seconds. Publication setup reuse is not yet enough; more real cost
+  reduction is owed, not another timeout increase.
+- The operator approved retaining a newly merged canonical rotation flow:
+  scheduled validation always targets `dev`; manual runs use a validated
+  explicit ref input, pin one SHA for every matrix job, and never report
+  candidate-PR failures as shared `dev` health. Removed only the overlapping
+  branch-selection implementation while keeping two workers, native Git,
+  diagnostic mode and unchanged budgets. Preserved the incoming encrypted
+  attribution refresh contract in its split module. All 44 runner/rotation
+  regressions and the real incoming attribution contract pass.
+- A subsequent review's claimed `(0, 0)` falsiness is not a Python bug:
+  nonempty tuples are truthy. A direct empty-native-group regression proves
+  the existing probe preserves `(0, 0)` without invoking `ps`; no speculative
+  production workaround was added.
+- Complete diagnostic 38091020889 passed the expanded portfolio (7,901
+  passes and 57 explicit/platform skips) but took 987.73 seconds including
+  cleanup. Normal 38091013070 stopped at 903.39 seconds; neither is
+  performance acceptance. Reported call work totals 1,361.20 seconds,
+  versus 192.70 seconds setup. The largest modules include recovery
+  (86.33), publication (86.19), landing (80.72), providers (79.71),
+  tracking (71.65), preconditions (64.68), and lease-store (57.26).
+- Twenty fork-rerun/tracking scenarios still called initial publication
+  solely to prepare state. Bound only those scenarios to independent real
+  published copies and let the shared helper reuse existing publication;
+  all actual fork movement, feedback commit, rerun, concurrency and
+  stale-record operations remain unchanged. AST equivalence confirms
+  both entire test modules differ only in fixture binding names.
+  Publication's full 32-case module passes. The combined and tracking-only
+  local runs still exceed existing bounds or lose workers to per-item
+  timeouts; a directly selected changed stale-reassignment case passes.
+  Those are unresolved performance evidence, not permission to lift limits
+  or claim the host is harmless. Hosted full validation remains required.
+- The operator rejected a four-worker experiment and explicitly directed
+  consolidation by valuable coverage. Audited independent PR, landing,
+  and provider tracks. Fifteen record-merge cases now use real isolated
+  YAML records, removing irrelevant Git initialization/publication,
+  fork movement, remote deletion and feedback commits; every identity,
+  revision, stale-write and serialization assertion remains. The separate
+  real locked push-identity and fork-publication tests retain Git boundaries.
+  All 15 record-only cases pass with calls at 0.18 seconds or less on
+  this host, instead of multi-second Git scenarios.
+- The existing squash-later-edit scenario now also checks the probe leaves
+  refs unchanged before the later edit, preserving the original assertion
+  without rebuilding its topology in a separate test. It passes. Combining
+  full base-aware/ref-deletion cases crossed the existing 30-second item
+  bound locally, so those attempted merges were reverted rather than raising
+  the timeout. The recovery sequence merge was also withdrawn without
+  claiming validation because another live runner owns the host slot.
+  Record-only narrowing and the one safe topology consolidation are the
+  retained slice; further consolidation still needs hosted cost evidence.
+- Extended that same boundary to fourteen manual registration/status cases:
+  real YAML/config resolution, attribution freeze, identity clearing and
+  persistence remain, but no irrelevant Git repository is built. All fourteen
+  pass. Four provider-ready transition cases similarly use a persisted manual
+  PR record instead of publishing Git branches before testing a provider
+  snapshot; draft/undraft, failure, no-op and legacy-label assertions all
+  pass, with call time no more than 0.06 seconds and setup no more than
+  0.07 seconds. Create/publication integration remains separately covered.
+  Normal run 38104483993 still exceeded900 (902.48 including cleanup)
+  before this further narrowing; it remains a failure.
+- Review identified that the live-only zombie filter also fed the process-slot
+  budget. Split those measurements: zombies count toward `max_processes`,
+  while only teardown excludes non-file-holding zombies. Native Linux checks
+  prove a retained zombie consumes one process slot but zero live teardown
+  slots, and real descendant cleanup still works on normal exit and timeout.
+  Direct limit regression supplies 130 slots against the128 bound.
+- Normal run 38106876346 completed the narrowed suite in779.06 seconds
+  including cleanup (7,900 passes,57 legitimate skips; max group130.15),
+  but repeat38108676486 exhausted900 at901.94 seconds. The first pass's
+  120.94-second margin is real for that run, not yet repeatable acceptance.
+  Retained newly merged canonical local-only/bounded guard implementations
+  and canonical no-window containment launch after explicit operator
+  approval; our overlapping guard hunks/tests were removed. Reconciled
+  runner/guard tests pass117 cases with one Windows-inapplicable skip.
+- Consolidated five read-only inconclusive head/ref/upstream checks into one
+  real Git topology. Every original invalid-input branch still asserts
+  refusal with a distinct case label, including the genuine `rev-list`
+  error path. It passes in1.66 seconds call plus5.13 session setup locally,
+  removing four repeated topology copies and remote relinks without mocking
+  away the Git failures. Normal hosted run38111811512 on the reconciled
+  predecessor remains in flight; this further consolidation needs its own
+  exact-head proof.
+- Current-head38112134295 passed the complete portfolio in725.05 seconds
+  including cleanup (7,899 passes,57 legitimate skips; max group126.95).
+  Identical-head repeat38113440807 instead surfaced an unrelated
+  ten-second host process census inside a pair-integrity doctor test.
+  Narrowed that test's unrelated daemon-health reporting boundary; pair
+  discovery/repair/JSON persistence remain real and pass in0.26 seconds.
+  The production census timeout is unchanged and its own tests remain.
+- Review caught one explicit exhaustive snapshot-rebase case selected by
+  a hardcoded scheme rather than parametrization. It now selects the fresh
+  unpublished snapshot fixture, retaining its real initial publication.
+  The explicit-tier legacy case passes. Linux runner CI also exposed an
+  incoming fake-process test that still mocked the pre-identity helper
+  signature; updated its identity/exit/teardown doubles without changing
+  production ownership checks. All40 local runner/containment cases pass
+  with one Linux-only skip; native Linux verifies the zombie-heavy limit.
+- Head2a35ab6ba completed normal38116527309 at833.98 seconds including
+  cleanup (7,899 passes/57 legitimate skips, max group136.89); repeat
+  38116536837 is still queued. Current Linux CI exposed eight installer
+  tests asserting the obsolete payload CWD; the safe canonical installer
+  runs its coordinator from the profile using absolute inputs. Retained
+  the already-merged upstream maintenance-CWD correction and environment-
+  scoped admission after explicit operator approval, and aligned only the
+  stale test CWD expectation. Four real Windows reserved-exit cases pass,
+  with four existing Unix skips; a patch changefile accompanies this
+  agent-index test correction. Reconciled runner/rotation tests pass50 cases
+  with one Linux-only skip. Fresh exact-head Linux and Windows evidence
+  remains required after this rebase; no historical pass substitutes for it.
+- Removed unnecessary per-file metadata copies from the precondition
+  topology, retaining Git file contents/refs/reflogs and real independent
+  publisher/object isolation. Its mutation regression and all60 precondition
+  cases pass under the unchanged bounds. The analogous landing-family
+  experiment could not complete its full local validation within300 seconds,
+  so that unproven change was withdrawn. No ceiling was raised.
+- Review identified an early aggregate-timeout return between groups that
+  exited before the shared final elapsed report. It now breaks with124,
+  joins cleanup, exits the sandbox, and reaches the same cleanup-inclusive
+  report as every other timeout. Direct regression proves second group never
+  starts and65.00 seconds final cleanup-inclusive elapsed is reported.
+  All41 runner/containment cases pass locally with one Linux-only skip.
+- Consolidated three duplicate malformed-codename publication scenarios:
+  the retained real stale-marker publish also asserts no marker token and no
+  attribution-head stamp, preserving each distinct security assertion while
+  removing two repeated publications. The non-string guard is pure Python
+  and no longer asks for an unrelated Git fixture. Folded unchanged caller-
+  body preservation into the explicit no-attribution override scenario,
+  removing one more duplicate publication. All four retained scenarios pass.
+- Further narrowed five marker-policy branches to the real persisted
+  `_finish_auto_open`/provider boundary: encrypted identity, first-touch
+  codename allocation/failure, malformed stale marker and disabled attribution.
+  Separate initial-create and implicit-default integration/preflight checks
+  retain full Git-to-provider wiring. All five retain their original provider,
+  payload and persisted-record assertions, passing at0.08 seconds or less
+  call locally rather than repeatedly publishing Git to test marker policy.
+- The operator approved retaining the stronger already-merged agent-index
+  reserved-exit regression (absolute coordinator/context assertions), dropping
+  our duplicate ancillary test/changefile. No agent-index diff remains.
+  Prior normal38123503844 and38125538648 still timed out at901.45 and
+  906.55 seconds; neither is accepted. More exact-head proof remains owed.
+- Provider-boundary candidate e61d41061 completed normal38179596848 in
+  679.56 seconds including cleanup (7,944 passes/58 legitimate skips,
+  maximum group110.73). Required rebase preserved incoming publication
+  ownership/revision and terminal active/open state checks, but its exact-head
+  runs38181136009/38181140945 exposed new fixture relocation obligations:
+  the recorded attested rewrite destination must relocate with a copied
+  remote, and synthetic fork movement must attest its new destination.
+  Both now follow the actual copied remote identity with explicit record
+  revision updates; fresh/legacy target tests clear ownership when their
+  contract says no attestation exists. Production repoint/rewrite fences
+  remain unchanged. All19 rebase/seed cases pass (16 existing explicit-tier
+  skips), and all53 publication/state cases pass.
+- The hosted authority-registration subprocess also failed because its
+  Python child wrote a checkmark to a cp1252 pipe. The test now launches the
+  real child with explicit UTF-8 and decodes the same encoding; concurrent
+  registry/ledger assertions are unchanged and pass. No normal timeout or
+  worker count changed. These fixes require fresh complete hosted evidence.
+- Normal38183013006 reached the newly expanded group9 and exposed one
+  observation-race test whose synthetic reassociation omitted the required
+  record revision bump. The stronger production merge correctly kept the
+  prior equal-revision identity, so the test was not actually creating its
+  stated concurrent change. Advanced the synthetic reassociation revision;
+  all three observation contracts pass, including rejection of the genuinely
+  changed identity. No production identity protection changed. The failed
+  run's group9 also took254.91 seconds, missing the240 headroom target;
+  this is still unresolved performance evidence, not acceptance.
+- The operator approved retaining upstream's legacy/unattested synthetic
+  fork scenario rather than our reattestation variant, while keeping copied
+  published-state relocation genuinely attested. Incoming config-bearing
+  existing-push tests were preserved in the split module and both pass.
+- Eleven fork-rerun/locked identity cases now independently copy one immutable
+  legacy topology (separate fork objects, pruned origin feature ref and
+  feedback commit), eliminating repeated setup-only fork movement/commits.
+  The seed prepares refs through real local Git plumbing; tests still perform
+  the actual rerun, repoint, lock, publication and concurrency operations.
+  Direct fork mutation/push proves seed isolation; rerun and locked repoint/
+  identity checks pass. Initial full-copy fork seed setup exceeded30 locally,
+  so replaced its redundant setup pushes with copied objects and explicit
+  ref preparation; validated setup is19.22 seconds, later copies1.21-2.35,
+  and checked calls2.14-8.61. Combined publication validation still exceeds
+  the local300 group bound; no ceiling increase or complete-pass claim.
+- Copied published fixture relocation now derives its identity from the exact
+  local URL the fixture just installed instead of repeatedly rediscovering
+  that known URL through Git subprocesses. The real destination probes and
+  equality assertion remain in seed-isolation tests and all guarded
+  production operations. All20 seed/rebase cases pass (16 existing
+  explicit-tier skips), preserving attested source identity without adding
+  another unrelated setup probe per copied test.
+- Review correctly identified macOS Python3.10-3.12 lacks `os.waitid`.
+  Replaced that platform-specific admission requirement with a portable
+  private-pipe controller protocol: the real command reports status while
+  the owner remains alive until verified group teardown, so its PID still
+  cannot be recycled before signals. The workload does not inherit the
+  reporting descriptor or control environment. Stale-group revalidation,
+  live-only teardown and zombie resource accounting remain unchanged.
+  All44 local runner/containment cases pass with one Linux-only skip;
+  native Linux proves real normal/timeout descendant reaping and absence
+  of control-env leakage. Added a focused change-scoped native macOS3.12
+  runner lane to prove the previously unsupported platform directly.
+  Its hosted result is still required; no untested fallback is claimed.
+- Native macOS3.12 lane114751708302 on e2699c86f actually executed
+  the portable ownership/cleanup checks:43 passed,2 platform skips in9.22s.
+  This is direct live-platform evidence, not a Linux proxy for missing
+  `waitid`. Full Windows candidate38230533458 and prior known-identity
+  candidate38227561414 are still queued behind hosted capacity.
+- Fork candidate38226500432 failed the real pane-wrapper15-second bound
+  after receipt and captured child arguments already existed. It therefore
+  stalled after command startup/argument delivery, not transport decoding.
+  Added trace only to the copied real wrapper to expose its last executed
+  statement on timeout, retaining executable logic, ownership job and bound.
+  The real launch plus all three bounded diagnostics pass locally; the
+  underlying hosted after-child stall remains unresolved until its next
+  failure supplies that evidence.
+- Normal rotation no longer requests a verbose line for every case:
+  unbuffered group/progress, complete failure reports and slowest30 item
+  durations remain. Explicit diagnostic mode retains verbose/all-duration
+  output. Ten rotation contracts pass and test selection/worker/resource
+  settings are unchanged. This removes avoidable output volume; no runtime
+  acceptance is inferred until hosted exact-head evidence completes.
+- Known-identity candidate38227561414 reached group9 and exposed a split
+  caller retaining the pre-mutation in-memory record after canonical fork
+  movement cleared ownership and advanced its revision. Reloaded the
+  persisted record after every direct setup move, matching the incoming
+  upstream scenario rather than weakening equal-revision merge protection.
+  The actual recorded-fork-disappearance contract passes. Its prior full run
+  remains a failure; current full portfolio proof is still required.
+- Shared the existing real-YAML record fixture with six newly added
+  native/legacy state-preservation cases, removing unrelated Git creation/
+  publication while retaining byte-for-byte non-mutation and terminal/live
+  classification assertions, including raw legacy YAML loading. All20
+  combined manual/state cases pass; state calls are0.05 seconds or less.
+- The prompt integration test had launched an extra PowerShell merely to
+  execute the generated quoted PowerShell command. It now asserts the real
+  `-File` builder shape and runs the same quoted launcher/manifest once;
+  actual launcher, wrapper, native ownership job, receipt and child argv
+  remain exercised. All four launch/diagnostic cases pass, with real call
+  reduced locally from4.94 to3.25 seconds. No bound changed and no hosted
+  stall is declared solved without fresh full evidence.
+- Quiet predecessor38234236124 repeated the already-fixed stale fork-record
+  failure and exposed an ancillary callback-burst test racing its own
+  three-second callback hold against twenty serial disk-backed registrations.
+  Snapshot production is now gated until all registrations complete, creating
+  a genuine twenty-event burst before exercising the same eight-worker bound
+  and no-loss assertions. Callback hold, test/group/plugin bounds and runtime
+  implementation are unchanged. All170 pull-request plugin cases pass;
+  a patch changefile records the test-only correction. No competing external
+  contributor implementation was displaced.
+
+### 2026-10-08 — Phase 6: complete hosted timing evidence and a second cost-reduction candidate
+- `dev` advanced during review and contained a broader, already-merged
+  watch-daemon correction (joined shutdown, unique atomic-write files,
+  serialized replacement, and stronger restart/concurrency tests).
+  The operator approved retaining that canonical implementation and removing
+  only this PR's superseded watch-daemon slice/changefile. Owned history was
+  backed up, net-squashed, and rebased once; both the upstream documentation
+  additions and dependency version updates were preserved. No competing fix
+  was forced over the upstream contribution. All 158 directly affected
+  regression tests pass after reconciliation; fresh review and hosted
+  verification remain required for the rewritten head.
+- The review-fixed full Windows worktree run 37885149671 passed all
+  intended cases in 540.84 seconds including cleanup (maximum group
+  95.04 seconds). Its repeat 37886775797 passed worktrees too, but
+  exposed a separate real `agent-pull-requests` restart-test race:
+  two in-process daemon generations remained live and attempted the same
+  subscription temporary file, causing a Windows PermissionError.
+  The daemon pollers now honor the existing shutdown event promptly; the
+  restart test shuts down and joins the old generation before constructing
+  the replacement, preserving durable subscribers. All 53 plugin tests pass
+  in the contained runner; a mandatory patch changefile accompanies the fix.
+- The revised Copilot request workflow hit its licensed-account REST quota,
+  not a code/test failure. Observed reset was 05:26:38 UTC; an owned bounded
+  backoff waited until that time before one failed-job retry. No token/account
+  switch, bypass merge, or repeated rate-limit retry was used. The actual
+  subsequent reviewer verdict remains required.
+- In response to the operator's pre-push cost question, timed every actual
+  guard rather than blaming the push bound. The unchanged 16-check sequence
+  took 244.50 seconds: headless-launch 89.15, bridge contracts 44.75,
+  docs consistency 28.64, and install contracts 27.40 seconds.
+  Whole-tree traversal, duplicate AST work and repeated immutable-evidence
+  probes dominated, not pytest execution.
+- Preserved the full gate while reducing work: existing exclusions are
+  pruned during enumeration; headless candidates parse once and duplicate
+  contents share analysis without sharing path-specific diagnostics; bridge
+  evidence avoids repeatedly probing the same available full commit IDs.
+  Missing evidence/mutable refs remain rechecked and recovery behavior is
+  preserved. Exact candidate/diagnostic and recovery regressions pass
+  (102 tests). The final same-machine 16-check sequence passed in 57.79
+  seconds, versus 244.50 seconds before. No publication or test timeout was
+  raised, no guard was removed, and no policy exclusion was widened.
+- The actual Copilot review raised a Medium teardown race: closing a
+  kill-on-close Windows Job Object initiates asynchronous descendant
+  termination, so group deletion could begin while a descendant still held
+  files. Fixed the entire cleanup contract: explicit Job termination and
+  raw active-process-count confirmation before handle close, POSIX live-group
+  confirmation after signals, controller reaping after forced kill, and no
+  cleanup scheduling on unproven teardown. A typed failure retains the named
+  sandbox instead of deleting beneath a possibly live process. Native Windows
+  regressions cover file-holding descendants after both normal controller exit
+  and timeout; portable tests cover delayed membership and retained failure
+  state. Review remains gated on the revised verdict and fresh hosted evidence.
+- Strict same-code normal runs 37865342941 and 37866787409 both
+  completed every intended case: 7,430 passed and 42 legitimate skips
+  across all 13 groups. Actual plugin elapsed time INCLUDING joined
+  cleanup was 567.25 and 857.44 seconds respectively, below the
+  unchanged 900-second ceiling. Maximum group times were 90.26 and
+  148.38 seconds, well below the 240-second headroom target.
+  The slower repeat has 42.56 seconds of aggregate margin; do not
+  describe the first run's 332.75-second margin as guaranteed. Readiness
+  now has real repeat evidence, but review, merge, promotion, and scheduled
+  firing remain distinct gates; another normal run is planned while review
+  proceeds.
+- Publication encountered the existing 180-second Git-push bound while
+  running all pre-push checks; no hook was skipped or timeout enlarged.
+  The feed-neutrality guard repeatedly walked the full checkout once per
+  pattern, including local test environments before filtering exclusions.
+  It now walks once and prunes only its original excluded directories.
+  Actual candidate sets are exactly identical (499 paths), measured
+  13.84 seconds before versus 1.51 seconds after; all 14 guard tests
+  pass. This removes a directly encountered publication bottleneck without
+  weakening feed policy or changing test budgets.
+- Normal run 37859573130 attempted every intended case (7,430 passed,
+  42 skipped), with all 13 pytest group times below 240 seconds
+  (maximum 187.39 seconds, total 873.49 seconds). However, its
+  first-group-to-final-status elapsed time was approximately 955.76
+  seconds, including 52 seconds of final sandbox cleanup. This is NOT
+  aggregate-budget acceptance even though the old runner reported success.
+- Fixed two real budget blind spots: an exited subprocess no longer
+  bypasses the elapsed wall check, and the plugin deadline is checked after
+  all cleanup. Cleanup of a fully reaped group's owned directory now
+  overlaps the next group through one bounded thread; all futures are joined
+  before outer sandbox removal and errors propagate. Short Windows `t/gN`
+  paths remain unchanged, reusing the framework's readonly-aware removal
+  rather than adding a path-length-increasing directory suffix.
+  Deadline/cleanup/rotation regressions pass (33 tests). A real two-group
+  execution with the final short paths passed all 57 cases in 84.48 seconds
+  including cleanup;
+  the complete hosted candidate must still prove actual aggregate headroom.
+- Complete uncensored candidate diagnostic 37834155432 passed every
+  group, but still took 1,714.21 seconds of pytest time. Durations above
+  0.05 seconds attribute 1,319.85 seconds to calls and 173.27 seconds
+  to setup; further fixture-only optimization cannot plausibly close the
+  gap by itself. The operator explicitly approved trying bounded
+  two-worker Windows execution plus further actual cost reduction, keeping
+  all existing budgets. The rotation now opts only `agent-worktrees` into
+  `pytest-xdist -n 2 --dist=loadfile`; default local execution and all
+  other plugins remain serial. Both workers stay in the same containment
+  job. This is an experiment awaiting hosted acceptance, not a budget
+  change or declaration of completion.
+- Removed 32 repeated initial `create_pr` calls that merely prepared
+  post-publication, push, and finalize scenarios. A real publication is
+  performed once per pytest worker session; each case receives independent
+  copied Git stores and a relocated tracking record. Fresh-publication and
+  tested rerun calls remain real. Mechanical inverse AST checks prove
+  the transformed cases preserve all later calls, assertions, decorators,
+  and parameterization. Two added mutation regressions verify the published
+  seed's complete byte snapshot remains unchanged across copied commit,
+  push, and tracking updates.
+- Contained two-worker checks pass under unchanged limits: 38 publication
+  and topology cases in 280.72 seconds, then all 35 parametrized push/finalize
+  cases in 198.84 seconds locally. The rotation worker-selection guard
+  (9 tests), focused lint, and install-contract gate pass. These timings are
+  not hosted full-suite acceptance; the complete hosted two-worker run is
+  still required before readiness.
+- The uncensored profile also identified `test_terminal_conclusion.py`
+  (73.89 seconds of reported calls), whose helper rebuilt the same Git
+  topology inside each call. It now copies an immutable session topology
+  and recreates only per-case tracking/session state. Mechanical inverse
+  AST checks preserve every existing operation/assertion/decorator; an
+  additional real commit/push/worktree-removal regression leaves both the
+  seed and sibling copy byte-identical. All 53 terminal-conclusion cases
+  pass locally under the same contained limits in 83.53 seconds.
+- First normal two-worker hosted run 37852839930 still exhausted the
+  900-second aggregate limit in group 9. Groups 1-8 passed in 64.11,
+  39.48, 114.33, 217.55, 58.36, 78.63, 55.46, and 186.10
+  seconds; every completed group met 240-second headroom, but the
+  remaining groups were not attempted. File-affinity scheduling left
+  uneven call-cost loads, so the two-worker experiment now uses work
+  stealing. The CI test process also resolves the same-version packaged
+  native Git to avoid Git for Windows' launcher
+  process; no persistent PATH/config changes are made.
+- All 124 modified contracts pass locally with work stealing and native
+  Git in two contained groups (67 in 272.25 seconds, 57 in 50.06
+  seconds), including the real pre-push hook and isolation regressions.
+  A prior accidentally broadened local selection included the entire
+  finalize-precondition module and exhausted its 300-second group budget;
+  it did not complete and is not acceptance evidence. The final hosted
+  candidate must still attempt every intended case under normal budgets.
+- A focused native-Git probe removed every other Git distribution directory
+  from the process PATH and still passed the real pre-push hook contract.
+  Therefore the final CI optimization prepends only native Git's binary
+  directory, leaving shell lookup priority unchanged rather than broadly
+  preferring Git's shell/tool directory.
+- Hosted run 37858035629 exposed a setup bug before tests started:
+  `Get-Command git -CommandType Application` returned three executables,
+  which PowerShell concatenated into one invalid command name. The
+  resolver now selects the first PATH match explicitly. Reproducing the
+  three-match PATH locally and executing the actual CI setup block passes;
+  the regression guard and all 9 rotation tests pass. This failed run is
+  setup evidence only and does not establish any suite timing.
+- The unchanged-budget combined candidate run 37831230027 still fails
+  aggregate acceptance, not an assertion: its first seven groups passed
+  in 63.52, 47.92, 149.31, 280.58, 73.69, 72.85, and 49.10
+  seconds; group 8 received only 154.218 seconds remaining and timed
+  out there. Group 4 also misses the 240-second target. No claim of
+  performance completion is supported. Diagnostic mode now emits every
+  setup/call/teardown duration over 0.05 seconds, rather than only the
+  top 30, so the next complete profile can attribute aggregate cost
+  rather than extrapolating from a censored summary.
+- Hosted diagnostic run 37742776238 attempted all 12 Windows groups:
+  7,425 passed, 42 skipped. Group 7 took 531.79 seconds and group 4
+  took 241.44 seconds; total pytest time was 1,714.58 seconds.
+  Default-budget acceptance remains open.
+- Reused immutable finalize landing/precondition Git seeds with independent
+  copied object stores, remote retargeting, and commit/push isolation
+  regressions. This removes approximately 696 net repeated setup Git calls.
+  The original 86 behavioral test bodies remain unchanged.
+- Split all 307 methods of the oversized PR-operations module into 12
+  explicit behavioral-contract modules. Independent AST multiset comparison
+  proves every test body, signature, decorator, and parameterization is
+  preserved. This improves grouping granularity; it does not itself reduce
+  aggregate work.
+- Identified a separate runner-side cost: the storage-budget probe repeated
+  filesystem stat calls for every accumulated temporary file every two
+  seconds. Cached `os.scandir` metadata measured 0.027 seconds versus
+  1.612 seconds for the same 15,766,315-byte representative Windows tree.
+  Accounting limits, sampling cadence, subprocess containment, and normal
+  timeout budgets are unchanged. Nested-size and no-link-following/removal
+  regressions plus the existing persistent-environment-drift check pass.
+  This microbenchmark is not full-suite acceptance.
+- Removed unused sample templates and automatic maintenance from the tiny
+  shared PR seed and avoided unnecessary file-metadata copies. The two
+  real-Git PR seed isolation regressions and a real create/push contract
+  passed focused contained runs. The new finalize regressions initially
+  inferred bare repos implicitly; fixed their probes to use explicit
+  `--git-dir` without weakening `safe.bareRepository` policy.
+- Focused contained validation of all copied topologies now passes
+  (4 regressions, 34.89 seconds). All split PR contracts collect
+  (311 parametrized cases), and 23 selected helper/CLI/real-publication
+  cases pass in 25.68 seconds. Focused F/E9 lint and install-contract
+  validation also pass. These are prerequisites, not full-suite acceptance.
+- Local full finalize validation remains incomplete: a normal-budget run
+  timed out during `test_a_commit_after_a_sync_still_counts` before reaching
+  the second module. Preserve this failure and obtain hosted evidence for the
+  combined candidate rather than claiming local or diagnostic-mode success
+  meets the target. Publication remains draft; neither the performance goal
+  nor the scheduled-event correction is landed.
+- Documentation impact: `TESTING.md` documents independent fixture copies,
+  the PR contract split, and cached storage probes. No production plugin
+  behavior, installer, or fresh-machine provision path changed, so the
+  clean-room tier does not apply. Hosted Windows full-suite validation is the
+  real external lane and must clear unchanged budgets before readiness.
+
 ### 2026-10-08 — Phase 6: Windows coverage rotation drafted, landed, and merged (PR #5662)
 Direct follow-up to reviewing CI build history after Phase 3.5 wrapped
 (at the operator's request): confirmed via `gh run list`/`gh run view`

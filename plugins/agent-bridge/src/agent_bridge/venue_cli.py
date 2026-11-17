@@ -11,6 +11,8 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from types import ModuleType
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -18,14 +20,13 @@ if TYPE_CHECKING:
     from .serving_reconcile import ServingRuntime
 
 from .parity_harness import (
-    CONTAINER_RECREATE_FAULT,
-    FAILED_ACP_HANDSHAKE_FAULT,
     FRONTEND_RESTART_HOSTINDEX_LOSS,
     RELAY_INTERRUPTION,
 )
+from .protocol import CONTAINER_RECREATE_FAULT, FAILED_ACP_HANDSHAKE_FAULT
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -127,7 +128,7 @@ def _fault_frontend_restart_hostindex_loss(
     if not frontend_pid_before:
         raise RuntimeError("could not identify the running frontend")
 
-    def quiet_service_call(action) -> None:
+    def quiet_service_call(action: Callable[[], object]) -> None:
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             action()
@@ -181,7 +182,8 @@ def _cmd_deploy(
     serving: ServingRuntime | None = None,
 ) -> None:
     from zdd import breadcrumb, routing
-    from zdd.cutover import CutoverOrchestrator
+    from zdd.cutover import CutoverOrchestrator, CutoverResult
+    from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
     from . import __version__
     from .client import BridgeClient
@@ -202,10 +204,10 @@ def _cmd_deploy(
             if observed is None:
                 raise ServingReconcileError("required cutover has no verified live local predecessor")
             if compare_serving_version(observed.version, __version__) == "current":
-                result = {"ok": True, "serving_reconcile": "current", "skipped": False}
+                current_result = {"ok": True, "serving_reconcile": "current", "skipped": False}
                 if getattr(args, "json", False):
                     core = _core()
-                    core._json_out(result)
+                    core._json_out(current_result)
                 else:
                     print("[OK] Required graceful cutover: verified serving runtime is current.")
                 return
@@ -283,11 +285,11 @@ def _cmd_deploy(
         s.bind((host, 0))
         port = s.getsockname()[1]
         s.close()
-        return port
+        return int(port)
 
     candidate = None
 
-    def spawn_passive(port: int):
+    def spawn_passive(port: int) -> Any:
         nonlocal candidate
         cmd = [sys.executable, "-m", "agent_bridge", "start", "--port", str(port), "--passive"]
         if serving is not None:
@@ -340,7 +342,8 @@ def _cmd_deploy(
         if serving is not None:
             from .serving_reconcile import guarded_client
 
-            return guarded_client(serving, base_url, token, int(args.drain_timeout) + 60)
+            client: BridgeClient = guarded_client(serving, base_url, token, int(args.drain_timeout) + 60)
+            return client
         return BridgeClient(base_url, token, timeout=int(args.drain_timeout) + 60)
 
     # Serving convergence is not stale-cutover repair: retain any existing
@@ -384,8 +387,34 @@ def _cmd_deploy(
         prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
     successor_published = False
+    ordinary_predecessor: routing.Endpoint | None = None
+    ordinary_successor: routing.Endpoint | None = None
+    unconfirmed_previous: dict[str, Any] | None = None
 
-    def refuse_serving(active: dict | None) -> str | None:
+    def refuse_ordinary(active: dict[str, Any] | None) -> str | None:
+        if active_route_is_forward(active):
+            return forwarded_skip
+        expected = ordinary_predecessor.to_dict() if ordinary_predecessor is not None else None
+        return "central predecessor route changed before publication" if active != expected else None
+
+    def record_ordinary_publication(endpoint: routing.Endpoint) -> None:
+        nonlocal ordinary_successor
+        ordinary_successor = endpoint
+
+    def retire_ordinary(endpoint: routing.Endpoint) -> dict[str, Any]:
+        from .central_retirement import retire_predecessor
+
+        if ordinary_successor is None or endpoint != ordinary_predecessor:
+            return {"exit_confirmed": False, "reason": "central publication identity unavailable"}
+        return retire_predecessor(
+            Path(config_dir()), endpoint, ordinary_successor,
+            make_client=lambda owner: BridgeClient(
+                owner.base_url, token, timeout=2, connect_grace=0,
+            ),
+        )
+
+    def refuse_serving(active: dict[str, Any] | None) -> str | None:
+        assert serving is not None
         if successor_published and isinstance(active, dict) and (
             type(active.get("generation")) is int
             and active["generation"] >= serving.route["generation"]
@@ -418,24 +447,61 @@ def _cmd_deploy(
         candidate.mark_published(endpoint)
         successor_published = True
 
-    orch = CutoverOrchestrator(
-        config_dir(),
-        bind=cfg.bind,
-        version=__version__,
-        spawn_passive=spawn_passive,
-        health_check=health_check,
-        make_client=make_client,
-        pick_free_port=pick_free_port,
-        refuse_old=(
-            refuse_serving if serving is not None else
-            lambda active: forwarded_skip if active_route_is_forward(active) else None
-        ),
-        expected_old=routing.Endpoint.from_dict(serving.route) if serving is not None else None,
-        on_published=record_successor_publication if serving is not None else None,
-    )
+    def run_cutover(held_lock: CutoverLock | None = None) -> CutoverResult:
+        nonlocal ordinary_predecessor, unconfirmed_previous
+        if serving is None:
+            healing = routing.reap_stale_active(config_dir(), service="agent-bridge")
+            if str(healing.get("reason", "")).startswith("error:"):
+                return CutoverResult(ok=False, error=f"routing reconciliation failed: {healing['reason']}")
+            table = routing.read_table(config_dir(), strict=True) or {}
+            routing._validate_endpoint_rows(table)
+            raw = table.get("active")
+            ordinary_predecessor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            if ordinary_predecessor is None and isinstance(table.get("previous"), dict):
+                unconfirmed_previous = table["previous"]
+        orch = CutoverOrchestrator(
+            config_dir(),
+            bind=cfg.bind,
+            version=__version__,
+            spawn_passive=spawn_passive,
+            health_check=health_check,
+            make_client=make_client,
+            pick_free_port=pick_free_port,
+            refuse_old=refuse_serving if serving is not None else refuse_ordinary,
+            expected_old=predecessor if serving is not None else ordinary_predecessor,
+            on_published=(
+                record_successor_publication if serving is not None else
+                record_ordinary_publication if ordinary_predecessor is not None else None
+            ),
+            retire_failed_predecessor=retire_ordinary if ordinary_predecessor is not None else None,
+            drain_predecessor=ordinary_predecessor is None,
+            writer_reconciliation=False if ordinary_predecessor is not None else None,
+            preserve_raw_active=serving is None,
+        )
+        if held_lock is not None:
+            return orch.run(
+                health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
+                force=args.force, held_lock=held_lock,
+            )
+        return orch.run(
+            health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force,
+        )
+
     res = None
     try:
-        res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
+        if serving is None:
+            lock = CutoverLock(config_dir())
+            try:
+                lock.acquire(timeout=args.health_timeout + args.drain_timeout + 60.0)
+            except CutoverLockedError as exc:
+                res = CutoverResult(ok=False, error=str(exc))
+            else:
+                try:
+                    res = run_cutover(lock)
+                finally:
+                    lock.release()
+        else:
+            res = run_cutover()
     finally:
         if candidate is not None:
             candidate.close(completed=res is not None and res.ok)
@@ -443,6 +509,12 @@ def _cmd_deploy(
     # output, since it lands on stdout ahead of the single JSON payload
     # `core._json_out(res.to_dict())` emits below.
     res.steps = prelude_steps + res.steps
+    if unconfirmed_previous is not None:
+        res.predecessor_cleanup = {
+            "exit_confirmed": False, "reason": "previous endpoint has no active native owner",
+            "endpoint": unconfirmed_previous,
+        }
+        res.retirement_pending = True
     if res.error == forwarded_skip:
         if args.json:
             data = res.to_dict()
@@ -466,7 +538,7 @@ def _cmd_deploy(
         # reattach retry below run while a legacy/partial routing record's
         # old frontend is still actually attached).
         if old is None:
-            old_confirmed_gone = True  # cold start -- no predecessor to wait for
+            old_confirmed_gone = unconfirmed_previous is None
         elif not old.pid:
             old_confirmed_gone = False  # pid unknown -- cannot confirm either way
         elif active is not None and old.pid == active.pid:
@@ -477,10 +549,14 @@ def _cmd_deploy(
             if serving is not None:
                 exited, forced = serving.process.wait(0), False
             else:
-                exited, forced = core._ensure_retired_daemon_exited(old.pid)
+                exited = res.retirement_confirmed
+                forced = bool((res.predecessor_cleanup or {}).get("forced"))
             if exited:
-                res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced tree reap)" if forced else ""))
+                res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced central-only)" if forced else ""))
                 old_confirmed_gone = True
+            elif serving is None:
+                res.retirement_pending = True
+                res.steps.append(f"central predecessor cleanup unconfirmed pid={old.pid}; successor remains active")
             else:
                 res.steps.append(f"FAILED: retired daemon pid={old.pid} is still alive")
                 res.ok = False
@@ -507,7 +583,8 @@ def _cmd_deploy(
             try:
                 active_url = f"http://{routing.format_authority(host, active.port)}"
                 reattach = make_client(active_url)._request(
-                    "POST", "/api/v1/session-hosts/reattach"
+                    "POST", "/api/v1/session-hosts/reattach",
+                    request_timeout=5.0, allow_retry=False,
                 ) or {}
                 res.steps.append(
                     f"post-cutover reattach: {reattach.get('reattached', 0)} session(s)"
@@ -588,7 +665,7 @@ def add_deploy_cutover_flags(
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
 
 
-def register_venue_commands(sub: argparse._SubParsersAction) -> None:
+def register_venue_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parity_p = sub.add_parser("parity", help="Run redacted launch/auth/reattach acceptance for a remote venue")
     parity_p.add_argument("target", help="Remote agent target (container: or codespace:)")
     parity_p.add_argument("--expect-workspace")

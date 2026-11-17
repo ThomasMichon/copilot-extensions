@@ -93,3 +93,12 @@ policy and Azure CLI JSON values remain dynamic at their existing validation
 boundaries; annotations do not validate provider data, alter scope decisions,
 or change credential expiry. OS-selected stdlib locking APIs retain their
 actual signatures on both analysis targets, without requiring platform stubs.
+
+## Listener retirement authority
+
+`CredentialRelayServer.start(reclaim=False)` never evicts an occupied fixed
+port or silently replaces that pin with an ephemeral listener. It retains the
+original bind error for the caller's independent retirement/readiness owner.
+The default `start()` behavior remains compatible for existing consumers.
+Bridge explicitly disables reclamation: relay activation must not become an
+alternate process-tree retirement path.
