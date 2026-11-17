@@ -31,7 +31,7 @@ def execute(
     nonce = secrets.token_hex(32)
     child_env = {**environment, NONCE_ENV: nonce}
 
-    def check(request: dict) -> None:
+    def check(request: dict[str, object]) -> None:
         if (
             request["argv"] != argv or request["session_id"] != session_id
             or request["cwd"] != cwd

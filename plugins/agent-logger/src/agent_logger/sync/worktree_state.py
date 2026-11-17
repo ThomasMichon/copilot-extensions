@@ -167,7 +167,7 @@ def select_repository_collection(
         raise WorktreeStateError("worktree collection requires a nonpassive authorized enforce plan")
     if plan.machine != resolve_machine_identity(cfg):
         raise WorktreeStateError("collection plan belongs to a different executing machine")
-    if os.name != "posix":
+    if os.name not in ("posix", "nt"):
         raise WorktreeStateError("typed worktree collection has no qualified native durability adapter")
     if cfg.sync_protection.enabled:
         raise WorktreeStateError("privacy policy withholds lossless worktree-state databases")
@@ -185,7 +185,7 @@ def select_repository_collection(
         raise WorktreeStateError(str(error)) from error
     configured = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     configured_root = configured.worktree_state_root()
-    if configured_root is None or _native_root(configured_root) != root:
+    if configured_root is None or str(_native_root(configured_root)) != str(root):
         raise WorktreeStateError("supplied destination differs from the current sync configuration")
     destination = ResourceBinding("filesystem", str(root)).canonical_identity
     matches = [
@@ -209,6 +209,6 @@ def select_repository_collection(
         claim.profile, claim.landing, claim.retention, claim.mutation,
     )):
         raise WorktreeStateError("collection claim has unsupported content or mutation policy")
-    if claim.resource.canonical_identity != destination or claimed_root != root:
+    if claim.resource.canonical_identity != destination or str(claimed_root) != str(root):
         return None
     return root

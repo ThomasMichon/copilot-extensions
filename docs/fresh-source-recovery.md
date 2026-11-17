@@ -291,6 +291,78 @@ A reader does not invent a retention limit, advance history, label an
 unexercised candidate good or enable automatic rollback. Historical
 qualification retains immutable source and consuming-repository association.
 
+### Association adapter receiving contract
+
+This is a review-first design for the existing association/declaration owner
+under [#7028](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6890789048),
+not an implemented capability. The
+[delivery and validation plan](../efforts/active/source-managed-runtime-installs/repository-suite-association.md)
+retains its completion gates. Schema 1, schema-2 preview, bootstrap discovery
+and all existing installation behavior remain unchanged by this contract.
+
+The existing Manager configuration owner retains one consuming-repository
+association per explicitly addressed configuration root. Store it in that
+root's existing `config.toml`, outside application version slots:
+
+```toml
+[repository_suite]
+version = 1
+repository_root = '<absolute-adopter-checkout>'
+```
+
+The table has exactly those two fields. `version` is integer 1, not a boolean;
+`repository_root` is a fully qualified filesystem path without parent
+components or control characters. An absent table is unassociated; an empty,
+malformed or unsupported table is not absence. The table stores the desired
+repository association, not a qualified source version, successful installation,
+last-known-good history or permission to change that repository.
+
+The adapter belongs to the existing Manager package. Its planned module/API
+requires an explicit Manager configuration root; it does not default to cwd,
+an adopted project, a registry entry or another installation. Planned operations:
+
+| Operation | Boundary |
+|---|---|
+| Inspect | Read one bounded configuration and report the stored association or its absence; no writes, adopter-policy read, Git, setup or service work |
+| Associate | Propose an existing ordinary adopter root; change the table only with explicit apply |
+| Clear | Propose removal of that table only; change it only with explicit apply |
+
+These are not commands to run until implementation and its actual module/schema
+discovery are available. An old runtime ignoring the extra TOML table does not
+implement the adapter. Missing module or unsupported schema is an explicit
+unsupported result, never permission to install or invoke a guessed fallback.
+
+Inspection accepts at most 64 KiB of configuration, rejects invalid TOML and
+unknown table fields, and does not create even a missing configuration root or
+lock. Reading the stored identity does not require the adopter still to exist.
+The existing declaration reader retains ordinary-path, parser and availability
+checks when a caller later consumes that root. Keep those data and source
+admission steps separate rather than executing Git during association discovery.
+
+Initial association requires absence or the same already-associated root.
+Replacing a different root requires an explicit expected current root; clearing
+also names the expected current root. Revalidate it under the existing shared
+configuration writer lock. A stale expectation refuses without changing the
+association. Equivalent native path spellings are not a different association.
+Repeat requests that already match the desired state are observations, not
+installation replay or new qualification.
+
+Validate inputs before entering the writer. Explicit apply uses the existing
+configuration path, lock and atomic-publication boundary and changes only this
+table. Preserve unrelated configuration, including Manager self-source and
+service-runtime policy. Do not copy their values into the association, rewrite
+them to match adopter data, or use old runtime health as a prerequisite to this
+explicit configuration operation.
+
+The installation/update caller remains responsible for effect authority and
+for selecting the addressed configuration root. A configuration read or bind
+does not prove an installed generation. The caller passes the stored adopter
+root to the existing declaration/parser owner, then resolves one immutable
+selection through the existing native acquisition/composition owner. Preserve
+explicit source-override precedence and independent policies. This contract
+does not wire ordinary callers, enable repository installation, select Copilot
+content or claim that any domain consumed the declaration.
+
 ### Compatibility and acceptance
 
 Use passive bootstrap discovery before choosing the distinct supported request

@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Iterator
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from . import config
 from .cache import PersistentCache, cache_enabled, get_cache as _raw_get_cache
@@ -28,6 +28,14 @@ class ServiceCacheUnavailable(RuntimeError):
 
 class ReadAdmissionExpired(ServiceCacheUnavailable):
     """An internal caller's native-read admission budget expired."""
+
+
+def require_binding(service: VaultService, binding: str, *, refresh: bool = False) -> None:
+    if any(
+        binding.startswith(prefix) and (prefix != binding or not refresh)
+        for prefix in service._blocked_service_cache
+    ):
+        raise ServiceCacheUnavailable(UNAVAILABLE)
 
 
 def get_cache() -> PersistentCache:
@@ -64,11 +72,8 @@ def read(
         selected = ServiceCacheStore(persistent, kpdb, group) if kpdb and cache_enabled() else None
         service._request_ctx.cache_warning = None
         binding = binding_for(kpdb, selected.group, entry, field) if selected is not None else ""
-        if selected is not None and any(
-            binding.startswith(prefix) and (prefix != binding or not refresh)
-            for prefix in service._blocked_service_cache
-        ):
-            raise ServiceCacheUnavailable(UNAVAILABLE)
+        if selected is not None:
+            require_binding(service, binding, refresh=refresh)
         if selected is not None:
             try:
                 # Even refresh observes pending revocation, but never deletes a
@@ -79,7 +84,7 @@ def read(
             if not refresh and record is not None:
                 service.cache[key] = record["value"]
                 service._credential_generations[key] = record["generation"]
-                return record["value"]
+                return cast(str, record["value"])
         elif not refresh:
             if key in service.cache:
                 return service.cache[key]
@@ -101,7 +106,7 @@ def read(
                 if not refresh and record is not None:
                     service.cache[key] = record["value"]
                     service._credential_generations[key] = record["generation"]
-                    return record["value"]
+                    return cast(str, record["value"])
             service._check_password_ttl()
             if not service.ensure_unlocked(kpdb):
                 return None

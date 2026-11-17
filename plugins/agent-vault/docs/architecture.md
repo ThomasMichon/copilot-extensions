@@ -8,6 +8,7 @@ This document describes the implementation as it exists today. It intentionally 
 |-----------|--------|----------------|
 | CLI | `src/agent_vault/cli.py` | Parses `agent-vault` commands, resolves the active vault on each call, cold-starts the service, performs persistent-cache tier-0 reads, and sends newline-framed JSON requests to the daemon. |
 | Credential reader | `src/agent_vault/credential_reads.py` | Owns the cache-first `get` handler, pinned read-only behavior and authoritative cache reconciliation; the CLI retains its existing handler export and IPC/lifecycle seams. |
+| Protected maintenance | `src/agent_vault/cache_maintenance.py` | Provides metadata-only population and verification through the selected service's existing protected-cache owner; [contract and provider-first rollout](cache-maintenance.md). |
 | Service | `src/agent_vault/service.py` | Owns the in-memory KeePass master-password cache and credential-value cache, verifies/unlocks databases, handles entry operations, GCM delegation, KEK operations, endpoint advertisement, and shutdown. |
 | Accepted requests | `src/agent_vault/service_connections.py` | Retains accepted connections and native request futures until server shutdown actually settles them. |
 | KeePassXC backend | `src/agent_vault/keepassxc.py` | Locates `keepassxc-cli` and maps service actions to `keepassxc-cli` commands. KeePassXC is the only secret-store backend today. |
@@ -153,6 +154,8 @@ The daemon supports the actions registered in `VaultService.handle_request`:
   [`ssh-key prepare`](ssh-key-preparation.md); optional `ssh` cryptographic extra,
   reuse-only by default, explicit initial creation and public-only response.
 - Service state: `ping`, `lock`, `unlock`, `stop`.
+- Protected-cache metadata: `cache-maintenance`, with running support advertised
+  by full `ping`; [provider-first contract](cache-maintenance.md).
 - Git HTTPS credential helper: `git-credential`, delegated to local Git Credential Manager for `VAULT_GCM_HOSTS` (default GitHub and Azure DevOps hosts), independent of KeePass unlock state.
 - Envelope KEK: `seal`, `unseal`, `kek-list`, independent of KeePass unlock state.
 - Extension actions registered with `register_action`.
