@@ -26,10 +26,6 @@ With ``self_retirement``, publication commits before ``activate_successor``
 can admit work. Serving readiness completes installation independently of
 predecessor retirement; an explicit bounded fallback may then clean up old owners.
 
-Exact-predecessor fencing retains writer-owned recovery by default. A caller
-that never drains the predecessor may explicitly disable writer reconciliation;
-its breadcrumb records that no drain was requested, so ordinary recovery does
-not change the predecessor's admission gate.
 """
 
 from __future__ import annotations
@@ -44,6 +40,7 @@ from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
 from . import routing_persistence
 from .cutover_result import CutoverResult as CutoverResult
+from .cutover_options import writer_reconciliation as validate_options
 from .cutover_selection import (
     candidate_port, raw_active, refuse_current_old, routing_deadline,
     routing_lock_kwargs, validate_routing_lock_timeout,
@@ -128,20 +125,6 @@ class CutoverOrchestrator:
         preserve_raw_active: bool = False,
         writer_reconciliation: bool | None = None,
     ) -> None:
-        if preserve_raw_active and refuse_old is None:
-            raise ValueError("raw active preservation requires a publication refusal guard")
-        if expected_old is not None and refuse_old is None:
-            raise ValueError("an expected predecessor also requires a publication refusal guard")
-        if on_published is not None and expected_old is None:
-            raise ValueError("publication notification requires an observed predecessor")
-        if self_retirement and (activate_successor is None or drain_before_publish):
-            raise ValueError("self-retirement requires successor activation without predecessor drain")
-        if activate_successor is not None and not self_retirement:
-            raise ValueError("successor activation requires self-retirement")
-        if writer_reconciliation is not None and type(writer_reconciliation) is not bool:
-            raise ValueError("writer reconciliation must be a boolean")
-        if writer_reconciliation is False and (drain_before_publish or drain_predecessor):
-            raise ValueError("writer reconciliation opt-out requires a no-drain cutover")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -158,10 +141,6 @@ class CutoverOrchestrator:
         self.routing = routing_mod
         self.drain_before_publish = drain_before_publish
         self.expected_old = expected_old
-        self.writer_reconciliation = (
-            drain_before_publish or expected_old is not None
-            if writer_reconciliation is None else writer_reconciliation
-        )
         self.preserve_raw_active = preserve_raw_active
         self.on_published = on_published
         self.self_retirement = self_retirement
@@ -174,6 +153,7 @@ class CutoverOrchestrator:
             require_predecessor_retirement, self_retirement, retire_failed_predecessor,
             expected_old, drain_predecessor,
         )
+        self.writer_reconciliation = validate_options(self, writer_reconciliation)
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
