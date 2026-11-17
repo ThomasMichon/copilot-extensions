@@ -18,15 +18,28 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows executab
 
 
 @pytest.mark.parametrize("pinned", [False, True])
-def test_selected_long_path_peer_preserves_arguments_and_stdio(tmp_path, monkeypatch, pinned):
+@pytest.mark.parametrize("supplementary", [False, True], ids=["ascii", "supplementary"])
+def test_selected_long_path_peer_preserves_arguments_and_stdio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pinned: bool, supplementary: bool,
+) -> None:
+    version = "1.0.0+" + "x" * 150
+    if supplementary:
+        version = "1.0.0"
+        selected = (
+            tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID / "plugins"
+            / "agent-worktrees" / "versions" / version / ".venv" / "Scripts" / "python.exe"
+        )
+        units = len(str(selected).encode("utf-16-le")) // 2
+        tmp_path /= "\U0001f600" * max(1, (260 - units) // 2 + 1)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
     own = _make_namespaced_context(cell)
-    version = "1.0.0+" + "x" * 150
     python = _make_live_peer(cell, "agent-worktrees", version, nested=True)
-    assert len(str(python)) > 260
+    assert len(str(python).encode("utf-16-le")) // 2 >= 260
+    if supplementary:
+        assert len(str(python)) < 260
     slot = python.parent.parent.parent
     if pinned:
         bootstrap = slot / ".runtime-bootstrap"

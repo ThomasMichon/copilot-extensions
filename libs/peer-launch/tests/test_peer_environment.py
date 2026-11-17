@@ -369,7 +369,11 @@ print(json.dumps({"selected": str(selected), "probe": environment["COPILOT_EXTEN
     ("\\\\?\\C:\\" + "x" * 250 + r"\python.exe", "\\\\?\\C:\\" + "x" * 250 + r"\python.exe"),
     ("\\\\server\\share\\" + "x" * 250 + r"\python.exe",
      "\\\\?\\UNC\\server\\share\\" + "x" * 250 + r"\python.exe"),
-], ids=["short-drive", "long-drive", "extended-drive", "long-unc"])
+    ("C:\\" + "x" * 235 + "\U0001f600" * 10 + r"\python.exe",
+     "\\\\?\\C:\\" + "x" * 235 + "\U0001f600" * 10 + r"\python.exe"),
+    ("C:\\runtime\\\ud800\\python.exe", "C:\\runtime\\\ud800\\python.exe"),
+], ids=["short-drive", "long-drive", "extended-drive", "long-unc",
+        "supplementary-long-drive", "unpaired-surrogate"])
 def test_windows_peer_launch_binds_executable_without_rewriting_argv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pinned: bool, selected: str, executable: str,
 ) -> None:
