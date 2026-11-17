@@ -18,11 +18,10 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** qualify the credential-free probe diagnostic and configured-HEAD
-identity correction. The unchanged-runtime packet executes three meaningful
-failures and 46 passing controls. Published `0b7ce1b150` remains blocked by those
-two findings; the separate environment-case refinement passes 191 selected
-controls but does not qualify this new correction. Source acceptance remains open.
+**Now:** publish exact source `0bb9856127`, qualified by all 195 selected
+controls, then obtain final-head review and CI. The unchanged-runtime packet
+executes three meaningful failures and 46 passing controls. Source acceptance
+remains open until actual merge and finite closeout.
 No production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
@@ -122,7 +121,7 @@ custody remain independent.
   refspecs and cached-bootstrap findings while preserving existing fetch callers.
 - [x] Resolve unusable-ref fallback, overlapping remote namespaces,
   command-scoped credentials and native short-source resolution.
-- [ ] Resolve authenticated-probe timeout redaction and configured-HEAD identity
+- [x] Resolve authenticated-probe timeout redaction and configured-HEAD identity
   while retaining native exclusion matching and OS environment semantics.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
@@ -164,7 +163,7 @@ custody remain independent.
   overlapping namespaces cannot overwrite either source; authorized scoped
   credentials survive without repository selectors; HEAD/tag short sources
   retain Git's actual resolution.
-- [ ] **Probe diagnostics and HEAD identity:** a synthetic authenticated timeout
+- [x] **Probe diagnostics and HEAD identity:** a synthetic authenticated timeout
   never exposes its injected value; an explicitly configured matching HEAD
   refreshes even without a local default, while a different HEAD remains a
   pre-write conflict.
