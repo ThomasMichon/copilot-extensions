@@ -27,6 +27,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 _GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
 _LOCAL_GIT_TIMEOUT = 10
+_MAX_BATCH_QUERIES = 256
 _OBJECT_TYPES: dict[str, str | None] = {}
 _BLOB_HASHES: dict[str, str | None] = {}
 _SOURCE_BLOBS: dict[tuple[str, str], str | None] = {}
@@ -35,6 +36,14 @@ _MANIFEST = "plugins/agent-bridge/plugin.json"
 
 
 def _batch(
+    queries: list[str], *, root: Path | None = None,
+) -> Iterable[tuple[str, str | None, str | None, bytes]]:
+    """Keep each local child bounded as retained provenance grows."""
+    for offset in range(0, len(queries), _MAX_BATCH_QUERIES):
+        yield from _read_batch(queries[offset:offset + _MAX_BATCH_QUERIES], root=root)
+
+
+def _read_batch(
     queries: list[str], *, root: Path | None = None,
 ) -> Iterable[tuple[str, str | None, str | None, bytes]]:
     require_local_object_reads()

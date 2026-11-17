@@ -896,6 +896,10 @@
         "tools/promotion_unit_tests/test_git_config_transaction.py::test_real_file_transaction_and_rollback_use_only_the_audited_temp_scope",
         "tools/promotion_unit_tests/test_git_config_transaction.py::test_cleanup_error_preserves_real_committed_bytes_and_receipt",
         "tools/promotion_unit_tests/test_git_config_transaction.py::test_lock_identity_failure_closes_the_owned_descriptor",
+        "tools/promotion_unit_tests/test_bridge_contract_git.py::test_large_object_inventory_is_bounded_complete_and_deduplicated",
+        "tools/promotion_unit_tests/test_bridge_contract_git.py::test_later_batch_failure_does_not_publish_partial_object_evidence[header]",
+        "tools/promotion_unit_tests/test_bridge_contract_git.py::test_later_batch_failure_does_not_publish_partial_object_evidence[truncated]",
+        "tools/promotion_unit_tests/test_bridge_contract_git.py::test_later_batch_failure_does_not_publish_partial_object_evidence[trailing]",
         "tools/promotion_unit_tests/test_manager_uninstall.py::test_batch_removal_refuses_invalid_generations_before_custody[empty]",
         "tools/promotion_unit_tests/test_manager_uninstall.py::test_batch_removal_refuses_invalid_generations_before_custody[dev]",
         "tools/promotion_unit_tests/test_manager_uninstall.py::test_batch_removal_refuses_invalid_generations_before_custody[parent]",
@@ -5798,6 +5802,7 @@
         "plugins/agent-vault/src/agent_vault/invocation.py",
         "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py",
         "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py",
+        "tools/agent_bridge_contract_git.py",
         "plugins/agent-vault/src/agent_vault/command_transport.py",
         "plugins/agent-vault/src/agent_vault/attachment_export.py",
         "plugins/agent-vault/src/agent_vault/attachment_export_files.py",
@@ -6681,6 +6686,8 @@
         "tools/promotion_unit_tests/test_retained_load_acceptance.py": "66914b86e95efc23f26380b4dc4e6a1b4a1a4d98e2d800793be1f8afa7393a42",
         "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py": "b05ac937b2d76d1cccffb5f2cadf1d14fc0843f412f6f4d9fb041ac459000c9a",
         "plugins/agent-bridge/src/agent_bridge/retained_load_configuration.py": "ee6ac53a49f6ac85dc98891cf5ba74b0d73e4048a922a82bbf4fec90a5b54f35",
-        "libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py": "0675a28c0c233ed235b392d1f1f12faa5196f7b2bb41f3a513fdb5c5b859adfb"
+        "libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py": "0675a28c0c233ed235b392d1f1f12faa5196f7b2bb41f3a513fdb5c5b859adfb",
+        "tools/agent_bridge_contract_git.py": "aa2b95afbb1512c968d2945f5c993dd8fb41d60dee8dcc018977e547929163b7",
+        "tools/promotion_unit_tests/test_bridge_contract_git.py": "90e66bfdc4bad7b72bf12d7cc4b25f1398b9ff1b226f829637c420347f5e0977"
     }
 }
