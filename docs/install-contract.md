@@ -5602,8 +5602,9 @@ snapshot/wheel/profile portfolio. Otherwise it builds the explicitly selected
 first-party projects once and calls the existing complete-profile owner for
 each component. One selected UV executable and monotonic deadline cover the
 portfolio. Component extras are explicit inputs to that same profile owner.
-The complete-profile worker borrows the same locked build-toolchain interpreter
-while its workspace remains held, including the compact Windows workspace.
+The complete-profile worker uses the invoking provider's interpreter through the
+caller-owned process adapter and shared monotonic deadline. The build-toolchain
+context remains held, including the compact Windows workspace.
 The cold parent needs no ambient Packaging installation. The worker checks its
 actual native marker environment against the selected parent interpreter and
 binds its source-record inspection to the parent's exact record. Existing
