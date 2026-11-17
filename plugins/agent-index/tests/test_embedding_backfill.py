@@ -1,27 +1,40 @@
 """Native finite-budget backfill, explicit repair and retained owner guards."""
 
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Iterable
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from test_embedding_pair_reuse import Client, chunk, profile
 
+from agent_index.engine.client import EngineClient
 from agent_index.index_config import IndexConfig
-from agent_index.indexing.embedding_backfill import BackfillRepairRequired, backfill_embedding_slice
+from agent_index.indexing.embedding_backfill import (
+    BackfillProgress, BackfillRepairRequired, backfill_embedding_slice,
+)
 from agent_index.indexing.engine import SourceSpec, source_scope_hash
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls, PendingCrawlConflict, recovery_scope, recover_source
 from agent_index.indexing.state import IndexState, SourceState
 from agent_index.store.chunk_id_index import prepare_chunk_id_index
+from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import LAYOUT, SourceLayoutError, initialize_source_store
+from agent_index.store.vector_table import VectorTable
+
+initialize_store = cast(Callable[[IndexConfig], MultiModelStore], initialize_source_store)
 
 
 @pytest.fixture
-def context(tmp_path, monkeypatch):
+def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
     config = IndexConfig(data_dir=tmp_path, model_profiles={"a": profile()})
-    store = initialize_source_store(config)
+    store = initialize_store(config)
     paths = PathIndex(tmp_path / "path_index.db")
     spec = SourceSpec(name="alias", type="git", repo="example/project")
     connector = SimpleNamespace(source_name="git:project", recovery_identity=("principal", "target"))
@@ -35,9 +48,9 @@ def context(tmp_path, monkeypatch):
     )
     state.save(config.state_file)
     client = Client()
-    ready = []
+    ready: list[bool] = []
 
-    def after(table, _selected):
+    def after(table: VectorTable, _selected: int) -> None:
         # An explicit physical-tail budget, not inferred from the selected count.
         prepare_chunk_id_index(table, max_rows=20)
 
@@ -46,10 +59,10 @@ def context(tmp_path, monkeypatch):
         items=items, client=client, ready=ready, after=after,
     )
 
-    def run(**kwargs):
+    def run(**kwargs: Any) -> BackfillProgress:
         return backfill_embedding_slice(
             result.spec, result.connector, config=config, store=store, paths=result.paths,
-            clients={"a": client}, row_budget=kwargs.pop("row_budget", 2),
+            clients=kwargs.pop("clients", {"a": client}), row_budget=kwargs.pop("row_budget", 2),
             after_store=kwargs.pop("after_store", result.after),
             before_embed=kwargs.pop("before_embed", lambda: ready.append(True)), **kwargs,
         )
@@ -58,7 +71,7 @@ def context(tmp_path, monkeypatch):
     return result
 
 
-def saved(context):
+def saved(context: SimpleNamespace) -> dict[str, Any]:
     conn = context.paths._connect()
     try:
         return dict(conn.execute(
@@ -68,7 +81,9 @@ def saved(context):
         conn.close()
 
 
-def test_finite_restart_resume_completion_and_no_canonical_or_checkpoint_writes(context) -> None:
+def test_finite_restart_resume_completion_and_no_canonical_or_checkpoint_writes(
+    context: SimpleNamespace,
+) -> None:
     original = context.store.content_store.capture_snapshot()
     state_bytes = context.config.state_file.read_bytes()
     first = context.run()
@@ -93,7 +108,61 @@ def test_finite_restart_resume_completion_and_no_canonical_or_checkpoint_writes(
     assert len(context.client.calls) == before_calls
 
 
-def test_canonical_change_keeps_indexing_active_and_requires_explicit_restart(context) -> None:
+def test_model_readiness_selects_only_missing_pairs_and_skips_covered_replay(
+    context: SimpleNamespace,
+) -> None:
+    assert context.run(row_budget=10).complete
+    old_calls = len(context.client.calls)
+    state_bytes = context.config.state_file.read_bytes()
+    snapshot = context.store.content_store.capture_snapshot()
+    context.config.model_profiles["b"] = profile("b")
+    with context.store._source_domain.write(context.store.content_store.db):
+        context.store.register_model(context.config.model_profiles["b"])._get_or_create_table()
+    added = Client()
+    clients = {"a": context.client, "b": added}
+    callbacks: list[str] = []
+    options = {
+        "clients": clients,
+        "before_embed": lambda: callbacks.append("generic"),
+        "before_model_embed": callbacks.append,
+    }
+
+    first = context.run(restart=True, **options)
+    assert first.offset == first.vector_rows_upserted == 2
+    assert callbacks == ["generic", "b"]
+    assert len(context.client.calls) == old_calls
+    assert len(added.calls) == 1 and len(added.calls[0]) == 2
+
+    replay = context.run(restart=True, **options)
+    assert replay.offset == 2 and replay.vector_rows_upserted == 0
+    assert callbacks == ["generic", "b"]
+    assert len(context.client.calls) == old_calls and len(added.calls) == 1
+    assert context.config.state_file.read_bytes() == state_bytes
+    assert context.store.content_store.capture_snapshot() == snapshot
+
+
+def test_model_readiness_failure_does_not_acknowledge_offset(context: SimpleNamespace) -> None:
+    state_bytes = context.config.state_file.read_bytes()
+    error = RuntimeError("model not ready")
+    models: list[str] = []
+
+    def refuse(model: str) -> None:
+        models.append(model)
+        raise error
+
+    with pytest.raises(RuntimeError) as raised:
+        context.run(before_model_embed=refuse)
+    assert raised.value is error
+    assert models == ["a"] and context.client.calls == []
+    progress = saved(context)
+    assert progress["complete"] == 0
+    assert json.loads(progress["payload"])["offset"] == 0
+    assert context.config.state_file.read_bytes() == state_bytes
+
+
+def test_canonical_change_keeps_indexing_active_and_requires_explicit_restart(
+    context: SimpleNamespace,
+) -> None:
     context.run()
     previous = saved(context)
     call_count = len(context.client.calls)
@@ -108,18 +177,20 @@ def test_canonical_change_keeps_indexing_active_and_requires_explicit_restart(co
     assert restarted.offset == 2 and restarted.total_rows == 6
 
 
-def test_ordinary_acquisition_is_not_fenced_by_pending_backfill(context) -> None:
+def test_ordinary_acquisition_is_not_fenced_by_pending_backfill(context: SimpleNamespace) -> None:
     context.run()
     journal = PendingCrawls(context.paths)
     assert journal.sources() == []
     state = IndexState.load(context.config.state_file)
 
-    def apply(*, manifest, full):
+    def apply(*, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]:
         state.mark_source_indexed(context.spec.name, "ordinary-poll", 5)
         return 0, 0, 0
 
+    scope = state.sources[context.spec.name].acquisition_scope
+    assert scope is not None
     recover_source(
-        context.spec.name, scope=state.sources[context.spec.name].acquisition_scope,
+        context.spec.name, scope=scope,
         state=state, state_file=context.config.state_file, paths=context.paths,
         full=False, family=context.connector.source_name,
         acquire=lambda: CrawlManifest(source=context.spec.name, commit="ordinary-poll"),
@@ -130,7 +201,9 @@ def test_ordinary_acquisition_is_not_fenced_by_pending_backfill(context) -> None
 
 
 @pytest.mark.parametrize("change", ["account", "config", "profile", "missing-scope", "family"])
-def test_binding_change_refuses_before_engine_or_progress(context, change) -> None:
+def test_binding_change_refuses_before_engine_or_progress(
+    context: SimpleNamespace, change: str,
+) -> None:
     context.run()
     before = saved(context)
     calls = len(context.client.calls)
@@ -154,7 +227,9 @@ def test_binding_change_refuses_before_engine_or_progress(context, change) -> No
     assert context.store._source_domain.receipt()["state"] == "clean"
 
 
-def test_completed_vector_coverage_change_requires_restart_not_cached_success(context) -> None:
+def test_completed_vector_coverage_change_requires_restart_not_cached_success(
+    context: SimpleNamespace,
+) -> None:
     assert context.run(row_budget=10).complete
     before = saved(context)
     import numpy as np
@@ -165,13 +240,15 @@ def test_completed_vector_coverage_change_requires_restart_not_cached_success(co
     assert saved(context) == before
 
 
-def test_progress_failure_retries_covered_pairs_without_reembedding(context, monkeypatch) -> None:
+def test_progress_failure_retries_covered_pairs_without_reembedding(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_index.indexing import embedding_backfill as module
 
     require = module._require_current
-    calls = []
+    calls: list[bool] = []
 
-    def fail_after_store(*args):
+    def fail_after_store(*args: Any) -> None:
         calls.append(True)
         if not context.store._source_domain.writing and context.client.calls:
             raise RuntimeError("progress publication interrupted")
@@ -191,8 +268,10 @@ def test_progress_failure_retries_covered_pairs_without_reembedding(context, mon
     assert len(context.client.calls) == 1
 
 
-def test_post_effect_failure_preserves_existing_outer_writer_uncertainty(context) -> None:
-    def fail(table, selected):
+def test_post_effect_failure_preserves_existing_outer_writer_uncertainty(
+    context: SimpleNamespace,
+) -> None:
+    def fail(table: VectorTable, selected: int) -> None:
         context.after(table, selected)
         raise RuntimeError("coverage interrupted")
 
@@ -204,7 +283,9 @@ def test_post_effect_failure_preserves_existing_outer_writer_uncertainty(context
         context.run()
 
 
-def test_pending_acquisition_blocks_slice_but_backfill_does_not_replace_manifest(context) -> None:
+def test_pending_acquisition_blocks_slice_but_backfill_does_not_replace_manifest(
+    context: SimpleNamespace,
+) -> None:
     manifest = CrawlManifest(
         source=context.spec.name, commit="target", stored_family=context.connector.source_name,
         accounting_family=context.connector.source_name,
@@ -219,13 +300,15 @@ def test_pending_acquisition_blocks_slice_but_backfill_does_not_replace_manifest
 
 
 @pytest.mark.parametrize("budget", [0, -1, True, 2.5])
-def test_invalid_budget_precedes_any_intent(context, budget) -> None:
+def test_invalid_budget_precedes_any_intent(context: SimpleNamespace, budget: object) -> None:
     with pytest.raises(ValueError, match="budget"):
         context.run(row_budget=budget)
     assert context.client.calls == []
 
 
-def test_unrelated_family_rows_consume_only_explicit_budget_without_vectors(context) -> None:
+def test_unrelated_family_rows_consume_only_explicit_budget_without_vectors(
+    context: SimpleNamespace,
+) -> None:
     unrelated = [chunk(f"unrelated {i}", source="git:project-extra") for i in range(3)]
     context.store.upsert_content(unrelated)
     prepare_chunk_id_index(context.store.content_store, max_rows=20)
@@ -239,23 +322,24 @@ def test_unrelated_family_rows_consume_only_explicit_budget_without_vectors(cont
 
 
 @pytest.mark.parametrize("size", [100, 10_000, 100_000])
-def test_native_offset_and_embedding_work_is_bounded_at_scale(context, monkeypatch, size) -> None:
-    from lancedb.table import LanceTable
-
+def test_native_offset_and_embedding_work_is_bounded_at_scale(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, size: int,
+) -> None:
     items = [chunk(f"scale {i}", path=f"scale-{i}.md", source=context.connector.source_name)
              for i in range(size - 5)]
     context.store.upsert_content(items)
     prepare_chunk_id_index(context.store.content_store, max_rows=size)
     snapshot = context.store.content_store.capture_snapshot()
     assert snapshot.rows == size
-    offsets = []
-    take = LanceTable.take_offsets
+    offsets: list[list[int]] = []
+    table_type = type(context.store.content_store._get_or_create_table())
+    take = table_type.take_offsets
 
-    def measured(table, selected):
+    def measured(table: Any, selected: Iterable[int]) -> Any:
         offsets.append(list(selected))
         return take(table, selected)
 
-    monkeypatch.setattr(LanceTable, "take_offsets", measured)
+    monkeypatch.setattr(table_type, "take_offsets", measured)
     first = context.run(row_budget=3)
     second = context.run(row_budget=3)
     assert offsets == [[0, 1, 2], [3, 4, 5]]
@@ -269,7 +353,7 @@ def test_native_offset_and_embedding_work_is_bounded_at_scale(context, monkeypat
 @pytest.mark.parametrize("corruption", [
     '{"version":2}', '{"version":true}', '{}', 'not-json',
 ])
-def test_corrupt_progress_never_grants_resume(context, corruption) -> None:
+def test_corrupt_progress_never_grants_resume(context: SimpleNamespace, corruption: str) -> None:
     context.run()
     before_calls = len(context.client.calls)
     conn = context.paths._connect()
@@ -283,7 +367,9 @@ def test_corrupt_progress_never_grants_resume(context, corruption) -> None:
     assert len(context.client.calls) == before_calls
 
 
-def test_new_model_backfills_only_its_missing_pairs_without_source_rewrites(context) -> None:
+def test_new_model_backfills_only_its_missing_pairs_without_source_rewrites(
+    context: SimpleNamespace,
+) -> None:
     assert context.run(row_budget=10).complete
     snapshot = context.store.content_store.capture_snapshot()
     original_calls = len(context.client.calls)
@@ -293,11 +379,11 @@ def test_new_model_backfills_only_its_missing_pairs_without_source_rewrites(cont
         context.store.register_model(new_profile)._get_or_create_table()
     second = Client()
 
-    def run(*, restart=False):
+    def run(*, restart: bool = False) -> BackfillProgress:
         return backfill_embedding_slice(
             context.spec, context.connector, config=context.config,
             store=context.store, paths=context.paths,
-            clients={"a": context.client, "b": second}, row_budget=10,
+            clients={"a": context.client, "b": cast(EngineClient, second)}, row_budget=10,
             after_store=context.after, restart=restart,
         )
 
@@ -311,14 +397,15 @@ def test_new_model_backfills_only_its_missing_pairs_without_source_rewrites(cont
     assert run().vector_rows_upserted == 0
 
 
-def test_cursor_compare_and_save_never_overwrites_a_concurrent_restart(context, monkeypatch) -> None:
-    import json
+def test_cursor_compare_and_save_never_overwrites_a_concurrent_restart(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_index.indexing import embedding_backfill as module
 
     save = module._save_progress
-    calls = []
+    calls: list[bool] = []
 
-    def race(paths, source, raw, payload):
+    def race(paths: PathIndex, source: str, raw: str, payload: dict[str, Any]) -> str:
         calls.append(True)
         if len(calls) == 2:
             conn = paths._connect()
@@ -339,7 +426,7 @@ def test_cursor_compare_and_save_never_overwrites_a_concurrent_restart(context, 
     assert context.store._source_domain.receipt()["state"] == "clean"
 
 
-def test_explicit_discard_preserves_data_and_refuses_a_newer_job(context) -> None:
+def test_explicit_discard_preserves_data_and_refuses_a_newer_job(context: SimpleNamespace) -> None:
     from agent_index.indexing.embedding_backfill import discard_embedding_backfill
 
     context.run()
@@ -360,11 +447,13 @@ def test_explicit_discard_preserves_data_and_refuses_a_newer_job(context) -> Non
     assert context.config.state_file.read_bytes() == state
 
 
-def test_intervening_ordinary_write_refuses_after_clean_writer_exit(context, monkeypatch) -> None:
+def test_intervening_ordinary_write_refuses_after_clean_writer_exit(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     content = context.store.content_store
     read = content.read_snapshot
 
-    def intervening(*args, **kwargs):
+    def intervening(*args: Any, **kwargs: Any) -> Any:
         records = read(*args, **kwargs)
         context.store.upsert_content([chunk("ordinary change", source=context.connector.source_name)])
         prepare_chunk_id_index(content, max_rows=20)
@@ -382,13 +471,15 @@ def test_intervening_ordinary_write_refuses_after_clean_writer_exit(context, mon
     assert context.run(restart=True).offset == 2
 
 
-def test_intervening_covered_restart_refuses_cleanly_before_pair_work(context, monkeypatch) -> None:
+def test_intervening_covered_restart_refuses_cleanly_before_pair_work(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     assert context.run(row_budget=10).complete
     content = context.store.content_store
     read = content.read_snapshot
-    restarted = []
+    restarted: list[bool] = []
 
-    def intervening(*args, **kwargs):
+    def intervening(*args: Any, **kwargs: Any) -> Any:
         records = read(*args, **kwargs)
         if not restarted:
             restarted.append(True)
@@ -404,8 +495,13 @@ def test_intervening_covered_restart_refuses_cleanly_before_pair_work(context, m
     assert context.run().offset == 4
 
 
-def test_unprepared_canonical_index_refuses_cleanly_then_can_be_prepared(context) -> None:
-    from agent_index.store.chunk_id_index import INDEX_NAME, ChunkIdIndexPreparationRequired
+def test_unprepared_canonical_index_refuses_cleanly_then_can_be_prepared(
+    context: SimpleNamespace,
+) -> None:
+    from agent_index.store.chunk_id_index import INDEX_NAME
+    from agent_index.store.scalar_index import (
+        ScalarIndexPreparationRequired as ChunkIdIndexPreparationRequired,
+    )
 
     content = context.store.content_store
     with context.store._source_domain.write(content.db):
@@ -420,7 +516,9 @@ def test_unprepared_canonical_index_refuses_cleanly_then_can_be_prepared(context
 
 
 @pytest.mark.parametrize("restart", [False, True])
-def test_legacy_recovery_fallback_never_grants_backfill_account_authority(context, restart) -> None:
+def test_legacy_recovery_fallback_never_grants_backfill_account_authority(
+    context: SimpleNamespace, restart: bool,
+) -> None:
     context.connector = SimpleNamespace(source_name=context.connector.source_name)
     state = IndexState.load(context.config.state_file)
     state.sources[context.spec.name].acquisition_scope = recovery_scope(
@@ -437,7 +535,7 @@ def test_legacy_recovery_fallback_never_grants_backfill_account_authority(contex
 
 @pytest.mark.parametrize("kind", ["configured", "stale"])
 def test_gc_guard_and_retirement_exclude_concurrent_backfill_admission(
-    context, monkeypatch, kind,
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str,
 ) -> None:
     import threading
     from agent_index.indexing.gc import (
@@ -445,15 +543,15 @@ def test_gc_guard_and_retirement_exclude_concurrent_backfill_admission(
     )
 
     guard = PendingCrawls.assert_gc_available
-    failures = []
+    failures: list[str] = []
 
-    def try_backfill():
+    def try_backfill() -> None:
         try:
             context.run()
         except SourceLayoutError as exc:
             failures.append(str(exc))
 
-    def interleaved(journal):
+    def interleaved(journal: PendingCrawls) -> None:
         guard(journal)
         worker = threading.Thread(target=try_backfill)
         worker.start()
@@ -478,7 +576,9 @@ def test_gc_guard_and_retirement_exclude_concurrent_backfill_admission(
     assert PendingCrawls(context.paths).backfill_sources() == []
 
 
-def test_explicit_retirement_refusal_keeps_domain_clean_and_backfill_reusable(context) -> None:
+def test_explicit_retirement_refusal_keeps_domain_clean_and_backfill_reusable(
+    context: SimpleNamespace,
+) -> None:
     from agent_index.indexing.gc import gc_unconfigured_sources
 
     context.run()

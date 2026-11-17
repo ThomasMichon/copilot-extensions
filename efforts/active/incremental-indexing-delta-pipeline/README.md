@@ -224,6 +224,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-16 explicit-backfill readiness](journal/2026/11.16%20backfill-readiness.md)
 - [2026-11-15 native Windows retrieval qualification](journal/2026/11.15%20windows-retrieval-qualification.md)
 - [2026-11-14 retrieval-glob intake](journal/2026/11.14-retrieval-glob-intake.md)
 - [2026-11-09 acceptance reconciliation](journal/2026/11.09%20acceptance-reconciliation.md)

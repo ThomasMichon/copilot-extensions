@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Recovery boundaries and owned inflow](journal/2026/11.16-recovery-boundaries-and-owned-inflow.md)
+
+- [2026-11-16 - Complete self-update convergence and receipt receiving](journal/2026/11.16-complete-self-update-receiving.md)
+
 - [2026-11-16 - Complete machine-state receiving reconciliation](journal/2026/11.16-complete-machine-state-receiving.md)
 
 - [2026-11-16 - Complete supported-UV receiving proposal](journal/2026/11.16-complete-supported-uv-receiving.md)

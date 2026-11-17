@@ -117,6 +117,18 @@ test, restore, scheduler or opt-in change ran.
 
 ## Relationship and next boundary
 
+### Complete planned receiving follow-through - 2026-11-16
+
+The [complete current-source receiving amendment](journal/2026/11.16-complete-self-update-receiving.md)
+retains #4075's original documentation OR explicitly owned runtime convergence
+choice AND every later inherited #4076 native occurrence/exit/receipt clause.
+The existing Machines root receives direct Plan/local/global Validation,
+continuing Coordination and Journal without changing incumbent check states
+or actual custodians. Normal review, actual delivery and full current
+root/source readback precede separate administrative source judgment; the
+earlier OPEN assessments above remain historical evidence, not proof this
+later complete proposal was accepted. No product or native result is claimed.
+
 Scheduling parity, effective ongoing convergence and causal receipt truth are
 related but non-equivalent. All three originals remain OPEN under their
 existing acceptance owners. The documentation OR branch stays available;
