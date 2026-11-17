@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
 from queue import Queue as Queue
 from threading import Lock
-from collections.abc import Callable, Iterable, Iterator, Mapping
 from types import ModuleType
 from typing import Any, Protocol, TypeVar, TypedDict, cast
 import shutil
@@ -30,17 +30,20 @@ from artifact_source_build import PromotionArtifactError, validate_runtime_metad
 from build_python_artifacts import build_wheel as build_wheel
 from build_toolchain_lock import (
     ToolchainLock, _query_marker_environment as _query_marker_environment,
-    sanitize_subprocess_env, strip_package_source_env_vars,
+    sanitize_subprocess_env,
 )
+from governed_feed_trust import strip_package_source_env_vars
 from runtime_profile import SCHEMA, ProfileError, RuntimeProfile, _wheel_filename, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import SourceLockCandidate as SourceLockCandidate
 from installer_source_wheel_cache import cached_source_wheel
 from installer_engine import (
-    FrozenInputs, ReadyCandidate, _package_roots as _package_roots, _source_files as _source_files,
+    ReadyCandidate, _package_roots as _package_roots, _source_files as _source_files,
     freeze_inputs, numbered_candidate as numbered_candidate, runtime as runtime,
 )
-from installer_dependency_policy import _private_retained_root, _select_uv_executable, _temporary_inputs, _toml as _toml
+from installer_dependency_policy import (
+    _private_retained_root, _select_uv_executable, _temporary_inputs, _toml as _toml,
+)
 from installer_wheel_inputs import WheelFacts, WheelLimits as WheelLimits, _check_deadline, _ordinary, inspect_archive
 from installer_wheel_snapshot import (
     WheelInstallInputs, _digest as snapshot_digest, _open, _unchanged, retain_wheel_inputs,
@@ -62,7 +65,7 @@ class _OwnerValidation(Protocol):
     def __call__(self, operation: Callable[[], _OperationResult]) -> _OperationResult: ...
 
 
-class _OfflineOptions(TypedDict, total=False):
+class _BuildOptions(TypedDict, total=False):
     offline: bool
     procutil: ModuleType | None
     construction_fd: int | None
@@ -70,8 +73,8 @@ class _OfflineOptions(TypedDict, total=False):
 
 
 def _selected_projects(
-    projects: Iterable[Path], root: str, extras: Iterable[str],
-    environment: dict[str, str], deadline: float,
+    projects: Sequence[Path], root: str, extras: Sequence[str],
+    environment: Mapping[str, str], deadline: float,
 ) -> tuple[Path, ...]:
     manifests: dict[str, tuple[Path, dict[str, Any]]] = {canonicalize_name(_toml(path / "pyproject.toml")["project"]["name"]):
                  (path, _toml(path / "pyproject.toml")["project"]) for path in projects}
@@ -129,8 +132,8 @@ def _build_environment_identity(opaque_identity: Callable[[str], str]) -> str:
 
 
 def _build_cache_binding(
-    record: dict[str, Any], build_record: dict[str, Any], toolchain: ToolchainLock, uv: str,
-    *, deadline: float, opaque_identity: Callable[[str], str],
+    record: dict[str, Any], build_record: dict[str, Any], toolchain: ToolchainLock,
+    uv: str, *, deadline: float, opaque_identity: Callable[[str], str],
 ) -> dict[str, Any]:
     """Only the admitted offline lane has exact backend archive identities."""
     tools = Path(__file__).parent
@@ -159,8 +162,8 @@ def _build_cache_binding(
 
 
 def _validate_local_metadata(
-    facts: WheelFacts, declaration: dict[str, Any], toolchain: ToolchainLock,
-    *, admitted_build: bool,
+    facts: WheelFacts, declaration: dict[str, Any], toolchain: ToolchainLock, *,
+    admitted_build: bool,
 ) -> None:
     generators = facts.wheel_metadata.get_all("Generator", [])
     if len(generators) != 1 or (not admitted_build and generators != [toolchain.generator]):
@@ -173,7 +176,7 @@ def _validate_local_metadata(
 
 def _extras(
     wheels: dict[str, dict[str, Any]], roots: list[str],
-    environment: dict[str, str], deadline: float,
+    environment: Mapping[str, str], deadline: float,
 ) -> dict[str, set[str]]:
     wanted: dict[str, set[str]] = {}
     pending = [(Requirement(text), {""}) for text in roots]
@@ -354,18 +357,38 @@ def retain_source_profile(
         if build_profile is not None or offline:
             raise ProfileError("associated first-party wheels cannot request backend construction")
     pins = {entry["name"]: entry for entry in record["pins"]}
+    selected_files = record.get("files")
+    if selected_files is not None:
+        if not isinstance(selected_files, list) or any(
+            not isinstance(entry, dict)
+            or entry.keys() != {"name", "version", "filename", "sha256"}
+            for entry in selected_files
+        ):
+            raise ProfileError("exact third-party files do not complete the source lock")
+        exact_files = {entry["name"]: entry for entry in selected_files}
+        if len(exact_files) != len(selected_files) or exact_files.keys() != pins.keys():
+            raise ProfileError("exact third-party files do not complete the source lock")
+    else:
+        exact_files = None
     if len(selected_projects) + len(pins) > max_wheels:
         raise ProfileError("source closure exceeds the wheel count budget")
     third_party = dict(third_party)
-    archives, expected, third_names = {}, {}, set()
+    archives: dict[str, Path] = {}
+    expected: dict[str, str] = {}
+    third_names: set[str] = set()
     for filename, path in third_party.items():
         _check_deadline(deadline)
         name, version, _, _ = _wheel_filename(filename, limits.max_tags, deadline)
         digest = _digest(path, limits.max_archive_bytes, deadline)
         pin = pins.get(name)
+        exact = exact_files.get(name) if exact_files is not None else None
         if (
             path.name != filename or name in third_names or pin is None
             or Version(pin["version"]) != version or digest not in pin["hashes"]
+            or (exact_files is not None and (
+                exact is None or exact["filename"] != filename or exact["sha256"] != digest
+                or Version(exact["version"]) != version
+            ))
         ):
             raise ProfileError("third-party wheel differs from the selected source lock")
         third_names.add(name)
@@ -382,13 +405,12 @@ def retain_source_profile(
         raise ProfileError("build-only closure differs from the retained source selection")
     if build_record is not None and not callable(opaque_identity):
         raise ProfileError("source wheel caching requires the installation owner's opaque identity provider")
-    cache_binding = (
-        _build_cache_binding(
-            record, build_record, toolchain, uv, deadline=deadline,
-            opaque_identity=cast(Callable[[str], str], opaque_identity),
+    cache_binding = None
+    if build_record is not None:
+        assert opaque_identity is not None
+        cache_binding = _build_cache_binding(
+            record, build_record, toolchain, uv, deadline=deadline, opaque_identity=opaque_identity,
         )
-        if build_record is not None else None
-    )
     with _temporary_inputs(None) as temporary:
         workspace = _private_retained_root(Path(temporary)).resolve(strict=True)
         output = workspace / "built"
@@ -418,13 +440,14 @@ def retain_source_profile(
             declaration = _toml(project_path / "pyproject.toml")["project"]
 
             def build(destination: Path) -> Path:
+                options: _BuildOptions = {
+                    "offline": True, "procutil": procutil,
+                    "construction_fd": construction_fd, "retained_runtime": retained_runtime,
+                }
                 return build_wheel(
                     project_path, destination, toolchain=toolchain, reserved_names=set(archives),
                     uv=uv, deadline=deadline,
-                    **cast(_OfflineOptions, {
-                        "offline": True, "procutil": procutil,
-                        "construction_fd": construction_fd, "retained_runtime": retained_runtime,
-                    } if offline else {}),
+                    **(options if offline else {}),
                 )
 
             def validate(wheel: Path) -> None:
@@ -437,7 +460,8 @@ def retain_source_profile(
                 name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
                 if name != canonicalize_name(declaration["name"]) or version != Version(declaration["version"]):
                     raise ProfileError("built first-party wheel filename differs from retained source")
-                if _build_environment_identity(cast(Callable[[str], str], opaque_identity)) != cast(dict[str, Any], cache_binding)["environment"]:
+                assert opaque_identity is not None and cache_binding is not None
+                if _build_environment_identity(opaque_identity) != cache_binding["environment"]:
                     raise ProfileError("source build environment changed during construction")
                 verify_compact_source()
                 candidate.verify(deadline=deadline)
@@ -458,11 +482,14 @@ def retain_source_profile(
                 )
             return declaration, wheel
 
+        completed: Iterable[tuple[dict[str, Any], Path]]
         if cache_binding is not None:
-            libraries = tuple(path for path in selected_projects if path != cast(FrozenInputs, frozen).plugin)
-            completed: Iterable[tuple[dict[str, Any], Path]] = _build_libraries(libraries, build_project)
-            if cast(FrozenInputs, frozen).plugin in selected_projects:
-                cast(list[tuple[dict[str, Any], Path]], completed).append(build_project(cast(FrozenInputs, frozen).plugin, lambda operation: operation()))
+            assert frozen is not None
+            libraries = tuple(path for path in selected_projects if path != frozen.plugin)
+            built = _build_libraries(libraries, build_project)
+            if frozen.plugin in selected_projects:
+                built.append(build_project(frozen.plugin, lambda operation: operation()))
+            completed = built
         else:
             completed = (
                 build_project(path, lambda operation: operation()) for path in selected_projects
@@ -482,8 +509,9 @@ def retain_source_profile(
         if before != runtime.fingerprint_source(_source_files(projects)):
             raise ProfileError("source changed while building the exact wheel closure")
         verify_compact_source()
-        observed_toolchain = toolchain.record if build_record is None else {
-            "packages": toolchain.packages, "admitted_profile": cast(RuntimeProfile, build_profile).record(),
+        assert build_record is None or build_profile is not None
+        observed_toolchain = toolchain.record if build_profile is None else {
+            "packages": toolchain.packages, "admitted_profile": build_profile.record(),
         }
         if observed_toolchain != toolchain_record:
             raise ProfileError("build toolchain selection changed while building the source closure")
@@ -595,7 +623,8 @@ def source_candidate(
         def validate_candidate(slot: Path) -> None:
             candidate.verify(deadline=deadline)
             installed_python = runtime.slot_python(root, slot.name)
-            if _query_marker_environment(cast(Path, installed_python), deadline=deadline) != record["target"]["environment"]:
+            assert installed_python is not None
+            if _query_marker_environment(installed_python, deadline=deadline) != record["target"]["environment"]:
                 raise ProfileError("installed interpreter differs from the selected target")
 
         with numbered_candidate(
