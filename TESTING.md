@@ -16,11 +16,16 @@ fixtures permit durable children to leave their caller Jobs; each packet also
 runs the queued-installer restrictive-Job negative and bounded-child cleanup.
 Ordinary runner containment remains unchanged. Contained hook fixtures retain
 their caller Job until owned work settles and do not claim Job-loss survival.
-The native Windows owner samples only its own instance registry in the existing
-resource-poll loop and retains birth-matched process handles through strict
-daemon cleanup, within the original process-count budget. This prevents a
+Ordinary contained Windows runs and the explicit native Windows owner sample
+only their own instance registry in the existing resource-poll loop and retain
+birth-matched process handles through strict daemon cleanup, within the original
+process-count budget. This prevents a
 released fixture PID from being reused before cleanup; it neither signals a
 process nor relaxes unknown or reused-identity holds for unpinned records.
+A settled receipt's exited handle is released rather than counted against
+later sequential instances; present receipts or unconfirmed exits keep their
+pins. The existing inventory bound remains independent of the concurrent
+process-handle budget.
 Default-service acceptance uses the explicit leased native profile too:
 an ordinary contained install cannot prove that its service outlives the
 constructor's cleanup Job. Service checks read the selected generation's
@@ -4022,6 +4027,7 @@ resource report. This covers exit ordering, not native CPython 3.13 installation
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
+`tools/test_installer_census_refusals.py`,
 `tools/test_installer_engine_commands.py`,
 `tools/test_worktrees_uninstall_custody.py`,
 `tools/test_installer_engine_stop.py`,
@@ -5872,6 +5878,18 @@ third-party backend request. Compressed wheel-tag alternatives pass through the
 existing bounded canonicalizer before filename parsing; a regression repeats
 each alternative 128 times and asserts the parser receives only one combination.
 
+An explicit `max_diagnostic_bytes` on `retain_source_wheel_lock` opts into
+bounded selection diagnostics from that same native compile. Its dated-feed
+cases offer universal and native wheels, exercise base/extra and repeated warm
+requests, and use raising first-party/helper metadata backends to detect
+unexpected execution. Pure `test_source_witness.py` cases reject missing,
+ambiguous, malformed and mismatched native selections without retaining URLs.
+The existing optional `wheel_inputs=true` source-profile lanes run those native
+compile cases and `tools/test_runtime_source_witness.py` on Linux, Windows and
+macOS. Dual-stream inclusive limits, overflow, deadlines and delayed descendants
+exercise the existing process owner's settlement before cleanup. These remain
+controlled-source checks, not source authentication, feed admission or rollout.
+
 `tools/test_runtime_source_authentication.py` composes actual installation-owned
 fallback intent with the existing configured-runtime-source acquisition and
 canonical preparation paths. Real local Git repositories exercise exact
@@ -6203,6 +6221,18 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+The existing `pr_service=true` manual selector retains two disposable jobs
+(Linux and Windows), each capped at 10 minutes. Its source-pinned standalone
+acceptance first runs `PYTEST_ADDOPTS="-k filtered"` with a 180-second runner
+limit: the filtered CLI tests and both actual Linux foreground-host scenarios.
+It then runs the complementary `PYTEST_ADDOPTS="-k 'not filtered'"` portfolio
+with a 420-second runner limit, reusing the prepared environment. No test is
+removed from the combined portfolio and failures remain failures. Use a pinned
+published source and keep unrelated selectors off. These synthetic fixtures
+qualify local peer credentials, sponsorship, restart, outage and subscription
+lifetime; they do not enroll a live provider or deploy a service. This is an
+opt-in integration lane, not required unit CI.
+
 The existing `pr_service=true` manual Linux/Windows lane also runs
 `services/pr/tests/test_image_inputs.py` through the standalone runner. It
 checks the repository-only offline-context consumer with real retained
@@ -6256,8 +6286,8 @@ credential/channel loss before lookup or during an already-started commit.
 It adds no required-PR process matrix and does not qualify a production
 credential provider, installed artifact or fleet placement.
 
-The same manual selector also runs `tools/run-standalone-tests.py services/pr
---prepare --timeout 180`. Its independent environment installs this checkout's
+The same manual selector runs the two complementary standalone selections above.
+Its independent environment installs this checkout's
 PR/Fleet dependencies and the standalone wheel without Copilot. Tests build a
 normal source-independent wheel, validate the existing reference-only
 `container.service` declaration, and drive an installed foreground service in

@@ -879,19 +879,80 @@ of returning 503 forever.
 the installer invokes during `update`/activation when a live daemon exists. It
 runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
 
+Ordinary deployment first takes native cutover authority, reconciles a dead
+active row to its live serving fallback, and only then captures the exact
+predecessor. That authority is borrowed by the orchestrator through publication
+and retirement; a dead advertised endpoint cannot hide the actual serving peer.
+A previous row without an active native owner never falls back to legacy drain
+or shutdown. Its original endpoint is reported as unconfirmed cleanup, and
+post-cutover Host reattachment is withheld without native predecessor-exit proof.
+
 1. pick a free port and spawn the new daemon `--passive` (no self-route, no
    relay);
 2. wait until it is healthy;
 3. **flip the routing table** -> new `active`, old demoted to `previous`;
-4. **drain** the old daemon (busy-oracle wait, optional `--force`);
-5. **-- commit point --** shut the old daemon down (`POST /api/v1/shutdown`:
-   releases every session-host claim this generation holds, then a clean
-   exit; it `clear_if_owner`s only its own route entry -- see
+4. verify the incoming daemon again, independently of predecessor drain;
+5. **-- commit point --** attempt bounded central-only retirement: observe
+   self-retirement for five seconds, then terminate only the
+   identity-pinned predecessor if it is still the exact demoted central owner.
+   The route lease serializes the final check and force signal with publication.
+   Successor health is checked again after the wait, under that lease before
+   the signal. Incoming readiness loss remains a failure rather than a successful
+   cleanup result.
+   No Session Host, session child, transport descendant or process group is
+   targeted. The separate required-graceful path's `POST /api/v1/shutdown` releases this generation's
+   session-host claims and `clear_if_owner`s only its own route entry -- see
    [Session-host generation handoff](#4-session-host-generation-handoff-claimreleaserecover)
    below);
 6. best-effort: adopt the credential relay (ephemeral) on the new daemon, and
    retry the session-host claim scan (`POST /api/v1/session-hosts/reattach`)
-   now that the old generation is confirmed gone.
+   now that the old generation is confirmed gone. The optional scan request has
+   a five-second client timeout and no automatic retry; an unknown later server
+   completion does not block or replay the central cutover.
+
+No unfenced HTTP shutdown is sent to the predecessor: such a request could stop
+a reselected active daemon or complete after its client times out. The only
+forced signal is identity-pinned and serialized with routing publication.
+Unconfirmed predecessor cleanup is reported separately from successful incoming
+readiness; it does not restore the incumbent or trigger a legacy process-tree
+reap. Missing native identity, changed routing or unsupported native pinning
+leaves cleanup unconfirmed rather than falling back to numeric-PID signaling.
+Explicit required-graceful/serving reconciliation and conditional repair keep
+their existing graceful-only contracts; they do not opt into this fallback.
+Ordinary no-drain deployment explicitly disables writer-owned reconciliation
+without weakening exact-predecessor fencing. Its recovery witness records that
+no predecessor drain was requested, so an interrupted deploy can use normal
+`--recover`/retry without an unavailable writer-recovery handler or an unfenced
+undrain request. The legacy `old` control target is null and exact observation
+is retained separately, so a prior recovery reader also cannot undrain the
+untouched peer. Stateful and conditional recovery defaults remain unchanged.
+
+The selected installed-generation startup uses the same exact-central fallback
+after a one-second self-retirement observation instead of waiting indefinitely.
+Once exit is confirmed, it adopts the singleton credential relay before joining
+even the initial Host recovery task, so a slow remote Host does not defer the
+relay bind. If the single bounded control attempt is unconfirmed, the existing
+post-publication task retains native exit observation without another control
+attempt or an incoming readiness gate. A later exit reaches the same
+ownership-checked relay-adoption path; route reselection cancels that continuation.
+Neither path restarts or reloads the surviving sessions.
+
+Relay activation snapshots the frontend's exact active route before credential
+source preparation. After that awaited work, the native routing lease revalidates
+the same owner and spans listener activation plus relay-port publication.
+Reselection or shutdown discards the prepared activation; failed publication
+closes the newly started listener before releasing the lease. Source discovery
+does not hold the routing lease.
+
+Activation uses strict relay-port publication: file-write failure propagates
+without installing the new in-process port, so the new listener is stopped and
+adoption stays unconfirmed. Legacy publication callers retain best-effort mode.
+
+Bridge starts this listener with port reclamation disabled. An occupied fixed
+port remains unavailable; relay startup cannot evict an unconfirmed predecessor
+or its descendants as a side effect of binding. Before promotion, passive
+readiness still registers provider-backed HTTP credential sources and defers
+only the TCP listener, including for embedded callers retaining relay enablement.
 
 Any failure **before** the commit point rolls back: re-publish the old endpoint
 as active, undrain the old daemon, and terminate the freshly spawned passive. If

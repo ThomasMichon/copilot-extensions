@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 import sys
 import time
+from typing import Any
 import uuid
 
 from sdk_desktop_observer import ObservationBlocked
@@ -19,6 +20,7 @@ from sdk_desktop_observer import ObservationBlocked
 PACKAGE_FILES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_daemon_instance_child.py",
     "_daemon_instance_cli.py", "_daemon_instance_clock.py", "_daemon_instance_identity.py",
+    "_daemon_instance_io.py",
     "_daemon_instance_linux.py", "_daemon_instance_native.py", "_daemon_instance_owner.py",
     "_daemon_instance_reconcile.py", "_daemon_instance_records.py",
     "_daemon_instance_shell.py", "_daemon_instance_shell_windows.py",
@@ -65,7 +67,7 @@ SDK_FILES = (
 )
 
 
-def require_sdk_sources(sdk: Path, sources: list[dict], *, runner: Path) -> None:
+def require_sdk_sources(sdk: Path, sources: list[dict[str, Any]], *, runner: Path) -> None:
     """Bind the required fixture, SDK fragments and import package to one root."""
     if not sdk.is_absolute() or sdk.resolve() != sdk:
         raise ObservationBlocked("SDK source root is missing or redirected")
@@ -94,7 +96,7 @@ def bind_sdk_import(sdk: Path) -> Path:
     importlib.invalidate_caches()
     package = importlib.import_module("agent_procutil")
     expected = source / "agent_procutil/__init__.py"
-    if Path(package.__file__).resolve() != expected.resolve():
+    if package.__file__ is None or Path(package.__file__).resolve() != expected.resolve():
         raise ObservationBlocked("SDK worker imported procutil outside its verified source")
     return expected
 
@@ -164,7 +166,7 @@ class ScopedEnrollment:
 
 
 def enroll_scoped_consumer(
-    sdk: Path, case: str, sources: list[dict], deadline: float,
+    sdk: Path, case: str, sources: list[dict[str, Any]], deadline: float,
 ) -> ScopedEnrollment:
     """Enroll only the literal SDK managed-root case through the source owner.
 
@@ -185,7 +187,7 @@ def enroll_scoped_consumer(
 
 
 def verify_scoped_root_packet(
-    packet: dict, enrollment: ScopedEnrollment, identity: dict,
+    packet: dict[str, Any], enrollment: ScopedEnrollment, identity: dict[str, Any],
 ) -> bool:
     """Validate root-only evidence; never promote it to full consumer coverage."""
     expected = {

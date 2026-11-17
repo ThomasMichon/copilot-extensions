@@ -3421,6 +3421,18 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete canonical and compatibility judgments](journal/2026/11.16-complete-canonical-and-compatibility-boundaries.md)
+  record actual #12996 delivery and sixteen whole-original decisions,
+  preserving superseded administrative tokens versus actual technical
+  acceptance, compatibility alternatives and continuing owner boundaries.
+  The complete 866-issue census is 137 above fixed 729 after two arrivals
+  and one external departure; no new campaign closure or custody release.
+  The [complete contracts and obsolete-consumer journal](journal/2026/11.16-complete-contracts-and-obsolete-consumer.md)
+  records actual #12983 delivery, separately verified #5785 obsolete-consumer
+  retirement and sixteen complete-original decisions retaining canonical
+  acceptance and actual owner boundaries. The full 865-issue census remains
+  136 above fixed 729 after new inflow; no technical checkbox or resource
+  obligation is completed by this documentary unit.
   The [canonical acceptance and active-owner adjudication](journal/2026/11.16-canonical-acceptance-and-active-owners.md)
   records actual #12971 delivery and eighteen complete-original decisions:
   actionable existing receivers, independent finite alternatives and current
