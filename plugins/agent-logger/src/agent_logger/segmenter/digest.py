@@ -104,7 +104,8 @@ def read_rewind_index(session_dir: Path) -> list[dict[str, Any]]:
         return []
     try:
         data = json.loads(idx_file.read_text(encoding="utf-8"))
-        return data.get("snapshots", [])
+        snapshots: list[dict[str, Any]] = data.get("snapshots", [])
+        return snapshots
     except Exception:
         return []
 

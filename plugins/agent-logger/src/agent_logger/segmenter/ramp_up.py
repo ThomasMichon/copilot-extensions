@@ -46,8 +46,10 @@ import os
 import subprocess
 import sys
 from collections import deque
+from collections.abc import Iterator
+from io import TextIOWrapper
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 
@@ -87,7 +89,7 @@ def _session_state_root() -> Path:
     return find_copilot_dir() / SESSION_STATE_SUBDIR
 
 
-def _iter_sessions():
+def _iter_sessions() -> Iterator[tuple[Path, dict[str, str], str, Path]]:
     """Yield ``(dir, workspace, cwd, events_path)`` for every real session.
 
     A "real" session has an ``events.jsonl`` and is not a quip/sub-agent temp
@@ -431,8 +433,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stdout).reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stderr).reconfigure(encoding="utf-8", errors="replace")
 
     ref = args.worktree
 
@@ -460,20 +462,21 @@ def main() -> None:
     # ── Resolve the target session(s) locally ──
     sessions: list[dict[str, Any]] = []
     worktree_root: str | None = None
+    chosen: dict[str, Any]
 
     if args.session:
-        session_dir = _session_dir_by_id(args.session)
-        if session_dir is None:
+        resolved_session_dir = _session_dir_by_id(args.session)
+        if resolved_session_dir is None:
             print(
                 f"error: session not found: {args.session}\n"
                 f"  checked: {_session_state_root() / args.session}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        ws = read_workspace(session_dir)
+        ws = read_workspace(resolved_session_dir)
         chosen = {
-            "id": session_dir.name,
-            "dir": session_dir,
+            "id": resolved_session_dir.name,
+            "dir": resolved_session_dir,
             "cwd": ws.get("cwd", ""),
             "branch": ws.get("branch", ""),
             "name": ws.get("name", ""),

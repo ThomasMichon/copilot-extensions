@@ -44,39 +44,41 @@ import argparse
 import os
 import sys
 from datetime import datetime, timezone
+from io import TextIOWrapper
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_logger import sessions
 from agent_logger.config import load_config
-from agent_logger.secret_patterns import SECRET_PATTERNS, redact  # noqa: F401
+from agent_logger.secret_patterns import SECRET_PATTERNS as SECRET_PATTERNS
+from agent_logger.secret_patterns import redact as redact
 from agent_logger.segmenter.digest import (  # noqa: F401 -- re-exported
-    DEFAULT_MAX_TOOL_OUTPUT,
-    DEFAULT_MAX_TOTAL,
-    DEFAULT_SEGMENT_SIZE,
-    TurnStats,
-    build_session_digest,
-    clear_digest_dir,
-    fmt_ts,
-    format_checkpoints,
-    format_digest,
-    format_metadata,
-    format_turn,
-    format_turn_stats,
-    read_checkpoints,
-    read_rewind_index,
-    read_workspace,
-    render_session_digest,
-    write_segments,
+    DEFAULT_MAX_TOOL_OUTPUT as DEFAULT_MAX_TOOL_OUTPUT,
+    DEFAULT_MAX_TOTAL as DEFAULT_MAX_TOTAL,
+    DEFAULT_SEGMENT_SIZE as DEFAULT_SEGMENT_SIZE,
+    TurnStats as TurnStats,
+    build_session_digest as build_session_digest,
+    clear_digest_dir as clear_digest_dir,
+    fmt_ts as fmt_ts,
+    format_checkpoints as format_checkpoints,
+    format_digest as format_digest,
+    format_metadata as format_metadata,
+    format_turn as format_turn,
+    format_turn_stats as format_turn_stats,
+    read_checkpoints as read_checkpoints,
+    read_rewind_index as read_rewind_index,
+    read_workspace as read_workspace,
+    render_session_digest as render_session_digest,
+    write_segments as write_segments,
 )
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.segmenter.turn_stream import (  # noqa: F401 -- re-exported
-    SKIP_EVENT_TYPES,
-    SKIP_TOOL_NAMES,
-    TurnStream,
-    parse_events,
-    strip_system_tags,
-    truncate,
+    SKIP_EVENT_TYPES as SKIP_EVENT_TYPES,
+    SKIP_TOOL_NAMES as SKIP_TOOL_NAMES,
+    TurnStream as TurnStream,
+    parse_events as parse_events,
+    strip_system_tags as strip_system_tags,
+    truncate as truncate,
 )
 
 # Pre-extraction private names, kept for existing importers.
@@ -183,9 +185,9 @@ def resolve_session_dir(spec: str) -> Path:
     candidate = state_root / spec
     if candidate.is_dir():
         return candidate
-    ref = sessions.resolve_ref(spec, state_root, *session_archive_stores())
-    if ref is not None and ref.is_archive:
-        return sessions.materialize_path(ref)
+    resolved_ref = sessions.resolve_ref(spec, state_root, *session_archive_stores())
+    if resolved_ref is not None and resolved_ref.is_archive:
+        return sessions.materialize_path(resolved_ref)
     raise FileNotFoundError(f"Session directory not found: {candidate}")
 
 
@@ -392,9 +394,7 @@ def _read_index(session_dir: Path) -> list[dict[str, Any]]:
         elif line.startswith("    ") and ":" in line and current:
             k, v = line.strip().split(":", 1)
             v = v.strip().strip('"')
-            if v in ("true", "false"):
-                v = v == "true"
-            current[k.strip()] = v
+            current[k.strip()] = (v == "true") if v in ("true", "false") else v
     if current:
         entries.append(current)
     return entries
@@ -609,8 +609,8 @@ def main() -> None:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stdout).reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stderr).reconfigure(encoding="utf-8", errors="replace")
 
     session_id = session_dir.name
 
@@ -654,10 +654,10 @@ def main() -> None:
             stream_factory=TurnStream,
         ).files
         print(f"Wrote {len(files)} segment(s) to {out_dir.resolve()}:")
-        for f in files:
-            fpath = out_dir / f
+        for filename in files:
+            fpath = out_dir / filename
             size = fpath.stat().st_size
-            print(f"  {f}  ({size:,} bytes)")
+            print(f"  {filename}  ({size:,} bytes)")
 
     if args.nas and nas_ok:
         print("nas_status: ok")
