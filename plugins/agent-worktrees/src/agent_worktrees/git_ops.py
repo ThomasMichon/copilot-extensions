@@ -17,20 +17,31 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
+from typing import cast, overload
 
 
-from . import env_scrub, git_tree_diff, push_timeout
+from . import env_scrub, git_acquisition_budget, git_tree_diff, push_timeout
 from .checkout_data import preservation_reason
 from .git_repository_environment import (
     _NO_HOOKS_PATH as _NO_HOOKS_PATH,
     _REPOSITORY_CONTEXT_ENV as _REPOSITORY_CONTEXT_ENV,
     repository_identity_env as repository_identity_env,
+    credential_config_scoped,
     identity_scoped,
 )
 from .git_errors import GitError, _redact_args as _redact_args
+from .git_fetch import _fetch_refspecs as _fetch_refspecs
+from .git_state_types import (
+    _GitProbeOptions,
+    _GitStateFields,
+    FastForwardResult as FastForwardResult,
+    WorktreeBaseResult as WorktreeBaseResult,
+    WorktreeState as WorktreeState,
+    WorktreeStateInfo as WorktreeStateInfo,
+)
 from .repos_registry_reader import RepositoryResolutionError
 from .github_credentials import (
     AccountCredentialError as AccountCredentialError,
@@ -102,6 +113,54 @@ def resolve_to_anchor(repo_path: Path) -> Path:
 #: protection is unaffected. #3707.
 
 
+@overload
+def git(
+    *args: str,
+    cwd: str | Path | None = None,
+    check: bool = True,
+    capture: bool = True,
+    timeout: float | None = None,
+    no_hooks: bool = False,
+    kill_tree: bool = False,
+    isolated_repository: bool = False,
+    auth_acquisition: bool = False,
+    input_data: None = None,
+    observation_deadline: float | None = None,
+) -> subprocess.CompletedProcess[str]: ...
+
+
+@overload
+def git(
+    *args: str,
+    cwd: str | Path | None = None,
+    check: bool = True,
+    capture: bool = True,
+    timeout: float | None = None,
+    no_hooks: bool = False,
+    kill_tree: bool = False,
+    isolated_repository: bool = False,
+    auth_acquisition: bool = False,
+    input_data: bytes,
+    observation_deadline: float | None = None,
+) -> subprocess.CompletedProcess[bytes]: ...
+
+
+@overload
+def git(
+    *args: str,
+    cwd: str | Path | None = None,
+    check: bool = True,
+    capture: bool = True,
+    timeout: float | None = None,
+    no_hooks: bool = False,
+    kill_tree: bool = False,
+    isolated_repository: bool = False,
+    auth_acquisition: bool = False,
+    input_data: bytes | None,
+    observation_deadline: float | None = None,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]: ...
+
+
 def git(
     *args: str,
     cwd: str | Path | None = None,
@@ -143,61 +202,60 @@ def git(
         raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
-    env = repository_identity_env() if isolated_repository or identity_scoped() else os.environ.copy()
+    env = (
+        repository_identity_env(preserve_credentials=credential_config_scoped())
+        if isolated_repository or identity_scoped() else os.environ.copy()
+    )
     from .update_auth_context import repository_environment, run_acquisition
     env = repository_environment(env)
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
 
-    def execute():
+    def execute() -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        timeout = git_acquisition_budget.remaining_timeout(requested_timeout)
         if observation_deadline is not None:
+            if input_data is not None:
+                return push_timeout.run_bounded(
+                    cmd, cwd=cwd, env=env, timeout=timeout,
+                    observation_deadline=observation_deadline,
+                    binary=True, input=input_data,
+                )
             return push_timeout.run_bounded(
                 cmd, cwd=cwd, env=env, timeout=timeout,
                 observation_deadline=observation_deadline,
-                **({"binary": True, "input": input_data} if input_data is not None else {}),
             )
         from agent_procutil import no_window_kwargs
 
         if kill_tree and timeout is not None:
+            if input_data is not None:
+                return push_timeout.run_bounded(
+                    cmd, cwd=cwd, env=env, timeout=timeout,
+                    binary=True, input=input_data,
+                )
             return push_timeout.run_bounded(
                 cmd, cwd=cwd, env=env, timeout=timeout,
-                **({"binary": True, "input": input_data} if input_data is not None else {}),
             )
-        io = (
-            {"input": input_data} if input_data is not None
-            else {"text": True, "encoding": "utf-8", "errors": "replace"}
-        )
+        if input_data is not None:
+            return subprocess.run(
+                cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout,
+                input=input_data, **no_window_kwargs(),
+            )
         return subprocess.run(
-            cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout, **io,
+            cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout,
+            text=True, encoding="utf-8", errors="replace",
             **no_window_kwargs(),
         )
 
-    result = run_acquisition(execute, repository=True) if auth_acquisition else execute()
+    requested_timeout = timeout
+    result = (
+        cast(
+            subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
+            run_acquisition(execute, repository=True),
+        )
+        if auth_acquisition else execute()
+    )
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())
     return result
-
-
-class WorktreeState(str, Enum):
-    """Worktree state classification.
-
-    Every value except :attr:`CONVO` is produced by :func:`classify_worktree`
-    from pure git inspection.  ``CONVO`` is a *session-derived* refinement of
-    ``UNUSED`` -- a clean, commit-less worktree whose Copilot session
-    nonetheless held conversation turns -- layered on by
-    :func:`refine_state_with_session`.  It lives in this enum (rather than as a
-    private render flag) so the tmux status bar and the picker data contract
-    (``list --json --classify``) share one display vocabulary.
-    """
-
-    ACTIVE = "active"
-    WIP = "wip"
-    DIRTY = "dirty"
-    UNUSED = "unused"
-    CONVO = "convo"
-    COMPLETED = "completed"
-    GONE = "gone"
-    ORPHAN = "orphan"
-    UNKNOWN = "unknown"
 
 
 def refine_state_with_session(state: WorktreeState, turns: int) -> WorktreeState:
@@ -218,75 +276,6 @@ def refine_state_with_session(state: WorktreeState, turns: int) -> WorktreeState
     if state == WorktreeState.UNUSED and turns > 0:
         return WorktreeState.CONVO
     return state
-
-
-@dataclass
-class WorktreeStateInfo:
-    """Result of classifying a worktree's git state."""
-
-    state: WorktreeState
-    ahead: int = 0
-    behind: int = 0
-    dirty: int = 0
-    title: str = ""
-    current_branch: str | None = None
-    """The worktree's actual HEAD branch (None if detached or unreadable)."""
-    branch_drift: bool = False
-    """True when the worktree's HEAD is on a different branch than tracked."""
-    fetch_failed: bool = False
-    """True when a requested fetch either failed outright (network down,
-    remote unreachable -- classification proceeded on stale local refs) OR
-    could not be confirmed after an actual fetch attempt (a timeout on the
-    fetch itself or a later probe) -- both cases mean a `fetch=True`
-    caller must not treat the result as refreshed evidence. Always False
-    when ``fetch=False`` (no fetch was attempted) or classification short-
-    circuited before reaching the fetch (GONE/zombie/ACTIVE)."""
-    fetch_requested: bool = False
-    """True only when ``fetch=True`` actually reached the point of
-    attempting a fetch (i.e. classification proceeded past the GONE/zombie/
-    ACTIVE short-circuits). A caller must derive "was this genuinely
-    refreshed" as ``fetch_requested and not fetch_failed`` -- `fetch_failed`
-    alone is insufficient, since it stays False when no fetch was ever
-    attempted (e.g. the caller passed ``fetch=False``), which would
-    otherwise let a fetch-free classification masquerade as refreshed."""
-
-
-@dataclass
-class FastForwardResult:
-    """Outcome of attempting to fast-forward a worktree to its upstream.
-
-    ``updated`` is True only when commits were actually advanced.  ``reason``
-    is a stable token describing what happened (or why nothing did):
-
-    - ``updated``     -- fast-forwarded ``behind`` commits onto the branch.
-    - ``up-to-date``  -- clean and already level with upstream (no-op).
-    - ``dirty``       -- working tree has uncommitted changes; skipped.
-    - ``ahead``       -- branch has local commits, none behind; skipped.
-    - ``diverged``    -- branch has both local commits and is behind; skipped.
-    - ``detached``    -- HEAD is detached; skipped.
-    - ``no-upstream`` -- the upstream ref does not exist; skipped.
-    - ``orphan``      -- no merge base with upstream; skipped.
-    - ``gone``        -- the worktree path/.git is missing; skipped.
-    - ``ff-failed``   -- the fast-forward merge itself failed; skipped.
-
-    ``fetch_error``: the requested fetch failed (compared to the last-known ref).
-    """
-
-    updated: bool
-    reason: str
-    behind: int = 0
-    ahead: int = 0
-    fetch_error: str | None = None
-
-
-@dataclass
-class WorktreeBaseResult:
-    """Fresh-base resolution for worktree creation or local source binding."""
-
-    start_point: str
-    fetched: bool
-    fetch_error: str | None
-    anchor: FastForwardResult
 
 
 def _rev_count(rangespec: str, *, cwd: str | Path) -> int:
@@ -316,7 +305,7 @@ def _get_current_branch_safe(
     observation_deadline: float | None = None,
 ) -> str | None:
     """Return the worktree's current branch, or None if detached/unreadable."""
-    options = {}
+    options: _GitProbeOptions = {}
     if timeout is not None:
         options["timeout"] = timeout
     if kill_tree:
@@ -375,7 +364,8 @@ def classify_worktree(
         if observation_deadline is not None:
             raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
         from .git_observation_legacy import classify
-        return classify(
+        legacy_classify = cast(Callable[..., WorktreeStateInfo], classify)
+        return legacy_classify(
             sys.modules[__name__], worktree_path, branch, fetch=fetch, remote=remote,
             default_branch=default_branch, active_paths=active_paths,
         )
@@ -405,7 +395,7 @@ def classify_worktree(
                 state=WorktreeState.ACTIVE, current_branch=actual_branch, branch_drift=drift,
             )
         return _classify_git_state(
-            path, actual_branch if drift else branch, upstream,
+            path, cast(str, actual_branch) if drift else branch, upstream,
             fetch=fetch, remote=remote, default_branch=default_branch,
             actual_branch=actual_branch, drift=drift,
             observation_deadline=deadline,
@@ -440,18 +430,18 @@ def _classify_git_state(
     deadline = _observation_deadline(observation_deadline) if _windows_observation() else None
     fetch_started = False
 
-    def _g(*args):
+    def _g(*args: str) -> subprocess.CompletedProcess[str]:
         nonlocal fetch_started
         try:
-            options = (
-                _observation_options(deadline) if deadline is not None
+            options: _GitProbeOptions = (
+                cast(_GitProbeOptions, _observation_options(deadline)) if deadline is not None
                 else {"timeout": _CLASSIFY_GIT_TIMEOUT}
             )
             result = git(*args, cwd=path, check=False, **options)
         except (subprocess.TimeoutExpired, push_timeout.ObservationUnavailable) as error:
             if args[0] == "fetch" and getattr(error, "observation_started", deadline is None):
                 fetch_started = True
-            error.fetch_requested = fetch_started
+            setattr(error, "fetch_requested", fetch_started)
             raise
         if args[0] == "fetch":
             fetch_started = True
@@ -524,7 +514,7 @@ def _classify_git_state(
             if len(title) > 60:
                 title = title[:57] + "..."
 
-    _drift_fields = dict(
+    _drift_fields: _GitStateFields = dict(
         current_branch=actual_branch, branch_drift=drift,
         fetch_requested=fetch, fetch_failed=fetch_failed,
     )
@@ -596,12 +586,12 @@ def _classify_git_state(
 
     # Upstream-only changes do not make this branch WIP. Compare object IDs
     # only on paths changed by the branch, without two Git children per path.
-    unmerged = any(
+    has_unmerged = any(
         upstream_objects.get(file, "0" * len(after)) != after
         for file, (_before, after) in branch_changes.items()
     )
     return WorktreeStateInfo(
-        state=WorktreeState.WIP if unmerged else WorktreeState.COMPLETED,
+        state=WorktreeState.WIP if has_unmerged else WorktreeState.COMPLETED,
         ahead=ahead, behind=behind, title=title,
         **_drift_fields,
     )
@@ -664,21 +654,26 @@ def fetch(
     Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
     :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
     ``timeout=None`` is unbounded. ``branch`` explicitly refreshes that tracking
-    ref even when the remote's configured fetch refspec excludes it.
+    ref independently of the remote's configured fetch mappings.
     """
-    refspec = [f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"] if branch else []
-    try:
-        git(
-            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", *refspec,
-            cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
-            auth_acquisition=True, **({"no_hooks": True} if no_hooks else {}),
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GitError(
-            ["git", "fetch", remote, "--quiet", *refspec], 124,
-            f"fetch from '{remote}' timed out after {timeout}s "
-            "(remote unreachable?)",
-        ) from exc
+    _fetch_branches(
+        remote, cwd=cwd, branches=(branch,) if branch else (), timeout=timeout,
+        isolated_repository=isolated_repository, no_hooks=no_hooks,
+    )
+
+
+def _fetch_branches(
+    remote: str, *, cwd: str | Path, branches: tuple[str, ...],
+    timeout: float | None = DEFAULT_FETCH_TIMEOUT,
+    isolated_repository: bool = False, no_hooks: bool = False,
+    tracking_remote: str | None = None,
+) -> None:
+    destination = remote if tracking_remote is None else tracking_remote
+    _fetch_refspecs(
+        remote, cwd=cwd,
+        refspec=tuple(f"+refs/heads/{branch}:refs/remotes/{destination}/{branch}" for branch in branches),
+        timeout=timeout, isolated_repository=isolated_repository, no_hooks=no_hooks,
+    )
 
 
 def rebase(onto: str, *, cwd: str | Path) -> bool:
@@ -1037,9 +1032,11 @@ def _gh_token_for_owner(owner: str) -> str | None:
     try:
         result = subprocess.run(
             [executable, "auth", "token", "--user", owner],
-            capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+            capture_output=True, text=True, timeout=git_acquisition_budget.remaining_timeout(60),
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
+        git_acquisition_budget.remaining_timeout(None)
         return None
     if result.returncode != 0:
         return None
@@ -1058,7 +1055,7 @@ def gh_token_for_account(account: str) -> str | None:
 
 
 @contextmanager
-def _credential_pin_lock(repo_path: Path, git_dir: str):
+def _credential_pin_lock(repo_path: Path, git_dir: str) -> Iterator[None]:
     """Serialize concurrent :func:`pin_git_credential` calls on one checkout.
 
     An interprocess file lock (same OS-native primitive as the binstub
@@ -1252,9 +1249,10 @@ def _active_gh_account() -> str | None:
     try:
         result = subprocess.run(
             ["gh", "auth", "status"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=git_acquisition_budget.remaining_timeout(10),
         )
     except Exception:
+        git_acquisition_budget.remaining_timeout(None)
         return None
     # `gh auth status` prints per-account blocks; the active one carries a
     # following "Active account: true" line. Track the most recent
@@ -1448,40 +1446,11 @@ def prepare_worktree_base(
     :func:`fast_forward_worktree` and is attempted only when the anchor is
     checked out on its configured default branch.
     """
-    anchor_path = Path(anchor)
-    fetched = False
-    fetch_error: str | None = None
-    if has_remote(remote, cwd=anchor_path):
-        try:
-            fetch(remote, cwd=anchor_path)
-            fetched = True
-        except Exception as exc:
-            fetch_error = str(exc)
+    from .worktree_base_preparation import prepare_worktree_base as prepare
 
-    start_point = resolve_start_point(
-        remote,
-        default_branch,
-        cwd=anchor_path,
-    )
-    branch = current_branch(anchor_path)
-    if not fast_forward_anchor:
-        anchor_result = FastForwardResult(False, "disabled")
-    elif branch is None:
-        anchor_result = FastForwardResult(False, "detached")
-    elif branch != default_branch:
-        anchor_result = FastForwardResult(False, "non-default-branch")
-    else:
-        anchor_result = fast_forward_worktree(
-            anchor_path,
-            remote=remote,
-            default_branch=default_branch,
-            do_fetch=False,
-        )
-    return WorktreeBaseResult(
-        start_point=start_point,
-        fetched=fetched,
-        fetch_error=fetch_error,
-        anchor=anchor_result,
+    return prepare(
+        Path(anchor), remote=remote, default_branch=default_branch,
+        fast_forward_anchor=fast_forward_anchor,
     )
 
 

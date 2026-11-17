@@ -4,7 +4,8 @@
 
 **Kind:** completion. Prepare a new worktree from its explicitly refreshed
 configured default branch without fetching unrelated branch refs, while
-preserving the existing safe-anchor and honest offline-fallback behavior.
+preserving committed-policy discovery, safe-anchor behavior and honest
+offline fallback.
 
 **Acceptance:** a fresh local-Git consumer proves exact configured-base
 selection even when the ordinary remote refspec excludes that branch,
@@ -17,15 +18,19 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** review this proposal before implementation.
-**Return:** implement only the accepted finite scope, then record its actual
+**Now:** publish exact source `0bb9856127`, qualified by all 195 selected
+controls, then obtain final-head review and CI. The unchanged-runtime packet
+executes three meaningful failures and 46 passing controls. Source acceptance
+remains open until actual merge and finite closeout.
+No production authority or another contributor's seed-delivery files are changed.
+**Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
 - **Slug:** `worktree-base-preparation`
 - **Repo:** copilot-extensions
 - **Branch(es):** separate managed plan and implementation PRs against `dev`
 - **Created:** 2026-11-17
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** below-altitude correction consistent with
   [repository/worktree identity](../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity)
 - **Umbrella issue:** #13013
@@ -92,18 +97,32 @@ custody remain independent.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Land this finite proposal through the repository's actual review/CI gate.
-- [ ] Reconcile the current default-base helper and independent contributor
+- [x] Land this finite proposal through the repository's actual review/CI gate.
+- [x] Reconcile the current default-base helper and independent contributor
   hunks without reopening their scopes or changing original acceptance.
 
 ### Phase 2 - Source delivery and finite acceptance
 
-- [ ] Add a few fail-first, fully typed controls using disposable local Git.
-- [ ] Pass `branch=default_branch` at the existing preparation fetch call;
-  preserve all subsequent start-point and safe-anchor decisions.
-- [ ] Satisfy whole-file strict changed-code checks without suppressions or
+- [x] Add a few fail-first, fully typed controls using disposable local Git.
+- [x] Explicitly refresh the configured creation base and its related policy
+  bootstrap through the existing fetch implementation; preserve all subsequent
+  start-point and safe-anchor decisions.
+- [x] Satisfy whole-file strict changed-code checks without suppressions or
   pending-project admission. Limit necessary typing corrections to unchanged
   behavior; reconcile any material contributor overlap before proceeding.
+- [x] Resolve the initial review's actual refmap, policy-discovery,
+  fixture-isolation and moved-source-closure findings. Prove the new behavioral
+  negatives before revising the fetch, then repeat impacted validation.
+- [x] Resolve the subsequent policy-head, source-namespace, independent-ref
+  failure and stale-declared-hop findings with real-Git regressions.
+- [x] Resolve the later deadline/authentication, unavailable-policy-probe,
+  aliased-tracking-source and truthful caller-warning findings.
+- [x] Resolve current repository custody, pre-write policy conflicts, effective
+  refspecs and cached-bootstrap findings while preserving existing fetch callers.
+- [x] Resolve unusable-ref fallback, overlapping remote namespaces,
+  command-scoped credentials and native short-source resolution.
+- [x] Resolve authenticated-probe timeout redaction and configured-HEAD identity
+  while retaining native exclusion matching and OS environment semantics.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
 - [ ] Record the finite accepted result, settle #13013 and its original claim,
@@ -111,36 +130,82 @@ custody remain independent.
 
 ## Validation Plan
 
-- [ ] **Exact base, fail first:** use a nonstandard configured default branch
+- [x] **Exact base, fail first:** use a nonstandard configured default branch
   omitted by the ordinary fetch refspec; advance it remotely and prove the real
   helper refreshes/selects its exact head.
-- [ ] **Ref scope:** advance an unrelated branch too and prove this operation
-  does not refresh its remote-tracking ref.
-- [ ] **Preservation:** retain eligible-anchor fast-forward and existing
+- [x] **Ref scope:** advance an unrelated branch too and prove this operation
+  does not refresh its remote-tracking ref, including alternate and mirror
+  configured mappings.
+- [x] **Policy discovery:** the actual offline committed-config reader sees a
+  changed bootstrap declaration and the following preparation selects that
+  declared branch, without refreshing unrelated refs.
+- [x] **Preservation:** retain eligible-anchor fast-forward and existing
   dirty/ahead/diverged/detached/non-default/no-remote controls.
-- [ ] **Offline reporting:** the actual preparation caller reports the literal
+- [x] **Offline reporting:** the actual preparation caller reports the literal
   fetch failure and selected last-known base, preserving the existing fallback.
-- [ ] **Fresh consumer:** local bare repositories and isolated Git configuration
+- [x] **Fresh consumer:** local bare repositories and isolated Git configuration
   exercise actual subprocess/ref behavior without network credentials, operator
   state, installed runtimes or product checkouts.
+- [x] **Policy edge cases:** refresh the configured base with a non-symbolic
+  optional HEAD; refresh surviving refs in either deletion direction; align a
+  non-origin creation remote with the reader's policy namespace; refresh a
+  newly declared but already tracked policy source before consuming it.
+- [x] **Remaining boundaries:** delayed authentication cannot launch a fetch
+  after the shared deadline; unavailable policy probes are not certified
+  absent; aliased policy tracking refs retain their configured sources; the
+  actual caller reports a refreshed base accurately after policy-only failure.
+- [x] **Repository and policy authority:** inherited Git selectors cannot redirect
+  any preparation stage; conflicting sources cannot overwrite the actual policy ref.
+- [x] **Effective refs:** normalize equivalent sources, apply exclusions before
+  ambiguity, reuse a matching refreshed base, refresh a surviving cached-bootstrap
+  hop, and preserve the public fetch/reload consumer.
+- [x] **Native inputs and fallback:** an unusable tracking ref is never selected;
+  overlapping namespaces cannot overwrite either source; authorized scoped
+  credentials survive without repository selectors; HEAD/tag short sources
+  retain Git's actual resolution.
+- [x] **Probe diagnostics and HEAD identity:** a synthetic authenticated timeout
+  never exposes its injected value; an explicitly configured matching HEAD
+  refreshes even without a local default, while a different HEAD remains a
+  pre-write conflict.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
-- [ ] **Evidence tiers:** document why the local-Git consumer is the relevant
+- [x] **Evidence tiers:** document why the local-Git consumer is the relevant
   end-to-end/first-touch proof; use genuinely available supported lanes without
   treating source/CI evidence as installed or live-venue qualification.
 
 ## Proposal
 
-Reuse `fetch(branch=...)` inside its existing default-base caller. Keep the
-network bound and literal failure path unchanged. Introduce no public API or
-cross-runtime contract. The architecture-pattern principles of right-sized
-surfaces, cross-platform parity and truthful failure apply; this below-altitude
-correction does not revise a vision or create a new service/lifecycle owner.
+Share the existing fetch implementation without changing ordinary
+`fetch(branch=...)` callers' configured policy mappings. Only creation preparation
+suppresses unrelated refmaps. Keep the existing network bound and literal
+base-failure fallback, result field layout and offline policy reader.
+
+**Agent-derived preservation refinement:** scope the complete preparation
+operation to its supplied repository. Resolve policy destinations and equivalent
+source names before writes; a conflicting base/policy destination must not lose
+its authoritative policy contents. Apply ordinary exclusions before judging
+ambiguity, while permitting reuse of the matching base that was explicitly
+refreshed. If a HEAD refresh fails, the available last-known bootstrap may still
+identify a surviving first hop; retain the warning rather than calling it fresh.
+
+This remains a below-altitude correction under the accepted repository/worktree
+identity intent and right-sized, cross-platform, truthful-failure patterns. It
+adds no public API, schema, service, dependency, timeout knob or rollout.
+
+The current agent-derived refinement additionally excludes unusable tracking
+refs from selection, using a verified local default branch or refusing creation.
+Destination checks use actual ref names and remote/source identity, not a remote
+name equality shortcut. Preserve already-authorized credential configuration
+without restoring repository selectors. Git, rather than a blanket branch
+prefix, defines short source identity: narrowly resolve explicitly configured
+short names when needed within the same acquisition deadline. The ordinary
+committed reader remains offline; no default-branch discovery is introduced.
+For explicitly configured HEAD, retain its native exclusion name while resolving
+its symbolic identity for conflict checks and fetch selection. Probe timeouts
+must never expose injected credential arguments.
 
 ## Journal
 
-### 2026-11-17 - Proposed finite correction
-
-- Read the current creation helper/caller, #4093/#4303 discussions and actual
-  independent contributor hunks. Public #13013 and its finite reservation are
-  published and audited. No implementation or installed operation has begun.
+- [2026-11-17 - Native source resolution and safe fallback](journal/2026/11.17-native-source-and-fallback.md)
+- [2026-11-17 - Policy custody and effective-refspec controls](journal/2026/11.17-policy-custody-controls.md)
+- [2026-11-17 - Preparation and qualification history](journal/2026/11.17-preparation-qualification.md)

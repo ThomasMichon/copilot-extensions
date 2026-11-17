@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Callable
+import argparse
 from pathlib import Path
 from types import SimpleNamespace
 import json
 import re
+import socket
+from typing import Any, cast
 
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import config as cfg, state_root
+from agent_worktrees import activity, config as cfg, git_ops, state_root, worktree_creation
+from agent_worktrees.creation_contracts import ConfigPlatform
+from agent_worktrees.launch_preflight import LaunchPreflight
 
 
 def _create_config(tmp_path: Path) -> cfg.Config:
@@ -20,7 +26,7 @@ def _create_config(tmp_path: Path) -> cfg.Config:
     config = cfg.Config(
         srcroot=str(tmp_path),
         machine="test",
-        platform=cfg.detect_platform(),
+        platform=cast(ConfigPlatform, cfg).detect_platform(),
         repo_name="demo-repo",
         repos={
             "demo-repo": cfg.RepoConfig(
@@ -32,26 +38,30 @@ def _create_config(tmp_path: Path) -> cfg.Config:
     project_dir = cfg.project_dir(config.repo_name)
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "config.yaml").write_text(json.dumps({
-        "repo_name": config.repo_name, "machine": config.machine,
-        "repos": {config.repo_name: {"anchor": str(anchor)}},
+        "repo_name": config.repo_name, "machine": config.machine, "platform": config.platform,
+        "repos": {config.repo_name: {
+            "anchor": str(anchor), "worktree_root": config.default_repo.worktree_root,
+        }},
     }), encoding="utf-8")
     return config
 
 
-def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cfg.Config) -> None:
-    monkeypatch.setattr(m.git_ops, "resolve_start_point", lambda *_a, **_k: "HEAD")
+def _stub_create_worktree_core_internals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, config: cfg.Config,
+) -> None:
+    monkeypatch.setattr(git_ops, "resolve_start_point", lambda *_a, **_k: "HEAD")
     monkeypatch.setattr(
         m, "_prepare_worktree_source", lambda *_a, **_k: SimpleNamespace(start_point="HEAD"),
     )
     monkeypatch.setattr(
-        m.git_ops, "create_worktree",
+        git_ops, "create_worktree",
         lambda _anchor, path, *_a, **_k: Path(path).mkdir(parents=True, exist_ok=True),
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
-    monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "resolve_state_root",
         lambda config, cwd=None: state_root.StateRoot(
             path=None, source="knowledge_repo", repo="", stateless=False,
@@ -67,45 +77,51 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cf
     monkeypatch.setattr(m, "_repo_session_env", lambda *_a, **_k: {})
     monkeypatch.setattr(m, "_build_env", lambda *_a, **_k: {})
     monkeypatch.setattr(m, "_apply_assignment_env", lambda env, _selection: env)
-    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
 
 
 def test_create_worktree_core_does_not_embed_pending_seed_in_its_own_launch_cmd(
-    tmp_path: Path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Single-owner invariant: this plan's own `cmd` must NOT also carry
     `--interactive <pending_seed>` -- only the Picker's real delivery point
     (the later --worktree-id re-resolve) does, so there is never a window
     where both this plan's direct execution AND a later fallback claim
     could deliver the same prompt twice."""
     config = _create_config(tmp_path)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    tracking_path = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
-    result = m._create_worktree_core(config, pending_seed="do the thing")
+    result = worktree_creation._create_worktree_core(config, pending_seed="do the thing")
 
     assert "--interactive" not in result["launch"]["cmd"]
 
 
 @pytest.mark.parametrize("drift", [False, True])
-def test_new_creation_retains_checked_profile_through_both_staging_calls(tmp_path, monkeypatch, drift):
+def test_new_creation_retains_checked_profile_through_both_staging_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: bool,
+) -> None:
     from agent_worktrees import application_admission, copilot_plugin_profile, guarded_anchors, local_cache_refresh, tracking
     from agent_worktrees.worktree_creation import LaunchSeedStagingFailure
 
     config = _create_config(tmp_path)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    tracking_path = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
-    preflight = m.LaunchPreflight(checked_profile="checked-input")
+    preflight = LaunchPreflight(checked_profile="checked-input")
     monkeypatch.setattr(m, "_preflight_launch", lambda *a, **kw: preflight)
-    staged = []
-    received = []
+    staged: list[tuple[str, cfg.Config, str]] = []
+    received: list[str] = []
 
-    def observe(config_arg, *, source, checked_profile):
+    def observe(
+        config_arg: cfg.Config, *, source: str, checked_profile: str,
+    ) -> LaunchPreflight:
         assert config_arg is config and checked_profile == "checked-input"
         received.append(source)
-        return m.LaunchPreflight(checked_profile=checked_profile)
+        return LaunchPreflight(checked_profile=checked_profile)
 
-    def prepare(path, *, config, checked_profile):
+    def prepare(path: str, *, config: cfg.Config, checked_profile: str) -> dict[str, str]:
         staged.append((str(path), config, checked_profile))
         if drift and len(staged) == 2:
             raise RuntimeError("profile changed after application admission")
@@ -119,28 +135,29 @@ def test_new_creation_retains_checked_profile_through_both_staging_calls(tmp_pat
     if drift:
         monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **kw: pytest.fail("unobserved roster launch"))
         with pytest.raises(LaunchSeedStagingFailure, match="profile changed"):
-            m._create_worktree_core(config)
-        assert len(tracking.list_records(tmp_path / "tracking")) == 1
+            worktree_creation._create_worktree_core(config)
+        assert len(tracking.list_records(tracking_path)) == 1
         assert received == []
     else:
-        result = m._create_worktree_core(config)
+        result = worktree_creation._create_worktree_core(config)
         assert staged == [(result["worktree"]["path"], config, "checked-input")] * 2
         assert received == [result["worktree"]["path"]]
 
 
 def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
-    tmp_path: Path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _create_config(tmp_path)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    tracking_path = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     monkeypatch.setenv("WORKTREE_NO_PROVISION", "1")
 
-    result = m._create_worktree_core(config)
+    result = worktree_creation._create_worktree_core(config)
 
     assert result["launch"]["env"]["WORKTREE_NO_PROVISION"] == "0"
     assert Path(result["launch"]["record_path"]) == (
-        tmp_path / "tracking" / f'{result["worktree"]["id"]}.yaml'
+        tracking_path / f'{result["worktree"]["id"]}.yaml'
     )
     assert type(result["launch"]["pane_shell_version"]) is int
     assert result["launch"]["pane_shell_version"] == 1
@@ -150,8 +167,8 @@ def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
 
 
 def test_create_worktree_core_stages_seed_in_worktree_state_folder(
-    tmp_path: Path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The Picker's own two-hop new-worktree flow discards THIS plan and
     re-resolves by --worktree-id moments later -- it needs pending_seed
     still sitting on the record for that re-resolve to pick up and deliver
@@ -160,16 +177,18 @@ def test_create_worktree_core_stages_seed_in_worktree_state_folder(
     from agent_worktrees import launch_seed_state, tracking
 
     config = _create_config(tmp_path)
-    tracking_path = tmp_path / "tracking"
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
+    tracking_path = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
-    result = m._create_worktree_core(config, pending_seed="do the thing")
+    result = worktree_creation._create_worktree_core(config, pending_seed="do the thing")
 
     worktree_id = result["worktree"]["id"]
     rec = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
+    assert rec is not None
     assert rec.pending_seed is None
     saved = launch_seed_state.peek(rec.yaml_path)
+    assert saved is not None
     assert saved.kind == "new" and saved.text == "do the thing"
     assert result["launch"]["seed_id"] == saved.seed_id
 
@@ -188,12 +207,13 @@ def test_creation_uses_one_environment_suffix_and_short_identity(
     machine: str, platform: str, prefix: str, seed: str | None,
 ) -> None:
     config = replace(_create_config(tmp_path), machine=machine, platform=platform)
-    monkeypatch.setattr(m.cfg, "detect_platform", lambda: platform)
-    monkeypatch.setattr(m.cfg.socket, "gethostname", lambda: machine)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(socket, "gethostname", lambda: machine)
+    tracking_path = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 
-    result = m._create_worktree_core(config, pending_seed=seed)
+    result = worktree_creation._create_worktree_core(config, pending_seed=seed)
 
     identity = result["worktree"]["id"]
     assert re.fullmatch(rf"{re.escape(prefix)}-\d{{8}}-\d{{6}}-[0-9a-f]{{4}}", identity)
@@ -203,25 +223,26 @@ def test_creation_uses_one_environment_suffix_and_short_identity(
 
 @pytest.mark.parametrize("committed", [False, True])
 def test_post_creation_staging_failure_returns_existing_identity_for_recovery(
-    tmp_path, monkeypatch, capfd, committed,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], committed: bool,
+) -> None:
     from agent_worktrees import launch_seed_state, resolve_cli, tracking, tracking_write
     from test_resolve_seed_delivery import _args, _stub_launch_plumbing
+    resolver_args = cast(Callable[..., argparse.Namespace], _args)
 
     config = _create_config(tmp_path)
-    tracking_path = tmp_path / "tracking"
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_path)
+    tracking_path = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     real_stage = launch_seed_state.stage
-    created = []
-    def fail_stage(path, **kwargs):
+    created: list[Path] = []
+    def fail_stage(path: Path, **kwargs: Any) -> None:
         created.append(path)
         if committed:
             real_stage(path, **kwargs)
             raise tracking_write.AmbiguousWriteOutcome("response was lost")
         raise OSError("state storage unavailable")
     monkeypatch.setattr(launch_seed_state, "stage", fail_stage)
-    assert resolve_cli.cmd_resolve(_args(new_worktree=True, worktree_id=None, seed="New task")) == 3
+    assert resolve_cli.cmd_resolve(resolver_args(new_worktree=True, worktree_id=None, seed="New task")) == 3
     failure = json.loads(capfd.readouterr().out)
     assert failure["created"] is True
     assert failure["worktree"]["id"] == created[0].stem
@@ -231,11 +252,12 @@ def test_post_creation_staging_failure_returns_existing_identity_for_recovery(
     assert len(tracking.list_records(tracking_path)) == 1
     if committed:
         saved = launch_seed_state.peek(created[0])
+        assert saved is not None
         assert saved.seed_id == failure["launch_seed"]["seed_id"]
         assert failure["launch_seed"]["status"] == "unknown"
         monkeypatch.setattr(launch_seed_state, "stage", real_stage)
         _stub_launch_plumbing(monkeypatch, config)
-        assert resolve_cli.cmd_resolve(_args(worktree_id=created[0].stem)) == 0
+        assert resolve_cli.cmd_resolve(resolver_args(worktree_id=created[0].stem)) == 0
         recovered = json.loads(capfd.readouterr().out)
         assert recovered["launch"]["seed_id"] == saved.seed_id
         assert len(tracking.list_records(tracking_path)) == 1
@@ -243,50 +265,53 @@ def test_post_creation_staging_failure_returns_existing_identity_for_recovery(
 
 @pytest.mark.parametrize("failure_site", ["pair-stamp", "launch-plan"])
 def test_any_post_record_tail_failure_preserves_recovery_identity(
-    tmp_path, monkeypatch, capfd, failure_site,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], failure_site: str,
+) -> None:
     from agent_worktrees import launch_seed_state, resolve_cli, tracking
     from test_resolve_seed_delivery import _args
+    resolver_args = cast(Callable[..., argparse.Namespace], _args)
 
     config = _create_config(tmp_path)
-    records = tmp_path / "tracking"
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: records)
+    records = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
-    def fail(*a, **k):
+    def fail(*a: Any, **k: Any) -> None:
         raise OSError("post-record tail failed")
     if failure_site == "pair-stamp":
         monkeypatch.setattr(m, "_stamp_and_compose_paired_knowledge", fail)
     else:
         monkeypatch.setattr(m, "_build_launch_cmd", fail)
-    assert resolve_cli.cmd_resolve(_args(new_worktree=True, worktree_id=None, seed="New task")) == 3
+    assert resolve_cli.cmd_resolve(resolver_args(new_worktree=True, worktree_id=None, seed="New task")) == 3
     payload = json.loads(capfd.readouterr().out)
     assert payload["created"] is True and payload["recovery"]["repeat_new"] is False
     path = records / f"{payload['worktree']['id']}.yaml"
-    assert path.exists() and launch_seed_state.peek(path).text == "New task"
+    saved = launch_seed_state.peek(path)
+    assert path.exists() and saved is not None and saved.text == "New task"
     assert len(tracking.list_records(records)) == 1
 
 
 @pytest.mark.parametrize("seed", [None, "New task"])
 def test_companion_trust_failure_cannot_return_a_successful_launch(
-    tmp_path, monkeypatch, capfd, seed,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], seed: str | None,
+) -> None:
     from agent_worktrees import launch_seed_state, permissions, resolve_cli, tracking
     from test_resolve_seed_delivery import _args
+    resolver_args = cast(Callable[..., argparse.Namespace], _args)
 
     config = _create_config(tmp_path)
-    records = tmp_path / "tracking"
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: records)
+    records = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     companion = str(tmp_path / "companion")
-    trust_calls = []
+    trust_calls: list[str] = []
 
-    def trust(path):
+    def trust(path: str) -> bool:
         trust_calls.append(path)
         if path == companion:
             raise permissions.FolderTrustError("companion trust update refused")
         return False
 
-    def carve(*args, **kwargs):
+    def carve(*args: Any, **kwargs: Any) -> None:
         permissions.ensure_trusted_folder(companion)
 
     monkeypatch.setattr(permissions, "ensure_trusted_folder", trust)
@@ -296,7 +321,7 @@ def test_companion_trust_failure_cannot_return_a_successful_launch(
         lambda *a, **k: pytest.fail("companion trust failed; do not continue the launch tail"),
     )
     assert resolve_cli.cmd_resolve(
-        _args(new_worktree=True, worktree_id=None, seed=seed),
+        resolver_args(new_worktree=True, worktree_id=None, seed=seed),
     ) == 3
     payload = json.loads(capfd.readouterr().out)
     assert payload["created"] is True
