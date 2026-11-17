@@ -6294,7 +6294,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
-        "tools/typecheck-projects.json": "19785e4835c258a0d1cf0096b49644959884c27511b7c5e81756b85d89bdb325",
+        "tools/typecheck-projects.json": "bd8b0013a8e9c25c7fb535a822aae0463cfcb017eb09b337457a0209baaa296d",
         "tools/promotion_unit_tests/test_typecheck_new_code.py": "2b086d280ff2d6de186672ce6d49eff16a413239a4deefe9fedc55c86c5ec7a2",
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "680a3389cd1226effb5e29658ba61671db64d72a3cda41145e0769fa34c14eaa",
