@@ -91,7 +91,7 @@ requires reconciliation, not arbitrary selection.
 |---|---|
 | Conclusively absent, with no unresolved prior creation | Create through the ordinary deduplicated task owner using the existing recipe and original request identity. Reconcile its acknowledgement; do not spawn a worker directly. |
 | Queued, reserved, claimed or actively executing | Preserve the same task and owner. Notify only when materially new activity needs delivery; unchanged input is NoOp, not a new task. |
-| Suspended under its existing owner | Prepare an ordinary scoped steer/nudge for materially new activity. Reuse its original request identity and recovery record; wake through the existing task owner, not a separate process launcher. |
+| Suspended under its existing owner | Prepare an ordinary scoped steer/nudge with a distinct request identity for materially new activity. Only retries or reconciliation of that same notification reuse its identity and recovery record; wake through the existing task owner, not a separate process launcher. |
 | Held, awaiting operator input, failed or terminal | Preserve that state and its original decision/settlement owner. A feed item does not answer a form, clear a hold, retry a failed operation or reopen completed work. |
 | Unknown lookup or mutation result | Reconcile the original operation through the same owner. Do not create a replacement task or infer that a missing live dedup result settles an older operation. |
 
@@ -102,6 +102,11 @@ actual task owner, not from PR metadata. Negotiate the executing coordinator's
 support before relying on those semantics; a prior coordinator silently
 ignoring fields is not equivalent enforcement. Retain the original prepared
 request after uncertainty instead of reconstructing it with a new key.
+Materially new activity needs a distinct prepared request and identity, even
+when the retained task has suspended again. Do not reuse an earlier accepted
+notification's key for a changed payload or task revision: that can conflict
+or replay the old acceptance without delivering another wake. An unchanged
+action remains NoOp, not a reason to allocate another notification identity.
 
 A stable task key prevents overlapping live review tasks; it is not an
 exactly-once notification guarantee. Conversely, an action correlation key
