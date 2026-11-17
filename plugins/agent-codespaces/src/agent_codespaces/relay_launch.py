@@ -271,8 +271,8 @@ _FEED_TOKEN_RESERVED_PREFIXES = ("__acs_fte_", "AGENT_CODESPACES_FEED_TOKEN_")
 # Wrapper installed under FEED_TOKEN_REFRESH_DIR for each feed client. When
 # the last successful mint in this process tree is older than the refresh
 # interval, it re-mints the bearer under a hard deadline (keeping the previous
-# value on failure), then execs the next same-named binary on PATH, skipping
-# its own directory.
+# value on failure, or when no deadline can be enforced), then execs the next
+# same-named binary on PATH, skipping its own directory.
 _FEED_TOKEN_REFRESH_SCRIPT = (
     """#!/usr/bin/env bash
 __acs_fte_self="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)"
@@ -289,10 +289,10 @@ if [ -n "${@VARS@:-}" ]; then
   if [ "$__acs_fte_now" -eq 0 ] \\
       || [ $(( __acs_fte_now - __acs_fte_last )) -ge "$__acs_fte_every" ] \\
       || [ "$__acs_fte_now" -lt "$__acs_fte_last" ]; then
+    # Without timeout the deadline can't be enforced, so keep the previous value.
+    __acs_fte_token=""
     if command -v timeout >/dev/null 2>&1; then
       __acs_fte_token="$(timeout -k 2 "$__acs_fte_wait" "@HELPER@" get-access-token 2>/dev/null || true)"
-    else
-      __acs_fte_token="$("@HELPER@" get-access-token 2>/dev/null || true)"
     fi
     if [ -n "$__acs_fte_token" ]; then
       read -r -a __acs_fte_vars <<< "${@VARS@}"
@@ -346,8 +346,10 @@ def build_feed_token_refresh_shim(var_names: Any) -> str:
     the relay-backed ``ado-auth-helper`` (under a short deadline, at most once
     per refresh interval in a process tree) and then execs the real binary.
     Tools absent at launch get no wrapper, so ``command -v`` still reports
-    them missing. Like the ``azure-auth-helper`` compat shim, PATH is exported
-    only for this launch and never written to a dotfile.
+    them missing. Each launch owns a unique subdirectory, so a later launch
+    with a different PATH never removes an earlier live session's wrappers.
+    Like the ``azure-auth-helper`` compat shim, PATH is exported only for this
+    launch and never written to a dotfile.
     """
     names = [
         name for name in _valid_env_names(var_names)
@@ -355,12 +357,13 @@ def build_feed_token_refresh_shim(var_names: Any) -> str:
     ]
     if not names:
         return ""
-    d = FEED_TOKEN_REFRESH_DIR
+    d = "$__acs_fte_dir"
     script = shlex.quote(_FEED_TOKEN_REFRESH_SCRIPT)
     tools = " ".join(FEED_TOKEN_REFRESH_TOOLS)
     return (
         f"export {FEED_TOKEN_REFRESH_VARS_ENV}={shlex.quote(' '.join(names))}; "
-        f'mkdir -p "{d}" 2>/dev/null && '
+        f'mkdir -p "{FEED_TOKEN_REFRESH_DIR}" 2>/dev/null && '
+        f'__acs_fte_dir="$(mktemp -d "{FEED_TOKEN_REFRESH_DIR}/launch.XXXXXXXXXX" 2>/dev/null)" && '
         f'printf %s {script} > "{d}/.feed-token-exec.$$" 2>/dev/null && '
         f'chmod 755 "{d}/.feed-token-exec.$$" 2>/dev/null && '
         f'mv -f "{d}/.feed-token-exec.$$" "{d}/feed-token-exec" 2>/dev/null && '
@@ -374,6 +377,7 @@ def build_feed_token_refresh_shim(var_names: Any) -> str:
         "unset __acs_fte_tool; "
         f'export PATH="{d}:$PATH"; '
         "} || true; "
+        "unset __acs_fte_dir; "
     )
 
 

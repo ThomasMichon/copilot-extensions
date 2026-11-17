@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -222,7 +223,8 @@ def test_build_relay_env_installs_refresh_shim_after_feed_export() -> None:
     env = build_relay_env(
         9857, "tok123", use_relay=True, feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"]
     )
-    assert f'export PATH="{FEED_TOKEN_REFRESH_DIR}:$PATH"; ' in env
+    assert f'mktemp -d "{FEED_TOKEN_REFRESH_DIR}/launch.XXXXXXXXXX"' in env
+    assert 'export PATH="$__acs_fte_dir:$PATH"; ' in env
     assert env.index("export EXAMPLE_NPM_AUTH_TOKEN=") < env.index(
         FEED_TOKEN_REFRESH_DIR
     )
@@ -379,8 +381,52 @@ def test_refresh_shim_wraps_only_tools_present_at_launch(tmp_path: Path) -> None
     )
     env = {"HOME": str(home), "PATH": f"{real_bin}:/usr/bin:/bin"}
     out = _run_bash(script, env).stdout.splitlines()
-    assert out[0].endswith("/.cache/agent-codespaces/feed-token-path/rush")
+    assert re.search(r"/\.cache/agent-codespaces/feed-token-path/launch\.[^/]+/rush$", out[0])
     assert out[1] == "pnpm missing"
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_later_launch_keeps_earlier_wrappers(tmp_path: Path) -> None:
+    home, real_bin = _helper_and_bin(tmp_path, "echo fresh\n")
+    _tool(real_bin / "rush", 'echo "rush=$FEED_TOKEN"\n')
+    shim = build_feed_token_refresh_shim(["FEED_TOKEN"])
+    # Subshell launches share $$, but must not share wrapper directories.
+    later = "export PATH=/usr/bin:/bin FEED_TOKEN=b; " + shim + "command -v rush || echo none"
+    script = (
+        "export FEED_TOKEN=a; " + shim
+        + f"({later}); rush"
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": f"{real_bin}:/usr/bin:/bin",
+        FEED_TOKEN_REFRESH_INTERVAL_ENV: "0",
+    }
+    out = _run_bash(script, env).stdout.splitlines()
+    assert out == ["none", "rush=fresh"]
+
+
+@pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
+def test_refresh_shim_skips_mint_without_timeout(tmp_path: Path) -> None:
+    counter = tmp_path / "count"
+    home, real_bin = _helper_and_bin(
+        tmp_path, f'echo 1 > "{counter}"\necho fresh\n'
+    )
+    _tool(real_bin / "npm", 'echo "token=$FEED_TOKEN"\n')
+    utils = tmp_path / "utils"
+    utils.mkdir()
+    for name in ("bash", "date", "dirname", "basename", "mkdir", "mktemp", "chmod", "mv", "ln", "rm"):
+        found = shutil.which(name)
+        assert found is not None
+        (utils / name).symlink_to(found)
+    script = (
+        "export FEED_TOKEN=launch; "
+        + build_feed_token_refresh_shim(["FEED_TOKEN"])
+        + "command -v timeout || npm --version"
+    )
+    env = {"HOME": str(home), "PATH": f"{real_bin}:{utils}"}
+    out = _run_bash(script, env)
+    assert out.stdout.splitlines() == ["token=launch"]
+    assert not counter.exists()
 
 
 @pytest.mark.skipif(_posix_bash() is None, reason="needs a POSIX bash")
