@@ -43,6 +43,14 @@ def _failure(code: str) -> dict[str, Any]:
     }
 
 
+def validate_selector(request: dict[str, Any]) -> dict[str, Any] | None:
+    if "kpdb" in request:
+        selected = request["kpdb"]
+        if not isinstance(selected, str) or not selected.strip():
+            return _failure("invalid_request")
+    return None
+
+
 def handle(
     vault: VaultService,
     persistent: PersistentCache,

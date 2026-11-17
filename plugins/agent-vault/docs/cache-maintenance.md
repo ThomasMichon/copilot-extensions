@@ -47,7 +47,9 @@ Send one entry/field reference over the existing selected, authorized transport:
 `operation` is `populate` or `verify`. `field` defaults to `password`;
 `max_age_seconds` is optional and, when supplied, must be a nonnegative integer.
 Database, group and installation selection keep their existing transport and
-cache-owner rules. Root anchors and standard field aliases use the existing
+cache-owner rules. An omitted database selector retains native service selection;
+an explicitly supplied selector must be a nonempty string, validated before
+default selection or database lookup. Root anchors and standard field aliases use the existing
 normalization owner. This action neither supplies repository policy nor loads
 client configuration or code in the service.
 

@@ -612,6 +612,10 @@ class VaultService:
                           transport: str) -> dict[str, Any]:
         self.keepalive()
         action: Any = request.get("action")
+        if action == "cache-maintenance":
+            invalid = cache_maintenance.validate_selector(request)
+            if invalid is not None:
+                return invalid
         if action == "ping" and request.get("health_only") is True:
             return self._generation_health()
         self._check_password_ttl()

@@ -64,10 +64,13 @@ def test_current_and_legacy_requests_cross_the_existing_json_transport(
         listener = await asyncio.start_server(connections.callback("tcp"), "127.0.0.1", 0)
         host, port = listener.sockets[0].getsockname()[:2]
 
-        async def send(request: dict[str, Any]) -> dict[str, Any]:
+        async def send(
+            request: dict[str, Any], *, select_database: bool = True,
+        ) -> dict[str, Any]:
             reader, writer = await asyncio.open_connection(host, port)
             try:
-                writer.write((json.dumps({"kpdb": kpdb, **request}) + "\n").encode())
+                selection = {"kpdb": kpdb} if select_database else {}
+                writer.write((json.dumps({**selection, **request}) + "\n").encode())
                 await writer.drain()
                 response = json.loads(await asyncio.wait_for(reader.readline(), timeout=5))
                 assert isinstance(response, dict)
@@ -87,6 +90,20 @@ def test_current_and_legacy_requests_cross_the_existing_json_transport(
             assert "fixture-value" not in json.dumps(populated)
             legacy = await send({"action": "get", "entry": "entry", "group": "Allowed"})
             assert legacy["ok"] and legacy["value"] == "fixture-value"
+            omitted = await send({
+                "action": "cache-maintenance", "operation": "verify",
+                "entry": "entry", "group": "Allowed",
+            }, select_database=False)
+            assert omitted["ok"] and omitted["present"]
+            for malformed in (None, False, 0, [], {}, ["database"], {"database": "wrong"}, "", " "):
+                refused = await send({
+                    "action": "cache-maintenance", "operation": "verify",
+                    "entry": "entry", "kpdb": malformed,
+                })
+                assert refused == {
+                    "ok": False, "code": "invalid_request",
+                    "error": "invalid protected-cache maintenance request",
+                }
         finally:
             await connections.close([listener], [], lambda: None)
             assert not connections.clients and not connections.workers and not connections.work
