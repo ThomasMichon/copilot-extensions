@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
 from .content_store import sanitize_fts_query
 from .repo_filter import _like_pattern, _sql_str, repo_filter_sql
 from .source_layout import SourceLayoutError
 
+if TYPE_CHECKING:
+    import numpy as np
 
-def source_predicate(families: tuple[str, ...], language=None, repo=None) -> str:
+    from .multi_model_store import MultiModelStore
+    from .store import SearchResult
+
+
+def source_predicate(
+    families: tuple[str, ...], language: str | None = None, repo: str | None = None,
+    *, repo_filter: Callable[[str], str] = repo_filter_sql,
+) -> str:
     if not families:
         return "FALSE"
     if len(families) > 32:
@@ -30,12 +42,15 @@ def source_predicate(families: tuple[str, ...], language=None, repo=None) -> str
     if language is not None:
         result += f" AND language = '{_sql_str(language)}'"
     if repo is not None:
-        result += f" AND ({repo_filter_sql(repo)})"
+        result += f" AND ({repo_filter(repo)})"
     return result
 
 
-def search_source_store(store, vectors: dict, query: str, *, families: tuple[str, ...],
-                        limit: int = 10, language=None, repo=None, include_fts=True):
+def search_source_store(
+    store: MultiModelStore, vectors: dict[str, np.ndarray[Any, Any]], query: str,
+    *, families: tuple[str, ...], limit: int = 10, language: str | None = None,
+    repo: str | None = None, include_fts: bool = True,
+) -> list[SearchResult]:
     """Caller supplies verified canonical families; this API does not authenticate grants."""
     from .multi_model_store import (
         _DEFAULT_FTS_WEIGHT,
@@ -55,14 +70,18 @@ def search_source_store(store, vectors: dict, query: str, *, families: tuple[str
         return []
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("invalid search limit")
-    predicate = source_predicate(families, language, repo)
+    predicate = source_predicate(
+        families, language, repo, repo_filter=store.content_store.repo_filter_sql,
+    )
     window = max(50, limit * 5)
     with domain.read(store.content_store.db):
-        content = store.content_store._get_or_create_table()
+        get_content_table: Callable[[], Any] = store.content_store._get_or_create_table
+        content = get_content_table()
         fts_ready = domain.require_fts(store.content_store) if include_fts else False
         branches = []
         for model, vector in vectors.items():
-            table = store.get_vector_table(model)._get_or_create_table()
+            get_vector_table: Callable[[], Any] = store.get_vector_table(model)._get_or_create_table
+            table = get_vector_table()
             if not {"source", "language"} <= set(table.schema.names):
                 raise SourceLayoutError("source projection incomplete")
             rows = (

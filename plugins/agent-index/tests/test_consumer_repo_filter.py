@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ntpath
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import SupportsIndex
 from unittest.mock import Mock
@@ -12,12 +13,14 @@ import numpy as np
 import pytest
 
 from agent_index.chunking.base import Chunk
-from agent_index.index_config import ModelProfile
+from agent_index.index_config import IndexConfig, ModelProfile
+from agent_index.search.engine import SearchEngine
 from agent_index.store import multi_model_store
 from agent_index.store.content_store import ContentStore
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.repo_filter import _like_pattern, path_glob_sql
 from agent_index.store.result_filters import SearchFilters
+from agent_index.store.source_layout import LAYOUT, initialize_source_store
 
 
 class CatalogStore(ContentStore):
@@ -27,6 +30,61 @@ class CatalogStore(ContentStore):
 
 def catalog_repo_matches(source: str, repo: str) -> bool:
     return bool(repo) and source.endswith(f":{repo}")
+
+
+@pytest.mark.parametrize("repo", ["owner/repo_under", "owner/repo'quoted"])
+def test_consumer_policy_scopes_authorized_native_queries_before_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: str,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("test", "test", table_name="vectors_test", dim=2)
+    config = IndexConfig(data_dir=tmp_path, model_profiles={"test": profile})
+    initialize: Callable[[IndexConfig], MultiModelStore] = initialize_source_store
+    initialize(config)
+    store = MultiModelStore(
+        config.lance_dir, content_store_type=CatalogStore, repo_matcher=catalog_repo_matches,
+    )
+    store.register_model(profile)
+    sources = [
+        f"catalog:issues:{repo}",
+        *(["catalog:issues:owner/other"] * 51),
+        f"catalog:issues-extra:{repo}",
+        f"catalog:issues:{repo}",
+    ]
+    chunks = [
+        Chunk(
+            f"needle document {index}", f"docs/item-{index}.py", "code",
+            "markdown" if index == len(sources) - 1 else "python", 1, 1, source=source,
+        )
+        for index, source in enumerate(sources)
+    ]
+    vectors = np.array([[0.1, 0.9], *([[1.0, 0.0]] * (len(chunks) - 1))], dtype=np.float32)
+    store.upsert("test", chunks, vectors)
+    assert store.ensure_fts_index()
+    inference = Mock()
+    inference.embed_query.return_value = np.array([1.0, 0.0], dtype=np.float32)
+    engine = SearchEngine({"test": inference}, store)
+    assert store._source_domain is not None
+    before = store._source_domain.receipt()
+    for mode in ("vector", "fts", "hybrid"):
+        hits = engine.search_authorized(
+            "needle", families=("catalog:issues",), repo=repo, language="python",
+            mode=mode, limit=1,
+        )
+        assert [hit.chunk_id for hit in hits] == [chunks[0].chunk_id]
+        assert engine.search_authorized(
+            "needle", families=("catalog:issues",), repo="issues", mode=mode,
+        ) == []
+        assert engine.search_authorized("needle", families=(), repo=repo, mode=mode) == []
+    assert store._source_domain.receipt() == before
+
+    default = MultiModelStore(config.lance_dir)
+    default.register_model(profile)
+    default_engine = SearchEngine({"test": inference}, default)
+    for mode in ("vector", "fts", "hybrid"):
+        assert default_engine.search_authorized(
+            "needle", families=("catalog:issues",), repo=repo, mode=mode,
+        ) == []
 
 
 @pytest.mark.parametrize("with_fts", [True, False])

@@ -187,6 +187,10 @@ source/language filters and execution before the candidate limit. Do not copy
 the FTS loop, replace a process-global helper or fetch an unbounded candidate
 set to filter in Python. Hydrated vector, similarity, hybrid and cross-model
 paths use the injected matcher, including unavailable/empty-FTS fallback paths.
+In an explicitly selected source-aware store, `SearchEngine.search_authorized`
+uses the content store's SQL policy in native vector, FTS and hydration queries.
+It retains canonical family authorization, language filtering and pre-limit
+selection; the repository policy does not grant access to another family.
 `tests/test_consumer_repo_filter.py` exercises the real native queries with
 wildcard, quote, backslash, metadata and independent-default-instance controls.
 Publish this expanded provider before migrating a consumer; an older provider's
