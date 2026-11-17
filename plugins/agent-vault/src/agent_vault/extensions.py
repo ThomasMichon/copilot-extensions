@@ -53,11 +53,14 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .transport_binding import MutationBinding
+
+if TYPE_CHECKING:
+    from importlib.metadata import EntryPoint
 
 log = logging.getLogger("agent-vault.extensions")
 
@@ -128,6 +131,11 @@ class _Ranked:
     single_attempt: bool = field(default=False, compare=False)
 
 
+def _hook_name(fn: Callable[..., Any], name: str | None) -> str:
+    value = name or getattr(fn, "__name__", "?")
+    return value if isinstance(value, str) else "?"
+
+
 class ExtensionRegistry:
     """Holds registered hooks and exposes ordered access to them."""
 
@@ -155,7 +163,7 @@ class ExtensionRegistry:
     ) -> None:
         """Register a provider consulted before the interactive unlock prompt."""
         self._unlock_providers.append(
-            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
+            _Ranked(priority, self._next_seq(), _hook_name(fn, name), fn)
         )
         self._unlock_providers.sort()
 
@@ -189,7 +197,7 @@ class ExtensionRegistry:
         target = self._transports_before if before_builtin else self._transports_after
         target.append(
             _Ranked(
-                priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn,
+                priority, self._next_seq(), _hook_name(fn, name), fn,
                 single_attempt=single_attempt,
             )
         )
@@ -200,7 +208,7 @@ class ExtensionRegistry:
     ) -> None:
         """Register a configuration source feeding the resolver."""
         self._config_sources.append(
-            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
+            _Ranked(priority, self._next_seq(), _hook_name(fn, name), fn)
         )
         self._config_sources.sort()
 
@@ -214,7 +222,7 @@ class ExtensionRegistry:
         to ``password``) or an ``(entry, field)`` pair.
         """
         self._cache_sources.append(
-            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
+            _Ranked(priority, self._next_seq(), _hook_name(fn, name), fn)
         )
         self._cache_sources.sort()
 
@@ -230,7 +238,7 @@ class ExtensionRegistry:
         verbs instead of forking ``cli.py``.
         """
         self._cli_commands.append(
-            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
+            _Ranked(priority, self._next_seq(), _hook_name(fn, name), fn)
         )
         self._cli_commands.sort()
 
@@ -248,7 +256,7 @@ class ExtensionRegistry:
         serving.
         """
         self._startup_hooks.append(
-            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
+            _Ranked(priority, self._next_seq(), _hook_name(fn, name), fn)
         )
         self._startup_hooks.sort()
 
@@ -321,12 +329,15 @@ class ExtensionRegistry:
         self, request: dict[str, Any], timeout: float | None, ctx: TransportContext,
         *, before_builtin: bool = False,
         binding: MutationBinding | None = None,
+        on_selected: Callable[[ClientTransport], None] | None = None,
     ) -> dict[str, Any] | None:
         """Consult client transports in priority order; first non-None wins.
 
         ``before_builtin`` selects the phase: the transports registered to run
         ahead of the built-in unix/TCP transports, or (default) the fallback
         transports consulted after them.
+        ``on_selected`` receives the actual winning callable. A command retaining
+        that route invokes it directly, not this fail-open selection loop.
         """
         transports = self._transports_before if before_builtin else self._transports_after
         for ranked in transports:
@@ -337,6 +348,8 @@ class ExtensionRegistry:
                 log.warning("Transport %r raised: %s", ranked.name, exc)
                 continue
             if result is not None:
+                if on_selected is not None and not isinstance(result, dict):
+                    return {"ok": False, "error": "invalid_extension_transport_response"}
                 if binding is not None:
                     def send(
                         payload: dict[str, Any], limit: float | None,
@@ -352,6 +365,8 @@ class ExtensionRegistry:
                         },
                     )
                 result.setdefault("_transport", f"ext:{ranked.name}")
+                if on_selected is not None:
+                    on_selected(cast(ClientTransport, ranked.fn))
                 return result
         return None
 
@@ -465,7 +480,7 @@ def _entry_point_registers(
         selected = (
             eps.select(group=ENTRY_POINT_GROUP)
             if hasattr(eps, "select")
-            else cast(Any, eps).get(ENTRY_POINT_GROUP, [])
+            else cast("Mapping[str, Iterable[EntryPoint]]", eps).get(ENTRY_POINT_GROUP, [])
         )
     except Exception as exc:
         if registry is not None:

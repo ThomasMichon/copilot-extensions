@@ -66,6 +66,17 @@ def test_vault_cache_policy_preserves_anchors_and_manifest_owners() -> None:
     ]
 
 
+def test_vault_cache_policy_retains_and_validates_the_maintenance_owner() -> None:
+    owner = Path(ROOT.anchor) / "declaring"
+    assert targets.preferences({"cache_maintenance": "selected-service"}, owner) == {
+        "cache_maintenance": "selected-service",
+    }
+    values: tuple[object, ...] = (True, None, [], "unknown")
+    for value in values:
+        with pytest.raises(RuntimeError, match="cache_maintenance"):
+            targets.preferences({"cache_maintenance": value}, owner)
+
+
 def test_vault_invalid_manifest_aborts_collection_without_substitute_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -6,8 +6,8 @@ import ast
 from contextlib import nullcontext
 import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any, NoReturn
+from types import MethodType, ModuleType, SimpleNamespace
+from typing import Any, Callable, NoReturn, cast
 
 import pytest
 
@@ -69,6 +69,11 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
     monkeypatch.setitem(sys.modules, package_name, package)
     monkeypatch.setitem(sys.modules, extensions.__name__, extensions)
+    transport_source = ROOT / "plugins/agent-vault/src/agent_vault/command_transport.py"
+    transport_module = ModuleType(f"{package_name}.command_transport")
+    transport_module.__package__ = package_name
+    monkeypatch.setitem(sys.modules, transport_module.__name__, transport_module)
+    exec(compile(transport_source.read_bytes(), str(transport_source), "exec"), transport_module.__dict__)
     namespace: dict[str, Any] = {
         "__name__": f"{package_name}.cli", "__package__": package_name,
         "config": SimpleNamespace(resolve_context=lambda: SimpleNamespace(
@@ -81,12 +86,14 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         ),
         "IS_WSL": False, "IS_WINDOWS": False,
         "_discover_endpoint": discover, "_send_socket": native, "_send_tcp": native,
+        "pipe_send": native,
     }
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
     return SimpleNamespace(
         send=namespace["send_command"], original=original,
         error=DiscoveryRefusal, state_error=InvalidDiscovery, invalid=invalid,
         state=state, calls=calls, package=package_name,
+        namespace=namespace, transport=transport_module, extensions=extensions,
     )
 
 
@@ -128,6 +135,84 @@ def test_legacy_strict_call_retains_its_existing_absent_advertisement_default(
     result = boundary.send({"action": "get"}, strict_endpoint=True)
     assert result["value"] == "legacy-value"
     assert boundary.calls == ["discovery", "preferred", "legacy"]
+
+
+@pytest.mark.parametrize("failure", ["lost-reply", "declined"])
+def test_retained_extension_failure_never_reenters_transport_selection(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    source = ROOT / "plugins/agent-vault/src/agent_vault/extensions.py"
+    tree = ast.parse(source.read_bytes(), filename=str(source))
+    registry = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "ExtensionRegistry")
+    method = next(
+        node for node in registry.body if isinstance(node, ast.FunctionDef) and node.name == "try_transports"
+    )
+    future = next(node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "__future__")
+    warnings: list[object] = []
+    namespace: dict[str, Any] = {
+        "cast": cast, "ClientTransport": Callable[..., Any],
+        "log": SimpleNamespace(warning=lambda *values: warnings.append(values)),
+    }
+    exec(compile(ast.Module(body=[future, method], type_ignores=[]), str(source), "exec"), namespace)
+    calls: list[str] = []
+
+    def selected(request: dict[str, Any], _timeout: object, _context: object) -> dict[str, Any] | None:
+        calls.append(request["action"])
+        if request["action"] == "ping":
+            return {"ok": True, "_transport": "ext:unqualified"}
+        if failure == "lost-reply":
+            raise TimeoutError("private-reply-detail")
+        return None
+
+    def other(*_arguments: object) -> NoReturn:
+        pytest.fail("uncertain request reached an unqualified transport")
+
+    instance = SimpleNamespace(
+        _transports_before=[
+            SimpleNamespace(name="selected", fn=selected),
+            SimpleNamespace(name="unqualified", fn=other),
+        ],
+        _transports_after=[],
+    )
+    instance.try_transports = MethodType(namespace["try_transports"], instance)
+    monkeypatch.setattr(boundary.extensions, "get_registry", lambda: instance)
+    route = boundary.transport.CommandRoute()
+    assert boundary.send(
+        {"action": "ping"}, strict_endpoint=True, require_endpoint=True, _route=route,
+    )["ok"]
+    assert route.sender is not None
+    assert boundary.send(
+        {"action": "cache-maintenance"}, strict_endpoint=True, require_endpoint=True, _route=route,
+    ) is None
+    assert calls == ["ping", "cache-maintenance"]
+    assert boundary.calls == ["discovery"]
+    assert warnings == []
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_maintenance_projection_omits_only_an_unselected_database_default(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, explicit_null: bool,
+) -> None:
+    monkeypatch.setattr(boundary.namespace["config"], "resolve_context", lambda: SimpleNamespace(
+        kpdb=None, group="Example", vault_name=None, port=10170, sources={"port": "default"},
+    ))
+    observations: list[dict[str, Any]] = []
+
+    def preferred(request: dict[str, Any], *_arguments: object, **_options: object) -> dict[str, Any]:
+        observations.append(dict(request))
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        boundary.extensions, "get_registry", lambda: SimpleNamespace(try_transports=preferred),
+    )
+    request: dict[str, Any] = {"action": "cache-maintenance"}
+    if explicit_null:
+        request["kpdb"] = None
+    assert boundary.send(request, strict_endpoint=True, require_endpoint=True)["ok"]
+    assert ("kpdb" in observations[0]) is explicit_null
+    assert observations[0]["group"] == "Example"
+    if explicit_null:
+        assert observations[0]["kpdb"] is None
 
 
 def test_restricted_reader_requires_advertisement_on_both_readiness_and_read(
