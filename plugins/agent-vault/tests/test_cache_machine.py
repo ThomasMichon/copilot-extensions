@@ -16,11 +16,11 @@ from agent_vault.cache_dpapi import MAGIC, CacheDecryptionUnavailable, CacheProt
 
 
 class PrivateFiles:
-    def __init__(self):
-        self.private = set()
+    def __init__(self) -> None:
+        self.private: set[tuple[int, int]] = set()
         self.refuse = False
 
-    def create(self, path, *, directory):
+    def create(self, path: Path, *, directory: bool) -> int | None:
         if self.refuse:
             raise PermissionError("fixture refused")
         if directory:
@@ -32,17 +32,19 @@ class PrivateFiles:
         self.private.add((info.st_dev, info.st_ino))
         return descriptor
 
-    def require(self, path, *, directory):
+    def require(self, path: Path, *, directory: bool) -> None:
         info = path.stat()
         if self.refuse or (info.st_dev, info.st_ino) not in self.private:
             raise PermissionError("fixture unsafe ACL")
 
 
 @pytest.fixture(params=["native", "wrapped-key"])
-def protected(request, monkeypatch, tmp_path):
+def protected(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> SimpleNamespace:
     state = SimpleNamespace(user_unavailable=False, machine_unavailable=False, calls=[])
 
-    def dpapi(protect, value, *, machine=False):
+    def dpapi(protect: bool, value: bytes, *, machine: bool = False) -> bytes:
         state.calls.append((protect, machine))
         if protect:
             return (b"M" if machine else b"U") + value
@@ -67,18 +69,18 @@ def protected(request, monkeypatch, tmp_path):
         (tmp_path / "credential-cache.enc").write_bytes(MAGIC + dpapi(True, data))
     else:
         class Fernet:
-            def __init__(self, _key):
+            def __init__(self, _key: bytes) -> None:
                 pass
 
-            def encrypt(self, plaintext):
+            def encrypt(self, plaintext: bytes) -> bytes:
                 return b"F" + plaintext
 
-            def decrypt(self, ciphertext):
+            def decrypt(self, ciphertext: bytes) -> bytes:
                 assert ciphertext.startswith(b"F")
                 return ciphertext[1:]
 
         module = ModuleType("agent_vault.protected_crypto")
-        module.Fernet = Fernet
+        module.__dict__["Fernet"] = Fernet
         monkeypatch.setitem(sys.modules, "agent_vault.protected_crypto", module)
         (tmp_path / "credential-cache.key").write_bytes(kek.WRAP_MAGIC + b"D" + dpapi(True, b"key"))
         (tmp_path / "credential-cache.enc").write_bytes(b"F" + data)
@@ -90,11 +92,11 @@ def protected(request, monkeypatch, tmp_path):
     )
 
 
-def prepare(protected):
+def prepare(protected: SimpleNamespace) -> None:
     assert cache_machine.prepare(protected.open()) == {"enabled": True, "populated": True}
 
 
-def test_default_off_keeps_original_decryption_failure(protected):
+def test_default_off_keeps_original_decryption_failure(protected: SimpleNamespace) -> None:
     protected.state.user_unavailable = True
     before = protected.primary.read_bytes()
     with pytest.raises(CacheDecryptionUnavailable):
@@ -103,7 +105,7 @@ def test_default_off_keeps_original_decryption_failure(protected):
     assert not protected.machine.parent.exists()
 
 
-def test_additive_preparation_and_primary_first_reads(protected):
+def test_additive_preparation_and_primary_first_reads(protected: SimpleNamespace) -> None:
     before = {path.name: path.read_bytes() for path in protected.root.iterdir() if path.is_file()}
     prepare(protected)
     assert {
@@ -116,7 +118,9 @@ def test_additive_preparation_and_primary_first_reads(protected):
 
 
 @pytest.mark.parametrize("readonly", [False, True])
-def test_fallback_is_read_only_even_for_ordinary_callers(protected, readonly):
+def test_fallback_is_read_only_even_for_ordinary_callers(
+    protected: SimpleNamespace, readonly: bool,
+) -> None:
     prepare(protected)
     before = protected.primary.read_bytes()
     protected.state.user_unavailable = True
@@ -131,7 +135,9 @@ def test_fallback_is_read_only_even_for_ordinary_callers(protected, readonly):
 @pytest.mark.parametrize("damage", [
     "primary", "key", "missing-primary", "ciphertext", "acl", "machine-dpapi", "schema",
 ])
-def test_unqualified_redundant_data_is_never_served(protected, damage):
+def test_unqualified_redundant_data_is_never_served(
+    protected: SimpleNamespace, damage: str,
+) -> None:
     prepare(protected)
     if damage == "primary":
         protected.primary.write_bytes(protected.primary.read_bytes() + b"changed")
@@ -157,7 +163,7 @@ def test_unqualified_redundant_data_is_never_served(protected, damage):
         protected.open().get("Allowed/token", readonly=True, machine_only=True)
 
 
-def test_old_writer_change_invalidates_the_machine_copy(protected):
+def test_old_writer_change_invalidates_the_machine_copy(protected: SimpleNamespace) -> None:
     prepare(protected)
     original = protected.primary.read_bytes()
     assert protected.open().put("Allowed/token", "password", "new-value")
@@ -169,12 +175,14 @@ def test_old_writer_change_invalidates_the_machine_copy(protected):
     assert protected.machine.read_bytes() == current_copy
 
 
-def test_partial_primary_publication_refuses_both_stale_and_future_copy(protected, monkeypatch):
+def test_partial_primary_publication_refuses_both_stale_and_future_copy(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     prepare(protected)
     original = protected.primary.read_bytes()
     replace = os.replace
 
-    def interrupted(source, target):
+    def interrupted(source: str | Path, target: str | Path) -> None:
         if Path(target) == protected.primary:
             raise OSError("fixture primary publication interrupted")
         return replace(source, target)
@@ -187,7 +195,7 @@ def test_partial_primary_publication_refuses_both_stale_and_future_copy(protecte
         protected.open().get("Allowed/token", readonly=True)
 
 
-def test_machine_publication_failure_preserves_the_primary(protected):
+def test_machine_publication_failure_preserves_the_primary(protected: SimpleNamespace) -> None:
     prepare(protected)
     original = protected.primary.read_bytes()
     protected.security.refuse = True
@@ -195,7 +203,7 @@ def test_machine_publication_failure_preserves_the_primary(protected):
     assert protected.primary.read_bytes() == original
 
 
-def test_rotation_invalidation_and_clear_share_the_redundant_writer(protected):
+def test_rotation_invalidation_and_clear_share_the_redundant_writer(protected: SimpleNamespace) -> None:
     prepare(protected)
     assert protected.open().begin_replace("Allowed/token", "password", "candidate", 1)
     assert protected.open().get("Allowed/token", readonly=True, machine_only=True) is None
@@ -212,7 +220,9 @@ def test_rotation_invalidation_and_clear_share_the_redundant_writer(protected):
         protected.open().get("Allowed/token", readonly=True, machine_only=True)
 
 
-def test_service_collection_is_included_without_promoting_it_to_direct_entries(protected):
+def test_service_collection_is_included_without_promoting_it_to_direct_entries(
+    protected: SimpleNamespace,
+) -> None:
     prepare(protected)
     persistent = protected.open()
     store = persistent._read_store(readonly=True, strict=True)
@@ -223,7 +233,7 @@ def test_service_collection_is_included_without_promoting_it_to_direct_entries(p
     assert "bound-subject" not in actual["entries"]
 
 
-def test_corrupt_primary_schema_does_not_authorize_fallback(protected):
+def test_corrupt_primary_schema_does_not_authorize_fallback(protected: SimpleNamespace) -> None:
     prepare(protected)
     persistent = protected.open()
     cipher = persistent._get_fernet(readonly=True)
@@ -232,7 +242,10 @@ def test_corrupt_primary_schema_does_not_authorize_fallback(protected):
         protected.open().get("Allowed/token", readonly=True)
 
 
-def test_verify_machine_path_exposes_only_counts_and_never_uses_user_dpapi(protected, monkeypatch, capsys):
+def test_verify_machine_path_exposes_only_counts_and_never_uses_user_dpapi(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     prepare(protected)
     protected.state.user_unavailable = True
     protected.state.calls.clear()
@@ -249,14 +262,19 @@ def test_verify_machine_path_exposes_only_counts_and_never_uses_user_dpapi(prote
     assert "fixture-value" not in captured.out
 
 
-def test_prepare_requires_explicit_risk_acceptance(protected, monkeypatch, capsys):
+def test_prepare_requires_explicit_risk_acceptance(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(cache, "get_cache", lambda: pytest.fail("unaccepted cache access"))
     assert cache_machine_cli.cmd_cache_machine_prepare(SimpleNamespace()) == 2
     assert "--accept-machine-scope" in capsys.readouterr().err
     assert not protected.machine.exists()
 
 
-def test_empty_store_can_opt_in_before_population(protected, monkeypatch):
+def test_empty_store_can_opt_in_before_population(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_vault.cache_dpapi import DpapiCacheCipher
 
     protected.primary.unlink()

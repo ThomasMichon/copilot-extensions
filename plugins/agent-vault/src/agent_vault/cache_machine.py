@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 import hashlib
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from . import kek
@@ -18,23 +20,25 @@ DIRECTORY = "machine-fallback"
 FILENAME = "credential-cache.enc"
 MAGIC = b"AVC1M"
 MAX_BYTES = 16 * 1024 * 1024
+if TYPE_CHECKING:
+    from .cache import PersistentCache
 
 
-class MachineReadStore(dict):
+class MachineReadStore(dict[str, Any]):
     """A redundant read must never become primary-cache writeback."""
 
 
 def _security() -> WindowsSecurity:
-    return WindowsSecurity()
+    return cast(Callable[[], WindowsSecurity], WindowsSecurity)()
 
 
-def enabled(cache) -> bool:
+def enabled(cache: PersistentCache) -> bool:
     from .cache import IS_WINDOWS, _path_exists
 
     return IS_WINDOWS and _path_exists(cache._base_dir / DIRECTORY)
 
 
-def _read(path: Path, security=None) -> bytes:
+def _read(path: Path, security: WindowsSecurity | None = None) -> bytes:
     before = _ordinary(path, directory=False)
     if security is not None:
         _require(path, security, directory=False)
@@ -54,7 +58,7 @@ def _read(path: Path, security=None) -> bytes:
     return value
 
 
-def _source(cache, primary: bytes | None = None) -> str:
+def _source(cache: PersistentCache, primary: bytes | None = None) -> str:
     from .cache import _path_exists
 
     primary = _read(cache._cache_file) if primary is None else primary
@@ -69,13 +73,13 @@ def _source(cache, primary: bytes | None = None) -> str:
     return hashlib.sha256(subject).hexdigest()
 
 
-def _directory(cache, security) -> Path:
+def _directory(cache: PersistentCache, security: WindowsSecurity) -> Path:
     directory = cache._base_dir / DIRECTORY
     _require(directory, security, directory=True)
     return directory
 
 
-def write_copy(cache, store: dict, primary: bytes) -> None:
+def write_copy(cache: PersistentCache, store: dict[str, Any], primary: bytes) -> None:
     """Publish a matching candidate before its primary atomic replacement."""
     from .cache import _path_exists
 
@@ -112,7 +116,7 @@ def write_copy(cache, store: dict, primary: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def read_store(cache) -> MachineReadStore:
+def read_store(cache: PersistentCache) -> MachineReadStore:
     """Read only a secure copy matching the selected primary and key bytes."""
     from .cache_recovery import require_coordinated
 
@@ -145,7 +149,7 @@ def read_store(cache) -> MachineReadStore:
         raise CacheProtectionError("Machine cache is unavailable; primary retained") from exc
 
 
-def prepare(cache) -> dict:
+def prepare(cache: PersistentCache) -> dict[str, bool]:
     """Explicitly enable and populate a redundant copy without primary writes."""
     from .cache import IS_WINDOWS, _path_exists
 
@@ -166,7 +170,7 @@ def prepare(cache) -> dict:
         return {"enabled": True, "populated": primary is not None}
 
 
-def clear_copy(cache) -> None:
+def clear_copy(cache: PersistentCache) -> None:
     """Clear redundant credential data while retaining the explicit opt-in."""
     from .cache import _path_exists
 

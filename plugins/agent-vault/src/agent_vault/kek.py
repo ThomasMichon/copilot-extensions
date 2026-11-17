@@ -29,6 +29,7 @@ import json
 import os
 import secrets
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import IS_WINDOWS, default_config_path
 
@@ -36,6 +37,8 @@ KEK_BYTES = 32          # AES-256
 NONCE_BYTES = 12        # GCM standard nonce
 SEAL_MAGIC = b"AVK1"    # sealed-blob magic + version
 WRAP_MAGIC = b"AVW1"    # wrapped-key-material magic + version
+if TYPE_CHECKING:
+    from .protected_crypto import AesGcm
 
 
 class KekError(RuntimeError):
@@ -60,7 +63,7 @@ def _dpapi(protect: bool, data: bytes, *, machine: bool = False) -> bytes:
     in_blob = DATA_BLOB(len(data), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_char)))
     out_blob = DATA_BLOB()
 
-    crypt32 = ctypes.windll.crypt32
+    crypt32 = getattr(ctypes, "windll").crypt32
     CRYPTPROTECT_UI_FORBIDDEN = 0x1  # never pop UI
     fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
     ok = fn(
@@ -68,12 +71,12 @@ def _dpapi(protect: bool, data: bytes, *, machine: bool = False) -> bytes:
         CRYPTPROTECT_UI_FORBIDDEN | (0x4 if protect and machine else 0), ctypes.byref(out_blob),
     )
     if not ok:
-        err = ctypes.GetLastError()
+        err = getattr(ctypes, "GetLastError")()
         raise KekError(f"DPAPI {'protect' if protect else 'unprotect'} failed (error {err})")
     try:
         return ctypes.string_at(out_blob.pbData, int(out_blob.cbData))
     finally:
-        ctypes.windll.kernel32.LocalFree(out_blob.pbData)
+        getattr(ctypes, "windll").kernel32.LocalFree(out_blob.pbData)
         del in_buf  # explicit: keep the buffer referenced until here
 
 
@@ -184,7 +187,7 @@ def delete_kek(name: str) -> bool:
 # seal / unseal (AES-256-GCM)
 # ---------------------------------------------------------------------------
 
-def _aesgcm(kek: bytes):
+def _aesgcm(kek: bytes) -> AesGcm:
     try:
         from .protected_crypto import AesGcm
     except ImportError as exc:  # pragma: no cover - env-dependent

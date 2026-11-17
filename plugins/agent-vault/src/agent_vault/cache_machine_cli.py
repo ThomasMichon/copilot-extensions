@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from typing import Any
@@ -31,7 +32,7 @@ def cmd_cache_machine_prepare(args: Any) -> int:
     return 0
 
 
-def register_prepare(subparsers) -> None:
+def register_prepare(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "cache-machine-prepare",
         help="Opt in to a redundant Windows machine-DPAPI copy without changing the user cache",
