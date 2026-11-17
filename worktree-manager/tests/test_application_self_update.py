@@ -1,0 +1,351 @@
+"""Application-root updates never publish legacy-format Manager launchers."""
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+import json
+import importlib
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import time
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from agent_procutil import no_window_kwargs
+
+from worktree_manager import application_footprints as footprints
+from worktree_manager import runtime_application_update as update
+from worktree_manager import runtime_source_prepare as preparation
+from worktree_manager import runtime_source as acquisition
+from worktree_manager import self_install, source_config
+from worktree_manager.runtime_source import ResolvedSource, SourceAcquisitionError
+from worktree_manager.runtime_source_config import RuntimeSource
+
+
+@pytest.mark.parametrize("phase", [
+    "advance", "repeat", "dry-run", "acquire", "provider", "identity", "setup", "selection",
+])
+def test_application_update_reuses_complete_setup_without_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    root = tmp_path / "custom-install-name"
+    previous = "2" if phase == "repeat" else "1"
+    selected = root / "versions" / previous
+    selected.mkdir(parents=True)
+    (selected / "application.json").write_text("{}")
+    (root / "current-version").write_text(previous)
+    source_config.set_source(repo=str(tmp_path / "upstream"), ref="dev", root=root)
+    config = (root / "config.toml").read_bytes()
+    monkeypatch.setattr("worktree_manager.runtime_application_update.shutil.which", lambda _: "git")
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *args, **kwargs: {"SOURCE": "fixture"})
+    monkeypatch.setattr(self_install, "self_install", lambda **kwargs: pytest.fail("legacy constructor"))
+    monkeypatch.setattr(self_install, "_fetch_via_tarball", lambda *args: pytest.fail("legacy fetch"))
+    monkeypatch.setattr(update, "preparer", lambda: tmp_path / "trusted-tool")
+    calls: list[str] = []
+    budget: list[float] = []
+    acquisition_roots: list[Path] = []
+    commit, tree = "a" * 40, "b" * 40
+
+    @contextmanager
+    def acquire(selection: RuntimeSource, **options: Any) -> Iterator[ResolvedSource]:
+        assert selection == RuntimeSource("dev", str(tmp_path / "upstream"), allow_dev=True)
+        acquisition_roots.append(options["root"])
+        if os.name == "nt":
+            assert options["root"] != root / "state" and options["root"].is_dir()
+        else:
+            assert options["root"] == root / "state"
+        assert options["compact"] is True
+        assert options["environment"] == {"SOURCE": "fixture"}
+        budget.append(options["deadline"])
+        calls.append("acquired")
+        if phase == "acquire":
+            raise SourceAcquisitionError("fixture acquisition failure")
+        yield ResolvedSource(selection, tmp_path / "checkout", commit, tree, commit, "c" * 40)
+        calls.append("released")
+
+    def prepare(tool: Path, resolved: ResolvedSource, output: Path, **options: Any) -> Path:
+        assert tool == tmp_path / "trusted-tool" and resolved.commit == commit
+        assert options == {"deadline": budget[0], "environment": {"SOURCE": "fixture"}}
+        assert output.parent == root / "state" / "footprints"
+        assert output.parent.is_dir()
+        if phase == "provider":
+            raise subprocess.CalledProcessError(1, ["fixture-provider"], stderr="fixture provider unavailable")
+        calls.append("prepared")
+        return tmp_path / "footprint"
+
+    def plan(footprint: Path, apps_root: Path, **options: Any) -> tuple[footprints.Application, ...]:
+        assert calls == ["acquired", "prepared", "released"]
+        assert footprint == tmp_path / "footprint" and apps_root == root.parent
+        assert options == {"selected": ("worktree-manager",)}
+        declaration = json.dumps({"construction": {"identity": {"runtime_source": {
+            "source_commit": "d" * 40 if phase == "identity" else commit, "source_tree": tree,
+        }}}}).encode()
+        return (footprints.Application(
+            "worktree-manager", "2", footprint / "apps" / "worktree-manager",
+            root.parent / "worktree-manager", "WORKTREE_MANAGER_ROOT", declaration, (),
+        ),)
+
+    def install(apps: tuple[footprints.Application, ...], **options: Any) -> None:
+        assert len(apps) == 1 and apps[0].root == root
+        assert options == {"stage": False, "deadline": budget[0]}
+        calls.append("setup")
+        if phase == "setup":
+            raise subprocess.CalledProcessError(7, ["fixture-setup"])
+        if phase != "selection":
+            (root / "current-version").write_text("2")
+
+    monkeypatch.setattr(update, "acquire", acquire)
+    monkeypatch.setattr(update, "prepare_footprint", prepare)
+    monkeypatch.setattr(footprints, "plan", plan)
+    monkeypatch.setattr(footprints, "install", install)
+    result = self_install.self_update(root=root, dry_run=phase == "dry-run")
+    assert result.previous == previous
+    assert (root / "config.toml").read_bytes() == config
+    if phase in {"acquire", "provider", "identity", "setup", "selection"}:
+        assert result.action == "error"
+        if phase == "provider":
+            assert result.reason is not None and "fixture provider unavailable" in result.reason
+        assert (root / "current-version").read_text() == previous
+    else:
+        assert result.action == ("already-current" if phase == "repeat" else "updated")
+        assert result.version == "2"
+        assert (root / "current-version").read_text() == (previous if phase == "dry-run" else "2")
+    assert ("setup" in calls) is (phase not in {"acquire", "provider", "identity", "dry-run"})
+    if os.name == "nt":
+        assert acquisition_roots and not acquisition_roots[0].exists()
+
+
+@pytest.mark.parametrize("case", ["missing-git", "auth"])
+def test_application_update_refuses_before_source_or_legacy_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    from worktree_manager.update_auth import AuthRequired
+
+    monkeypatch.setattr(
+        "worktree_manager.runtime_application_update.shutil.which",
+        lambda _: None if case == "missing-git" else "git",
+    )
+    monkeypatch.setattr(update, "acquire", lambda *args, **kwargs: pytest.fail("no acquisition"))
+
+    def auth(*args: Any, **kwargs: Any) -> None:
+        if case == "missing-git":
+            pytest.fail("no auth")
+        raise AuthRequired("fixture authentication required")
+
+    monkeypatch.setattr("worktree_manager.update_auth.environment", auth)
+    result = update.update(tmp_path / "manager", repo=str(tmp_path / "source"), ref="main", dry_run=False)
+    assert result.action == ("skipped" if case == "missing-git" else "auth_required")
+
+
+@pytest.mark.parametrize("receipt", ["valid", "other", "late"])
+@pytest.mark.parametrize("local_source", [False, True])
+def test_footprint_preparation_uses_packaged_producer_and_one_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, receipt: str, local_source: bool,
+) -> None:
+    provider = tmp_path / "trusted" / "application_footprint.py"
+    provider.parent.mkdir()
+    provider.write_text("# fixture")
+    output = tmp_path / "prepared"
+    selection = RuntimeSource("main", str(tmp_path / "source")) if local_source else RuntimeSource("main")
+    resolved = ResolvedSource(selection, tmp_path / "checkout", "a" * 40, "b" * 40, "a" * 40, "a" * 40)
+    deadline = time.monotonic() + 30
+
+    def run(command: list[str], **options: Any) -> SimpleNamespace:
+        assert str(provider) in command and command[command.index("--source-commit") + 1] == resolved.commit
+        assert command[command.index("--branch") + 1] == "main"
+        assert options["cwd"] == (Path(provider.anchor) if os.name == "nt" else provider.parent)
+        assert options["deadline"] == deadline
+        assert 0 < float(command[command.index("--timeout") + 1]) <= 30
+        if local_source:
+            assert json.loads(command[command.index("--source-descriptor") + 1]) == {
+                "source": "directory", "path": selection.repo,
+            }
+        else:
+            assert "--source-descriptor" not in command
+        if receipt == "late":
+            monkeypatch.setattr("worktree_manager.runtime_source_prepare.time.monotonic", lambda: deadline + 1)
+        return SimpleNamespace(stdout=json.dumps({
+            "footprint": str(tmp_path / "other" if receipt == "other" else output / "footprint"),
+        }))
+
+    monkeypatch.setattr(preparation, "_runtime_installer", lambda: SimpleNamespace(engine=SimpleNamespace(
+        run_owned=run, _native_retained_path=lambda path: str(path),
+    )))
+    if receipt == "valid":
+        assert preparation.prepare_footprint(
+            provider.parent / "prepare_runtime_source.py", resolved, output, deadline=deadline,
+        ) == output / "footprint"
+    else:
+        with pytest.raises(ValueError, match="different output|over-budget"):
+            preparation.prepare_footprint(
+                provider.parent / "prepare_runtime_source.py", resolved, output, deadline=deadline,
+            )
+
+
+def test_preparer_prefers_complete_packaged_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for relative in ("runtime-source-tools/tools", "runtime-input-provider/tools", "runtime-source-tools"):
+        directory = tmp_path / relative
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "prepare_runtime_source.py").write_text("# fixture")
+    monkeypatch.setattr(preparation, "_runtime_scripts", lambda: tmp_path)
+    assert preparation.preparer() == tmp_path / "runtime-source-tools" / "tools" / "prepare_runtime_source.py"
+
+
+def test_packaged_footprint_producer_composes_without_checkout_tool_imports(tmp_path: Path) -> None:
+    repository = tmp_path / "source"
+    project = repository / "worktree-manager"
+    project.mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.0.0"\n',
+    )
+    checkout = Path(__file__).resolve().parents[2]
+    templates = repository / "libs" / "payload-invocation" / "templates"
+    shutil.copytree(checkout / "libs" / "payload-invocation" / "templates", templates)
+    (templates.parent / "generate.py").write_text("raise AssertionError('fetched tooling executed')\n")
+    plugin = repository / "plugins" / "sample"
+    (plugin / "scripts").mkdir(parents=True)
+    for name in ("install.sh", "install.ps1", "resolve-runtime.sh", "resolve-runtime.ps1"):
+        (plugin / "scripts" / name).write_text("# fixture installer input\n")
+    (plugin / "payload-invocation.json").write_text(json.dumps({
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "sample", "module": "sample.cli", "purpose": "Sample command",
+        "runtimeRoot": ".sample", "noSelfProvisionEnv": "SAMPLE_NO_PROVISION",
+    }))
+    bundle = tmp_path / "packaged"
+    declaration = json.loads((checkout / "worktree-manager" / "packaged-assets.json").read_text())
+    for group in declaration["groups"]:
+        if group["canonicalDir"] == "libs/installer-engine":
+            for name in group["files"]:
+                destination = repository / group["canonicalDir"] / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(checkout / group["canonicalDir"] / name, destination)
+        prefix = "scripts/runtime-source-tools/"
+        if not group["payloadDir"].startswith(prefix):
+            continue
+        for name in group["files"]:
+            destination = bundle / group["payloadDir"].removeprefix(prefix) / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(checkout / group["canonicalDir"] / name, destination)
+    generator = bundle / "libs" / "payload-invocation" / "generate.py"
+    cached_generator = tmp_path / "cached-generator.py"
+    generator.rename(cached_generator)
+    os.link(cached_generator, generator)
+    acquisition._git(repository, "init", "-q", "-b", "main")
+    acquisition._git(repository, "add", ".")
+    acquisition._git(
+        repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "Fixture application source",
+    )
+    commit = acquisition._git(repository, "rev-parse", "HEAD")
+    producer = bundle / "tools" / "application_footprint.py"
+    code = (
+        "import json,sys,time; from pathlib import Path; "
+        "sys.path.insert(0,str(Path(sys.argv[1]).parent)); "
+        "import application_footprint,local_install_source; "
+        "assert Path(application_footprint.__file__)==Path(sys.argv[1]); "
+        "repo=Path(sys.argv[2]); output=Path(sys.argv[4]); "
+        "record=local_install_source.compose(repo,sys.argv[3],sys.argv[3],output,"
+        "source_descriptor={'source':'directory','path':str(repo)},"
+        "deadline=time.monotonic()+60); "
+        "assert record['composition']['main_seed']==sys.argv[3]; "
+        "assert (output/'source/worktree-manager/pyproject.toml').is_file(); "
+        "assert 'sample.cli' in (output/'source/plugins/sample/bin/sample').read_text(); "
+        "print(json.dumps({'composed':True}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(producer),
+         str(repository), commit, str(tmp_path / "composed")],
+        capture_output=True, text=True, timeout=90, cwd=tmp_path,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {"composed": True}
+    profile = subprocess.run(
+        [sys.executable, "-I", str(bundle / "tools" / "local_install_profile.py"), "--help"],
+        capture_output=True, text=True, timeout=30, cwd=tmp_path,
+        env={**os.environ, "PYTHONSAFEPATH": "1"}, **no_window_kwargs(),
+    )
+    assert profile.returncode == 0, profile.stdout + profile.stderr
+    assert "--application-components" in profile.stdout
+    assert not list(bundle.rglob("*.pyc"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git ordinary-path length boundary")
+def test_native_acquisition_under_a_deep_application_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "source"
+    repository.mkdir()
+    acquisition._git(repository, "init", "-q", "-b", "main")
+    (repository / "payload.txt").write_text("fixture source\n")
+    acquisition._git(repository, "add", ".")
+    acquisition._git(
+        repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "Fixture source",
+    )
+    root = tmp_path / ("deep-app-" + "x" * max(1, 208 - len(str(tmp_path)) - 10))
+    temporary = tmp_path / ("temp-" + "x" * max(1, 156 - len(str(tmp_path)) - 6))
+    temporary.mkdir()
+    monkeypatch.setattr("worktree_manager.runtime_application_update.tempfile.gettempdir", lambda: str(temporary))
+    with update._acquisition_root(root) as cache:
+        with acquisition.acquire(
+            RuntimeSource("main", str(repository)), root=cache, compact=True,
+        ) as resolved:
+            assert (resolved.checkout / "payload.txt").read_text() == "fixture source\n"
+            worktree = resolved.checkout / ".promote-scratch" / "promote-fixture"
+            worktree.parent.mkdir()
+            acquisition._git(resolved.checkout, "worktree", "add", "--detach", str(worktree), resolved.commit)
+            try:
+                assert acquisition._git(worktree, "rev-parse", "HEAD") == resolved.commit
+                assert (worktree / "payload.txt").read_text() == "fixture source\n"
+            finally:
+                acquisition._git(resolved.checkout, "worktree", "remove", str(worktree))
+            marker = resolved.checkout / ".git" / "runtime-source-owner.json"
+        owner = json.loads(marker.read_text())
+        owner["repo"] = str(tmp_path / "different-repository")
+        marker.write_text(json.dumps(owner))
+        with pytest.raises(SourceAcquisitionError, match="different selection owner"):
+            with acquisition.acquire(RuntimeSource("main", str(repository)), root=cache, compact=True):
+                pytest.fail("compact-key collision admitted a different repository owner")
+        readonly = cache / "readonly-object"
+        readonly.write_bytes(b"fixture Git object\n")
+        readonly.chmod(0o400)
+    assert not cache.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows long interpreter-path creation")
+def test_native_toolchain_query_from_a_deep_preparation_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "tools"))
+    query_versions = importlib.import_module("build_toolchain_queries").query_versions
+
+    uv = shutil.which("uv")
+    assert uv is not None
+    environment = tmp_path / ("deep-output-" + "x" * 100) / ("toolchain-" + "y" * 100)
+    result = subprocess.run(
+        [uv, "venv", "--python", sys.executable, str(environment)],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    python = environment / "Scripts" / "python.exe"
+    assert len(str(python)) > 260
+    assert query_versions(python, (), dict(os.environ), deadline=time.monotonic() + 30) == {}
+    marker = importlib.import_module("build_toolchain_lock")._query_marker_environment(
+        python, deadline=time.monotonic() + 30,
+    )
+    assert marker["sys_platform"] == "win32"
+    application = environment / "application"
+    application.mkdir()
+    (application / "pyproject.toml").write_text(
+        '[project]\nname="fixture-application"\nversion="0"\nrequires-python=">=3.10"\n'
+        'dependencies=[]\n[tool.uv]\npackage=false\n',
+    )
+    importlib.import_module("local_install_profile")._lock_application(
+        application, uv=uv, deadline=time.monotonic() + 30,
+    )
+    assert (application / "uv.lock").is_file()

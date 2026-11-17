@@ -495,9 +495,10 @@ def _run(
     if os.name == "nt":
         _, engine = _resources(slot)
         python, cwd = engine._native_retained_path(python), slot.anchor
+        command_directory = root if record["name"] == "worktree-manager" else slot
         target = [
             "-c", "import os,runpy,sys\n"
-            f"os.chdir({engine._native_retained_path(slot)!r})\n"
+            f"os.chdir({engine._native_retained_path(command_directory)!r})\n"
             "target=sys.argv.pop(1)\n"
             "runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True) "
             "if target == '-m' else runpy.run_path(target, run_name='__main__')",

@@ -7028,6 +7028,48 @@ The separate installer-child executable-spelling failure remains tracked in
 [issue #12253](https://github.com/ThomasMichon/copilot-extensions/issues/12253);
 do not report its installation cases as passing preparation evidence.
 
+### Prepared Manager footprint: explicit Windows lifetime
+
+The on-demand `tools/test_application_footprint.py` native case consumes an
+already prepared footprint through `MANAGER_PREPARED_FOOTPRINT`.
+`MANAGER_NATIVE_LIFETIME=1` explicitly selects actual daemon survival beyond
+the setup caller; the ordinary contained-test lane remains unchanged.
+It uses private roots and IPC plus the canonical renewable daemon-test lifecycle,
+and requires exact instance cleanup to settle. It is not a host rollout.
+
+The `repeat` case proves real staging/full setup, app/global command routing,
+neutral setup with the input concealed, durable-state preservation and unchanged
+slot code. Set `MANAGER_UPDATE_FOOTPRINT` to a second canonically prepared frozen
+candidate to select the `update-reverse` case as well. That case requires a
+distinct generated version and exercises rejected input followed by corrected
+installation, incoming staging without selection, actual installed-consumer
+update/repeat, compatible reverse selection and live generation-specific health.
+An omitted second footprint skips that case, not an update pass.
+
+Set `MANAGER_UPDATE_REPOSITORY` to an owned local fixture repository with
+explicit Main and candidate Dev refs to select `default-update`. Its baseline
+must contain the application-root update adapter. This case runs the installed
+`update --target worktree-manager` command twice, including real acquisition,
+packaged promotion/footprint production and incoming setup. It requires live
+incoming routing after caller Jobs close, unchanged old/new code trees and
+preserved durable state. The fixture's selected Dev ref is isolated test input,
+not publication or qualification of unmerged source as the real merged branch.
+An omitted repository skips this case, not a default-update pass.
+
+Use the existing prepared tooling/test interpreter, with PATH `uv`:
+
+```powershell
+$env:MANAGER_PREPARED_FOOTPRINT = '<baseline-footprint>'
+$env:MANAGER_UPDATE_FOOTPRINT = '<incoming-footprint>'
+$env:MANAGER_UPDATE_REPOSITORY = '<owned-local-fixture-repository>'
+$env:MANAGER_NATIVE_LIFETIME = '1'
+& $testPython -m pytest tools\test_application_footprint.py -k full_setup
+```
+
+These are explicit integration controls, not additions to required unit CI.
+Keep Main/Dev production, release, clean-OS and authorized installed-adoption
+evidence separate.
+
 ## Unit-only promotion packet
 
 The exclusive attachment-export consumer packet executes the real export

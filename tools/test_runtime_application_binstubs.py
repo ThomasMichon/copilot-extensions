@@ -908,6 +908,28 @@ def test_install_transaction_last_good_follows_start_acknowledgement(
     assert json.loads((fixture.slot / "install-success.json").read_text())["state"] == "installed"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows application dispatch")
+@pytest.mark.parametrize("name", ["worktree-manager", "fixture-app"])
+def test_native_manager_dispatch_uses_app_root_not_long_slot_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], name: str,
+) -> None:
+    root = tmp_path / "app"
+    slot = root / "versions" / ("1.0+" + "a" * 180)
+    slot.mkdir(parents=True)
+    (slot / (name + ".py")).write_text(
+        "import os\nprint(os.getcwd())\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        runtime_application_install, "_resources", lambda _slot: (None, engine),
+    )
+    runtime_application_install._run({
+        "name": name, "module": "fixture_app:main", "root_environment": "FIXTURE_APP_HOME",
+    }, ["--fixture"], root, slot)
+    actual = capfd.readouterr().out.strip()
+    assert Path(actual).samefile(root if name == "worktree-manager" else slot)
+
+
 @pytest.mark.parametrize("stage,failure", [(True, False), (False, False), (False, True)])
 def test_manager_regular_install_routes_to_its_owner_before_generic_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: bool, failure: bool,

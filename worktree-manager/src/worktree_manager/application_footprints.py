@@ -206,6 +206,8 @@ def install(
     prepared: tuple[Any, str] | None = None,
 ) -> None:
     """App setup owns environment construction, selection and actual readiness."""
+    from update_driver import participant_environment
+
     installer, shell = prepared if prepared is not None else _preflight(applications)
     runtime = installer.runtime
     construction = runtime._runtime_component("versioned_runtime_construction")
@@ -254,8 +256,10 @@ def install(
                     }
                 }
                 environment.update(roots)
+                environment.update(participant_environment())
                 result = process.run_owned(
-                    command, cwd=application.slot, env=environment, timeout=remaining(),
+                    command, cwd=Path(application.slot.anchor) if os.name == "nt" else application.slot,
+                    env=environment, timeout=remaining(),
                     deadline=deadline, procutil=agent_procutil,
                     construction_fd=descriptors[application.name],
                     runtime_root=application.root, runtime_version=application.version,

@@ -913,6 +913,10 @@ onto one branch.
 
 - 2026-11-17: [Finite Manager-owned application consumer](journal/2026/11.17%20manager-footprint-consumer.md)
   merged in #12930; F1-F3 and the complete Manager reference remain open.
+- 2026-11-17: [Frozen Manager footprint producer](journal/2026/11.17%20manager-footprint-consumer.md#prepared-footprint-producer)
+  merged in #12965 after exact-head approval and required PR-event CI; the source
+  worktree is finalized. Real relocated Windows staging/construction passed;
+  release emission, full Manager install/update and F1-F3 remain open.
 
 ### 2026-11-16 - Manager reference and clean-break state boundaries
 

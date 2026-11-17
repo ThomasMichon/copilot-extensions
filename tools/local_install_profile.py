@@ -17,12 +17,16 @@ import sys
 import time
 import zipfile
 from typing import TYPE_CHECKING, Any
+
+sys.dont_write_bytecode = True
+
 from packaging.requirements import Requirement
 
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "worktree-manager" / "scripts"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import install_source as source_inputs
@@ -348,21 +352,7 @@ def _write_snapshot(
                   if row["name"] not in root_names),
             ],
         )
-        isolated = {
-            key: value for key, value in os.environ.items()
-            if key not in {
-                "UV_PROJECT", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
-                "UV_WORKING_DIR", "UV_FROZEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
-            }
-        }
-        result = subprocess.run(
-            [uv, "lock", "--offline", "--python", sys.executable],
-            cwd=application, env=isolated, capture_output=True, text=True,
-            timeout=max(0.1, deadline - time.monotonic()),
-            creationflags=_HEADLESS,
-        )
-        if result.returncode:
-            raise ProfileError(f"application uv lock failed: {result.stderr}")
+        _lock_application(application, uv=uv, deadline=deadline)
         project["application"] = application.relative_to(prepared).as_posix()
     (prepared / source_inputs.MANIFEST).write_text(
         json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
@@ -372,6 +362,27 @@ def _write_snapshot(
             raise ProfileError("prepared snapshot source changed during readback")
         inputs.verify()
     return prepared
+
+
+def _lock_application(application: Path, *, uv: str, deadline: float) -> None:
+    isolated = {
+        key: value for key, value in os.environ.items()
+        if key not in {
+            "UV_PROJECT", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
+            "UV_WORKING_DIR", "UV_FROZEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+        }
+    }
+    command = [uv, "lock", "--offline", "--python", sys.executable]
+    if os.name == "nt":
+        native: Callable[[Path], str] = getattr(engine, "_native_retained_path")
+        command.extend(["--project", native(application)])
+    result = subprocess.run(
+        command, cwd=Path(application.anchor) if os.name == "nt" else application,
+        env=isolated, capture_output=True, text=True,
+        timeout=max(0.1, deadline - time.monotonic()), creationflags=_HEADLESS,
+    )
+    if result.returncode:
+        raise ProfileError(f"application uv lock failed: {result.stderr}")
 
 
 def _profile_policy(

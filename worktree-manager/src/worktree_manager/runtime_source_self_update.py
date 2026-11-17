@@ -50,6 +50,10 @@ def _update(
     ref = ref or owner.manager_ref(installation)
     repo = owner.manager_repo(installation)
     previous = owner.current_version(installation)
+    from .runtime_application_update import is_application, update as update_application
+
+    if is_application(installation):
+        return update_application(installation, repo=repo, ref=ref, dry_run=dry_run)
     staging = installation / owner.STAGING_DIR
     payload = staging / "worktree-manager"
     source_options: dict[str, Any] = {}
