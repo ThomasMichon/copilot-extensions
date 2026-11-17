@@ -79,6 +79,25 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _validate_declaration(app: Any) -> None:
+    if (
+        not isinstance(app, dict)
+        or not isinstance(app.get("name"), str) or not _NAME.fullmatch(app["name"])
+        or not isinstance(app.get("construction"), dict)
+        or not isinstance(app["construction"].get("runtime_version"), str)
+        or not _VERSION.fullmatch(app["construction"]["runtime_version"])
+        or app["construction"]["runtime_version"].endswith(".")
+        or not isinstance(app.get("root_environment"), str)
+        or not re.fullmatch(r"[A-Z][A-Z0-9_]*(?:_ROOT|_HOME|_INSTALL_DIR)", app["root_environment"])
+        or not isinstance(app.get("commands"), list) or not app["commands"]
+        or any(not isinstance(command, str) or not _NAME.fullmatch(command)
+               for command in app["commands"])
+        or app["name"] not in app["commands"]
+        or len(set(app["commands"])) != len(app["commands"])
+    ):
+        raise ValueError("invalid application footprint declaration")
+
+
 def plan(
     footprint: Path, apps_root: Path, *, selected: tuple[str, ...] = (),
 ) -> tuple[Application, ...]:
@@ -118,17 +137,10 @@ def plan(
             raise ValueError("application footprint must not contain a prepared environment or runtime state")
         declaration = _read(source / "application.json")
         app = json.loads(declaration, object_pairs_hook=_unique)
+        _validate_declaration(app)
         if (
-            not isinstance(app, dict) or app.get("name") != name
-            or not isinstance(app.get("construction"), dict)
+            app.get("name") != name
             or app["construction"].get("runtime_version") != version
-            or not isinstance(app.get("root_environment"), str)
-            or not re.fullmatch(r"[A-Z][A-Z0-9_]*(?:_ROOT|_HOME|_INSTALL_DIR)", app["root_environment"])
-            or not isinstance(app.get("commands"), list) or not app["commands"]
-            or any(not isinstance(command, str) or not _NAME.fullmatch(command)
-                   for command in app["commands"])
-            or name not in app["commands"]
-            or len(set(app["commands"])) != len(app["commands"])
         ):
             raise ValueError(f"application differs from its footprint entry: {name}")
         if app["root_environment"] in environments:
@@ -218,7 +230,9 @@ def select_generation(
             return application
     elif installed is not None:
         try:
-            validate(json.loads(installed, object_pairs_hook=_unique))
+            record = json.loads(installed, object_pairs_hook=_unique)
+            validate(record)
+            _validate_declaration(record)
         except (ValueError, UnicodeError):
             pass
         else:

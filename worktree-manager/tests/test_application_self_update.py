@@ -184,9 +184,11 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
 
 @pytest.mark.parametrize("damage", [
     "missing", "truncated", "utf8", "shape", "commands", "oversized",
+    "command-name", "environment-name", "runtime-version",
     "unreadable", "helper-syntax", "helper-import", "helper-api", "helper-runtime",
     "frontdoors", "conflict", "incoming", "incoming-module", "incoming-helper",
-    "incoming-unreadable", "indirect",
+    "incoming-unreadable", "incoming-command-name", "incoming-environment-name",
+    "incoming-runtime-version", "indirect",
 ])
 def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
@@ -243,6 +245,15 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         metadata.write_bytes(b"[]")
     elif damage == "commands":
         metadata.write_text(json.dumps({**declaration, "commands": []}), encoding="utf-8")
+    elif damage.removeprefix("incoming-") in {"command-name", "environment-name", "runtime-version"}:
+        corruptions: dict[str, dict[str, Any]] = {
+            "command-name": {"commands": ["worktree-manager", "../broken"]},
+            "environment-name": {"root_environment": "../broken"},
+            "runtime-version": {"construction": {"runtime_version": "../broken"}},
+        }
+        invalid = corruptions[damage.removeprefix("incoming-")]
+        target = app / "application.json" if damage.startswith("incoming-") else metadata
+        target.write_text(json.dumps({**declaration, **invalid}), encoding="utf-8")
     elif damage == "oversized":
         metadata.write_bytes(b"x" * 65537)
     elif damage == "conflict":
@@ -305,6 +316,7 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     result = self_install.self_update(root=root)
     if damage in {
         "conflict", "incoming", "incoming-module", "incoming-helper", "incoming-unreadable", "indirect",
+        "incoming-command-name", "incoming-environment-name", "incoming-runtime-version",
     }:
         assert result.action == "error"
         assert (root / "current-version").read_text(encoding="utf-8").strip() == "2"
