@@ -85,8 +85,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     entries=project.get("entry-points",{})
     with zipfile.ZipFile(pathlib.Path(wheel_directory)/wheel,"w") as archive:
         for member in (root/"src").rglob("*"):
-            if member.is_file():
-                archive.writestr(member.relative_to(root/"src").as_posix(),member.read_bytes())
+            relative=member.relative_to(root/"src")
+            if member.is_file() and not any(part.endswith((".egg-info",".dist-info")) for part in relative.parts):
+                archive.writestr(relative.as_posix(),member.read_bytes())
         archive.writestr(info+"/METADATA",metadata+"\n")
         archive.writestr(info+"/WHEEL","Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
         if entries:
@@ -273,6 +274,7 @@ def _relay_artifacts(
 
 def _closed_wheels(
     payload: Path, env: dict[str, str], home: Path, desired: str,
+    *, additional_roots: tuple[str, ...] = (),
 ) -> tuple[Path, Path, Path, Path]:
     from packaging.markers import default_environment
     source_wheels = importlib.import_module("runtime_source_wheels")
@@ -299,6 +301,7 @@ def _closed_wheels(
         }
     extras = ["federated-relay", "ssh"] if desired == "ssh-federated-relay" else [desired]
     roots = ["agent-vault[" + ",".join(extras) + "]==" + wheels["agent-vault"]["version"]]
+    roots.extend(additional_roots)
     environment = default_environment()
     wanted: dict[str, set[str]] = source_wheels._extras(
         wheels, roots, environment, time.monotonic() + 30,
@@ -688,7 +691,7 @@ def _exercise_source_stamp(
     repository = plugin.parents[1]
     monkeypatch.syspath_prepend(str(repository / "tools"))
     monkeypatch.syspath_prepend(str(payload / "scripts"))
-    import versioned_runtime_source as source
+    source = importlib.import_module("versioned_runtime_source")
 
     version = json.loads((payload / "plugin.json").read_text())["version"]
     digest = source.assembly_hash(payload)
