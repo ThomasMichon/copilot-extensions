@@ -3421,6 +3421,18 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete resident-readiness receiving proposal](journal/2026/11.16-resident-readiness-receiving.md)
+  directly preserves #5215's continuous configured-sink readiness/launch and
+  connectivity outcomes, actual serving responsiveness, idle/no-command
+  visibility and honest unknown/stale/dead-producer semantics for planned
+  receiving in existing #5035. Its selected native-owner and independent
+  Linux cleanup-scope lanes and #10231 claimant remain intact. Nine new
+  technical Plan/Validation rows remain unchecked; reviewed intent, actual
+  whole receiving readback and separate source judgment precede retirement.
+  The same journal records actual #12962 delivery and fifteen whole-original
+  judgments, including current bounded claims, two-set recovery acceptance,
+  retained native/prototype gates and actual source exclusions. The complete
+  861-issue census remains 132 above fixed 729, with no new closure credit.
   The [finite Linux/WSL startup receiving proposal](journal/2026/11.16-linux-startup-and-canonical-boundaries.md)
   directly preserves #4307's equivalent startup-hook diagnostic flow AND
   bounded/async hardening of blockers actually found in the existing startup
