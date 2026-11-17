@@ -193,11 +193,20 @@ authorize production updates, recovery mutations or new access.
   Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
   ambiguity/collision/read-failure refusal and no mutations through the native
   CLI boundary. Source release is not caller adoption or installed recovery.
-- [ ] Qualify the incoming inspection bootstrap under #11083/U18. Run the
+- [x] Qualify the incoming inspection bootstrap under #11083/U18. Run the
   existing reader from canonically constructed incoming code without consulting
   or changing the selected runtime, registrations, selectors or service state.
   Keep preparation/read failures distinct from absence, installation and caller
-  adoption; U17's delivered source/release remains complete.
+  adoption; U17's delivered source/release remains complete. Source #11136,
+  native run `42297364665` and containing release #11182 fulfill this bounded
+  source request; #11083 is closed as completed.
+- [ ] Qualify the optional complete prepared-Source/application input through
+  the incoming inspection entry. The existing composition control is not real
+  prepared-application consumer evidence. Preserve cold/historical-seed
+  performance, caller adoption and installed recovery as separate outcomes.
+  Actual Windows qualification fails in the existing installed-content verifier;
+  [the contributor-owned #10570 boundary](https://github.com/ThomasMichon/copilot-extensions/pull/10570#issuecomment-6961180893)
+  retains correction/coordination. Do not patch or supersede that open contribution.
 
 ### Whole installer and resident-companion lifecycle - #5820
 
@@ -432,6 +441,54 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### 2026-11-17 - Prepared incoming inspection exposes wheel-data verification failure
+
+The existing canonical preparer successfully produces a complete Worktrees
+Source/profile/application from Dev
+`565e41e5a89a9f12250f0866bb1bab2a01660460` and Main seed
+`3d925e38178b01d23a3c38074c2306c254e631ee`. The actual prepared inspection entry
+then completes source selection, retention and staging of all 25 distributions
+on Windows/Python 3.11, but fails before the reader runs. Installed-content
+verification searches a wheel's `.data/data/share/...` member beneath
+`site-packages` instead of its spread installation location. This is a failed
+consumer qualification, not an incoming readiness or repeat pass.
+
+The [reproduction and bounded correction request](https://github.com/ThomasMichon/copilot-extensions/pull/10570#issuecomment-6961180893)
+are on the existing contributor-owned PR changing this exact verifier; the
+overlapping source-project extension request remains there too. No shared helper,
+synchronized consumer or contributor branch is patched or superseded here.
+Retain complete installed-set, origin, content and containment checks.
+
+Post-failure checks verify the six known prior installation/binding files byte
+for byte, canonical Source/profile integrity and removal of the temporary
+inspection control directory. PowerShell creates its own module-analysis cache
+inside the isolated profile; no exact whole-profile or inode/mtime preservation
+result is claimed. The first attempt's metadata preimage was not persisted.
+The 600-second preparation and 180-second consumer bounds remain unchanged.
+Local-clone provenance and checkout-path fixture failures remain distinct from
+the later real verifier failure. There is no installed-host runtime change,
+service operation or rollout. Resume this consumer after its existing shared-source owner
+provides a qualified correction.
+
+### 2026-11-17 - Incoming inspection source disposition reconciled
+
+The bounded #11083 source request is closed as completed in
+[its disposition](https://github.com/ThomasMichon/copilot-extensions/issues/11083#issuecomment-6851278348).
+The implementation was already merged in #11136 and its containing release was
+verified in #11182. The previously recorded exact-source native run
+`42297364665` covers all 53 controls per platform, including repeated
+broken-predecessor, fresh, alias/exposure, refusal and no-mutation scenarios.
+This reconciles the stale source checkbox; it is not a new native execution,
+whole-tree correspondence claim or installed-host result.
+
+The separate optional complete prepared-Source/application consumer remains an
+explicit open Plan item. Its focused composition/custody control does not
+qualify real application preparation and invocation. Cold construction and
+historical-seed performance, caller adoption, installed recovery and the
+broader parent retain their original acceptance and effect boundaries. The
+effort remains Active; no issue closure, custody transfer or deployment is
+performed by this reconciliation.
 
 ### Proposed finite #7117 interrupted-installer receiving
 

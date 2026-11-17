@@ -1426,6 +1426,22 @@ def test_python_and_posix_installed_resolution_match(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_inherited_isolated_copilot_home(
+    runner_name: str, command: tuple[str, ...], tmp_path: Path,
+) -> None:
+    del runner_name
+    copilot, payload, durable = _installed_layout(
+        tmp_path, {"source": "github", "repo": "example-org/example-marketplace.git"},
+    )
+    result = _run(
+        command, "resolve", "--payload-root", payload, "--durable-home", durable,
+        env={"COPILOT_HOME": str(copilot)},
+    )
+    assert json.loads(result.stdout)["locator"]["copilotHome"] == str(copilot.resolve())
+    assert not durable.exists()
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
 def test_conflicting_same_key_declarations_fail_closed(
     runner_name: str,
     command: tuple[str, ...],

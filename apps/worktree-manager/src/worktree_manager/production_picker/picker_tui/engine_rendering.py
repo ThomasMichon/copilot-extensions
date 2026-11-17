@@ -1,0 +1,910 @@
+#!/usr/bin/env python3
+"""PickerScreen mixin extracted from ``engine.py``."""
+from __future__ import annotations
+
+from rich.text import Text
+from textual.app import ComposeResult
+from machine_transport import split_machine_environment
+
+from .deferred_row import DeferredRow
+from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT, C_HINT, C_HINT_ON, C_LABEL, C_LOAD, C_META, C_PULSE, C_READY, C_SECTION, C_SPIN, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, VERSION, VRow, _size_mb
+from .engine_regions import _PickerButtons, _PickerMachine, _PickerNativeData, _PickerNotices, _PickerPivots, _PickerSegment, _PickerStickyHeader
+
+from .engine_navigation_rendering import PickerNavigationRenderingMixin
+from .engine_footer import PickerFooterMixin
+
+
+class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMixin):
+    def build_body(self, width, *, deferred=False):
+        vrows = []
+        cur_band = None
+        cur_section = None
+
+        def add(text, stop=None, kind=None, data=None, new_section=None):
+            # ``new_section`` lets an extracted body component (e.g.
+            # MaintenanceView, #88 F5) open a section without reaching into this
+            # closure's ``cur_section``/``vrows``: it pins the section to the
+            # label + the vrow index this row will occupy, exactly as the inline
+            # branches do via ``cur_section = (label, len(vrows))``.
+            nonlocal cur_section
+            if new_section is not None:
+                cur_section = (new_section, len(vrows))
+            vr = VRow(text, stop, kind, data)
+            vr.pin_band = cur_band
+            vr.pin_section = cur_section
+            vrows.append(vr)
+            return vr
+
+        sel = self.sel
+        if self._kind() == "worktrees":
+            self.worktrees_view.build_chrome(add, width, sel)
+            for line in self.worktrees_view.notice_lines():
+                add(line)
+            self.worktrees_view.build_data(add, width, sel, deferred=deferred)
+        elif self._kind() == "maintenance":
+            self.maintenance_view.build(add, width, sel)
+        elif self._kind() == "registered":
+            self.tasks_view.build(add, width, sel)
+        elif self._kind() == "config_section":
+            self._current_view().build(add, width, sel)
+        else:
+            self.profiles_view.build(add, width, sel)
+        return vrows
+    def _current_view(self):
+        if self._kind() == "config_section":
+            from .engine_configuration import ConfigurationSectionView
+            return ConfigurationSectionView(self)
+        return {
+            "worktrees": self.worktrees_view,
+            "maintenance": self.maintenance_view,
+            "registered": self.tasks_view,
+        }.get(self._kind(), self.profiles_view)
+    def _render_sig(self, W, H):
+        """A cheap fingerprint of everything the derived frame / split depend on
+        (#169). Two sibling segment widgets rendering in one paint pass share the
+        same signature, so the memoized frame is built once and reused; any state
+        change (a nav, a scroll, a reload, a machine/pivot switch, a direct
+        attribute set from the capture seam) shifts the signature and forces a
+        single rebuild. Mirrors the native list's own data signature, widened
+        with the focus-cursor state (``sel`` / ``btn_idx`` / ``pcol``) and scroll
+        offsets the chrome + body window also key on."""
+        try:
+            kind = self._kind()
+            if kind == "registered":
+                nrows = len(self._task_rows())
+            elif kind == "maintenance":
+                nrows = len(self.maint_records())
+            else:
+                nrows = len(self.list_records())
+        except Exception:
+            kind, nrows = None, -1
+        wt = tuple(sorted(self.wt_sel.ids)) if hasattr(self, "wt_sel") else ()
+        from .source_read_notices import worktree_read_feedback
+        return (W, H, self.sel, self.top, self._data_top, kind, self.htab,
+                self.machine_idx, self.btn_idx, getattr(self, "pcol", 0),
+                nrows, wt, getattr(self, "pulse", 0),
+                getattr(self, "update_state", None),
+                getattr(self, "manager_update_state", None),
+                getattr(self, "include_maintenance", False),
+                getattr(self, "debug", None),
+                getattr(self, "_knowledge_readiness", {}).get("ready"),
+                getattr(self, "_knowledge_readiness", {}).get("code"),
+                self.cmd_mode, self.list_view.query, self.list_view.sort_index,
+                self.list_view.group_index, self.list_view.status_index,
+                tuple(worktree_read_feedback(self)) if kind == "worktrees" else ())
+    def _build_body_split(self, width, sel=None):
+        """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
+        fixed machine-scope + button chrome vs the scrolling data -- by driving
+        the view's ``build_chrome`` / ``build_data`` emitters into two separate
+        VRow sinks (#88 NF3). Concatenated, the rendered rows equal
+        ``build_body(width)`` byte-for-byte; the split lets the compose tree
+        render the chrome fixed and scroll only the data. ``sel`` defaults to the
+        live ``self.sel``; the native OptionList body (#88 NF5-5) passes a
+        sentinel sel so no focus-cursor highlight is baked into the row text (the
+        native widget owns the cursor)."""
+        use_sel = self.sel if sel is None else sel
+        H = self.size.height or 30
+        key = (self._render_sig(width, H), use_sel)
+        cache = self._split_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
+
+        def make_sink():
+            vrows = []
+            section = {"cur": None}
+
+            def add(text, stop=None, kind=None, data=None, new_section=None):
+                if new_section is not None:
+                    section["cur"] = (new_section, len(vrows))
+                vr = VRow(text, stop, kind, data)
+                vr.pin_section = section["cur"]
+                vrows.append(vr)
+                return vr
+            return vrows, add
+
+        view = self._current_view()
+        chrome, add_c = make_sink()
+        view.build_chrome(add_c, width, use_sel)
+        if view is self.worktrees_view:
+            for line in view.notice_lines():
+                add_c(line)
+        data, add_d = make_sink()
+        view.build_data(add_d, width, use_sel)
+        self._split_cache = (key, (chrome, data))
+        return chrome, data
+    def _build_data_vrows(self, width, sel=None):
+        """Data-only VRows for the current pivot (no chrome) -- used by the
+        native OptionList body (#88 NF5-5), which renders the chrome separately
+        and must not drive ``build_chrome`` (e.g. ``tab_bar``) before the screen
+        is set up. ``sel`` defaults to ``self.sel``; a sentinel suppresses the
+        focus-cursor highlight so the native widget owns the cursor."""
+        use_sel = self.sel if sel is None else sel
+        vrows = []
+        section = {"cur": None}
+
+        def add(text, stop=None, kind=None, data=None, new_section=None):
+            if new_section is not None:
+                section["cur"] = (new_section, len(vrows))
+            vr = VRow(text, stop, kind, data)
+            vr.pin_section = section["cur"]
+            vrows.append(vr)
+            return vr
+
+        view = self._current_view()
+        if view is self.worktrees_view:
+            view.build_data(add, width, use_sel, deferred=True)
+        else:
+            view.build_data(add, width, use_sel)
+        return vrows
+    def _build_chrome_vrows(self, width, sel=None):
+        """Chrome-only VRows (machine-scope + button rows) -- no data body.
+
+        The interactive path's chrome segment widgets (``_PickerMachine`` /
+        ``_PickerButtons``) use THIS instead of ``_build_body_split`` so a pure
+        navigation (a highlight/``sel`` move) repaints only the small fixed
+        chrome and NEVER rebuilds the scrolling data body. The live body is the
+        native OptionList (``_PickerNativeData``), which owns its own cursor and
+        diffs cheaply; rebuilding every data row here on each arrow keypress was
+        a ~100ms/key stall that saturated the input queue under key-repeat and
+        read as an unrecoverable freeze (dotfiles#948 follow-up). Cached by the
+        same ``_render_sig`` key so the two chrome widgets in one paint pass
+        share a single build; ``refresh()`` busts it alongside the other caches.
+        """
+        use_sel = self.sel if sel is None else sel
+        H = self.size.height or 30
+        key = (self._render_sig(width, H), use_sel)
+        cache = self._chrome_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        vrows = []
+        section = {"cur": None}
+
+        def add(text, stop=None, kind=None, data=None, new_section=None):
+            if new_section is not None:
+                section["cur"] = (new_section, len(vrows))
+            vr = VRow(text, stop, kind, data)
+            vr.pin_section = section["cur"]
+            vrows.append(vr)
+            return vr
+
+        self._current_view().build_chrome(add, width, use_sel)
+        self._chrome_cache = (key, vrows)
+        return vrows
+    def _ensure_data_visible(self, data_vrows, data_h):
+        """Scroll the data-body (compose tree) so the selected data row is
+        visible; a no-op for chrome selections (they live in the fixed chrome and
+        aren't in ``data_vrows``, so ``_stop_line`` returns 0) (#88 NF3)."""
+        line = self._stop_line(data_vrows, self.sel)
+        if line < self._data_top:
+            self._data_top = line
+        elif line >= self._data_top + data_h:
+            self._data_top = line - data_h + 1
+        self._data_top = max(0, min(self._data_top,
+                                    max(0, len(data_vrows) - data_h)))
+    def _data_sticky(self, data_vrows, data_h):
+        """Pin the current section header at the top of the scrolled data body
+        (mirrors ``_sticky`` over the data-relative offset)."""
+        if self._data_top <= 0 or self._data_top >= len(data_vrows):
+            return []
+        first = data_vrows[self._data_top]
+        ps = first.pin_section
+        if ps and ps[1] < self._data_top:
+            return [self._pin_line(ps[0], "section")]
+        return []
+    def _data_lines(self, data_vrows, data_h):
+        """The windowed data-body rows for the compose tree's data widget --
+        scroll + sticky over just the data rows (the fixed chrome renders
+        separately above), padded to ``data_h`` (#88 NF3)."""
+        return [vr.text if isinstance(vr, VRow) else vr
+                for vr in self._data_window(data_vrows, data_h, pad=True)]
+    def _data_window(self, data_vrows, data_h, pad=False):
+        """The concrete window of data VRows (with the sticky section header
+        substituted at the top when scrolled) -- shared by ``_data_lines`` (render)
+        and ``_data_stop_at`` (pointer hit-testing) so a click maps to exactly the
+        row that was drawn (#88 NF4)."""
+        self._ensure_data_visible(data_vrows, data_h)
+        window = data_vrows[self._data_top: self._data_top + data_h]
+        sticky = self._data_sticky(data_vrows, data_h)
+        for i, s in enumerate(sticky):
+            if i < len(window):
+                window[i] = s
+            else:
+                window.append(s)
+        if pad:
+            window = list(window)
+            while len(window) < data_h:
+                window.append(Text(""))
+        return window
+    def _data_stop_at(self, data_vrows, data_h, y):
+        """The ``sel`` stop of the data row drawn at visible offset ``y`` in the
+        data body, or ``None`` (blank line, sticky/section header, out of range)
+        -- for click-to-select (#88 NF4)."""
+        window = self._data_window(data_vrows, data_h)
+        if 0 <= y < len(window):
+            vr = window[y]
+            stop = getattr(vr, "stop", None)
+            if stop is not None:
+                return stop
+        return None
+    def _chrome_split(self, chrome):
+        """Split the pivot's chrome vrows into ``(machine_vrows, button_vrows)``
+        at the button row, so the machine-scope and button regions can be
+        separate focusable widgets (#88 NF3). Pivots without a top button region
+        (Tasks) return all-machine + empty buttons."""
+        bi = next((i for i, vr in enumerate(chrome)
+                   if vr.stop == ("BTN", 0)), None)
+        if bi is None:
+            return chrome, []
+        return chrome[:bi], chrome[bi:]
+    def _widget_for_zone(self, zone):
+        return self._ZONE_WIDGET.get(zone, "nf-body-data")
+    def _nf_initial_focus(self):
+        """Place the initial region focus on the widget that owns the default
+        ``sel`` and arm the focus bridge (#88 NF3). Runs after the region widgets
+        mount; guarded so it sets focus without a sel round-trip."""
+        self._nf_syncing = True
+        try:
+            wid = self._widget_for_zone(self.sel[0])
+            try:
+                self.query_one(f"#{wid}").focus()
+            except Exception:
+                pass
+        finally:
+            self._nf_syncing = False
+        self._nf_mounted = True
+        self.refresh()
+    def _sync_focus_to_sel(self):
+        """Mirror native focus onto the region widget that owns the current
+        ``sel`` (the other half of the on_focus -> sel bridge), so Tab/arrow
+        navigation through the manual model keeps the framework's focus in step
+        (#88 NF3). Guarded so the resulting ``focus()`` can't recurse."""
+        wid = self._widget_for_zone(self.sel[0])
+        try:
+            w = self.query_one(f"#{wid}")
+        except Exception:
+            return
+        if getattr(w, "can_focus", False) and self.app.focused is not w:
+            self._nf_syncing = True
+            try:
+                w.focus()
+            finally:
+                self._nf_syncing = False
+    def _hl(self, base, selected, focused):
+        """Augment a base style with the selection highlight: the inversion
+        cursor when the machine region is focused, a subtle bg when merely the
+        active tab. Applied per-span so a highlight can be non-contiguous."""
+        if not selected:
+            return base
+        extra = "reverse bold" if focused else "on grey23"
+        return f"{base} {extra}".strip()
+    def _machine_group(self, group, focused):
+        """Render one machine's tab block: the machine (config) name once, then
+        each of its environments as 'env marker', joined by ' · '. The name and
+        the *selected* env+marker carry the highlight; sibling envs do not -- so
+        selecting a secondary env shows a deliberate break in the highlight.
+        Machine name takes the slot color (grey when idle, white when active);
+        each env keeps its assigned per-env color."""
+        first = self.machines[group[0]]
+        label0, m0 = first[0], first[1]
+        t = Text(" ")
+        if label0 == "All":
+            i = group[0]
+            sel = i == self.machine_idx
+            base = "bold white" if sel else C_TABOFF
+            t.append("All", style=self._hl(base, sel, focused))
+            t.append(" ")
+            return t
+        tab0 = self.source_tabs[group[0]] if self.source_tabs else {}
+        if tab0.get("source_kind") not in (None, "machine-ssh"):
+            i = group[0]
+            state = self.machine_state(i)
+            sel = i == self.machine_idx
+            label_base = C_DISABLED if state == "disabled" else (
+                "bold white" if sel else C_TABOFF
+            )
+            t.append(label0, style=self._hl(label_base, sel, focused))
+            t.append(" ")
+            if state == "disabled":
+                marker, marker_style = "-", C_DISABLED
+            elif state == "loading":
+                marker, marker_style = self.spin(), C_LOAD
+            elif state == "failed":
+                marker, marker_style = self._source_failure_marker(i)
+            elif self._source_read_error(i):
+                marker, marker_style = "~", C_DIM
+            else:
+                marker, marker_style = "✓", C_READY
+            t.append(marker, style=self._hl(marker_style, sel, focused))
+            t.append(" ")
+            return t
+        group_sel = any(i == self.machine_idx for i in group)
+        all_disabled = all(self.machine_state(i) == "disabled" for i in group)
+        name_base = (C_DISABLED if all_disabled
+                     else "bold white" if group_sel else C_TABOFF)
+        t.append(tab0.get("machine_label") or split_machine_environment(m0).machine,
+                 style=self._hl(name_base, group_sel, focused))
+        for n, i in enumerate(group):
+            e = self.machines[i][2]
+            state = self.machine_state(i)
+            sel = i == self.machine_idx
+            t.append(" ") if n == 0 else t.append(" · ", style=C_DIM)
+            env_base = C_DISABLED if state == "disabled" else C_ENV.get(e, C_TABOFF)
+            t.append(e, style=self._hl(env_base, sel, focused))
+            t.append(" ", style=self._hl("", sel, focused))
+            if state == "disabled":
+                # #1289: a reliably single-width ASCII glyph (the old empty-set
+                # marker U+2205 rendered ~1.5 cells on some terminals, shifting
+                # the tab bar).
+                mk, mkb = "-", C_DISABLED
+            elif state == "loading":
+                mk, mkb = self.spin(), C_LOAD
+            elif state == "failed":
+                mk, mkb = self._source_failure_marker(i)
+            elif self._source_read_error(i):
+                mk, mkb = "~", C_DIM
+            else:
+                mk, mkb = "✓", C_READY
+            t.append(mk, style=self._hl(mkb, sel, focused))
+        t.append(" ")
+        return t
+    def status_text(self, compact=False):
+        t = Text()
+        if self._kind() == "config_section":
+            return Text("Configuration", style=C_LABEL)
+        if self._kind() == "worktrees":
+            sections = self.current_list()[1]
+            secs = {label: len(rows) for label, rows in sections}
+            rows = [row for label, items in sections if not label.startswith(("Owned", "Unowned"))
+                    for row in items]
+            a = sum(row["state"] == "ACTIVE" for row in rows)
+            c = sum(row["state"] in ("FINAL", "MERGED") for row in rows)
+            r = len(rows) - a - c
+            u = sum(n for lbl, n in secs.items() if lbl.startswith("Unowned"))
+            owned = sum(n for lbl, n in secs.items() if lbl.startswith("Owned"))
+            t.append("●", style=C_PULSE[self.pulse])
+            if compact:
+                t.append(f"{a} ", style=C_LABEL)
+                t.append(f"◷{r} ✓{c}", style=C_FAINT)
+                if owned:
+                    t.append(f" own:{owned}", style=C_FAINT)
+                if u:
+                    t.append(f" ?{u}", style=C_FAINT)
+            else:
+                t.append(f" {a} active", style=C_LABEL)
+                t.append(" · ", style=C_DIM)
+                t.append(f"{r} unfinished", style=C_META)
+                t.append(" · ", style=C_DIM)
+                t.append(f"{c} completed", style=C_META)
+                if owned:
+                    t.append(" · ", style=C_DIM)
+                    t.append(f"{owned} owned", style=C_META)
+                if u:
+                    t.append(" · ", style=C_DIM)
+                    t.append(f"{u} unowned", style=C_META)
+        elif self._kind() == "maintenance":
+            rows = self.cleanup_rows()
+            mib = sum(_size_mb(w) for w in rows)
+            if compact:
+                t.append(f"⌫ {len(rows)}", style=C_META)
+            else:
+                t.append(f"{len(rows)} candidates · ~{mib} MiB", style=C_META)
+        elif self._kind() == "registered":
+            reg = self._reg_pivot()
+            state, rows, _err = self._task_state()
+            glyph = self.spin() if state == "loading" else "◆"
+            t.append(f"{glyph} ", style=C_LOAD if state == "loading" else C_FAINT)
+            label = reg.label if reg else "tasks"
+            t.append(f"{len(rows)}{'' if compact else ' ' + label.lower()}", style=C_LABEL)
+        else:
+            n = self.profiles_present()
+            t.append("⚙ ", style=C_FAINT)
+            t.append(f"{n}{' set' if not compact else ''}", style=C_LABEL)
+        # Live mode: surface how many machines are still loading / failed so the
+        # All view's streaming fill-in is legible.
+        if self.live and self.loader is not None and self._kind() == "worktrees":
+            # Only the loading-spinner count is surfaced. A machine-load (SSH)
+            # failure is NOT a failed worktree -- the per-machine tab already
+            # shows its ✗ -- so totalling them here only confused (test-chamber
+            # #1347).
+            _ready, loading, _failed = self.loader.counts()
+            if loading:
+                t.append(f"  {self.spin()}{loading}", style=C_LOAD)
+                if not compact:
+                    t.append(" loading", style=C_LOAD)
+        if self._kind() == "worktrees" and self._orphans:
+            t.append("  ⚠", style="yellow")
+        return t
+    def _top_pad(self, W, more_above, scrolled):
+        left = f"▲ {scrolled} more above" if more_above else "▲"
+        lstyle = C_HINT_ON if more_above else C_HINT
+        use = self.status_text(False)
+        if 1 + len(left) + 3 + use.cell_len + 1 > W:
+            use = self.status_text(True)
+        t = Text(" ")
+        t.append(left, style=lstyle)
+        gap = W - t.cell_len - use.cell_len - 1
+        t.append(" " * max(1, gap))
+        t.append_text(use)
+        t.append(" " * max(0, W - t.cell_len))
+        return t
+    def _frame_segments(self, *, include_body=True):
+        """Compute the four screen segments -- header / chrome / body / footer --
+        as lists of ``Text`` line-rows, plus the working width ``W`` (#88 NF2).
+
+        This is the single source of the picker's screen content. The monolithic
+        ``render()`` flattens the four segments in order (byte-identical to the
+        pre-NF2 output); the NF2 compose skeleton (behind
+        ``AGENT_WORKTREES_PICKER_NF``) has each child leaf widget render its own
+        segment from this same dict, so the two paths are guaranteed identical.
+        """
+        W = self.size.width or 100
+        H = self.size.height or 30
+        key = (self._render_sig(W, H), include_body)
+        cache = self._frame_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        top = self.topbar(W)              # [title, htabs]  (2 rows)
+        foot = self.footer(W)
+        # chrome rows: title, htabs, header-border, stats, bottom-border, footer
+        body_h = max(1, H - len(top) - 4)
+        body_lines = []
+        more_above = False
+        below = 0
+        if include_body:
+            vrows = self.build_body(W, deferred=True)
+            self._ensure_visible(vrows, body_h)
+            window = vrows[self.top: self.top + body_h]
+            sticky = self._sticky(vrows, body_h)
+            for i, s in enumerate(sticky):
+                if i < len(window):
+                    window[i] = s
+                else:
+                    window.append(s)
+            body_lines = [vr.text if isinstance(vr, VRow) else vr for vr in window]
+            body_lines = [line.as_text() if isinstance(line, DeferredRow) else line
+                          for line in body_lines]
+            while len(body_lines) < body_h:
+                body_lines.append(Text(""))
+            more_above = self.top > 0
+            below = len(vrows) - (self.top + body_h)
+        elif self._nf_mounted:
+            native = self.query_one("#nf-body-data", _PickerNativeData)
+            y = native.scroll_offset.y
+            more_above = y > 0
+            below = native.virtual_size.height - y - native.size.height
+        header_border = self._border_row(W, "▲", more_above)
+        bottom_border = self._border_row(W, "▼", below > 0)
+        stats = self._stats_row(W)
+        seg = {
+            "W": W,
+            "header": list(top),
+            "chrome": [header_border, stats],
+            "body": body_lines,
+            "footer": [bottom_border, foot],
+        }
+        self._frame_cache = (key, seg)
+        return seg
+    @staticmethod
+    def _join_lines(lines, W):
+        """Join screen rows into a single ``Text``, cropping each to ``W`` so a
+        line never wraps (shared by ``render()`` and the NF2 segment widgets)."""
+        out = Text()
+        for i, ln in enumerate(lines):
+            if i:
+                out.append("\n")
+            lt = ln if isinstance(ln, Text) else Text(str(ln))
+            lt.truncate(W, overflow="crop")   # never let a line wrap
+            out.append_text(lt)
+        return out
+    def compose(self) -> ComposeResult:
+        # NF5 (#88): the native compose tree is the *sole display path*. The
+        # screen is a container of segment/region widgets -- a passive title +
+        # chrome + footer view, and the focusable pivots / machine-scope / button
+        # / data regions (native Tab moves between them; on_focus mirrors ``sel``;
+        # the machine + button chrome renders fixed above the scrolling data).
+        # ``render()`` is retained NOT as a display path but as the deterministic
+        # *capture* seam (capture.py, the golden, the picker-snapshot A/B tool,
+        # the picker vision's auditable-rendering); it and these widgets both
+        # derive from ``_frame_segments`` / ``_build_body_split``, so they cannot
+        # drift.
+        yield _PickerSegment(self, "header", slice(0, 1), id="nf-title")
+        yield _PickerPivots(self, id="nf-pivots")
+        yield _PickerSegment(self, "chrome", id="nf-chrome")
+        yield _PickerMachine(self, id="nf-machine")
+        yield _PickerButtons(self, id="nf-buttons")
+        yield _PickerNotices(self, id="nf-notices")
+        # NF5-5 (#88): the native OptionList data body is the only remaining
+        # body path, with a pinned section header above it (hidden until
+        # scrolled).
+        yield _PickerStickyHeader(id="nf-body-sticky")
+        yield _PickerNativeData(self, id="nf-body-data")
+        yield _PickerSegment(self, "footer", id="nf-footer")
+    # pivot-streaming-transport Phase 4: the only segments whose rendered
+    # content can depend on the purely-clock-driven cosmetic pulse
+    # (`self.pulse`, advanced in `_tick()`) -- audited against every consumer
+    # of `self.pulse`/`self.spin()` reachable from each segment's own
+    # `render()`: `nf-chrome`'s `_stats_row()` -> `status_text()` always
+    # includes a pulse-colored dot; `nf-body-data` already fast-paths a
+    # pulse-only repaint internally (#4719) but must still be invoked so that
+    # fast path runs. Every other segment (title/pivots/machine/buttons/
+    # footer) has no `pulse`/`spin()` dependency *unless* a concurrently-busy
+    # condition is also active -- and `cause="pulse"` is only ever passed by
+    # `_tick()`'s own branch that fires exactly when nothing else (no busy
+    # state, no pending nav) is also true, so that gap can't arise here. If
+    # any segment ever gains its own pulse/spin dependency, add it here too --
+    # this tuple is deliberately an allowlist, not inferred automatically.
+    _PULSE_ONLY_SEGMENTS = ("nf-chrome", "nf-body-data")
+    # The segments whose rendered content can depend on `self.sel`/`wt_sel`
+    # moving within the Worktrees list body (zone "L") -- a pure in-list
+    # cursor move, the `_nav_dirty` cause set by
+    # `on_option_list_option_highlighted`. Audited empirically (a headless
+    # harness run diffing each segment's actual rendered content, not just
+    # static tracing) across two cases: (1) the real-world boot edge case,
+    # where the VERY FIRST navigation ever also flips `wt_sel` from empty to
+    # one item (`_wt_track_focus()`'s "selection follows focus" rule,
+    # #2258 P3-1) -- `nf-footer`'s `_focus_hint()` genuinely changes text
+    # for that one transition (`"Space: select"` -> `"Space: select/
+    # deselect"`); and (2) steady-state (every subsequent move), where
+    # `nf-footer` is provably unchanged (`wt_sel` already has exactly one
+    # item either way, and the "nsel" branch's text doesn't name the
+    # specific row). Rather than special-case the one-time transition,
+    # `nf-footer` stays in the always-refreshed set for this cause --
+    # correctness over the marginal cost of one cheap `Text` repaint.
+    # `nf-body-data` must still run (native cursor move + the focused row's
+    # own checkbox glyph, #2258 P3-1 again). `nf-body-sticky` (the pinned
+    # column/section header above the data body) was never part of this
+    # method's own refresh set in the first place, before OR after Phase 4 --
+    # `_PickerStickyHeader.set_lines()` manages its own repaint need via its
+    # own content-equality check, called from a separate path
+    # (`_update_sticky()`), so it is correctly absent here, not narrowed away.
+    # `nf-title`/`nf-pivots`/`nf-chrome`/`nf-machine`/`nf-buttons` were
+    # empirically confirmed unchanged (byte-identical rendered output) in
+    # both audited cases -- `build_chrome()`'s own `sel` usage only compares
+    # `sel == ("M", 0)`/`sel == ("BTN", 0)`, never the in-zone index, so an
+    # in-list move (`sel[0]` staying `"L"` throughout) can never flip either.
+    _NAV_SEGMENTS = ("nf-body-data", "nf-footer")
+    _ALL_NF_SEGMENTS = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
+                         "nf-buttons", "nf-notices", "nf-body-data", "nf-footer")
+    _CAUSE_SEGMENTS = {"pulse": _PULSE_ONLY_SEGMENTS, "nav": _NAV_SEGMENTS}
+
+    def _refresh_nf_segments(self, cause: str | None = None) -> None:
+        """Propagate a screen state change to the child segment/region widgets
+        (their ``render()`` reads back off this screen). The native OptionList
+        data body (#88 NF5-5) rebuilds its options on demand instead.
+
+        ``cause`` narrows which segments actually need re-rendering for a
+        specific, audited refresh trigger (pivot-streaming-transport Phase 4)
+        -- ``None`` (the default, used by every caller that doesn't pass a
+        cause) refreshes every segment, identical to this method's behavior
+        before Phase 4. Only ``"pulse"``/``"nav"`` are currently recognized;
+        any other value is treated the same as ``None`` (refresh everything)
+        rather than silently skipping segments for an un-audited cause.
+        """
+        if not getattr(self, "_nf_mounted", False):
+            return
+        seg_ids = self._CAUSE_SEGMENTS.get(cause, self._ALL_NF_SEGMENTS)
+        notice_state = (
+            self._kind(),
+            tuple(self.worktrees_view.notice_lines()) if self._kind() == "worktrees" else (),
+        )
+        if notice_state != getattr(self, "_notice_state", None):
+            if "nf-notices" not in seg_ids:
+                seg_ids = (*seg_ids, "nf-notices")
+            self._notice_state = notice_state
+        orphan_hint = self._kind() == "worktrees" and bool(self._orphans)
+        if orphan_hint != getattr(self, "_orphan_hint", False):
+            if "nf-footer" not in seg_ids:
+                seg_ids = (*seg_ids, "nf-footer")
+            self._orphan_hint = orphan_hint
+        # A replacement read can settle without changing rows or the global busy state.
+        if getattr(self, "_registered_refresh_note", None) is not None:
+            from .registered_scopes import refresh_footer
+
+            status = refresh_footer(self, self.debug)
+            if cause == "pulse" and status != getattr(self, "_registered_footer_status", None):
+                seg_ids = (*seg_ids, "nf-footer")
+            self._registered_footer_status = status
+        for seg_id in seg_ids:
+            try:
+                w = self.query_one(f"#{seg_id}")
+                if isinstance(w, _PickerNativeData):
+                    w.refresh_data()
+                else:
+                    if isinstance(w, _PickerNotices):
+                        w.styles.height = len(notice_state[1])
+                        w.display = bool(notice_state[1])
+                    w.refresh()
+            except Exception:
+                pass
+    def refresh(self, *args, cause: str | None = None, **kwargs):
+        # Keep the NF2 segment widgets in step with the screen: any state change
+        # that refreshes the screen must re-render the child segments too (they
+        # read off this screen). A no-op when the skeleton is disabled.
+        # Bust the per-refresh render caches (#169) first: a refresh means the
+        # screen state may have changed, so the memoized frame/split must be
+        # recomputed once and then shared by every segment widget in this pass.
+        # ``cause`` is this screen's own keyword (Phase 4's segment narrowing,
+        # see ``_refresh_nf_segments``) -- it is never forwarded to Textual's
+        # own ``Widget.refresh()``, whose signature has no such parameter.
+        self._frame_cache = None
+        self._split_cache = None
+        self._chrome_cache = None
+        if cause in self._CAUSE_SEGMENTS and not args:
+            # pivot-streaming-transport Phase 4 (correction over the initial
+            # landing in #5418/#5433): narrowing which CHILD segment widgets
+            # get refreshed was, on its own, provably unable to change
+            # Textual's full-vs-incremental compositor decision --
+            # `Widget.refresh()` called with no explicit regions marks the
+            # CALLING widget's own entire area dirty
+            # (`Widget._set_dirty()`/`textual/widget.py`), and every prior
+            # narrowed-cause tick still called `self.refresh(cause=...)` on
+            # the SCREEN itself first, which always added the screen's own
+            # full `screen_region` to its dirty set regardless of which
+            # children were also touched. `_compositor.render_update()`
+            # chooses `render_full_update()` specifically when `screen_region
+            # in self._dirty_regions` -- so the screen-level call alone
+            # already guaranteed a full repaint every time, independent of
+            # this method's own child-segment narrowing. For an audited,
+            # narrowed cause, skip the screen's OWN widget-level refresh
+            # entirely and only mark the narrowed child segments dirty --
+            # confirmed empirically (a headless cProfile rerun of the exact
+            # PR #5398 methodology) to cut `render_full_update` compositor
+            # passes from ~21 to ~5 over the same 12s idle window, and
+            # confirmed via a direct before/after comparison against an
+            # unmodified checkout that no content is left stale (Textual's
+            # own dirty-region tracking is cumulative, never lost until
+            # painted -- a less frequent compositor pass still picks up
+            # every accumulated child-level change, just debounced).
+            self._refresh_nf_segments(cause=cause)
+            return self
+        result = super().refresh(*args, **kwargs)
+        self._refresh_nf_segments(cause=cause)
+        return result
+    def _border_row(self, W, arrow, active):
+        """A separator line carrying a centered scroll arrow with a blank space
+        either side: ────── ▲ ──────. Arrow glows when there's more that way."""
+        left = (W - 3) // 2
+        rightn = W - 3 - left
+        t = Text("─" * max(0, left), style=C_DIM)
+        t.append(" ")
+        t.append(arrow, style=C_HINT_ON if active else C_HINT)
+        t.append(" ")
+        t.append("─" * max(0, rightn), style=C_DIM)
+        return t
+    def _hint_row(self, W, direction, active, count):
+        arrow = "▲" if direction == "up" else "▼"
+        t = Text()
+        if active:
+            label = f"{arrow}  {count} more above" if direction == "up" \
+                else f"{arrow}  {count} more below"
+            pad = (W - len(label)) // 2
+            t.append(" " * max(0, pad))
+            t.append(label, style=C_HINT_ON)
+        else:
+            pad = (W - 1) // 2
+            t.append(" " * max(0, pad))
+            t.append(arrow, style=C_HINT)
+        t.append(" " * max(0, W - t.cell_len))
+        return t
+    def _manager_update_seg(self, focused: bool, show_text: bool = True):
+        """Render the Manager's OWN update-availability state -- distinct
+        from :meth:`_update_seg` (the engine/marketplace payload's staged
+        state). Directly qualifies the ``v{VERSION}`` string it sits next
+        to: ``idle`` shows nothing (never checked yet / non-GitHub source),
+        ``current`` shows ``mgr✓`` (always carrying the ``mgr`` qualifier --
+        never a bare ✓ -- so it reads distinctly from :meth:`_update_seg`'s
+        own bare ✓ when both render adjacently in the topbar), ``available``
+        shows a short, focusable ``↻ Update available`` button (Enter
+        self-updates the Manager and restarts the picker on it -- see zone
+        ``"MUP"``). Kept intentionally terse (no embedded version number or
+        literal command) to match :meth:`_update_seg`'s style and avoid
+        overflowing the topbar; the exact target version remains available
+        via ``manager_update_check.read_status()`` for anyone who wants it."""
+        st = getattr(self, "manager_update_state", "idle")
+        if st == "idle":
+            return None
+        t = Text()
+        if st == "current":
+            t.append(" mgr\u2713", style=C_READY)
+        elif st == "available":
+            t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
+            if show_text:
+                t.append(" Update available",
+                         style=C_BTN_SEL if focused else C_HINT_ON)
+        return t
+    def _update_seg(self, focused: bool):
+        """Render the launcher's idle/paused/checking/current/available state."""
+        st = getattr(self, "update_state", "idle")
+        if st == "idle":
+            return None
+        t = Text()
+        if st == "checking":
+            t.append(" " + self.spin(), style=C_SPIN)
+        elif st in ("current", "paused"):
+            t.append(" ✓" if st == "current" else " ‖",
+                     style=C_READY if st == "current" else C_DIM)
+        elif st == "available":
+            t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
+        return t
+    def topbar(self, W):
+        # Right-side segments, dropped in this order as width shrinks:
+        # version, branch, env, repo. Always kept: "Worktree Manager" + machine.
+        ver = f" · v{VERSION}"
+        m, e = self._src_local()
+        host = m.lower() if m else "…"
+        # Repo name + default branch are project config, surfaced by the data
+        # source (data_local/data_ssh expose REPO/BRANCH from the resolved
+        # config); never hardcoded. Empty when a source omits them (e.g. a
+        # fixture source) so the segment is dropped rather than showing a
+        # fabricated name.
+        repo, branch = self._src_repo_branch()
+        present = {"mgr_update_text": True, "update_text": True, "version": True,
+                   "repo": bool(repo), "env": bool(e), "branch": bool(branch)}
+        upd_focused = self.sel[0] == "UPD"
+        mup_focused = self.sel[0] == "MUP"
+
+        def build():
+            left = Text(" Worktree Manager", style="bold")
+            from ... import picker_review
+
+            if picker_review.active():
+                left.append(f" [READ-ONLY {picker_review.current().candidate}]", style="bold yellow")
+            if present["version"]:
+                left.append(ver, style=C_DIM)
+            # Manager-self update indicator: qualifies the version string
+            # directly above (distinct from the engine/marketplace segment
+            # below -- see _manager_update_seg's own docstring for why they
+            # must not be conflated).
+            mgr_seg = self._manager_update_seg(mup_focused, present["mgr_update_text"])
+            if mgr_seg is not None:
+                left.append_text(mgr_seg)
+            # Update indicator (#1430): spinner while the launcher stages the
+            # marketplace update, ✓ when current, ↻ when an update is staged.
+            seg = (None if getattr(self, "manager_update_state", "idle") == "available"
+                   else self._update_seg(upd_focused))
+            if seg is not None:
+                left.append_text(seg)
+                if present["update_text"] and self.update_state in ("available", "paused"):
+                    left.append(" Update available…" if self.update_state == "available"
+                                else " Updates paused",
+                                style=(C_BTN_SEL if upd_focused else C_HINT_ON)
+                                if self.update_state == "available" else C_DIM)
+            right = Text("host ", style=C_DIM)
+            right.append(host, style=C_META)
+            if present["env"]:
+                right.append(" · ", style=C_DIM)
+                right.append(e, style=C_ENV.get(e, C_META))
+            if present["repo"]:
+                right.append(f"  ·  {repo}", style=C_DIM)
+            if present["branch"]:
+                right.append(f" · {branch}", style=C_DIM)
+            return left, right
+
+        for drop in ("mgr_update_text", "update_text", "version", "branch", "env", "repo"):
+            left, right = build()
+            if left.cell_len + 1 + right.cell_len + 1 <= W:
+                break
+            present[drop] = False
+        left, right = build()
+        l1 = left
+        gap = W - left.cell_len - right.cell_len - 1
+        l1.append(" " * max(1, gap))
+        l1.append_text(right)
+        l1.append(" " * max(0, W - l1.cell_len))
+        l2 = Text("  ")
+        v_focus = self.sel[0] == "V"
+        for n, i in enumerate(self._left_pivots()):
+            label = self.htabs[i]
+            if n:
+                l2.append("     ")
+            if i == self.htab:
+                l2.append(label.upper(),
+                          style=C_TAB_FOCUS_ON if v_focus else C_BAND)
+            else:
+                l2.append(label, style="white" if v_focus else C_TABOFF)
+        # Right-aligned ⚙ Configuration entry hosting Profiles etc. (#1426). It
+        # is active when the current pivot lives under it, focused when the
+        # ("CFG", 0) stop holds the cursor.
+        cfg = self._config_pivots()
+        if cfg:
+            cfg_focus = self.sel[0] == "CFG"
+            cfg_active = self.htab in cfg
+            cstyle = (C_TAB_FOCUS_ON if cfg_focus
+                      else C_TAB_ACTIVE if cfg_active else C_TABOFF)
+            chip = Text("⚙ Configuration", style=cstyle)
+            l2.append(" " * max(2, W - l2.cell_len - chip.cell_len - 1))
+            l2.append_text(chip)
+            l2.append(" ")
+        else:
+            # Tab never switches the view -- it moves focus between regions. The
+            # view pivot moves with ◀▶ (while focused here) or [ ]/^⇧◀▶ (#1344).
+            hint = ("◀▶ switch view · ↓ body · Tab region "
+                    if v_focus else "[ ] switch view ")
+            l2.append(hint.rjust(max(1, W - l2.cell_len)), style=C_DIM)
+        return [l1, l2]
+    def _stop_line(self, vrows, stop):
+        for i, vr in enumerate(vrows):
+            if vr.stop == stop or (isinstance(vr.stop, list) and stop in vr.stop):
+                return i
+        return 0
+    def _ensure_visible(self, vrows, body_h):
+        line = self._stop_line(vrows, self.sel)
+        if line < self.top:
+            self.top = line
+        elif line >= self.top + body_h:
+            self.top = line - body_h + 1
+        self.top = max(0, min(self.top, max(0, len(vrows) - body_h)))
+    def _sticky(self, vrows, body_h):
+        if self.top <= 0 or self.top >= len(vrows):
+            return []
+        first = vrows[self.top]
+        pins = []
+        pb = first.pin_band
+        ps = first.pin_section
+        if pb and pb[1] < self.top:
+            pins.append(self._pin_line(pb[0], "band"))
+        if ps and ps[1] < self.top:
+            pins.append(self._pin_line(ps[0], "section"))
+        return pins
+    def _pin_line(self, label, kind):
+        W = self.size.width or 100
+        if kind == "band":
+            t = Text(f" {label}", style=C_BAND)
+        else:
+            t = Text(f"  ── {label} ", style=C_SECTION)
+        t.append(" " * max(0, W - t.cell_len))
+        t.stylize("on grey15")  # subtle pinned background
+        return t
+    @staticmethod
+    def _wrap_text(text: str, width: int) -> list[str]:
+        """Word-wrap ``text`` to ``width`` columns; collapse blank lines.
+
+        Preserves the transcript's own line breaks, then greedily wraps each
+        line on whitespace. A single word longer than ``width`` is hard-split.
+        """
+        width = max(8, width)
+        out: list[str] = []
+        for raw in text.replace("\r", "").split("\n"):
+            line = raw.rstrip()
+            if not line:
+                if out and out[-1] != "":
+                    out.append("")
+                continue
+            cur = ""
+            for word in line.split(" "):
+                while len(word) > width:
+                    if cur:
+                        out.append(cur)
+                        cur = ""
+                    out.append(word[:width])
+                    word = word[width:]
+                if not cur:
+                    cur = word
+                elif len(cur) + 1 + len(word) <= width:
+                    cur += " " + word
+                else:
+                    out.append(cur)
+                    cur = word
+            if cur:
+                out.append(cur)
+        return out or [""]

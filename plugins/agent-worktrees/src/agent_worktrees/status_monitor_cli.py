@@ -71,7 +71,7 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
 @daemon_entrypoint("agent-worktrees-status-monitor", source=__file__, purpose="production")
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """Elected, demand-aware publisher; native/mux events bypass the interval backstop."""
-    import shutil
+    from .daemon_launch_context import monitor_mux
     import threading
     import time
 
@@ -98,8 +98,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     core = _core()
-    mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
-    mux_bin = (shutil.which(mux) or mux) if mux else None
+    mux, mux_bin = monitor_mux()
     interval = (
         args.interval
         if getattr(args, "interval", None) and args.interval >= 2

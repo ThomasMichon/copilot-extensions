@@ -1,0 +1,220 @@
+"""The caller side: dial an existing daemon, boot one on demand, or fall back.
+
+Pure functions over a resolved ``(host, port, token)`` endpoint -- this module
+never resolves rendezvous or boots a daemon itself; each consumer plugin
+already owns that (its own session-state / installation-cell layout).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import secrets
+import socket
+import time
+from collections.abc import Callable
+from typing import Any
+
+PROTOCOL_VERSION = 1
+_DEFAULT_DIAL_TIMEOUT_S = 2.0
+
+
+class DaemonUnavailable(Exception):
+    """No daemon answered within the caller's budget -- take the fallback path."""
+
+
+def new_client_id() -> str:
+    """A fresh opaque subscriber identity for one caller's lifetime."""
+    return secrets.token_hex(8)
+
+
+def _completion_deadline(timeout: float | None) -> float | None:
+    if timeout is None:
+        return None
+    if (
+        isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout) or timeout <= 0
+    ):
+        raise ValueError("completion_timeout_s must be finite and positive")
+    return time.monotonic() + timeout
+
+
+def _send_recv(
+    host: str, port: int, token: str, message: dict[str, Any], *, timeout: float,
+    completion_deadline: float | None = None,
+) -> dict[str, Any]:
+    def remaining() -> float:
+        if completion_deadline is None:
+            return timeout
+        budget = min(timeout, completion_deadline - time.monotonic())
+        if budget <= 0:
+            raise TimeoutError("daemon request completion deadline expired")
+        return budget
+
+    try:
+        with socket.create_connection((host, port), timeout=remaining()) as sock:
+            envelope = dict(message, version=PROTOCOL_VERSION, token=token)
+            sock.settimeout(remaining())
+            sock.sendall(json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n")
+            sock.shutdown(socket.SHUT_WR)
+            buf = b""
+            while not buf.endswith(b"\n"):
+                sock.settimeout(remaining())
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+    except OSError as exc:
+        raise DaemonUnavailable(str(exc)) from exc
+    if not buf:
+        raise DaemonUnavailable("empty response")
+    try:
+        response = json.loads(buf.decode("utf-8"))
+    except ValueError as exc:
+        raise DaemonUnavailable("malformed response") from exc
+    if not isinstance(response, dict) or response.get("version") != PROTOCOL_VERSION:
+        raise DaemonUnavailable("malformed response")
+    if completion_deadline is not None and time.monotonic() >= completion_deadline:
+        raise DaemonUnavailable("daemon request completion deadline expired")
+    return response
+
+
+def subscribe(
+    host: str, port: int, token: str, client_id: str, *, timeout: float = _DEFAULT_DIAL_TIMEOUT_S
+) -> None:
+    resp = _send_recv(
+        host, port, token, {"action": "subscribe", "client_id": client_id}, timeout=timeout
+    )
+    if not resp.get("ok"):
+        raise DaemonUnavailable("subscribe rejected")
+
+
+def release(
+    host: str, port: int, token: str, client_id: str, *, timeout: float = _DEFAULT_DIAL_TIMEOUT_S,
+    completion_timeout_s: float | None = None,
+) -> None:
+    """Best-effort: a failed release is backstopped by the server's own liveness reaper."""
+    deadline = _completion_deadline(completion_timeout_s)
+    try:
+        _send_recv(
+            host, port, token, {"action": "release", "client_id": client_id}, timeout=timeout,
+            **({"completion_deadline": deadline} if deadline is not None else {}),
+        )
+    except DaemonUnavailable:
+        pass
+
+
+def request(
+    host: str,
+    port: int,
+    token: str,
+    *,
+    kind: str,
+    key: str,
+    payload: dict[str, Any],
+    request_deadline_s: float,
+    client_id: str | None = None,
+    completion_timeout_s: float | None = None,
+) -> dict[str, Any]:
+    """Send one request, optionally bounding the entire transport completion.
+
+    The optional monotonic completion budget includes dialing, sending and all
+    response fragments. Ordinary calls retain their server-deadline grace.
+    """
+    completion_deadline = _completion_deadline(completion_timeout_s)
+    deadline = time.time() + request_deadline_s
+    message: dict[str, Any] = {
+        "action": "request",
+        "kind": kind,
+        "key": key,
+        "payload": payload,
+        "deadline": deadline,
+    }
+    if client_id:
+        message["client_id"] = client_id
+    resp = _send_recv(
+        host, port, token, message, timeout=request_deadline_s + 1.0,
+        **({"completion_deadline": completion_deadline} if completion_deadline is not None else {}),
+    )
+    if resp.get("fallback"):
+        reason = resp.get("reason")
+        if reason:
+            # A structured rejection (e.g. "superseded" -- see
+            # CoalescingServer.close_admission) rather than an ordinary
+            # per-request deadline miss: this endpoint is no longer
+            # admitting new work, so the caller's *next* call should
+            # re-resolve rendezvous rather than retry this same endpoint.
+            raise DaemonUnavailable(f"daemon reported fallback (reason={reason})")
+        raise DaemonUnavailable("daemon reported fallback (deadline exceeded server-side)")
+    result = resp.get("result")
+    if not isinstance(result, dict):
+        raise DaemonUnavailable("malformed response")
+    return result
+
+
+def call_with_fallback(
+    *,
+    dial: Callable[[], tuple[str, int, str] | None],
+    boot: Callable[[], None] | None,
+    boot_wait_s: float,
+    kind: str,
+    key: str,
+    payload: dict[str, Any],
+    request_deadline_s: float,
+    fallback: Callable[[], dict[str, Any]],
+    client_id: str | None = None,
+    poll_interval_s: float = 0.1,
+) -> dict[str, Any]:
+    """The full client sequence -- never raises past this call.
+
+    1. ``dial()`` resolves rendezvous; ``None`` means no live daemon is
+       currently discoverable.
+    2. On a miss, invoke ``boot`` once (best-effort) and re-poll ``dial`` up
+       to ``boot_wait_s`` -- the boot-wait budget.
+    3. Send one coalesced request within ``request_deadline_s``.
+    4. Any failure at any phase (no daemon, boot-wait timeout, request
+       timeout/fallback/error) falls through to ``fallback()`` -- the
+       always-optional, always-correct inline path.
+
+    ``dial``/``boot`` are caller-supplied and may themselves raise (e.g. a
+    daemon-spawn helper hitting a transient OS error) -- this function's own
+    docstring promises it never raises past this call, so those callbacks
+    (and every dial during the boot-wait poll) are wrapped the same
+    best-effort way the request phase already is (Copilot review finding):
+    a caller must never see the whole call break just because starting the
+    daemon happened to fail.
+    """
+    started = time.time()
+
+    def _safe_dial() -> tuple[str, int, str] | None:
+        try:
+            return dial()
+        except Exception:
+            return None
+
+    endpoint = _safe_dial()
+    if endpoint is None and boot is not None:
+        try:
+            boot()
+        except Exception:
+            pass
+        while endpoint is None and time.time() - started < boot_wait_s:
+            time.sleep(poll_interval_s)
+            endpoint = _safe_dial()
+    if endpoint is None:
+        return fallback()
+
+    host, port, token = endpoint
+    try:
+        return request(
+            host,
+            port,
+            token,
+            kind=kind,
+            key=key,
+            payload=payload,
+            request_deadline_s=request_deadline_s,
+            client_id=client_id,
+        )
+    except DaemonUnavailable:
+        return fallback()

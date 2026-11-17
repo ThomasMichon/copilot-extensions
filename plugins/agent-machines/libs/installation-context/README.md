@@ -176,7 +176,15 @@ root, and locator only; it does not prove runtime ownership, readiness, or selec
 an installation. An ambient installation-context pointer is deliberately outside
 this source-only API's scope. Missing, conflicting, or unsupported provenance
 raises `InstallationContextError`, never a guessed source. Explicit management
-callers may supply a source descriptor. `resolve_context(...)` composes the same
+callers may supply a source descriptor. An explicit Copilot-home argument takes
+precedence over `COPILOT_HOME`, which takes precedence over the account's
+`.copilot` directory. Python, POSIX and PowerShell readers retain that same
+selection. An inherited home must be absolute; it does not replace the required
+marketplace declaration or relax conflicting-declaration checks. Per-source
+venue installations must carry their actual isolated home when invoking their
+payload's catalog and commands; the readers do not infer an installation home
+from an arbitrary payload path.
+`resolve_context(...)` composes the same
 source resolver with its existing receipt and cell-ownership checks; those checks
 remain mandatory when selecting or managing a cell. Catalog integration is a
 separate consumer change, not implied by this API's presence.

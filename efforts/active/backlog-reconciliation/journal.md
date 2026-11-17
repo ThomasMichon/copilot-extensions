@@ -3,6 +3,28 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Authentication, finite baseline and engine receiving](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+
+- [2026-11-17 - Webhook and host-teardown receipt, with receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
+
+- [2026-11-17 - Webhook and host-teardown receiving, with five retained contracts](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+
+- [2026-11-17 - Composition receipt and client-only installation inflow](journal/2026/11.17-composition-receipt-and-client-only-inflow.md)
+
+- [2026-11-17 - Fork receipt and composition gate clarification](journal/2026/11.17-fork-receipt-and-composition-gate-clarification.md)
+
+- [2026-11-17 - Attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+
+- [2026-11-17 - Complete attention receiving and seven retained contracts](journal/2026/11.17-attention-receiving-and-seven-contracts.md)
+
+- [2026-11-17 - Hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)
+
+- [2026-11-17 - Hosted-session receiving and condition provenance](journal/2026/11.17-hosted-session-receiving-and-condition-provenance.md)
+
+- [2026-11-17 - Shared-core receipt and retained runtime contracts](journal/2026/11.17-shared-core-receipt-and-runtime-contracts.md)
+
+- [2026-11-17 - Complete shared-core receiving proposal](journal/2026/11.17-complete-shared-core-receiving.md)
+
 - [2026-11-17 - Platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
 
 - [2026-11-17 - Ten source deltas and gate provenance](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)

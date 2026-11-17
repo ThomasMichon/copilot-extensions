@@ -63,7 +63,7 @@ class SourceView:
 
     def verify(self, root: Path) -> None:
         """Do not credit changed inputs or a changed checker view."""
-        prefix = INSTALLATION_ENTRY.rsplit("/", 1)[0] + "/"
+        prefix = self.inputs[0][0].rsplit("/", 1)[0] + "/"
         present = {
             prefix + path.name
             for path in (root / prefix).glob("_installation_context_*.py")
@@ -190,10 +190,12 @@ def _parse(
         ) from exc
 
 
-def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> SourceView:
+def installation_view(
+    root: Path, paths: tuple[str, ...], output: Path, *, entry_path: str = INSTALLATION_ENTRY,
+) -> SourceView:
     """Inline only the literal loader's actual call, without importing product code."""
-    entry = _read(root, INSTALLATION_ENTRY)
-    tree = _parse(entry, INSTALLATION_ENTRY)
+    entry = _read(root, entry_path)
+    tree = _parse(entry, entry_path)
     declarations = [
         node
         for node in tree.body
@@ -229,7 +231,7 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
     fragments = tuple(name for name in value if isinstance(name, str))
     if len(set(fragments)) != len(fragments):
         raise SourceViewError("Installation-context fragment list contains duplicates")
-    prefix = INSTALLATION_ENTRY.rsplit("/", 1)[0] + "/"
+    prefix = entry_path.rsplit("/", 1)[0] + "/"
     members = tuple(prefix + name for name in fragments)
     physical = {
         path
@@ -239,12 +241,12 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
         and path.rsplit("/", 1)[-1].startswith("_installation_context_")
         and path != prefix + "_installation_context_worker.py"
     }
-    if set(members) != physical or INSTALLATION_ENTRY not in paths:
+    if set(members) != physical or entry_path not in paths:
         raise SourceViewError(
             "Installation-context fragment membership differs from physical inventory"
         )
     inputs = (
-        (INSTALLATION_ENTRY, entry),
+        (entry_path, entry),
         *((name, _read(root, name)) for name in members),
     )
     lines: list[SourceLine] = []
@@ -282,12 +284,12 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
             lines.append(SourceLine(path, number))
 
     entry_lines = entry.splitlines(keepends=True)
-    append(INSTALLATION_ENTRY, b"".join(entry_lines[: call.lineno - 1]))
-    append(INSTALLATION_ENTRY, b"\n", start=call.lineno)
+    append(entry_path, b"".join(entry_lines[: call.lineno - 1]))
+    append(entry_path, b"\n", start=call.lineno)
     for name, content in inputs[1:]:
         append(name, content, fragment=True)
     append(
-        INSTALLATION_ENTRY,
+        entry_path,
         b"".join(entry_lines[call.end_lineno or call.lineno :]),
         start=(call.end_lineno or call.lineno) + 1,
     )

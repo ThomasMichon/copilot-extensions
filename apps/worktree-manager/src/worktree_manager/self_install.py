@@ -1,0 +1,1054 @@
+"""Versioned self-install for the Worktree Manager (matches the harness convention).
+
+The Worktree Manager is delivered out-of-plugin, but its install flow follows the
+**same versioning convention as the harness's other installers** (see
+``plugins/agent-worktrees/scripts/versioned_runtime.py``):
+
+* an immutable per-version slot at ``<root>/versions/<version>/``,
+* a plain-text ``<root>/current-version`` **marker file** naming the active
+  version (written atomically: temp + rename), and
+* a **binstub** in ``~/.local/bin/`` (``worktree-manager`` + ``.cmd``/``.ps1`` on
+  Windows) that resolves the marker and runs the active slot.
+
+The standalone payload ships canonical installer-engine/versioned-runtime
+helpers independently of any plugin. Its adapter constructs and health-gates
+an installed candidate before publication; legacy or damaged selected slots
+require distinct repair generations rather than in-place rebuilding.
+"""
+
+from __future__ import annotations
+
+import json
+import importlib.util
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+from contextlib import ExitStack
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
+
+import worktree_manager
+
+from .self_install_runtime import (
+    running_payload_dir as running_payload_dir,
+    load_runtime_installer as _load_runtime_installer,
+    slot_is_complete as _runtime_slot_is_complete,
+    slot_package_version as _runtime_slot_package_version,
+    runtime_scripts as _runtime_resource_scripts,
+)
+from .self_install_payload import (
+    _clear_dir as _clear_dir,
+    _fetch_via_tarball as _payload_fetch_via_tarball,
+)
+from .source_config import default_root as default_root
+
+MARKER = "current-version"
+VERSIONS_DIR = "versions"
+STAGING_DIR = "staging"
+CONTROL_PLANE_PROVIDERS_SUBDIR = "control-plane-providers.d"
+CONTROL_PLANE_PROVIDERS_DIR_ENV = "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"
+_VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
+
+
+def manager_repo(root: Path | None = None) -> str:
+    """The git source :func:`self_update` fetches from.
+
+    Resolves the **user-level source config** (``[source].repo`` in
+    ``<root>/config.toml``), else the canonical GitHub repo. The override is a
+    config file managed by ``worktree-manager source`` — deliberately **not** an
+    env var — so it can point the updater at a **fork** or a **canary branch**
+    for future updates, without weakening the out-of-plugin boundary.
+    """
+    from .source_config import resolved_repo
+
+    return resolved_repo(root)
+
+
+def manager_ref(root: Path | None = None) -> str:
+    """The branch/ref :func:`self_update` fetches, from the source config or default."""
+    from .source_config import resolved_ref
+
+    return resolved_ref(root)
+
+
+# Owner/name from a GitHub https or ssh remote (``.git`` + trailing slash optional).
+_GITHUB_REPO_RE = re.compile(r"github\.com[/:]+(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
+
+
+def manager_tarball_url(root: Path | None = None, ref: str | None = None) -> str | None:
+    """The GitHub codeload tarball URL for the configured source, or ``None``.
+
+    Derives ``https://codeload.github.com/<owner>/<name>/tar.gz/<ref>`` from the
+    resolved source repo (:func:`manager_repo`) when it is a GitHub remote. Returns
+    ``None`` for a non-GitHub source (a local path or an enterprise remote), where
+    no codeload endpoint exists and git is genuinely required. This is what lets
+    the bootstrap and :func:`self_update` fetch the payload **without git** on a
+    bare machine — the git-optional path.
+    """
+    m = _GITHUB_REPO_RE.search(manager_repo(root).strip())
+    if not m:
+        return None
+    ref = ref or manager_ref(root)
+    return f"https://codeload.github.com/{m.group('owner')}/{m.group('name')}/tar.gz/{ref}"
+
+
+def remote_init_url(root: Path | None = None, ref: str | None = None) -> str | None:
+    """The raw GitHub URL for the configured source's ``__init__.py``, or
+    ``None`` for a non-GitHub source (mirrors :func:`manager_tarball_url`'s
+    GitHub-only support). This is the lightweight (single small file, no
+    clone/tarball) endpoint :func:`fetch_remote_version` reads to check
+    whether a newer Manager release exists without a full fetch."""
+    m = _GITHUB_REPO_RE.search(manager_repo(root).strip())
+    if not m:
+        return None
+    ref = ref or manager_ref(root)
+    return (
+        f"https://raw.githubusercontent.com/{m.group('owner')}/{m.group('name')}"
+        f"/{ref}/worktree-manager/src/worktree_manager/__init__.py"
+    )
+
+
+def fetch_remote_version(
+    root: Path | None = None, ref: str | None = None, timeout: float = 5.0,
+) -> str | None:
+    """The ``__version__`` currently on the configured source's ``ref``, via a
+    single small HTTP GET -- no git, no clone/tarball. Best-effort: returns
+    ``None`` on any failure (network, timeout, non-GitHub source, unparsable
+    content), so a caller (a background update-availability poll) never has
+    to guard this itself. This is deliberately separate from
+    :func:`manager_tarball_url`/:func:`self_update`'s full fetch: it exists
+    purely to answer "is a newer Manager version available", cheaply enough
+    to run on a background thread on every picker launch."""
+    url = remote_init_url(root, ref)
+    if url is None:
+        return None
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+            text = resp.read().decode("utf-8", errors="replace")
+    except (OSError, urllib.error.URLError, ValueError):
+        return None
+    m = _VERSION_RE.search(text)
+    return m.group(1) if m else None
+
+
+def local_bin() -> Path:
+    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    return home / ".local" / "bin"
+
+
+def control_plane_providers_dir() -> Path:
+    override = os.environ.get(CONTROL_PLANE_PROVIDERS_DIR_ENV)
+    if override:
+        return Path(override).expanduser()
+    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    return home / ".agent-worktrees" / CONTROL_PLANE_PROVIDERS_SUBDIR
+
+
+def _runtime_installer() -> Any:
+    return _load_runtime_installer(_runtime_scripts())
+
+
+def _runtime_scripts() -> Path:
+    return _runtime_resource_scripts(Path(worktree_manager.__file__).resolve().parent, running_payload_dir)
+
+
+def payload_version(payload_dir: Path | None = None) -> str | None:
+    """Read ``__version__`` from a payload's src/worktree_manager/__init__.py."""
+    pd = payload_dir or running_payload_dir()
+    init = pd / "src" / "worktree_manager" / "__init__.py"
+    try:
+        m = _VERSION_RE.search(init.read_text("utf-8"))
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def current_version(root: Path | None = None) -> str | None:
+    """The active version from the marker file, or None if not installed."""
+    marker = (root or default_root()) / MARKER
+    try:
+        return marker.read_text("utf-8").strip() or None
+    except (OSError, UnicodeError):
+        return None
+
+
+def version_slot(version: str, root: Path | None = None) -> Path:
+    return (root or default_root()) / VERSIONS_DIR / version
+
+
+_SLOT_COMPLETE_MARKER = ".install-complete"
+_SLOT_KEY_FILES = (
+    "pyproject.toml",
+    "src/worktree_manager/__init__.py",
+    "src/worktree_manager/__main__.py",
+)
+
+
+def _mark_slot_complete(slot: Path) -> None:
+    (slot / _SLOT_COMPLETE_MARKER).write_text("", encoding="utf-8")
+
+
+def _slot_is_complete(slot: Path) -> bool:
+    return _runtime_slot_is_complete(slot, _runtime_installer, _SLOT_KEY_FILES)
+
+
+def _binstub_files() -> list[str]:
+    if os.name == "nt":
+        return ["worktree-manager.cmd", "worktree-manager.ps1", "worktree-manager"]
+    return ["worktree-manager"]
+
+
+def _primary_binstub_name() -> str:
+    return "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
+
+
+def _provider_manifest_template_path(payload_dir: Path | None = None) -> Path:
+    packaged = (
+        Path(worktree_manager.__file__).resolve().parent
+        / "_runtime_assets" / "references" / "control-plane-provider.json"
+    )
+    if payload_dir is not None:
+        candidate = payload_dir / "references" / "control-plane-provider.json"
+        if candidate.is_file():
+            return candidate
+    if packaged.is_file():
+        return packaged
+    candidate = running_payload_dir() / "references" / "control-plane-provider.json"
+    if candidate.is_file():
+        return candidate
+    return running_payload_dir() / "references" / "control-plane-provider.json"
+
+
+def _expected_control_plane_provider_manifest(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> dict[str, object]:
+    template = json.loads(
+        _provider_manifest_template_path(payload_dir).read_text(encoding="utf-8")
+    )
+    template["command"] = [str((local_bin() / _primary_binstub_name()).resolve())]
+    template["resident_picker"] = {
+        "version": 1, "command": [*template["command"], "--resident-picker"],
+        "session": {"version": 1, "root": str((root or default_root()).resolve())},
+    }
+    template["provider_root"] = str((root or default_root()).resolve())
+    return cast(dict[str, object], template)
+
+
+def _control_plane_provider_manifest_path(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> Path:
+    provider = str(
+        _expected_control_plane_provider_manifest(payload_dir, root=root).get("provider") or ""
+    ).strip()
+    return control_plane_providers_dir() / f"{provider}.json"
+
+
+def _control_plane_provider_manifest_is_stale(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> bool:
+    path = _control_plane_provider_manifest_path(payload_dir, root=root)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    return bool(current != _expected_control_plane_provider_manifest(payload_dir, root=root))
+
+
+def _write_control_plane_provider_manifest(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> Path:
+    path = _control_plane_provider_manifest_path(payload_dir, root=root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # A unique per-writer temp name -- a concurrent repair (two
+    # worktree-manager instances independently detecting and fixing the
+    # same stale manifest) must not race on one shared ``.tmp`` file, where
+    # the loser's os.replace() would raise FileNotFoundError after the
+    # winner already moved it.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(
+        json.dumps(
+            _expected_control_plane_provider_manifest(payload_dir, root=root),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _replace_with_retry(tmp, path)
+    return path
+
+
+def _replace_with_retry(src: Path, dst: Path, *, attempts: int = 10, delay_s: float = 0.01) -> None:
+    """``os.replace(src, dst)``, retrying a transient Windows
+    ``PermissionError`` (``ERROR_ACCESS_DENIED``, errno 13).
+
+    POSIX ``rename()`` is atomic even when two processes/threads target the
+    same ``dst`` concurrently -- exactly one call wins and the other simply
+    sees its own replace succeed with no error either way. Windows'
+    underlying ``MoveFileEx`` can instead briefly deny one of two truly
+    concurrent replacements of the same destination (observed in practice:
+    two callers each committing their own uniquely-named temp file onto the
+    same manifest path at once). The content is identical in that case --
+    both writers computed the same expected manifest -- so retrying after a
+    short backoff until this call's own replace succeeds (another
+    concurrent winner having already published equivalent content is not a
+    failure) is correct, not merely a cosmetic swallow.
+    """
+    last: PermissionError | None = None
+    for _ in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            last = e
+            time.sleep(delay_s)
+    assert last is not None
+    raise last
+
+
+def binstub_present() -> Path | None:
+    lb = local_bin()
+    for name in _binstub_files():
+        p = lb / name
+        if p.exists():
+            return p
+    return None
+
+
+def _application_launchers(slot: Path) -> ModuleType:
+    script = slot / "runtime_application_binstubs.py"
+    spec = importlib.util.spec_from_file_location("_manager_application_binstubs", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Manager application launchers are unavailable")
+    launchers = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launchers)
+    return launchers
+
+
+def _expected_binstub_contents(*, application_slot: Path | None = None) -> dict[str, str]:
+    """The exact binstub file contents this version would (re)deploy.
+
+    Factored out of :func:`_deploy_binstubs` so :func:`_binstubs_are_stale`
+    can compare against the same expectation without writing anything.
+    """
+    if application_slot is not None:
+        launchers = _application_launchers(application_slot)
+        declaration = application_slot / "application.json"
+        record = json.loads(declaration.read_text(encoding="utf-8")) if declaration.exists() else {}
+        if not isinstance(record, dict):
+            raise ValueError("Manager application declaration must be an object")
+        commands = record.get("commands", ["worktree-manager"])
+        if (
+            not isinstance(commands, list) or not commands
+            or any(not isinstance(command, str) for command in commands)
+            or "worktree-manager" not in commands or len(set(commands)) != len(commands)
+        ):
+            raise ValueError("Manager application commands must be unique and include Manager")
+        contents: dict[str, str] = {}
+        for command in commands:
+            contents.update(launchers.global_binstubs(
+                command, "WORKTREE_MANAGER_ROOT", ".worktree-manager",
+                root=application_slot.parent.parent,
+            ))
+        return contents
+    contents = {"worktree-manager": _sh_binstub()}
+    if os.name == "nt":
+        contents = {
+            "worktree-manager.cmd": _cmd_binstub(),
+            "worktree-manager.ps1": _ps1_binstub(),
+            "worktree-manager": _sh_binstub(),  # for git-bash on Windows
+        }
+    return contents
+
+
+def _expected_frontdoor_contents(application_slot: Path | None) -> dict[Path, str]:
+    globals_text = _expected_binstub_contents(application_slot=application_slot)
+    result = {local_bin() / name: body for name, body in globals_text.items()}
+    if application_slot is not None:
+        root = application_slot.parent.parent
+        result.update({root / "bin" / name: body for name, body in globals_text.items()})
+        setup = _application_launchers(application_slot).global_binstubs(
+            "setup", "WORKTREE_MANAGER_ROOT", ".worktree-manager", root=root,
+            slot_directory="bin",
+        )
+        result.update({root / "bin" / name: body for name, body in setup.items()})
+    return result
+
+
+def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
+    """True when a deployed binstub is missing or its content doesn't match.
+
+    ``binstub_present()`` only proves *some* file with an expected name
+    exists -- it says nothing about what's actually in it. A machine can
+    carry a **legacy, pre-versioned, or otherwise incompatible**
+    ``worktree-manager`` (e.g. left over from an earlier install attempt or
+    prototype) that happens to occupy the exact binstub filename. Content-less
+    presence-checking then makes :func:`needs_install` report "already
+    installed" and skip re-deploying, silently leaving that stale/broken file
+    in place -- which then fails the consuming ``agent-worktrees`` seam's
+    ``--version`` health probe and falls back to the bundled picker instead of
+    handing off to this Manager. Comparing content closes that gap: any
+    mismatch (or absence) means the binstub needs (re)deploying.
+    """
+    try:
+        contents = _expected_frontdoor_contents(application_slot)
+    except Exception:
+        # Unreadable selected inputs and older rendering APIs are replacement gaps.
+        return True
+    for p, expected in contents.items():
+        try:
+            # newline="" preserves exact line endings on read (matches how
+            # _deploy_binstubs writes them) -- otherwise universal-newline
+            # translation would normalize a freshly-written \r\n binstub back
+            # to \n on read, making an up-to-date file look "stale".
+            with p.open(encoding="utf-8", newline="") as f:
+                actual = f.read()
+        except (OSError, UnicodeError):
+            return True
+        if actual != expected:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class SelfInstallStatus:
+    installed_version: str | None
+    binstub: str | None
+    root: str
+
+    @property
+    def installed(self) -> bool:
+        if self.installed_version is None:
+            return False
+        root = Path(self.root)
+        version = _slot_package_version(version_slot(self.installed_version, root))
+        return version is not None and _core_install_satisfied(version, root)
+
+
+def status(root: Path | None = None) -> SelfInstallStatus:
+    r = root or default_root()
+    stub = binstub_present()
+    return SelfInstallStatus(
+        installed_version=current_version(r),
+        binstub=str(stub) if stub else None,
+        root=str(r),
+    )
+
+
+def _selected_runtime_slot(root: Path) -> Path | None:
+    selected = current_version(root)
+    if not selected:
+        return None
+    try:
+        _runtime_installer().runtime._validate_dev_previous_version(selected)
+    except (OSError, ImportError, RuntimeError, ValueError):
+        return None
+    return version_slot(selected, root)
+
+
+def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
+    """A valid selection, slot and binstubs match the requested package."""
+    r = root or default_root()
+    slot = _selected_runtime_slot(r)
+    return (
+        slot is not None
+        and _slot_package_version(slot) == version
+        and _slot_is_complete(slot)
+        and binstub_present() is not None
+        and not (
+            _binstubs_are_stale(application_slot=slot)
+            if (slot / "application.json").is_file() else _binstubs_are_stale()
+        )
+    )
+
+
+def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list[str]:
+    """Human-readable reasons :func:`_core_install_satisfied` returned
+    ``False`` for ``version`` -- one entry per failing sub-check.
+
+    A caller falling through to a full reinstall on a ``False`` result must
+    never do so silently (#5219's requested fix 2): this is what let a
+    manifest-only gap silently escalate to "full reinstall" in practice,
+    even while ``doctor`` was reporting the very same install as fully
+    healthy (``doctor`` only compares the marker to the running version --
+    it does not check slot completeness or binstub staleness at all).
+    """
+    r = root or default_root()
+    gaps: list[str] = []
+    cur = current_version(r)
+    valid_selection = _selected_runtime_slot(r)
+    selected = valid_selection or version_slot(version, r)
+    matching_payload = _slot_package_version(selected) == version
+    if valid_selection is None:
+        gaps.append(f"current-version marker is missing, empty or invalid: {cur!r}")
+    elif cur != version and not matching_payload:
+        gaps.append(f"current-version marker is {cur!r}, not {version!r}")
+    target = selected if matching_payload else version_slot(version, r)
+    if not _slot_is_complete(target):
+        gaps.append(
+            f"slot {target} is missing its completion marker "
+            "or a key file"
+        )
+    stub = binstub_present()
+    if stub is None:
+        gaps.append("no binstub found in ~/.local/bin")
+    elif (
+        _binstubs_are_stale(application_slot=selected)
+        if (selected / "application.json").is_file() else _binstubs_are_stale()
+    ):
+        gaps.append(f"binstub {stub} content does not match this version's template")
+    return gaps
+
+
+def _currently_running_from(slot: Path) -> bool:
+    """``True`` when *this process's own interpreter* lives inside ``slot``.
+
+    Checked by path containment against the running interpreter
+    (``sys.executable``), never by a version-string comparison -- the whole
+    point is to catch this even when :func:`_core_install_satisfied`
+    incorrectly disagrees that the version matches (#5219). Overwriting
+    such a slot is a **self-overwrite**: on Windows, ``shutil.rmtree``
+    cannot delete the currently-open venv's ``python.exe`` (``WinError 5:
+    Access is denied``), and even where deletion nominally succeeds on
+    another platform, destroying your own on-disk payload mid-execution is
+    never something a reinstall needs to do -- the process already proves
+    this exact version runs.
+    """
+    try:
+        exe = Path(sys.executable).resolve()
+    except OSError:
+        return False
+    try:
+        slot_resolved = slot.resolve()
+    except OSError:
+        slot_resolved = slot
+    return slot_resolved == exe or slot_resolved in exe.parents
+
+
+def needs_install(version: str, root: Path | None = None) -> bool:
+    r = root or default_root()
+    return not (
+        _core_install_satisfied(version, r)
+        and not _control_plane_provider_manifest_is_stale(root=r)
+    )
+
+
+# Preserve existing test/caller seams while native rendering has its own owner.
+from .runtime_launchers import _cmd_binstub as _cmd_binstub
+from .runtime_launchers import _ps1_binstub as _ps1_binstub
+from .runtime_launchers import _sh_binstub as _sh_binstub
+
+
+def _slot_package_version(slot: Path) -> str | None:
+    return _runtime_slot_package_version(slot, _runtime_installer, payload_version)
+
+
+def _deploy_binstubs(
+    *, application_slot: Path | None = None, _published: dict[Path, Any] | None = None,
+) -> list[Path]:
+    lb = local_bin()
+    lb.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    contents = _expected_frontdoor_contents(application_slot)
+    if application_slot is not None:
+        for path in contents:
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                raise RuntimeError(f"Foreign Manager command preserved: {path}")
+    # Explicit installation owns these named outputs, not their historical byte template.
+    for p, body in contents.items():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if application_slot is None:
+            p.write_text(body, encoding="utf-8", newline="")
+            if os.name != "nt":
+                p.chmod(0o755)
+        else:
+            publication = _runtime_installer().runtime._runtime_component("versioned_runtime_publication")
+            temporary = p.with_name(f".{p.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+            try:
+                with temporary.open("xb") as stream:
+                    stream.write(body.encode("utf-8"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if os.name != "nt":
+                    temporary.chmod(0o755)
+                created = publication.state_path(temporary)
+                _replace_with_retry(temporary, p)
+                if _published is not None:
+                    _published[p] = created
+                if publication.state_path(p) != created:
+                    raise RuntimeError(f"Manager command changed during publication: {p}")
+            finally:
+                temporary.unlink(missing_ok=True)
+        if p.parent == lb:
+            written.append(p)
+    return written
+
+
+def _write_marker(root: Path, version: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    tmp = root / (MARKER + ".tmp")
+    tmp.write_text(version, encoding="utf-8")
+    tmp.replace(root / MARKER)  # atomic publish
+
+
+# Payload build/validate/atomic-publish -- see self_install_payload.py's own
+# module docstring for why this is a separate module (purely a line-count
+# split; no behavior change). _copy_payload is imported here so the one
+# existing call site below (and tests that
+# `monkeypatch.setattr(si, "_copy_payload", ...)`) keep working unchanged
+# against this module's own namespace. Its own internal helpers
+# (_copy_payload_unsafe, _materialize_payload_pointers, _find_any_symlink,
+# _swap_in_staged_slot) have no other caller in this module and are not
+# re-exported here -- reach them via `self_install_payload` directly if ever
+# needed.
+from .self_install_payload import _copy_payload, _safe_extract
+
+
+class _CutoverLockBusy(Exception):
+    """A genuinely concurrent cutover holds the mux-daemon lock right now."""
+
+
+def _acquire_install_cutover_lease(root: Path) -> tuple[Any, ModuleType]:
+    """The shared mux-daemon cutover lease, held for the WHOLE slot mutation
+    below (reap + :func:`_copy_payload`).
+
+    Raises :class:`_CutoverLockBusy` both when the lock is genuinely held by
+    a live concurrent cutover elsewhere, AND when the cutover machinery
+    itself fails to import: an import failure does not prove no older mux
+    daemon or concurrent cutover exists, so this fails CLOSED (defers the
+    install) rather than silently proceeding unprotected. Per
+    ``docs/patterns/graceful-daemon-cutover.md``'s "serialize cutover
+    attempts under one lease" rule, a caller that cannot establish the
+    lease must defer rather than mutate the slot unprotected -- releasing
+    the lease before ``_copy_payload`` runs (or skipping it on a busy
+    timeout or missing dependency) would reopen the exact race this
+    closes: a concurrent cutover's ``spawn_passive`` could stand a new
+    passive up inside the very slot ``_copy_payload`` is about to
+    ``rmtree``.
+    """
+    try:
+        from . import mux_daemon_cutover
+    except Exception as exc:  # surfaced to the caller as a defer, not swallowed
+        raise _CutoverLockBusy(
+            f"mux-daemon cutover machinery is unavailable for {root}: {exc}"
+        ) from exc
+    try:
+        lease = mux_daemon_cutover._acquire_cutover_lock(root, timeout_s=5.0)
+    except Exception as exc:  # surfaced to the caller as a defer, not swallowed
+        raise _CutoverLockBusy(
+            f"a concurrent mux-daemon cutover holds the lock for {root}: {exc}"
+        ) from exc
+    return lease, mux_daemon_cutover
+
+
+from .self_install_recovery import reap_stranded_cutover_passive as _reap_stranded_cutover_passive  # noqa: F401 -- compatibility test seam
+from .self_install_recovery import recover_frontdoors
+
+
+# ── legacy artifact recognition + cleanup ────────────────────────────────
+#
+# Before this out-of-plugin, versioned Manager existed, an EARLIER and
+# entirely unrelated "worktree-manager" plugin lived at
+# ``plugins/worktree-manager/`` (2026-05-26) and shipped its own
+# ``~/.local/bin/worktree-manager`` (+ ``.cmd``) binstub, plus a
+# non-versioned ``~/.worktree-manager/.venv`` + ``~/.worktree-manager/lib``
+# runtime layout. That plugin was renamed to ``agent-worktrees`` days later
+# (commit 6512114be) -- but a machine that installed it *before* the rename
+# can still carry those exact files, and the rename never cleaned them up.
+# They collide on both the binstub name and the root directory this Manager
+# now uses for its own versioned layout, and agent-worktrees' own
+# ``--version`` health probe against that ancient stub is exactly what
+# fails and falls back to the bundled picker.
+#
+# These are the byte-exact contents git history shows for that prototype
+# (unchanged from its initial scaffold through the rename commit). Matching
+# them exactly -- not just "the binstub looks wrong" -- lets cleanup
+# positively attribute what it removes to this one known, historical
+# artifact, rather than assuming any unrecognized content at that path is
+# safe to delete.
+_LEGACY_PRERENAME_SH = (
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n"
+    "\n"
+    'if [[ -z "${WORKTREE_PROJECT:-}" ]]; then\n'
+    '    echo "ERROR: WORKTREE_PROJECT is not set. Use the project-specific '
+    'binstub or export WORKTREE_PROJECT." >&2\n'
+    "    exit 1\n"
+    "fi\n"
+    "\n"
+    "# Dual-layout: prefer new runtime, fall back to legacy\n"
+    'if [[ -x "$HOME/.worktree-manager/.venv/bin/python" ]]; then\n'
+    '    PYTHON="$HOME/.worktree-manager/.venv/bin/python"\n'
+    '    export PYTHONPATH="$HOME/.worktree-manager/lib"\n'
+    "else\n"
+    '    echo "ERROR: Venv not found. Run the installer first." >&2\n'
+    "    exit 1\n"
+    "fi\n"
+    "\n"
+    "unset PYTHONHOME\n"
+    'exec "$PYTHON" -m worktree_manager "$@"\n'
+)
+
+_LEGACY_PRERENAME_CMD = (
+    "@echo off\n"
+    "setlocal\n"
+    "\n"
+    "if not defined WORKTREE_PROJECT (\n"
+    "    echo ERROR: WORKTREE_PROJECT is not set. Use the project-specific "
+    "binstub or set WORKTREE_PROJECT. >&2\n"
+    "    exit /b 1\n"
+    ")\n"
+    "\n"
+    "rem Resolve runtime\n"
+    'set "NEW_RUNTIME=%USERPROFILE%\\.worktree-manager"\n'
+    "\n"
+    'if exist "%NEW_RUNTIME%\\.venv\\Scripts\\python.exe" (\n'
+    '    set "PYTHON=%NEW_RUNTIME%\\.venv\\Scripts\\python.exe"\n'
+    '    set "PYTHONPATH=%NEW_RUNTIME%\\lib"\n'
+    ") else (\n"
+    "    echo ERROR: Venv not found. Run the installer first. >&2\n"
+    "    exit /b 1\n"
+    ")\n"
+    "\n"
+    '"%PYTHON%" -m worktree_manager %*\n'
+    "exit /b %ERRORLEVEL%\n"
+)
+
+_LEGACY_LABEL = (
+    "pre-rename 'worktree-manager' plugin prototype, May 2026 -- "
+    "before it became agent-worktrees"
+)
+
+_KNOWN_LEGACY_BINSTUB_SIGNATURES: dict[str, str] = {
+    "worktree-manager": _LEGACY_PRERENAME_SH,
+    "worktree-manager.cmd": _LEGACY_PRERENAME_CMD,
+}
+
+# The non-versioned runtime layout that same prototype kept directly under
+# the shared ``~/.worktree-manager`` root -- orphaned relative to this
+# Manager's own ``versions/`` + ``current-version`` layout, which never
+# creates either of these.
+_LEGACY_ROOT_DIRS = (".venv", "lib")
+
+
+def _read_exact(p: Path) -> str | None:
+    try:
+        with p.open(encoding="utf-8", newline="") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _identify_legacy_binstub(name: str, text: str) -> str | None:
+    """A human label when ``text`` exactly matches ``name``'s known legacy
+    signature, else ``None`` -- never a fuzzy/generic "looks different" match."""
+    expected = _KNOWN_LEGACY_BINSTUB_SIGNATURES.get(name)
+    return _LEGACY_LABEL if expected is not None and text == expected else None
+
+
+def plan_legacy_cleanup(root: Path | None = None) -> list[str]:
+    """Report (never act on) recognized legacy artifacts a real run would remove."""
+    r = root or default_root()
+    lb = local_bin()
+    findings: list[str] = []
+    for name in _KNOWN_LEGACY_BINSTUB_SIGNATURES:
+        text = _read_exact(lb / name)
+        if text is not None and (label := _identify_legacy_binstub(name, text)):
+            findings.append(f"legacy binstub {lb / name} ({label})")
+    for name in _LEGACY_ROOT_DIRS:
+        d = r / name
+        if d.is_dir():
+            findings.append(f"legacy root artifact {d} ({_LEGACY_LABEL})")
+    return findings
+
+
+def clean_legacy_artifacts(root: Path | None = None) -> list[str]:
+    """Remove recognized legacy worktree-manager artifacts; return what was removed.
+
+    Only acts on content positively identified via
+    :data:`_KNOWN_LEGACY_BINSTUB_SIGNATURES` or the prototype's known root
+    layout (:data:`_LEGACY_ROOT_DIRS`) -- never a generic "this looks wrong"
+    guess, so an operator's own unrelated file at the same path is never
+    touched.
+    """
+    r = root or default_root()
+    lb = local_bin()
+    cleaned: list[str] = []
+    for name in _KNOWN_LEGACY_BINSTUB_SIGNATURES:
+        p = lb / name
+        text = _read_exact(p)
+        if text is None:
+            continue
+        label = _identify_legacy_binstub(name, text)
+        if not label:
+            continue
+        try:
+            p.unlink()
+        except OSError:
+            continue
+        cleaned.append(f"removed legacy binstub {p} ({label})")
+    for name in _LEGACY_ROOT_DIRS:
+        d = r / name
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+            cleaned.append(f"removed legacy root artifact {d} ({_LEGACY_LABEL})")
+    return cleaned
+
+
+@dataclass(frozen=True)
+class SelfInstallResult:
+    version: str | None
+    action: str          # "installed" | "already-current" | "planned" | "error"
+    root: str
+    slot: str | None = None
+    marker: str | None = None
+    binstubs: tuple[str, ...] = ()
+    reason: str | None = None
+    cleaned: tuple[str, ...] = ()
+
+
+def _complete_candidate(
+    ready: Any, payload: Path, root: Path, *, previous: str | None,
+    was_current: bool, before_publish: Callable[[], None] | None = None,
+    after_activate: Callable[[Path], object] | None = None,
+    transactional_activation: bool = False,
+) -> SelfInstallResult:
+    return _complete_slot(
+        ready.slot, payload, payload_version(payload), root, previous=previous,
+        was_current=was_current, reused=ready.reused, before_publish=before_publish,
+        after_activate=after_activate, transactional_activation=transactional_activation,
+    )
+
+
+def _complete_slot(
+    slot: Path, payload: Path, version: str | None, root: Path, *,
+    previous: str | None, was_current: bool, reused: bool,
+    before_publish: Callable[[], None] | None = None,
+    after_activate: Callable[[Path], object] | None = None, transactional_activation: bool = False,
+) -> SelfInstallResult:
+    stubs: list[Path] = []
+    application_slot = slot if (slot / "application.json").is_file() else None
+    baseline: dict[Path, Any] = {}
+    contents: dict[Path, bytes | None] = {}
+    published: dict[Path, Any] = {}
+    started, leased = False, False
+    interrupted: BaseException | None = None
+
+    def publish_frontdoors() -> None:
+        nonlocal stubs, started, leased, interrupted
+        publication = installer.runtime._runtime_component("versioned_runtime_publication")
+        targets = [*(
+            _expected_frontdoor_contents(application_slot)
+            if application_slot is not None else (local_bin() / name for name in _binstub_files())
+        ),
+                   _control_plane_provider_manifest_path(payload, root=root)]
+        if not leased:
+            publication_custody.enter_context(publication.target_leases(root, targets))
+            leased = True
+        if application_slot is not None and not baseline:
+            for path in targets:
+                baseline[path] = publication.state_path(path)
+                contents[path] = (
+                    publication.CopyPublication._bytes(path, baseline[path])
+                    if baseline[path] is not None else None
+                )
+        if not started:
+            if before_publish is not None:
+                before_publish()
+            if transactional_activation and after_activate is not None:
+                try:
+                    after_activate(slot)
+                except installer.ActivationStarted as committed:
+                    interrupted = committed.interruption
+                started = True
+        stubs = (
+            _deploy_binstubs(application_slot=application_slot, _published=published)
+            if application_slot is not None else _deploy_binstubs()
+        )
+        provider = _write_control_plane_provider_manifest(payload, root=root)
+        if application_slot is not None:
+            published[provider] = publication.state_path(provider)
+
+    installer = _runtime_installer()
+    if before_publish is not None:
+        before_publish()
+    try:
+        with ExitStack() as publication_custody:
+            installer.activate(
+                root, slot.name, expected=previous, before_publish=publish_frontdoors,
+                forward_only=lambda: started,
+            )
+        if interrupted is not None:
+            raise interrupted
+        if after_activate is not None and not transactional_activation:
+            after_activate(slot)
+    except BaseException:
+        if application_slot is not None and published and not started:
+            publication = installer.runtime._runtime_component("versioned_runtime_publication")
+            recover_frontdoors(publication, root, baseline, contents, published, _replace_with_retry)
+        raise
+    return SelfInstallResult(
+        version=version, action="already-current"
+        if was_current and reused and previous == slot.name else "installed",
+        root=str(root), slot=str(slot), marker=slot.name,
+        binstubs=tuple(str(stub) for stub in stubs),
+    )
+
+
+def self_install(
+    payload_dir: Path | None = None,
+    *,
+    root: Path | None = None,
+    dry_run: bool = True,
+    stage_only: bool = False,
+    _after_activate: Callable[[Path], object] | None = None,
+    _before_publish: Callable[[], None] | None = None,
+    _transactional_activation: bool = False, _reconcile_instances: bool = True,
+    _wheel_inputs: Any = None, _local_packages: tuple[str, ...] | None = None,
+    _validate_candidate: Callable[..., Any] | None = None,
+    _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
+    _application: Path | None = None, _native_wheel_inputs: Any = None,
+) -> SelfInstallResult:
+    """Construct and health-gate; stage-only proves readiness without selection."""
+    from .runtime_identity import running_application_slot
+    from . import _installation_context
+
+    path_is_within: Callable[[str | Path, str | Path], bool] = vars(_installation_context)["path_is_within"]
+    paths_equal: Callable[[str | Path, str | Path], bool] = vars(_installation_context)["paths_equal"]
+
+    r = (root or default_root()).resolve()
+    application_slot = running_application_slot() if payload_dir is None else None
+    pd = payload_dir or application_slot or running_payload_dir()
+    version = worktree_manager.__version__ if application_slot is not None else payload_version(pd)
+    if version is None:
+        return SelfInstallResult(version=None, action="error", root=str(r),
+                                 reason="could not read payload __version__")
+    slot = application_slot or version_slot(version, r)
+    try:
+        installer = _runtime_installer()
+        if application_slot is not None and (
+            not paths_equal(application_slot.parent.parent, r)
+            or not path_is_within(worktree_manager.__file__, application_slot / ".venv")
+        ):
+            raise RuntimeError("Running Manager application belongs to another installation")
+        if dry_run:
+            if application_slot is not None:
+                return SelfInstallResult(
+                    version=version, action="already-current"
+                    if current_version(r) == slot.name and not needs_install(version, r) else "planned",
+                    root=str(r), slot=str(slot), marker=slot.name, reason="dry-run",
+                )
+            selected = _selected_runtime_slot(r)
+            generation, source_matches = installer.source_install_selection(
+                pd, version, selected,
+                **({"wheel_inputs": _wheel_inputs, "local_packages": _local_packages}
+                   if _wheel_inputs is not None else {}),
+            )
+            slot = version_slot(generation, r)
+            if source_matches and selected is not None and not needs_install(version, r):
+                return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                         slot=str(selected), marker=selected.name)
+            return SelfInstallResult(version=version, action="planned", root=str(r),
+                                     slot=str(slot), reason="dry-run")
+        previous = current_version(r)
+        was_current = not needs_install(version, r)
+        if _reconcile_instances and not stage_only and not (
+            os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+            or os.environ.get("PYTEST_CURRENT_TEST")
+        ):
+            from installer_instance_reconcile import reconcile_installer_instances
+
+            reconcile_installer_instances(_runtime_scripts(), runtime_root=r)
+        candidate_options = {key: value for key, value in (
+            ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
+            ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
+            ("application", _application), ("native_wheel_inputs", _native_wheel_inputs),
+        ) if value is not None}
+        with ExitStack() as custody:
+            if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
+                if custody.enter_context(installer._installation_custody()) is None:
+                    raise RuntimeError("Manager construction requires live installation custody")
+            if application_slot is not None:
+                script = application_slot / "install.py"
+                spec = importlib.util.spec_from_file_location("_manager_application_install", script)
+                if spec is None or spec.loader is None:
+                    raise RuntimeError("Manager application install entry is unavailable")
+                application = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(application)
+                record = application._application(application_slot)
+                if record["name"] != "worktree-manager":
+                    raise RuntimeError("Running application is not Manager")
+                reused = installer.runtime.is_complete(r, slot.name)
+                _, unchanged = custody.enter_context(application._qualified(slot, record))
+                if stage_only:
+                    return cast(SelfInstallResult, installer.stage_application(r, slot, version, unchanged))
+
+                def before_publish() -> None:
+                    unchanged()
+                    if _before_publish is not None:
+                        _before_publish()
+
+                return _complete_slot(
+                    slot, slot, version, r, previous=previous,
+                    was_current=was_current, reused=reused, before_publish=before_publish,
+                    after_activate=_after_activate or (
+                        lambda selected: installer._activate_after_bootstrap_update(
+                            r, selected, start_if_missing=True,
+                        )
+                    ),
+                    transactional_activation=True,
+                )
+            ready = custody.enter_context(installer.candidate(pd, r, assemble=_copy_payload, **candidate_options))
+            slot = ready.slot
+            if stage_only:
+                installer.verify_stage_readiness(r, ready, wheel_inputs=_wheel_inputs)
+                return SelfInstallResult(
+                    version=version, action="staged", root=str(r), slot=str(slot), marker=slot.name,
+                )
+            return _complete_candidate(
+                ready, pd, r, previous=previous,
+                was_current=was_current or ((_wheel_inputs is not None or _native_wheel_inputs is not None) and previous == slot.name),
+                before_publish=_before_publish, after_activate=_after_activate,
+                transactional_activation=_transactional_activation,
+            )
+    except (OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        if _raise_candidate_errors:
+            raise
+        return SelfInstallResult(
+            version=version, action="error", root=str(r), slot=str(slot), reason=str(error),
+        )
+
+
+@dataclass(frozen=True)
+class SelfUpdateResult:
+    action: str          # "updated" | "already-current" | "skipped" | "error"
+    version: str | None = None
+    previous: str | None = None
+    reason: str | None = None
+    cutover: dict[str, object] | None = None
+
+
+def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
+    return _payload_fetch_via_tarball(staging, url, timeout=timeout, _extract=_safe_extract)
+
+
+def self_update(
+    *,
+    ref: str | None = None,
+    root: Path | None = None,
+    dry_run: bool = False,
+) -> SelfUpdateResult:
+    """Fetch the independent Manager source through its canonical update owner."""
+    from .runtime_source_self_update import run_update
+
+    return run_update(ref=ref, root=root, dry_run=dry_run)

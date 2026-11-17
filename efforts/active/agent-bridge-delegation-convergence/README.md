@@ -113,6 +113,15 @@ The proposed #4029/#4191 residual below retains this Host, #1460/#1468,
 It assigns no implementation or resource, creates no new ACK and does not
 apply #1448's source-specific supersession clause to unrelated trackers.
 
+The proposed #4681 attention follow-up below likewise retains terminal-event
+production with #22 and existing Session Host/ACP owners, represented-target
+resolution with its live-registry owner, and compatibility with #1460/#1468.
+This effort receives the observable wait contract, not those underlying
+resources. The completed Phase 1B and archived Done attention baseline keep
+their earned credit. Normal reviewed delivery, current complete source/ROOT
+readback and separate source-specific judgment precede any tracker retirement;
+neither this proposal nor a tracking change repairs the wait channel.
+
 ## Context
 
 The current bridge already exposes most required mechanisms: create, send, read,
@@ -198,6 +207,51 @@ Tracked by #1449.
       attention reason and the successor identity.
 - [x] Consume #22's terminal-event reconciliation for transport failure; #1450
       owns wait settlement semantics, not the underlying terminal emission.
+
+### Proposed finite #4681 attention-wait follow-up
+
+This directly retains all three lanes in #4681, including its consolidated
+#7977 deadline/continuation and #9387 represented-session requirements.
+Existing finite command-deadline handling is bounded credit, not a freshly
+reproduced indefinite hang or complete repair. The original argparse notes
+were ancillary and already fixed. These reader/CLI follow-ups do not become
+a prerequisite for unrelated Phase 2, AHP or whole-parent work.
+
+- [ ] **AW4681-P1:** Across Session-Host reattach, settle the genuinely completed
+  ORIGINAL turn from correlated durable terminal evidence, preserving native/
+  session identity, caller position and conversation continuity. Idle or
+  quiescence alone cannot prove completion. Reconcile through the existing
+  terminal producer and waiter; status-based cutover proof is not wait-channel
+  acceptance. Preserve bounded honest failure without starting, resuming,
+  recreating or replaying a conversation to make the wait succeed.
+- [ ] **AW4681-P2:** Document the configured attention-wait command deadline;
+  add per-wait timeout with zero meaning indefinite while preserving finite
+  configured behavior. An unsettled deadline exits distinctly nonzero, not
+  successful attention settlement. Text output includes the next position and
+  one-line re-arm hint; JSON settled/position semantics and the existing cursor
+  remain authoritative without requiring a global timeout change.
+- [ ] **AW4681-P3:** Resolve represented interactive sessions consistently
+  against the same live-registry target IF attention supports them, OR return
+  explicit unsupported-capability rather than false absence. Preserve original
+  process, turn and session. Collect exact daemon-version attribution and a
+  bounded source-independent reproducer before claiming a regression or common
+  cause; the historical represented not-found and post-reattach hang are
+  distinct observations, not proof of one defect.
+- [ ] **AW4681-LV1:** Through a fresh separate-process wait after a completed
+  reattached turn, distinguish durable/correlated completion from merely idle,
+  including retained native/session/position continuity and honest bounded
+  failure. Keep the existing status-based drill and completed attention baseline
+  credited at their actual scope; neither substitutes for this channel.
+- [ ] **AW4681-LV2:** Exercise unsettled deadline exit/result, zero and per-call
+  override, finite configuration, continuation position/text hint and JSON
+  re-arm without losing events. A successful process exit is not settlement,
+  and attention settlement is not completion of the application objective.
+- [ ] **AW4681-LV3:** Check represented supported/unsupported, genuinely absent,
+  live/running and uncertain targets against consistent registry resolution
+  with exact daemon attribution and the bounded independent reproducer.
+  Preserve process/session identity and compatibility/refusal behavior.
+  Historical timing is not a new measurement; no deploy/restart, native drill,
+  live subscription or session mutation is authorized by this plan.
 
 ### Phase 2 — Make steering queue-first and handoff-safe (#1451)
 
@@ -490,6 +544,15 @@ future-turn queueing or final snapshots for the distinct outcomes below.
 
 ## Validation Plan
 
+- [ ] **AW4681-G:** Complete all AW4681-P1..3 and LV1..3 lanes: the original
+  completed reattached turn's correlated terminal settlement, truthful per-wait
+  deadline/result/position continuation, and represented target support OR
+  explicit unsupported-capability with daemon attribution and bounded
+  independent reproduction. Preserve the completed Phase 1B/archived Done
+  baseline, original evidence tiers, current compatibility and all terminal/
+  live-registry/source/resource custodians. No AHP, all-native, whole-parent,
+  new ACK or automatic operational gate is added.
+
 - [ ] **D4029-G:** Resolve D4029-P1/P2 and local Validation alongside the
   D4029-P3/LV3 active-turn stream/steer, reused #1448 typed-MCP/actual-tool,
   durable attributed results and structured
@@ -550,6 +613,17 @@ bridge does not absorb task claiming, recurring scheduling, or unattended goal
 ownership.
 
 ## Journal
+
+### 2026-11-17 - Complete attention-wait follow-up proposed
+
+Added three unchecked Plan, three local Validation and one actual global
+Validation rows directly receiving #4681/#7977/#9387. Reattach settlement,
+deadline/result/continuation and represented support OR explicit refusal
+remain independent obligations. Current durable-event/deadline source is
+credited without a new hang or regression claim. Completed Phase 1B, archived
+Done credit, existing terminal/live-registry custodians and all incumbent
+checks remain unchanged. Review, full current readback and separate judgment
+remain ahead of source disposition; no implementation or live operation.
 
 ### 2026-11-15 - Named-definition and shell continuity residuals proposed
 

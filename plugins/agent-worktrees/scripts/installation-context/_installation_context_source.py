@@ -749,7 +749,7 @@ def resolve_payload_source(
 
     environment = environment if environment is not None else os.environ
     home = Path(environment.get("HOME") or Path.home())
-    copilot_value = Path(copilot_home or home / ".copilot")
+    copilot_value = Path(copilot_home or environment.get("COPILOT_HOME") or home / ".copilot")
     if not _path_is_fully_qualified(copilot_value):
         _fail("--copilot-home must be absolute.")
     copilot = canonical_path(copilot_value)

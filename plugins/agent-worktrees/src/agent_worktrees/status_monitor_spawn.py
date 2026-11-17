@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from typing import Any
 
 
 def _spawn_detached(
-    argv: list[str], *, spawned_handles: list[subprocess.Popen] | None = None,
+    argv: list[str], *, spawned_handles: list[subprocess.Popen[Any]] | None = None,
 ) -> bool:
     from . import status_monitor_runtime as runtime
 
@@ -19,8 +20,8 @@ def _spawn_detached(
     argv = list(argv)
     from .runtime_monitor_launch import retained_monitor_argv
 
-    env = runtime._daemon_environment()
     try:
+        env = runtime._daemon_environment()
         argv = retained_monitor_argv(argv)
         from .status_monitor_cutover import spawn_monitor
 

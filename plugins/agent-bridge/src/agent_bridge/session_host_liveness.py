@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import contextlib
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from .models import SessionStatus
+from .session_status import SessionStatus
 
 if TYPE_CHECKING:
-    from .session_manager import Session
+    from .session_manager import Session, SessionManager
 
 
 class _HostLivenessMixin:
@@ -24,7 +24,10 @@ class _HostLivenessMixin:
 
     async def _settle_exited_host_client(self, session: Session, rec: Any, client: Any) -> None:
         """Settle an observed exit without clearing a concurrently recovered host."""
+        self = cast("SessionManager", self)
         async with session._lifecycle_lock:
+            if self._db.retained_recovery_held(session.session_id):
+                return
             def still_current() -> bool:
                 return (
                     self._sessions.get(session.session_id) is session
@@ -70,17 +73,17 @@ class _HostLivenessMixin:
         ``_reattach_one`` (which prunes on failure), so a truly-dead remote host
         is dropped when the reattach fails rather than by a bogus local pid check.
         """
-        from .session_host.osutil import pid_alive
+        from agent_remote_driver.session_host.osutil import pid_alive
         if getattr(rec, "boundary", "local") == "local":
-            return pid_alive(rec.host_pid)
+            return bool(pid_alive(rec.host_pid))
         return True
 
     def _rec_child_alive(self, rec: Any) -> bool:
         """Is the copilot child alive? Local: ``pid_alive``; remote: presumed
         (a dead remote child surfaces as the host closing on ATTACH)."""
-        from .session_host.osutil import pid_alive
+        from agent_remote_driver.session_host.osutil import pid_alive
         if getattr(rec, "boundary", "local") == "local":
-            return pid_alive(rec.child_pid)
+            return bool(pid_alive(rec.child_pid))
         return True
 
     async def settle_dead_local_session(self, session: "Session") -> bool:
@@ -108,7 +111,10 @@ class _HostLivenessMixin:
         settle), reaps the stale host record, persists STOPPED, and appends
         a ``session_state_changed`` event so subscribers stop seeing a
         stale RUNNING/IDLE (matching ``_settle_dead_child``'s own event)."""
+        self = cast("SessionManager", self)
         async with session._lifecycle_lock:
+            if self._db.retained_recovery_held(session.session_id):
+                return False
             rec = self._host_index.get(session.session_id) if self._host_index else None
             if rec is None or getattr(rec, "boundary", "local") != "local":
                 return False  # no longer a stale local record to settle
@@ -136,6 +142,7 @@ class _HostLivenessMixin:
 
     def _live_host_records(self) -> list[Any]:
         """Records whose host is (boundary-appropriately) alive."""
+        self = cast("SessionManager", self)
         if self._host_index is None:
             return []
         return [r for r in self._host_index.all() if self._rec_host_alive(r)]
@@ -163,8 +170,11 @@ class _HostLivenessMixin:
     def _prune_dead_hosts(self) -> None:
         """Drop records whose host is dead (local only -- remote is verified by
         the reattach probe, never by a local pid check)."""
+        self = cast("SessionManager", self)
         if self._host_index is None:
             return
         for r in [r for r in self._host_index.all() if not self._rec_host_alive(r)]:
+            if self._db.retained_recovery_held(r.session_id):
+                continue
             with contextlib.suppress(Exception):
                 self._host_index.remove(r.session_id)

@@ -388,3 +388,222 @@ The separate audited tracker judgment retired #3442 `NOT_PLANNED` into that
 planned receiver. #954 remains OPEN; source discussions and the existing
 implementation claim remain intact. No new issue, second primary owner,
 executor, credential operation, native proof or resource transfer is created.
+
+## Complete six-category shared-core intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete shared dispatch, session/process ownership, launch policy, credentials, recovery and parity tests with genuine thin substrate adapters | Public #4227, complete original and all three eligible refinements | routed (proposed; effective after reviewed direct Plan acceptance) | [venue-parity](../venue-parity/README.md), P4227-1..8/V4227-1..3/G4227 through existing WS1/WS-D/WS-B/WS-E | Retain #4227 until reviewed delivery, complete current ROOT/source readback and separate source-specific judgment; no new issue, executor or resource effect |
+
+The existing Bridge-owned programme is the sole canonical domain owner;
+responsibility-owned packages may compose its reusable core. The direct
+Plan/global Validation retain all six categories, actual consumers,
+genuine lifecycle/endpoint/bootstrap/boot differences and restricted denial.
+#5837's now-#2709 pre-creation contract retains BOTH races and no-create/
+rejoin-only OR prior authorization alternatives; its tracker supersession
+does not imply implementation.
+
+Actual affected-P3 reconciliation remains planned work before dependent
+implementation, preserving the existing provider-capability/idle-restart
+reservation. It is not a new native/whole-parent or generic-ACK prerequisite
+to reviewing this complete plan. All incumbent #954 and inherited acceptance,
+P3442, #3507's literal OR condition and source/resource owners remain.
+The twelve new technical rows stay unchecked. Ledger publication alone is
+neither domain acceptance, tracker retirement nor implementation completion.
+
+## Complete shared-core reviewed receipt (2026-11-17 UTC)
+
+#13126 merged the complete direct venue-parity domain amendment after
+current-head approval and required CI. Complete current ROOT and source/
+custody readback confirms all eight Plan, three local Validation and one
+actual global Validation clauses; the proposed route is now accepted
+through the existing contract. This appends its outcome without rewriting
+the proposed-route row or any earlier pass.
+
+The separate audited judgment retired #4227 `NOT_PLANNED` as redundant
+tracking. Its original and three earlier discussions remain unchanged;
+#954 stays OPEN. All twelve technical rows and actual affected-P3
+reconciliation before dependent implementation remain unfinished.
+The original reservation, inherited acceptance and every source/resource
+owner remain; no new issue, executor, implementation or operational effect.
+
+## Complete hosted-session preservation intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Earlier conditional rows and their history remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Standard hosted-session protocol behind the public orchestration layer, preserving lifecycle, credentials, policy and rollback compatibility | Public #4229, complete original and both eligible discussions; current #1266 original and all five discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-bridge-ahp-convergence](../agent-bridge-ahp-convergence/README.md), existing ROOT-R4229-P1..4/V1..4/G4229 and six-component crosswalk | Keep #4229 until reviewed complete receiving, current whole ROOT/source/custody readback and separate source-specific judgment; #1266 remains the same assigned held lane |
+
+The additional assignee-receipt veto was a campaign research recommendation,
+not a literal original requirement or independent #1266 owner condition.
+The domain amendment corrects that provenance prospectively without waiving
+actual custody. This Draft receiver retains all technical checks, inherited
+#989 and distinct #1460/#1138/#1454 ownership. No new issue, implementation
+owner, activation, credential operation, native proof or resource transfer
+is created. Ledger publication is not domain acceptance or tracker retirement.
+
+## Complete hosted-session reviewed receipt (2026-11-17 UTC)
+
+#13133 merged the complete direct AHP domain amendment after current-head
+Copilot approval and required CI. Complete current ROOT/source/custody
+readback confirms all four Plan, four Validation, one global gate and
+six-component crosswalk clauses. The proposed route is now accepted
+through the existing contract; this receipt appends rather than rewriting
+its proposed-route row or any earlier conditional pass.
+
+The separate audited judgment retired #4229 `NOT_PLANNED` as redundant
+tracking. Its original and both earlier discussions remain unchanged;
+#1266 stays OPEN under the same actual assignee. All nine direct technical
+rows remain unchecked, the AHP effort remains Draft, and actual held
+implementation/source/resource responsibilities remain unchanged.
+The campaign-origin extra receipt veto is prospectively corrected, not a
+waiver of actual owner custody. No keeper-body edit, implementation,
+activation, credential operation, native proof or resource transfer follows.
+
+## Complete attention-wait preservation intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Earlier conditional rows and their history remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Original-turn post-reattach settlement, per-wait deadline/result/continuation and represented support OR explicit unsupported-capability | Public #4681, including complete #7977/#9387 refinements and eligible discussion | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-bridge-delegation-convergence](../agent-bridge-delegation-convergence/README.md), direct AW4681-P1..3/LV1..3/global G | Keep #4681 until reviewed complete receiving, current whole ROOT/source/custody readback and separate source-specific judgment; completed Phase 1B and archived Done baseline retain credit |
+
+Terminal production, actual live-registry resolution and compatibility stay
+with their existing owners. No new ACK, implementation claimant, AHP or
+all-parent prerequisite, session operation or live wait is introduced.
+The seven direct technical rows remain unchecked. Ledger publication is
+neither domain acceptance, tracker retirement nor wait-channel completion.
+
+## Complete attention-wait reviewed receipt (2026-11-17 UTC)
+
+#13136 merged the complete direct delegation-domain amendment after
+current-head Copilot approval and required CI. Complete current ROOT and
+source/custody readback confirms all three Plan, three local Validation and
+one actual global Validation clauses. The proposed route is now accepted
+through the existing contract; this receipt appends without rewriting it.
+
+The separate audited judgment retired #4681 `NOT_PLANNED` as redundant
+tracking. Its original and earlier discussion remain unchanged. The seven
+technical rows remain unchecked, and all 92 incumbent checkbox lines,
+completed Phase 1B/archived Done credit and actual terminal/live-registry/
+compatibility/source/resource owners remain. No wait-channel repair,
+session operation, live subscription or service/native/rollout effect.
+
+## Whole fork-consent and recipe-composition preservation intake (2026-11-17 UTC)
+
+These are proposed routes, effective only after normal reviewed direct
+domain Plan acceptance. Earlier whole-OPEN/history rows remain retained.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Whole private durable fork target/account/remote consent and reuse, prior-existence/reauthorization before POST, automatic exact remote repair and persistence failure | Public #4756 original and both complete eligible discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [account-aware-operations](../account-aware-operations/README.md), separate FC4756-P1..3/LV1..3/global G | Keep #4756 until reviewed WHOLE receiving, current entire ROOT/source/custody readback and separate judgment; Draft, temporary token, #5791 separation and #5904/#1043 independence remain |
+| Whole RC1..4/RCV1..3 recursive/direct typed-engine composition, every defining-hop path field and single-producer taxonomy/reference authority | Public #4959 expanded original, inherited #5174/#5732/#4691 and all three eligible discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-dispatch-recipe-composability](../agent-dispatch-recipe-composability/README.md), existing P4959/V4959 plus T4959-P1/P2/local Validation and WHOLE4959-G | Keep #4959 until reviewed complete union, current entire ROOT/source/custody readback and separate judgment; #8300 completed claim and actual registrar/base/provider/resource owners remain |
+
+Neither route appoints an executor or runs credentials, fork/provider/script,
+queue/task/lease/native operations. All twelve new technical rows remain
+unchecked. The old taxonomy scope exclusion is prospectively reconciled to
+the already-incorporated whole source, not a reversal of historical credit.
+Ledger publication alone is neither domain acceptance nor source retirement.
+
+## Whole fork-consent reviewed receipt and composition condition (2026-11-17 UTC)
+
+#13138 merged both direct domain amendments after current-head Copilot
+approval and required CI. Complete current account/composability ROOT and
+source/custody readback confirms all whole-source Plan, local Validation
+and actual global gates. Earlier proposed routes and history remain.
+
+The separate audited judgment retired #4756 `NOT_PLANNED` as redundant
+tracking. Its original and both earlier discussions remain exact; all
+seven new technical rows stay unchecked, with all 46 incumbent checkbox
+lines and Draft/temporary-token/source/resource conditions unchanged.
+The whole consent/publish outcome remains separate from #5791.
+
+#4959 remains OPEN. Its complete RC1..4/RCV1..3 Plan union is reviewed, but
+post-merge readback exposed an older umbrella-open sentence needing
+prospective clarification before separate administrative judgment.
+The proposed clarification preserves the Active effort's full technical
+completion gate, every incumbent checkbox and actual owner; it does not
+reopen #8300's completed claim or waive native/source/resource conditions.
+No implementation, new claimant, credential/provider/script/native effect
+or source/resource transfer follows from either receipt.
+
+## Whole composition reviewed receipt and separate judgment (2026-11-17 UTC)
+
+#13139 merged the administrative-versus-technical gate clarification after
+current-head Copilot approval and required CI. Complete current ROOT,
+source and custody readback confirms all RC1..4/RCV1..3 receiving, with
+all 52 checkbox lines and the technical Plan/global Validation unchanged.
+Earlier proposed routes, continuing-OPEN statements and histories remain.
+
+The separate audited explanation retired #4959 `NOT_PLANNED` as redundant
+tracking only. Its original and all three earlier discussions remain exact;
+the existing composability effort remains Active with every unfinished
+technical gate and actual owner retained. #8300's bounded claim stays
+complete, while independent #5731/#2570/catalog/consumer obligations and
+archived recipe/provider credit remain distinct. No implementation,
+script/provider/task/lease/native operation or resource release follows.
+
+## Proposed webhook and host-teardown receiving (2026-11-17 UTC)
+
+| Source contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Complete three-route shared-webhook graceful generation replacement | Public #5319 original and complete discussion | routed (proposed; effective after reviewed direct Plan acceptance) | [versioned-singleton-manager](../versioned-singleton-manager/README.md), P5319/V5319/actual G5319 and Coordination | Explicit additional adopter, not implied existing callback coverage; readiness, routing, admission closure, drain, owned retirement and accepted-request custody without assumed redelivery; actual owners/native bounds and source-specific conditions unchanged |
+| Successful-Windows-host-teardown Fleet Hygiene caveat and bounded mitigation/upstream assessment | Public #5427 original and both complete discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [cli-default-bridging](../cli-default-bridging/README.md), P5427/V5427/actual G5427 and Coordination | Same owner/per-phase review; direct-SIGTERM-only Linux witness; supported limitation may satisfy assessment; #5432 discovery and #5930 arbitration distinct; no new reaper/every-host qualification or native run |
+
+The [complete seven-source checkpoint](../backlog-reconciliation/journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+also retains #5293's same-canonical programme, #5353's different-domain gap,
+#5330's finite conformance follow-up, #5340's earlier coverage intake and
+current-ROOT qualification gap, and #5352's historical source exclusion.
+All six new technical rows remain unchecked. No source disposition,
+implementation appointment, execution, custody transfer or hold release
+follows from ledger publication.
+
+## Webhook and host-teardown reviewed receipt (2026-11-17 UTC)
+
+#13148 merged the complete direct #5319/#5427 Plan, local Validation,
+actual global gates and continuing Coordination after current-head Copilot
+approval and required CI. Entire current receiving ROOT/source/custody
+readback and independent metadata/roster/ordered-retention checks preserve
+all 90 singleton-manager and 25 CLI-default incumbent checkbox lines.
+The six new technical rows remain unchecked.
+
+Separate audited explanations retired #5319 and #5427 `NOT_PLANNED` as
+redundant tracking, not implemented work. Originals and prior discussions
+remain exact; actual owners, native bounds, completed credit and independent
+conditions remain. No request replay, new executor, source/resource release,
+native test or rollout follows.
+
+The earlier #5340 current-ROOT research gap is now resolved: complete
+qualified readback confirms #12727's existing finite direct Plan and actual
+global Validation receiving survived #13001's historical-journal restoration.
+That missing research was not a nonmember finding or a new source hold.
+Its Draft coverage effort, three unchecked technical rows and explicit
+source-OPEN condition remain; no duplicate amendment or retirement follows.
+
+## Singleton receipt and proposed complete receiving (2026-11-17 UTC)
+
+Complete current same-canonical #5512 receiving/source/custody readback confirms
+the original and discussion in the unchanged singleton-correctness ROOT.
+The separate audited explanation retired redundant #5512 tracking
+`NOT_PLANNED`; its Draft effort, sole-owner continuation/handoff condition,
+sequential Phase 1/2 work, deferred design and all technical checks remain.
+An unassigned issue is not vacancy; no implementation takeover occurred.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Current authentication AND all delegated/relay-subscribe initial/cached waiter axes | Public #5452 complete original/discussion and #11166's already-reviewed #5410 intake | routed (proposed; effective after reviewed whole-domain acceptance) | [agent-dispatch-tasks-pane-ux-overhaul](../agent-dispatch-tasks-pane-ux-overhaul/README.md), P5452-A1/A2, existing P5452/V5452, V5452-A1/A2, expanded actual G5452 and Coordination | Four new unchecked rows; BOTH affected modules, actual constructed/sent values, withdrawn universal claim, legitimate no-token/error behavior, SAME durable waiter/exact command/shared lookup, original finite tiers and actual custodians; historical outside-auth scope explicitly reconciled |
+| INITIAL 70-site headless baseline cohort | Public #5518 original and both complete discussions | routed (proposed; SAME reviewed PR as domain clauses, not accepted yet) | [windows-launch-hardening](../windows-launch-hardening/README.md), canonical P5518/local V5518/C5518/actual G5518 and Journal | Eight new unchecked rows; suppression/removal OR specifically reviewed exception, Rule 3/Rule 4 real-context distinctions, prior credit, bounded Vault claim and GUI/POSIX protection; no every-host/durable-lifetime bar or personal ACK |
+| Existing PID/adoption/safe-stop ONE-OR-MORE plus complete saved-environment union | Public #5549 current expanded original/discussion and inherited #5686 | clarification proposed; source remains OPEN | [agent-index-engine-daemon](../agent-index-engine-daemon/README.md), existing four DE5549 rows and prospective administrative/technical Coordination/Journal clarification | Historical parent-OPEN decision must be explicitly reconciled through actual reviewed domain delivery and whole current readback before separate judgment; no implementation/rollback prerequisite, technical acceptance, owner/resource transfer or replay of #5686 |
+
+The [complete six-source checkpoint](../backlog-reconciliation/journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+retains #5479's unfinished third-party request and literal maintainer OR,
+and #5555's whole four-pivot/venue outcome beyond Worktrees-local receiving.
+Neither is closed or reassigned. All twelve new product/coordination rows
+remain unchecked; ledger publication alone is not receiving acceptance,
+technical completion, native authority or a source-specific disposition.

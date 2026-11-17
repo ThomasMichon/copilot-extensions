@@ -1,0 +1,543 @@
+"""Public Textual Line-API timeline with bounded strips and explicit demand messages."""
+
+from __future__ import annotations
+
+from collections import OrderedDict
+from dataclasses import replace
+from collections.abc import Callable
+from datetime import datetime
+from itertools import islice
+
+from rich.segment import Segment
+from rich.style import Style
+from rich.text import Text
+from textual import events
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.geometry import Size
+from textual.message import Message
+from textual.scroll_view import ScrollView
+from textual.strip import Strip
+from textual.widgets import Button, Collapsible, Select, Static
+
+from .companion_timeline_contract import (
+    Availability, EventRef, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, OVERSCAN_LINES, Provider,
+    SourcePosition, SourceToken, TimelineGap, TimelineSnapshot, ViewportAnchor, aware_time,
+)
+from .companion_timeline_layout import OUTPUT_GROUP_LINE, TimelineLayout, display_text, wrap_lines
+from .companion_timeline_model import TimelineWindow, WindowResult
+
+
+class SubwayTimeline(ScrollView, can_focus=True):
+    DEFAULT_CSS = """
+    SubwayTimeline { height: 1fr; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+    """
+    BINDINGS = [
+        ("end", "follow_live", "Follow live"),
+        ("home", "browse_oldest", "Oldest loaded"),
+        ("enter", "expand_selected", "Details"),
+    ]
+
+    class Changed(Message):
+        def __init__(self, result: WindowResult | None = None) -> None:
+            super().__init__()
+            self.result = result
+
+    class HistoryRequested(Message):
+        def __init__(self, token: SourceToken, before: SourcePosition) -> None:
+            super().__init__()
+            self.token, self.before = token, before
+
+    class DemandChanged(Message):
+        def __init__(self, visible: bool) -> None:
+            super().__init__()
+            self.visible = visible
+
+    class ReconciliationRequested(Message):
+        def __init__(self, token: SourceToken, position: SourcePosition | None) -> None:
+            super().__init__()
+            self.token, self.position = token, position
+
+    def __init__(
+        self, window: TimelineWindow | None = None, *, name: str | None = None,
+        id: str | None = None, classes: str | None = None, disabled: bool = False,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        self.window = window if window is not None else TimelineWindow()
+        self.layout_index = TimelineLayout()
+        self.selected: EventRef | None = None
+        self._selected_group = False
+        self.demand_visible = True
+        self._clock: datetime | None = None
+        self._programmatic = False
+        self._padding = 0
+        self._layout_generation = 0
+        self._anchor_character_offset = 0
+        self._cache: OrderedDict[tuple[int, int, int], tuple[Strip, int]] = OrderedDict()
+        self.cache_bytes = 0
+
+    def on_mount(self) -> None:
+        self._reflow(None)
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._reflow(self.capture_anchor())
+
+    def notify_style_update(self) -> None:
+        super().notify_style_update()
+        self._clear_cache()
+
+    def _clear_cache(self) -> None:
+        self._cache.clear()
+        self.cache_bytes = 0
+
+    def capture_anchor(self) -> ViewportAnchor | None:
+        for screen_row in range(max(0, self.size.height)):
+            row = self.layout_index.row(int(self.scroll_offset.y) + screen_row - self._padding, self.window)
+            if row is not None:
+                self._anchor_character_offset = row.character_offset
+                return ViewportAnchor(row.event, row.logical_line, screen_row)
+        return None
+
+    def _select_event(self, ref: EventRef | None, *, group: bool = False) -> None:
+        if ref is not None:
+            group |= self.layout_index.is_group(ref)
+            ref = self.layout_index.visible_ref(ref, group=group)
+        if self.selected != ref or self._selected_group != group:
+            self.selected = ref
+            self._selected_group = group
+            self._clear_cache()
+            self.refresh()
+
+    def _select_visible_event(self) -> None:
+        if self.selected is not None and self.layout_index.is_visible(
+            self.selected, int(self.scroll_offset.y) - self._padding, self.size.height,
+            group=self._selected_group,
+        ):
+            return
+        self._select_anchor(self.capture_anchor())
+
+    def _select_anchor(self, anchor: ViewportAnchor | None) -> None:
+        self._select_event(
+            anchor.event if anchor is not None else None,
+            group=anchor is not None and anchor.logical_line == OUTPUT_GROUP_LINE,
+        )
+
+    def _reflow(self, anchor: ViewportAnchor | None) -> None:
+        refs = tuple(ref for ref in (anchor.event if anchor else None, self.selected) if ref is not None)
+        self.layout_index.rebuild(
+            self.window, self.scrollable_content_region.width or 1, now=self._clock, anchors=refs,
+        )
+        self._select_event(self.selected, group=(
+            self._selected_group and self.selected is not None and self.layout_index.has_group(self.selected)
+        ))
+        anchor_row = None
+        screen_row = 0
+        if anchor is not None and not self.window.follow_live:
+            anchor_row = self.layout_index.anchor_row(
+                anchor, character_offset=self._anchor_character_offset,
+            )
+            screen_row = min(anchor.screen_row, max(0, self.size.height - 1))
+        self._padding = max(0, self.size.height - self.layout_index.height)
+        if anchor_row is not None:
+            self._padding = max(0, screen_row - anchor_row)
+        self._layout_generation += 1
+        self._clear_cache()
+        self._programmatic = True
+        try:
+            self.virtual_size = Size(
+                max(1, self.scrollable_content_region.width), max(self.size.height, self.layout_index.height + self._padding),
+            )
+            if self.window.follow_live:
+                self.scroll_end(animate=False, immediate=True, x_axis=False)
+            elif anchor_row is not None:
+                self.scroll_to(
+                    y=max(0, anchor_row + self._padding - screen_row), animate=False, immediate=True,
+                )
+            else:
+                self.scroll_to(
+                    y=min(self.scroll_offset.y, self.max_scroll_y), animate=False, immediate=True,
+                )
+        finally:
+            self._programmatic = False
+        if self.window.follow_live:
+            self._select_event(self.window.events[-1].ref if self.window.events else None)
+        else:
+            self._select_visible_event()
+        self.refresh()
+
+    def _change(self, apply: Callable[[], WindowResult]) -> WindowResult:
+        anchor = self.capture_anchor()
+        self.window.pin_viewport(
+            anchor.event if anchor is not None and not self.window.follow_live else None,
+        )
+        result = apply()
+        self._reflow(anchor)
+        self._post_timeline_message(self.Changed(result))
+        return result
+
+    def _post_timeline_message(self, message: Message) -> bool:
+        # Parent delegates may be the active message pump when constructing events.
+        return self.post_message(message.set_sender(self))
+
+    def bind_source(self, token: SourceToken) -> WindowResult:
+        return self._change(lambda: self.window.bind(token))
+
+    def apply_snapshot(self, snapshot: TimelineSnapshot) -> WindowResult:
+        return self._change(lambda: self.window.apply_snapshot(snapshot))
+
+    def apply_delta(self, delta: LiveDelta) -> WindowResult:
+        return self._change(lambda: self.window.apply_delta(delta))
+
+    def recover_snapshot(self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...]) -> WindowResult:
+        return self._change(lambda: self.window.recover_snapshot(snapshot, replay))
+
+    def prepend_page(self, page: HistoryPage) -> WindowResult:
+        return self._change(lambda: self.window.prepend_page(page))
+
+    def apply_gap(self, gap: TimelineGap) -> WindowResult:
+        return self._change(lambda: self.window.apply_gap(gap))
+
+    def source_error(self, token: SourceToken, message: str) -> WindowResult:
+        return self._change(lambda: self.window.source_error(token, message))
+
+    def pause_source(self, token: SourceToken) -> WindowResult:
+        return self._change(lambda: self.window.pause_source(token))
+
+    def set_cached_time(self, now: datetime) -> None:
+        """Update labels from a caller-owned cached clock, never from source polling."""
+        aware_time(now, "cached timeline time")
+        self._clock = now
+        self._reflow(self.capture_anchor())
+
+    def set_demand_visible(self, visible: bool) -> None:
+        self.demand_visible = visible
+        if not visible:
+            self.window.sources = {
+                key: replace(state, requested_before=None) for key, state in self.window.sources.items()
+            }
+        self._post_timeline_message(self.DemandChanged(visible))
+
+    def on_unmount(self) -> None:
+        self.set_demand_visible(False)
+        self._clear_cache()
+
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        super().watch_scroll_y(old_value, new_value)
+        # A layout clamp from an obsolete range is not user browsing.
+        if not self._programmatic and old_value != new_value and old_value <= self.max_scroll_y:
+            self.window.set_follow_live(False)
+            anchor = self.capture_anchor()
+            self._select_anchor(anchor)
+            self._post_timeline_message(self.Changed())
+            if new_value <= OVERSCAN_LINES and self.demand_visible:
+                self.action_request_history()
+
+    def action_follow_live(self) -> None:
+        self.window.set_follow_live(True)
+        self._reflow(None)
+        self._post_timeline_message(self.Changed())
+
+    def _begin_upward_browse(self) -> None:
+        self.window.set_follow_live(False)
+        anchor = self.capture_anchor()
+        self._select_anchor(anchor)
+        if self.scroll_offset.y <= OVERSCAN_LINES:
+            self.action_request_history()
+        self._post_timeline_message(self.Changed())
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        if not event.ctrl and not event.shift:
+            self._begin_upward_browse()
+
+    def action_page_up(self) -> None:
+        self._begin_upward_browse()
+        if self.allow_vertical_scroll:
+            super().action_page_up()
+
+    def action_scroll_up(self) -> None:
+        self._begin_upward_browse()
+        if self.allow_vertical_scroll:
+            super().action_scroll_up()
+
+    def action_browse_oldest(self) -> None:
+        self.window.set_follow_live(False)
+        self.scroll_to(y=0, animate=False, immediate=True)
+        anchor = self.capture_anchor()
+        self._select_anchor(anchor)
+        self.action_request_history()
+        self._post_timeline_message(self.Changed())
+
+    def action_request_history(self) -> None:
+        if not self.demand_visible:
+            return
+        for state in self.window.sources.values():
+            if (
+                state.availability is Availability.OBSERVED and state.before is not None
+                and state.requested_before is None
+            ):
+                result = self.window.request_history(state.token, state.before)
+                if result.applied:
+                    self._post_timeline_message(self.HistoryRequested(state.token, state.before))
+                else:
+                    self._post_timeline_message(self.Changed(result))
+                return
+
+    def action_reconcile_source(self) -> None:
+        for key in sorted(self.window.reconciliation_required):
+            state = self.window.sources[key]
+            self._post_timeline_message(self.ReconciliationRequested(state.token, state.position))
+
+    def action_expand_selected(self) -> None:
+        self._select_visible_event()
+        if self.selected is not None:
+            output = self.layout_index.toggle_output(self.selected) if self._selected_group else None
+            if output is not None:
+                self.window.last_result = output
+                self._reflow(self.capture_anchor())
+                self._post_timeline_message(self.Changed(output))
+                return
+            self._change(lambda: self.window.toggle_expansion(self.selected))
+
+    def on_click(self, event: events.Click) -> None:
+        row = self.layout_index.row(
+            int(self.scroll_offset.y) + event.offset.y - self._padding, self.window,
+        )
+        if row is not None:
+            self.window.set_follow_live(False)
+            self._select_event(row.event, group=row.logical_line == OUTPUT_GROUP_LINE)
+            if row.heading and event.offset.x < self.layout_index.prefix_width:
+                self.action_expand_selected()
+
+    def _store(self, key: tuple[int, int, int], strip: Strip) -> Strip:
+        size = 64 + sum(64 + len(segment.text.encode("utf-8")) for segment in strip)
+        if size <= MAX_STRIP_CACHE_BYTES:
+            self._cache[key] = strip, size
+            self.cache_bytes += size
+            while self.cache_bytes > MAX_STRIP_CACHE_BYTES or len(self._cache) > 2048:
+                _old_key, (_old_strip, old_size) = self._cache.popitem(last=False)
+                self.cache_bytes -= old_size
+        return strip
+
+    def render_line(self, y: int) -> Strip:
+        index = int(self.scroll_offset.y) + y
+        key = self._layout_generation, index, self.scrollable_content_region.width
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            return cached[0]
+        width = max(1, self.scrollable_content_region.width)
+        row = self.layout_index.row(index - self._padding, self.window)
+        if row is None:
+            if not self.window.events and y == max(0, self.size.height - 1):
+                observed = bool(self.window.sources) and all(
+                    state.availability is Availability.OBSERVED for state in self.window.sources.values()
+                )
+                label = "No events in the observed window." if observed else "History unknown or unavailable."
+                strip = Strip([Segment(label, self.rich_style)]).crop_extend(0, width, self.rich_style)
+                return self._store(key, strip)
+            return Strip.blank(width, self.rich_style)
+        prefix = self.layout_index.prefix(row, self.window)
+        selected = row.event == self.selected and (row.logical_line == OUTPUT_GROUP_LINE) == self._selected_group
+        style = self.rich_style + Style(reverse=True) if selected else self.rich_style
+        strip = Strip([
+            Segment(prefix, style), Segment(row.text, style),
+        ]).crop_extend(0, width, self.rich_style)
+        return self._store(key, strip)
+
+
+class CompanionTimelinePanel(Vertical):
+    """Sticky source context and explicit controls around the virtual canvas."""
+
+    DEFAULT_CSS = """
+    CompanionTimelinePanel { height: 1fr; }
+    CompanionTimelinePanel .timeline-context { height: auto; max-height: 2; text-style: bold; }
+    CompanionTimelinePanel .timeline-health { height: auto; max-height: 2; color: #b2b2b2; }
+    CompanionTimelinePanel .timeline-state { height: auto; }
+    CompanionTimelinePanel .timeline-creation { height: auto; max-height: 8; }
+    CompanionTimelinePanel .timeline-evidence {
+        height: auto; max-height: 50%; overflow-y: auto;
+        margin: 0; padding: 0; border: none;
+    }
+    CompanionTimelinePanel .timeline-evidence Contents { padding: 0 1; }
+    CompanionTimelinePanel .timeline-buttons { height: 1; }
+    CompanionTimelinePanel .timeline-buttons Button {
+        height: 1; min-width: 6; width: auto; border: none; padding: 0 1;
+    }
+    CompanionTimelinePanel .timeline-unread { width: 1fr; text-align: right; }
+    CompanionTimelinePanel #timeline-current-compact { height: auto; max-height: 2; }
+    CompanionTimelinePanel #timeline-tool-statistics { display: none; height: auto; }
+    """
+
+    def __init__(
+        self, window: TimelineWindow | None = None, *, name: str | None = None,
+        id: str | None = None, classes: str | None = None, source_controls: bool = False,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes)
+        self.window = window if window is not None else TimelineWindow()
+        self.creation_expanded = False
+        self.source_controls = source_controls
+        self._provider_notices: dict[Provider, tuple[str, bool]] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Static(classes="timeline-context")
+        yield Static(classes="timeline-health")
+        if self.source_controls:
+            yield Static(id="timeline-current-compact")
+        with Collapsible(title="Evidence", collapsed=True, classes="timeline-evidence"):
+            yield Static(classes="timeline-effort")
+            yield Static(classes="timeline-state")
+            yield Static(classes="timeline-creation")
+            if self.source_controls:
+                yield Static("Rich Agenda: awaiting selected owner publication", id="timeline-agenda-status")
+                yield Static("Bridge: awaiting selected owner", id="timeline-bridge-status")
+                yield Static(id="timeline-current-input")
+                yield Static(id="timeline-tool-statistics")
+                yield Select([("Bridge feed: membership (discover delegates)", "membership")],
+                             value="membership", allow_blank=False, id="bridge-feed")
+        yield SubwayTimeline(self.window)
+        with Horizontal(classes="timeline-buttons"):
+            yield Button("Follow live", name="follow", classes="timeline-follow")
+            yield Button(
+                "Older", name="older", classes="timeline-older", disabled=True,
+                tooltip="Load one bounded history page. Repeat to continue; hide the timeline to cancel.",
+            )
+            yield Button("Creation", name="creation")
+            yield Button("Reconcile source", name="reconcile", classes="timeline-reconcile", disabled=True)
+            yield Static(classes="timeline-unread")
+
+    def on_mount(self) -> None:
+        self._update_context()
+
+    def bind_source(self, token: SourceToken) -> WindowResult:
+        return self.query_one(SubwayTimeline).bind_source(token)
+
+    def capture_viewport(self) -> tuple[ViewportAnchor | None, int]:
+        timeline = self.query_one(SubwayTimeline)
+        anchor = timeline.capture_anchor()
+        return anchor, timeline._anchor_character_offset
+
+    def restore_viewport(self, viewport: tuple[ViewportAnchor | None, int]) -> None:
+        timeline = self.query_one(SubwayTimeline)
+        anchor, timeline._anchor_character_offset = viewport
+        timeline._reflow(anchor)
+
+    def replace_window(
+        self, window: TimelineWindow, *, viewport: tuple[ViewportAnchor | None, int] | None = None,
+    ) -> None:
+        """Install an admitted window, retaining a browsing anchor when still present."""
+        timeline = self.query_one(SubwayTimeline)
+        anchor, offset = self.capture_viewport() if viewport is None else viewport
+        selected = timeline.selected
+        self.window = window
+        if not window.sources:
+            self._provider_notices.clear()
+        timeline.window = window
+        timeline._anchor_character_offset = offset
+        timeline.selected = selected if selected is not None and window.event(selected) is not None else None
+        timeline._reflow(anchor)
+        self._update_context()
+
+    def apply_snapshot(self, snapshot: TimelineSnapshot) -> WindowResult:
+        return self.query_one(SubwayTimeline).apply_snapshot(snapshot)
+
+    def apply_delta(self, delta: LiveDelta) -> WindowResult:
+        return self.query_one(SubwayTimeline).apply_delta(delta)
+
+    def recover_snapshot(self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...]) -> WindowResult:
+        return self.query_one(SubwayTimeline).recover_snapshot(snapshot, replay)
+
+    def prepend_page(self, page: HistoryPage) -> WindowResult:
+        return self.query_one(SubwayTimeline).prepend_page(page)
+
+    def apply_gap(self, gap: TimelineGap) -> WindowResult:
+        return self.query_one(SubwayTimeline).apply_gap(gap)
+
+    def source_error(self, token: SourceToken, message: str) -> WindowResult:
+        return self.query_one(SubwayTimeline).source_error(token, message)
+
+    def pause_source(self, token: SourceToken) -> WindowResult:
+        return self.query_one(SubwayTimeline).pause_source(token)
+
+    def set_cached_time(self, now: datetime) -> None:
+        self.query_one(SubwayTimeline).set_cached_time(now)
+
+    def set_demand_visible(self, visible: bool) -> None:
+        self.query_one(SubwayTimeline).set_demand_visible(visible)
+
+    def provider_notice(self, provider: Provider, message: str | None, *, failed: bool = False) -> None:
+        """Retain typed preparation failures even before a source token can bind."""
+        if message is None:
+            self._provider_notices.pop(provider, None)
+        elif failed or not self._provider_notices.get(provider, ("", False))[1]:
+            self._provider_notices[provider] = (message[:2048], failed)
+        self._update_context()
+
+    def _update_context(self) -> None:
+        purpose, effort, creation = self.window.context()
+        heading = Text("Purpose: " + display_text((purpose or "unknown")[:240]))
+        self.query_one(".timeline-context", Static).update(heading)
+        self.query_one(".timeline-effort", Static).update(Text("Effort: " + display_text(effort or "unknown")))
+        status = "; ".join(
+            f"{key[:40]}: {state.availability.value}/{state.completeness.value}"
+            for key, state in self.window.sources.items()
+        ) or "No source bound; history unknown."
+        if not self.window.last_result.applied:
+            status += f"\n{self.window.last_result.code.value}: {self.window.last_result.reason}"
+        if self.window.evicted:
+            status += f"; {self.window.evicted} display records evicted; source history not erased"
+        for gap in self.window.source_gaps.values():
+            status += f"\nHistory gap: {gap.reason}; floor {gap.floor.cursor}; {gap.reconcile}: {gap.details}"
+        health = ["History gap"] if self.window.source_gaps else []
+        if not self.window.last_result.applied:
+            health.append(self.window.last_result.code.value.replace("-", " "))
+        providers = tuple(Provider) if self.source_controls else tuple(dict.fromkeys(
+            state.token.identity.provider for state in self.window.sources.values()
+        ))
+        for provider in providers:
+            states = [state for state in self.window.sources.values() if state.token.identity.provider is provider]
+            notice = self._provider_notices.get(provider)
+            labels = list(dict.fromkeys(
+                "retained" if state.availability is Availability.UNKNOWN and state.snapshot is not None
+                else state.availability.value.replace("-", " ")
+                for state in states
+            ))
+            label = ("error" if notice[1] else "loading") if notice else " / ".join(labels) or "unknown"
+            health.append(f"{provider.value.title()}: {label}")
+        if any(state.completeness.value != "complete" for state in self.window.sources.values()):
+            health.append("history partial")
+        for provider, (message, failed) in self._provider_notices.items():
+            status += f"\n{provider.value} {'unavailable' if failed else 'preparing'}: {message}"
+            if provider not in providers:
+                health.append(f"{provider.value.title()}: {'error' if failed else 'unknown'}")
+        self.query_one(".timeline-health", Static).update(Text(" | ".join(health) or "History unknown"))
+        self.query_one(".timeline-state", Static).update(Text(display_text(status)))
+        context = self.query_one(".timeline-creation", Static)
+        context.display = self.creation_expanded
+        context.update(Text("\n".join(
+            line for line, _logical in islice(wrap_lines(creation or "Creation context unknown.", max(1, self.size.width)), 8)
+        )))
+        self.query_one(".timeline-unread", Static).update(Text(f"{len(self.window.unread)} unread"))
+        self.query_one(".timeline-older", Button).disabled = not any(
+            state.availability is Availability.OBSERVED and state.before is not None
+            for state in self.window.sources.values()
+        )
+        reconcile = self.query_one(".timeline-reconcile", Button)
+        reconcile.display = bool(self.window.reconciliation_required)
+        reconcile.disabled = not self.window.reconciliation_required
+
+    def on_subway_timeline_changed(self, message: SubwayTimeline.Changed) -> None:
+        self._update_context()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        timeline = self.query_one(SubwayTimeline)
+        if event.button.name == "follow":
+            timeline.action_follow_live()
+        elif event.button.name == "older":
+            timeline.action_request_history()
+        elif event.button.name == "creation":
+            self.creation_expanded = not self.creation_expanded
+            if self.creation_expanded:
+                self.query_one(Collapsible).collapsed = False
+            self._update_context()
+        elif event.button.name == "reconcile":
+            timeline.action_reconcile_source()

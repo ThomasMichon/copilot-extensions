@@ -66,6 +66,13 @@ lean `install.{ps1,sh} provision` path and then dispatches. For normal ongoing
 updates, use `agent-worktrees update`; it refreshes payloads and reconciles
 runtimes rather than requiring hand-run `copilot plugin update` plus init.
 
+For an isolated native plugin installation, carry its owning `COPILOT_HOME`
+when invoking its payload catalog and commands. Source and context resolution
+use an explicit Copilot-home argument first, then the inherited native
+`COPILOT_HOME`, then the account's default `.copilot` directory. Missing or
+conflicting source declarations remain errors; do not copy provenance records
+or move the payload to make it look like a different installation.
+
 On Windows, stamping and first-use provisioning respect the selected update
 authority. If the update driver is busy, first use releases its provisioning lock
 and retries for up to 120 seconds; an unsettled queue requires recovery instead.

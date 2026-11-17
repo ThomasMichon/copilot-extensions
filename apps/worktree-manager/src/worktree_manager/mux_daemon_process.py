@@ -1,0 +1,135 @@
+"""Process- and lease-oriented helpers for the resident mux-daemon."""
+
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Any, BinaryIO, Callable
+
+import agent_procutil
+from agent_procutil import direct_python, spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+from work_coalescing_singleton import client as wcs_client
+
+from .mux_file_lock import _try_lock_file_once, _unlock_file
+from .self_install import default_root
+
+python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
+
+_DAEMON_EXCLUDED_ENV_KEYS = {
+    "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+    "UPDATE_DRIVER_WITNESS", "AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER",
+    "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON",
+}
+
+
+def selected_root(root: Path | None = None) -> Path:
+    """Anchor caller-relative runtime paths without following their indirection."""
+    return Path(os.path.abspath(root if root is not None else default_root()))
+
+
+def daemon_is_live(
+    data: dict[str, Any] | None, *,
+    endpoint_from_rendezvous: Callable[[dict[str, Any] | None], tuple[str, int, str] | None],
+) -> bool:
+    """Prove liveness by actually reaching the endpoint, not just trusting
+    the lock file's presence."""
+    endpoint = endpoint_from_rendezvous(data)
+    if endpoint is None:
+        return False
+    host, port, token = endpoint
+    client_id = wcs_client.new_client_id()
+    try:
+        wcs_client.subscribe(host, port, token, client_id, timeout=2.0)
+    except wcs_client.DaemonUnavailable:
+        return False
+    finally:
+        wcs_client.release(host, port, token, client_id, timeout=2.0)
+    return True
+
+
+def spawn_lock_path(root: Path) -> Path:
+    return root / "mux-daemon.spawn.lock"
+
+
+def acquire_daemon_lease(root: Path) -> BinaryIO | None:
+    """Attempt the daemon's single-instance lease (non-blocking)."""
+    root.mkdir(parents=True, exist_ok=True)
+    fh = open(spawn_lock_path(root), "a+b")
+    if _try_lock_file_once(fh):
+        return fh
+    fh.close()
+    return None
+
+
+def release_daemon_lease(fh: BinaryIO) -> None:
+    try:
+        _unlock_file(fh)
+    except OSError:
+        pass
+    fh.close()
+
+
+def scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in env.items()
+        if key.upper() not in _DAEMON_EXCLUDED_ENV_KEYS
+    }
+
+
+def direct_daemon_python(executable: str) -> tuple[str, dict[str, str]]:
+    """Resolve direct console Python while preserving a Windows venv's imports.
+
+    A venv redirector's PID is not the daemon PID. Do not silently retain
+    that launch shape when the shared helper cannot select the real base
+    interpreter: routing and generation ownership require the returned PID
+    to belong to the runtime itself. Recurring mux children need a console
+    root under windowless_daemon_kwargs, not a GUI-subsystem interpreter.
+    """
+    return direct_python(executable)
+
+
+def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:
+    """Spawn a survivable daemon; log expected launch failures and return False.
+
+    The child runs from ``cwd`` (the stable mux root) or, when that is not an
+    existing directory, the user's home -- never the caller's working
+    directory, which a long-lived process would otherwise hold open on
+    Windows (blocking removal of a worktree or payload directory)."""
+    try:
+        python, extra_env = direct_daemon_python(argv[0])
+        env = scrub_session_credentials(dict(os.environ))
+        env.update(extra_env)
+        run_dir = (
+            os.fspath(cwd) if cwd is not None and os.path.isdir(cwd)
+            else os.path.expanduser("~")
+        )
+        run_dir = os.fspath(selected_root(Path(run_dir)))
+        spawn_daemon(
+            [python, *argv[1:]], cwd=run_dir, env=env,
+            log_path=Path(run_dir) / "mux-daemon.log", console_children=True,
+            instance=DaemonInstanceSpec(
+                "worktree-manager-mux", Path(run_dir), Path(__file__).resolve(),
+            ),
+        )
+        return True
+    except (OSError, RuntimeError, ValueError) as exc:
+        logging.getLogger(__name__).error("Mux daemon launch failed: %s", exc)
+        return False
+
+
+def detached_child_argv(root: Path | None = None) -> list[str]:
+    from update_driver import runtime_command
+
+    command, _environment = runtime_command("worktree_manager", ("mux-daemon", "run"))
+    argv = [
+        sys.executable,
+        *([] if "-B" in command[1:] else python_cache_args(selected_root(root))),
+        *command[1:],
+    ]
+    if root is not None:
+        argv.append(f"--root={root}")
+    return argv

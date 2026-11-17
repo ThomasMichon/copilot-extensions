@@ -29,11 +29,11 @@ def _bench_which_executable(iterations: int) -> tuple[float, float]:
         shutil.which("git")
     uncached = time.perf_counter() - start
 
-    resolver._GIT_WHICH_CACHE.clear()
+    from plugin_resolve import git as discovery
+    discovery._cache.clear()
     start = time.perf_counter()
     for _ in range(iterations):
-        if "git" not in resolver._GIT_WHICH_CACHE:
-            resolver._GIT_WHICH_CACHE["git"] = shutil.which("git")
+        resolver._git_executable()
     cached = time.perf_counter() - start
     return uncached, cached
 

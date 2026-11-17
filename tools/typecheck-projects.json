@@ -728,6 +728,15 @@
       "requirements": "tools/typecheck-runner-requirements.txt"
     },
     {
+      "name": "worktree-manager-application",
+      "include": [
+        "apps/worktree-manager"
+      ],
+      "exclude": [],
+      "level": "pending",
+      "requirements": "tools/typecheck-runner-requirements.txt"
+    },
+    {
       "name": "worktree-manager",
       "include": [
         "worktree-manager"

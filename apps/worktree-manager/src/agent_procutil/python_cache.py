@@ -1,0 +1,144 @@
+"""External bytecode namespaces derived from existing installed build evidence."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+import uuid
+from functools import lru_cache
+from pathlib import Path
+
+POLICY_VERSION = 2
+
+
+@lru_cache(maxsize=1)
+def _store():
+    from . import python_cache_store
+
+    return python_cache_store
+
+
+def _read_regular(path: Path) -> bytes:
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+        raise ValueError("cache identity requires ordinary installed evidence")
+    data = path.read_bytes()
+    after = path.lstat()
+    if (
+        before.st_ino, before.st_dev, before.st_size, before.st_mtime_ns, before.st_ctime_ns
+    ) != (
+        after.st_ino, after.st_dev, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+    ):
+        raise ValueError("installed cache identity changed while reading")
+    return data
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate completion field")
+        result[key] = value
+    return result
+
+
+def _installed_identity(target: Path) -> str | None:
+    marker = target / ".install-complete.json"
+    try:
+        raw = _read_regular(marker)
+        completion = json.loads(raw, object_pairs_hook=_unique_object)
+        if (
+            not isinstance(completion, dict)
+            or set(completion) != {"version", "completed_at", "pid", "payload_hash"}
+            or completion["version"] != target.name
+            or target.name == "dev"
+            or not isinstance(completion["completed_at"], str)
+            or not completion["completed_at"]
+            or type(completion["pid"]) is not int
+            or completion["pid"] < 0
+            or not isinstance(completion["payload_hash"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", completion["payload_hash"]) is None
+        ):
+            return None
+        environment = target / ".venv" if os.path.lexists(target / ".venv") else target
+        environment_info = environment.lstat()
+        if (
+            not stat.S_ISDIR(environment_info.st_mode)
+            or getattr(environment_info, "st_file_attributes", 0) & 0x400
+        ):
+            return None
+        locations = [environment / "Lib" / "site-packages"]
+        locations += sorted((environment / "lib").glob("python*/site-packages"))
+        records = sorted(path for location in locations for path in location.glob("*.dist-info/RECORD"))
+        if not records:
+            return None
+        digest = hashlib.sha256(raw)
+        for record in records:
+            if any(
+                path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400
+                for path in (target, record.parent, record.parent.parent)
+            ):
+                return None
+            recorded = _read_regular(record)
+            if re.search(rb",sha256=[A-Za-z0-9_-]{43},[0-9]+\r?(?:\n|\Z)", recorded) is None:
+                return None
+            digest.update(str(record.relative_to(target)).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(recorded)
+            digest.update(b"\0")
+        if _read_regular(marker) != raw:
+            return None
+        return digest.hexdigest()
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def cache_arguments(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Keep cache writes external; reuse only a target's recorded installation."""
+    owned_root = os.fspath(root)
+    if not os.path.isabs(owned_root):
+        raise ValueError("Python cache requires an absolute owned runtime root")
+    target = Path(sys.prefix if runtime is None else runtime)
+    if not target.is_absolute():
+        raise ValueError("Python cache requires an absolute target runtime")
+    if target.parent.name in {"Scripts", "bin"}:
+        target = target.parent.parent
+    if target.name == ".venv" and target.parent.parent.name == "versions":
+        target = target.parent
+    identity = _installed_identity(target)
+    scope = "installed-" + identity if identity is not None else "unsealed-" + uuid.uuid4().hex
+    prefix = os.path.normpath(os.path.join(owned_root, "cache", "python", scope))
+    if os.name == "nt" and not prefix.startswith("\\\\?\\"):
+        prefix = "\\\\?\\UNC\\" + prefix[2:] if prefix.startswith("\\\\") else "\\\\?\\" + prefix
+    return ["-X", "pycache_prefix=" + prefix]
+
+
+def policy_arguments(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Use private OS-cache bytecode for completed slots, otherwise disable writes."""
+    if not os.path.isabs(root):
+        raise ValueError("Python cache requires an absolute owned runtime root")
+    target = Path(sys.prefix if runtime is None else runtime)
+    if not target.is_absolute():
+        raise ValueError("Python cache requires an absolute target runtime")
+    if target.parent.name in {"Scripts", "bin"}:
+        target = target.parent.parent
+    if target.name == ".venv" and target.parent.parent.name == "versions":
+        target = target.parent
+    identity = _installed_identity(target)
+    if identity is None or target.parent.name != "versions":
+        return ["-B"]
+    try:
+        store = _store()
+        if store.normalized(target.parent.parent) != store.normalized(root):
+            return ["-B"]
+        prefix = store.prepare(Path(root), target, identity, read_record=_read_regular)
+    except (OSError, ValueError, ImportError, RuntimeError):
+        return ["-B"]
+    return ["-X", "pycache_prefix=" + str(prefix)]

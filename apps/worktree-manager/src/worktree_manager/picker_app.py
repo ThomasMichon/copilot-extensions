@@ -1,0 +1,825 @@
+"""The Worktree Manager Picker — a Textual UI over the engine-client boundary.
+
+This is the interactive front-end the bare-invocation seam hands off to (the
+out-of-plugin Picker the plugin's ``picker_tui`` is being retired in favour of).
+It reaches worktree data **only** through :mod:`engine_client` (which shells out
+to ``agent-worktrees --json``); it owns no worktree logic or state, and imports
+nothing from the plugin — the process boundary that keeps the coupling one-way.
+
+The UI takes an **injected source** (``Callable[[], list[Worktree]]``) so it can
+render live engine data, a fake/demo engine (Example Labs), or a fixture in a
+test, all identically. A headless :func:`capture_svg` renders a screenshot with
+no terminal for demos and golden checks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+
+from textual.app import App, ComposeResult
+from textual.events import Key
+from textual.widgets import Button, DataTable, Footer, Header, Static, Tab, Tabs
+
+from . import demo, demo_engine
+from . import engine_client as ec
+from .engine_client import EngineError, Worktree
+from .pivot_runtime import PivotLoadError, PivotPayload, load_pivot
+from .plugin_contracts import PivotContract, PluginContribution, parse_manifest
+from .picker_button import PickerButton
+
+Source = Callable[[], "list[Worktree]"]
+ContextSource = Callable[[], "Mapping[str, object]"]
+PivotLoader = Callable[[PivotContract, Mapping[str, object]], PivotPayload]
+
+_WORKTREES = "worktrees"
+
+
+def _worktrees_contract() -> PivotContract:
+    """The current internal Worktrees contribution during payload migration."""
+    contribution = parse_manifest(
+        {
+            "schema_version": 1,
+            "label": "Worktrees",
+            "entity": "worktree",
+            "home": True,
+            "after": "Worktrees",
+            "list": [
+                "agent-worktrees",
+                "--project",
+                "{project}",
+                "list",
+                "--json",
+                "--classify",
+            ],
+            "items_field": "worktrees",
+            "entry": {
+                "id": "id",
+                "title": "title",
+            },
+            "columns": [
+                {"key": "id4", "header": "id"},
+                {"key": "machine", "header": "machine"},
+                {"key": "repo", "header": "repo"},
+                {"key": "state_display", "header": "state"},
+                {"key": "sync_tag", "header": "±sync"},
+                {"key": "title", "header": "title"},
+            ],
+            "ready_status": "{project} · {count} worktree(s)",
+            "actions": [
+                {
+                    "key": "resume",
+                    "label": "Launch/Resume",
+                    "kind": "internal",
+                    "verb": "resume",
+                    "shortcut": "l",
+                },
+            ],
+            "view_actions": [
+                {
+                    "key": "new",
+                    "label": "New worktree",
+                    "kind": "internal",
+                    "verb": "new",
+                    "shortcut": "n",
+                },
+            ],
+            "empty_hint": "No worktrees for this project.",
+        },
+        name=_WORKTREES,
+        marketplace="worktree-manager",
+        plugin="agent-worktrees",
+        source_path="internal:worktrees",
+    )
+    assert contribution.pivot is not None
+    return contribution.pivot
+
+
+_WORKTREES_CONTRACT = _worktrees_contract()
+
+
+@dataclass(frozen=True)
+class _PivotDescriptor:
+    key: str
+    label: str
+    pivot: PivotContract
+    contribution: PluginContribution | None = None
+
+
+@dataclass
+class _ViewState:
+    status: str = "idle"
+    rows: list[object] = field(default_factory=list)
+    summary: dict[str, object] = field(default_factory=dict)
+    error: str = ""
+    install_hint: bool = False
+    generation: int = 0
+
+
+@dataclass(frozen=True)
+class LaunchRequest:
+    """A launch the operator asked for in the Picker, handed to the runner.
+
+    The Textual app cannot cleanly exec-replace itself, so pressing a launch key
+    records this request and quits the app; :func:`run_picker`'s ``on_launch``
+    callback then resolves + executes it (fetch the plan across the engine
+    boundary, compose by mux capability, run). ``mode`` maps to the engine's
+    ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``new`` -> ``--new``.
+
+    ``new_window``, unlike every other field here, is NOT dispatched through
+    the exit-the-app-then-run cycle above -- it opens a brand-new, visible
+    terminal window running the launch while the Picker/TUI keeps running
+    (see ``headed_actions.open_worktree_cli_headed``), so it is only ever
+    handed directly to ``_run_launch`` from inside a still-running screen,
+    never via ``LaunchRequest`` -> ``app.exit()`` -> the ``_run_production_picker``
+    dispatch loop. Supported only for a local, mux-presented launch resolved
+    to the relocated ``launch-session.{ps1,sh}`` script; requesting it for a
+    remote/AHP/non-exec plan is a clear error in ``_run_launch``, never a
+    silent fallback that would block the caller's own process instead.
+    """
+
+    project: str
+    worktree_id: str | None
+    mode: str
+    title: str | None = None
+    no_mux: bool = False
+    ahp: bool = False
+    machine: str | None = None
+    environment: str | None = None
+    seed_prompt: str | None = None
+    new_window: bool = False
+    attempt_id: str | None = None
+
+
+def _state_cell(w: Worktree) -> str:
+    state = (w.state or "-").upper()
+    if w.dirty and "DIRTY" not in state:
+        state = f"{state} DIRTY" if state != "-" else "DIRTY"
+    return state
+
+
+def _worktree_record(worktree: Worktree) -> dict[str, object]:
+    """Adapt the typed cross-cutting model to the declarative pivot row."""
+    record = dict(worktree.raw)
+    record.update({
+        "id": worktree.id,
+        "id4": worktree.id4,
+        "machine": worktree.machine or "?",
+        "repo": worktree.repo or "?",
+        "state_display": _state_cell(worktree),
+        "sync_tag": worktree.sync_tag,
+        "title": worktree.title or "",
+    })
+    return record
+
+
+def _worktree_from_pivot_row(
+    pivot: PivotContract,
+    row: Mapping[str, object],
+) -> Worktree:
+    """Normalize declared semantic fields into the typed Worktree model."""
+    normalized = dict(row)
+    normalized["id"] = row.get(pivot.id_field)
+    normalized["title"] = row.get(pivot.title_field)
+    return ec.worktree_from_dict(normalized)
+
+
+def rows_to_text(worktrees: list[Worktree], *, project: str) -> str:
+    """A plain-text table of the same rows the Picker shows (preview + tests)."""
+    header = f"Worktree Manager — {project}  ({len(worktrees)} worktrees)"
+    lines = [header, "-" * len(header)]
+    for w in worktrees:
+        lines.append(
+            f"  {w.id4}  {(w.machine or '?').ljust(13)}  "
+            f"{(w.repo or '?').ljust(18)}  {_state_cell(w).ljust(12)}  "
+            f"{(w.sync_tag or '').ljust(6)}  {w.title or ''}")
+    return "\n".join(lines) + "\n"
+
+
+class WorktreeManagerApp(App):
+    """A Picker over worktrees plus Manager-owned plugin contributions."""
+
+    TITLE = "Worktree Manager"
+    CSS = """
+    Screen { layout: vertical; }
+    Tabs { height: 3; }
+    #status { color: $text-muted; padding: 0 1; height: auto; }
+    #view-actions { height: auto; }
+    DataTable { height: 1fr; }
+    """
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("r", "refresh", "Refresh"),
+        ("ctrl+shift+h", "launch_history", "Launch history"),
+    ]
+
+    def __init__(
+        self,
+        source: Source,
+        *,
+        project: str,
+        subtitle: str | None = None,
+        contributions: Sequence[PluginContribution] = (),
+        context_source: ContextSource | None = None,
+        pivot_loader: PivotLoader = load_pivot,
+    ) -> None:
+        super().__init__()
+        self._source = source
+        self._project = project
+        self._context_source = context_source or (
+            lambda: {"project": project, "machine": ""}
+        )
+        self._pivot_loader = pivot_loader
+        self._pivots = self._build_pivots(contributions)
+        self._pivot_by_tab = {
+            f"pivot-{index}": pivot for index, pivot in enumerate(self._pivots)
+        }
+        home_contribution = next(
+            (
+                contribution for contribution in contributions
+                if contribution.pivot is not None
+                and contribution.pivot.home
+                and contribution.command_available
+            ),
+            None,
+        )
+        self._initial_pivot = next(
+            (
+                pivot for pivot in self._pivots
+                if pivot.contribution is home_contribution
+            ),
+            self._pivots[0],
+        )
+        self._active_key = self._initial_pivot.key
+        self._states = {pivot.key: _ViewState() for pivot in self._pivots}
+        self._last_status = ""
+        self._worktrees_by_pivot: dict[str, list[Worktree]] = {}
+        #: Set when the operator picks a launch; read by the runner after quit.
+        self.pending_launch: LaunchRequest | None = None
+        self.sub_title = subtitle or project
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Tabs(
+            *(
+                Tab(pivot.label, id=f"pivot-{index}")
+                for index, pivot in enumerate(self._pivots)
+            ),
+            id="pivots",
+        )
+        yield Static("", id="status")
+        from textual.containers import Horizontal
+        yield Horizontal(*(
+            PickerButton(action.label, id=f"view-{descriptor.key}-{action.key}")
+            for descriptor in self._pivots for action in descriptor.pivot.view_actions
+            if action.kind == "command" and action.run
+        ), id="view-actions")
+        table: DataTable = DataTable(zebra_stripes=True, cursor_type="row")
+        yield table
+        yield Footer()
+
+    def on_mount(self) -> None:
+        initial_tab = next(
+            tab_id for tab_id, pivot in self._pivot_by_tab.items()
+            if pivot.key == self._initial_pivot.key
+        )
+        self.query_one(Tabs).active = initial_tab
+        self._activate(self._initial_pivot)
+        self.query_one(DataTable).focus()
+
+    @staticmethod
+    def _build_pivots(
+        contributions: Sequence[PluginContribution],
+    ) -> list[_PivotDescriptor]:
+        worktrees = _PivotDescriptor(
+            key=_WORKTREES,
+            label=_WORKTREES_CONTRACT.label,
+            pivot=_WORKTREES_CONTRACT,
+        )
+        contributed: list[_PivotDescriptor] = []
+        for index, contribution in enumerate(contributions):
+            pivot = contribution.pivot
+            if pivot is None:
+                continue
+            contributed.append(_PivotDescriptor(
+                key=f"contribution-{index}",
+                label=pivot.label,
+                pivot=pivot,
+                contribution=contribution,
+            ))
+
+        all_descriptors = [worktrees, *contributed]
+        by_label: dict[str, _PivotDescriptor] = {}
+        for descriptor in all_descriptors:
+            by_label.setdefault(descriptor.label.casefold(), descriptor)
+
+        fallback = {
+            descriptor.key
+            for descriptor in contributed
+            if descriptor.contribution.pivot.after.casefold() not in by_label
+        }
+        # A pivot anchored to an unresolved pivot belongs in the same fallback
+        # tail, rather than jumping ahead of its missing parent.
+        changed = True
+        while changed:
+            changed = False
+            for descriptor in contributed:
+                if descriptor.key in fallback:
+                    continue
+                anchor = by_label[
+                    descriptor.contribution.pivot.after.casefold()
+                ]
+                if anchor.key in fallback:
+                    fallback.add(descriptor.key)
+                    changed = True
+
+        ordered_candidates = [
+            descriptor for descriptor in contributed
+            if descriptor.key not in fallback
+        ]
+        nodes = [worktrees, *ordered_candidates]
+        edges = {descriptor.key: set() for descriptor in nodes}
+        indegree = {descriptor.key: 0 for descriptor in nodes}
+
+        def add_edge(before: _PivotDescriptor, after: _PivotDescriptor) -> None:
+            if after.key not in edges[before.key]:
+                edges[before.key].add(after.key)
+                indegree[after.key] += 1
+
+        siblings: dict[str, _PivotDescriptor] = {}
+        for descriptor in ordered_candidates:
+            add_edge(worktrees, descriptor)
+            anchor_label = descriptor.contribution.pivot.after.casefold()
+            anchor = by_label[anchor_label]
+            add_edge(anchor, descriptor)
+            if prior := siblings.get(anchor_label):
+                add_edge(prior, descriptor)
+            siblings[anchor_label] = descriptor
+
+        position = {
+            descriptor.key: index for index, descriptor in enumerate(nodes)
+        }
+        by_key = {descriptor.key: descriptor for descriptor in nodes}
+        ready = [key for key, degree in indegree.items() if degree == 0]
+        ordered: list[_PivotDescriptor] = []
+        while ready:
+            ready.sort(key=position.__getitem__)
+            key = ready.pop(0)
+            ordered.append(by_key[key])
+            for child in edges[key]:
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    ready.append(child)
+
+        # Cycles cannot satisfy `after`; keep those pivots usable at the tail.
+        emitted = {descriptor.key for descriptor in ordered}
+        ordered.extend(
+            descriptor for descriptor in ordered_candidates
+            if descriptor.key not in emitted
+        )
+        ordered.extend(
+            descriptor for descriptor in contributed
+            if descriptor.key in fallback
+        )
+        return ordered
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tab.id and event.tab.id in self._pivot_by_tab:
+            self._activate(self._pivot_by_tab[event.tab.id])
+
+    def on_key(self, event: Key) -> None:
+        if self.screen is not self.screen_stack[0]:
+            return
+        descriptor = self._active_pivot()
+        actions = (*descriptor.pivot.actions, *descriptor.pivot.view_actions)
+        action = next(
+            (
+                action for action in actions
+                if action.available
+                and action.shortcut == event.key
+                and descriptor.pivot.entity == "worktree"
+                and action.internal in ("resume", "new")
+            ),
+            None,
+        )
+        if action and action.internal:
+            event.prevent_default()
+            event.stop()
+            self._request_launch(action.internal)
+
+    def action_refresh(self) -> None:
+        self._start_load(self._active_pivot(), force=True)
+
+    def action_launch_history(self) -> None:
+        from .launch_history_screen import LaunchHistoryScreen
+
+        if self.screen is self.screen_stack[0]:
+            self.push_screen(LaunchHistoryScreen(self._project))
+
+    def _active_pivot(self) -> _PivotDescriptor:
+        return next(pivot for pivot in self._pivots if pivot.key == self._active_key)
+
+    def _activate(self, pivot: _PivotDescriptor) -> None:
+        self._active_key = pivot.key
+        self._configure_table(pivot)
+        self._render(pivot)
+        self._start_load(pivot)
+
+    def _configure_table(self, descriptor: _PivotDescriptor) -> None:
+        table = self.query_one(DataTable)
+        table.clear(columns=True)
+        pivot = descriptor.pivot
+        if pivot.columns:
+            for column in pivot.columns:
+                table.add_column(column.header, width=column.width)
+        else:
+            table.add_columns("id", "title", "details")
+
+    def _start_load(self, descriptor: _PivotDescriptor, *, force: bool = False) -> None:
+        state = self._states[descriptor.key]
+        if state.status == "loading" or (state.status != "idle" and not force):
+            return
+        contribution = descriptor.contribution
+        if contribution is not None and not contribution.command_available:
+            state.status = "error"
+            state.error = (
+                f"{descriptor.pivot.list_cmd[0]} is not available on PATH"
+            )
+            self._render(descriptor)
+            return
+        state.generation += 1
+        generation = state.generation
+        state.status = "loading"
+        state.error = ""
+        state.install_hint = False
+        self._render(descriptor)
+        self.run_worker(
+            self._load(descriptor, generation),
+            name=f"load-{descriptor.key}",
+        )
+
+    async def _load(self, descriptor: _PivotDescriptor, generation: int) -> None:
+        try:
+            semantic_worktrees: list[Worktree] | None = None
+            if descriptor.key == _WORKTREES:
+                worktrees = list(await asyncio.to_thread(self._source))
+                rows: list[object] = [
+                    _worktree_record(worktree) for worktree in worktrees
+                ]
+                summary: dict[str, object] = {
+                    "project": self._project,
+                    "count": len(worktrees),
+                }
+                semantic_worktrees = worktrees
+            else:
+                contribution = descriptor.contribution
+                assert contribution is not None
+                context = dict(await asyncio.to_thread(self._context_source))
+                context.setdefault("project", self._project)
+                payload = await asyncio.to_thread(
+                    self._pivot_loader, descriptor.pivot, context
+                )
+                rows = list(payload.rows)
+                summary = dict(payload.summary)
+                if descriptor.pivot.entity == "worktree":
+                    try:
+                        semantic_worktrees = [
+                            _worktree_from_pivot_row(descriptor.pivot, row)
+                            for row in rows
+                            if isinstance(row, Mapping)
+                        ]
+                    except (TypeError, ValueError) as error:
+                        raise PivotLoadError(
+                            f"invalid worktree row: {error}") from error
+        except (EngineError, PivotLoadError) as error:
+            state = self._states[descriptor.key]
+            if state.generation != generation:
+                return
+            state.status = "error"
+            state.error = str(error)
+            state.install_hint = isinstance(error, EngineError) and error.install_hint
+            if self._active_key == descriptor.key:
+                self._render(descriptor)
+            return
+
+        state = self._states[descriptor.key]
+        if state.generation != generation:
+            return
+        state.status = "ready"
+        state.rows = rows
+        state.summary = summary
+        state.error = ""
+        state.install_hint = False
+        if semantic_worktrees is not None:
+            self._worktrees_by_pivot[descriptor.key] = semantic_worktrees
+        if self._active_key == descriptor.key:
+            self._render(descriptor)
+
+    def _render(self, descriptor: _PivotDescriptor) -> None:
+        if self._active_key != descriptor.key:
+            return
+        state = self._states[descriptor.key]
+        table = self.query_one(DataTable)
+        table.clear()
+        self._render_pivot_rows(table, descriptor, state)
+        self._set_status(self._status_text(descriptor, state))
+        self._render_view_actions(descriptor)
+
+    def _render_view_actions(self, descriptor):
+        from .production_picker.picker_tui.pivot_actions import entry_matches
+        from textual.containers import Horizontal
+
+        container = self.query_one("#view-actions", Horizontal)
+        summary = self._states[descriptor.key].summary
+        actions = [
+            action for action in descriptor.pivot.view_actions
+            if action.kind == "command" and action.available
+            and action.run and entry_matches(action.when, summary)
+        ]
+        container.display = bool(actions)
+        visible = {f"view-{descriptor.key}-{action.key}" for action in actions}
+        for button in container.query(Button):
+            button.display = button.id in visible
+
+    def on_button_pressed(self, event: Button.Pressed):
+        from .pivot_progress import PivotProgressScreen
+        from .production_picker.picker_tui.pivot_actions import entry_matches
+        from .production_picker.picker_tui.tasks import RegisteredPivotRuntime
+        from .production_picker.picker_tui.engine_action_confirm import confirm_then
+
+        descriptor = self._active_pivot()
+        state = self._states[descriptor.key]
+        action = next((
+            action for action in descriptor.pivot.view_actions
+            if action.kind == "command"
+            and event.button.id == f"view-{descriptor.key}-{action.key}" and action.available
+            and action.run and entry_matches(action.when, state.summary)
+        ), None)
+        if action is None:
+            return
+        event.stop()
+        runtime = RegisteredPivotRuntime(descriptor.pivot)
+        confirm_then(self, action, lambda: self.push_screen(PivotProgressScreen(
+                runtime, action, state.summary,
+                completed=lambda: self._start_load(descriptor, force=True),
+                close_runtime=True,
+            )))
+
+    def _render_pivot_rows(
+        self,
+        table: DataTable,
+        descriptor: _PivotDescriptor,
+        state: _ViewState,
+    ) -> None:
+        pivot = descriptor.pivot
+        for raw in state.rows:
+            if not isinstance(raw, Mapping):
+                continue
+            if pivot.columns:
+                table.add_row(*(_cell_text(raw.get(column.key)) for column in pivot.columns))
+                continue
+            badges: list[str] = []
+            for field_name in pivot.badge_fields:
+                value = raw.get(field_name)
+                if isinstance(value, (list, tuple)):
+                    badges.extend(str(item) for item in value)
+                elif value not in (None, ""):
+                    badges.append(str(value))
+            subtitle = raw.get(pivot.subtitle_field) if pivot.subtitle_field else None
+            details = " · ".join(
+                [*(f"[{badge}]" for badge in badges), *([str(subtitle)] if subtitle else [])]
+            )
+            table.add_row(
+                _cell_text(raw.get(pivot.id_field)),
+                _cell_text(raw.get(pivot.title_field)),
+                details,
+            )
+
+    def _status_text(
+        self,
+        descriptor: _PivotDescriptor,
+        state: _ViewState,
+    ) -> str:
+        cached = len(state.rows)
+        pivot = descriptor.pivot
+        if state.summary.get("banner_text"):
+            return str(state.summary["banner_text"])
+        if state.status == "loading":
+            return (
+                f"{pivot.label} · refreshing {cached} cached entr{'y' if cached == 1 else 'ies'}…"
+                if cached else f"loading {pivot.label.lower()}…"
+            )
+        if state.status == "error":
+            suffix = f" · showing {cached} cached" if cached else ""
+            hint = (
+                "  Run `worktree-manager setup --apply` to install it."
+                if state.install_hint else ""
+            )
+            return f"{pivot.label} unavailable: {state.error}{suffix}{hint}"
+        if not state.rows:
+            return pivot.empty_hint
+        values = {
+            **state.summary,
+            "project": self._project,
+            "count": cached,
+            "label": pivot.label,
+        }
+        if pivot.ready_status:
+            ready = _format_template(pivot.ready_status, values)
+        else:
+            summary = _format_summary(pivot, state.summary)
+            suffix = f" · {summary}" if summary else ""
+            ready = f"{cached} {pivot.label.lower()}{suffix}"
+        action_hints = [
+            f"{action.shortcut}: {action.label}"
+            for action in (*pivot.actions, *pivot.view_actions)
+            if action.available
+            and action.shortcut
+            and pivot.entity == "worktree"
+            and action.internal in ("resume", "new")
+        ]
+        return " · ".join([ready, *action_hints, "r: refresh", "q: quit"])
+
+    # ── launch/resume action ─────────────────────────────────────────────────
+
+    def _selected_worktree(self) -> Worktree | None:
+        try:
+            table = self.query_one(DataTable)
+        except Exception:
+            return None
+        idx = table.cursor_row
+        worktrees = self._worktrees_by_pivot.get(self._active_key, [])
+        if idx is None or idx < 0 or idx >= len(worktrees):
+            return None
+        return worktrees[idx]
+
+    def _request_launch(self, mode: str) -> None:
+        """Record the operator's launch choice and quit so the runner can act."""
+        descriptor = self._active_pivot()
+        actions = (
+            descriptor.pivot.view_actions
+            if mode == "new"
+            else descriptor.pivot.actions
+        )
+        if (
+            descriptor.pivot.entity != "worktree"
+            or not any(action.internal == mode for action in actions)
+        ):
+            self._set_status("pivot actions are not available in this parity slice.")
+            return
+        if mode == "new":
+            request = LaunchRequest(
+                project=self._project, worktree_id=None, mode="new")
+        else:
+            w = self._selected_worktree()
+            if w is None:
+                self._set_status("no worktree selected — move the cursor to a row first.")
+                return
+            request = LaunchRequest(
+                project=self._project, worktree_id=w.id, mode=mode, title=w.title)
+
+        from .launch_confirmation import confirm_before_effect
+
+        def saved(decision):
+            self.pending_launch = replace(request, attempt_id=decision["attempt_id"])
+            self.exit()
+
+        confirm_before_effect(
+            self, self._project, {
+                "action": mode, "worktree_id": request.worktree_id,
+                "title": request.title, "is_local": True,
+            }, surface="compact-picker", saved=saved,
+        )
+
+    def _set_status(self, text: str) -> None:
+        self._last_status = text
+        try:
+            self.query_one("#status", Static).update(text)
+        except Exception:
+            pass
+
+    def on_data_table_row_selected(self, event) -> None:  # Enter on a row
+        if self.screen is not self.screen_stack[0]:
+            return
+        descriptor = self._active_pivot()
+        if (
+            descriptor.pivot.entity == "worktree"
+            and any(
+                action.internal == "resume"
+                for action in descriptor.pivot.actions
+            )
+        ):
+            self._request_launch("resume")
+
+# ── sources ─────────────────────────────────────────────────────────────────
+
+def engine_source(project: str) -> Source:
+    """A source that lists a project's worktrees via the real engine."""
+    return lambda: ec.list_worktrees(project)
+
+
+def engine_context_source(project: str) -> ContextSource:
+    """Resolve process-boundary context used by contributed argv templates."""
+    return lambda: {
+        "project": project,
+        "machine": ec.get_value(project, "machine"),
+    }
+
+
+def demo_source() -> Source:
+    """A source backed by the bundled Example Labs fake engine.
+
+    Routes through ``engine_client`` + a subprocess to the fake engine, so the
+    demo exercises the exact render path (spawn → JSON → dataclass) the real
+    engine uses — the process boundary is never bypassed.
+    """
+    ec.set_engine_command(demo_engine.command_argv())
+    return lambda: ec.list_worktrees(demo.DEMO_PROJECT)
+
+
+# ── headless capture ─────────────────────────────────────────────────────────
+
+async def _render_svg(app: WorktreeManagerApp, size: tuple[int, int]) -> str:
+    async with app.run_test(size=size):
+        await app.workers.wait_for_complete()
+        return app.export_screenshot()
+
+
+def capture_svg(
+    source: Source,
+    *,
+    project: str,
+    size: tuple[int, int] = (110, 32),
+    subtitle: str | None = None,
+    contributions: Sequence[PluginContribution] = (),
+    context_source: ContextSource | None = None,
+) -> str:
+    """Render the Picker headlessly and return an SVG screenshot string."""
+    app = WorktreeManagerApp(
+        source,
+        project=project,
+        subtitle=subtitle,
+        contributions=contributions,
+        context_source=context_source,
+    )
+    return asyncio.run(_render_svg(app, size))
+
+
+def run_picker(
+    source: Source,
+    *,
+    project: str,
+    subtitle: str | None = None,
+    on_launch: "Callable[[LaunchRequest], int] | None" = None,
+    contributions: Sequence[PluginContribution] = (),
+    context_source: ContextSource | None = None,
+) -> int:
+    """Launch the interactive Picker (blocks until the user quits).
+
+    If the operator picks a launch/resume and ``on_launch`` is provided, the app
+    quits and ``on_launch`` runs the composed launch (its exit code is returned).
+    Plain quit returns 0. Keeping the exec out of the running app is what lets the
+    launch cleanly replace / follow the TUI rather than nest under it.
+    """
+    app = WorktreeManagerApp(
+        source,
+        project=project,
+        subtitle=subtitle,
+        contributions=contributions,
+        context_source=context_source,
+    )
+    app.run()
+    if app.pending_launch is not None and on_launch is not None:
+        return on_launch(app.pending_launch)
+    return 0
+
+
+def _cell_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
+
+
+def _format_summary(pivot: PivotContract, summary: Mapping[str, object]) -> str:
+    if not pivot.summary_template or not summary:
+        return ""
+    return _format_template(pivot.summary_template, summary)
+
+
+def _format_template(template: str, values: Mapping[str, object]) -> str:
+    class _Default(dict):
+        def __missing__(self, key: str) -> str:
+            return ""
+
+    safe = _Default({
+        key: "" if value is None else str(value)
+        for key, value in values.items()
+    })
+    try:
+        return template.format_map(safe)
+    except (KeyError, IndexError, ValueError):
+        return template
