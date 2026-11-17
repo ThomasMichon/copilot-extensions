@@ -3223,7 +3223,8 @@ def test_profile_batch_refuses_invalid_selection_before_reading_source(
 
 
 @pytest.mark.parametrize("repair", [False, True])
-def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repair: bool) -> None:
+@pytest.mark.parametrize("explicit", [False, True])
+def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repair: bool, explicit: bool) -> None:
     local_install_profile: ModuleType = importlib.import_module("local_install_profile")
     source = local_install_profile.source_inputs
     snapshot, payload, root, uv, python = (
@@ -3243,6 +3244,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
         "--base-python", str(python), "--health-module", "demo_app",
         "--expected-runtime-version", "selected", "--expected-payload-hash", "a" * 64,
         "--install-application", *(["--repair"] if repair else []),
+        *(["--global-bin", str(root / "commands")] if explicit else []),
         "--", "--root", "callback root", "--repair", "--",
     ]
     assert source.main(arguments) == 0
@@ -3250,6 +3252,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
         "uv": uv, "base_python": python, "health_module": "demo_app",
         "expected_version": "selected", "expected_hash": "a" * 64,
         "arguments": ("--root", "callback root", "--repair", "--"), "repair": repair,
+        **({"global_bin": root / "commands"} if explicit else {}),
     })]
     assert json.loads(capsys.readouterr().out) == {
         "state": "installed", "slot": str(root / "versions" / "selected"),
@@ -3262,6 +3265,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
     ["--repair"],
     ["--", "--callback"],
     ["--install-application", "unseparated"],
+    ["--native-inputs", "--global-bin", "/commands"],
 ])
 def test_application_cli_refuses_invalid_modes_before_source_access(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
     local_install_profile: ModuleType = importlib.import_module("local_install_profile")
@@ -3342,6 +3346,7 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
     def child(_argv: list[str], **options: Any) -> None:
         slot = options["candidate"]
         fixture.children.append(slot.name)
+        fixture.argv = _argv
         fixture.child_options.append(options)
         if fixture.child_error:
             raise fixture.child_error
@@ -3363,6 +3368,66 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
         expected_version=version, expected_hash=selection["payload_hash"], **options,
     )
     return fixture
+
+
+@pytest.mark.parametrize("receiver", ["current", "old", "malformed", "rolled-back", "slot-directory"])
+def test_application_adapter_selects_actual_helper_before_construction_and_dispatch(
+    application_adapter: SimpleNamespace, receiver: str,
+) -> None:
+    fixture = application_adapter
+    capable = (
+        "APPLICATION_INSTALL_CAPABILITIES = ('global-bin/v1',)\n"
+        "raise AssertionError('capability discovery must not execute this helper')\n"
+    )
+    (fixture.application / "install.py").write_text(
+        "APPLICATION_INSTALL_CAPABILITIES = (\n" if receiver == "malformed"
+        else "pass\n" if receiver == "old" else capable,
+    )
+    (fixture.old / "install.py").write_text("pass\n" if receiver == "rolled-back" else capable)
+    selected = fixture.old if receiver == "slot-directory" else fixture.root / "isolated commands"
+    if receiver == "current":
+        assert Path(fixture.install(global_bin=selected, arguments=("--fixture",))["slot"]) == fixture.old
+        command = fixture.argv[fixture.argv.index(str(fixture.old / "install.py")):]
+        assert command == [
+            str(fixture.old / "install.py"), "--global-bin", str(selected), "--", "--fixture",
+        ]
+    else:
+        message = (
+            "cannot overlap runtime version slots" if receiver == "slot-directory"
+            else "selected application helper lacks global-bin/v1"
+        )
+        with pytest.raises(ValueError, match=message):
+            fixture.install(global_bin=selected)
+        assert fixture.children == []
+        assert fixture.versions == ([fixture.old.name] if receiver == "rolled-back" else [])
+    assert (fixture.old / "preserved").read_bytes() == b"incumbent bytes"
+
+
+def test_application_adapter_reuse_checks_selected_publication_directory(
+    application_adapter: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import runtime_application_install as application
+
+    fixture = application_adapter
+    helper = application.__file__
+    assert helper is not None
+    for location in (fixture.application, fixture.old):
+        declaration = json.loads((location / "application.json").read_text())
+        declaration.update(setup=[], start=[])
+        (location / "application.json").write_text(json.dumps(declaration))
+        (location / "install.py").write_bytes(Path(helper).read_bytes())
+    selected = fixture.root / "commands"
+    observed: list[Path | None] = []
+
+    def current(_slot: Path, _record: dict[str, Any], *, global_bin: Path | None = None) -> bool:
+        observed.append(global_bin)
+        return len(observed) > 1
+
+    monkeypatch.setattr(application, "_publication_current", current)
+    result = fixture.install(global_bin=selected)
+    assert fixture.install(global_bin=selected) == result
+    assert observed == [selected, selected]
+    assert fixture.children == [fixture.old.name]
 
 
 @pytest.mark.parametrize("declared,expected", [
