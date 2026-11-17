@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -16,20 +17,23 @@ import ssl
 import subprocess
 import sys
 import threading
-import time
+import time as time
 from types import ModuleType
+from typing import Any, BinaryIO, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from installer_wheel_inputs import WheelError, _check_deadline
-from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs
+from installer_wheel_inputs import WheelError as WheelError, _check_deadline
+from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot as WheelSnapshot, retain_wheel_inputs as _retain_wheel_inputs
 import installer_wheel_inputs as _inspection
 import installer_wheel_snapshot as _snapshots
 import installer_feed_policy as _feed_policy
 
 
 DELIVERY_POLICY = "configured-feed-delegation-v1"
+_Record = dict[str, Any]
+retain_wheel_inputs = cast(Callable[..., Any], _retain_wheel_inputs)
 
 
 class AcquisitionUnavailable(WheelError):
@@ -70,8 +74,8 @@ class AcquiredWheels:
     snapshot: WheelSnapshot
     evidence_json: bytes
 
-    def evidence(self) -> dict:
-        return json.loads(self.evidence_json)
+    def evidence(self) -> _Record:
+        return cast(_Record, json.loads(self.evidence_json))
 
     def construction_inputs(self, inputs: WheelInstallInputs) -> WheelInstallInputs:
         """Bind acquired facts into the existing receipt, never grant approval."""
@@ -90,8 +94,8 @@ class AdmittedRetainedWheels:
     snapshot: WheelSnapshot
     evidence_json: bytes
 
-    def evidence(self) -> dict:
-        return json.loads(self.evidence_json)
+    def evidence(self) -> _Record:
+        return cast(_Record, json.loads(self.evidence_json))
 
 
 def _url(value: str) -> tuple[str, str]:
@@ -125,14 +129,14 @@ def _url(value: str) -> tuple[str, str]:
         raise WheelError("wheel acquisition requires an ordinary HTTPS location") from None
 
 
-def _name(value: str) -> str:
+def _name(value: object) -> str:
     if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}", value) is None:
         raise WheelError("wheel acquisition needs an exact distribution identity")
     return re.sub(r"[-_.]+", "-", value).lower()
 
 
-def _unique(pairs):
-    result = {}
+def _unique(pairs: list[tuple[str, Any]]) -> _Record:
+    result: _Record = {}
     for key, value in pairs:
         if key in result:
             raise WheelError("wheel index contains duplicate JSON properties")
@@ -141,13 +145,13 @@ def _unique(pairs):
 
 
 class _Links(HTMLParser):
-    def __init__(self, limit):
+    def __init__(self, limit: int) -> None:
         super().__init__(convert_charrefs=True)
         self.limit = limit
-        self.links = []
-        self.current = None
+        self.links: list[_Record] = []
+        self.current: tuple[dict[str, str | None], list[str]] | None = None
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag != "a":
             return
         if self.current is not None or len(self.links) >= self.limit:
@@ -156,11 +160,11 @@ class _Links(HTMLParser):
             raise WheelError("wheel index has ambiguous link attributes")
         self.current = (dict(attrs), [])
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self.current is not None:
             self.current[1].append(data)
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self.current is not None:
             attrs, text = self.current
             self.links.append({
@@ -173,7 +177,7 @@ class _Links(HTMLParser):
             self.current = None
 
 
-def _entries(content: bytes, media: str, name: str, limit: int) -> list[dict]:
+def _entries(content: bytes, media: str, name: str, limit: int) -> list[_Record]:
     try:
         text = content.decode("utf-8")
         if media in ("application/vnd.pypi.simple.v1+json", "application/json"):
@@ -197,12 +201,14 @@ def _entries(content: bytes, media: str, name: str, limit: int) -> list[dict]:
             raise WheelError("unsupported wheel index content type")
         if len(entries) > limit or any(not isinstance(item, dict) for item in entries):
             raise WheelError("wheel index exceeds its candidate budget or has invalid entries")
-        return entries
+        return cast(list[_Record], entries)
     except (UnicodeError, json.JSONDecodeError, RecursionError):
         raise WheelError("wheel index is malformed") from None
 
 
-def _selected(entries, expected, base, cutoff):
+def _selected(
+    entries: list[_Record], expected: _Record, base: str, cutoff: datetime,
+) -> tuple[str, str, str | None]:
     selected = [item for item in entries if item.get("filename") == expected["filename"]]
     if not selected:
         raise AcquisitionUnavailable("selected exact wheel is not listed by its feed")
@@ -248,12 +254,14 @@ def _selected(entries, expected, base, cutoff):
 
 
 class _NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self, request: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str,
+    ) -> None:
         return None
 
 
 class _Budget:
-    def __init__(self, limits, deadline, control_bytes=0):
+    def __init__(self, limits: AcquisitionLimits, deadline: float, control_bytes: int = 0) -> None:
         self.deadline = deadline
         self.maximums = {
             "requests": limits.max_requests, "redirects": limits.max_redirects,
@@ -263,18 +271,18 @@ class _Budget:
         self.counts = dict.fromkeys(self.maximums, 0)
         self.lock = threading.Lock()
         self.failed = threading.Event()
-        self.failure = None
+        self.failure: BaseException | None = None
 
-    def check(self):
+    def check(self) -> None:
         _check_deadline(self.deadline)
         if self.failed.is_set():
             raise WheelError("wheel acquisition cancelled after a transfer failure")
 
-    def current(self, kind):
+    def current(self, kind: str) -> int:
         with self.lock:
             return self.counts[kind]
 
-    def reserve(self, kind, amount):
+    def reserve(self, kind: str, amount: int) -> None:
         with self.lock:
             self.check()
             if self.counts[kind] + amount > self.maximums[kind]:
@@ -282,7 +290,7 @@ class _Budget:
                 raise WheelError(f"wheel acquisition {label} budget exceeded")
             self.counts[kind] += amount
 
-    def fail(self, error):
+    def fail(self, error: BaseException) -> None:
         with self.lock:
             if self.failure is None:
                 self.failure = error
@@ -290,34 +298,43 @@ class _Budget:
 
 
 class _Client:
-    def __init__(self, limits, deadline, context, proxies, budget=None):
+    def __init__(
+        self, limits: AcquisitionLimits, deadline: float, context: ssl.SSLContext,
+        proxies: dict[str, str], budget: _Budget | None = None,
+    ) -> None:
         self.limits, self.deadline = limits, deadline
         self.budget = budget or _Budget(limits, deadline)
         self.opener = build_opener(ProxyHandler(proxies), HTTPSHandler(context=context), _NoRedirect())
 
     @property
-    def requests(self):
+    def requests(self) -> int:
         return self.budget.current("requests")
 
     @property
-    def redirects(self):
+    def redirects(self) -> int:
         return self.budget.current("redirects")
 
     @property
-    def metadata_bytes(self):
+    def metadata_bytes(self) -> int:
         return self.budget.current("metadata_bytes")
 
     @property
-    def wheel_bytes(self):
+    def wheel_bytes(self) -> int:
         return self.budget.current("wheel_bytes")
 
-    def request(self, location, feed, origins, accept, *, index=False):
+    def request(
+        self, location: str, feed: WheelFeed, origins: set[str] | None, accept: str, *,
+        index: bool = False,
+    ) -> tuple[Any, str, list[str]]:
         chain = []
         resets = 0
         while True:
             self.budget.check()
             location, origin = _url(location)
-            if index and _feed_policy._is_public_pypi_url(location):
+            if (
+                index and _feed_policy._is_public_pypi_url(location)
+                and origin != _url(feed.index_url)[1]
+            ):
                 raise WheelError("wheel feed cannot substitute a public package index")
             if origins is not None and origin not in origins:
                 raise WheelError(f"wheel acquisition location is outside selected source trust: {origin}")
@@ -357,7 +374,9 @@ class _Client:
                     continue
                 raise WheelError("wheel feed request failed or timed out") from None
 
-    def read(self, response, limit, *, output=None):
+    def read(
+        self, response: Any, limit: int, *, output: BinaryIO | None = None,
+    ) -> tuple[bytes, str, int]:
         self.budget.check()
         if (
             len(response.headers.get_all("Content-Length", [])) > 1
@@ -399,11 +418,11 @@ class _Client:
 
 
 def validate_acquisition_inputs(
-    expected, *, feeds: tuple[WheelFeed, ...], download_origins: tuple[str, ...],
+    expected: Sequence[_Record], *, feeds: tuple[WheelFeed, ...], download_origins: tuple[str, ...],
     cutoffs: dict[str, datetime], policy_id: str, limits: AcquisitionLimits,
     deadline: float, ssl_context: ssl.SSLContext, proxies: dict[str, str],
     procutil: ModuleType,
-):
+) -> tuple[list[_Record], set[str]]:
     """Validate captured transport and exact selected records without acquiring bytes."""
     limits.verify()
     _check_deadline(deadline)
@@ -467,11 +486,11 @@ def validate_acquisition_inputs(
 
 @contextmanager
 def acquire_wheel_inputs(
-    expected, *, feeds: tuple[WheelFeed, ...], download_origins: tuple[str, ...],
+    expected: Sequence[_Record], *, feeds: tuple[WheelFeed, ...], download_origins: tuple[str, ...],
     cutoffs: dict[str, datetime], policy_id: str, limits: AcquisitionLimits,
     deadline: float, ssl_context: ssl.SSLContext, proxies: dict[str, str],
     procutil: ModuleType,
-):
+) -> Iterator[AcquiredWheels]:
     """Retain exact downloads and file-policy facts through inspected construction.
 
     This mechanism cannot establish feed/profile trust. The existing installation
@@ -516,11 +535,11 @@ def acquire_wheel_inputs(
 
 @contextmanager
 def admit_retained_wheel_inputs(
-    expected, *, snapshot: WheelSnapshot, feeds: tuple[WheelFeed, ...],
+    expected: Sequence[_Record], *, snapshot: WheelSnapshot, feeds: tuple[WheelFeed, ...],
     download_origins: tuple[str, ...], cutoffs: dict[str, datetime], policy_id: str,
     limits: AcquisitionLimits, deadline: float, ssl_context: ssl.SSLContext,
     proxies: dict[str, str], procutil: ModuleType,
-):
+) -> Iterator[AdmittedRetainedWheels]:
     """Check selected retained bytes against one current feed-metadata pass.
 
     The caller independently selects the exact records, owns snapshot custody,
@@ -586,7 +605,11 @@ def admit_retained_wheel_inputs(
         snapshot.verify()
 
 
-def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context, budget, retained_size=None):
+def _download_one(
+    root: Path, item: _Record, feeds: tuple[WheelFeed, ...], origins: set[str],
+    cutoffs: dict[str, datetime], limits: AcquisitionLimits, deadline: float,
+    context: ssl.SSLContext, budget: _Budget, retained_size: int | None = None,
+) -> _Record:
     client = _Client(limits, deadline, context, {}, budget)
     budget.check()
     name = _name(item["name"])
@@ -652,12 +675,16 @@ def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context
             response.close()
 
 
-def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context, control_bytes, retained_sizes=None):
+def _download(
+    root: Path, expected: list[_Record], feeds: tuple[WheelFeed, ...], origins: set[str],
+    cutoffs: dict[str, datetime], limits: AcquisitionLimits, deadline: float,
+    context: ssl.SSLContext, control_bytes: int, retained_sizes: dict[str, int] | None = None,
+) -> _Record:
     budget = _Budget(limits, deadline, control_bytes)
     if retained_sizes is None:
         root.mkdir()
 
-    def transfer(item):
+    def transfer(item: _Record) -> _Record:
         try:
             retained = {} if retained_sizes is None else {"retained_size": retained_sizes[item["filename"]]}
             return _download_one(
@@ -685,7 +712,7 @@ def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context
     }
 
 
-def _tls_record(context):
+def _tls_record(context: ssl.SSLContext) -> _Record:
     return {
         "certificates": [base64.b64encode(value).decode("ascii") for value in context.get_ca_certs(binary_form=True)],
         "minimum": int(context.minimum_version), "maximum": int(context.maximum_version),
@@ -696,7 +723,7 @@ def _tls_record(context):
     }
 
 
-def _tls_context(record):
+def _tls_context(record: _Record) -> ssl.SSLContext:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.minimum_version, context.maximum_version = ssl.TLSVersion(record["minimum"]), ssl.TLSVersion(record["maximum"])
     context.options, context.verify_flags = record["options"], record["verify_flags"]
@@ -706,26 +733,30 @@ def _tls_context(record):
     return context
 
 
-def _worker_sources():
+def _worker_sources() -> dict[str, bytes]:
     result = {}
     for source in (
         Path(__file__), Path(_inspection.__file__), Path(_snapshots.__file__),
         Path(_feed_policy.__file__),
     ):
-        before = _inspection._ordinary(source)
+        before = _inspection._ordinary(source, allow_hardlinks=True)
         if before.st_size > 1 << 20:
             raise WheelError("acquisition worker source protocol budget exceeded")
         with _snapshots._open(source) as stream:
-            opened = _snapshots._unchanged(source, before, stream)
+            opened = _snapshots._unchanged(source, before, stream, allow_hardlinks=True)
             content = stream.read((1 << 20) + 1)
-            _snapshots._unchanged(source, before, stream, opened=opened)
+            _snapshots._unchanged(source, before, stream, opened=opened, allow_hardlinks=True)
         if len(content) > 1 << 20:
             raise WheelError("acquisition worker source protocol budget exceeded")
         result[source.name] = content
     return result
 
 
-def _run_worker(root, expected, feeds, origins, cutoffs, limits, deadline, context, procutil, *, retained_sizes=None):
+def _run_worker(
+    root: Path, expected: list[_Record], feeds: tuple[WheelFeed, ...], origins: set[str],
+    cutoffs: dict[str, datetime], limits: AcquisitionLimits, deadline: float,
+    context: ssl.SSLContext, procutil: ModuleType, *, retained_sizes: dict[str, int] | None = None,
+) -> _Record:
     from installer_engine_process import ChildLaunchError, run_owned
     from installer_dependency_policy import _native_retained_path
 
@@ -812,10 +843,10 @@ def _run_worker(root, expected, feeds, origins, cutoffs, limits, deadline, conte
         (worker / name).unlink()
     worker.rmdir()
     control.unlink()
-    return evidence
+    return cast(_Record, evidence)
 
 
-def _worker(path):
+def _worker(path: str) -> None:
     try:
         control = Path(path)
         with control.open("rb") as stream:
