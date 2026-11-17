@@ -19,7 +19,6 @@ from typing import Literal, TextIO
 from agent_procutil import no_window_kwargs
 
 from agent_remote_driver.mux_observation_types import ObservationUnavailable
-from agent_remote_driver.windows_mux_version import require_creation_binary
 
 
 class CreationUncertain(RuntimeError):
@@ -131,7 +130,11 @@ def run_or_join(
             return None
         if platform.system() != "Windows" and Path(binary).name == "tmux" and has_session(binary, "=" + session):
             return None
-        selected = require_creation_binary(binary) if gated else binary
+        selected = binary
+        if gated:
+            from agent_remote_driver.windows_mux_version import require_creation_binary
+
+            selected = require_creation_binary(binary)
         argv.extend(prepare())
         if gated:
             argv[0] = selected

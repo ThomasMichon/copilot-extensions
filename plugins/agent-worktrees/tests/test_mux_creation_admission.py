@@ -77,7 +77,7 @@ def test_detached_join_does_not_build_a_second_pane_or_emit_creation(
 
     monkeypatch.setattr(mux_creation, "session_gate", joined)
     monkeypatch.setattr(
-        mux_creation, "require_creation_binary",
+        windows_mux_version, "require_creation_binary",
         lambda *_args: pytest.fail("a legacy join must not require a creation-version probe"),
     )
     monkeypatch.setattr(
@@ -143,7 +143,7 @@ def test_post_dispatch_failure_preserves_pending_pane_arguments(
         return True
 
     monkeypatch.setattr(mux_creation, "session_gate", acquired)
-    monkeypatch.setattr(mux_creation, "require_creation_binary", lambda binary: binary)
+    monkeypatch.setattr(windows_mux_version, "require_creation_binary", lambda binary: binary)
     def start(*args: object, **kwargs: object) -> Client:
         stderr = cast(BinaryIO, kwargs["stderr"])
         stderr.write(diagnostic)
