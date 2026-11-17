@@ -70,7 +70,16 @@ section for supported invocation, provenance and unsupported contexts.
 ### Segmenter (`agent_logger.segmenter`)
 
 Collates a single Copilot session into context-ingestible Markdown digest
-chunks. Four console scripts:
+chunks. The events → Markdown conversion is one reusable engine,
+`agent_logger.segmenter.digest`: readers for the session artifacts, streaming
+turn rendering, segmentation (`build_session_digest`, which also lets a caller
+observe each turn in the same pass) and single-string rendering
+(`render_session_digest`). Each consumer is a **charter on top of that
+engine**: `collate-session` persists the digest for the `session-log-writer`
+charter, and `ramp-up-session` renders a takeover brief for the
+`session-rampup` charter from the same building blocks. A new summarizing
+charter should reuse the engine rather than re-plumb `events.jsonl` parsing.
+Four console scripts:
 
 - `collate-session` — split a session (`~/.copilot/session-state/<id>`) into
   a context file + numbered transcript segments, written to a local store
