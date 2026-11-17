@@ -7063,6 +7063,14 @@ The fixture's selected Dev ref is isolated test input,
 not publication or qualification of unmerged source as the real merged branch.
 An omitted repository skips this case, not a default-update pass.
 
+The `same-source-repair` case uses a baseline prepared from the fixture's exact
+Dev source/profile, removes only its installed `application.json`, then runs
+the same installed update twice. It requires a distinct `.repair.<id>` slot,
+unchanged damaged-slot bytes/mtimes, preserved state, ready incoming service
+and same-PID reuse under renewed consumer demand. The missing declaration must
+not select the legacy installation path. It uses the same private lifecycle
+and exact cleanup as `default-update`, not a host repair.
+
 Use the existing prepared tooling/test interpreter, with PATH `uv`:
 
 ```powershell

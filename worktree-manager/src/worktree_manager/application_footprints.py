@@ -4,9 +4,10 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from graphlib import CycleError, TopologicalSorter
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -19,6 +20,7 @@ import sys
 import time
 from typing import Any
 from typing import cast
+import uuid
 
 import agent_procutil
 
@@ -163,6 +165,10 @@ def plan(
 def _verify_copy(path: Path, application: Application) -> None:
     if _read(path / "application.json") != application.declaration:
         raise ValueError(f"application declaration changed before setup: {application.name}")
+    _verify_tree(path, application)
+
+
+def _verify_tree(path: Path, application: Application) -> None:
     def unreadable(error: OSError) -> None:
         raise error
     for directory, children, files in os.walk(path, followlinks=False, onerror=unreadable):
@@ -173,6 +179,37 @@ def _verify_copy(path: Path, application: Application) -> None:
                 raise ValueError(f"application input is not an ordinary file or directory: {member}")
         if Path(directory) == path and path == application.slot:
             children[:] = [name for name in children if name not in {".venv", "state"}]
+
+
+def select_generation(application: Application, current: str | None) -> Application:
+    """Reuse the selected repair or allocate a distinct slot for damaged metadata."""
+    from .self_install import _runtime_installer
+
+    _verify_copy(application.source, application)
+    _runtime_installer()
+    validate = importlib.import_module("runtime_application_install")._validate_application
+    validate(json.loads(application.declaration, object_pairs_hook=_unique))
+    base = application.version
+    if current and re.fullmatch(re.escape(base) + r"\.repair\.[0-9a-f]{32}", current):
+        application = replace(application, version=current)
+    _ordinary(application.slot)
+    if not os.path.lexists(application.slot):
+        return application
+    _verify_tree(application.slot, application)
+    try:
+        installed = _read(application.slot / "application.json")
+    except (FileNotFoundError, ValueError):
+        installed = None
+    if installed == application.declaration:
+        return application
+    if installed is not None:
+        try:
+            validate(json.loads(installed, object_pairs_hook=_unique))
+        except (ValueError, UnicodeError):
+            pass
+        else:
+            raise ValueError("application declaration conflicts with its existing generation")
+    return replace(application, version=base + ".repair." + uuid.uuid4().hex)
 
 
 def _selection_key(footprint: Path, applications: tuple[Application, ...]) -> str:

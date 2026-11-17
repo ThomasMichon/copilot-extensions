@@ -506,7 +506,7 @@ def test_actual_prepared_manager_stages_without_changing_legacy_selection(
     or os.environ.get("MANAGER_NATIVE_LIFETIME") != "1",
     reason="requires an explicit native Windows Manager footprint/lifetime qualification",
 )
-@pytest.mark.parametrize("mode", ["repeat", "update-reverse", "default-update"])
+@pytest.mark.parametrize("mode", ["repeat", "update-reverse", "default-update", "same-source-repair"])
 def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
@@ -518,7 +518,7 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
     update_repository = os.environ.get("MANAGER_UPDATE_REPOSITORY")
     if mode == "update-reverse" and not update_source:
         pytest.skip("requires a second explicitly prepared Manager footprint")
-    if mode == "default-update" and not update_repository:
+    if mode in {"default-update", "same-source-repair"} and not update_repository:
         pytest.skip("requires an explicitly selected fixture Manager source repository")
     sys.path.insert(0, str(TOOLS.parent / "worktree-manager" / "src"))
     from worktree_manager import mux_daemon_cutover
@@ -547,7 +547,7 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
     applications = plan(incoming, home / ".copilot-extensions" / "apps")
     assert len(applications) == 1
     application = applications[0]
-    deadline = time.monotonic() + (1500 if mode == "default-update" else 360)
+    deadline = time.monotonic() + (1500 if mode in {"default-update", "same-source-repair"} else 360)
     install(applications, stage=True, deadline=deadline)
     assert marker.read_bytes() == b"legacy\n" and command.read_bytes() == b"legacy command\n"
     assert not (application.root / "current-version").exists()
@@ -607,7 +607,7 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
             repeated_endpoint.client_host, repeated_endpoint.port, root=application.root,
             generation=application.version,
         )
-        if mode == "default-update":
+        if mode in {"default-update", "same-source-repair"}:
             import update_driver
             from worktree_manager import source_config
 
@@ -615,6 +615,9 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
             assert Path(update_repository).is_absolute() and Path(update_repository).is_dir()
             source_config.set_source(repo=update_repository, ref="dev", root=application.root)
             installed_environment["WORKTREE_MANAGER_ROOT"] = str(application.root)
+            if mode == "same-source-repair":
+                (application.slot / "application.json").unlink()
+                immutable = _code_snapshot(application.slot)
             previous_pid = None
             default_code = None
             for attempt in range(2):
@@ -623,6 +626,8 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
                 selected = mux_daemon_cutover.routed_endpoint(application.root)
                 assert selected is not None and selected.version is not None
                 assert selected.version != application.version
+                if mode == "same-source-repair":
+                    assert selected.version.startswith(application.version + ".repair.")
                 assert selected.pid is not None
                 slot = application.root / "versions" / selected.version
                 if attempt:

@@ -99,6 +99,7 @@ def test_application_update_reuses_complete_setup_without_legacy_fallback(
     monkeypatch.setattr(update, "acquire", acquire)
     monkeypatch.setattr(update, "prepare_footprint", prepare)
     monkeypatch.setattr(footprints, "plan", plan)
+    monkeypatch.setattr(footprints, "select_generation", lambda application, current: application)
     monkeypatch.setattr(footprints, "install", install)
     result = self_install.self_update(root=root, dry_run=phase == "dry-run")
     assert result.previous == previous
@@ -147,6 +148,8 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
         }))
         (app / "application.json").write_text(json.dumps({
             "name": "worktree-manager", "commands": ["worktree-manager"],
+            "module": "worktree_manager", "default_directory": ".worktree-manager",
+            "setup": [], "start": [],
             "root_environment": "WORKTREE_MANAGER_ROOT",
             "construction": {"runtime_version": "2", "identity": {"runtime_source": {
                 "source_commit": commit, "source_tree": tree,
@@ -173,6 +176,120 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
     assert (root / "current-version").read_text() == ("1" if fail_setup else "2")
     assert workspace and not workspace[0].exists()
     assert prepared_inputs and not prepared_inputs[0].exists()
+
+
+@pytest.mark.parametrize("damage", [
+    "missing", "truncated", "utf8", "shape", "commands", "oversized",
+    "conflict", "incoming", "incoming-module", "indirect",
+])
+def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    root = tmp_path / "worktree-manager"
+    footprint = tmp_path / "prepared"
+    app = footprint / "apps" / "worktree-manager"
+    (app / "bin").mkdir(parents=True)
+    commit, tree = "a" * 40, "b" * 40
+    declaration = {
+        "name": "worktree-manager", "commands": ["worktree-manager"],
+        "module": "worktree_manager", "root_environment": "WORKTREE_MANAGER_ROOT",
+        "default_directory": ".worktree-manager", "setup": [], "start": [],
+        "construction": {"runtime_version": "2", "identity": {"runtime_source": {
+            "source_commit": commit, "source_tree": tree,
+        }}},
+    }
+    (footprint / "footprint.json").write_text(json.dumps({
+        "schema": "copilot-extensions.application-footprint", "version": 1,
+        "apps": [{"name": "worktree-manager", "version": "2", "dependencies": []}],
+    }), encoding="utf-8")
+    (app / "application.json").write_text(json.dumps(declaration), encoding="utf-8")
+    for name in ("pyproject.toml", "uv.lock"):
+        (app / name).write_text("# fixture\n", encoding="utf-8")
+    (app / "bin" / "setup.ps1").write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$slot = Split-Path -Parent $PSScriptRoot\n"
+        "if ($args -notcontains '--stage') {\n"
+        "  Set-Content -LiteralPath (Join-Path $env:WORKTREE_MANAGER_ROOT 'current-version') "
+        "-Value (Split-Path -Leaf $slot)\n"
+        "}\n", encoding="utf-8",
+    )
+    (app / "bin" / "setup.sh").write_text(
+        '#!/bin/sh\nset -eu\nif [ "${1:-}" != "--stage" ]; then\n'
+        '  basename "$(dirname "$(dirname "$0")")" > "$WORKTREE_MANAGER_ROOT/current-version"\n'
+        "fi\n", encoding="utf-8",
+    )
+    old = root / "versions" / "2"
+    shutil.copytree(app, old)
+    (root / "current-version").write_text("2\n", encoding="utf-8")
+    (root / "durable-state").write_bytes(b"preserved")
+    metadata = old / "application.json"
+    if damage == "missing":
+        metadata.unlink()
+    elif damage == "truncated":
+        metadata.write_bytes(b'{"commands": [')
+    elif damage == "utf8":
+        metadata.write_bytes(b"\xff")
+    elif damage == "shape":
+        metadata.write_bytes(b"[]")
+    elif damage == "commands":
+        metadata.write_text(json.dumps({**declaration, "commands": []}), encoding="utf-8")
+    elif damage == "oversized":
+        metadata.write_bytes(b"x" * 65537)
+    elif damage == "conflict":
+        metadata.write_text(json.dumps({**declaration, "module": "other_owner"}), encoding="utf-8")
+    elif damage == "incoming-module":
+        (app / "application.json").write_text(json.dumps({
+            **declaration, "module": "not a module",
+        }), encoding="utf-8")
+    elif damage == "indirect":
+        original = Path.lstat
+
+        def indirect(path: Path, *args: Any, **kwargs: Any) -> Any:
+            info = original(path, *args, **kwargs)
+            if path == metadata:
+                return SimpleNamespace(
+                    st_mode=info.st_mode,
+                    st_file_attributes=getattr(info, "st_file_attributes", 0) | 0x400,
+                )
+            return info
+
+        monkeypatch.setattr(Path, "lstat", indirect)
+    else:
+        (app / "application.json").write_bytes(b'{"commands": [')
+    before = {path.relative_to(old): (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in old.rglob("*") if path.is_file()}
+    source = RuntimeSource("dev", str(tmp_path / "upstream"), allow_dev=True)
+    source_config.set_source(repo=source.repo, ref="dev", root=root)
+
+    @contextmanager
+    def acquire(*args: Any, **options: Any) -> Iterator[ResolvedSource]:
+        yield ResolvedSource(source, tmp_path / "checkout", commit, tree, commit, "c" * 40)
+
+    monkeypatch.setattr(update, "acquire", acquire)
+    monkeypatch.setattr(update, "preparer", lambda: tmp_path / "trusted-tool")
+    monkeypatch.setattr(update, "prepare_footprint", lambda *args, **options: footprint)
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *args, **options: {})
+    monkeypatch.setattr(self_install, "self_install", lambda **options: pytest.fail("legacy constructor"))
+    result = self_install.self_update(root=root)
+    if damage in {"conflict", "incoming", "incoming-module", "indirect"}:
+        assert result.action == "error"
+        assert (root / "current-version").read_text(encoding="utf-8").strip() == "2"
+        assert list((root / "versions").iterdir()) == [old]
+    else:
+        assert result.action == "updated", result.reason
+        assert result.version is not None and result.version.startswith("2.repair.")
+        repaired = root / "versions" / result.version
+        assert (repaired / "application.json").read_bytes() == (app / "application.json").read_bytes()
+        repeated = self_install.self_update(root=root)
+        assert repeated.action == "already-current", repeated.reason
+        assert repeated.version == result.version
+        assert (root / "current-version").read_text(encoding="utf-8").strip() == result.version
+        assert {path for path in (root / "versions").iterdir() if not path.name.startswith(".")} == {
+            old, repaired,
+        }
+    assert (root / "durable-state").read_bytes() == b"preserved"
+    assert {path.relative_to(old): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in old.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize("case", ["missing-git", "auth"])

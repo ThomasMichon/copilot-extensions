@@ -60,6 +60,17 @@ def test_legacy_version_slot_without_application_keeps_legacy_default(
     assert source_config.default_root() == tmp_path / "home" / ".worktree-manager"
 
 
+def test_missing_application_declaration_does_not_redirect_configuration_to_legacy(
+    application: Path,
+) -> None:
+    (application / "application.json").unlink()
+    (application / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    (application / "bin").mkdir()
+    for name in ("setup.ps1", "setup.sh"):
+        (application / "bin" / name).write_text("# fixture\n", encoding="utf-8")
+    assert source_config.default_root() == application.parent.parent
+
+
 def test_standalone_configuration_keeps_prepackage_bootstrap(tmp_path: Path) -> None:
     source_config.set_source(repo="https://example.invalid/bootstrap.git", root=tmp_path / ".worktree-manager")
     environment = {key: value for key, value in os.environ.items() if key != "WORKTREE_MANAGER_ROOT"}

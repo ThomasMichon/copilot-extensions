@@ -57,7 +57,7 @@ def is_application(root: Path) -> bool:
     selected = current_version(root)
     return bool(
         selected and re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", selected)
-        and (root / "versions" / selected / "application.json").is_file()
+        and runtime_identity.is_application_slot(root / "versions" / selected)
     )
 
 
@@ -116,6 +116,7 @@ def update(root: Path, *, repo: str, ref: str, dry_run: bool) -> SelfUpdateResul
                 or identity.get("source_tree") != resolved.tree
             ):
                 raise ValueError("Manager footprint differs from its independent source selection")
+            application = application_footprints.select_generation(application, previous)
             version = application.version
             if dry_run:
                 return self_install.SelfUpdateResult(
