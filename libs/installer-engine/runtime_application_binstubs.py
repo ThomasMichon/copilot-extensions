@@ -105,6 +105,37 @@ def slot_binstubs(
     return result
 
 
+def _launcher_root(root: Path) -> Path:
+    value = str(root)
+    if value.startswith("\\\\?\\"):
+        ordinary = value[4:]
+        if ordinary[:4].casefold() == "unc\\":
+            candidate = "\\\\" + ordinary[4:]
+            components = ordinary[4:].split("\\")
+            if len(components) < 2 or not all(components[:2]):
+                return root
+        elif re.match(r"[A-Za-z]:\\", ordinary):
+            candidate = ordinary
+            components = ordinary[3:].split("\\")
+        else:
+            return root
+        if components[-1] == "":
+            components.pop()
+        for component in components:
+            if (
+                not component or component in {".", ".."} or component.endswith((".", " "))
+                or re.search(r'[<>:"/|?*\x00-\x1f]', component)
+                or re.fullmatch(
+                    r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]"
+                    r"|LPT[1-9\u00b9\u00b2\u00b3])(?:[ .].*)?",
+                    component, re.IGNORECASE,
+                )
+            ):
+                return root
+        return Path(candidate)
+    return root
+
+
 def global_binstubs(
     name: str, root_environment: str, default_directory: str, *, root: Path | None = None,
 ) -> dict[str, str]:
@@ -114,6 +145,8 @@ def global_binstubs(
         or not re.fullmatch(r"\.[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*", default_directory)
     ):
         raise ValueError("global launchers require an ordinary app and root binding")
+    if root is not None:
+        root = _launcher_root(root)
     shell_root = (
         f'root="${{{root_environment}:-$HOME/{default_directory}}}"\n' if root is None else
         f'root="${{{root_environment}:-}}"\n'

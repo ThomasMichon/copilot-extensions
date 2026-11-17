@@ -296,8 +296,8 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP "mcp-headed-mux-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile "$archive" -TimeoutSeconds 120
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
+          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/psmux/psmux/releases/download/v3.4.0/psmux-v3.4.0-windows-x64.zip' -OutFile "$archive" -TimeoutSeconds 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721') {
             throw 'Pinned native mux archive digest mismatch'
           }
           Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root 'psmux')

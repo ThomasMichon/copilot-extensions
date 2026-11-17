@@ -1,22 +1,27 @@
 import json
 import shutil
 from pathlib import Path
+import time
 
 import pytest
 
+from agent_remote_driver import mux_creation
 from agent_worktrees import config, launch_seed_exec, session_shell, sessions, sessions_pane_args as transport
 from test_session_shell import launch as launch
 
+LaunchFixture = tuple[Path, Path, Path]
+StartupFixture = tuple[Path, Path, session_shell.SessionShell]
+
 
 @pytest.fixture
-def startup(launch, monkeypatch):
+def startup(launch: LaunchFixture, monkeypatch: pytest.MonkeyPatch) -> StartupFixture:
     record, runtime, _assets = launch
     scripts = runtime / "scripts"
     scripts.mkdir()
     canonical = Path(__file__).resolve().parents[1] / "scripts"
     for name in (
         "default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
-        "reconcile-machine-settings.ps1",
+        "reconcile-machine-settings.ps1", "native-seed-process.ps1", "native-seed-process.cs",
     ):
         shutil.copy2(canonical / name, scripts / name)
     monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
@@ -27,7 +32,7 @@ def startup(launch, monkeypatch):
     return record, runtime, prepared
 
 
-def setup_command(prepared, *, wrapped=True):
+def setup_command(prepared: session_shell.SessionShell, *, wrapped: bool = True) -> list[str]:
     command = [
         "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(prepared.wrapper),
         "-RuntimePython", "installation-python.exe", "-NativeArgumentsJson", '{"args":[""]}',
@@ -38,7 +43,9 @@ def setup_command(prepared, *, wrapped=True):
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
-def test_final_serialization_retains_typed_setup_until_pane_build(startup, launch, wrapped):
+def test_final_serialization_retains_typed_setup_until_pane_build(
+    startup: StartupFixture, launch: LaunchFixture, wrapped: bool,
+) -> None:
     _record, runtime, prepared = startup
     _record, _runtime, pane_assets = launch
     command = setup_command(prepared, wrapped=wrapped)
@@ -49,7 +56,8 @@ def test_final_serialization_retains_typed_setup_until_pane_build(startup, launc
     ]
     command[-1] = json.dumps({"args": ["", "two words", "2026-01-01", "'quote'", "--", "; $literal"]})
     original = list(command)
-    assert Path(command[launch_seed_exec.native_setup_index(command)]) == prepared.wrapper
+    index = launch_seed_exec.native_setup_index(command)
+    assert index is not None and Path(command[index]) == prepared.wrapper
     pane = transport.file_mux_pane_cmd(str(pane_assets / "pane-wrapper.ps1"), ["-AwWt", "wt"], cmd=command)
     outer = Path(pane[-1][1:-1].replace("''", "'"))
     compact = json.loads(outer.read_text())["argv"][2:]
@@ -70,7 +78,7 @@ def test_final_serialization_retains_typed_setup_until_pane_build(startup, launc
 
 
 @pytest.mark.parametrize("change", ["installed", "old", "custom", "host", "options", "empty"])
-def test_unqualified_startup_keeps_original_command(startup, change):
+def test_unqualified_startup_keeps_original_command(startup: StartupFixture, change: str) -> None:
     _record, runtime, prepared = startup
     command = setup_command(prepared)
     if change == "installed":
@@ -90,13 +98,15 @@ def test_unqualified_startup_keeps_original_command(startup, change):
     assert not (prepared.directory / "pane-args").exists()
 
 
-def test_failed_outer_publication_removes_its_startup_handoff(startup, launch, monkeypatch):
+def test_failed_outer_publication_removes_its_startup_handoff(
+    startup: StartupFixture, launch: LaunchFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _record, _runtime, prepared = startup
     _record, _runtime, pane_assets = launch
     write = transport._write_manifest
-    manifests = []
+    manifests: list[Path] = []
 
-    def fail_outer(wrapper, args):
+    def fail_outer(wrapper: str, args: list[str]) -> Path:
         if manifests:
             raise OSError("outer publication failed")
         manifests.append(write(wrapper, args))
@@ -111,14 +121,16 @@ def test_failed_outer_publication_removes_its_startup_handoff(startup, launch, m
     assert not manifests[0].exists()
 
 
-def test_indirect_startup_asset_refuses_before_serialization(startup, monkeypatch):
+def test_indirect_startup_asset_refuses_before_serialization(
+    startup: StartupFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _record, _runtime, prepared = startup
     plain = session_shell._plain
 
-    def reject(path, **kwargs):
+    def reject(path: Path, *, directory: bool = False) -> None:
         if path.name == "launch-command.ps1":
             raise ValueError("linked startup wrapper")
-        return plain(path, **kwargs)
+        plain(path, directory=directory)
 
     monkeypatch.setattr(session_shell, "_plain", reject)
     with pytest.raises(ValueError, match="linked startup wrapper"):
@@ -126,7 +138,7 @@ def test_indirect_startup_asset_refuses_before_serialization(startup, monkeypatc
     assert not (prepared.directory / "pane-args").exists()
 
 
-def test_cleanup_refuses_another_shells_manifest(startup):
+def test_cleanup_refuses_another_shells_manifest(startup: StartupFixture) -> None:
     record, runtime, prepared = startup
     compact = session_shell.startup_command(setup_command(prepared))
     other = session_shell.prepare(
@@ -140,7 +152,9 @@ def test_cleanup_refuses_another_shells_manifest(startup):
     assert not Path(compact[-1]).exists()
 
 
-def test_uncertain_creation_retains_outer_and_startup_handoffs(startup, launch, monkeypatch):
+def test_uncertain_creation_retains_outer_and_startup_handoffs(
+    startup: StartupFixture, launch: LaunchFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _record, _runtime, prepared = startup
     _record, _runtime, pane_assets = launch
     argv = transport.file_mux_pane_cmd(
@@ -149,11 +163,11 @@ def test_uncertain_creation_retains_outer_and_startup_handoffs(startup, launch, 
     outer = Path(argv[-1][1:-1].replace("''", "'"))
     inner = Path(json.loads(outer.read_text())["argv"][-1])
 
-    def uncertain(arguments, **kwargs):
+    def uncertain(arguments: list[str], **kwargs: object) -> None:
         arguments.extend(argv)
-        raise sessions.mux_creation.CreationUncertain("dispatched; outcome unknown")
+        raise mux_creation.CreationUncertain("dispatched; outcome unknown")
 
-    monkeypatch.setattr(sessions.mux_creation, "run_or_join", uncertain)
+    monkeypatch.setattr(mux_creation, "run_or_join", uncertain)
     monkeypatch.setattr(sessions, "_mux_bin", lambda _mux: "psmux.exe")
     try:
         result = sessions.mux_new_session("wt", str(prepared.directory), ["program"], mux="psmux")
@@ -165,13 +179,15 @@ def test_uncertain_creation_retains_outer_and_startup_handoffs(startup, launch, 
     assert not outer.exists() and not inner.exists()
 
 
-def test_startup_handoff_uses_existing_registered_expiry(startup, monkeypatch):
+def test_startup_handoff_uses_existing_registered_expiry(
+    startup: StartupFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
 
     _record, _runtime, prepared = startup
     compact = session_shell.startup_command(setup_command(prepared))
     manifest = Path(compact[-1])
-    monkeypatch.setattr(transport.time, "time", lambda: 200000.0)
+    monkeypatch.setattr(time, "time", lambda: 200000.0)
     os.utime(manifest, (200000 - transport.PANE_ARGS_MAX_AGE, 200000 - transport.PANE_ARGS_MAX_AGE))
     transport.sweep_mux_pane_args()
     assert manifest.exists()

@@ -13,10 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from machine_transport import detect_platform
 
 from agent_worktrees import __main__ as main
 from agent_worktrees import activity, config as cfg, launch_seed_state
-from agent_worktrees import profile_assignment, resolve_cli, sessions, tracking
+from agent_worktrees import git_ops, profile_assignment, resolve_cli, sessions, tracking
 from agent_worktrees.launch_progress import preview_mode, step
 
 pytestmark = pytest.mark.guard
@@ -42,18 +43,19 @@ def _snapshot(root: Path) -> dict[str, tuple[bytes, int] | None]:
 def case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: None) -> PreviewCase:
     anchor = tmp_path / "anchor"
     anchor.mkdir()
-    worktree = tmp_path / "checkout"
+    worktree = tmp_path / "wt-preview"
     worktree.mkdir()
     config = cfg.Config(
-        srcroot=str(tmp_path), machine="test", platform=cfg.detect_platform(),
+        srcroot=str(tmp_path), machine="test", platform=detect_platform(),
         repo_name="demo", auto_fast_forward=False,
         repos={"demo": cfg.RepoConfig(
-            anchor=str(anchor), worktree_root=str(tmp_path / "children"),
+            anchor=str(anchor), worktree_root=str(tmp_path),
             launch={"windows": ["copilot"], "linux": ["copilot"]},
             session_env={"PREVIEW_CHECK": "{work_dir}"},
         )},
     )
     cfg.set_active_project("demo")
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path)
     session_id = "00000000-0000-0000-0000-000000000001"
     session_root = tmp_path / "session-state"
     session_dir = session_root / session_id
@@ -74,6 +76,7 @@ def case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: No
     record = tracking.load_record(path)
     result = PreviewCase(tmp_path, config, record)
     monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: result.config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *args, **kwargs: result.config)
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: {})
     monkeypatch.setattr(sessions, "verify_worktree_active", lambda *args: sessions.LiveVerdict())
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
@@ -226,23 +229,23 @@ def test_foreign_space_preview_still_refuses(
     case: PreviewCase, monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str], json_mode: bool,
 ) -> None:
-    platform = case.config.platform
-    foreign = "wsl" if platform == "windows" else "windows"
-    entries = {
-        name: cfg.MachineEntry(
-            key=name, display_name=name, execution_platform=execution_platform,
-            hostname="same-physical-host", physical_host="same-physical-host",
-        )
-        for name, execution_platform in (("test", platform), ("foreign", foreign))
-    }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: entries)
-    data = yaml.safe_load(case.record.yaml_path.read_text(encoding="utf-8"))
-    data.update(machine="foreign", platform=foreign)
-    case.record.yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    current_platform = case.config.platform
+    foreign = "wsl" if current_platform == "windows" else "windows"
+    reporter = case.record._reporting_context
+    assert reporter is not None
+    monkeypatch.setattr(
+        tracking, "load_record",
+        lambda path, **kwargs: dataclasses.replace(
+            case.record,
+            _reporting_context=dataclasses.replace(
+                reporter, environment=foreign,
+            ),
+        ),
+    )
     before = _snapshot(case.root)
     for _ in range(2):
         assert _resolve(case, json_mode=json_mode) == 3
-        assert "different execution space" in json.loads(capfd.readouterr().out)["error"]
+        assert "reporter observations belong to another execution platform" in json.loads(capfd.readouterr().out)["error"]
         assert _snapshot(case.root) == before
 
 
@@ -289,7 +292,8 @@ def test_manual_and_replayed_profile_previews_retain_launch_details(
             case.record.yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
         before = _snapshot(case.root)
         for _ in range(2):
-            assert _resolve(case, **({"profile": "choice"} if manual else {})) == 0
+            code = _resolve(case, profile="choice") if manual else _resolve(case)
+            assert code == 0
             plan = json.loads(capfd.readouterr().out)["launch"]
             assert plan["cmd"][plan["cmd"].index("--model") + 1] == "choice"
             assert plan["env"]["PROFILE_ENV"] == "choice"
@@ -327,7 +331,8 @@ def test_seed_snapshot_preserves_revision_fence_without_a_writer_lock(
         plan = json.loads(capfd.readouterr().out)["launch"]
         assert plan["seed_kind"] == "new" and plan["seed_id"] == "preview"
         assert _snapshot(case.root) == before
-    assert launch_seed_state.peek(case.record.yaml_path).seed_id == "superseded"
+    seed = launch_seed_state.peek(case.record.yaml_path)
+    assert seed is not None and seed.seed_id == "superseded"
     assert case.record.yaml_path.with_suffix(".lock").exists()
 
 
@@ -410,7 +415,7 @@ def test_base_preview_preserves_stale_git_index(
     capfd: pytest.CaptureFixture[str], json_mode: bool,
 ) -> None:
     anchor = Path(case.config.default_repo.anchor)
-    git = main.git_ops.git
+    git = git_ops.git
     git("init", "--quiet", cwd=anchor, isolated_repository=True, timeout=10)
     tracked = anchor / "tracked.txt"
     tracked.write_text("unchanged content\n", encoding="utf-8")
@@ -436,7 +441,7 @@ def test_base_preview_preserves_stale_git_index(
         assert index.stat().st_mtime_ns == index_mtime
         assert _snapshot(case.root) == before
 
-    assert main.git_ops.get_dirty_files(anchor) == []
+    assert git_ops.get_dirty_files(anchor) == []
     assert index.read_bytes() != index_bytes
     assert index.stat().st_mtime_ns != index_mtime
 
@@ -469,10 +474,10 @@ main._load_full_command_surface()
 root = Path(sys.argv[1])
 cfg.set_active_project("demo")
 cfg.tracking_dir = lambda: root / "worktrees"
-cfg.project_dir = lambda name=None: root / ".demo"
+cfg.project_dir = lambda name=None: root
 config = cfg.Config(srcroot=str(root), machine="test", platform=cfg.detect_platform(), repo_name="demo",
     repos={"demo": cfg.RepoConfig(anchor=str(root / "anchor"),
-        worktree_root=str(root / "children"), launch={"windows": ["copilot"], "linux": ["copilot"]})})
+        worktree_root=str(root), launch={"windows": ["copilot"], "linux": ["copilot"]})})
 cfg.load_config = lambda *args, **kwargs: config
 cfg.load_machines_yaml = lambda *args, **kwargs: {}
 activity.log_path = lambda: root / "logs" / "activity.jsonl"

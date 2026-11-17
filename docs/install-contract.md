@@ -3664,6 +3664,14 @@ The existing format fixes *what the binstub is*. Each Windows entry point in
   bare `CreateProcess`/`PATHEXT` spawn, `cmd /c` Windows Terminal profiles, ssh
   launchers) that cannot resolve a `.ps1`. Forwards with `%*`.
 
+Standalone application front doors render ordinary Windows file-root aliases
+consistently: extended drive and `UNC` spellings become their ordinary drive
+and UNC forms before quoting only when their components retain ordinary Win32
+semantics. Trailing-dot/space names, reserved devices, traversal and alternate
+streams retain their extended spelling; other device namespaces stay unchanged.
+This is launcher presentation, not a relaxation of physical-root or ownership
+checks; explicit environment root overrides retain their existing precedence.
+
 ### Why `.ps1` is primary, not `.cmd`
 
 A `.cmd` forwarding `%*` **re-tokenizes** the command line through cmd.exe's
