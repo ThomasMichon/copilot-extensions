@@ -18,8 +18,8 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** publish the qualified scoped-fetch revision and complete exact-source
-review and required CI.
+**Now:** resolve the final-head review's four policy-refresh edge cases with
+measured negatives, then repeat impacted qualification and exact-source review/CI.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -209,6 +209,27 @@ does not claim these newly exposed cases already passed.
   canonical test and runtime-verification phases all passed. Subsequent
   journal-only updates do not change those tested runtime/test bytes.
   Final-head review, required CI, actual merge and finite acceptance remain open.
+
+### 2026-11-17 - Policy refresh edge cases
+
+- Review 5934856436 against `b6a4adb4545789a07fdb7cbe12c887e4ddbd7467`
+  recognizes all six prior threads as resolved, but reports four new Medium
+  findings. Required CI is green; the review gate is not satisfied.
+- Added focused real-Git negatives for direct/non-symbolic optional remote
+  HEAD, deleted bootstrap, deleted configured base, a non-origin creation
+  remote whose policy tracking namespace remains `origin`, and an already
+  tracked but stale newly declared policy source. Runtime is still unchanged;
+  no new fail-first result is claimed yet.
+- Refine the previous one-fetch assumption: related refs must be independently
+  refreshable when one has disappeared. Attempt each required source/destination
+  ref once within one shared existing fetch deadline, preserve the first
+  literal failure, and still refresh surviving related inputs. This is not a
+  retry policy or permission for an ordinary broad fetch.
+- Keep the committed reader's existing `origin` source, candidate precedence
+  and single policy hop. Reuse its parser/reader to refresh that declared hop
+  before consuming an already tracked stale copy; do not duplicate policy
+  resolution or discover remote HEAD over the network. A non-symbolic optional
+  bootstrap must not prevent the configured base's refresh.
 
 ### 2026-11-17 - Finite correction validated locally
 

@@ -106,8 +106,9 @@ def test_preparation_refreshes_only_the_configured_base(
         assert _git("rev-parse", "trunk", cwd=anchor) == old_base
 
 
+@pytest.mark.parametrize("transition", ["new-ref", "stale-ref", "deleted-base", "non-origin"])
 def test_preparation_preserves_committed_policy_branch_discovery(
-    local_repositories: tuple[Path, Path],
+    local_repositories: tuple[Path, Path], transition: str,
 ) -> None:
     seed, anchor = local_repositories
     policy_path = ".agent-worktrees/config.yaml"
@@ -122,30 +123,96 @@ def test_preparation_preserves_committed_policy_branch_discovery(
     candidates = (Path(policy_path),)
     initial = inrepo_config_source.load_inrepo_config_from_committed_ref(anchor, candidates)
     assert initial["default_branch"] == "dev"
+    if transition == "stale-ref":
+        _git("branch", "stable", cwd=seed)
+        _git("push", "origin", "stable", cwd=seed)
+        _git(
+            "fetch", "origin", "+refs/heads/stable:refs/remotes/origin/stable", cwd=anchor,
+        )
     old_dev = _git("rev-parse", "origin/dev", cwd=anchor)
     old_side = _git("rev-parse", "origin/side", cwd=anchor)
-    _git("checkout", "-b", "stable", cwd=seed)
+    if transition == "stale-ref":
+        _git("checkout", "stable", cwd=seed)
+    else:
+        _git("checkout", "-b", "stable", cwd=seed)
     new_base = _commit(seed, policy_path, "default_branch: stable\n")
     _git("checkout", "trunk", cwd=seed)
     _commit(seed, policy_path, "default_branch: stable\n")
     _git("push", "origin", "trunk", "stable", cwd=seed)
+    if transition == "deleted-base":
+        _git("push", "origin", "--delete", "dev", cwd=seed)
+    remote = "origin"
+    if transition == "non-origin":
+        origin_url = _git("remote", "get-url", "origin", cwd=anchor)
+        _git("remote", "remove", "origin", cwd=anchor)
+        _git("update-ref", "refs/remotes/origin/side", old_side, cwd=anchor)
+        _git("remote", "add", "upstream", origin_url, cwd=anchor)
+        _git(
+            "config", "--replace-all", "remote.upstream.fetch",
+            "+refs/heads/*:refs/remotes/origin/*", cwd=anchor,
+        )
+        _git(
+            "fetch", "upstream",
+            "+refs/heads/trunk:refs/remotes/origin/trunk",
+            "+refs/heads/dev:refs/remotes/origin/dev", cwd=anchor,
+        )
+        _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk", cwd=anchor)
+        _git("checkout", "trunk", cwd=seed)
+        _commit(seed, policy_path, "default_branch: stable\nmarker: refreshed\n")
+        _git("push", "origin", "trunk", cwd=seed)
 
     prepared = git_ops.prepare_worktree_base(
-        anchor, remote="origin", default_branch="dev", fast_forward_anchor=False,
+        anchor, remote=remote, default_branch="dev", fast_forward_anchor=False,
     )
 
-    assert prepared.fetched is True
+    assert prepared.fetched is (transition != "deleted-base")
+    assert (prepared.fetch_error is not None) is (transition == "deleted-base")
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == old_dev
     discovered = inrepo_config_source.load_inrepo_config_from_committed_ref(anchor, candidates)
     assert discovered["default_branch"] == "stable"
+    if transition == "non-origin":
+        assert discovered.get("marker") == "refreshed"
     following = git_ops.prepare_worktree_base(
-        anchor, remote="origin", default_branch=discovered["default_branch"],
+        anchor, remote=remote, default_branch=discovered["default_branch"],
         fast_forward_anchor=False,
     )
     assert following.fetched is True
-    assert following.start_point == "origin/stable"
+    assert following.start_point == f"{remote}/stable"
     assert _git("rev-parse", following.start_point, cwd=anchor) == new_base
     assert _git("rev-parse", "origin/side", cwd=anchor) == old_side
+
+
+@pytest.mark.parametrize("policy_head", ["direct", "deleted"])
+def test_preparation_refreshes_base_despite_unavailable_policy_head(
+    local_repositories: tuple[Path, Path], policy_head: str,
+) -> None:
+    seed, anchor = local_repositories
+    if policy_head == "direct":
+        _git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD", cwd=anchor)
+        _git("update-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk", cwd=anchor)
+    else:
+        _git("branch", "retired-policy", cwd=seed)
+        _git("push", "origin", "retired-policy", cwd=seed)
+        _git(
+            "fetch", "origin",
+            "+refs/heads/retired-policy:refs/remotes/origin/retired-policy", cwd=anchor,
+        )
+        _git(
+            "symbolic-ref", "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/retired-policy", cwd=anchor,
+        )
+        _git("push", "origin", "--delete", "retired-policy", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert prepared.start_point == "origin/trunk"
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert prepared.fetched is (policy_head == "direct")
+    assert (prepared.fetch_error is not None) is (policy_head == "deleted")
 
 
 def test_preparation_caller_reports_literal_offline_failure_and_last_known_base(
