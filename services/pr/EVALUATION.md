@@ -48,6 +48,8 @@ Missing members/facts, incomplete inventory, mixed cache generations, unknown
 reference history, expired/buffered evidence and mismatched candidates never
 become a successful action comparison. A field difference records two observed
 values; separate reads can race, so it is not itself a service-defect verdict.
+Buffered actions must satisfy both their original expiry and the comparison's
+current freshness budget; refreshed pull facts cannot renew an older action.
 Keep acquisition times and original cursors with the external evidence owner.
 Do not silently rebaseline or repeat an uncertain effect to make reports agree.
 

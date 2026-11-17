@@ -126,6 +126,24 @@ def test_expired_reference_buffered_action_and_incoherent_pages_are_not_disagree
     assert changed.action == "unavailable" and "moved" in changed.reason
 
 
+def test_buffered_action_honors_a_stricter_comparison_freshness_budget(tmp_path: Path) -> None:
+    selected = fixtures.setup(tmp_path)
+    fixtures.observe(selected)
+    buffered = fixtures.request(selected)
+    selected[0][0] = 1100
+    fixtures.observe(selected)
+    pulls = fixtures.request(selected, "query", number=7)
+    assert pulls["pulls"][0]["observed_at"] == 1100
+    assert buffered["next_actions"][0]["expires_at"] > 1100
+    result = example.compare(
+        pulls, buffered, reference(selected, observed_at=1100),
+        identity=selected[2], consumer="consumer", reviewer="reviewer", number=7,
+        now=1100, max_age_seconds=60,
+    )
+    assert set(result.facts.values()) == {"agree"}
+    assert result.action == "stale" and "expired" in result.reason
+
+
 def test_reference_and_cached_scope_are_fenced_before_comparison(tmp_path: Path) -> None:
     selected = fixtures.setup(tmp_path)
     fixtures.observe(selected)

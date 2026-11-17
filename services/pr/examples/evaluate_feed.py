@@ -104,7 +104,10 @@ def compare(
         }
     ):
         return Comparison(number, facts, "unavailable", "action candidate differs")
-    if actions and not actions[0]["observed_at"] <= now < actions[0]["expires_at"]:
+    if actions and not (
+        actions[0]["observed_at"] <= now < actions[0]["expires_at"]
+        and now - actions[0]["observed_at"] < max_age_seconds
+    ):
         return Comparison(number, facts, "stale", "action evidence expired")
     author = native.get("author")
     if not isinstance(author, str) or not author.strip():
