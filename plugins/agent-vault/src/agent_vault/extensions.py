@@ -345,7 +345,10 @@ class ExtensionRegistry:
             try:
                 result = transport(request, timeout, ctx)
             except Exception as exc:
-                log.warning("Transport %r raised: %s", ranked.name, exc)
+                if on_selected is not None:
+                    log.warning("Extension transport failed during qualification")
+                else:
+                    log.warning("Transport %r raised: %s", ranked.name, exc)
                 continue
             if result is not None:
                 if on_selected is not None and not isinstance(result, dict):

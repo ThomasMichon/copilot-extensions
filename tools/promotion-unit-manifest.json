@@ -96,6 +96,10 @@
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_retained_extension_failure_never_reenters_transport_selection[declined]",
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_maintenance_projection_omits_only_an_unselected_database_default[False]",
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_maintenance_projection_omits_only_an_unselected_database_default[True]",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_qualification_logging_is_sanitized_without_changing_legacy_selection[True-True]",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_qualification_logging_is_sanitized_without_changing_legacy_selection[True-False]",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_qualification_logging_is_sanitized_without_changing_legacy_selection[False-True]",
+        "tools/promotion_unit_tests/test_vault_transport_order.py::test_qualification_logging_is_sanitized_without_changing_legacy_selection[False-False]",
         "tools/promotion_unit_tests/test_lifecycle_pins.py::test_pin_release_needs_both_receipt_settlement_and_original_exit[False-0]",
         "tools/promotion_unit_tests/test_lifecycle_pins.py::test_pin_release_needs_both_receipt_settlement_and_original_exit[True-0]",
         "tools/promotion_unit_tests/test_lifecycle_pins.py::test_pin_release_needs_both_receipt_settlement_and_original_exit[False-None]",
@@ -5522,7 +5526,7 @@
         "tools/promotion_unit_tests/test_vault_attachment_import.py": "bcf7e9c4a50b41913a8b3859e6d03356825767cc98a61b09e8e968aa1e0eca34",
         "plugins/agent-vault/src/agent_vault/cli.py": "304787d8d739c00615b5b6a93fc7f5ffa968968887c380b2e647fd7c847c8c5b",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
-        "tools/promotion_unit_tests/test_vault_transport_order.py": "0a500ff3c503016065eed52a953db3ff643c3380871dc28f4cea3b5d6c1978ba",
+        "tools/promotion_unit_tests/test_vault_transport_order.py": "2afbf9703e5244e71df06ef5ed0f09573cb199637276b3a5521897bc35036344",
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
         "tools/promotion_unit_tests/test_application_sources.py": "1250079b456ca5565211d8b2f889c46050276288fcd0f93e2d25b398eb06cb47",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",
@@ -6321,7 +6325,7 @@
         "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
         "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970",
         "plugins/agent-vault/src/agent_vault/transport_binding.py": "b6585c5d3b9396470439d15247c222cb7647b1952d9033c9cb524072d57440a7",
-        "plugins/agent-vault/src/agent_vault/extensions.py": "a5d1510f89750e93110a666292329562a542220e52e333fdebe99af20937e3a6",
+        "plugins/agent-vault/src/agent_vault/extensions.py": "b4da236e82fea4923932269ff377ba54a19853890c5145b71c22ce0f2bccec56",
         "plugins/agent-vault/src/agent_vault/config.py": "5cf6389c6d3d13a0e76e94485b30ce382320e4a676544ce0e7ce4325ad44b65e",
         "plugins/agent-vault/src/agent_vault/command_transport.py": "9653da567eb71a2da198785e41384ceaa7636baefd1684c753003a7b69fcf3c4"
     }

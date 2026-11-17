@@ -21,6 +21,8 @@ full-ping qualification. Per-entry requests invoke that retained callable or
 native endpoint directly, without rediscovery or re-entering extension fallback.
 A lost reply, exception or later `None` result is unconfirmed, never permission
 to try another route. Transport labels do not establish which callable was chosen.
+Qualification-time extension failures log a fixed warning, without the provider's
+name or exception text. Ordinary callers retain their existing logging.
 The CLI never activates
 a service, reads/prepares/migrates a local cache, copies keys or falls back to
 local protection after an unsupported provider or failed request.

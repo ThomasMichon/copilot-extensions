@@ -137,10 +137,7 @@ def test_legacy_strict_call_retains_its_existing_absent_advertisement_default(
     assert boundary.calls == ["discovery", "preferred", "legacy"]
 
 
-@pytest.mark.parametrize("failure", ["lost-reply", "declined"])
-def test_retained_extension_failure_never_reenters_transport_selection(
-    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
-) -> None:
+def transport_registry_method(warnings: list[object]) -> Callable[..., Any]:
     source = ROOT / "plugins/agent-vault/src/agent_vault/extensions.py"
     tree = ast.parse(source.read_bytes(), filename=str(source))
     registry = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "ExtensionRegistry")
@@ -148,12 +145,19 @@ def test_retained_extension_failure_never_reenters_transport_selection(
         node for node in registry.body if isinstance(node, ast.FunctionDef) and node.name == "try_transports"
     )
     future = next(node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "__future__")
-    warnings: list[object] = []
     namespace: dict[str, Any] = {
         "cast": cast, "ClientTransport": Callable[..., Any],
         "log": SimpleNamespace(warning=lambda *values: warnings.append(values)),
     }
     exec(compile(ast.Module(body=[future, method], type_ignores=[]), str(source), "exec"), namespace)
+    return cast(Callable[..., Any], namespace["try_transports"])
+
+
+@pytest.mark.parametrize("failure", ["lost-reply", "declined"])
+def test_retained_extension_failure_never_reenters_transport_selection(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    warnings: list[object] = []
     calls: list[str] = []
 
     def selected(request: dict[str, Any], _timeout: object, _context: object) -> dict[str, Any] | None:
@@ -174,7 +178,7 @@ def test_retained_extension_failure_never_reenters_transport_selection(
         ],
         _transports_after=[],
     )
-    instance.try_transports = MethodType(namespace["try_transports"], instance)
+    instance.try_transports = MethodType(transport_registry_method(warnings), instance)
     monkeypatch.setattr(boundary.extensions, "get_registry", lambda: instance)
     route = boundary.transport.CommandRoute()
     assert boundary.send(
@@ -187,6 +191,42 @@ def test_retained_extension_failure_never_reenters_transport_selection(
     assert calls == ["ping", "cache-maintenance"]
     assert boundary.calls == ["discovery"]
     assert warnings == []
+
+
+@pytest.mark.parametrize("retained", [True, False])
+@pytest.mark.parametrize("before_builtin", [True, False])
+def test_qualification_logging_is_sanitized_without_changing_legacy_selection(
+    retained: bool, before_builtin: bool,
+) -> None:
+    warnings: list[object] = []
+    calls: list[str] = []
+    selected: list[Callable[..., Any]] = []
+
+    def broken(*_arguments: object) -> NoReturn:
+        calls.append("broken")
+        raise RuntimeError("private-qualification-detail")
+
+    def available(*_arguments: object) -> dict[str, Any]:
+        calls.append("available")
+        return {"ok": True}
+
+    ranked = [
+        SimpleNamespace(name="private-transport-name", fn=broken),
+        SimpleNamespace(name="available", fn=available),
+    ]
+    instance = SimpleNamespace(
+        _transports_before=ranked if before_builtin else [],
+        _transports_after=[] if before_builtin else ranked,
+    )
+    invoke = MethodType(transport_registry_method(warnings), instance)
+    assert invoke(
+        {"action": "ping"}, 1.0, SimpleNamespace(),
+        before_builtin=before_builtin, on_selected=selected.append if retained else None,
+    )["ok"]
+    assert calls == ["broken", "available"]
+    assert selected == ([available] if retained else [])
+    assert len(warnings) == 1
+    assert ("private-" in str(warnings)) is (not retained)
 
 
 @pytest.mark.parametrize("explicit_null", [False, True])

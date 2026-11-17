@@ -165,6 +165,41 @@ def test_malformed_extension_qualification_refuses_without_fallback(
     assert cli.main(["--configuration-root", str(repository), "cache-populate"]) == 1
 
 
+def test_qualification_exception_diagnostics_do_not_escape_the_real_command(
+    selected: SelectedFixture, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = configure(selected, monkeypatch)
+    calls: list[str] = []
+    native_transport(monkeypatch, lambda _request: None)
+
+    def broken(request: dict[str, Any], *_arguments: object) -> None:
+        calls.append("broken:" + request["action"])
+        raise RuntimeError("fixture-private-qualification-detail")
+
+    def available(request: dict[str, Any], *_arguments: object) -> dict[str, Any]:
+        calls.append("available:" + request["action"])
+        if request["action"] == "ping":
+            return {"ok": True, "accepting_work": True, "cache_maintenance": cache_maintenance.describe()}
+        return {
+            "ok": True, "contract": cache_maintenance.CONTRACT, "version": 1,
+            "owner": "selected-service", "present": True,
+        }
+
+    selected[2].register_transport(
+        broken, name="fixture-private-transport-name", priority=10, before_builtin=True,
+    )
+    selected[2].register_transport(available, priority=20, before_builtin=True)
+    assert cli.main(["--configuration-root", str(repository), "cache-populate"]) == 0
+    output = capsys.readouterr()
+    assert calls == [
+        "broken:ping", "available:ping",
+        "available:cache-maintenance", "available:cache-maintenance",
+    ]
+    assert "Cached 2 credential(s), 0 failed" in output.out
+    assert "fixture-private-" not in caplog.text + output.out + output.err
+
+
 @pytest.mark.parametrize("failure", [
     "old-provider", "boolean-version", "wrong-owner", "unavailable",
     "rollback", "malformed-result", "needs-unlock",
