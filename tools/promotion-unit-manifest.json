@@ -5290,7 +5290,12 @@
         "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[resumed-fresh]",
         "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[receipt-miss]",
         "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[receipt-present]",
-        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[cached-admission]"
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[cached-admission]",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py::test_native_projection_precedes_roster_and_reuses_completed_inventory",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py::test_tmux_uses_read_only_view_of_the_original_owner",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py::test_cooperative_progress_uses_completion_based_cadence_and_no_reentry",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py::test_observation_scopes_restore_outer_owners_after_failure",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py::test_projected_formatter_marks_advisory_state_without_inventing_counts"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5638,7 +5643,11 @@
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py",
-        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py"
+        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
+        "plugins/agent-worktrees/src/agent_worktrees/observation_progress.py",
+        "plugins/agent-worktrees/src/agent_worktrees/monitor_projection_cache.py",
+        "plugins/agent-worktrees/src/agent_worktrees/mux_state_projection.py",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_presentation.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -5668,7 +5677,7 @@
         "libs/payload-invocation/runtime_admission.py": "41e856c4fcfbc5f98cb59cc4e5525da07b3afa9451e59905fe3f47fbbb68efbf",
         "tools/promotion_unit_tests/test_runtime_admission_delivery.py": "dbb56e0d18615ff20c03f3422f49e0ace70e57a1c49a73271c5bb6c34c2a03e8",
         "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py": "9886d39d2f23973999333f780b72e7ccf63ebd6bcf654e2942075159c299038f",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "440c130c9a1132fbb701c139dde722ebfa64f1de641e73165e2d4a3a15d91bac",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "edcfde8acf56828aa5be88d26a3d67ee807ae549fb4e1c9fb8fe445c256cf2a7",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
         "tools/promotion_unit_tests/test_hook_demand.py": "699e774bfd04d87fd4b4fd7e24f8188cfb7c51557b5bf4c14f7997f418d19a9c",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
@@ -5684,7 +5693,7 @@
         "worktree-manager/src/worktree_manager/source_config.py": "7d1ddf9c38da759e378bd5b24eef9005f4ac2606eb758128612c8b1d409717fd",
         "worktree-manager/src/worktree_manager/maintenance_policy.py": "956786f3f5a8006b468deca8e3f1e9c86ca5e87c0e284d6f9995508bbb7a0c56",
         "worktree-manager/src/worktree_manager/bootstrap_policy.py": "883749bc1a13e318506f2063cb912fc38f55837d498b0fa9e9e59529484388f3",
-        "tools/promotion_unit_tests/test_daemon_instance_creation.py": "ddaea149e0f95383bdc4e8af15ee8e6609da3096a8df2d8d1fa03d02eb2635cb",
+        "tools/promotion_unit_tests/test_daemon_instance_creation.py": "40472a864d01d1aa379cceb83b60e872e6b8db66ef442011cb3fcfc4c2c42156",
         "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "62eb1c8e321ab56e888dc155d9c4ecf9d175bc83ba633b4fc03ea7e0c6416150",
         "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py": "cd20ca0f3b49aff562300673ee6d6ef5352f6fb9630eebd17658ef78049accea",
         "plugins/agent-vault/src/agent_vault/config.py": "1432329b4a7725464b15618064fecc644983ae1e5a2f75559f5b1a6538dc461e",
@@ -6112,7 +6121,7 @@
         "tools/promotion_unit_tests/test_namespace_contract.py": "8e691a991ed59907727538ad3141ae5b6fb6f41ab7a123fc6c11127cfc87b46a",
         "tools/promotion_unit_tests/test_native_owned.py": "fa183e43ce186240c24ccaf475352ffd1dbeddd594999eb84a4050562d333d89",
         "tools/promotion_unit_tests/test_native_qualification_contract.py": "e108d1d598f95e04ccad78d48733adf0314ff6fa953673225de98eaf71c6b4f1",
-        "tools/promotion_unit_tests/test_native_qualification_owner.py": "bb7cc5bd6ec685abc1157829fcd871f84985de0521bd54dc749e64aafd91fb9c",
+        "tools/promotion_unit_tests/test_native_qualification_owner.py": "75e001f62ebb2bd64d9a314fdcbf4cdf5d105ef98b04b957734ba42ea53e75f5",
         "tools/promotion_unit_tests/test_native_qualification_receiver.py": "bf6551522a3c64c1e876e193cc71587d497446f68e40a0cfee65d730ef8d2f6d",
         "tools/promotion_unit_tests/test_owned_workspace.py": "e7a4e440078f8b96e311f574f78781712e8cf73692c32233a7808129d73088b1",
         "tools/promotion_unit_tests/test_owned_worktree.py": "b6a511fb903e3c60e5cd6183c9a6cc9e19360f1e2fd69787ecb4567d5ae2af42",
@@ -6215,7 +6224,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/runtime_paths.py": "31d75ff46f826bd23e92317488c457b6c42aee18f503906b66b66b0a22881b98",
         "plugins/agent-worktrees/src/agent_worktrees/__init__.py": "2f7f50572fc8353aeb7986e2f83f144aa34cd315b77ff28cced61bb038f65538",
         "plugins/agent-worktrees/src/agent_worktrees/codename_config.py": "4d9123d7ddf40489eb768958a61256e4cd72af25a8f25af541264cab19ca9cb2",
-        "plugins/agent-worktrees/src/agent_worktrees/config_cache.py": "0e27a514cdcf99802c74e46b98bdb3bd42accd8b9acc78ae80d30745536993c9",
+        "plugins/agent-worktrees/src/agent_worktrees/config_cache.py": "1a6c0f35240b409c47ca1437a8753c3f05520b7cc6596c9d240eac90b029d9c5",
         "plugins/agent-worktrees/src/agent_worktrees/creation_identity.py": "69502029b31f5c72c8edd61513770662a7ee2c7a6023e0ab52515d02f755f432",
         "plugins/agent-worktrees/src/agent_worktrees/disposition_history.py": "736fbfa24f1707ef175dd5a3982a8276b39f2dc3bf019cf5ba2caad0ccc9259a",
         "plugins/agent-worktrees/src/agent_worktrees/effort_focus.py": "a2a80f2a4421f068e3b24983b8023023da5ef7e4e98d06f93d9951be81646ff5",
@@ -6470,6 +6479,11 @@
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py": "18bf1ff704db6aefb593947f1b46c669f564d002669a2df4e816524df2ad57d9",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py": "f8180ab97c95b608991360ad33dc5a1d0678ba713bcbbc2cd80ab222b526f13e",
         "tools/promotion_unit_tests/test_retained_admission_work.py": "bdde7bac4e96079165d6b1bdf94735a8e7ddc9c43e2566fe51e9420d9bc9515e",
-        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba"
+        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba",
+        "plugins/agent-worktrees/src/agent_worktrees/monitor_projection_cache.py": "96a5d521df3272df471512a2d1a432d160d36f701f2fde53e08522fc5bc9760f",
+        "plugins/agent-worktrees/src/agent_worktrees/mux_state_projection.py": "5826df869af2e87b348ac05d7d10ba5e5bf16497ab203ee3b32d9ba8df37a057",
+        "plugins/agent-worktrees/src/agent_worktrees/observation_progress.py": "4df55d21de9e1e1376dce5c1581fcfbe2432af698e2293e6c7ea0205220a5b65",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_presentation.py": "acf90c0ffd1be276a25b52665648b22653b437e30ea0a32d02f75bbe6441d061",
+        "tools/promotion_unit_tests/test_mux_projection_progress.py": "ae5cf4218c1e2b81c536b89477ba2fac39489dc1d68fde253fb25301003acaa6"
     }
 }

@@ -16,7 +16,7 @@ from .status_monitor_idle import (
     _TRACKING_WRITE_SHUTDOWN_GRACE_S as _TRACKING_WRITE_SHUTDOWN_GRACE_S,
     _wait_for_tracking_write_idle as _wait_for_tracking_write_idle,
 )
-from .status_monitor_presentation import run_monitor_sweep
+from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
 
 if TYPE_CHECKING:
@@ -243,6 +243,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         return session
 
     segment_cache = status_segment_cache_type(cache_ttl)
+    presentation_progress = PresentationProgress(interval) if mux == "psmux" else None
     wake_event = threading.Event()
     installation_context = registry_paths.installation_context()
     repositories_runtime = repository_map.RepositoryMapRuntime(
@@ -861,6 +862,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     token,
                     my_prefix,
                     ctx_done,
+                    progress=presentation_progress,
+                    state_snapshot=lambda project: worktrees_runtime.handle({
+                        "contract_version": 1, "project": project, "passive": True,
+                    }),
                     interval=interval,
                     picker_projects=external_projects | worktrees_runtime.take_changed_projects(
                         resident_push.project_resolver(session_projects, segment_cache)),
@@ -878,6 +883,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     roster_publisher=lambda: publish_active_project(
                         worktrees_runtime, observe_records=allocation_linker.observe,
                         managed_mux_cache=managed_mux_runtime.cache,
+                        on_progress=presentation_progress,
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,

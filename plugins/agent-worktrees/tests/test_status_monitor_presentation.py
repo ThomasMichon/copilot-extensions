@@ -1,17 +1,29 @@
 """Successive native sweeps reach the real managed status publication seam."""
 
 from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from agent_remote_driver.mux_observation_types import Observation
 from agent_worktrees import __main__ as monitor
-from agent_worktrees import mux_link, mux_status_link, status_bar_cli
-from agent_worktrees import push_timeout
+from agent_worktrees import git_ops, mux_link, mux_status_link, status_bar_cli, tracking
+from agent_worktrees import config as cfg, push_timeout
 from agent_worktrees import status_monitor_presentation as presentation
+from agent_worktrees.observation_progress import NativeInventory, capture_inventory, progress_scope
 from agent_worktrees.status_monitor_presentation import run_monitor_sweep
+
+
+class UnloadedRecord(tracking.WorktreeRecord):
+    _loaded_record_subject: tuple[object, ...] | None = None
+
+
+def set_inventory(
+    monkeypatch: pytest.MonkeyPatch, collect: Callable[[str], NativeInventory | None],
+) -> None:
+    monkeypatch.setattr(monitor, "_monitor_list_sessions", capture_inventory(collect))
 
 
 class Segments:
@@ -20,16 +32,11 @@ class Segments:
     def observation_blocked(self, project: str, path: str) -> bool:
         return False
 
-    def get(self, path: str) -> str:
+    def get_cached(self, path: str) -> str | None:
         return self.value
 
-
-@pytest.fixture(autouse=True)
-def native_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(presentation, "observe_psmux", lambda session, **k: Observation(
-        "present", incarnation="$8:100" if session == "wt-two" else "$7:100", clients=1,
-    ))
-
+    def get(self, path: str) -> str:
+        pytest.fail("projection requested computation")
 
 def test_successive_native_sweeps_publish_full_payload_and_changed_segment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -42,7 +49,7 @@ def test_successive_native_sweeps_publish_full_payload_and_changed_segment(
         "observed_at": datetime.now(timezone.utc).isoformat(),
     })["applied"]
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
-    monkeypatch.setattr(monitor, "_monitor_list_sessions", lambda *a: {"wt-one": (1, "$7:100")})
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
     monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
     monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
     monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
@@ -57,7 +64,7 @@ def test_successive_native_sweeps_publish_full_payload_and_changed_segment(
     segments = Segments()
     ctx_done: set[str] = set()
     published: dict[tuple[str, str], str] = {}
-    options = {
+    options: dict[str, Any] = {
         "managed_mux_cache": cache, "segment_cache": segments,
         "published": published, "incarnations": {},
     }
@@ -81,7 +88,7 @@ def test_unknown_native_observation_does_not_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
-    monkeypatch.setattr(monitor, "_monitor_list_sessions", lambda *a: None)
+    set_inventory(monkeypatch, lambda *a: None)
     monkeypatch.setattr(
         mux_status_link, "publish_managed_session_status",
         lambda **k: pytest.fail("unknown native observation"),
@@ -90,6 +97,431 @@ def test_unknown_native_observation_does_not_publish(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         managed_mux_cache=mux_link.ManagedMuxCache(), segment_cache=Segments(),
     ) == -1
+
+
+def test_native_presentation_precedes_bulk_roster_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    requests: list[dict[str, Any]] = []
+    before_collection: list[list[dict[str, Any]]] = []
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    def collect_roster() -> None:
+        before_collection.append(list(requests))
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        picker_projects={"roster"}, roster_publisher=collect_roster,
+        managed_mux_cache=cache, segment_cache=Segments(),
+    ) == 1
+    assert len(before_collection) == 1
+    assert [request["mux_session"] for request in before_collection[0]] == ["wt-one"]
+
+
+def test_native_projection_reads_computed_segment_without_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    monkeypatch.setattr(
+        status_bar_cli, "_render_status_segment", lambda *a, **k: pytest.fail("Git renderer"),
+    )
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("Git classification"))
+    requests: list[dict[str, Any]] = []
+
+    class ComputedSegments(Segments):
+        def get_cached(self, path: str) -> str:
+            return "already-computed"
+
+        def get(self, path: str) -> str:
+            pytest.fail("projection requested computation")
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=cache, segment_cache=ComputedSegments(),
+    ) == 1
+    assert requests[0]["values"]["@aw_seg"] == "already-computed"
+
+
+@pytest.mark.parametrize("second_present", [True, False])
+@pytest.mark.parametrize("current", [True, False])
+def test_native_projection_batches_inventory_and_computed_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second_present: bool, current: bool,
+) -> None:
+    from agent_worktrees import sessions
+    from agent_worktrees.closure_descriptor import DESCRIPTOR_VERSION
+
+    cache = mux_link.ManagedMuxCache()
+    for index, name in enumerate(("one", "two"), start=7):
+        assert cache.apply_observation({
+            "project": "project", "worktree_id": name, "worktree_path": str(tmp_path / name),
+            "mux_session": "wt-" + name, "session_incarnation": f"${index}:100",
+            "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        })["applied"]
+    lists: list[bool] = []
+
+    def inventory(*args: Any) -> dict[str, tuple[int, str]]:
+        lists.append(True)
+        return {
+            "wt-one": (1, "$7:100"),
+            **({"wt-two": (1, "$8:100")} if second_present else {}),
+        }
+
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, inventory)
+    monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    monkeypatch.setattr(
+        status_bar_cli, "_render_status_segment", lambda *a, **k: pytest.fail("Git renderer"),
+    )
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("Git classification"))
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **k: pytest.fail("has-session"))
+    monkeypatch.setattr(
+        presentation, "observe_psmux", lambda *a, **k: pytest.fail("per-session probe"),
+        raising=False,
+    )
+
+    class ComputedSegments(Segments):
+        def get_cached(self, path: str) -> str | None:
+            return "older-computed" if current else None
+
+    reads: list[str] = []
+    descriptor = {
+        "version": DESCRIPTOR_VERSION, "label": "DIRTY", "style": "dirty",
+        "compact": "DIRTY C2", "closure": {"final": False},
+        "action": {"disposition": "blocked"}, "claims": {"held": 2},
+        "follow_ups": {"open": 0},
+    }
+
+    def state_snapshot(project: str) -> dict[str, Any]:
+        reads.append(project)
+        return {
+            "ok": True, "projection": {"quality": "current"},
+            **({} if current else {"availability": {"status": "stale"}}),
+            "worktrees": [{
+                "id": name, "path": str(tmp_path / name), "title": name,
+                "state": "dirty", "ahead": 2, "behind": 1, "closure": descriptor,
+            } for name in ("one", "two")],
+        }
+
+    requests: list[dict[str, Any]] = []
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=cache, segment_cache=ComputedSegments(),
+        state_snapshot=state_snapshot,
+    ) == (2 if second_present else 1)
+    assert lists == [True]
+    assert reads == ["project"]
+    assert [request["mux_session"] for request in requests] == (
+        ["wt-one", "wt-two"] if second_present else ["wt-one"]
+    )
+    for request in requests:
+        segment = request["values"]["@aw_seg"]
+        assert "DIRTY C2" in segment
+        assert ("\u21912" in segment) is current
+        assert ("DIRTY C2 ?" in segment) is (not current)
+
+
+def test_missing_computed_state_remains_pending_without_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("Git classification"))
+
+    class UnrenderedSegments(Segments):
+        def get_cached(self, path: str) -> None:
+            return None
+
+    requests: list[dict[str, Any]] = []
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=cache, segment_cache=UnrenderedSegments(),
+        state_snapshot=lambda project: {"ok": False, "error": {"code": "unready"}},
+    ) == 1
+    assert requests[0]["values"]["@aw_ctx"] == "context"
+    assert "STATE(?)" in requests[0]["values"]["@aw_seg"]
+
+
+def test_non_native_monitor_receives_state_only_segment_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("Git classification"))
+    monkeypatch.setattr(
+        status_bar_cli, "_render_status_segment", lambda *a, **k: pytest.fail("Git renderer"),
+    )
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert options["segment_cache"].get(str(tmp_path)) == "first"
+        assert options["segment_cache"].owner is segments
+        return 2
+
+    segments = Segments()
+    assert run_monitor_sweep(
+        sweep, "tmux", "monitor", "fixture", set(), segment_cache=segments,
+    ) == 2
+
+
+@pytest.mark.parametrize("render_seconds", [0.0, 90.0])
+def test_bulk_classification_yields_presentation_and_restores_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_seconds: float,
+) -> None:
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    monkeypatch.setattr(monitor, "_build_active_paths", lambda *a: set())
+    clock = [0.0]
+    progress = presentation.PresentationProgress(clock=lambda: clock[0])
+    requests: list[dict[str, Any]] = []
+    classified: list[str] = []
+    records: list[tracking.WorktreeRecord] = [
+        UnloadedRecord(
+            worktree_id=name, branch="worktree/" + name, worktree_path=str(tmp_path / name),
+            repo="roster", machine="host", platform="windows", title=name,
+            started_at="", last_resumed_at="", resume_count=0, status="active",
+            completed_at=None, sessions=[],
+        )
+        for name in ("first", "second")
+    ]
+    for record in records:
+        Path(record.worktree_path).mkdir()
+    info = git_ops.WorktreeStateInfo(git_ops.WorktreeState.WIP)
+
+    class TimedSegments(Segments):
+        def get_cached(self, path: str) -> str:
+            clock[0] += render_seconds
+            return self.value
+
+    segments = TimedSegments()
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    def classify(path: str, *args: Any, **kwargs: Any) -> git_ops.WorktreeStateInfo:
+        assert cfg.active_project() == "roster"
+        count = len(requests)
+        progress()
+        assert len(requests) == count
+        classified.append(Path(path).name)
+        segments.value = "after-" + Path(path).name
+        clock[0] += 31.0
+        return info
+
+    def collect_roster() -> None:
+        segments.value = "during-roster"
+        clock[0] += 31.0
+        with progress_scope(progress):
+            assert monitor._classify_records_live(
+                records, repo=SimpleNamespace(remote="origin", default_branch="main"),
+            ) == {record.worktree_id: info for record in records}
+
+    monkeypatch.setattr(git_ops, "classify_worktree", classify)
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        progress=progress, picker_projects={"roster"}, roster_publisher=collect_roster,
+        managed_mux_cache=cache, segment_cache=segments, published={},
+    ) == 1
+    assert classified == ["first", "second"]
+    assert [request["values"]["@aw_seg"] for request in requests] == [
+        "first", "during-roster", "after-first",
+    ]
+    assert cfg.active_project() == "roster"
+    clock[0] += 1000.0
+    progress()
+    assert len(requests) == 3
+
+
+@pytest.mark.parametrize("hold_phase", ["before-render", "during-render"])
+def test_cooperative_presentation_does_not_wait_while_roster_holds_project_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hold_phase: str,
+) -> None:
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+
+    class ProjectLock:
+        depth = 0
+
+        def __enter__(self) -> None:
+            self.depth += 1
+
+        def __exit__(self, *args: Any) -> None:
+            self.depth -= 1
+
+    project_lock = ProjectLock()
+    waits: list[int] = []
+    monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: waits.append(project_lock.depth))
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    clock = [0.0]
+    held = [False]
+    collecting = [False]
+    progress = presentation.PresentationProgress(clock=lambda: clock[0])
+    requests: list[dict[str, Any]] = []
+
+    class PrioritySegments(Segments):
+        def get_cached(self, path: str) -> str:
+            if collecting[0] and hold_phase == "during-render":
+                assert project_lock.depth == 2
+                held[0] = True
+            return "during" if collecting[0] else "first"
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    def collect_roster() -> None:
+        assert project_lock.depth == 1
+        collecting[0] = True
+        held[0] = hold_phase == "before-render"
+        clock[0] += 31.0
+        progress()
+        assert project_lock.depth == 1
+        assert cfg.active_project() == "roster"
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        progress=progress, picker_projects={"roster"}, roster_publisher=collect_roster,
+        lifecycle_priority=SimpleNamespace(is_set=lambda: held[0]),
+        project_lock=project_lock,
+        managed_mux_cache=cache, segment_cache=PrioritySegments(), published={},
+    ) == 1
+    assert len(requests) == 1
+    assert waits and set(waits) == {0}
+    assert project_lock.depth == 0
+
+
+@pytest.mark.parametrize("failure", ["native-unavailable", "governance-held"])
+def test_cooperative_presentation_keeps_native_and_governance_refusals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    collecting = [False]
+    set_inventory(
+        monkeypatch,
+        lambda *a: None if collecting[0] and failure == "native-unavailable"
+        else {"wt-one": (1, "$7:100")},
+    )
+    decision = {"status": "blocked", "reason": "held"}
+
+    def recheck(*args: Any) -> None:
+        if collecting[0] and failure == "governance-held":
+            raise monitor._StatusMonitorGovernanceDeferred(decision)
+
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", recheck)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    clock = [0.0]
+    progress = presentation.PresentationProgress(clock=lambda: clock[0])
+    requests: list[dict[str, Any]] = []
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    def collect_roster() -> None:
+        collecting[0] = True
+        clock[0] += 31.0
+        progress()
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    options: dict[str, Any] = {
+        "progress": progress, "picker_projects": {"roster"}, "roster_publisher": collect_roster,
+        "managed_mux_cache": cache, "segment_cache": Segments(), "published": {},
+    }
+    if failure == "governance-held":
+        with pytest.raises(monitor._StatusMonitorGovernanceDeferred) as held:
+            run_monitor_sweep(
+                monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(), **options,
+            )
+        assert held.value.result is decision
+    else:
+        assert run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(), **options,
+        ) == 1
+    assert len(requests) == 1
+    clock[0] += 1000.0
+    progress()
+    assert len(requests) == 1
 
 
 @pytest.mark.parametrize("native_present", [True, False])
@@ -107,15 +539,14 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     }
     assert cache.apply_observation(original)["applied"]
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
-    monkeypatch.setattr(monitor, "_monitor_list_sessions", lambda *a: {"wt-one": (1, "$7:100")})
+    set_inventory(
+        monkeypatch,
+        lambda *a: {"wt-one": (1, "$7:100")} if native_present else None,
+    )
     monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
     monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
     monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
     monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "new-context")
-    monkeypatch.setattr(presentation, "observe_psmux", lambda *a, **k: (
-        Observation("present", incarnation="$7:100", clients=1) if native_present
-        else Observation("unknown", "timeout")
-    ))
     discoveries: list[dict[str, Any]] = []
     requests: list[dict[str, Any]] = []
 
@@ -137,7 +568,7 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done,
         managed_mux_cache=cache, segment_cache=Segments(),
         incarnations={"wt-one": original_incarnation}, published=published,
-    ) == 1
+    ) == (1 if native_present else -1)
     if native_present:
         assert discoveries[0]["session_incarnation"] == "$7:100"
         assert requests[0]["mapping_revision"] == 2
@@ -164,7 +595,7 @@ def test_one_renderer_failure_preserves_other_sessions_and_later_sweeps(
             "observed_at": datetime.now(timezone.utc).isoformat(),
         })["applied"]
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
-    monkeypatch.setattr(monitor, "_monitor_list_sessions", lambda *a: {
+    set_inventory(monkeypatch, lambda *a: {
         "wt-one": (1, "$7:100"), "wt-two": (1, "$8:100"),
     })
     monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
@@ -178,7 +609,7 @@ def test_one_renderer_failure_preserves_other_sessions_and_later_sweeps(
         return "context"
 
     class RenderSegments(Segments):
-        def get(self, path: str) -> str:
+        def get_cached(self, path: str) -> str:
             if failed and path == str(tmp_path / "one") and failure == "segment":
                 raise RuntimeError("unavailable segment")
             return self.value
@@ -192,7 +623,7 @@ def test_one_renderer_failure_preserves_other_sessions_and_later_sweeps(
 
     monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
     ctx_done: set[str] = set()
-    options = {
+    options: dict[str, Any] = {
         "managed_mux_cache": cache, "segment_cache": RenderSegments(),
         "published": {}, "incarnations": {},
     }
@@ -220,7 +651,7 @@ def test_governance_deferral_is_not_swallowed(
         "observed_at": datetime.now(timezone.utc).isoformat(),
     })["applied"]
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
-    monkeypatch.setattr(monitor, "_monitor_list_sessions", lambda *a: {"wt-one": (1, "$7:100")})
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
 
     decision = {"status": "blocked", "reason": "held"}
 
@@ -247,7 +678,7 @@ def test_cleanup_failure_stays_with_its_existing_owner(
         "observed_at": datetime.now(timezone.utc).isoformat(),
     })["applied"]
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
-    monkeypatch.setattr(monitor, "_monitor_list_sessions", lambda *a: {"wt-one": (1, "$7:100")})
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
     monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
     monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
     monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
@@ -256,7 +687,7 @@ def test_cleanup_failure_stays_with_its_existing_owner(
     retained: list[push_timeout.ObservationCleanupError] = []
 
     class PendingSegments(Segments):
-        def get(self, path: str) -> str:
+        def get_cached(self, path: str) -> str:
             if not retained:
                 raise error
             return "cleanup pending"

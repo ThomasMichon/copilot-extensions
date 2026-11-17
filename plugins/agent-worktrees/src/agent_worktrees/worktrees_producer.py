@@ -5,17 +5,34 @@ from __future__ import annotations
 import contextlib
 import sys
 import time
+from collections.abc import Callable, Iterable
+from typing import Any, Protocol, TypeVar
 
 from . import config as cfg
-from . import reclaim, sessions, tracking, push_timeout, git_ops
+from . import config_cache, reclaim, sessions, tracking, push_timeout, git_ops
+from .monitor_projection_cache import SegmentOwner
+from .observation_progress import progress_scope
+from machine_transport import detect_platform
 from .worktrees_current_rows import materialize, selection_row
 from .mux_list_result import MuxObservationUnavailable
 from .worktrees_projection_index import ProjectionError, ProjectionUnavailable, SelectionIndex
+from .worktrees_runtime import WorktreesRuntime
+
+_T = TypeVar("_T")
+
+
+class ObservationOwner(SegmentOwner, Protocol):
+    def run_observation(
+        self, project: str, anchor: str | None, path: str | None, observe: Callable[[], _T],
+    ) -> _T: ...
 
 
 def publish_project_rosters(
-    projects, *, interval, project_lock, lifecycle_priority, governance,
-    segment_cache, config_cache_for_project, roster_publisher, warm_list_cache,
+    projects: Iterable[str], *, interval: float, project_lock: contextlib.AbstractContextManager[Any] | None,
+    lifecycle_priority: Any, governance: Any,
+    segment_cache: ObservationOwner | None,
+    config_cache_for_project: Callable[[str], config_cache.ConfigCacheSession] | None,
+    roster_publisher: Callable[[], object] | None, warm_list_cache: Callable[..., object],
 ) -> None:
     from . import __main__ as core, config_cache
 
@@ -36,7 +53,7 @@ def publish_project_rosters(
                         )
             except core._StatusMonitorGovernanceDeferred:
                 raise
-            except git_ops.push_timeout.ObservationCleanupError as exc:
+            except push_timeout.ObservationCleanupError as exc:
                 if segment_cache is None:
                     raise
                 segment_cache.retain_unclaimed_cleanup(project, None, exc)
@@ -48,8 +65,12 @@ def publish_project_rosters(
 
 
 def publish_active_project(
-    runtime, *, observe_records=None, cleanup_owner=None, managed_mux_cache=None,
+    runtime: WorktreesRuntime, *,
+    observe_records: Callable[[str, list[tracking.WorktreeRecord]], object] | None = None,
+    cleanup_owner: ObservationOwner | None = None, managed_mux_cache: Any = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> int:
+    """Publish existing facts, yielding between records when requested."""
     project = cfg.project_name()
     if cleanup_owner is not None and git_ops._windows_observation():
         try:
@@ -62,6 +83,7 @@ def publish_active_project(
                 project, repo.anchor, None,
                 lambda: publish_active_project(
                     runtime, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
+                    on_progress=on_progress,
                 ),
             )
         except push_timeout.ObservationCleanupPending as error:
@@ -70,6 +92,7 @@ def publish_active_project(
     try:
         return _publish_active_project(
             runtime, project, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
+            on_progress=on_progress,
         )
     except Exception as exc:
         runtime.publication_failed(project, exc)
@@ -77,7 +100,9 @@ def publish_active_project(
 
 
 def _publish_active_project(
-    runtime, project: str, *, observe_records=None, managed_mux_cache=None,
+    runtime: WorktreesRuntime, project: str, *,
+    observe_records: Callable[[str, list[tracking.WorktreeRecord]], object] | None = None,
+    managed_mux_cache: Any = None, on_progress: Callable[[], None] | None = None,
 ) -> int:
     from . import __main__ as core, worktrees_reporting
 
@@ -86,19 +111,20 @@ def _publish_active_project(
     records = tracking.list_records(cfg.tracking_dir(project))
     if observe_records is not None:
         observe_records(project, records)
-    refresh_requests = runtime.refreshes.pending(project)
+    pending_refreshes = runtime.refreshes.pending(project)
+    refresh_requests: tuple[tuple[str, dict[str, Any]], ...] = ()
     refreshed = set()
-    if refresh_requests:
+    if pending_refreshes:
         from .list_cli import _refresh_list_record
         from .worktrees_refresh import record_identity
 
         positions = {record.worktree_id: index for index, record in enumerate(records)}
         selection_index = SelectionIndex(selection_row(record) for record in records)
         accepted_requests = []
-        for request_id, selection in refresh_requests:
+        for request_id, selection in pending_refreshes:
             try:
                 selected_ids = selection_index.select(worktrees_reporting.platform_selection(
-                    selection, cfg.detect_platform(),
+                    selection, detect_platform(),
                 ))
             except ProjectionError as error:
                 runtime.refreshes.reject(request_id, str(error))
@@ -119,7 +145,10 @@ def _publish_active_project(
                         managed_mux_cache.get(project, record.worktree_id)
                         if managed_mux_cache is not None else None
                     )
-                    record = _refresh_list_record(record, strict=True)
+                    updated = _refresh_list_record(record, strict=True)
+                    if updated is None:
+                        raise ValueError("Selected record disappeared during point refresh")
+                    record = updated
                     records[positions[record.worktree_id]] = record
                     if record.mux_live is False:
                         runtime.refreshes.supersede_mux(project, record.worktree_id, previous_mux)
@@ -167,14 +196,22 @@ def _publish_active_project(
                 exists=True, clients=entry["attached_clients"],
             )
     repo = cfg.load_config(cfg.project_dir(project) / "config.yaml", project=project).default_repo
-    state_map = core._classify_records_live(records, session_ctx, repo=repo)
+    with progress_scope(on_progress):
+        state_map = core._classify_records_live(records, session_ctx, repo=repo)
     bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
     bridge_live_wts = reclaim.live_bridge_worktrees()
     observed_at = time.time()
-    with cfg.cached_load_config_scope():
+
+    def serialize(record: tracking.WorktreeRecord, **options: Any) -> dict[str, Any]:
+        if on_progress is not None:
+            on_progress()
+        result: dict[str, Any] = core._worktree_to_dict(record, **options)
+        return result
+
+    with config_cache.cached_load_config_scope():
         rows = materialize(
             records,
-            serialize=core._worktree_to_dict,
+            serialize=serialize if on_progress is not None else core._worktree_to_dict,
             observed_at=observed_at,
             state_map=state_map,
             mux_map=mux_map,

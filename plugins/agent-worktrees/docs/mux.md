@@ -158,9 +158,10 @@ PSMux CLI fallback. Explicit foreground attach/create and provider writes still
 run PSMux and retain its startup-cleanup risk. This mitigation does not repair
 lost registrations or authorize provider restart, recovery or a host update.
 Fresh observations do not reactivate automatic pane discovery/status-bar
-repainting through the PSMux CLI. Worktrees publishes current roster facts;
-Manager's periodic status-option writes remain refused. Cached in-pane bar
-text is not fresh listing evidence.
+repainting through the PSMux CLI. The elected Worktrees monitor publishes
+managed session options through Manager's native status transport, with its
+normal mapping/incarnation fences and readback. Cached in-pane bar text is not
+fresh listing evidence.
 Legacy `status-updater` entrypoints also skip PSMux rather than restarting that
 CLI polling loop when monitor registration is unavailable. Manager's warm
 Picker observes presence and incarnation natively; an unknown observation
@@ -195,8 +196,8 @@ and mux-live controls become unavailable along with the badge; preserved raw
 client counts and Git facts do not remain current control evidence. A fresh
 publication restores the normal controls.
 
-This mitigation retains automatic PSMux status-painting restrictions while
-restoring fresh listings and client-count refresh. It does **not** make explicit
+This mitigation retains the automatic PSMux CLI restrictions while
+restoring native status publication, fresh listings and client-count refresh. It does **not** make explicit
 creation, attachment, recovery or shutdown commands harmless, upgrade PSMux,
 repair a running server, or qualify another executable with the same protocol.
 Strict action-time Windows checks retain the bounded native reader, now
@@ -224,9 +225,34 @@ incomplete reply or changing inventory remains unknown.
 `PSMUX_DATA_DIR` must be absolute when set; live
 servers whose registrations are outside that selected directory also prevent
 a complete result. This conservative action-time support does not re-enable
-periodic discovery or change cleanup authority. A silent failed PSMux CLI
+periodic PSMux CLI discovery or change cleanup authority. A silent failed PSMux CLI
 presence query still cannot authorize a cold replacement, and failed
 reachability does not make a mux-homed process reclaimable.
+
+### Resident state-only status projection
+
+The elected monitor projects already-computed Worktrees state, not Git work.
+One completed native inventory batch supplies session membership, incarnation
+and attached-client counts for the pass; it does not probe each worktree with
+`has-session`. Unknown inventory is not an empty catalog, and a cached live
+mapping absent from the current batch does not authorize a status write.
+
+Each presentation batch reads each project's passive current-roster snapshot
+once. Current canonical closure descriptors take precedence over completed
+segment-cache values. Otherwise the monitor retains a completed segment or
+marks advisory/pending state explicitly; projection never invokes the
+compute-on-miss segment getter, Git classification or a refresh request.
+The normal TMux monitor path also uses this read-only segment view. Explicit
+status commands and the existing Git sweep, lifecycle and watcher owners retain
+their own refresh behavior.
+
+Native presentation runs before bulk roster collection. During that same
+owner's roster pass, moderated cooperative progress between record observations
+and serialization can project another batch without waiting for the whole
+project's Git roster. It creates no thread, daemon or second publisher, preserves
+the active project and observation/cleanup ownership, and skips publication
+when lifecycle priority is pending rather than waiting inside the roster lock.
+Publication duration does not consume an individual Git observation's deadline.
 
 For an affected host:
 

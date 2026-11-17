@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from tools import test_native_qualification_owner as original
+from contextlib import nullcontext
+from importlib import import_module
+
+import pytest
+
+original = import_module("tools.test_native_qualification_owner")
+
+
+@pytest.fixture(autouse=True)
+def actor_free_native_pins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tools.plugin_test_lifecycle._native_instance_pins", lambda *args: nullcontext())
+
 
 for name in (
     "test_assignment_setup_crossing_work_deadline_cannot_release_readiness",

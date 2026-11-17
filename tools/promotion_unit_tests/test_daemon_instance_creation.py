@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "libs/agent-procutil/src"))
 from agent_procutil import _daemon_instance_owner as owner
 from agent_procutil import _daemon_instance_store as store
+from agent_procutil import _daemon_instance_io as instance_io
 
 
 class Function:
@@ -37,6 +38,8 @@ class Pointer(Scalar):
 
 
 class Structure:
+    _fields_: list[tuple[str, Any]]
+
     def __init__(self, *values: Any) -> None:
         for (name, _kind), value in zip(self._fields_, values, strict=True):
             setattr(self, name, value.value if isinstance(value, Scalar) else value)
@@ -143,7 +146,7 @@ def test_creation_signatures_accept_interleaved_cold_layout_types(
     factory = owner._attributes_type
     layouts = []
 
-    def cold_layout() -> type[Structure]:
+    def cold_layout() -> type[object]:
         layout = factory()
         layouts.append(layout)
         return layout
@@ -259,11 +262,12 @@ def test_private_store_directory_lock_and_record_use_shared_creation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(owner, "os", SimpleNamespace(name="posix", open=os.open))
+    monkeypatch.setattr(instance_io, "sys", SimpleNamespace(platform="linux"))
     if os.name == "nt":
         # Native ownership is a separate lane; this unit checks portable I/O wiring.
         monkeypatch.setattr(store, "assert_path_owner", lambda path: None)
-    calls = []
-    mkdir, opened = store.mkdir_private, store.open_private
+    calls: list[tuple[object, ...]] = []
+    mkdir, opened = owner.mkdir_private, owner.open_private
 
     def directory(path: Path, *, exist_ok: bool) -> None:
         calls.append(("directory", path))
