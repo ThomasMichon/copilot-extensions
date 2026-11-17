@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 import inspect
 import os
 import stat
@@ -18,9 +18,15 @@ if TYPE_CHECKING:
     from agent_pull_requests.watch_replay_store import ReplayStore
 
 
-def core(*, filtered: bool = False) -> None:
+class _ActivitySelection(TypedDict, total=False):
+    repository_activity: bool
+
+
+def core(*, filtered: bool = False, reviewer_actions: bool = False) -> None:
     """Qualify executing source APIs, without native/provider/credential calls."""
     try:
+        if filtered and reviewer_actions:
+            raise ValueError
         if filtered:
             from agent_pull_requests.filtered_subscriptions import contract
         else:
@@ -32,6 +38,12 @@ def core(*, filtered: bool = False) -> None:
             or "response_limit" not in inspect.signature(LocalServiceRequest).parameters
         ):
             raise ValueError
+        if reviewer_actions:
+            capability = contract(reviewer_actions=True).get("reviewer_actions")
+            if not isinstance(capability, dict) or (
+                capability.get("protocol") != "agent-pull-requests.reviewer-actions/v1"
+            ):
+                raise ValueError
     except (ImportError, AttributeError, TypeError, ValueError):
         raise ValueError("selected local repository core/SDK unsupported") from None
 
@@ -47,6 +59,7 @@ class LocalHostConfig:
     workspaces: None = None
     reports: None = None
     filtered: bool = False
+    reviewer_actions: bool = False
 
     @property
     def bindings(self) -> tuple[WatchScopeBinding, ...]:
@@ -62,15 +75,17 @@ class LocalHostConfig:
 
     def store(self) -> ReplayStore:
         from agent_pull_requests.watch_replay_store import ReplayStore
-        core(filtered=self.filtered)
+        core(filtered=self.filtered, reviewer_actions=self.reviewer_actions)
         self._private_root()
         if self.filtered:
             return ReplayStore(
                 self.root, self.namespace, repository_cache=True, repository_continuing=True,
                 repository_filtered=True,
             )
+        selected: _ActivitySelection = {"repository_activity": True} if self.reviewer_actions else {}
         return ReplayStore(
             self.root, self.namespace, repository_cache=True, repository_continuing=True,
+            **selected,
         )
 
     def _private_root(self) -> None:
@@ -97,13 +112,16 @@ class LocalHostConfig:
     def parse(cls, raw: object) -> LocalHostConfig:
         value = _fields(raw, {
             "schema", "version", "profile", "root", "namespace", "repository_cache",
-        }, {"interval", "operation_seconds", "drain_timeout"})
+        }, {"interval", "operation_seconds", "drain_timeout", "reviewer_actions"})
         filtered = (value["version"], value["profile"]) == (3, "repository-filtered/v1")
         if value["schema"] != "agent-pull-requests.service" or type(value["version"]) is not int or (
             not filtered and (value["version"], value["profile"]) != (2, "repository-local/v1")
         ):
             raise ValueError("unsupported local host profile")
-        core(filtered=filtered)
+        reviewer_actions = value.get("reviewer_actions", False)
+        if type(reviewer_actions) is not bool:
+            raise ValueError("explicit reviewer-action selection required")
+        core(filtered=filtered, reviewer_actions=reviewer_actions)
         from .repository_config import RepositoryConfig
         root = _path(value["root"])
         config = cls(
@@ -112,7 +130,7 @@ class LocalHostConfig:
             ),
             _seconds(value.get("interval", 5)), _seconds(value.get("operation_seconds", 60)),
             _seconds(value.get("drain_timeout", 60)),
-            filtered=filtered,
+            filtered=filtered, reviewer_actions=reviewer_actions,
         )
         store = config.store()
         from single_instance_lease import SingleInstance

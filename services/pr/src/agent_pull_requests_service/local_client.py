@@ -16,7 +16,7 @@ from typing import Any
 
 PROTOCOL = "agent-pull-requests.repository-cache/v1"
 MAX_BYTES = 1_048_576
-COMMANDS = ("list", "query", "subscribe", "inspect", "events", "acknowledge", "cancel", "follow")
+COMMANDS = ("list", "query", "next-actions", "subscribe", "inspect", "events", "acknowledge", "cancel", "follow")
 
 
 def _unique(items: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -97,6 +97,7 @@ class LocalClient:
         self.path, self.namespace, self.target = path, namespace, target
         self.binding: dict[str, Any] | None = None
         self.deadline: float | None = None
+        self.reviewer_actions = False
 
     def _http(self, method: str, operation: str, value: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.deadline is not None and time.monotonic() >= self.deadline:
@@ -139,6 +140,14 @@ class LocalClient:
             self.binding = {
                 name: selected[name] for name in ("protocol", "namespace", "repository_key")
             }
+            feature = selected.get("reviewer_actions")
+            self.reviewer_actions = isinstance(feature, dict) and (
+                feature.get("protocol") == "agent-pull-requests.reviewer-actions/v1"
+                and feature.get("storage") == "repository_activity_version:1"
+                and feature.get("effects") == "none"
+            )
+        if operation == "next-actions" and not self.reviewer_actions:
+            raise LocalClientError("selected local reviewer-action profile unsupported")
         value = self._http("POST", operation, {**self.binding, "request": payload})
         result = value.get("result")
         if value.get("repository_key") != self.binding["repository_key"] or not isinstance(result, dict):
@@ -155,8 +164,13 @@ def add_commands(commands: Any) -> None:
         parser.add_argument("--target", required=name != "list", default="listing")
         if name == "list":
             continue
-        if name == "query":
-            parser.add_argument("--number", type=int)
+        if name in ("query", "next-actions"):
+            if name == "next-actions":
+                parser.add_argument("--reviewer", required=True)
+                parser.add_argument("--max-age-seconds", type=int, default=1800)
+                parser.add_argument("--cursor", type=int)
+            else:
+                parser.add_argument("--number", type=int)
             parser.add_argument("--after", type=int, default=0)
             parser.add_argument("--limit", type=int, default=16)
         elif name == "subscribe":
@@ -184,9 +198,13 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "list":
             print(json.dumps(client._http("GET", "list"), allow_nan=False))
             return 0
-        if args.command == "query":
+        if args.command in ("query", "next-actions"):
             payload = {"after": args.after, "limit": args.limit}
-            if args.number is not None:
+            if args.command == "next-actions":
+                payload.update(reviewer=args.reviewer, max_age_seconds=args.max_age_seconds)
+                if args.cursor is not None:
+                    payload["cursor"] = args.cursor
+            elif args.number is not None:
                 payload["number"] = args.number
         elif args.command == "subscribe":
             payload = {"request_id": args.request_id, "ttl": args.ttl, "after": args.after}

@@ -53,7 +53,6 @@ class _CacheValidation(Protocol):
 class _LegacyQualify(Protocol):
     def __call__(self, binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None: ...
 
-
 class WatchService:
     """One host-local writer, connector and bounded, non-overlapping observation.
 
@@ -129,6 +128,8 @@ class WatchService:
                 handler=self.gateway.handle_local, operation_seconds=operation_seconds,
             )
         else:
+            if slot is None or gateway_origin is None:
+                raise ValueError("Gateway profile requires its slot and origin")
             self.connector = ServiceConnector(
                 slot=cast(str, slot), gateway_origin=cast(str, gateway_origin),
                 access_token_callback=access_token_callback, proof_key=proof_key,
@@ -230,6 +231,11 @@ class WatchService:
                 raise ValueError("native and replay state roots must be separate")
             self._check()
             def validate_storage() -> None:
+                if self.store.repository_activity:
+                    self.store.adopt_repository_activity(
+                        lifecycle_checkpoint=self._check,
+                        expires_at=self._authority(), checkpoint=self._check,
+                    )
                 self.store.observation_targets(
                     expires_at=self._authority(), checkpoint=self._check,
                 )

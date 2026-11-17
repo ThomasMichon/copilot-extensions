@@ -1,14 +1,22 @@
 """Continuing cache subscriptions under the existing ReplayStore transaction owner."""
 
+from __future__ import annotations
+
 import copy
 import json
 import uuid
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from .repository_contract import MAX_REGISTRATIONS, PROTOCOL, RepositoryIdentity
 
+if TYPE_CHECKING:
+    from .repository_projection import RepositoryProjection
+
 RESPONSE_BYTES = 1_048_576
-OPERATIONS = {
+OPERATIONS: dict[str, tuple[set[str], set[str]]] = {
     "query": (set(), {"after", "limit", "number"}),
+    "next-actions": ({"reviewer"}, {"after", "limit", "cursor", "max_age_seconds"}),
     "subscribe": ({"request_id", "ttl"}, {"after"}),
     "inspect": ({"registration_id"}, set()),
     "events": ({"registration_id"}, {"after", "limit"}),
@@ -25,13 +33,13 @@ class RepositoryRequestConflict(ValueError):
     """An original identity cannot be reused with changed intent or scope."""
 
 
-def _integer(value, minimum=0, maximum=2**53 - 1):
+def _integer(value: object, minimum: int = 0, maximum: int = 2**53 - 1) -> int:
     if type(value) is not int or not minimum <= value <= maximum:
         raise ValueError("invalid bounded repository integer")
     return value
 
 
-def _text(value):
+def _text(value: object) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 128 or any(
         ord(char) < 32 for char in value
     ):
@@ -39,7 +47,10 @@ def _text(value):
     return value
 
 
-def _page(state, identity, after=0, limit=16, number=None, now=0, *, budget=None):
+def _page(
+    state: dict[str, Any], identity: RepositoryIdentity, after: int = 0, limit: int = 16,
+    number: int | None = None, now: int = 0, *, budget: int | None = None,
+) -> dict[str, Any]:
     budget = RESPONSE_BYTES - 8192 if budget is None else budget
     row = next((row for row in state["repositories"]
                 if RepositoryIdentity.parse(row["identity"]).key == identity.key), None)
@@ -48,7 +59,7 @@ def _page(state, identity, after=0, limit=16, number=None, now=0, *, budget=None
         row = _new_repository(identity)
     rows = sorted((pull for pull in row["pulls"] if pull["number"] > after
                    and (number is None or pull["number"] == number)), key=lambda pull: pull["number"])
-    result = {"identity": identity.document(), "inventory": row["inventory"],
+    result: dict[str, Any] = {"identity": identity.document(), "inventory": row["inventory"],
               "pulls": [], "more": False, "cursor": state["next_sequence"] - 1, "now": now}
     for pull in rows[:limit]:
         candidate = {**result, "pulls": [*result["pulls"], pull]}
@@ -62,12 +73,14 @@ def _page(state, identity, after=0, limit=16, number=None, now=0, *, budget=None
 class RepositorySubscriptions:
     """Read-only forge profile; only local subscription/delivery metadata mutates."""
 
-    def __init__(self, projection):
+    def __init__(self, projection: RepositoryProjection) -> None:
         if not projection.store.repository_continuing:
             raise ValueError("continuing repository storage requires explicit fresh provisioning")
         self.projection, self.store = projection, projection.store
 
-    def execute(self, key, consumer, operation, payload, **authority):
+    def execute(
+        self, key: str, consumer: str, operation: str, payload: dict[str, Any], **authority: Any,
+    ) -> dict[str, Any]:
         """Validate one admitted operation and reconcile its original identities."""
         if key not in self.projection.identities or operation not in OPERATIONS or (
             not isinstance(payload, dict)
@@ -80,14 +93,25 @@ class RepositorySubscriptions:
         identity = self.projection.identities[key]
         if operation == "query":
             return self.projection.query(key, **payload, **authority)
+        if operation == "next-actions":
+            if not self.store.repository_activity:
+                raise ValueError("reviewer actions require selected activity storage")
+            from .repository_reviewer import page
+            return self.projection._transaction(
+                lambda state: page(
+                    state, identity, consumer, now=int(self.store.clock()), **payload,
+                ),
+                **authority,
+            )
 
-        def transact(document, commit):
+        def transact(document: dict[str, Any], commit: Callable[[], None]) -> dict[str, Any]:
             state = document["repository_cache"]
             now = int(self.store.clock())
             changed = False
+            result: dict[str, Any]
             if operation == "subscribe":
                 request_id = _text(payload["request_id"])
-                request = {"after": payload.get("after"),
+                request: dict[str, Any] = {"after": payload.get("after"),
                            "ttl": _integer(payload["ttl"], 1, 86400)}
                 if request["after"] is not None:
                     _integer(request["after"])
@@ -155,7 +179,7 @@ class RepositorySubscriptions:
                         event["target"] == key and event["sequence"] > after
                         and (status == "active" or event["sequence"] <= row["delivered"])
                     )]
-                    batch = []
+                    batch: list[dict[str, Any]] = []
                     result = {"status": status, "registration_id": registration_id,
                               "events": batch, "more": False}
                     for event in events[:limit]:
@@ -193,8 +217,12 @@ class RepositorySubscriptions:
         )
 
 
-def contract() -> dict[str, object]:
+def contract(*, reviewer_actions: bool = False) -> dict[str, object]:
     """Declare executing opt-in cache/continuing support, not package equality."""
-    return {"protocol": PROTOCOL, "storage": "repository_cache_version:2",
+    result = {"protocol": PROTOCOL, "storage": "repository_cache_version:2",
             "continuing": True, "effects": "local-subscription-state",
             "response_bytes": RESPONSE_BYTES, "forge_writes": False, "task_emissions": False}
+    if reviewer_actions:
+        from .repository_reviewer import capability
+        result["reviewer_actions"] = capability()
+    return result

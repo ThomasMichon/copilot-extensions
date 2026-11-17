@@ -181,6 +181,24 @@ class Attention:
     expires_at: int
 
 
+@dataclass(frozen=True)
+class ReviewActivity:
+    """Qualified observational review state, never a full-candidate handled receipt."""
+
+    reviewer: str
+    status: str
+    review_id: int | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.reviewer)
+        if self.status not in ("initial", "updated", "head-reviewed", "unknown"):
+            raise ValueError("invalid review activity")
+        if self.review_id is not None:
+            _integer(self.review_id, 1)
+        if self.status in ("updated", "head-reviewed") and self.review_id is None:
+            raise ValueError("review activity requires its original review identity")
+
+
 def project(
     facts: Facts,
     interest: Interest,
@@ -188,12 +206,15 @@ def project(
     *,
     now: int,
     max_age_seconds: int,
+    review_activity: ReviewActivity | None = None,
 ) -> Attention:
     """Project already admitted facts; no provider read, task or effect is performed."""
     if (
         type(facts) is not Facts
         or type(interest) is not Interest
         or (handled is not None and type(handled) is not Handled)
+        or review_activity is not None and type(review_activity) is not ReviewActivity
+        or review_activity is not None and handled is not None
     ):
         raise ValueError("typed attention inputs required")
     _integer(now)
@@ -250,6 +271,14 @@ def project(
         reasons.append("merge-nudge")
     if facts.final_iteration:
         reasons.append("final-iteration")
+    if review_activity is not None:
+        if review_activity.status in ("initial", "updated"):
+            reasons.append("initial-review" if review_activity.status == "initial" else "follow-up")
+        elif not reasons:
+            return result("unavailable", (
+                "reviewed-base-unknown" if review_activity.status == "head-reviewed"
+                else "review-activity-unavailable"
+            ))
     if not reasons:
         reasons.append("initial-review" if handled is None else "follow-up")
     return result("actionable", *reasons)
@@ -265,7 +294,7 @@ def rank(
     _integer(now)
     _integer(aging_seconds, 1)
     selected = []
-    seen = set()
+    seen: set[tuple[PRKey, str, str]] = set()
     for item in items:
         if type(item) is not Attention:
             raise ValueError("typed attention projections required")
@@ -282,7 +311,7 @@ def rank(
                 raise ValueError("future attention baseline")
             selected.append(item)
 
-    def order(item: Attention) -> tuple:
+    def order(item: Attention) -> tuple[int, int, str, str, str, int, str, str, str, str]:
         age = (now - item.pending_since) // aging_seconds
         key = item.key
         return (

@@ -112,6 +112,7 @@ class ReplayStore:
         repository_cache: bool = False,
         repository_continuing: bool = False,
         repository_filtered: bool = False,
+        repository_activity: bool = False,
     ) -> None:
         if type(repository_cache) is not bool:
             raise ValueError("explicit repository cache selection required")
@@ -122,6 +123,11 @@ class ReplayStore:
         if type(repository_filtered) is not bool or repository_filtered and not repository_continuing:
             raise ValueError("filtered repository selection requires its continuing owner")
         self.repository_filtered = repository_filtered
+        if type(repository_activity) is not bool or repository_activity and (
+            not repository_continuing or repository_filtered
+        ):
+            raise ValueError("repository activity requires its unfiltered continuing cache owner")
+        self.repository_activity = repository_activity
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
@@ -239,10 +245,24 @@ class ReplayStore:
             ):
                 raise ReplayStoreInvalid("repository cache reader unavailable for adopted owner")
             names.update(("repository_cache_version", "repository_cache"))
-            validate_cache(
-                document.get("repository_cache"), self.namespace,
-                version=document["repository_cache_version"],
-            )
+            activity = "repository_activity_version" in document
+            if activity != self.repository_activity or activity and (
+                type(document["repository_activity_version"]) is not int
+                or document["repository_activity_version"] != 1
+            ):
+                raise ReplayStoreInvalid("repository activity reader unavailable for adopted owner")
+            if activity:
+                names.add("repository_activity_version")
+            if self.repository_filtered:
+                validate_cache(
+                    document.get("repository_cache"), self.namespace,
+                    version=document["repository_cache_version"],
+                )
+            else:
+                validate_cache(
+                    document.get("repository_cache"), self.namespace,
+                    version=document["repository_cache_version"], activity=activity,
+                )
         elif self.repository_cache:
             raise ReplayStoreInvalid("repository cache requires explicit fresh provisioning")
         prepared = "review_intent_version" in document
@@ -703,8 +723,21 @@ class ReplayStore:
                         ),
                         repository_cache=empty(),
                     )
+                    if self.repository_activity:
+                        document["repository_activity_version"] = 1
                 self._validate_owner(document)
             _atomic_write_json(self.path, document)
+
+    def adopt_repository_activity(
+        self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> Document:
+        """Adopt activity metadata without changing replay, registration or effect custody."""
+        from .repository_activity import adopt
+        return adopt(
+            self, lifecycle_checkpoint=lifecycle_checkpoint,
+            expires_at=expires_at, checkpoint=checkpoint,
+        )
 
     def check_current(self, expires_at: int, checkpoint: Callable[[], None] | None) -> None:
         """Check the embedding owner's current authority, including between reads."""
@@ -761,6 +794,7 @@ class ReplayStore:
 
         def targets(core: WatchReplay) -> tuple[ObservationTarget, ...]:
             from .terminal_retention import replay_epoch
+            assert document is not None
             return tuple(
                 replace(target, retention_epoch=replay_epoch(cast(Document, document), target))
                 for target in core.observation_targets()
