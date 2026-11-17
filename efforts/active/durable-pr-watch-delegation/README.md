@@ -65,11 +65,12 @@ because they also require the separate live qualification.
   Plan/Validation item is resolved or transferred to a named tracked objective,
   owned PRs are terminal, and resource obligations have been settled or
   accepted by their rightful owners through the normal guarded flow.
-- **Now:** Finish the owned filtered-population source and qualification
-  gates. The Windows registry snapshot correction is a bounded lifecycle
-  prerequisite, not a new root objective.
-- **Return:** After that slice, resume the remaining M1 integration,
-  installed/running and consumer-owned acceptance under this same effort.
+- **Now:** The filtered-population source and synthetic qualification are
+  complete through #12200, including the bounded Windows registry snapshot
+  prerequisite. Reconcile release evidence and the remaining M1 integration
+  criteria without treating source publication as installed acceptance.
+- **Return:** Continue installed/running and consumer-owned acceptance under
+  this same effort when its separate operational authority is available.
   Existing MCP follow-through, domain custody, operational holds and separate
   spending, deployment, credential and retained-resource authority remain.
 
@@ -374,9 +375,11 @@ its implementation or authorizing production activation.
 
 - [x] Review and land the filter/subscription contract before implementing it
   (#12161; approved current head and green required CI).
-- [ ] Deliver the linked expression, driver, demand/storage and actual
-  service/client slices with their complete validation plan; source completion
-  does not close the parent service/fleet or live-provider acceptance.
+- [x] Deliver the linked expression, driver, demand/storage and actual
+  service/client slices with their finite source validation plan (#12166,
+  #12184, #12200). The [source completion record](journal/2026/11.17%20Filtered%20source%20completion.md)
+  distinguishes hosted qualification from final-head compatibility checks;
+  parent service/fleet, release/installed and live-provider acceptance remain open.
 
 ### First integrated repository cache and event milestone
 
@@ -1203,6 +1206,13 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite [filtered-population source controls](filter-subscriptions.md#validation-plan):
+  hosted run 44001919435 passes both disposable platforms at its recorded source;
+  later source-preserving rebase compatibility and final-head review/required CI
+  pass before #12200 merges. See the [qualification record](journal/2026/11.17%20Filtered%20source%20completion.md).
+  Synthetic native/foreground/client evidence does not establish release,
+  installed/running, live-provider or review-consumer acceptance.
+
 - [ ] Resolve the [reviewer-action feed validation](reviewer-action-feeds.md#validation-plan)
   under #12947, keeping actual cache/client/stream behavior, inert consumer
   controls and separately authorized provider/operational proof distinct.
@@ -1585,6 +1595,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-17 - Filtered source completion; parent acceptance retained](journal/2026/11.17%20Filtered%20source%20completion.md)
 - [2026-11-16 - Reviewer-action feed contract reviewed](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md)
 - [2026-11-09 - First integrated cache/event milestone selected](journal/2026/11.09%20Repository%20cache%20events%20milestone.md)
 - [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
