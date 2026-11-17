@@ -183,7 +183,7 @@ The operation's request fields match the CLI. Scope comes from OS admission,
 not the expected-binding fields. Missing/prior support refuses; clients never
 fall back to one-shot watch, a state-file read or an ambient account.
 The separately selected [reviewer-action capability](REVIEWER.md) adds
-`next-actions` under this same envelope.
+`next-actions` and finite local SSE subscriptions under this same envelope.
 
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and

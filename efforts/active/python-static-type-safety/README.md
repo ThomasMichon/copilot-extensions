@@ -311,6 +311,20 @@ Confirmed operator responses:
   is insufficient. Directly dependent canonical generated copies retain their
   normal ownership and release checks; their consumers are not thereby admitted.
 
+- `license_metadata_packet=true`: finish only the retained Manager and Dispatch
+  license-metadata compatibility fixes in a separate managed worktree, preserving
+  all original library work and evidence. One fresh source-bound 600-second
+  packet (510 work, 90 cleanup) may exercise the declared setuptools 68 backend
+  with the existing Python 3.12 installation. Keep used storage plus the
+  512 MiB reserve below 6 GiB, with 128-process, 4,096 MiB memory and 512 MiB
+  temporary-storage limits. Use only the currently configured approved package
+  feed and stop if none is configured; credentials stay with the normal
+  dependency owner, with no global settings change or implicit public fallback.
+  Scope is the two license-field fixes, required changefiles, focused artifact
+  checks and normal reviewed publication. No held SDK reuse/rebuild, automatic
+  packet retry, broader library-copy/Linux-shell qualification, retained-evidence
+  cleanup or rollout is authorized. The original library holds otherwise remain.
+
 ## Plan
 
 The decomposition and proposed mechanics below are **agent-recommended**
@@ -3429,3 +3443,25 @@ composition prerequisites, and review/validation rules.
   unavailable inbound coordination evidence is not treated as an empty
   roster. No source/caller ownership transfer, installed rollout, cleanup
   waiver or whole-effort completion is inferred.
+
+### 2026-11-16 - License-metadata packet stopped on audit normalization
+
+- The configured dependency owner reports an explicit feed in the environment
+  and retained UV configuration. No implicit public-index fallback is selected.
+  The two retained standalone license-field fixes and their release intent are
+  isolated from the original library work.
+- The single approved 600-second packet stops after 123.843 seconds. Its fresh
+  Python 3.12 environment installs seasoned setuptools 68.0.0, wheel 0.45.1
+  and packaging 25.0 through the configured feed. The original Manager license
+  string is rejected; the corrected real project generates metadata and a
+  license artifact.
+- The audit then incorrectly compares version strings literally:
+  `0.1.0-dev97` is normalized by the backend to `0.1.0.dev97`. This is an
+  audit failure, not a demonstrated packaging defect. Dispatch checks and the
+  install-contract gate are not reached; this is not a passing packet.
+- Source hashes remain unchanged, the fresh environment is removed with
+  confirmed process settlement, and cleanup finishes within the original
+  deadline. The observed joint allocation peaks at 727,099,114 bytes, below
+  the 6 GiB ceiling with its 512 MiB reserve. Evidence is retained.
+  The one-shot grant is spent. No automatic retry, original-library gate
+  completion, strict admission or installed rollout is inferred.

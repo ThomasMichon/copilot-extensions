@@ -22,6 +22,7 @@ from .watch_observer import NativeObservationBinding, ReplayObserver
 from .watch_replay_store import ReplayCallerExpired, ReplayStore
 from .repository_contract import RepositoryBackpressure
 from .filtered_state import Authority, Checkpoint, Document
+from .repository_stream import LocalStreamResponse
 
 if TYPE_CHECKING:
     from pr_filters import Definitions
@@ -40,7 +41,7 @@ class _Connector(Protocol):
 class _LocalIngressFactory(Protocol):
     def __call__(
         self, *, path: Path | str, namespace: str, peers: Iterable[tuple[int, str]],
-        handler: Callable[[LocalServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse]],
+        handler: Callable[[LocalServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse | LocalStreamResponse]],
         operation_seconds: int,
     ) -> _Connector: ...
 

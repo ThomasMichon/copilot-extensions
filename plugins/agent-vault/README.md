@@ -312,7 +312,7 @@ Supported built-in command groups:
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
 | Git HTTPS credentials | `git-credential get|store|erase` (delegates allowlisted hosts to local Git Credential Manager) |
-| Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
+| Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify`, `cache-machine-prepare` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
 
@@ -828,6 +828,63 @@ runtime. Without it, POSIX caches are inert and KEK commands return a clear
 error. New Windows caches can use native per-user DPAPI without a third-party
 package. Existing Fernet caches require the backend; unreadable originals are
 never overwritten. Existing DPAPI caches keep their format after installation.
+
+### Optional Windows machine-protected fallback
+
+An SSH/NETWORK logon can run as the cache owner without access to that account's
+DPAPI master key. The optional redundant machine copy avoids this dependency.
+**Any local user who obtains machine-scope ciphertext can decrypt it.**
+Owner-and-SYSTEM-only protected DACLs guard its directory, final file and every
+temporary file from creation. Administrators can take ownership; same-user code
+and SYSTEM remain trusted. This is not TPM-backed or portable to another machine.
+
+Check `invocation-contract --json` on the selected executing owner for
+`windows-machine-cache-v1`, then explicitly accept that tradeoff:
+
+```powershell
+agent-vault cache-machine-prepare --accept-machine-scope
+agent-vault cache-verify --machine-fallback --entry API/OpenAI --json
+```
+
+Preparation reads the selected existing primary and creates only its redundant
+copy under `machine-fallback/`; it never unlocks, contacts a service, re-keys or
+rewrites the user cache. An empty store can opt in before ordinary population.
+No new environment variable selects this policy: the private directory retains
+the explicit opt-in for that selected store.
+
+These machine-copy commands require local cache-maintenance ownership.
+Ordinary `cache-verify` retains configured `selected-service` routing;
+machine preparation and forced machine verification refuse that policy rather
+than reading or changing an unrelated caller-side store.
+
+Capable writers update the machine copy through the shared protected-store
+writer, including explicit population, unlock warming, service records,
+rotation journals and invalidation. Readers prefer the primary; only a
+user-DPAPI decryption-unavailable failure permits ordinary fallback. Machine
+reads never migrate keys or write through to the unreadable primary.
+If a valid machine copy has no usable value, or its file has not yet been
+populated, ordinary reads retain the user-decryption-unavailable state for the
+existing selected-service fallback. They do not attempt cache writeback;
+cache-only refusal and explicit-refresh reconciliation requirements remain.
+`cache-verify --machine-fallback` deliberately exercises the machine read path
+without changing the primary, exposing only verification counts/missing subjects.
+
+Each encrypted machine envelope binds the selected store path and exact primary
+ciphertext/key digests. A candidate is published before primary replacement.
+Interrupted writes and older writers therefore make a copy unavailable rather
+than serving stale credentials. Missing primary bytes, unsafe ACLs, corruption
+and selection/recovery errors remain refusals. Source and machine ciphertexts
+are bounded to 16 MiB; an oversized opted-in write fails before primary replacement.
+`cache-clear` removes both
+ciphertexts while retaining the opt-in directory. Keep both bytes and ACLs under
+the same approved custody; do not copy this machine-bound artifact between hosts.
+
+Old runtimes retain their original behavior and reject the new syntax. They do
+not maintain redundant copies; after an old writer changes primary bytes, use a
+capable owner to prepare/populate the copy again. A new CLI does not make an old
+running service capable: unlock warming requires the authorized service upgrade.
+Reboot/relock availability and other-user denial require qualification on the
+target context, not inference from an interactive DPAPI roundtrip.
 
 `cache-populate` bounds old-cache adoption through a contained helper: ten
 seconds for reading/decoding, with two seconds reserved separately for native

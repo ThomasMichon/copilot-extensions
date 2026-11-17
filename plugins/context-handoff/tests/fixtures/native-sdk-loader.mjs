@@ -1,6 +1,6 @@
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === "@github/copilot-sdk" ||
-      specifier === "@github/copilot-sdk/extension") {
+  if (specifier === "@microsoft/copilot-sdk" ||
+      specifier === "@microsoft/copilot-sdk/extension") {
     return { url: "native-test:sdk", shortCircuit: true };
   }
   return nextResolve(specifier, context);

@@ -1,6 +1,9 @@
 """Private Linux Unix HTTP ingress within the existing WatchService lifetime."""
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Awaitable, Callable, Iterable
 import os
 from pathlib import Path
 import socket
@@ -11,17 +14,29 @@ import time
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_handler import RequestLifetime
+from fleet_manager.gateway_service_handler import BoundedServiceResponse, ServiceResponse
 from fleet_manager.local_service_handler import LocalCallerContext, LocalServiceRequest
 
 from .repository_subscriptions import RESPONSE_BYTES
+from .repository_stream import LocalStreamResponse, MAX_BYTES, MAX_FRAMES
 
 
 class LocalIngress:
     """OS peer admission, never caller-selected identity from HTTP headers."""
 
     connected: asyncio.Event
+    path: Path
+    namespace: str
+    peers: dict[int, str]
+    seconds: int
+    handler: Callable[[LocalServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse | LocalStreamResponse]]
+    _closing: bool
 
-    def __init__(self, *, path, namespace, peers, handler, operation_seconds):
+    def __init__(
+        self, *, path: Path | str, namespace: str, peers: Iterable[tuple[int, str]],
+        handler: Callable[[LocalServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse | LocalStreamResponse]],
+        operation_seconds: int,
+    ) -> None:
         if sys.platform != "linux" or not hasattr(socket, "SO_PEERCRED"):
             raise ValueError("local repository ingress requires Linux peer credentials")
         self.path, self.namespace = Path(path), namespace
@@ -30,11 +45,13 @@ class LocalIngress:
             raise ValueError("invalid private local ingress selection")
         self.handler, self.seconds = handler, operation_seconds
         self.connected = asyncio.Event()
-        self._tasks = set()
-        self._requests = {}
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._requests: dict[asyncio.Task[None], tuple[asyncio.StreamWriter, RequestLifetime]] = {}
         self._closing = False
 
-    def _stale(self):
+    def _stale(self) -> None:
+        if sys.platform != "linux":
+            raise ValueError("Linux local transport required")
         if not self.path.exists() and not self.path.is_symlink():
             return
         info = self.path.lstat()
@@ -53,7 +70,9 @@ class LocalIngress:
         finally:
             probe.close()
 
-    async def run(self, stop):
+    async def run(self, stop: asyncio.Event) -> None:
+        if sys.platform != "linux":
+            raise ValueError("Linux local transport required")
         self._stale()
         server = await asyncio.start_unix_server(self._accept, path=str(self.path), limit=8192)
         os.chmod(self.path, 0o600)
@@ -75,7 +94,7 @@ class LocalIngress:
             if self.path.exists() and self.path.lstat().st_ino == owned.st_ino:
                 self.path.unlink()
 
-    def _accept(self, reader, writer):
+    def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         if self._closing or len(self._tasks) >= 8:
             writer.close()
             writer.transport.abort()
@@ -84,13 +103,17 @@ class LocalIngress:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _connection(self, reader, writer):
+    async def _connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        if sys.platform != "linux":
+            raise ValueError("Linux local transport required")
         deadline = time.monotonic() + self.seconds
         expires_at = int(time.time()) + self.seconds
         lifetime = RequestLifetime()
         task = asyncio.current_task()
+        assert task is not None
         self._requests[task] = (writer, lifetime)
-        monitor = pending = None
+        monitor: asyncio.Task[None] | None = None
+        pending: asyncio.Task[ServiceResponse | BoundedServiceResponse | LocalStreamResponse] | None = None
         try:
             if self._closing:
                 lifetime.close()
@@ -106,7 +129,7 @@ class LocalIngress:
                     self._write(writer, 403, b'{"error":"local_peer_refused"}'), self.seconds,
                 )
                 return
-            async def receive():
+            async def receive() -> LocalServiceRequest:
                 raw = await reader.readuntil(b"\r\n\r\n")
                 if len(raw) > 8192:
                     raise ValueError
@@ -133,13 +156,21 @@ class LocalIngress:
                     response_limit=RESPONSE_BYTES,
                 )
             request = await asyncio.wait_for(receive(), self.seconds)
-            monitor = asyncio.create_task(reader.read(1))
-            pending = asyncio.create_task(self.handler(request))
+            async def disconnected() -> None:
+                await reader.read(1)
+                lifetime.close()
+            monitor = asyncio.create_task(disconnected())
+            async def dispatch() -> ServiceResponse | BoundedServiceResponse | LocalStreamResponse:
+                return await self.handler(request)
+            pending = asyncio.create_task(dispatch())
             done, _ = await asyncio.wait({monitor, pending}, return_when=asyncio.FIRST_COMPLETED)
             if monitor in done:
                 lifetime.close()
             result = await asyncio.shield(pending)
             lifetime.check()
+            if isinstance(result, LocalStreamResponse):
+                await self._stream(writer, result, deadline, lifetime)
+                return
             if len(result.body) > RESPONSE_BYTES:
                 raise ValueError
             await asyncio.wait_for(
@@ -165,7 +196,39 @@ class LocalIngress:
                 writer.transport.abort()
 
     @staticmethod
-    async def _write(writer, status, body):
+    async def _stream(
+        writer: asyncio.StreamWriter, result: LocalStreamResponse, deadline: float,
+        lifetime: RequestLifetime,
+    ) -> None:
+        iterator = result.chunks
+        used = frames = 0
+        try:
+            writer.write(
+                b"HTTP/1.1 200 Result\r\nContent-Type: text/event-stream\r\n"
+                b"Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+            )
+            await asyncio.wait_for(writer.drain(), max(.001, deadline - time.monotonic()))
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        anext(iterator), max(.001, deadline - time.monotonic()),
+                    )
+                except StopAsyncIteration:
+                    return
+                lifetime.check()
+                if time.monotonic() >= deadline:
+                    return
+                used, frames = used + len(chunk), frames + 1
+                if len(chunk) > RESPONSE_BYTES or used > MAX_BYTES or frames > MAX_FRAMES:
+                    return
+                writer.write(chunk)
+                await asyncio.wait_for(writer.drain(), max(.001, deadline - time.monotonic()))
+        finally:
+            lifetime.close()
+            await iterator.aclose()
+
+    @staticmethod
+    async def _write(writer: asyncio.StreamWriter, status: int, body: bytes) -> None:
         writer.write(
             f"HTTP/1.1 {status} Result\r\nContent-Type: application/json\r\n"
             f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body,

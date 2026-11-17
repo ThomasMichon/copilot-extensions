@@ -74,6 +74,7 @@ def invocation_contract() -> dict[str, Any]:
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
+            "windows-machine-cache-v1",
             CACHE_TARGET_CAPABILITY,
             *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
             "service-cache-maintenance-v1",
