@@ -9,9 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
+CREATE_NO_WINDOW = 0x08000000
+
 
 @pytest.mark.parametrize("operation", ["--describe-contract", "--observe"])
-def test_resume_fixture_forwards_observation_input_and_exit(monkeypatch, operation):
+def test_resume_fixture_forwards_observation_input_and_exit(
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
     source = Path(__file__).parent / "native" / "test_resume_pane_startup.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
     owner = next(
@@ -22,15 +26,15 @@ def test_resume_fixture_forwards_observation_input_and_exit(monkeypatch, operati
     )
     arguments = ["-I", "-X", "utf8", "-m", "agent_remote_driver.mux_observation", operation]
     request = b'{"version":1,"session":"fixture-session"}\n'
-    calls = []
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=17)
 
     monkeypatch.setattr(sys, "argv", ["fixture-owner", *arguments])
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(request)))
-    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", CREATE_NO_WINDOW, raising=False)
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(SystemExit) as exited:
         exec(compile(owner, str(source), "exec"), {"__name__": "__main__"})
@@ -39,7 +43,7 @@ def test_resume_fixture_forwards_observation_input_and_exit(monkeypatch, operati
     assert len(calls) == 1
     argv, options = calls[0]
     assert argv == [sys.executable, *arguments]
-    assert options["creationflags"] == subprocess.CREATE_NO_WINDOW
+    assert options["creationflags"] == CREATE_NO_WINDOW
     if operation == "--observe":
         assert options["input"] == request
         assert "stdin" not in options
