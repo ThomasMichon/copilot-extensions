@@ -64,6 +64,29 @@ def test_selected_older_launcher_api_is_a_replacement_gap_not_a_status_error(
     assert install._binstubs_are_stale(application_slot=slot)
 
 
+@pytest.mark.parametrize("corrupt", [b'{"commands": [', b"\xff"])
+def test_corrupt_selected_declaration_needs_replacement_but_cannot_be_published(
+    application: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, corrupt: bytes,
+) -> None:
+    slot, _ = application
+    root = slot.parent.parent
+    install._deploy_binstubs(application_slot=slot)
+    (root / "current-version").write_text(slot.name + "\n", encoding="utf-8")
+    monkeypatch.setattr(install, "_slot_package_version", lambda _slot: slot.name)
+    monkeypatch.setattr(install, "_slot_is_complete", lambda _slot: True)
+    monkeypatch.setattr(
+        install, "_control_plane_provider_manifest_is_stale", lambda **_options: False,
+    )
+    assert not install.needs_install(slot.name, root)
+    outputs = install._expected_frontdoor_contents(slot)
+    before = {path: path.read_bytes() for path in outputs}
+    (slot / "application.json").write_bytes(corrupt)
+    assert install.needs_install(slot.name, root)
+    with pytest.raises(ValueError):
+        install._deploy_binstubs(application_slot=slot)
+    assert {path: path.read_bytes() for path in outputs} == before
+
+
 def test_uncommitted_publication_recovers_neutral_and_global_outputs(
     application: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

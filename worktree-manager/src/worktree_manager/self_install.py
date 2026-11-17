@@ -394,8 +394,8 @@ def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
     """
     try:
         contents = _expected_frontdoor_contents(application_slot)
-    except TypeError:
-        # Older selected slots can predate neutral setup rendering.
+    except (OSError, ValueError, TypeError):
+        # Unreadable selected inputs and older rendering APIs are replacement gaps.
         return True
     for p, expected in contents.items():
         try:
