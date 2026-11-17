@@ -588,11 +588,11 @@ def test_lazy_toolchain_marker_read_keeps_original_deadline(monkeypatch: pytest.
     reads: list[tuple[Path, dict[str, Any]]] = []
     monkeypatch.setattr(
         locks, "_query_marker_environment",
-        lambda path, **options: (_append_result(reads, (path, options), {"fixture": True})),
+        lambda path, **options: (_append_result(reads, (path, options), {"sys_platform": "fixture"})),
     )
     selected = tmp_path / "python"
     lock = locks.ToolchainLock(selected, {}, deadline=deadline)
-    assert lock.marker_environment == {"fixture": True}
+    assert lock.marker_environment == {"sys_platform": "fixture"}
     assert reads == [(selected, {"deadline": deadline})]
     monkeypatch.setattr(time, "monotonic", lambda: deadline + 1)
     with pytest.raises(ArtifactBuildError):
