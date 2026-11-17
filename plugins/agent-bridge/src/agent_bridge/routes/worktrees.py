@@ -12,11 +12,13 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from ..agent_registry import AgentConfig, AgentResolver
 from ..loop_governance import LoopGovernance
@@ -210,7 +212,7 @@ class WorktreeDiscoveryCache:
             task = asyncio.create_task(_probe_archived_owner(worktree_id, resolver))
             self._archive_probe_inflight[worktree_id] = task
 
-            def _evict(t: asyncio.Task, wid: str = worktree_id) -> None:
+            def _evict(t: asyncio.Task[tuple[str, AgentConfig] | None], wid: str = worktree_id) -> None:
                 if self._archive_probe_inflight.get(wid) is t:
                     del self._archive_probe_inflight[wid]
 
@@ -235,7 +237,7 @@ class WorktreeDiscoveryCache:
             task = asyncio.create_task(_probe_live_worktree(worktree_id, resolver))
             self._live_probe_inflight[worktree_id] = task
 
-            def _evict(t: asyncio.Task, wid: str = worktree_id) -> None:
+            def _evict(t: asyncio.Task[tuple[str, _WorktreeEntry] | None], wid: str = worktree_id) -> None:
                 if self._live_probe_inflight.get(wid) is t:
                     del self._live_probe_inflight[wid]
 
@@ -300,11 +302,11 @@ class WorktreeDiscoveryCache:
               for name, cfg in eligible),
             return_exceptions=True,
         )
-        result = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
-        if result is not None and result.get("status") != "ready":
+        governance = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
+        if governance is not None and governance.get("status") != "ready":
             raise RuntimeError(
                 "worktree discovery governance changed before cache update: "
-                f"{result.get('reason')}"
+                f"{governance.get('reason')}"
             )
 
         self._sync_sources(self._resolver if self._resolver is not None else resolver)
@@ -371,7 +373,7 @@ class WorktreeDiscoveryCache:
                 host = target.host or config.host
                 user = target.user or config.ssh_user
 
-        async def _run(args: list[str], *, timeout: float | None = None):
+        async def _run(args: list[str], *, timeout: float | None = None) -> tuple[str | None, str]:
             if is_local:
                 return await _run_local_ex(project, args, timeout=timeout)
             return await _run_ssh_ex(
@@ -599,7 +601,7 @@ def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
     if proc is None or proc.returncode is not None:
         return
     pid = proc.pid
-    if hasattr(os, "killpg") and hasattr(os, "getpgid"):
+    if sys.platform != "win32" and hasattr(os, "killpg") and hasattr(os, "getpgid"):
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return
@@ -802,7 +804,7 @@ def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
 async def resume_worktree(
     worktree_id: str, request: Request, reclaim: bool = False, strict: bool = False
-) -> SessionInfo:
+) -> SessionInfo | JSONResponse:
     """Keep the original HTTP shape while always preserving the native head."""
     from ..worktree_native_resume import resume_native_worktree
 
@@ -828,7 +830,7 @@ async def handoff_worktree(
 
     mgr = getattr(request.app.state, "session_manager", None)
     session = _latest_session_for_worktree(mgr, worktree_id)
-    if session is None:
+    if mgr is None or session is None:
         raise HTTPException(
             status_code=404,
             detail=f"No session found for worktree {worktree_id}",
@@ -881,7 +883,7 @@ async def handoff_worktree_request(
 
     mgr = getattr(request.app.state, "session_manager", None)
     session = _latest_session_for_worktree(mgr, worktree_id)
-    if session is None:
+    if mgr is None or session is None:
         raise HTTPException(
             status_code=404,
             detail=f"No session found for worktree {worktree_id}",
@@ -950,12 +952,16 @@ async def _run_for_agent(
     if _is_local_target(target.host, resolver, target.execution_space_key):
         return await _run_local(config.project, args)
 
+    if target.ssh_shell in {"pwsh", "powershell", "cmd"}:
+        return await _run_ssh(
+            host=target.host or config.host, user=target.user or config.ssh_user,
+            project=config.project, args=args, ssh_shell=target.ssh_shell,
+        )
     return await _run_ssh(
         host=target.host or config.host,
         user=target.user or config.ssh_user,
         project=config.project,
         args=args,
-        **({"ssh_shell": target.ssh_shell} if target.ssh_shell in {"pwsh", "powershell", "cmd"} else {}),
     )
 
 

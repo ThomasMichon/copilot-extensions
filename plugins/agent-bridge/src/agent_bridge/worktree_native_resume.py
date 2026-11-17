@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_gates import AcquisitionGateHeld
@@ -40,10 +41,26 @@ def _refuse(reason: str, detail: str, *, status: int = 409) -> HTTPException:
     return HTTPException(status, detail={"reason": reason, "detail": detail})
 
 
+@router.get("/api/v1/targets")
+async def list_targets(request: Request, refresh: bool = False) -> dict[str, Any]:
+    """Project registrations and every discovered workspace without hydration."""
+    from .target_inventory import inventory
+
+    return await inventory(request, refresh=refresh)
+
+
+@router.post("/api/v1/worktrees/{worktree_id}/metadata", response_model=SessionInfo)
+async def hydrate_worktree(worktree_id: str, request: Request) -> JSONResponse:
+    """Resolve and hydrate the authoritative head without resuming it."""
+    from .worktree_metadata import hydrate
+
+    return await hydrate(worktree_id, request)
+
+
 @router.post("/api/v1/worktrees/{worktree_id}/resume/{mode}", response_model=SessionInfo)
 async def resume_native_worktree(
     worktree_id: str, request: Request, mode: Mode, reclaim: bool = False, strict: bool = False,
-) -> SessionInfo:
+) -> SessionInfo | JSONResponse:
     from .routes import worktrees as wt
 
     singleton = repo_name_from_anchor_key(worktree_id) if isinstance(worktree_id, str) else None
@@ -60,16 +77,22 @@ async def resume_native_worktree(
         raise _refuse("draining", "Bridge is draining", status=503)
     async with wt._fresh_start_locks.setdefault(worktree_id, asyncio.Lock()):
         try:
-            with executor(db, worktree_id):
-                manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
-                try:
+            manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
+            try:
+                if not singleton:
+                    from .retained_worktree_resume import resume
+
+                    recovered = await resume(request, worktree_id, mode)
+                    if recovered is not None:
+                        return recovered
+                with executor(db, worktree_id):
                     if singleton:
                         from .singleton_resume import resume_singleton_anchor
 
                         return await resume_singleton_anchor(worktree_id, request, mode, strict=strict)
                     return await _resume(worktree_id, request, mode, manager, db, resolver)
-                finally:
-                    manager._active_acquisitions -= 1
+            finally:
+                manager._active_acquisitions -= 1
         except AcquisitionRefused as exc:
             raise _refuse(exc.code, str(exc)) from exc
         except AcquisitionGateHeld as exc:
