@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Hygiene engine and Index custody](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+
 - [2026-11-17 - Lifecycle and cache-owner acceptance](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
 
 - [2026-11-17 - SDK release, cache adoption and transport observation](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)

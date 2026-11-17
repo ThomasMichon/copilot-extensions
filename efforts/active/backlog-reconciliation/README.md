@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [hygiene-engine and Index-custody checkpoint](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+  distinguishes #1544's engine from current privacy adapters and verifies
+  #1843's complete planned receiving without releasing its assigned coordination.
   The [lifecycle and cache-owner checkpoint](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
   preserves #78's finite source gap, #84's complete accepted canonical and new
   #9532/#12900 owner deltas without equating source delivery with adoption.
