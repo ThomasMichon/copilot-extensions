@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve extension registration across current and preceding Copilot SDK contracts",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

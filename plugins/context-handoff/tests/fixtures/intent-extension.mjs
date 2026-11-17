@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
+const tools = session.config.tools.definitions ?? session.config.tools;
 session.sessionId = "fixture-intent-session";
 const emit = async (type, data = {}, extra = {}) =>
   session.handlers.get(type)?.({ type, data, ...extra });
@@ -28,7 +29,7 @@ const replay = session.sends.find((message) => message.prompt?.includes("<intent
 assert.equal(replay.source, "system");
 const facts = JSON.parse(replay.prompt.split("\n\n")[2]);
 assert.equal(facts.corpus.count, 2);
-const reader = session.config.tools.find((tool) => tool.name === "read_intent_corpus");
+const reader = tools.find((tool) => tool.name === "read_intent_corpus");
 assert.ok(reader);
 const segments = [];
 let cursor = {};
@@ -40,7 +41,7 @@ do {
   cursor = page.next;
 } while (cursor);
 assert.equal(segments.join(""), text);
-const generate = session.config.tools.find((tool) => tool.name === "generate_handoff_prompt");
+const generate = tools.find((tool) => tool.name === "generate_handoff_prompt");
 const generated = await generate.handler({}, {});
 assert.ok(generated.textResultForLlm.includes(facts.corpus.id));
 assert.match(generated.textResultForLlm, /Canonical Goal and Intent Corpus/u);
