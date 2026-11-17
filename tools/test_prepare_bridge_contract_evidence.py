@@ -305,14 +305,6 @@ def test_native_git_captured_tree_survives_without_an_advertised_branch(
     assert git("for-each-ref") == ""
 
 
-def test_ci_prepares_checkpoint_before_local_only_contract_validation():
-    source = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text("utf-8")
-    assert source.index("python tools/prepare_bridge_contract_evidence.py") < source.index(
-        "run: python tools/check-agent-bridge-contracts.py",
-    )
-    assert '${{ github.server_url }}/${{ github.repository }}.git' in source
-
-
 def _published_orphaned_closure(root, monkeypatch, *, chunked):
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     subprocess.run(

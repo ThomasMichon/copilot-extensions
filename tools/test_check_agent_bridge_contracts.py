@@ -387,40 +387,9 @@ def test_checker_validates_complete_chunked_history_without_rewriting(repo: Path
     assert all((repo / path).read_bytes() == data for path, data in outputs.items())
 
 
-def test_ci_checks_registry_once_and_keeps_pr_source_coverage() -> None:
-    import yaml
-
-    workflow = yaml.safe_load(
-        (SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    )
-    steps = [
-        step for step in workflow["jobs"]["checks"]["steps"]
-        if SCRIPT.name in step.get("run", "")
-    ]
-    assert len(steps) == 2
-    impact = "steps.code-impact.outputs.run == 'true' && "
-    assert all(step["if"].startswith(impact) for step in steps)
-    commands = {step["if"].removeprefix(impact): step["run"] for step in steps}
-    assert commands == {
-        "github.event_name != 'pull_request'": "python tools/check-agent-bridge-contracts.py",
-        "github.event_name == 'pull_request'": (
-            "python tools/check-agent-bridge-contracts.py "
-            "--base ${{ github.event.pull_request.base.sha }}"
-        ),
-    }
-    for event in ("pull_request", "push", "workflow_dispatch", "future_event", ""):
-        selected = [
-            command for condition, command in commands.items()
-            if (
-                condition == "github.event_name == 'pull_request'"
-                and event == "pull_request"
-            ) or (
-                condition == "github.event_name != 'pull_request'"
-                and event != "pull_request"
-            )
-        ]
-        assert len(selected) == 1
-        assert ("--base " in selected[0]) is (event == "pull_request")
+def test_ci_does_not_gate_on_the_contract_registry() -> None:
+    workflow = (SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert SCRIPT.name not in workflow
 
 
 @pytest.mark.parametrize("corruption", ["schema", "fixture", "provenance"])

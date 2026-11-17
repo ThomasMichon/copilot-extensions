@@ -46,7 +46,7 @@ def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
         "check-headless-launch.py", "check-picker-inbox-discipline.py",
         "check-skills.py", "check-docs-consistency.py", "check-runbook-references.py",
         "check-version-consistency.py", "check-effort-vision-structure.py",
-        "check-feed-neutrality.py", "check-agent-bridge-contracts.py",
+        "check-feed-neutrality.py",
         "check-changefile-presence.py", "check-no-agent-machines-packages.py",
         "check-module-size.py",
     ):

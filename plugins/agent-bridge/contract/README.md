@@ -4,6 +4,12 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+The registry and `tools/check-agent-bridge-contracts.py` are **not** a CI gate.
+Refresh evidence and run the checker manually (or through the on-demand
+`Installation context full` portfolios) when deliberately working on Bridge
+protocol evidence; ordinary source changes do not require a recapture.
+Statements below about CI or required contract gates are historical.
+
 The H1 prior-runtime corpus also retains the exact `0.4.0-dev150` frontend
 source beside its existing protocol source. Both come from the same immutable
 release commit and retain their original bytes and Git blob identities.
