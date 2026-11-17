@@ -1,9 +1,0 @@
-{
-  "comment": "Add internal shared MCP custody and authenticated backend handover, with native physical-generation qualification, without changing ordinary client adoption.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

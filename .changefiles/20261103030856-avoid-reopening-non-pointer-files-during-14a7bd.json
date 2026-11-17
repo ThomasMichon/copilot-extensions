@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid reopening non-pointer files during local source composition",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "monitor-agent-fleet: re-resolve a fleet-wide recurring watch's roster each cycle from the topology manifest and read-only SSH readiness, keeping unready machines as coverage gaps",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

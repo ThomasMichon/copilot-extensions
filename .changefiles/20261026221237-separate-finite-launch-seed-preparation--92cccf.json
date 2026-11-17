@@ -1,9 +1,0 @@
-{
-  "comment": "Add finite native backend handoffs and a dormant Windows adapter while preserving legacy launch admission and seed semantics",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

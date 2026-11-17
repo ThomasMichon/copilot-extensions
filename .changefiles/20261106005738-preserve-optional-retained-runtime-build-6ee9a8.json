@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve optional retained runtime build identity through the shared slot bootstrap while retaining ordinary unpinned invocation.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

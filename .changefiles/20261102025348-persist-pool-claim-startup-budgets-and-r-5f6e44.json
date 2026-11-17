@@ -1,9 +1,0 @@
-{
-  "comment": "Persist pool claim startup budgets and retain exhausted execution custody",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit bounded hourly collection candidates and confirmed versioned local staging",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

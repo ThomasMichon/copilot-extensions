@@ -1,9 +1,0 @@
-{
-  "comment": "Route legacy Bridge bootstrap stamp and unattended drift install through the shared installation foundation and ordinary queue while preserving source-aware readiness and independent guidance.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prefer a standalone Copilot executable over Windows forwarding shims and batch wrappers for literal multiline startup prompts.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add read-only first-run guides with existing owner handoffs and setup-plan navigation",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

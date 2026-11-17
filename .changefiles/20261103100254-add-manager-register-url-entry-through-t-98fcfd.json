@@ -1,9 +1,0 @@
-{
-  "comment": "Add Manager register URL entry through the existing explicit repository setup flow",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

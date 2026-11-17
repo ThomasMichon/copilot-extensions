@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit resumable terminal-scope cache and materialization retirement",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

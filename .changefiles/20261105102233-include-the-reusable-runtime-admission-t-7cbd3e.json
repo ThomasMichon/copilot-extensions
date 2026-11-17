@@ -1,9 +1,0 @@
-{
-  "comment": "Include the reusable runtime admission toolkit in the Worktrees payload",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

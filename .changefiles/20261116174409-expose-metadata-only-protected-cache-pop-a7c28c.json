@@ -1,9 +1,0 @@
-{
-  "comment": "Expose metadata-only protected cache population and verification through the selected running service",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

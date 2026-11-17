@@ -1,9 +1,0 @@
-{
-  "comment": "Compose explicit managed client generation install, forward update and exact uninstall through the existing lifecycle owners.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

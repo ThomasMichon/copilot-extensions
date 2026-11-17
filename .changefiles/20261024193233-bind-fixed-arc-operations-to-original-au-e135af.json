@@ -1,9 +1,0 @@
-{
-  "comment": "Bind fixed ARC operations to original authenticated callers inside the existing Gateway",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

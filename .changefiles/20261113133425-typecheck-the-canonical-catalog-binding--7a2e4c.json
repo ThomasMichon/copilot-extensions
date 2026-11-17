@@ -1,9 +1,0 @@
-{
-  "comment": "Typecheck the canonical catalog-binding bootstrap through source-mapped views and focused source/frozen controls.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

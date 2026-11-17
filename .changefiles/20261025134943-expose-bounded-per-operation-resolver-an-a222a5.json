@@ -1,9 +1,0 @@
-{
-  "comment": "Expose bounded per-operation terminal observations with recorded results, child exits and explicitly unknown final wrapper exits.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

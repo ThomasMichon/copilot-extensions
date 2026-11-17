@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify actual offline native-client discovery across physical MCP handover",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

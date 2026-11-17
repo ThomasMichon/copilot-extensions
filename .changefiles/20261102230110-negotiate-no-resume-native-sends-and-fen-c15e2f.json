@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate no-resume native sends and fence stopped ACP sessions under the existing turn lock",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

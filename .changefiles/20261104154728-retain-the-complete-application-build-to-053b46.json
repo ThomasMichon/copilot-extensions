@@ -1,9 +1,0 @@
-{
-  "comment": "Retain the complete-application build toolchain and permit reuse without provisioning",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add native-owned worker closeout through normal finalization without task release",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify actual native accepted tool result loss without replay during physical handover",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

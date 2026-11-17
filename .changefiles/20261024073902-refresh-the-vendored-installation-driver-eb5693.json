@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the vendored installation driver with canonical SSH selected-snapshot admission.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

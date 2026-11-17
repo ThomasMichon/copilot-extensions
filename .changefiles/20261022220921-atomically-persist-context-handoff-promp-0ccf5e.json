@@ -1,9 +1,0 @@
-{
-  "comment": "Atomically persist context-handoff prompt receipts in the existing locked durable trace with bounded lookup output.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

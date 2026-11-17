@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate oversized unrelated provider entries without relaxing owned publication",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "dev"
-    }
-  ]
-}

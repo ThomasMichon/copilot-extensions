@@ -1,9 +1,0 @@
-{
-  "comment": "Report terminal reconciliation diagnostics and skipped payload actions as unsuccessful without canceling independent work.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Observe immutable legacy Worktrees slot generation without child processes or writer admission",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

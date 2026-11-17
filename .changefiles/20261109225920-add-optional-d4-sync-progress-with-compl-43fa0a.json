@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional D4 Sync progress with complete paired results and runtime support declaration",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fleet and delegates accept only a host's current roster as proof that a delegate's caller is gone or terminal; saved, stale or unlabeled rosters leave the caller unknown and block finalization (host-roster-advisory)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

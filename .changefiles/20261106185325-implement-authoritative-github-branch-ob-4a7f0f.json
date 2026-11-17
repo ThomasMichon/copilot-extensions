@@ -1,9 +1,0 @@
-{
-  "comment": "Implement authoritative GitHub branch observation for foreign publication checks",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

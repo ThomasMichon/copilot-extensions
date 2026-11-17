@@ -1,9 +1,0 @@
-{
-  "comment": "Windows installer: read optional active-route keys safely under strict mode so the running daemon is pinned during updates and a failed cutover's fallback no longer crashes",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

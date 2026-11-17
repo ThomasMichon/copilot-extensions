@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in local ordinary relationship admission through original queue and live writer owners",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

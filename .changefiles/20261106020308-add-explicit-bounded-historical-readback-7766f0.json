@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit bounded historical-readback capture storage without enabling protected tracking or serving",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

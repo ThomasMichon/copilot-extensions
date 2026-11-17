@@ -1,9 +1,0 @@
-{
-  "comment": "Consume copied Windows mux setup startup arguments through a launch-owned one-shot manifest without retaining installation-root argv.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

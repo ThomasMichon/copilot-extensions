@@ -1,9 +1,0 @@
-{
-  "comment": "Deliver corrected native output relays in the bundled caller-lifetime runtime",
-  "changes": [
-    {
-      "plugin": "wsl-setup",
-      "type": "patch"
-    }
-  ]
-}

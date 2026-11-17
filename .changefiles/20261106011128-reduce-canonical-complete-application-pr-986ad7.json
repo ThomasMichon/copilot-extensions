@@ -1,9 +1,0 @@
-{
-  "comment": "Reduce canonical complete-application preparation work while preserving source and profile bindings",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

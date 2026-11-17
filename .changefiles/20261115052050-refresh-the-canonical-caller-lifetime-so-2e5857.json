@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the canonical caller-lifetime source archive with required async Windows child-containment support.",
-  "changes": [
-    {
-      "plugin": "wsl-setup",
-      "type": "patch"
-    }
-  ]
-}

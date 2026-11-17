@@ -1,9 +1,0 @@
-{
-  "comment": "Export finite principal-bound ADO review evidence through the existing read transport",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

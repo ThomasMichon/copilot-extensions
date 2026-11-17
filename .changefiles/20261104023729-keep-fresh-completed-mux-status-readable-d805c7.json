@@ -1,9 +1,0 @@
-{
-  "comment": "Keep fresh completed mux status readable during ordinary Git observation and mutation-admission contention.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

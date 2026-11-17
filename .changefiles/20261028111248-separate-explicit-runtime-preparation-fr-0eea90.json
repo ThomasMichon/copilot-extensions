@@ -1,9 +1,0 @@
-{
-  "comment": "Separate explicit runtime preparation from adoption and preserve supervisors during strict coordinator-only updates.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

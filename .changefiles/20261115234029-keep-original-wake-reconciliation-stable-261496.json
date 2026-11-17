@@ -1,9 +1,0 @@
-{
-  "comment": "Keep original wake reconciliation stable across owner liveness updates while fencing semantic task and execution changes.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

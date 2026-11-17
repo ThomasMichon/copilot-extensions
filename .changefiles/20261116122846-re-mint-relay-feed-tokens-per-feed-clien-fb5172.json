@@ -1,9 +1,0 @@
-{
-  "comment": "Re-mint relay feed tokens per feed-client invocation so reused sessions do not send expired bearers",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

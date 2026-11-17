@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit bounded passive Bridge listener observations for local health records",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native caller lifetime across byte-distinct application generations",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

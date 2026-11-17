@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the canonical installation-driver SSH command lifecycle composition.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

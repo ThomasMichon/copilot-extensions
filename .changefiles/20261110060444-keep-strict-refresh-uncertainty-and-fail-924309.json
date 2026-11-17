@@ -1,9 +1,0 @@
-{
-  "comment": "Keep strict Refresh uncertainty and failures request-local while superseding older managed observations",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

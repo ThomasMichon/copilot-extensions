@@ -1,9 +1,0 @@
-{
-  "comment": "Reuse a supported external UV later on PATH before bootstrap acquisition.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

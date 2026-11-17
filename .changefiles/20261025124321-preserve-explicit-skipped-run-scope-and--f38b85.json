@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve explicit skipped run scope and prior full-update history without masking required failures",
-  "changes": [
-    {
-      "plugin": "libs/update-telemetry",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Retain opt-in native fault diagnostics independently of terminal rendering",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

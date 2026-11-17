@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve native daemon target exit status after application cleanup and validate Job scopes before instance reservation.",
-  "changes": [
-    {
-      "plugin": "libs/agent-procutil",
-      "type": "patch"
-    }
-  ]
-}

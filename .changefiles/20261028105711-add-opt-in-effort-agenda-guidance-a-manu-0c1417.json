@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in effort agenda guidance, a manual cursor convention and bounded detour-return procedure.",
-  "changes": [
-    {
-      "plugin": "efforts",
-      "type": "patch"
-    }
-  ]
-}

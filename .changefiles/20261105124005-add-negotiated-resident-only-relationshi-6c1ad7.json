@@ -1,9 +1,0 @@
-{
-  "comment": "Add negotiated resident-only relationship inspection without direct fallback",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

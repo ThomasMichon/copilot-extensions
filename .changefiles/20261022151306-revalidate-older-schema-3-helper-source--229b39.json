@@ -1,9 +1,0 @@
-{
-  "comment": "Revalidate older schema-3 helper source locators through canonical ownership before fresh Manager recovery",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

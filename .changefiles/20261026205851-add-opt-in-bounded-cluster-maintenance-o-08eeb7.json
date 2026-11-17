@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in bounded cluster maintenance over witnessed bucket generations and prepared selected-model reads",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

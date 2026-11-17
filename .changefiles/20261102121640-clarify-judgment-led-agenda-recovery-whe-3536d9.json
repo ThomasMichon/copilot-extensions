@@ -1,9 +1,0 @@
-{
-  "comment": "Clarify judgment-led agenda recovery when planning state is unavailable, stale or rewound.",
-  "changes": [
-    {
-      "plugin": "efforts",
-      "type": "patch"
-    }
-  ]
-}

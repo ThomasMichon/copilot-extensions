@@ -1,9 +1,0 @@
-{
-  "comment": "Recover SSH local control after abandoned peers and interrupted activation",
-  "changes": [
-    {
-      "plugin": "services/ssh",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in direct HTTP profile for typed PR observation",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

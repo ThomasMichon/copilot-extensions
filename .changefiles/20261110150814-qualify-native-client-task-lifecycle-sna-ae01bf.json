@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native client-task lifecycle snapshots and real interactive schedule visibility with exact cleanup.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

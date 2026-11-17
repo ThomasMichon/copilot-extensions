@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify real task-assignment claim retention and cleanup blocking across interrupted reserve/bind and exact task disposition.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Retain configured-cohort fences through original pool metadata request preparation, sending, replay and acknowledgment.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

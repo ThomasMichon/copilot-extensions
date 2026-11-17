@@ -1,9 +1,0 @@
-{
-  "comment": "Extend the supported pytest development dependency range.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

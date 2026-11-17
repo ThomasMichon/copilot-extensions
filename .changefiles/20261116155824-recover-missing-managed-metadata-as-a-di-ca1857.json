@@ -1,9 +1,0 @@
-{
-  "comment": "Recover missing managed metadata as a distinct same-native control epoch with retained ownership and history exclusions",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

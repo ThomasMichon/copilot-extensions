@@ -1,9 +1,0 @@
-{
-  "comment": "Author agents manage their own PRs and created branches (rebase, conflict resolution, force-push, derived-artifact regeneration, review re-requests, thread replies) without approval prompts; mechanical rebase pushes do not count against revision or review-round caps.",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

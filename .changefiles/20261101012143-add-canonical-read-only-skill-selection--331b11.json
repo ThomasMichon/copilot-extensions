@@ -1,9 +1,0 @@
-{
-  "comment": "Add canonical read-only skill-selection and source-bound decision contracts",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

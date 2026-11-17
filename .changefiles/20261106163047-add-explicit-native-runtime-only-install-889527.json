@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit native runtime-only install and update composition without project inference.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

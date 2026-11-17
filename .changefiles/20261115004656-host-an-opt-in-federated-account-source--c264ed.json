@@ -1,9 +1,0 @@
-{
-  "comment": "Host an opt-in federated account-source channel in the existing Vault service through a verified local Gateway conduit.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

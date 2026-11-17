@@ -1,9 +1,0 @@
-{
-  "comment": "Show source-qualified tool-start statistics on the existing selected session reader",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

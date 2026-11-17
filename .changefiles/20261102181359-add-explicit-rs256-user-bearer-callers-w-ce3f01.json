@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit RS256 user bearer callers with independent local Gateway and current operation admission",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

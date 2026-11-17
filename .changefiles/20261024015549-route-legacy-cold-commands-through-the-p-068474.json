@@ -1,9 +1,0 @@
-{
-  "comment": "Route legacy cold commands through the packaged caller-independent installation driver; refuse unqualified cold cells and roots.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

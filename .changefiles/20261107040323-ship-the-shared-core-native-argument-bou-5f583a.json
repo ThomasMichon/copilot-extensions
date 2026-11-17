@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the shared core native argument-boundary correction with Bridge.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

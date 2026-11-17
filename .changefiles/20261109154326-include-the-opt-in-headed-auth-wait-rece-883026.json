@@ -1,9 +1,0 @@
-{
-  "comment": "Include the opt-in headed auth-wait receiver in the vendored Manager driver consumer",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

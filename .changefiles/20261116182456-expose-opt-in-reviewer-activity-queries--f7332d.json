@@ -1,9 +1,0 @@
-{
-  "comment": "Expose opt-in reviewer activity queries in the standalone local service without changing default peers",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

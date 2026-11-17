@@ -1,9 +1,0 @@
-{
-  "comment": "Validate direct and derived SSH writer destinations without writes before consumer admission.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

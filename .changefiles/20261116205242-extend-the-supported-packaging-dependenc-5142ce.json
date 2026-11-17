@@ -1,9 +1,0 @@
-{
-  "comment": "Extend the supported packaging dependency range.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

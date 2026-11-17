@@ -1,9 +1,0 @@
-{
-  "comment": "Add owner-attributed per-machine maintenance standby guidance with native 30-minute polling.",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

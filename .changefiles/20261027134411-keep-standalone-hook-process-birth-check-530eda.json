@@ -1,9 +1,0 @@
-{
-  "comment": "Keep standalone hook process-birth checks independent of runtime dependencies.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

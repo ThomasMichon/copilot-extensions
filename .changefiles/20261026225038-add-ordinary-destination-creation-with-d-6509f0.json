@@ -1,9 +1,0 @@
-{
-  "comment": "Add ordinary destination creation with durable origin responsibility and asynchronous claim linkage.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep a gone ordinary native started while its current wake is still in flight so a stopped worker resumes in its original conversation.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

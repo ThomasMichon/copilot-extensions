@@ -1,9 +1,0 @@
-{
-  "comment": "Distinguish unknown Knowledge readiness from missing setup and retry checks on Reload",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

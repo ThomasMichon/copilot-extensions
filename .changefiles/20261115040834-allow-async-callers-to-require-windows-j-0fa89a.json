@@ -1,9 +1,0 @@
-{
-  "comment": "Allow async callers to require Windows Job containment before execution; settle failed suspended starts before returning.",
-  "changes": [
-    {
-      "plugin": "libs/agent-procutil",
-      "type": "patch"
-    }
-  ]
-}

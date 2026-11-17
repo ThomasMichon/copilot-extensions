@@ -1,9 +1,0 @@
-{
-  "comment": "Share the existing relay protocol probe and require expected-listener readiness before direct SSH work.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

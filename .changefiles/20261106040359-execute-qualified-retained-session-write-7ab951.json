@@ -1,9 +1,0 @@
-{
-  "comment": "Execute qualified retained session writes in the admitted process instead of an unqualified resident",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

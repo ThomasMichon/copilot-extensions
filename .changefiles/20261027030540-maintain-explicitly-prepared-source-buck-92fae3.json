@@ -1,9 +1,0 @@
-{
-  "comment": "Maintain explicitly prepared source-bucket indices during ingestion and qualify native cluster-enabled engine rounds.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

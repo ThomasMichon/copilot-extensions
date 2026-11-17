@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve configured project ownership during delegated legacy-route phases without selecting an authority mode.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

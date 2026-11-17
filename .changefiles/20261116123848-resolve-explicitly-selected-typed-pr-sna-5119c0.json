@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve explicitly selected typed PR snapshots without a local repository anchor",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

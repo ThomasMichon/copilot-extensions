@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded task diagnostics, fenced assignment/reset recovery and original native wake reconciliation",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

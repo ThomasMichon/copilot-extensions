@@ -1,9 +1,0 @@
-{
-  "comment": "Add confirmed registry-only local knowledge checkout registration in Configuration.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

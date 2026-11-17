@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in native Linux client exec with explicit session owner MCP overlays",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

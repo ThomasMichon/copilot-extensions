@@ -1,1 +1,0 @@
-{"comment": "Keep fresh PSMux creation independent of parent mux nesting and fail requested embodiment verification truthfully.", "changes": [{"plugin": "agent-worktrees", "type": "patch"}]}

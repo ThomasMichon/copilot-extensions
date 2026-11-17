@@ -1,9 +1,0 @@
-{
-  "comment": "Keep generated metadata out of payload fingerprints and route inventory and targeted updates without suite bootstrap",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

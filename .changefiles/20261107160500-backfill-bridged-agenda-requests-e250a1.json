@@ -1,9 +1,0 @@
-{
-  "comment": "Include agent-bridge delivered requests, attributed to their sender, when backfilling an agenda from session history.",
-  "changes": [
-    {
-      "plugin": "efforts",
-      "type": "patch"
-    }
-  ]
-}

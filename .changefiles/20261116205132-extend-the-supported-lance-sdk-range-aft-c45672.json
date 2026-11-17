@@ -1,9 +1,0 @@
-{
-  "comment": "Extend the supported Lance SDK range after index-maintenance qualification.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

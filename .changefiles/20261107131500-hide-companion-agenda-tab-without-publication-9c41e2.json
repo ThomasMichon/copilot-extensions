@@ -1,9 +1,0 @@
-{
-  "comment": "Hide the Companion Agenda tab for heads that have not published an agenda",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

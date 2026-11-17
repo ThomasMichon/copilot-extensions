@@ -1,9 +1,0 @@
-{
-  "comment": "Keep cold roster startup pending and show non-authoritative saved rows until current publication.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

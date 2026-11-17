@@ -1,9 +1,0 @@
-{
-  "comment": "Persist current inbox consumer enrollment and fence retired extension incarnations",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

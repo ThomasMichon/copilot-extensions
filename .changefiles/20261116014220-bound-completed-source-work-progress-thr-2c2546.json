@@ -1,9 +1,0 @@
-{
-  "comment": "Bound completed source-work progress through the canonical standalone runtime helper.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

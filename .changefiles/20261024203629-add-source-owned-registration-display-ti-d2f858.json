@@ -1,9 +1,0 @@
-{
-  "comment": "Add source-owned registration display titles and friendly catalog labels without changing runtime identity",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

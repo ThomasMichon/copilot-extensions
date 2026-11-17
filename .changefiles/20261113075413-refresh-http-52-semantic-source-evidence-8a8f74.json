@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh HTTP-52 semantic source evidence after removing session-binding naming stamps",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

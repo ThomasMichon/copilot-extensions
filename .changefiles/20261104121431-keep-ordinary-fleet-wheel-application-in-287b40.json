@@ -1,9 +1,0 @@
-{
-  "comment": "Keep ordinary Fleet wheel-application installs client-only instead of invoking an unsupported hosting startup callback.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Report terminal worktree ownership and checkout-use holds in Doctor without automatic retirement",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

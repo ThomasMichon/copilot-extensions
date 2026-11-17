@@ -1,9 +1,0 @@
-{
-  "comment": "Report an installed wheel version without implying runtime readiness",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

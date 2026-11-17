@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify actual Bridge pickup of the retained native conversation from a copied standalone Core.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

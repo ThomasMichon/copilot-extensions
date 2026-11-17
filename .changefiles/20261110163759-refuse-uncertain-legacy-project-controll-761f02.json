@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse uncertain legacy project-controller discovery and preserve UTF-8 engine diagnostics",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in Controller service offers and original-caller Gateway dispatch",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

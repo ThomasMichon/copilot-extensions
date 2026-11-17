@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit admitted Komodo substrate owner with native custody, preserving adoption and journaled lifecycle",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Continue Manager Python prerequisite detection past unsupported or unusable PATH candidates without acquiring or changing Python.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

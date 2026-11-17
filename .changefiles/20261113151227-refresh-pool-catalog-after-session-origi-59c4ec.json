@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh pool catalog after session origin capability discovery",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

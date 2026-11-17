@@ -1,9 +1,0 @@
-{
-  "comment": "Verify Manager candidate containment across equivalent Windows native paths",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

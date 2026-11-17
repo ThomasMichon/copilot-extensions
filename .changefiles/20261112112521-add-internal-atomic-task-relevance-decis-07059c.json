@@ -1,9 +1,0 @@
-{
-  "comment": "Add internal atomic task relevance decisions and retained owner closeout intent",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add a canonical JSON stdin digest to optional launch traces while preserving raw byte hashes and explicit reconstruction evidence.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

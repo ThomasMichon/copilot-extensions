@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit retained-good client recovery with unchanged admission and shared selector-command authority",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

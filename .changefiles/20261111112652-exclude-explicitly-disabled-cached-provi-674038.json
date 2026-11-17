@@ -1,9 +1,0 @@
-{
-  "comment": "Exclude explicitly disabled cached providers from incoming readiness while preserving retained lookup and strict active ambiguity",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

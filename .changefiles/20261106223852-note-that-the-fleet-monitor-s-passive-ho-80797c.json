@@ -1,9 +1,0 @@
-{
-  "comment": "Note that the fleet monitor's passive host reads never wake a status-monitor or renew its scan demand",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

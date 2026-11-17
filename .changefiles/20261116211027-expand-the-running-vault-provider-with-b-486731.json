@@ -1,9 +1,0 @@
-{
-  "comment": "Expand the running Vault provider with bounded non-activating attachment export; preserve legacy export behavior",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

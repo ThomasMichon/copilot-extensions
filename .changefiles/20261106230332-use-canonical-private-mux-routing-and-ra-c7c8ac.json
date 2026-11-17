@@ -1,9 +1,0 @@
-{
-  "comment": "Use canonical private mux routing and raw pane argv in native Driver fixtures.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

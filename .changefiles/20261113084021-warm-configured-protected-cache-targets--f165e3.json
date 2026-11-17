@@ -1,9 +1,0 @@
-{
-  "comment": "Warm configured protected-cache targets after successful unlocks with bounded service-owned work.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

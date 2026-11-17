@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit existing-owner feedback-capture storage without enabling protected feedback or serving",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

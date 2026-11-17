@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify fresh and resumed native broker calls through the constructed Manager application",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

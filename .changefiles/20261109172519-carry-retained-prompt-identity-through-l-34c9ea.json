@@ -1,9 +1,0 @@
-{
-  "comment": "Carry retained prompt identity through local launch delegation and refresh admission-only fallback interpreters.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

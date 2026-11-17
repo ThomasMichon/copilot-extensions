@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify real Bridge ACP pickup of the relocated standalone Core without conversation or seed replay.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

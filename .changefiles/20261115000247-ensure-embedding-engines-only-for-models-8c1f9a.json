@@ -1,9 +1,0 @@
-{
-  "comment": "Ensure embedding engines only for models with pending pairs while preserving legacy batch callbacks.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

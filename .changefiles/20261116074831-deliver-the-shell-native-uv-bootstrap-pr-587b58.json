@@ -1,9 +1,0 @@
-{
-  "comment": "Deliver the shell-native UV bootstrap provider before standalone installer adoption.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

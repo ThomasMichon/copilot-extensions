@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit budgeted chunk-ID index preparation and strict prepared point reads without compaction or pruning",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

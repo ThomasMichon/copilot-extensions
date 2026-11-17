@@ -1,9 +1,0 @@
-{
-  "comment": "Add pinned, budgeted full-snapshot acquisition and resumable keyset reconciliation in the existing crawl journal.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

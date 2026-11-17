@@ -1,9 +1,0 @@
-{
-  "comment": "Add exact worktree-only resume selection, executing-CLI contract disclosure and unconfirmed-response fencing without positional fallback",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep local SSH control ownership checks responsive and cancellation drained",
-  "changes": [
-    {
-      "plugin": "services/ssh",
-      "type": "patch"
-    }
-  ]
-}

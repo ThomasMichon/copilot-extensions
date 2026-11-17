@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit filtered population demand and source-only foreground consumers",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

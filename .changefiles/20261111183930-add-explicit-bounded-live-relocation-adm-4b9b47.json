@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit bounded live relocation admission and revalidate owners before publication.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

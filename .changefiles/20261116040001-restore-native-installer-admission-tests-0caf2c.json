@@ -1,9 +1,0 @@
-{
-  "comment": "Restore native installer admission tests by declaring existing wheel inputs in their extracted fixture.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

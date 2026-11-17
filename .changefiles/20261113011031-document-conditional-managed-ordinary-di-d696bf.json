@@ -1,9 +1,0 @@
-{
-  "comment": "Document conditional managed ordinary Dispatch origin creation",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

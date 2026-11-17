@@ -1,9 +1,0 @@
-{
-  "comment": "Add confirmed acquisition-only remote knowledge checkouts to Repositories Configuration.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep contribution-guard payload imports read-only by disabling bytecode in native hook wrappers.",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

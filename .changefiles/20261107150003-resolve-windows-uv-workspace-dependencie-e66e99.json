@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve Windows UV workspace dependencies once and preserve already-enabled supervisor tasks without redundant enable mutations",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

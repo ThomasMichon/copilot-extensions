@@ -1,9 +1,0 @@
-{
-  "comment": "Report installed and recorded package versions when candidate provenance health fails",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

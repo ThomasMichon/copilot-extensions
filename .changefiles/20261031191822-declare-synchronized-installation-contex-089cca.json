@@ -1,9 +1,0 @@
-{
-  "comment": "Declare synchronized installation-context byte-preservation changes for the standalone consumer",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

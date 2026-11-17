@@ -1,9 +1,0 @@
-{
-  "comment": "Add a dormant copied Bash reader for literal native seed preparation replies.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

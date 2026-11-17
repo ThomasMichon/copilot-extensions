@@ -1,9 +1,0 @@
-{
-  "comment": "Replace mandatory duplicate PR audit with proportionate coordinator monitoring.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prefer capability-level prose in skill guidance while preserving required exact invocation and routing identities.",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Capture large session accounting corpora in bounded, adaptively split batches without increasing per-read budgets.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

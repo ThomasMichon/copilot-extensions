@@ -1,9 +1,0 @@
-{
-  "comment": "Release procutil after governed library allocator activation",
-  "changes": [
-    {
-      "plugin": "libs/agent-procutil",
-      "type": "dev"
-    }
-  ]
-}

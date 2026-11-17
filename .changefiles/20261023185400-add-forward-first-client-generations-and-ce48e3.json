@@ -1,9 +1,0 @@
-{
-  "comment": "Add forward-first client generations and explicit lifecycle commands",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

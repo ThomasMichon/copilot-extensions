@@ -1,9 +1,0 @@
-{
-  "comment": "Retain provider-prepared form requests and expose row-independent receipt checks and confirmed identical retries.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

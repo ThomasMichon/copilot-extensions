@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify attached public Copilot caller loss across both native caller Jobs",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

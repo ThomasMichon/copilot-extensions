@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native model addition, chunk policy invalidation and bounded backfill retry at three corpus sizes",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Integrate managed CLI and mixed-lane allocator claims with assignment-aware first prompts",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

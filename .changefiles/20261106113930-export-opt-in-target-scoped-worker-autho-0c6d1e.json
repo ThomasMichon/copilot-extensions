@@ -1,9 +1,0 @@
-{
-  "comment": "Export opt-in target-scoped worker author policy without self-merge or bypass grants (#11070).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

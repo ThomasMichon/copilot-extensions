@@ -1,9 +1,0 @@
-{
-  "comment": "Share routed vector-pair writes with an opt-in prepared stored-content path",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

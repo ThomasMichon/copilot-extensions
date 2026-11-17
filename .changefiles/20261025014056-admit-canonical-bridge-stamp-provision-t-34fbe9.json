@@ -1,9 +1,0 @@
-{
-  "comment": "Admit canonical Bridge stamp/provision through the shared installation queue and refuse unattended elevation repair.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

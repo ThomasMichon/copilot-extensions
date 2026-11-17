@@ -1,9 +1,0 @@
-{
-  "comment": "Expose model-selective readiness on explicit embedding backfill while preserving legacy callback behavior.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

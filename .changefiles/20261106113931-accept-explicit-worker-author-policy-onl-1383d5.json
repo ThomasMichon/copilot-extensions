@@ -1,9 +1,0 @@
-{
-  "comment": "Accept explicit worker author policy only after selected frontend and Worktrees capability checks (#11070).",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

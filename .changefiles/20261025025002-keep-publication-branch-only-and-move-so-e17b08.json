@@ -1,9 +1,0 @@
-{
-  "comment": "Keep publication branch-only, omit anchor inventories, and move source validators to required CI",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

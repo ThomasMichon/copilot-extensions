@@ -1,9 +1,0 @@
-{
-  "comment": "Carry retained Worktrees writer requirements through ordinary keyed creation CLI",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

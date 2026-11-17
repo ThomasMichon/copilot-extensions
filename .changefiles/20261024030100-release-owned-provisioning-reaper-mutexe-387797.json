@@ -1,9 +1,0 @@
-{
-  "comment": "Release owned provisioning reaper mutexes on interruption and bound refusal of unowned mutexes.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

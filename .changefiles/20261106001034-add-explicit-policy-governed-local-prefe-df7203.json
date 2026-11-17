@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit policy-governed local preference acceptance and atomic snapshot publication",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

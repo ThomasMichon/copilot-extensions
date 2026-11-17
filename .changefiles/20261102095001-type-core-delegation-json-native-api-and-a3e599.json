@@ -1,9 +1,0 @@
-{
-  "comment": "Type Core Delegation JSON, native API and transport test contracts",
-  "changes": [
-    {
-      "plugin": "libs/core-delegation",
-      "type": "patch"
-    }
-  ]
-}

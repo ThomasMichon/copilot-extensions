@@ -1,9 +1,0 @@
-{
-  "comment": "Return success after completed native Bash uninstall while preserving explicit failure propagation",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

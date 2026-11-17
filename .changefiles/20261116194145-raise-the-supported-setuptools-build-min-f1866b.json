@@ -1,9 +1,0 @@
-{
-  "comment": "Raise the supported setuptools build minimum to 84.2.1.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

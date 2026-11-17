@@ -1,9 +1,0 @@
-{
-  "comment": "Render runtime-qualified local Sync progress with complete results and independent observation and execution budgets",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Support evidence-backed settlement of legacy boolean follow-ups without changing terminal disposition or cleanup gates.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

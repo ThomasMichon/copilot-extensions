@@ -1,9 +1,0 @@
-{
-  "comment": "Require native knowledge readiness before New authoring and retain structured configuration failures",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

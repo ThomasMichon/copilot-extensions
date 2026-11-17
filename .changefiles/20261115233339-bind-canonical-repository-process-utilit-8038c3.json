@@ -1,9 +1,0 @@
-{
-  "comment": "Bind canonical repository process utilities in fresh recovery and its isolated execution child",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

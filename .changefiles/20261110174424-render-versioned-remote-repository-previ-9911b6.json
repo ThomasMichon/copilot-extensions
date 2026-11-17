@@ -1,9 +1,0 @@
-{
-  "comment": "Render versioned remote repository previews without changing local confirmation semantics",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

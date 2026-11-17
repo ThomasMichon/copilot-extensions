@@ -1,9 +1,0 @@
-{
-  "comment": "Read fresh publication URL authority once per decision and batch exact transport configuration.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

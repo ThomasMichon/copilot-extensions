@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit inspected single-question mux fallback with exact local pane binding, durable audit and conservative outcome verification.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

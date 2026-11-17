@@ -1,9 +1,0 @@
-{
-  "comment": "Separate Windows task scheduling from service readiness; preserve existing registrations by default and support validated task-only retirement.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

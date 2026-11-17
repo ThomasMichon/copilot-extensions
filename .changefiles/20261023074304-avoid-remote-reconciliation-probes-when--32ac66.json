@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid remote reconciliation probes when no published live PR branch is eligible.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

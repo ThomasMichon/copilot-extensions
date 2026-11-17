@@ -1,9 +1,0 @@
-{
-  "comment": "Use ordinary construction progress and identify runtime-only provisioning",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

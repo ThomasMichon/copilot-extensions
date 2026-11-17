@@ -1,9 +1,0 @@
-{
-  "comment": "Add source-declared operator controls over the existing Workers Save lifecycle, retaining advanced CLI compatibility and exact source binding.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Evaluate prepared Windows single-shell post-tool events without a blocking advisory client",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

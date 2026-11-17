@@ -1,9 +1,0 @@
-{
-  "comment": "Add inert scoped PR attention projections and bounded fair ordering",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

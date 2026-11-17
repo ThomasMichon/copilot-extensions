@@ -1,9 +1,0 @@
-{
-  "comment": "Verify native worktree-owner stdio forwarding and exact exit status.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Expose original configured-cohort projection and history recovery through the negotiated catalog transport",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

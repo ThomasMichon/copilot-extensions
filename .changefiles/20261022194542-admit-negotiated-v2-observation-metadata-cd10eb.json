@@ -1,9 +1,0 @@
-{
-  "comment": "Admit negotiated v2 observation metadata atomically in current-roster parsers",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

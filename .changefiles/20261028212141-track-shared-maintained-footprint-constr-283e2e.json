@@ -1,9 +1,0 @@
-{
-  "comment": "Track shared maintained-footprint construction helper updates.",
-  "changes": [
-    {
-      "plugin": "services/chat",
-      "type": "patch"
-    }
-  ]
-}

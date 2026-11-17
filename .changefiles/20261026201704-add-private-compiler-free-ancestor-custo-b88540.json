@@ -1,9 +1,0 @@
-{
-  "comment": "Add private compiler-free ancestor custody and current-drive query qualification.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

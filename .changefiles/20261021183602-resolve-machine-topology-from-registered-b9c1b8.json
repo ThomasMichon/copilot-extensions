@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve machine topology from registered anchors instead of linked worktree copies, retain explicit CLI typing and keep lazy version handling in its focused component.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

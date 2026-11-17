@@ -1,9 +1,0 @@
-{
-  "comment": "Recover exact settled self-session claims through explicit finalized-session conclusion",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

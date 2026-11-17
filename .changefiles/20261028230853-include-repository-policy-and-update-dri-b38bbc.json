@@ -1,9 +1,0 @@
-{
-  "comment": "Include repository-policy and update-driver in standalone Windows snapshots",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

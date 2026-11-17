@@ -1,9 +1,0 @@
-{
-  "comment": "Defer checkout retirement while live processes use it; never terminate mux sessions or cwd holders during cleanup or finalize.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

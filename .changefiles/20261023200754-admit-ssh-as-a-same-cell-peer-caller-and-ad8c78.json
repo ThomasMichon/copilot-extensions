@@ -1,9 +1,0 @@
-{
-  "comment": "Admit SSH as a same-cell peer caller and cover its read-only state-root adapter.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

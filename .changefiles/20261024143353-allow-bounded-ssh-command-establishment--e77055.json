@@ -1,9 +1,0 @@
-{
-  "comment": "Allow bounded SSH command establishment to use its selected execution budget.",
-  "changes": [
-    {
-      "plugin": "libs/ssh-manager",
-      "type": "patch"
-    }
-  ]
-}

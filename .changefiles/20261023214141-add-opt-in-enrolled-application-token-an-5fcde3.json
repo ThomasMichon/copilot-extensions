@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in enrolled application-token and independent proof-key authentication profile",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

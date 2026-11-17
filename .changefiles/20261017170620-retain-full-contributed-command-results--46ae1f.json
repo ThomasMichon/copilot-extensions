@@ -1,9 +1,0 @@
-{
-  "comment": "Retain full contributed command results in a shared plain-text terminal screen.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

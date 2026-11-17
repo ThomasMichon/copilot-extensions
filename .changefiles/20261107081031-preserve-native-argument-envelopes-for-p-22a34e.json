@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve native argument envelopes for packaged Worktrees launch assets",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
