@@ -3421,12 +3421,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
-  The [filtered-population source-completion proposal](journal/2026/11.17-filtered-population-source-completion.md)
-  records actual #13067 delivery and the complete #12159 source-only
-  original-to-merged-delivery crosswalk, while retaining #12175's claimed
-  bounded-batching repair and all broader parent, release and resource gates.
-  The complete census remains 877 whole open, 148 above fixed 729; the
-  proposed completion is not an issue closure or new campaign credit.
+  The [filtered-population source reconciliation](journal/2026/11.17-filtered-population-source-completion.md)
+  records actual #13067/#13072 delivery, the complete #12159 source-only
+  original-to-merged-delivery crosswalk and its audited COMPLETED closure,
+  while retaining #12175's claimed bounded-batching repair and all broader
+  parent, release and resource gates. The complete post-closure census is
+  876 whole open, 147 above fixed 729, with one verified campaign departure
+  and no arrivals or external departures.
   All incumbent checkbox states, explicit holds and custody remain unchanged.
   The [complete workflow, delivery and native-consumer contracts](journal/2026/11.17-complete-workflow-delivery-and-native-consumer-contracts.md)
   record actual #13064 delivery and twenty-three complete-original judgments,
