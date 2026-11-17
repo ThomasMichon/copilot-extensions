@@ -12,6 +12,10 @@ import re
 import sys
 import tempfile
 import uuid
+from typing import Any, NoReturn, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from versioned_runtime_publication import PhysicalState
 
 from .client import ClientError, emit
 from .construction import _engine, client_candidate
@@ -22,7 +26,7 @@ _JOURNAL = "installation.json"
 _MAX_BYTES = 1024 * 1024
 
 
-def _refuse(message: str) -> None:
+def _refuse(message: str) -> NoReturn:
     raise ClientError("setup_refused", message)
 
 
@@ -34,7 +38,7 @@ def _slot_name(value: str) -> str:
     return value
 
 
-def _publication():
+def _publication() -> object:
     _engine()
     return importlib.import_module("agent_chat_service.versioned_runtime_publication")
 
@@ -46,21 +50,29 @@ def _absolute(value: Path) -> Path:
     return path
 
 
-def _read(path: Path, publication):
-    before = publication.state_path(path, private=True)
+def _read(path: Path, publication: object) -> Any:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
+    before = checked.state_path(path, private=True)
     if before is None or before.size > _MAX_BYTES:
         _refuse("Required setup metadata is absent or oversized.")
     data = path.read_bytes()
-    if publication.state_path(path, private=True) != before:
+    if checked.state_path(path, private=True) != before:
         _refuse("Setup metadata changed during its read.")
     return strict_json(data, max_bytes=_MAX_BYTES)
 
 
-def _write(path: Path, data: dict, publication) -> None:
+def _write(path: Path, data: dict[str, Any], publication: object) -> None:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     contents = json_bytes(data) + b"\n"
     if len(contents) > _MAX_BYTES:
         _refuse("Installation journal reached its supported byte bound.")
-    before = publication.state_path(path, private=True)
+    before = checked.state_path(path, private=True)
     fd, name = tempfile.mkstemp(prefix=".installation-", dir=path.parent)
     temporary = Path(name)
     try:
@@ -68,7 +80,7 @@ def _write(path: Path, data: dict, publication) -> None:
             stream.write(contents)
             stream.flush()
             os.fsync(stream.fileno())
-        if publication.state_path(path, private=True) != before:
+        if checked.state_path(path, private=True) != before:
             _refuse("Setup journal changed before commit.")
         os.replace(temporary, path)
     finally:
@@ -76,7 +88,13 @@ def _write(path: Path, data: dict, publication) -> None:
             temporary.unlink()
 
 
-def _identity(root: Path, installation_id: str, publication, *, create: bool = False):
+def _identity(
+    root: Path, installation_id: str, publication: object, *, create: bool = False,
+) -> dict[str, Any] | None:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     root = _absolute(root)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", installation_id):
         _refuse("Provide an ordinary nonsecret installation identity.")
@@ -85,11 +103,11 @@ def _identity(root: Path, installation_id: str, publication, *, create: bool = F
     if not os.path.lexists(root):
         if not create:
             return None
-        publication.state_path(root)
+        checked.state_path(root)
         root.mkdir(mode=0o700)
         created = True
     # Probe parents before trusting this root, including on an unselected install.
-    state = publication.state_path(journal, private=True)
+    state = checked.state_path(journal, private=True)
     if state is None:
         if not created:
             _refuse("Root has no attributable Chat journal; legacy roots are not adopted.")
@@ -110,12 +128,18 @@ def _identity(root: Path, installation_id: str, publication, *, create: bool = F
     return data
 
 
-def _settled(data):
+def _settled(data: dict[str, Any]) -> None:
     if data["pending"] is not None:
         _refuse("An installation operation is unresolved; invoke explicit recover first.")
 
 
-def _operation(root: Path, value: dict, publication):
+def _operation(
+    root: Path, value: dict[str, Any], publication: object,
+) -> tuple[Path, Path, list[Path], dict[Path, PhysicalState | None]]:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     if not isinstance(value, dict) or set(value) != {
         "id", "baseline", "context", "expected", "receipts", "state",
     } or not isinstance(value["state"], str) or value["state"] not in {
@@ -129,7 +153,7 @@ def _operation(root: Path, value: dict, publication):
     if not isinstance(value["baseline"], dict) or set(value["baseline"]) != set(_TARGETS):
         _refuse("Invalid operation baseline.")
     baseline = {
-        root / name: publication.PhysicalState.parse(state) if state is not None else None
+        root / name: checked.PhysicalState.parse(state) if state is not None else None
         for name, state in value["baseline"].items()
     }
     if (not isinstance(value["expected"], list) or len(value["expected"]) != len(_TARGETS)
@@ -149,11 +173,11 @@ def _operation(root: Path, value: dict, publication):
             or len(set(value["receipts"])) != len(value["receipts"])):
         _refuse("Invalid operation receipt bindings.")
     context = workspace / "copy-context.json"
-    if publication.state_path(context, private=True) != publication.PhysicalState.parse(
+    if checked.state_path(context, private=True) != checked.PhysicalState.parse(
         value["context"],
     ):
         _refuse("Operation context changed its captured physical binding.")
-    context_root, entries = publication.read_context(context)
+    context_root, entries = checked.read_context(context)
     if context_root != root or set(entries) != targets:
         _refuse("Operation context does not match the installation.")
     for index, name in enumerate(_TARGETS):
@@ -169,14 +193,20 @@ def _operation(root: Path, value: dict, publication):
     receipts = []
     for name in value["receipts"]:
         receipt = workspace / name
-        if name == "copy-forward.jsonl" or publication.state_path(receipt) is not None:
+        if name == "copy-forward.jsonl" or checked.state_path(receipt) is not None:
             receipts.append(receipt)
     return workspace, context, receipts, baseline
 
 
-def _proofs(root: Path, data: dict, publication):
-    proofs = {root / name: [] for name in _TARGETS}
-    allowed = {path: set() for path in proofs}
+def _proofs(
+    root: Path, data: dict[str, Any], publication: object,
+) -> dict[Path, list[PhysicalState]]:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
+    proofs: dict[Path, list[PhysicalState]] = {root / name: [] for name in _TARGETS}
+    allowed: dict[Path, set[str]] = {path: set() for path in proofs}
     for operation in data["history"]:
         _operation(root, operation, publication)
         if operation["state"] not in {"published", "reversed"}:
@@ -186,7 +216,7 @@ def _proofs(root: Path, data: dict, publication):
     for operation in data["history"]:
         _, _, receipts, _ = _operation(root, operation, publication)
         for receipt in receipts:
-            values = publication.read_receipt(
+            values = checked.read_receipt(
                 receipt, root, set(proofs), recovery_only=operation["state"] == "reversed",
             )
             # Recovery restores a prior selection, whose bytes are declared in history.
@@ -197,10 +227,14 @@ def _proofs(root: Path, data: dict, publication):
     return proofs
 
 
-def _owned(root: Path, data: dict, publication):
+def _owned(root: Path, data: dict[str, Any], publication: object) -> dict[str, Any]:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     proofs = _proofs(root, data, publication)
     for path, states in proofs.items():
-        current = publication.state_path(path)
+        current = checked.state_path(path)
         if current is None or current not in states:
             _refuse("A selected object is absent or physically replaced; preserving it.")
     selected = _read(root / "selected.json", publication)
@@ -224,24 +258,31 @@ def _owned(root: Path, data: dict, publication):
     return selected
 
 
-def _config(path: Path, root: Path, publication) -> str:
+def _config(path: Path, root: Path, publication: object) -> str:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     path = _absolute(path)
     if path.is_relative_to(root):
         _refuse("Client configuration must be outside the runtime root.")
     from .cli import configured
-    before = publication.state_path(path, private=True)
+    before = checked.state_path(path, private=True)
     if before is None:
         _refuse("Explicit client configuration is missing.")
     client = configured(str(path))
     if client.directory.is_relative_to(root):
         _refuse("Client state must be outside the runtime root.")
-    if publication.state_path(path, private=True) != before:
+    if checked.state_path(path, private=True) != before:
         _refuse("Client configuration changed while validated.")
     return before.digest
 
 
-def _argv(root: Path, selected: dict):
-    runtime = _engine().runtime
+def _argv(root: Path, selected: dict[str, Any]) -> list[str]:
+    if TYPE_CHECKING:
+        import versioned_runtime as runtime
+    else:
+        runtime = _engine().runtime
     version = selected["slot"]
     slot = root / "versions" / version
     if not runtime.is_complete(root, version, expect_hash=selected["payload_hash"]):
@@ -255,11 +296,15 @@ def _argv(root: Path, selected: dict):
     ]
 
 
-def status(root: Path, installation_id: str) -> dict:
+def status(root: Path, installation_id: str) -> dict[str, Any]:
     """Read local ownership only; no locks, construction, subprocess or repair."""
     publication = _publication()
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     data = _identity(root, installation_id, publication)
-    result = {
+    result: dict[str, Any] = {
         "schema": "agent-chat.setup-status", "version": 1, "installation_id": installation_id,
         "role": "manual-client", "state": "absent", "commands": [],
         "mutations_performed": False, "remote_verified": False,
@@ -271,7 +316,7 @@ def status(root: Path, installation_id: str) -> dict:
         result["state"] = "recovery-required"
         return result
     if data["selected"] is None:
-        if any(publication.state_path(root / name) is not None for name in _TARGETS):
+        if any(checked.state_path(root / name) is not None for name in _TARGETS):
             _refuse("Unexpected selectors exist in an unselected installation.")
         result["state"] = "unselected"
         return result
@@ -283,7 +328,7 @@ def status(root: Path, installation_id: str) -> dict:
     return result
 
 
-def catalog(root: Path, installation_id: str) -> dict:
+def catalog(root: Path, installation_id: str) -> dict[str, Any]:
     """Derive invocation from the selected slot's independently verified catalog."""
     publication = _publication()
     data = _identity(root, installation_id, publication)
@@ -319,22 +364,26 @@ def catalog(root: Path, installation_id: str) -> dict:
 
 
 def install(root: Path, installation_id: str, *, config: Path, version: str,
-            project: Path, uv: Path, python: Path) -> dict:
+            project: Path, uv: Path, python: Path) -> dict[str, Any]:
     version = _slot_name(version)
     publication = _publication()
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     root = _absolute(root)
     project, uv, python = (_absolute(path) for path in (project, uv, python))
     config_digest = _config(config, root, publication)
     # Validate an existing root before the operation lease can create anything.
     data = _identity(root, installation_id, publication, create=True)
-    with publication.target_leases(root, [root / _JOURNAL]):
-        data = _identity(root, installation_id, publication)
+    with checked.target_leases(root, [root / _JOURNAL]):
+        data = cast(dict[str, Any], _identity(root, installation_id, publication))
         _settled(data)
         if data["selected"] is not None:
             old = _owned(root, data, publication)
             if old["config"] != str(config) or old["config_sha256"] != config_digest:
                 _refuse("Install/update does not implicitly migrate or rewrite configuration.")
-        elif any(publication.state_path(root / name) is not None for name in _TARGETS):
+        elif any(checked.state_path(root / name) is not None for name in _TARGETS):
             _refuse("Unattributable selectors exist; preserving them.")
         with client_candidate(
             root, version, project=project, uv=uv, python=python,
@@ -361,11 +410,11 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
                 fd = os.open(source, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 with os.fdopen(fd, "wb") as stream:
                     stream.write(value)
-                bindings.append(publication.CopyBinding(
+                bindings.append(checked.CopyBinding(
                     source, root / name, hashlib.sha256(value).hexdigest(),
                 ))
 
-            def validate():
+            def validate() -> None:
                 if _config(config, root, publication) != config_digest:
                     _refuse("Client configuration changed before publication.")
                 if data["selected"] is not None:
@@ -373,7 +422,7 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
                     if data["pending"] is None:
                         _owned(root, data, publication)
 
-            def pending():
+            def pending() -> None:
                 if data["selected"] is not None:
                     _owned(root, data, publication)
                 elif any(state is not None for state in publisher.baseline.values()):
@@ -384,14 +433,16 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
                         "state": "pending",
                         "baseline": {path.name: asdict(state) if state else None
                                      for path, state in publisher.baseline.items()},
-                        "context": asdict(publication.state_path(publisher.context, private=True)),
+                        "context": asdict(cast(
+                            "PhysicalState", checked.state_path(publisher.context, private=True),
+                        )),
                         "expected": publisher.expected,
                         "receipts": ["copy-forward.jsonl", "copy-recovery.1.jsonl"],
                     },
                 }
                 _write(root / _JOURNAL, data, publication)
 
-            publisher = publication.CopyPublication(
+            publisher = checked.CopyPublication(
                 root, workspace, bindings, validate_inputs=validate, before_effects=pending,
             )
             publisher.publish()
@@ -407,7 +458,11 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
             return {"state": "selected", "selection": selection}
 
 
-def _recover(root: Path, data: dict, publication) -> None:
+def _recover(root: Path, data: dict[str, Any], publication: object) -> None:
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     pending = data["pending"]
     if (not isinstance(pending, dict) or set(pending) != {"kind", "operation"}
             or pending["kind"] not in {"publish", "remove"}):
@@ -425,8 +480,8 @@ def _recover(root: Path, data: dict, publication) -> None:
         expected = [binding for op in data["history"] for binding in op["expected"]]
     else:
         receipts, expected = previous, operation["expected"]
-    receipts = [path for path in receipts if publication.state_path(path) is not None]
-    foreign = publication.recover_uncontested(
+    receipts = [path for path in receipts if checked.state_path(path) is not None]
+    foreign = checked.recover_uncontested(
         context, receipts, workspace / name, expected, baseline, recovery_only=True,
     )
     if foreign:
@@ -440,26 +495,34 @@ def _recover(root: Path, data: dict, publication) -> None:
     _write(root / _JOURNAL, data, publication)
 
 
-def recover(root: Path, installation_id: str) -> dict:
+def recover(root: Path, installation_id: str) -> dict[str, Any]:
     publication = _publication()
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     data = _identity(root, installation_id, publication)
     if data is None:
         _refuse("No installation operation exists.")
-    with publication.target_leases(root, [root / _JOURNAL]):
-        data = _identity(root, installation_id, publication)
+    with checked.target_leases(root, [root / _JOURNAL]):
+        data = cast(dict[str, Any], _identity(root, installation_id, publication))
         if data["pending"] is not None:
             _recover(root, data, publication)
     return {"state": "recovered", "selection": data["selected"]}
 
 
-def uninstall(root: Path, installation_id: str) -> dict:
+def uninstall(root: Path, installation_id: str) -> dict[str, Any]:
     """Withdraw only attributable selectors; preserve slots, proofs, config and data."""
     publication = _publication()
+    if TYPE_CHECKING:
+        import versioned_runtime_publication as checked
+    else:
+        checked = publication
     data = _identity(root, installation_id, publication)
     if data is None:
         return {"state": "absent"}
-    with publication.target_leases(root, [root / _JOURNAL]):
-        data = _identity(root, installation_id, publication)
+    with checked.target_leases(root, [root / _JOURNAL]):
+        data = cast(dict[str, Any], _identity(root, installation_id, publication))
         _settled(data)
         if data["selected"] is None:
             return {"state": "unselected"}
@@ -474,7 +537,7 @@ def uninstall(root: Path, installation_id: str) -> dict:
     return {"state": "unselected", "preserved": ["runtime-slots", "configuration", "data", "proofs"]}
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

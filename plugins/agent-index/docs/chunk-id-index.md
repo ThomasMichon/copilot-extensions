@@ -253,6 +253,13 @@ and the pair writer's explicitly budgeted `after_store` preparation callback.
 Prepared canonical indices remain a prerequisite; the helper never hides a
 corpus-wide preparation step.
 
+Optional readiness callbacks retain caller-owned engine lifecycle.
+`before_embed()` keeps its zero-argument calling convention;
+`before_model_embed(model_id)` receives only a model with missing pairs,
+before that model's embedding batch. A covered replay invokes neither hook.
+Callback exceptions propagate without acknowledging the unfinished offset;
+existing writer uncertainty and repair rules still apply.
+
 Backfill intent lives in the existing path database, initialized with the
 `PendingCrawls` owner. It binds the accepted source/account configuration and
 canonical family from `IndexState`, effective embedding policies and routing/

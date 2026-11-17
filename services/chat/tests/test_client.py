@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from typing import Any, Callable, IO, Iterator, NoReturn, TypeAlias, cast
 
 import pytest
 
@@ -17,12 +18,13 @@ from agent_chat_service.client import MAX_PENDING, reader_lock
 class LocalTransport:
     identity = "example-conversation"
 
-    def __init__(self, store):
+    def __init__(self, store: ChatStore) -> None:
+        self.calls: list[dict[str, Any]]
         self.store, self.calls = store, []
-        self.before = None
-        self.after = None
+        self.before: Callable[[dict[str, Any]], None] | None = None
+        self.after: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None
 
-    def call(self, request):
+    def call(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(copy.deepcopy(request))
         if self.before:
             self.before(request)
@@ -33,8 +35,11 @@ class LocalTransport:
         return self.after(request, result) if self.after else result
 
 
+Pair: TypeAlias = tuple[Client, LocalTransport, ChatStore]
+
+
 @pytest.fixture
-def pair(tmp_path):
+def pair(tmp_path: Path) -> Iterator[tuple[Client, LocalTransport, ChatStore]]:
     store = ChatStore(tmp_path / "store", "example-installation")
     transport = LocalTransport(store)
     client = Client(transport, {"codename": "agent-a"}, tmp_path / "client")
@@ -45,25 +50,27 @@ def pair(tmp_path):
         store.close()
 
 
-def test_uncertain_post_creates_private_exclusive_temporary_before_atomic_replace(pair, monkeypatch):
+def test_uncertain_post_creates_private_exclusive_temporary_before_atomic_replace(
+    pair: Pair, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import agent_chat_service.client as module
 
     client, transport, _ = pair
     opened, replaced = [], []
     original_open, original_replace = os.open, os.replace
 
-    def create(path, flags, mode=0o777, **kwargs):
+    def create(path: str | Path, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
         opened.append((Path(path), flags, mode))
         return original_open(path, flags, mode, **kwargs)
 
-    def replace(source, target):
+    def replace(source: Path, target: Path) -> None:
         assert json.loads(source.read_text(encoding="utf-8"))["text"] == "retained private body"
         if os.name != "nt":
             assert source.stat().st_mode & 0o777 == 0o600
         replaced.append(target)
         return original_replace(source, target)
 
-    def unavailable(_request):
+    def unavailable(_request: dict[str, Any]) -> NoReturn:
         raise ClientError("provider_timeout", "Synthetic uncertain response.")
 
     transport.before = unavailable
@@ -81,7 +88,7 @@ def test_uncertain_post_creates_private_exclusive_temporary_before_atomic_replac
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX creation modes require native POSIX")
-def test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process(tmp_path):
+def test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process(tmp_path: Path) -> None:
     probe = """
 import os,sys
 from pathlib import Path
@@ -116,7 +123,7 @@ print("private retained post",flush=True)
     assert result.stdout.strip() == "private retained post"
 
 
-def test_members_pages_preserve_legacy_shape_without_read_progress(pair):
+def test_members_pages_preserve_legacy_shape_without_read_progress(pair: Pair) -> None:
     client, transport, store = pair
     for name in ("agent-b", "agent-c"):
         store.dispatch({"op": "join", "channel": "room", "actor": {"codename": name}})
@@ -137,7 +144,7 @@ def test_members_pages_preserve_legacy_shape_without_read_progress(pair):
     {"limit": 0}, {"limit": 101}, {"limit": True},
     {"after": ""}, {"after": "invalid name"},
 ])
-def test_invalid_member_controls_refuse_before_transport(pair, controls):
+def test_invalid_member_controls_refuse_before_transport(pair: Pair, controls: dict[str, Any]) -> None:
     client, transport, _ = pair
     calls = len(transport.calls)
     with pytest.raises(ChatError):
@@ -149,12 +156,12 @@ def test_invalid_member_controls_refuse_before_transport(pair, controls):
     "more-type", "empty-more", "wrong-next", "over-limit",
     "descending", "duplicate", "terminal-next", "extra-field", "before-after",
 ])
-def test_invalid_member_pages_refuse_progress(pair, mutation):
+def test_invalid_member_pages_refuse_progress(pair: Pair, mutation: str) -> None:
     client, transport, store = pair
     for name in ("agent-b", "agent-c", "agent-d"):
         store.dispatch({"op": "join", "channel": "room", "actor": {"codename": name}})
 
-    def after(request, result):
+    def after(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if mutation == "more-type":
             result["more"] = 1
         elif mutation == "empty-more":
@@ -181,7 +188,7 @@ def test_invalid_member_pages_refuse_progress(pair, mutation):
     assert caught.value.code == "invalid_response"
 
 
-def test_output_flush_precedes_progress_and_viewers_are_independent(pair, tmp_path):
+def test_output_flush_precedes_progress_and_viewers_are_independent(pair: Pair, tmp_path: Path) -> None:
     client, transport, store = pair
     client.post("room", "original body", "request-1")
     other = Client(transport, {"codename": "agent-b"}, tmp_path / "client")
@@ -189,12 +196,12 @@ def test_output_flush_precedes_progress_and_viewers_are_independent(pair, tmp_pa
     flushed = []
 
     class Output(io.StringIO):
-        def flush(self):
+        def flush(self) -> None:
             assert store.dispatch({"op": "read", "channel": "room", "codename": "agent-a"})["cursor"] == 0
             flushed.append(True)
             super().flush()
 
-    def before(request):
+    def before(request: dict[str, Any]) -> None:
         if request["op"] == "cursor":
             assert flushed
 
@@ -208,17 +215,17 @@ def test_output_flush_precedes_progress_and_viewers_are_independent(pair, tmp_pa
 
 
 @pytest.mark.parametrize("failure", ["write", "partial", "flush"])
-def test_failed_output_never_commits_a_cursor(pair, failure):
+def test_failed_output_never_commits_a_cursor(pair: Pair, failure: str) -> None:
     client, transport, _ = pair
     client.post("room", "body", "request-1")
 
     class Output(io.StringIO):
-        def write(self, value):
+        def write(self, value: str) -> int:
             if failure == "write":
                 raise BrokenPipeError("synthetic")
             return 1 if failure == "partial" else super().write(value)
 
-        def flush(self):
+        def flush(self) -> None:
             if failure == "flush":
                 raise OSError("synthetic")
             super().flush()
@@ -230,15 +237,15 @@ def test_failed_output_never_commits_a_cursor(pair, failure):
 
 
 @pytest.mark.parametrize("failure", ["refused", "mismatched"])
-def test_flushed_output_with_unconfirmed_progress_is_explicit(pair, failure):
+def test_flushed_output_with_unconfirmed_progress_is_explicit(pair: Pair, failure: str) -> None:
     client, transport, _ = pair
     client.post("room", "body", "request-1")
 
-    def before(request):
+    def before(request: dict[str, Any]) -> None:
         if request["op"] == "cursor" and failure == "refused":
             raise ClientError("unavailable", "Synthetic failure.")
 
-    def after(request, result):
+    def after(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if request["op"] == "cursor" and failure == "mismatched":
             result["cursor"] = True
         return result
@@ -258,11 +265,11 @@ def test_flushed_output_with_unconfirmed_progress_is_explicit(pair, failure):
 @pytest.mark.parametrize("mutation", [
     "channel", "codename", "cursor-bool", "position", "duplicate-id", "foreign-event", "event-type",
 ])
-def test_invalid_pages_do_not_print_or_advance(pair, mutation):
+def test_invalid_pages_do_not_print_or_advance(pair: Pair, mutation: str) -> None:
     client, transport, _ = pair
     client.post("room", "body", "request-1")
 
-    def after(request, result):
+    def after(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if request["op"] != "read":
             return result
         if mutation in {"channel", "codename"}:
@@ -287,7 +294,7 @@ def test_invalid_pages_do_not_print_or_advance(pair, mutation):
     assert not any(call["op"] == "cursor" for call in transport.calls)
 
 @pytest.mark.parametrize("op", ["join", "leave", "wait", "scan", "members", "resolve"])
-def test_malformed_success_objects_do_not_confirm_an_operation(pair, op):
+def test_malformed_success_objects_do_not_confirm_an_operation(pair: Pair, op: str) -> None:
     client, transport, _ = pair
     transport.after = lambda request, result: {"unexpected": True}
     with pytest.raises(ClientError):
@@ -302,12 +309,12 @@ def test_malformed_success_objects_do_not_confirm_an_operation(pair, op):
 
 
 @pytest.mark.parametrize("mutation", ["body", "unreturned-progress", "epoch", "duplicate-channel"])
-def test_scan_validates_body_free_returned_only_progress_without_reading(pair, mutation):
+def test_scan_validates_body_free_returned_only_progress_without_reading(pair: Pair, mutation: str) -> None:
     client, transport, store = pair
     client.post("room", "one", "request-1")
     client.post("room", "two", "request-2")
 
-    def after(request, result):
+    def after(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if request["op"] != "scan":
             return result
         if mutation == "body":
@@ -328,10 +335,10 @@ def test_scan_validates_body_free_returned_only_progress_without_reading(pair, m
     assert not any(request["op"] in {"read", "cursor"} for request in transport.calls)
 
 
-def test_pending_original_is_retained_and_only_explicit_same_id_recovery_sends(pair):
+def test_pending_original_is_retained_and_only_explicit_same_id_recovery_sends(pair: Pair) -> None:
     client, transport, store = pair
 
-    def lost(request, result):
+    def lost(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if request["op"] == "post":
             raise ClientError("unavailable", "Synthetic lost response.")
         return result
@@ -354,10 +361,10 @@ def test_pending_original_is_retained_and_only_explicit_same_id_recovery_sends(p
     assert store._db.execute("SELECT count(*) FROM events").fetchone()[0] == 1
 
 
-def test_pending_capacity_is_exact_and_a_later_refusal_does_not_erase_uncertainty(pair):
+def test_pending_capacity_is_exact_and_a_later_refusal_does_not_erase_uncertainty(pair: Pair) -> None:
     client, transport, _ = pair
 
-    def unavailable(_):
+    def unavailable(_: dict[str, Any]) -> NoReturn:
         raise ClientError("unavailable", "Synthetic failure.")
 
     transport.before = unavailable
@@ -381,7 +388,7 @@ def test_pending_capacity_is_exact_and_a_later_refusal_does_not_erase_uncertaint
         client.post("room", "body", "overflow")
     assert caught.value.code == "pending_capacity" and len(transport.calls) == before
 
-    def refused(_):
+    def refused(_: dict[str, Any]) -> NoReturn:
         raise ClientError("notjoined", "Synthetic refusal.", status=409)
 
     transport.before = refused
@@ -390,7 +397,7 @@ def test_pending_capacity_is_exact_and_a_later_refusal_does_not_erase_uncertaint
     assert len(client.status()["pending_posts"]) == MAX_PENDING
 
 
-def test_new_definitive_refusal_does_not_leave_an_unknown_post(pair):
+def test_new_definitive_refusal_does_not_leave_an_unknown_post(pair: Pair) -> None:
     client, _, _ = pair
     client.leave("room")
     with pytest.raises(ClientError) as caught:
@@ -400,7 +407,9 @@ def test_new_definitive_refusal_does_not_leave_an_unknown_post(pair):
 
 
 @pytest.mark.parametrize("publication", ["normal", "sharing-race"])
-def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path, monkeypatch, publication):
+def test_local_reader_lock_is_shared_and_crash_released(
+    pair: Pair, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publication: str,
+) -> None:
     from agent_procutil import direct_python, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     client, _, _ = pair
@@ -424,12 +433,12 @@ def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path, monkeypa
     )
     try:
         deadline = time.monotonic() + 5
-        last_error = None
+        last_error: OSError | None = None
         injected = False
         original_read = Path.read_text
         original_exists = Path.exists
 
-        def read_published(path, *args, **kwargs):
+        def read_published(path: Path, *args: Any, **kwargs: Any) -> str:
             nonlocal injected
             value = original_read(path, *args, **kwargs)
             if path == ready and publication == "sharing-race" and not injected:
@@ -479,10 +488,10 @@ def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path, monkeypa
             process.wait(timeout=5)
         if job is not None:
             job.close()
-        process.stderr.close()
+        cast(IO[str] | IO[bytes], process.stderr).close()
 
 
-def test_response_json_can_be_large_without_widening_default_request_bounds():
+def test_response_json_can_be_large_without_widening_default_request_bounds() -> None:
     raw = json.dumps({"value": "x" * 65536}).encode()
     with pytest.raises(ChatError):
         strict_json(raw)

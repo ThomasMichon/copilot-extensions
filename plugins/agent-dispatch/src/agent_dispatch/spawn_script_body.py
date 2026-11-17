@@ -25,8 +25,9 @@ import tempfile
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Protocol
 
-SpawnFn = Callable[[dict], "tuple[bool, dict]"]
+SpawnFn = Callable[[dict[str, Any]], tuple[bool, dict[str, Any]]]
 ScriptBodyVerdictFn = Callable[[int, "str | None"], str]
 
 _SCRIPT_BODY_PREFIX = "script-body:"
@@ -118,7 +119,7 @@ def _default_script_body_verdict(pid: int, start_token: str | None) -> str:
     return _tracking().LIVE if current == start_token else _tracking().GONE
 
 
-def _load_script_spec(task: dict) -> tuple[list[str], str | None, dict[str, str], int | None]:
+def _load_script_spec(task: dict[str, Any]) -> tuple[list[str], str | None, dict[str, str], int | None]:
     raw_payload = task.get("payload_inline")
     if not isinstance(raw_payload, str) or not raw_payload.strip():
         raise ValueError("script embodiment requires a JSON payload_inline object")
@@ -188,7 +189,19 @@ def _load_script_spec(task: dict) -> tuple[list[str], str | None, dict[str, str]
     return argv, cwd, env, heartbeat_seconds
 
 
-def _tracking():
+class _Tracking(Protocol):
+    GONE: str
+    UNKNOWN: str
+    LIVE: str
+
+    def list_local_body_sessions(
+        self, *, timeout: float = 3.0, ensure_daemon: bool = True,
+    ) -> list[dict[str, Any]]: ...
+
+    def session_activity(self, session: dict[str, Any] | None) -> str | None: ...
+
+
+def _tracking() -> _Tracking:
     """Lazy accessor for the ``tracking`` module (its verdict constants)."""
     from . import tracking
 
@@ -216,14 +229,13 @@ def make_script_spawn(
     invoking an LLM.
     """
 
-    def spawn(task: dict) -> tuple[bool, dict]:
+    def spawn(task: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         worker_id = f"script-{uuid.uuid4().hex[:8]}"
         try:
             argv, cwd, extra_env, heartbeat_seconds = _load_script_spec(task)
         except ValueError as exc:
             return False, {"error": str(exc)}
 
-        task_file: tempfile.NamedTemporaryFile[str] | None = None
         task_file_path: str | None = None
         try:
             task_file = tempfile.NamedTemporaryFile(
@@ -287,7 +299,7 @@ def make_script_spawn(
             "worktree": None,
         }
 
-    spawn.requires_reusable_worktree = False
-    spawn.allocation_driver = "agent-dispatch"
-    spawn.allocation_interface = "script"
+    setattr(spawn, "requires_reusable_worktree", False)
+    setattr(spawn, "allocation_driver", "agent-dispatch")
+    setattr(spawn, "allocation_interface", "script")
     return spawn

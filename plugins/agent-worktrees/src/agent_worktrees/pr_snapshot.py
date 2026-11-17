@@ -55,6 +55,8 @@ class PRSnapshot:
     """Provider-returned target tip, not the merge base or synthetic merge commit."""
     endpoint: str = ""
     """Effective authority captured by the provider read; absent means unknown."""
+    reviews_complete: bool | None = None
+    """Review-page coverage, not an atomic candidate snapshot or approval policy."""
 
     @property
     def max_review_id(self) -> int:

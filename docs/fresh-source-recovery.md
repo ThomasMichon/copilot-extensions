@@ -291,6 +291,107 @@ A reader does not invent a retention limit, advance history, label an
 unexercised candidate good or enable automatic rollback. Historical
 qualification retains immutable source and consuming-repository association.
 
+### Association adapter receiving contract
+
+The receiving design was reviewed in
+[#12987](https://github.com/ThomasMichon/copilot-extensions/pull/12987), under the
+[accepted association/declaration split](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6890789048).
+Manager's separate `worktree_manager.repository_suite` module now supplies the
+bounded association operations below. The
+[delivery and validation plan](../efforts/active/source-managed-runtime-installs/repository-suite-association.md)
+retains its completion gates. Schema 1, schema-2 preview, bootstrap discovery
+and all existing installation behavior remain unchanged by this adapter.
+
+The existing Manager configuration owner retains one consuming-repository
+association per explicitly addressed configuration root. Store it in that
+root's existing `config.toml`, outside application version slots:
+
+```toml
+[repository_suite]
+version = 1
+repository_root = '<absolute-adopter-checkout>'
+```
+
+The table has exactly those two fields. `version` is integer 1, not a boolean;
+`repository_root` is a fully qualified filesystem path without parent
+components or control characters. An absent table is unassociated; an empty,
+malformed or unsupported table is not absence. The table stores the desired
+repository association, not a qualified source version, successful installation,
+last-known-good history or permission to change that repository.
+
+The adapter belongs to the existing Manager package. Its module/API
+requires an explicit Manager configuration root; it does not default to cwd,
+an adopted project, a registry entry or another installation. Operations:
+
+| Operation | Boundary |
+|---|---|
+| Inspect | Read one bounded configuration and report the stored association or its absence; no writes, adopter-policy read, Git, setup or service work |
+| Associate | Propose an existing ordinary adopter root; change the table only with explicit apply |
+| Clear | Propose removal of that table only; change it only with explicit apply |
+
+Use the existing installation/tooling owner to select the Manager interpreter
+and package closure. Do not select bare PATH Python or infer a Python-storage
+location. The module can then be invoked with this argv shape:
+
+```text
+<selected-manager-python> -I -B -X utf8 -m worktree_manager.repository_suite --describe
+<selected-manager-python> -I -B -X utf8 -m worktree_manager.repository_suite --root <absolute-manager-config-root> inspect
+<selected-manager-python> -I -B -X utf8 -m worktree_manager.repository_suite --root <absolute-manager-config-root> associate --repository-root <absolute-adopter-checkout>
+```
+
+`--describe` alone returns
+`worktree-manager.repository-suite-association.capabilities`, version 1,
+with explicit-root, read-only-default and apply-required support. Ordinary
+results use `worktree-manager.repository-suite-association`, version 1. They
+name the operation, configuration root, actual current repository root,
+proposed repository root and whether configuration changed. They are data,
+not installation or execution receipts.
+
+With `--root` and no operation, inspection is the default. Add `--apply` only
+to associate or clear when that configuration effect is authorized. Replacing
+an existing different association adds `--expect-current-root <previous-root>`.
+Clear uses `clear --expect-current-root <previous-root>` and is also read-only
+without `--apply`. An already-matching desired state changes nothing.
+Every parser requires the declared option spelling. Abbreviations such as
+`--app` are rejected before association or clear can change configuration.
+
+An old runtime ignoring the extra TOML table does not implement the adapter.
+Missing module or unsupported schema is an explicit unsupported result, never
+permission to install or invoke a guessed fallback.
+
+Inspection accepts at most 64 KiB of configuration, rejects invalid TOML and
+unknown table fields, and does not create even a missing configuration root or
+lock. Reading the stored identity does not require the adopter still to exist.
+The existing declaration reader retains ordinary-path, parser and availability
+checks when a caller later consumes that root. Keep those data and source
+admission steps separate rather than executing Git during association discovery.
+
+Initial association requires absence or the same already-associated root.
+Replacing a different root requires an explicit expected current root; clearing
+also names the expected current root. Revalidate it under the existing shared
+configuration writer lock. A stale expectation refuses without changing the
+association. Equivalent native path spellings are not a different association.
+Repeat requests that already match the desired state are observations, not
+installation replay or new qualification.
+
+Validate inputs before entering the writer. Explicit apply uses the existing
+configuration path, lock and atomic-publication boundary and changes only this
+table. Preserve unrelated configuration, including Manager self-source and
+service-runtime policy. Do not copy their values into the association, rewrite
+them to match adopter data, or use old runtime health as a prerequisite to this
+explicit configuration operation. A noncanonical representation that cannot be
+rewritten without changing unrelated data refuses with the original file
+retained; no partial or lossy TOML writer is used as fallback.
+
+The installation/update caller remains responsible for effect authority and
+for selecting the addressed configuration root. A configuration read or bind
+does not prove an installed generation. The caller passes the stored adopter
+root to the existing declaration/parser owner, then resolves one immutable
+selection through the existing native acquisition/composition owner. Preserve
+explicit source-override precedence and independent policies. This contract
+does not wire ordinary callers, enable repository installation, select Copilot
+content or claim that any domain consumed the declaration.
+
 ### Compatibility and acceptance
 
 Use passive bootstrap discovery before choosing the distinct supported request

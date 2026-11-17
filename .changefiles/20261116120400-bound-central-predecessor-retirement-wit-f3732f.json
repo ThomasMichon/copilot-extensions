@@ -1,0 +1,9 @@
+{
+  "comment": "Bound central predecessor retirement without signaling session or transport trees, and adopt the relay before Host reattachment.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agent_index.chunking.base import Chunk
 from agent_index.indexing.embedding_batch import (
@@ -21,7 +21,9 @@ from agent_index.indexing.embedding_coverage import EmbeddingCoverage, embedding
 from agent_index.indexing.pending_crawl import PendingCrawls, PendingCrawlConflict, recovery_scope
 from agent_index.indexing.state import IndexState
 from agent_index.store.content_snapshot import ContentSnapshot, ContentSnapshotUnavailable
-from agent_index.store.chunk_id_index import ChunkIdIndexPreparationRequired
+from agent_index.store.scalar_index import (
+    ScalarIndexPreparationRequired as ChunkIdIndexPreparationRequired,
+)
 from agent_index.store.source_layout import SourceLayoutError
 
 if TYPE_CHECKING:
@@ -86,7 +88,7 @@ def _binding(
     return {"source": spec.name, "scope": scope, "family": family, "profiles": signature}
 
 
-def _snapshot(payload: dict) -> ContentSnapshot:
+def _snapshot(payload: dict[str, Any]) -> ContentSnapshot:
     raw = payload.get("snapshot")
     if not isinstance(raw, dict):
         raise BackfillRepairRequired("Malformed backfill snapshot")
@@ -97,7 +99,7 @@ def _snapshot(payload: dict) -> ContentSnapshot:
         raise BackfillRepairRequired("Malformed backfill snapshot") from exc
 
 
-def _decode(raw: str, complete: int) -> dict:
+def _decode(raw: str, complete: int) -> dict[str, Any]:
     try:
         value = json.loads(raw)
         if (not isinstance(value, dict) or set(value) != {
@@ -128,7 +130,7 @@ def _vector_versions(config: IndexConfig, store: MultiModelStore) -> dict[str, i
 
 
 def _require_current(
-    payload: dict, spec: SourceSpec, connector: SourceConnector,
+    payload: dict[str, Any], spec: SourceSpec, connector: SourceConnector,
     config: IndexConfig, store: MultiModelStore,
 ) -> None:
     if payload["binding"] != _binding(spec, connector, config, store):
@@ -151,7 +153,7 @@ def _chunk(record: ChunkRecord) -> Chunk:
     return value
 
 
-def _save_progress(paths: PathIndex, source: str, raw: str, payload: dict) -> str:
+def _save_progress(paths: PathIndex, source: str, raw: str, payload: dict[str, Any]) -> str:
     updated = json.dumps(payload, sort_keys=True)
     with closing(paths._connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -193,13 +195,16 @@ def backfill_embedding_slice(
     spec: SourceSpec, connector: SourceConnector, *, config: IndexConfig,
     store: MultiModelStore, paths: PathIndex, clients: dict[str, EngineClient],
     row_budget: int, after_store: Callable[[VectorTable, int], None],
-    before_embed: Callable[[], None] | None = None, restart: bool = False,
+    before_embed: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None, restart: bool = False,
 ) -> BackfillProgress:
     """Process one bounded global offset range, selecting only the accepted family.
 
     Ordinary indexing remains active. Restart resets only derived backfill
     intent, never canonical data, acquisition identity or source checkpoints.
     The preparation callback owns its explicit physical-vector-tail budget.
+    Readiness callbacks run only for missing pairs; the model callback receives
+    the selected model ID and leaves engine lifecycle ownership with the caller.
     """
     if type(row_budget) is not int or row_budget < 1 or type(restart) is not bool:
         raise ValueError("Backfill requires a positive integer row budget and explicit restart mode")
@@ -287,7 +292,7 @@ def backfill_embedding_slice(
             written = embed_and_store_pairs(
                 chunks, store, clients, config.model_profiles, stream_batch_size=row_budget,
                 coverage=coverage, bounded=True,
-                before_embed=prepare, after_store=after_store,
+                before_embed=prepare, before_model_embed=before_model_embed, after_store=after_store,
             )
             for name, profile in config.model_profiles.items():
                 selected = routed_model_chunks(chunks, name, config.model_profiles)

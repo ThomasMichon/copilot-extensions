@@ -53,9 +53,11 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
+
+from .transport_binding import MutationBinding
 
 log = logging.getLogger("agent-vault.extensions")
 
@@ -64,10 +66,10 @@ EXTENSIONS_ENV = "AGENT_VAULT_EXTENSIONS"
 
 # Hook callable aliases (documentation only -- hooks are duck-typed).
 UnlockProvider = Callable[["UnlockContext"], "str | None"]
-ProtocolAction = Callable[[Any, dict, "ActionContext"], dict]
-ClientTransport = Callable[[dict, "float | None", "TransportContext"], "dict | None"]
-ConfigSource = Callable[["str | None"], dict]
-CacheSource = Callable[["str | None"], "object"]
+ProtocolAction = Callable[[Any, dict[str, Any], "ActionContext"], dict[str, Any]]
+ClientTransport = Callable[[dict[str, Any], "float | None", "TransportContext"], "dict[str, Any] | None"]
+ConfigSource = Callable[["str | None"], dict[str, Any]]
+CacheSource = Callable[["str | None"], "Iterable[object] | None"]
 CliCommand = Callable[[Any], None]
 StartupHook = Callable[[Any, "StartupContext"], None]
 
@@ -122,7 +124,8 @@ class _Ranked:
     priority: int
     seq: int
     name: str = field(compare=False)
-    fn: Callable = field(compare=False)
+    fn: Callable[..., Any] = field(compare=False)
+    single_attempt: bool = field(default=False, compare=False)
 
 
 class ExtensionRegistry:
@@ -130,7 +133,7 @@ class ExtensionRegistry:
 
     def __init__(self) -> None:
         self._unlock_providers: list[_Ranked] = []
-        self._actions: dict[str, Callable] = {}
+        self._actions: dict[str, ProtocolAction] = {}
         self._transports_before: list[_Ranked] = []
         self._transports_after: list[_Ranked] = []
         self._config_sources: list[_Ranked] = []
@@ -152,7 +155,7 @@ class ExtensionRegistry:
     ) -> None:
         """Register a provider consulted before the interactive unlock prompt."""
         self._unlock_providers.append(
-            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
         )
         self._unlock_providers.sort()
 
@@ -167,6 +170,7 @@ class ExtensionRegistry:
     def register_transport(
         self, fn: ClientTransport, *, priority: int = 100, name: str | None = None,
         before_builtin: bool = False,
+        single_attempt: bool = False,
     ) -> None:
         """Register a client transport.
 
@@ -176,10 +180,18 @@ class ExtensionRegistry:
         that must take precedence over the local daemon in some contexts. Such a
         transport should return ``None`` when it does not apply, so the built-ins
         still run.
+
+        ``single_attempt=True`` additionally promises that one callback invocation
+        pins one owner/route, sends at most once and never retries or falls through
+        internally after a lost reply. Only such callbacks may carry a bound
+        create-only mutation; existing callbacks remain usable for ordinary reads.
         """
         target = self._transports_before if before_builtin else self._transports_after
         target.append(
-            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+            _Ranked(
+                priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn,
+                single_attempt=single_attempt,
+            )
         )
         target.sort()
 
@@ -188,7 +200,7 @@ class ExtensionRegistry:
     ) -> None:
         """Register a configuration source feeding the resolver."""
         self._config_sources.append(
-            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
         )
         self._config_sources.sort()
 
@@ -202,7 +214,7 @@ class ExtensionRegistry:
         to ``password``) or an ``(entry, field)`` pair.
         """
         self._cache_sources.append(
-            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
         )
         self._cache_sources.sort()
 
@@ -218,7 +230,7 @@ class ExtensionRegistry:
         verbs instead of forking ``cli.py``.
         """
         self._cli_commands.append(
-            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
         )
         self._cli_commands.sort()
 
@@ -236,7 +248,7 @@ class ExtensionRegistry:
         serving.
         """
         self._startup_hooks.append(
-            _Ranked(priority, self._next_seq(), name or getattr(fn, "__name__", "?"), fn)
+            _Ranked(priority, self._next_seq(), name or str(getattr(fn, "__name__", "?")), fn)
         )
         self._startup_hooks.sort()
 
@@ -247,10 +259,10 @@ class ExtensionRegistry:
         return list(self._unlock_providers)
 
     @property
-    def actions(self) -> dict[str, Callable]:
+    def actions(self) -> dict[str, ProtocolAction]:
         return dict(self._actions)
 
-    def action(self, name: str) -> Callable | None:
+    def action(self, name: str) -> ProtocolAction | None:
         return self._actions.get(name)
 
     @property
@@ -288,7 +300,7 @@ class ExtensionRegistry:
         """
         for ranked in self._unlock_providers:
             try:
-                pw = ranked.fn(ctx)
+                pw = cast(UnlockProvider, ranked.fn)(ctx)
             except Exception as exc:
                 log.warning("Unlock provider %r raised: %s", ranked.name, exc)
                 continue
@@ -306,9 +318,10 @@ class ExtensionRegistry:
         return None
 
     def try_transports(
-        self, request: dict, timeout: float | None, ctx: TransportContext,
+        self, request: dict[str, Any], timeout: float | None, ctx: TransportContext,
         *, before_builtin: bool = False,
-    ) -> dict | None:
+        binding: MutationBinding | None = None,
+    ) -> dict[str, Any] | None:
         """Consult client transports in priority order; first non-None wins.
 
         ``before_builtin`` selects the phase: the transports registered to run
@@ -317,12 +330,27 @@ class ExtensionRegistry:
         """
         transports = self._transports_before if before_builtin else self._transports_after
         for ranked in transports:
+            transport = cast(ClientTransport, ranked.fn)
             try:
-                result = ranked.fn(request, timeout, ctx)
+                result = transport(request, timeout, ctx)
             except Exception as exc:
                 log.warning("Transport %r raised: %s", ranked.name, exc)
                 continue
             if result is not None:
+                if binding is not None:
+                    def send(
+                        payload: dict[str, Any], limit: float | None,
+                        selected: ClientTransport = transport,
+                    ) -> dict[str, Any] | None:
+                        return selected(payload, limit, ctx)
+
+                    binding.select(
+                        send, single_attempt=ranked.single_attempt is True,
+                        defaults={
+                            key: request[key] for key in ("kpdb", "group", "vault")
+                            if key in request
+                        },
+                    )
                 result.setdefault("_transport", f"ext:{ranked.name}")
                 return result
         return None
@@ -339,7 +367,7 @@ class ExtensionRegistry:
         merged: dict[str, Any] = {}
         for ranked in self._config_sources:
             try:
-                contribution = ranked.fn(cwd)
+                contribution = cast(ConfigSource, ranked.fn)(cwd)
             except Exception as exc:
                 if strict:
                     raise ValueError("Configuration source failed") from None
@@ -363,9 +391,11 @@ class ExtensionRegistry:
         """
         from .cache_sources import collect
 
-        return collect((ranked.fn for ranked in self._cache_sources), machine).entries
+        return collect(
+            (cast(CacheSource, ranked.fn) for ranked in self._cache_sources), machine
+        ).entries
 
-    def apply_cli_commands(self, subparsers) -> None:
+    def apply_cli_commands(self, subparsers: Any) -> None:
         """Let each registered CLI-command builder add its subparser(s).
 
         Builders run in priority order. One that raises is logged and skipped
@@ -396,7 +426,7 @@ class ExtensionRegistry:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_register(target: str) -> Callable | None:
+def _resolve_register(target: str) -> Callable[[ExtensionRegistry], None] | None:
     """Resolve a ``module`` or ``module:callable`` string to a register callable."""
     module_name, _, attr = target.partition(":")
     module_name = module_name.strip()
@@ -412,7 +442,7 @@ def _resolve_register(target: str) -> Callable | None:
     if not callable(fn):
         log.warning("Extension %r has no callable %r", module_name, attr or "register")
         return None
-    return fn
+    return cast(Callable[[ExtensionRegistry], None], fn)
 
 
 def _env_targets() -> list[str]:
@@ -420,7 +450,9 @@ def _env_targets() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _entry_point_registers(registry: ExtensionRegistry | None = None) -> list[Callable]:
+def _entry_point_registers(
+    registry: ExtensionRegistry | None = None,
+) -> list[Callable[[ExtensionRegistry], None]]:
     try:
         from importlib.metadata import entry_points
     except Exception:
@@ -433,14 +465,14 @@ def _entry_point_registers(registry: ExtensionRegistry | None = None) -> list[Ca
         selected = (
             eps.select(group=ENTRY_POINT_GROUP)
             if hasattr(eps, "select")
-            else eps.get(ENTRY_POINT_GROUP, [])
+            else cast(Any, eps).get(ENTRY_POINT_GROUP, [])
         )
     except Exception as exc:
         if registry is not None:
             registry._load_failed = True
         log.warning("Entry-point discovery failed: %s", exc)
         return []
-    registers: list[Callable] = []
+    registers: list[Callable[[ExtensionRegistry], None]] = []
     for ep in selected:
         try:
             fn = ep.load()
@@ -462,7 +494,7 @@ def load_extensions(registry: ExtensionRegistry) -> ExtensionRegistry:
         return registry
     registry._loaded = True
 
-    registers: list[Callable] = list(_entry_point_registers(registry))
+    registers: list[Callable[[ExtensionRegistry], None]] = list(_entry_point_registers(registry))
     for target in _env_targets():
         fn = _resolve_register(target)
         if fn is not None:

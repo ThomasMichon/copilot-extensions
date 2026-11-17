@@ -125,6 +125,7 @@ machine key, not the address grammar.
 | File | Purpose | Written by |
 |------|---------|-----------|
 | `~/.copilot/settings.json` | Per-user CLI settings and user-global plugin activation, including session extensions | you |
+| `<manager-configuration-root>/config.toml` | Manager-owned configuration; the [repository-suite association](fresh-source-recovery.md#association-adapter-receiving-contract) selects an explicitly addressed adopter without rewriting independent self/runtime source policies | Existing Manager configuration owner; explicit association apply only |
 | `~/.copilot-extensions/installation-mode.json` | OS-profile-pinned desired installation mode: legacy by default, with namespaced opt-in and exact marketplace/plugin overrides | you, through explicit machine-local policy |
 | `~/.copilot-extensions/maintenance` + `maintenance.json` | Existence gate plus strict ownership sidecar that quiesces new plugin activity during user-wide surgical maintenance | maintenance command / you |
 | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles` | `install` |

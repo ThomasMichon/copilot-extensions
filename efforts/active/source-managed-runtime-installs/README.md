@@ -29,11 +29,20 @@ including vendored in-process code and local versions for local promotion.
 Manager orders separately installed IPC dependencies, whose implementation is
 never imported by consumers. Slot setup stages without selecting; full setup
 establishes the version-neutral app/global commands and actual readiness.
-Complete one component's install and update using only this new path before
-broader app conversion. The [verbatim direction](inception-transcript.md#manager-owned-app-footprints-and-local-promotion)
+Complete Worktree Manager's install and update using only this new path before
+broader app conversion. The new flow uses the common application hierarchy,
+allowing legacy and new footprints to coexist until explicit global-command
+activation. Durable state and configuration remain outside version slots;
+exclusively version-owned, disposable state is confined to a slot-local `state/`
+directory and is never needed across updates. The eventual common repository
+namespace is standing direction, not a bulk live migration in this slice.
+The [verbatim direction](inception-transcript.md#manager-owned-app-footprints-and-local-promotion)
 is retained; #12905 tracks delivery without reassigning existing owners.
-The current contribution captures and reviews this direction only, before any
-app refactor or host operation.
+The reference scope includes Manager-owned orchestration, promotion-produced
+Main/pinned-Dev/frozen-WIP footprints, complete Manager install/update
+qualification and reviewed, CI-passing, merged delivery. Capture-only work is a
+completed milestone, not that implementation's completion gate. Host/fleet
+rollout, credentials/access changes and unrelated app conversion are excluded.
 
 Fresh installation and update share the same incoming bootstrap, Manager-first
 application construction and repository-derived required closure. The
@@ -50,6 +59,13 @@ none assumes an installed Python location or resolves Python from PATH.
 This supersedes that earlier setup assumption, not compiler-free execution,
 process safety or package admission. #12775 owns the bounded architecture/plan
 revision; existing implementation and deployment owners retain the open work.
+
+The [repository-suite association adapter](repository-suite-association.md)
+defines the separate consuming-repository/configuration boundary before shared
+caller changes. It reuses Manager's existing configuration owner and the
+declaration reader, without absorbing ordinary update, construction, independent
+source policies or content delivery. Its receiving design is not installed
+association or convergence evidence.
 
 The [current lifetime clarification](update-service-lifetimes.md) is part of
 this Goal: ordinary updates are foreground-owned and cancellable, while accepted
@@ -156,12 +172,14 @@ service-supervision ownership changes.
 ## Coordination
 
 The [Manager-owned footprint direction](app-footprint-transition.md) and #12905
-amend the target before app refactoring. This contribution owns only vision,
-verbatim-request and plan capture, not the existing implementation or installed
-resources. Preserve promotion/vendoring (#3654), execution (#7758), component and
-native owners and current holds. Vault is illustrative; select an exemplar
-with its rightful owner before implementation. Historical bounded app releases
-do not establish one fully converted component under the new contract.
+amend the target before app refactoring. The capture merged in #12908; the
+subsequent bounded implementation assignment selects Worktree Manager itself
+as the reference through complete install/update and merged delivery. Preserve
+promotion/vendoring (#3654), execution (#7758), component and native owners,
+existing source reservations and current holds; reconcile actual source
+overlaps before edits. Vault remains illustrative. Historical bounded app
+releases do not establish this reference under the new contract. No installed
+resource custody or rollout authority transfers with the assignment.
 
 The [reviewed scope amendment](finite-scope.md) consolidates the parent completion
 gate. Historical #2822/#4010/#4015/#4058/#5353 intake and the
@@ -601,10 +619,11 @@ Existing checked rows below retain only their historical scope.
 - [ ] F2: Have the existing promotion owner produce whole-copy app footprints
   from Main, pinned Dev and explicit frozen WIP, including embedded-code
   vendoring, local output versions and declared IPC dependency components.
-- [ ] F3: Select one component with its existing owner and qualify its real
+- [ ] F3: Qualify the selected Worktree Manager reference's real
   installation and update using only this new path, including applicable
-  dependency staging/IPC readiness and neutral app/global commands. No
-  legacy-installer fallback or historical partial witness counts.
+  actual dependency staging/IPC readiness, new application-root coexistence,
+  separated durable/disposable state and neutral app/global commands.
+  No legacy-installer fallback or historical partial witness counts.
 - [ ] F4: After F3 passes, convert additional apps through bounded existing-owner
   slices; preserve independently required native and authorized installed gates.
 
@@ -890,6 +909,22 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+- 2026-11-17: [Finite Manager-owned application consumer](journal/2026/11.17%20manager-footprint-consumer.md)
+  merged in #12930; F1-F3 and the complete Manager reference remain open.
+
+### 2026-11-16 - Manager reference and clean-break state boundaries
+
+The operator selected Worktree Manager itself for complete new-flow install and
+update, including Manager-owned management, promotion-produced footprints and
+reviewed/CI-passing merged delivery. The
+[subsequent verbatim amendments](inception-transcript.md#manager-reference-and-clean-break-layout)
+adopt the common app hierarchy, side-by-side legacy/new footprints until command
+cutover, durable state/configuration outside slots, and a narrow slot-local
+`state/` exception for exclusively version-owned disposable data. Repository
+namespace migration remains long-term. The receiving plan and governing vision
+carry these boundaries; #12905 coordinates the assignment. No implementation
+acceptance, source-owner transfer or host rollout is claimed by this amendment.
 
 ### 2026-11-16 - Copyable app footprints and Manager ownership
 

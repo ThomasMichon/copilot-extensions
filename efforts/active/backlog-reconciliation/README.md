@@ -3421,6 +3421,130 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete acceptance and interrupted-control judgments](journal/2026/11.16-complete-acceptance-and-interrupted-control.md)
+  record actual #13016 delivery, both reviewed documentary corrections and
+  thirty-seven whole-original decisions without repeated implementation
+  studies or custody transfer. The complete post-merge census is 871 whole
+  open, 142 above fixed 729 after one external departure; no new campaign
+  credit or parent checkbox state changes.
+  The [complete fleet and resource judgments](journal/2026/11.16-complete-fleet-and-resource-boundaries.md)
+  record actual #13006 delivery and nine whole-original decisions without
+  repeating unchanged implementation studies or transferring live custody.
+  Stable complete metadata observes 869 whole open issues, 140 above fixed
+  729, after four arrivals and one external departure; no new campaign credit
+  or parent checkbox state changes.
+  The [complete canonical and compatibility judgments](journal/2026/11.16-complete-canonical-and-compatibility-boundaries.md)
+  record actual #12996 delivery and sixteen whole-original decisions,
+  preserving superseded administrative tokens versus actual technical
+  acceptance, compatibility alternatives and continuing owner boundaries.
+  The complete 866-issue census is 137 above fixed 729 after two arrivals
+  and one external departure; no new campaign closure or custody release.
+  The [complete contracts and obsolete-consumer journal](journal/2026/11.16-complete-contracts-and-obsolete-consumer.md)
+  records actual #12983 delivery, separately verified #5785 obsolete-consumer
+  retirement and sixteen complete-original decisions retaining canonical
+  acceptance and actual owner boundaries. The full 865-issue census remains
+  136 above fixed 729 after new inflow; no technical checkbox or resource
+  obligation is completed by this documentary unit.
+  The [canonical acceptance and active-owner adjudication](journal/2026/11.16-canonical-acceptance-and-active-owners.md)
+  records actual #12971 delivery and eighteen complete-original decisions:
+  actionable existing receivers, independent finite alternatives and current
+  bounded claimants remain open without repeated implementation studies or
+  keep-open comments. Actual source boundaries remain withheld. The complete
+  863-issue census has one new arrival and no departure, 134 above fixed 729;
+  no technical acceptance, owner or resource obligation is declared complete.
+  The [complete resident-readiness receiving proposal](journal/2026/11.16-resident-readiness-receiving.md)
+  directly preserves #5215's continuous configured-sink readiness/launch and
+  connectivity outcomes, actual serving responsiveness, idle/no-command
+  visibility and honest unknown/stale/dead-producer semantics for planned
+  receiving in existing #5035. Its selected native-owner and independent
+  Linux cleanup-scope lanes and #10231 claimant remain intact. Nine new
+  technical Plan/Validation rows remain unchecked; reviewed intent, actual
+  whole receiving readback and separate source judgment precede retirement.
+  The same journal records actual #12962 delivery and fifteen whole-original
+  judgments, including current bounded claims, two-set recovery acceptance,
+  retained native/prototype gates and actual source exclusions. The complete
+  861-issue census remains 132 above fixed 729, with no new closure credit.
+  Reviewed #12966 subsequently delivered this complete intent; full current
+  #5035 receiving readback preceded verified #5215 `NOT_PLANNED` retirement.
+  All sixteen incumbent/new technical rows and existing custody remain open.
+  Five further whole-original judgments and two arrivals leave the complete
+  862-issue census 133 above fixed 729: one campaign departure, not a fix.
+  The [finite Linux/WSL startup receiving proposal](journal/2026/11.16-linux-startup-and-canonical-boundaries.md)
+  directly preserves #4307's equivalent startup-hook diagnostic flow AND
+  bounded/async hardening of blockers actually found in the existing startup
+  Plan/local/global Validation and Coordination. All eight technical rows
+  remain unchecked, with the Windows claimant and independent 20/20 programme
+  unchanged. Reviewed delivery, full current receiving readback and separate
+  source judgment precede tracking retirement. The same journal records actual
+  #12951 delivery, whole-original canonical discriminators, distinct inflow
+  and the complete 864-issue census, 135 above fixed 729.
+  The [complete claims-ownership receiving reconciliation](journal/2026/11.16-complete-claims-ownership-receiving.md)
+  records actual #12960 delivery and verified #4307 tracking retirement, with
+  all eight Linux technical rows unchecked. Existing final-OPEN #12957 now
+  directly retains complete #12955 cross-project/PR-URL matching and #12956
+  terminal-claim/cache/completeness acceptance alongside all six original gaps.
+  Full current receiving readback preceded both verified `NOT_PLANNED`
+  source retirements; all fourteen CO/COV rows remain unchecked. The complete
+  00:41:22 UTC census is 861 whole open, 132 above fixed 729, with two campaign
+  departures and no new arrivals or unrelated departures since 863.
+  The [complete standalone-consumer receiving proposal](journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md)
+  directly retains #3439's exact Dispatch-only plugin composition, local alias,
+  real empty inbox, subsequent same-coordinator dynamic health/version and
+  honest failure controls in the existing standalone effort's Plan/local/global
+  Validation and Coordination. Every technical row remains unchecked; normal
+  review, actual merge/readback and separate source judgment precede retirement.
+  The same journal records actual #12913 delivery and distinct whole-original
+  #2861/#2908/#3296/#3342 canonical retentions without repeated implementation
+  studies, forced ownership changes or new closure credit.
+  Reviewed #12919 subsequently delivered complete S3439 planned receiving;
+  verified #3439 retirement is `NOT_PLANNED`, not a passing solo scenario.
+  The complete 22:30:29 UTC census is 858 whole open, 129 above fixed 729:
+  that campaign departure is offset by two eligible arrivals. Their complete
+  originals retain #12914's bounded native Logger claim and #12920's distinct
+  in-process context-core program. The same journal preserves #3677's two
+  parser/publication contracts and #3698's complete leased-native/owner-admission
+  acceptance without another implementation study or operational effect.
+  The [complete supported-UV receiving proposal](journal/2026/11.16-complete-supported-uv-receiving.md)
+  directly preserves #3946's real WinGet-alias/headless-Windows contract AND inherited
+  #7313 scalar child-handoff acceptance in the existing Installer Engine
+  Plan/local/global Validation and Coordination. Every technical row stays unchecked;
+  actual normal reviewed receiving delivery, complete current readback and a separate
+  source judgment precede tracking retirement. Worktrees' permanent service-engine
+  exception and actual prerequisite/adopter/native/source custodians remain unchanged.
+  Reviewed #12925 subsequently delivered complete U3946 planned receiving;
+  verified #3946 tracking retirement is `NOT_PLANNED`, not a Windows/child
+  qualification pass. The complete 22:53:07 UTC census is 856 whole open,
+  127 above fixed 729: one campaign departure and one unrelated departure,
+  with no new inflow. Whole #3972 session-sync and #3977 materialization
+  contracts remain separate OPEN canonicals for their explicit residuals.
+  The [complete machine-state receiving reconciliation](journal/2026/11.16-complete-machine-state-receiving.md)
+  directly retains #3983's four-workstream Windows/Linux/WSL programme, all
+  inherited #3984 migration acceptance and exact #6342 opt-in pack in the
+  existing declarative-control-plane effort. Actual capability inventory,
+  parity and owner acceptance still gate legacy retirement; #3115's separate
+  live umbrella remains unsatisfied. #3983's literal whole-original/validation
+  OPEN condition remains: reviewed planned receiving does not waive it or
+  authorize source retirement, restore or machine operations.
+  The [complete self-update receiving proposal](journal/2026/11.16-complete-self-update-receiving.md)
+  records actual #12927 delivery and #3983's retained literal OPEN condition,
+  then extends the same Machines root for #4075's entire original and inherited
+  #4076 same-occurrence native exit/actual-work/atomic-receipt contract. The
+  finite documentation OR owned runtime convergence choice remains distinct
+  from that native lane; existing ownership and #3115's separate gate remain.
+  All technical rows stay unchecked; actual normal reviewed delivery, full
+  current readback and separate source judgment precede tracking retirement.
+  Whole #3985/#3989/#3993/#4023/#4043 remain separate OPEN canonicals for
+  their exact residuals, without new native investigation or closure credit.
+  The [recovery-boundary and owned-inflow reconciliation](journal/2026/11.16-recovery-boundaries-and-owned-inflow.md)
+  records actual #12936 delivery and verified #4075 tracking retirement,
+  retaining all eleven technical rows unchecked. Complete-original
+  #4102/#4118/#4122/#4124/#4125/#4130 discriminators preserve their specific
+  policy, supported-entry, owner-acceptance and whole-contract gaps without
+  another implementation study. Three qualified arrivals retain their
+  existing implementation claims; two further arrivals remain metadata-only.
+  The complete 23:52:30 UTC census is 860 whole open, 131 above fixed 729:
+  two arrivals and one unrelated departure since 859, with no new campaign
+  closure credit. #3983's literal OPEN condition and #3115's live gate remain.
   The [complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
   preserves #2729's five-package AND inherited #2726 contract in the existing
   Active Installer Engine Plan/local/global Validation and Coordination.

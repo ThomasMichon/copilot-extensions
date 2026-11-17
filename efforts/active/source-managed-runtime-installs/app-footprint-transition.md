@@ -11,11 +11,19 @@ using only the new flow before broad app refactoring. Extend the existing
 promotion and installer machinery; do not build a parallel dependency resolver,
 queue or lifecycle engine.
 
-The current contribution records the visions, exact request and receiving plan
-before refactoring. Existing promotion, vendoring, execution, component, native
-and deployment owners retain their scope, evidence and holds. No component is
-assigned, no app code is changed, and no host install/update is authorized here.
-Vault is the footprint example, not a selected exemplar.
+The initial capture cleared review and merged in #12908. The operator
+subsequently selected Worktree Manager itself as the reference, through
+Manager-owned orchestration, complete Main/pinned-Dev/frozen-WIP footprints,
+real install/update qualification and reviewed, CI-passing, merged delivery.
+Every owned implementation PR remains owned through actual merge and source
+worktree finalization; opening a PR is not completion.
+
+Existing promotion, vendoring, execution, component, native and deployment
+owners retain their scope, evidence, reservations and holds. Reconcile concrete
+overlaps before editing their source. Host/fleet rollout, credentials/access
+changes, unrelated app conversion and bulk repository relocation are excluded.
+Vault remains a footprint example; audit Manager's actual dependencies rather
+than inferring a Vault/SSH dependency from the example.
 
 ## Required model
 
@@ -55,12 +63,44 @@ The operator's proposed footprint is:
 
 <home>/.copilot-extensions/apps/<app>/
   versions/<version>/         # complete promoted app directory
+    state/                   # only disposable, exclusively version-owned data
+  state/                     # durable application state
+  config/                    # configuration that survives version replacement
   <version-marker>
   bin/setup.{ps1,sh,cmd}       # version-neutral
 
 <home>/.local/bin/
   <app-command>.{ps1,sh,cmd}   # version-neutral
 ```
+
+The new flow specifically uses this application root rather than installing
+new versions into `~/.agent-<app>`. Legacy and new footprints can coexist until
+explicit full setup updates the global commands. Copying or staging the new
+footprint must leave the old command destination unchanged; neither coexistence
+nor activation implies deletion of the old tree or competing writers to its
+durable state.
+
+Version code, dependencies and setup inputs remain immutable after construction.
+Configuration, secrets, sessions, databases and other state needed across updates
+live outside version slots. Exclusively version-owned disposable disk caches,
+temporary databases and similar execution state may use
+`versions/<version>/state/`, not arbitrary files mixed into code. Losing that
+directory must not lose user data or prevent update/recovery. It is not shared
+between versions or a migration source required by a successor. Existing live
+process/retention custody still prevents premature slot deletion.
+
+The long-term repository layout is separate from application installation:
+
+```text
+<home>/.copilot-extensions/repos/<repo>/
+  worktrees/
+  config.yaml
+```
+
+This reuses the marketplace-cell hierarchy's organizational shape, not its
+plugin identity or mutable-state selection. Capture the target now; moving
+existing repositories/configuration is not required by the Manager reference
+and needs its own owner-scoped migration.
 
 Slot-local `setup --stage` internally uses PATH `uv` with the project's
 declared Python. It prepares the candidate without updating the version marker
@@ -103,8 +143,8 @@ Existing compatible providers can satisfy readiness without unnecessary restart.
 4. Produce equivalent footprints from Main, pinned Dev and explicit frozen WIP
    with the same promotion implementation. Keep local version assignment in
    generated outputs, not the mutable source tree or a public release.
-5. Select one component with its existing owner and qualify its real install
-   and update through this path exclusively. Include its actual dependencies
+5. Qualify Worktree Manager's real install and update through this path
+   exclusively, reconciling its existing source owners. Include its actual dependencies
    and lifecycle; a CLI-only result does not qualify service/IPC behavior.
 6. Only after that complete reference flow passes, convert additional apps
    through bounded owner-scoped slices. Existing historical qualification is
@@ -115,13 +155,16 @@ Implementation choices, not extra operator requirements: reuse `uv.lock`,
 record; prefer a simple shell-readable selection marker; generate thin
 setup/application shims rather than hand-maintain copies. Manager invokes the
 incoming slot's setup directly, not the neutral setup that still selects V1.
-Keep configuration/data/cache outside immutable version code and preserve
+Keep durable configuration/data/cache outside immutable version code; confine
+exclusively version-owned disposable state to the slot's `state/`. Preserve
 existing installation identity, package/feed policy and process custody.
 
 ## Validation and completion _(agent-recommended)_
 
-- [ ] Request capture and governing visions clear normal review before app
-  refactoring; #12905 remains open for implementation, not closed by this plan.
+- [x] Initial request capture and governing visions cleared normal review in
+  #12908; #12905 remains open for implementation, not closed by that capture.
+- [x] Subsequent Manager reference/layout/state amendments cleared normal review
+  before runtime realization in #12923.
 - [ ] Main and local pinned-Dev/WIP promotion produce complete copyable app
   directories with correct vendored imports and distinguishable local versions.
   Source files remain unchanged; local outputs do not claim public release.
@@ -131,6 +174,13 @@ existing installation identity, package/feed policy and process custody.
   no system-Python discovery, escaped source dependency or copied venv is needed.
 - [ ] Staging and repeated staging preserve exact active pointers, neutral
   commands, configuration, registrations and service ownership.
+- [ ] Legacy and new-root fixtures coexist before activation; staging preserves
+  exact legacy global-command routing and full setup explicitly selects the
+  new installation without deleting the old footprint.
+- [ ] Runtime writes remain outside version code/setup inputs. Durable state
+  and configuration survive replacement; slot-local disposable state is
+  exclusively version-owned beneath `state/`, unshared and unnecessary to a
+  successor or supported recovery. Retiring a slot respects live ownership.
 - [ ] Required IPC providers stage before consumer full setup and are selected/
   ready before neutral invocation. Missing, incompatible or cyclic dependencies
   are explicit outcomes. Consumer code never imports provider implementation

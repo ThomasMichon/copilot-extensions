@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 _ROOT: ContextVar[str | None] = ContextVar("vault_configuration_root", default=None)
+CACHE_TARGET_CAPABILITY = "repository-cache-targets-v1"
+CACHE_TARGET_FIELDS = frozenset({"cache_entries", "cache_manifests"})
 
 
 def configuration_root(cwd: str | None = None) -> str | None:
@@ -64,6 +66,8 @@ def invocation_contract() -> dict[str, Any]:
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
+            CACHE_TARGET_CAPABILITY,
+            *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
         ],
     }
 

@@ -308,6 +308,129 @@ ready permit, native-liveness assertion or admission of every other writer
 of the shared workspace. The ordinary Dispatch writer remains independently
 gated.
 
+### Metadata loss without native conversation loss
+
+For the union of registered sessions and workspace-only targets, and its
+metadata-only head-hydration operation, see
+[target inventory](target-inventory.md).
+
+The optional `retained_native_metadata_adoption: 1` health capability adds
+metadata preparation to the same original keyed-creation owner:
+
+- `POST /api/v1/sessions/{predecessor-id}/retained-metadata` takes
+  `{"recovery": <version-1 retained recovery request>, "worktree_writer":
+  <original requirement>}`.
+- `GET /api/v1/sessions/{predecessor-id}/retained-metadata/{journal-key}`
+  inspects a committed adoption without native effects.
+
+The separately negotiated `client_retained_metadata.prepare` and `inspect`
+helpers use these routes within HTTP generation 52. This provider-first
+expansion adds no CLI option or automatic caller migration. Each attempt
+checks the actual receiving daemon's capability; older receivers return an
+unsupported-contract result before mutation, not a generic resume fallback.
+The client validates the returned version, original key/request, predecessor,
+new control ID and history boundary. An unconfirmed reply is not replayable.
+
+Preparation requires a complete original creation journal and unchanged native
+head/workspace incarnation, a compatible current Worktrees writer, no old
+managed record or conflicting holder, complete Host inventory and no unresolved
+launch, recovery, handoff or stop custody. Original agent, model, effort, tools
+and task origin come from immutable creation facts; unsupported or incomplete
+configuration refuses. The native owner is observed before and after its
+dormant-conversation admission preview. Preparation starts no native process,
+sends no prompt, drains no queue and attaches no task.
+Provider-backed targets reconstruct request-owned environment, argument and
+controller-origin provenance with the original start-time merge rules. A later
+provider refresh can change provider defaults without losing those original
+request overrides.
+
+When prior managed history is missing, the existing native-import transaction
+commits one **new managed control ID** and its immutable adoption in the original
+creation journal together. The original key, birth ID, native ID, writer,
+handoffs and recovery operations remain unchanged. Version-1 outcomes contain
+`request`, `predecessor_id`, `session_id`, `prior_operations` and
+`history: {status: "unavailable", predecessor_id, event_epoch, turn_epoch}`.
+The new event and turn epochs equal the new managed ID. No old events, turns,
+cursors or delivery receipts are synthesized. The predecessor and native-ID
+aliases do not address this new stream; use its explicit managed ID.
+
+A lost response, restart or repeated identical preparation discovers that same
+committed epoch. A missing adopted record remains held rather than allocating
+another epoch. Absence of an observable adoption is not negative evidence about
+an earlier uncertain request. Old-epoch recovery operation IDs cannot be
+reinterpreted against the new record.
+
+The adopted record stays stopped with background recovery disabled. Its first
+native execution must use the existing qualified retained-recovery operation,
+with a new operation ID and current head evidence. Generic resume/import cannot
+drop this custody; permission requests remain held for explicit resolution.
+After a new qualified native recovery completes, ordinary lifecycle closeout
+can proceed. Historical completed operations alone do not release retention.
+Ordinary worktree resume checks that recovery hold before either ACP or CLI
+launch can claim a gate. After qualification, normal handoff admits its exact
+journaled successor without allowing an unrelated import or reusing an excluded
+control ID. The epoch marker remains internal ownership metadata during
+provider classification and refresh; genuine provider targets still require
+their original override provenance.
+Only the adopted control's own marker denotes missing history. A handoff
+successor's fresh native conversation retains normal native-ID resolution and
+transcript resync, even when its target carries the predecessor's lineage marker.
+This preparation does not prove a new turn, native acceptance, original-task
+attachment or installed-provider qualification.
+
+Writable migration adds nullable `creation_adoption_json` and the exclusion,
+identity, pointer and configuration-retention guards plus an indexed adopted-ID
+lookup at schema 49. Retention uses that index rather than scanning every creation
+journal for each session. Passive
+cutover validates the current schema before writes; a prior schema-48 receiver
+refuses it. Supported rollback must retain these semantics or remain unable to
+open this store: do not downgrade its schema stamp, erase adoption or restore
+an empty old namespace. Arbitrary legacy writable bootstrap is not a qualified
+rollback path. This operation-level compatibility limit is not an installer
+replacement veto or a requirement to keep the original executable.
+
+The actor-free promotion controls exercise birth/handoff/adopted lineage,
+old-namespace and old-receipt exclusion, corrupt boundaries and qualified import
+inputs. Selected plugin controls separately exercise actual HTTP negotiation
+and malformed/lost replies, atomic database rollback/restart, independent-process
+serialization, configuration retention and prior-schema passive refusal.
+Native same-conversation execution, a new turn and installed rollback remain
+independent qualification gates.
+
+### Ordinary worktree resume after metadata loss
+
+`retained_worktree_resume: 1` advertises composition through the existing
+worktree ACP resume front door. It selects the workspace's unique original
+keyed journal, verifies its discovered owner/project/path and authoritative
+native head through a compatible writer, prepares the control epoch when
+needed, then invokes retained native recovery under its existing launch owner.
+It does not require the caller to reconstruct rows or supply writer facts.
+The metadata and native operations retain their separate exclusion boundaries;
+ordinary resume does not nest a second workspace executor inside preparation.
+
+The response carries `retained_metadata_adoption`, `retained_recovery` and
+`worktree_writer_observation` alongside the ordinary session fields. The
+explicit adopted managed ID is current control identity; the original native
+conversation and missing historical stream remain distinct. A confirmed ready
+control is reusable without another native load or recovery operation; its
+response has no newly executed `retained_recovery`. A known subsequent stopped
+activation obtains current head evidence and a distinct operation ID, not a
+replay of a historical completion or a task-policy reset.
+
+Unknown operations, changed native heads, ambiguous readiness, unavailable
+writers and incompatible workspace ownership hold before another native load.
+Missing keyed metadata is not silently converted to CLI control. Existing
+present birth records and qualified handoff successors retain their ordinary
+paths. Source tests cover lost replies and concurrent retries against the real
+resume front door without a second native load.
+
+This provider integration does not itself implement the complete target union,
+ordinary lazy lookup hydration, Dispatch control-identity migration, assignment
+delivery or affirmative worker task acceptance. Those consumers must negotiate
+their required receiving semantics independently. Neither source controls nor
+a successful resume prove a new native turn, task `STARTED`, closeout or
+installed recovery.
+
 ## Qualification boundary
 
 The optional `retained_acquisition_writer_inspection: 1` health capability

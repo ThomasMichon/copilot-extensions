@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -81,7 +82,7 @@ def _function_body(text: str, name: str) -> str:
     return text[start:end]
 
 
-def test_versioned_slot_clean_propagates_real_exit_code():
+def test_versioned_slot_clean_propagates_real_exit_code() -> None:
     """Construction ownership must be acquired or its refusal propagated."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     body = _function_body(text, "_versioned_slot_clean")
@@ -95,7 +96,7 @@ def test_versioned_slot_clean_propagates_real_exit_code():
     assert "return 0" not in body
 
 
-def test_versioned_slot_clean_fails_closed_for_an_existing_slot_without_bootstrap_python():
+def test_versioned_slot_clean_fails_closed_for_an_existing_slot_without_bootstrap_python() -> None:
     """When no bootstrap python can be resolved at all (e.g. a uv-only
     machine with no system python yet and no prior `venv` link to borrow
     from), `_versioned_slot_clean` must fail CLOSED (return 1, "can't
@@ -114,7 +115,7 @@ def test_versioned_slot_clean_fails_closed_for_an_existing_slot_without_bootstra
     assert "return 0" not in body
 
 
-def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_into_it():
+def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_into_it() -> None:
     """`_versioned_slot_clean` inspects whether a live process is running
     FROM the target slot -- using that slot's OWN interpreter to run the
     census would make the helper process itself show up as such a
@@ -143,7 +144,7 @@ def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_i
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
 @pytest.mark.parametrize("exclusion", ["exclude-venv-dir", "exclude-runtime-root"])
-def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path, exclusion: str):
+def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path, exclusion: str) -> None:
     """Behavioral (not just textual) regression guard: with `LINK_DIR`
     SYMLINKED into `VENV_DIR` (the exact mid-migration scenario a plain
     string comparison of the two variables wouldn't catch),
@@ -178,6 +179,7 @@ LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
 INSTALL_DIR="{_bash_path(runtime)}"
 PATH="{_bash_path(fallback_bin)}:$PATH"
+unset COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
 {fn_body}
 }}
 _bootstrap_python {exclusion}
@@ -186,7 +188,7 @@ _bootstrap_python {exclusion}
         harness_path = Path(td) / "harness.sh"
         harness_path.write_text(harness, encoding="utf-8")
         r = subprocess.run(
-            [_BASH, str(harness_path)],
+            [cast(str, _BASH), str(harness_path)],
             capture_output=True, text=True, timeout=30,
         )
         assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
@@ -201,7 +203,7 @@ _bootstrap_python {exclusion}
 @pytest.mark.parametrize("exclusion", ["exclude-venv-dir", "exclude-runtime-root"])
 def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
     tmp_path: Path, exclusion: str,
-):
+) -> None:
     """`exclude-venv-dir` must reject the `python3`/`python` PATH fallback
     too, not just the explicit `$LINK_DIR/bin/python` candidate: if an
     installer is launched with the target venv's own `bin/` on PATH (e.g.
@@ -239,6 +241,7 @@ LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
 INSTALL_DIR="{_bash_path(runtime)}"
 PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}"
+unset COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
 {fn_body}
 }}
 _bootstrap_python {exclusion}
@@ -247,7 +250,7 @@ _bootstrap_python {exclusion}
         harness_path = Path(td) / "harness.sh"
         harness_path.write_text(harness, encoding="utf-8")
         r = subprocess.run(
-            [_BASH, str(harness_path)],
+            [cast(str, _BASH), str(harness_path)],
             capture_output=True, text=True, timeout=30,
         )
         assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
@@ -258,7 +261,117 @@ _bootstrap_python {exclusion}
         )
 
 
-def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("selection", ["prepared", "missing", "relative", "unsupported", "excluded"])
+def test_prepared_bootstrap_python_never_falls_back(tmp_path: Path, selection: str) -> None:
+    from agent_procutil import no_window_kwargs
+
+    runtime = tmp_path / "runtime"
+    linked = runtime / "bin"
+    linked.mkdir(parents=True)
+    unexpected = tmp_path / "fallback-used"
+    fallback = '#!/bin/sh\nprintf used > "{}"\nexit 0\n'.format(_bash_path(unexpected))
+    for name in ("python", "python3"):
+        path = linked / name
+        path.write_text(fallback, encoding="utf-8")
+        path.chmod(0o700)
+    selected = _bash_path(Path(sys.executable))
+    if selection == "missing":
+        selected = _bash_path(tmp_path / "missing-python")
+    elif selection == "relative":
+        selected = "python3"
+    elif selection == "unsupported":
+        path = tmp_path / "unsupported-python"
+        path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        path.chmod(0o700)
+        selected = _bash_path(path)
+    elif selection == "excluded":
+        selected = _bash_path(linked / "python")
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    harness = f"""
+set -uo pipefail
+LINK_DIR="{_bash_path(runtime)}"
+VENV_DIR="{_bash_path(runtime)}"
+INSTALL_DIR="{_bash_path(runtime)}"
+PATH="{_bash_path(linked)}:$PATH"
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="{selected}"
+{_function_body(text, "_bootstrap_python")}
+}}
+_bootstrap_python exclude-runtime-root
+"""
+    script = tmp_path / "prepared-python.sh"
+    script.write_text(harness, encoding="utf-8")
+    result = subprocess.run(
+        [cast(str, _BASH), str(script)], capture_output=True, text=True, timeout=15,
+        **no_window_kwargs(),
+    )
+    if selection == "prepared":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == _bash_path(Path(sys.executable))
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+    assert not unexpected.exists()
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("selection", ["runtime-root", "trampoline", "symlink"])
+def test_prepared_bootstrap_excludes_resolved_interpreter(
+    tmp_path: Path, selection: str,
+) -> None:
+    import shlex
+
+    from agent_procutil import no_window_kwargs
+
+    real = Path(sys.executable)
+    selected = real
+    if selection == "trampoline":
+        selected = tmp_path / "outside-runtime"
+        selected.write_text(
+            "#!/bin/sh\nexec " + shlex.quote(_bash_path(real)) + ' "$@"\n',
+            encoding="utf-8",
+        )
+        selected.chmod(0o700)
+    elif selection == "symlink":
+        selected = tmp_path / real.name
+        try:
+            selected.symlink_to(real)
+        except OSError as error:
+            pytest.skip(f"executable symlink is unavailable: {error}")
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    script = tmp_path / "resolved-python.sh"
+    script.write_text(
+        f"""
+set -uo pipefail
+LINK_DIR={shlex.quote(_bash_path(tmp_path / "absent"))}
+VENV_DIR="$LINK_DIR"
+INSTALL_DIR={shlex.quote(_bash_path(real.parent))}
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON={shlex.quote(_bash_path(selected))}
+{_function_body(text, "_bootstrap_python")}
+}}
+control="$(_bootstrap_python)" || exit 77
+[[ -n "$control" ]] || exit 78
+if _bootstrap_python exclude-runtime-root; then exit 90; fi
+printf '%s\\n' refused
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [cast(str, _BASH), str(script)], capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
+    )
+    if selection == "symlink" and result.returncode == 77:
+        pytest.skip("this host cannot execute the real interpreter through an executable symlink")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "refused"
+
+
+def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot() -> None:
     """`deploy_venv` must capture `_versioned_slot_clean`'s result, retry
     briefly on failure, and refuse to call `uv venv` at all when the slot is
     still dirty after retries -- never silently build into a possibly-live,
@@ -282,7 +395,7 @@ def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
     assert "return 1" in fail_branch
 
 
-def test_deploy_venv_and_package_survives_set_e_on_the_already_complete_signal():
+def test_deploy_venv_and_package_survives_set_e_on_the_already_complete_signal() -> None:
     """`deploy_venv` returning 2 (already complete, no-op) is a NONZERO
     exit from a bare command -- under this file's own `set -euo pipefail`,
     a bare `deploy_venv` statement followed by a separate `local rc=$?`
@@ -303,7 +416,7 @@ def test_deploy_venv_and_package_survives_set_e_on_the_already_complete_signal()
     )
 
 
-def test_versioned_activate_releases_the_lease_even_on_set_e(): 
+def test_versioned_activate_releases_the_lease_even_on_set_e() -> None:
     """The SAME `set -e` hazard applies to `_versioned_activate`'s own
     wrapper: a bare `_versioned_activate_inner` statement whose health
     gate genuinely fails (a real, non-hypothetical path -- see
@@ -329,7 +442,7 @@ def test_versioned_activate_releases_the_lease_even_on_set_e():
     )
 
 
-def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
+def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean() -> None:
     """A slot-clean liveness check alone is check-then-act -- two concurrent
     installer invocations could both observe a clean slot (neither has
     started its external build yet) and then both build into it (#5439).
@@ -360,7 +473,7 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     assert "_release_versioned_slot_lease" in activate_wrapper
 
 
-def test_versioned_slot_lease_has_an_unconditional_exit_trap():
+def test_versioned_slot_lease_has_an_unconditional_exit_trap() -> None:
     """`_versioned_activate`'s release-on-every-outcome wrapper only ever
     runs if control actually reaches it -- a build/package/governance
     failure between acquiring the lease and reaching that wrapper calls
@@ -387,7 +500,7 @@ def test_versioned_slot_lease_has_an_unconditional_exit_trap():
     )
 
 
-def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
+def test_versioned_slot_lease_uses_flock_held_for_process_lifetime() -> None:
     """The lease primitive must be an OS-level `flock` held on an open fd
     (auto-released by the kernel on crash/exit -- never a PID-recorded
     marker file requiring staleness detection) on platforms that have it,
@@ -416,7 +529,7 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     assert "exec 8>&-" in release_body
 
 
-def test_versioned_slot_lease_falls_back_to_mkdir_when_neither_flock_nor_python_exist():
+def test_versioned_slot_lease_falls_back_to_mkdir_when_neither_flock_nor_python_exist() -> None:
     """A brand-new machine with neither `flock` NOR any bootstrap python
     yet (uv itself can provision a Python with no system interpreter
     present at all -- that's the whole point of `uv venv`) is NOT a case
@@ -463,7 +576,7 @@ def test_versioned_slot_lease_falls_back_to_mkdir_when_neither_flock_nor_python_
     )
 
 
-def test_versioned_slot_lease_shares_one_gate_regardless_of_flock_or_python_visibility():
+def test_versioned_slot_lease_shares_one_gate_regardless_of_flock_or_python_visibility() -> None:
     """Two concurrent processes can have DIFFERENT flock/python
     availability -- e.g. this plugin's own full launcher's richer PATH vs.
     its first-use binstub's restricted one -- so picking a lock primitive
@@ -517,7 +630,7 @@ def test_versioned_slot_lease_shares_one_gate_regardless_of_flock_or_python_visi
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
-def test_versioned_slot_lease_mkdir_fallback_behavioral(tmp_path: Path):
+def test_versioned_slot_lease_mkdir_fallback_behavioral(tmp_path: Path) -> None:
     """Behavioral (not just textual) regression guard: a concurrent second
     acquire must be refused while the first holds the mkdir-based lock, a
     later acquire must succeed once released, a lock abandoned by a dead
@@ -624,7 +737,7 @@ printf '%s' "$dead_reclaimer_pid" > "${{lock_file}}.reclaiming/pid"
         harness_path.write_text(harness, encoding="utf-8")
         lock_file = str(Path(td) / "lease.lock")
         r = subprocess.run(
-            [_BASH, str(harness_path), lock_file],
+            [cast(str, _BASH), str(harness_path), lock_file],
             capture_output=True, text=True, timeout=60,
         )
         assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
@@ -635,7 +748,7 @@ printf '%s' "$dead_reclaimer_pid" > "${{lock_file}}.reclaiming/pid"
         ], events
 
 
-def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure():
+def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure() -> None:
     """Hardcoding "another process is building this slot" for EVERY
     acquisition failure would hide a genuinely persistent lease-machinery
     failure (lease file/FIFOs couldn't be created, the no-flock helper
@@ -669,7 +782,7 @@ def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure
     assert "AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC" in deploy_body
 
 
-def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the_helper_never_starts():
+def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the_helper_never_starts() -> None:
     """The `-t 10` timeout on the status read must cover the ENTIRE wait,
     including the FIFO's own open -- not just the `read` builtin after it.
     A plain `read -t 10 line <"$out_fifo"` performs a blocking read-ONLY
@@ -704,7 +817,7 @@ def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the
     assert 'read_timeout="${_VERSIONED_SLOT_LEASE_PY_READ_TIMEOUT:-10}"' in fallback_body
 
 
-def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
+def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock() -> None:
     """A hand-rolled dotlock protocol (create-if-absent, detect-and-reclaim
     stale owners, ...) is an unbounded chain of narrowing TOCTOU windows --
     every userspace "is it safe to reclaim?" check is itself a second
@@ -767,7 +880,7 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     reason="bash or a POSIX (fcntl-capable) python is unavailable -- this "
     "fallback is production-reachable only on a genuine POSIX host",
 )
-def test_versioned_slot_lease_python_fallback_enforces_real_cross_process_exclusion():
+def test_versioned_slot_lease_python_fallback_enforces_real_cross_process_exclusion() -> None:
     """Behavioral (not just textual) regression guard: a second, genuinely
     independent attempt must be refused while the first resident helper
     holds the real OS-level flock, and a later attempt must succeed once
@@ -834,7 +947,7 @@ sleep 0.5
         out_file.write_text("")
 
         r = subprocess.run(
-            [_BASH, str(harness_path), lock_file, str(out_file)],
+            [cast(str, _BASH), str(harness_path), lock_file, str(out_file)],
             capture_output=True, text=True, timeout=30,
         )
         assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"

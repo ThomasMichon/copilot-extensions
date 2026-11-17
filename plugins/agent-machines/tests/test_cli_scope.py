@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 
 from agent_machines import __main__ as cli
+from agent_machines import cli_fleet_update
 from agent_machines.manifest import ManifestError, RequirementPackage
 
 
-def _args(*, repo=None, all_projects=False):
+def _args(*, repo: str | None = None, all_projects: bool = False) -> argparse.Namespace:
     return argparse.Namespace(repo=repo, all_projects=all_projects)
 
 
-def test_reconcile_defaults_to_cwd_repo(monkeypatch, tmp_path):
+def test_reconcile_defaults_to_cwd_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(
         cli._layout,
@@ -43,8 +47,8 @@ def test_reconcile_defaults_to_cwd_repo(monkeypatch, tmp_path):
 
 
 def test_reconcile_defaults_to_adopted_project_plus_supplement(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     current = tmp_path / "current"
     supplement = tmp_path / "supplement"
     current.mkdir()
@@ -70,7 +74,9 @@ def test_reconcile_defaults_to_adopted_project_plus_supplement(
         ],
     )
 
-    def packages_in_repo(path, name, machine, **kwargs):
+    def packages_in_repo(
+        path: Path, name: str, machine: str, **kwargs: Any,
+    ) -> list[RequirementPackage]:
         calls.append((path, name, kwargs["source_anchor"]))
         return [current_package if name == "current" else supplemental_package]
 
@@ -92,8 +98,8 @@ def test_reconcile_defaults_to_adopted_project_plus_supplement(
 
 
 def test_reconcile_unavailable_supplement_names_exact_repo_escape(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     current = tmp_path / "current"
     current.mkdir()
     missing = tmp_path / "missing"
@@ -119,7 +125,7 @@ def test_reconcile_unavailable_supplement_names_exact_repo_escape(
         cli._collect_reconcile_packages(_args(), "box")
 
 
-def test_reconcile_all_projects_is_explicit(monkeypatch):
+def test_reconcile_all_projects_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
     package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(
         cli,
@@ -136,7 +142,7 @@ def test_reconcile_all_projects_is_explicit(monkeypatch):
     assert scope == "all-projects"
 
 
-def test_reconcile_accepts_registered_repo(monkeypatch, tmp_path):
+def test_reconcile_accepts_registered_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(
         cli._discover,
@@ -163,7 +169,7 @@ def test_reconcile_accepts_registered_repo(monkeypatch, tmp_path):
     assert scope == "repo:canonical"
 
 
-def test_reconcile_accepts_explicit_repo_path(monkeypatch, tmp_path):
+def test_reconcile_accepts_explicit_repo_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(cli._discover, "resolve_registered_repo", lambda name: None)
     monkeypatch.setattr(
@@ -186,14 +192,16 @@ def test_reconcile_accepts_explicit_repo_path(monkeypatch, tmp_path):
     assert scope == "repo:canonical"
 
 
-def test_reconcile_unknown_repo_fails(monkeypatch):
+def test_reconcile_unknown_repo_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli._discover, "resolve_registered_repo", lambda name: None)
 
     with pytest.raises(ManifestError, match="neither a directory nor a registered repo"):
         cli._collect_reconcile_packages(_args(repo="missing"), "box")
 
 
-def test_reconcile_explicit_non_git_directory_is_specific(monkeypatch, tmp_path):
+def test_reconcile_explicit_non_git_directory_is_specific(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(cli._discover, "resolve_registered_repo", lambda name: None)
     monkeypatch.setattr(
         cli._layout,
@@ -209,14 +217,14 @@ def test_reconcile_explicit_non_git_directory_is_specific(monkeypatch, tmp_path)
         cli._collect_reconcile_packages(_args(repo=str(tmp_path)), "box")
 
 
-def test_scope_flags_are_mutually_exclusive():
+def test_scope_flags_are_mutually_exclusive() -> None:
     with pytest.raises(SystemExit):
         cli.main(["plan", "--repo", "one", "--all-projects"])
 
 
 def test_explicit_repo_identity_does_not_validate_unrelated_projects(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         cli._discover,
         "candidate_repos",
@@ -234,7 +242,100 @@ def test_explicit_repo_identity_does_not_validate_unrelated_projects(
     assert identity.canonical == "fixture"
 
 
-def test_validate_json_preserves_findings_array(monkeypatch, capsys):
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+@pytest.mark.parametrize("explicit_path", [False, True])
+def test_machine_identity_uses_registered_anchor_not_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    entrypoint: ModuleType, explicit_path: bool,
+) -> None:
+    anchor = tmp_path / "anchor"
+    worktree = tmp_path / "worktree"
+    for root, platform_name in ((anchor, "linux"), (worktree, "windows")):
+        topology = root / ".agent-worktrees" / "machines.yaml"
+        topology.parent.mkdir(parents=True)
+        topology.write_text(
+            f"machines:\n  fixture:\n    execution_platform: {platform_name}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(
+        entrypoint._discover,
+        "candidate_repos",
+        lambda: [entrypoint._discover.RepoCandidate(name="current", path=anchor)],
+    )
+    monkeypatch.setattr(
+        entrypoint._discover, "resolve_registered_repo", lambda _selector: None
+    )
+    monkeypatch.setattr(
+        entrypoint._layout,
+        "resolve_cwd_repo",
+        lambda path=None: ("current", worktree, anchor),
+    )
+    args = argparse.Namespace(
+        repo=str(worktree) if explicit_path else None, machine="fixture"
+    )
+
+    identity = entrypoint._resolve_machine_identity(args)
+
+    assert identity.canonical == "fixture"
+    assert identity.execution_platform == "linux"
+    assert identity.topology_path == anchor / ".agent-worktrees" / "machines.yaml"
+
+
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+def test_machine_identity_preserves_standalone_topology(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entrypoint: ModuleType,
+) -> None:
+    topology = tmp_path / "machines.yaml"
+    topology.write_text(
+        "machines:\n  fixture:\n    execution_platform: linux\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(entrypoint._discover, "candidate_repos", lambda: [])
+    monkeypatch.setattr(
+        entrypoint._layout,
+        "resolve_cwd_repo",
+        lambda: ("standalone", tmp_path, tmp_path),
+    )
+
+    identity = entrypoint._resolve_machine_identity(
+        argparse.Namespace(repo=None, machine="fixture")
+    )
+
+    assert identity.execution_platform == "linux"
+    assert identity.topology_path == topology
+
+
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+def test_machine_identity_retains_cross_anchor_conflict_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entrypoint: ModuleType,
+) -> None:
+    anchors = [tmp_path / "first", tmp_path / "second"]
+    for root, platform_name in zip(anchors, ("linux", "windows")):
+        root.mkdir()
+        (root / "machines.yaml").write_text(
+            f"machines:\n  fixture:\n    execution_platform: {platform_name}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(
+        entrypoint._discover,
+        "candidate_repos",
+        lambda: [
+            entrypoint._discover.RepoCandidate(name=root.name, path=root)
+            for root in anchors
+        ],
+    )
+    monkeypatch.setattr(
+        entrypoint._layout,
+        "resolve_cwd_repo",
+        lambda: ("first", anchors[0], anchors[0]),
+    )
+
+    with pytest.raises(ManifestError, match="conflicting topology declarations"):
+        entrypoint._resolve_machine_identity(argparse.Namespace(repo=None, machine="fixture"))
+
+
+def test_validate_json_preserves_findings_array(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(
         cli,
         "_collect_reconcile_packages",
@@ -254,7 +355,9 @@ def test_validate_json_preserves_findings_array(monkeypatch, capsys):
     assert payload == []
 
 
-def test_validate_human_reports_scope_with_findings(monkeypatch, capsys):
+def test_validate_human_reports_scope_with_findings(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     finding = type(
         "Finding",
         (),

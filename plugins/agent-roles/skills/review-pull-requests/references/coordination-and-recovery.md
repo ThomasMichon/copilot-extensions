@@ -38,6 +38,23 @@ ledger service, receipt issuer, scheduler or message database. A state-write
 failure leaves the next effect unready; it does not license dropping history.
 The synthetic asset illustrates these distinctions, not runtime wire fields.
 
+### Accept results without inventing completed reviews
+
+Assignment, metadata acquisition, source acquisition, completed judgment,
+applied verdict, authoritative readback and parent acceptance are separate
+milestones. An existing approval or a no-work response is an observation, not
+a newly completed review. Retain the source/range and finding coverage plus
+uncertainty for each result. A bounded delta or closure of the reviewer's own
+thread does not earn credit for a fresh full review; compatible retained
+coverage remains explicitly retained, not newly performed.
+
+Integrate a returned receipt idempotently through the existing canonical state
+owner. Receipt integration and its pending-result marker must refer to the same
+accepted state revision; if either write is interrupted, reconcile that revision
+before crediting completion or clearing pending work. A repeated delivery must
+not count twice. This is a persistence guideline, not a second database or a
+claim that the selected adapter implements transactions.
+
 ## One PR, one retained reviewer
 
 Use the charter's positive concurrency target as a work-conserving baseline
@@ -198,3 +215,14 @@ Verify actual merged/closed state and settle only owned resources/effects.
 Finite drain requires its complete final census and parent gate; continuous
 empty census remains attending. A claimed task, merged slice or finalized
 workspace alone does not complete the original objective.
+
+For an explicit stop or sunset, stop only this role's owned watches, schedules
+and nudges through their existing owners; do not stop another scope's flows.
+Reconcile outstanding writes, unknown effects, claims, resources and useful WIP
+with their actual owners. Transfer unresolved work to a named tracked objective
+or an explicitly accepting custodian, retaining scope, evidence, remaining gates
+and next action; merely naming a proposed recipient is not accepted custody.
+Report any unsettled item and its owner rather than declaring clean settlement.
+Closing the role does not delete records/resources, abandon an open PR, cancel
+another owner's work or waive the parent completion gate. These are operator
+procedures, not a promise of runtime-enforced cleanup.

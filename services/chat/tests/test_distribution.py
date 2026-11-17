@@ -6,13 +6,15 @@ import re
 import subprocess
 import tarfile
 import zipfile
+from types import SimpleNamespace
+from typing import IO, cast
 
 import pytest
 
 
 def test_source_removed_installed_transport_enforces_raw_budgets_and_strict_text(
-    tmp_path, installed_chat,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace,
+) -> None:
     probe = r"""
 import json,sys
 from agent_chat_service.client import ClientError
@@ -62,7 +64,9 @@ print(json.dumps({"installed_transport":checks}),flush=True)
 
 @pytest.mark.parametrize("installed_chat", [None, "0.1.20-dev1"], indirect=True,
                          ids=["source-metadata", "promoted-metadata"])
-def test_source_independent_wheel(tmp_path, installed_chat, request):
+def test_source_independent_wheel(
+    tmp_path: Path, installed_chat: SimpleNamespace, request: pytest.FixtureRequest,
+) -> None:
     run = installed_chat.run
     probe = """
 import importlib.metadata
@@ -110,9 +114,9 @@ finally:
     expected_version = request.node.callspec.params["installed_chat"]
     if expected_version is None:
         manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
-        expected_version = re.search(
+        expected_version = cast(re.Match[str], re.search(
             r'(?m)^version = "([^"]+)"$', manifest.read_text(encoding="utf-8"),
-        )[1]
+        ))[1]
     assert result["version"] == expected_version
     assert result["installed"] and result["messages"] == 1 and result["cursor"] == 0
     console = installed_chat.console
@@ -132,7 +136,7 @@ finally:
         "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
         "shell": "direct", "availability": "ready",
     }
-    assert len(catalog["resource_sha256s"]) == 28
+    assert len(catalog["resource_sha256s"]) == 29
     assert "hosting.py" in catalog["resource_sha256s"]
     assert "workspace.py" in catalog["resource_sha256s"]
     assert "collaboration.py" in catalog["resource_sha256s"]
@@ -164,8 +168,8 @@ print(json.dumps({
 
 
 def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
-    tmp_path, installed_chat, monkeypatch,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import hashlib
 
     root = Path(__file__).resolve().parents[3]
@@ -177,6 +181,7 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
             name: runtime / name for name in (
                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                 "versioned_runtime_publication.py", "versioned_runtime_source.py",
+                "versioned_runtime_cache.py",
             )
         },
         **{
@@ -210,20 +215,21 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
             member, = (
                 item for item in members if item.name.endswith("/src/agent_chat_service/" + name)
             )
-            with archive.extractfile(member) as stream:
+            with cast(IO[bytes], archive.extractfile(member)) as stream:
                 data = stream.read()
             assert data == source.read_bytes()
             assert catalog["resource_sha256s"][name] == hashlib.sha256(data).hexdigest()
         helper, = (item for item in members if item.name.endswith("/_standalone_runtime_build.py"))
-        with archive.extractfile(helper) as stream:
+        with cast(IO[bytes], archive.extractfile(helper)) as stream:
             assert stream.read() == (runtime / "standalone_build.py").read_bytes()
     assert not catalog["release_selection_verified"]
 
 
 @pytest.mark.parametrize("shadow_source", ["cwd", "pythonpath"])
 def test_installed_catalog_worker_preserves_isolation(
-    tmp_path, rpc_endpoint, installed_chat, shadow_source,
-):
+    tmp_path: Path, rpc_endpoint: SimpleNamespace, installed_chat: SimpleNamespace,
+    shadow_source: str,
+) -> None:
     shadow = tmp_path / "shadow"
     package = shadow / "agent_chat_service"
     package.mkdir(parents=True)
@@ -250,7 +256,7 @@ def test_installed_catalog_worker_preserves_isolation(
         [*catalog["commands"][0]["argv"], "--config", str(config), "join", "room"],
         cwd=shadow if shadow_source == "cwd" else tmp_path,
         env=environment, capture_output=True, text=True, encoding="utf-8", timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert not marker.exists(), "HTTP worker imported the shadow package"
     assert result.returncode == 0, result.stdout + result.stderr

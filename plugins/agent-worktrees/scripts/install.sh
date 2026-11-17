@@ -40,6 +40,17 @@ export AGENT_WORKTREES_INSTALL_DEADLINE_SEC
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+_bootstrap_python_candidates() {
+    if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
+        case "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" in
+            /*) printf '%s\n' "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" ;;
+            *) printf '%s\n' "ERROR: Bootstrap Python must be an absolute executable." >&2; return 1 ;;
+        esac
+    else
+        type -ap python3 python
+    fi
+}
+
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
 CONTEXTUAL_INSTALL=false
@@ -190,7 +201,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 fi
                 __aw_admission_python="$(cd "$(dirname "$__aw_candidate_path")" && pwd -P)/$(basename "$__aw_candidate_path")"
                 break
-            done < <(type -ap python3 python)
+            done < <(_bootstrap_python_candidates)
             [[ -n "$__aw_admission_python" ]] || {
                 printf '%s\n' "ERROR: Attributable runtime admission requires bootstrap Python." >&2
                 exit 1
@@ -1225,9 +1236,8 @@ header()  { echo ""; echo "═══ $* $(printf '═%.0s' $(seq 1 $((56 - ${#1}
 
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
+    # venv exists (e.g. the pre-build toss). An explicit prepared interpreter
+    # excludes every fallback; legacy callers prefer the current link, then PATH.
     #
     # Pass "exclude-venv-dir" when the caller is about to INSPECT $VENV_DIR
     # itself (the slot-clean liveness census, and the lease's own resident
@@ -1266,6 +1276,9 @@ _bootstrap_python() {
             [[ -n "$link_real" && -n "$venv_real" && "$link_real" == "$venv_real" ]] && use_link_python=0
         fi
     fi
+    if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
+        use_link_python=0
+    fi
     if [[ "$use_link_python" == 1 ]] && [[ -x "$LINK_DIR/bin/python" ]]; then
         echo "$LINK_DIR/bin/python"
         return 0
@@ -1281,10 +1294,25 @@ _bootstrap_python() {
             # (one level under the directory venv_real points at), not AT
             # venv_real itself -- compare with a prefix match, not equality.
             __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
-            [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
+            [[ -n "$__resolved_bin_real" &&
+               ( "$__resolved_bin_real" == "$venv_real" || "$__resolved_bin_real" == "$venv_real"/* ) ]] && continue
         fi
+        local __probe_root="$venv_real" __probe_candidate="$__resolved"
+        case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                [[ -z "$__probe_root" ]] || __probe_root="$(cygpath -m "$__probe_root")" || continue
+                __probe_candidate="$(cygpath -m "$__probe_candidate")" || continue ;;
+        esac
         __resolved="$("$__resolved" -I -B -X utf8 -c \
-            'import sys; assert sys.version_info >= (3, 11); print(sys.executable)' 2>/dev/null)" \
+            'import sys
+from pathlib import Path
+assert sys.version_info >= (3, 11)
+if sys.argv[1]:
+    boundary = Path(sys.argv[1]).resolve()
+    for value in (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+                  getattr(sys, "_base_executable", sys.executable)):
+        assert not Path(value).resolve().is_relative_to(boundary)
+print(sys.executable)' "$__probe_root" "$__probe_candidate" 2>/dev/null)" \
             || continue
         case "${OSTYPE:-}" in
             msys*|cygwin*)
@@ -1293,7 +1321,16 @@ _bootstrap_python() {
         esac
         echo "$__resolved"
         return 0
-    done < <(type -ap python3 python)
+    done < <(
+        if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
+            case "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" in
+                /*) printf '%s\n' "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" ;;
+                *) printf '%s\n' "ERROR: Bootstrap Python must be an absolute executable." >&2; return 1 ;;
+            esac
+        else
+            type -ap python3 python
+        fi
+    )
     return 1
 }
 

@@ -5,13 +5,18 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
 from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch
+from .invocation import CACHE_TARGET_FIELDS
 
-FIELDS = {"vault", "group", "enabled"}
+if TYPE_CHECKING:
+    from configuration_layers import Composition
+
+FIELDS = {"vault", "group", "enabled", *CACHE_TARGET_FIELDS}
 
 
 def service_configuration_root(cwd: str | None = None) -> str:
@@ -41,7 +46,7 @@ def service_configuration_snapshot(cwd: str | None = None) -> dict[str, str]:
     return {"root": root, "config": path}
 
 
-def _legacy_report(root: Path) -> dict | None:
+def _legacy_report(root: Path) -> dict[str, Any] | None:
     from .config import home_dir
 
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
@@ -89,7 +94,9 @@ def _legacy_report(root: Path) -> dict | None:
     )
 
 
-def _checked_report(report, own):
+def _checked_report(
+    report: dict[str, Any] | None, own: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if report is not None and own is not None and (
         context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
     ):
@@ -97,7 +104,7 @@ def _checked_report(report, own):
     return report
 
 
-def owner_report(root: Path) -> dict | None:
+def owner_report(root: Path) -> dict[str, Any] | None:
     from .config import home_dir
 
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
@@ -139,30 +146,43 @@ def owner_report(root: Path) -> dict | None:
     ), own)
 
 
-def _ordinary(raw: dict) -> dict:
+def _ordinary(raw: dict[str, Any], directory: Path | None = None) -> dict[str, Any]:
     from .config import _validate_config_data
 
     values = {key: value for key, value in raw.items() if key in FIELDS}
     _validate_config_data(values, "ordinary vault selection")
+    if directory is not None and any(values.get(key) for key in CACHE_TARGET_FIELDS):
+        from .cache_targets import preferences
+
+        values.update(preferences(values, directory))
     return values
 
 
-def compose_preferences(cwd, repo_data: dict, global_data: dict, ext_data: dict) -> dict | None:
-    from .config import configuration_root
+def compose_preferences(
+    cwd: str | None, repo_data: dict[str, Any],
+    global_data: dict[str, Any], ext_data: dict[str, Any],
+    *, repository_directory: Path | None = None,
+) -> Composition | None:
+    from .config import _global_config_path, configuration_root
 
-    report = owner_report(Path(configuration_root(cwd)).resolve())
+    root = Path(configuration_root(cwd)).resolve()
+    report = owner_report(root)
     if report is None:
         return None
     context = context_from_owner(report)
     layers = [{
         "id": "vault-defaults", "tier": "defaults", "origin": "defaults",
-        "values": {"vault": None, "group": None, "enabled": False},
+        "values": {
+            "vault": None, "group": None, "enabled": False,
+            "cache_entries": [], "cache_manifests": [],
+        },
     }, {
         "id": "vault-native-extension", "tier": "repository", "origin": "base",
-        "repository_id": context["repository_id"], "values": _ordinary(ext_data),
+        "repository_id": context["repository_id"], "values": _ordinary(ext_data, root),
     }, {
         "id": "vault-selected-repository", "tier": "repository", "origin": "base",
-        "repository_id": context["repository_id"], "values": _ordinary(repo_data),
+        "repository_id": context["repository_id"],
+        "values": _ordinary(repo_data, repository_directory or root),
     }]
     sources = [(context["base_root"], "repository", "base")]
     if context["binding"] == "bound":
@@ -181,13 +201,13 @@ def compose_preferences(cwd, repo_data: dict, global_data: dict, ext_data: dict)
         layer = {
             "id": f"vault-{origin}", "tier": tier, "origin": origin,
             "repository_id": context["repository_id"],
-            "values": _ordinary(raw), "source": document["source"],
+            "values": _ordinary(raw, Path(root)), "source": document["source"],
         }
         if tier == "repository_machine":
             layer["execution_machine"] = context["execution_machine"]
             layer["installation_cell"] = context["installation_cell"]
         layers.append(layer)
-    machine = _ordinary(global_data)
+    machine = _ordinary(global_data, _global_config_path().parent)
     if "default_vault" in global_data:
         machine["vault"] = global_data["default_vault"]
     if "group" not in machine and "vault_group" in global_data:
@@ -208,11 +228,14 @@ def runtime_enabled(cwd: str | None = None) -> bool:
     from .config import _discover_repo_config, _validate_config_data, configuration_root, load_global_config
 
     cwd = configuration_root(cwd)
-    _, repository = _discover_repo_config(cwd, strict=True)
+    path, repository = _discover_repo_config(cwd, strict=True)
     machine = load_global_config(strict=True)
     _validate_config_data(repository, "repository vault configuration")
     _validate_config_data(machine, "global vault configuration")
-    result = compose_preferences(cwd, repository, machine, {})
+    result = compose_preferences(
+        cwd, repository, machine, {},
+        repository_directory=path.parent if path is not None else None,
+    )
     if result is not None:
-        return result["values"]["enabled"]
-    return machine.get("enabled", repository.get("enabled", False))
+        return cast(bool, result["values"]["enabled"])
+    return cast(bool, machine.get("enabled", repository.get("enabled", False)))

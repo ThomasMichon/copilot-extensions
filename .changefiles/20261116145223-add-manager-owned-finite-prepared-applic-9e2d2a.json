@@ -1,0 +1,9 @@
+{
+  "comment": "Add Manager-owned finite prepared-application orchestration",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

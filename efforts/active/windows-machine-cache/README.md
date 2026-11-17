@@ -1,0 +1,132 @@
+# Windows Machine-Protected Cache
+
+## Goal
+
+Provide an additive, explicitly enabled LocalMachine-DPAPI credential-cache
+copy that remains usable by its owning account in noninteractive Windows
+logons when user-bound DPAPI is unavailable.
+
+- **Slug:** `windows-machine-cache`
+- **Repo:** copilot-extensions
+- **Created:** 2026-11-16
+- **Status:** Draft
+- **Vision:** [independent cache](../../../visions/vault/README.md#independent-cache-and-standard-auth-providers)
+- **Umbrella issue:** [#13009](https://github.com/ThomasMichon/copilot-extensions/issues/13009)
+
+## Guiding Intent
+
+Close the independent-cache availability gap without requiring a live unlocked
+service, changing the existing user-protected cache, or concealing the weaker
+machine-scope threat model. This is not a hardware-backed key solution.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Cache driver | Plan, source, tests and reviewed delivery | Owning source worktree |
+
+## Coordination
+
+Independent proposal and implementation PRs. The cache driver owns this bounded
+slice; the broader Vault service, provider and installation owners remain
+unchanged. Deployment and credential migration require adopter authority.
+
+## Context
+
+Windows NETWORK logons can lack the interactive user's DPAPI master key.
+[#12216](https://github.com/ThomasMichon/copilot-extensions/issues/12216)
+addresses selected-service fallback, not independent disk-cache availability.
+The portable cache owner is `plugins/agent-vault`; downstream compatibility
+front doors should not add another cache implementation.
+
+## Request
+
+Public-safe capture of the requested behavior:
+
+1. Implement a redundant LocalMachine-DPAPI copy alongside the existing
+   user-protected cache. Accept administrator/SYSTEM decryptability explicitly.
+2. Populate it through unlock warming and explicit cache population. Prefer
+   the user cache on reads, then the machine copy when user decryption fails.
+3. Give every new machine-cache directory, ciphertext and temporary file its
+   owner-and-SYSTEM-only DACL at creation. Keep credentials out of argv and env.
+4. Add tests and qualify synthetic plaintext under a noninteractive Windows
+   logon. Deliver through reviewed PRs; TPM-backed CNG is optional future work.
+
+## Scope Approvals
+
+This public plan authorizes no live credential mutation, service restart,
+unlock, elevation or deployment. Adopters retain those effect decisions.
+Source qualification uses synthetic plaintext in an owned temporary directory.
+
+## Proposal
+
+Machine scope lets any local user who obtains the ciphertext decrypt it.
+The protected owner/SYSTEM DACL supplies the other-user boundary; administrators
+can take ownership, and same-user code remains trusted. Optional entropy stored
+with the application is not another secret boundary. Reboot/relock survival
+must be distinguished from actual observed native qualification.
+
+_(Agent-recommended implementation details:)_
+
+- Explicit persistent opt-in in the selected cache store, default off; no
+  identity-bearing environment variable and no automatic legacy conversion.
+- Reuse the existing Windows security helper for restrictive creation and
+  security validation, including private temporary files and atomic publication.
+- Bind the encrypted redundant store to the exact primary ciphertext digest.
+  Publish the redundant candidate before the primary atomic replacement:
+  interrupted writes or older writers then cause a mismatch/refusal, never
+  resurrection of an older credential. Missing/unreadable primary bytes,
+  unsafe ACLs, schema or selection errors do not authorize fallback.
+- All successful cache mutations, including rotation journals, invalidation and
+  service-cache records, share the redundant writer. Decryption-unavailable
+  fallback is read-only and never rewrites the primary.
+- Provide explicit additive preparation and a non-secret verification command
+  that exercises machine-copy reads without renaming/deleting the primary,
+  fetching new credentials or requesting a ceremony.
+
+### Alternatives
+
+| Primitive | Assessment |
+|-----------|------------|
+| LocalMachine DPAPI + DACL | Chosen fast path; machine-bound, not user-bound cryptography; administrator/SYSTEM access accepted |
+| TPM-backed CNG | Optional future hardening; non-exportability and NETWORK-token access need native qualification; TPM reset requires recovery |
+| Software CNG | Export policy and DACL help, but independence from unavailable user protection is unproven |
+| SSH identity/agent | Signing is not generic decryption/KEK derivation; would add an availability and protocol dependency |
+| Daemon-sealed KEK | Memory survives relock but not process exit/reboot; still needs an independent unattended protector |
+| Credential Manager | Not a dependable NETWORK-logon replacement; native credential sets and underlying protection remain logon-dependent |
+
+Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),
+[creation security](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
+[NETWORK credential sets](https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credreadw).
+
+## Plan
+
+### Phase 1 - Review the bounded proposal
+- [ ] Merge this proposal before implementing the portable behavior.
+
+### Phase 2 - Implement and qualify
+- [ ] Add explicit opt-in, secure redundant writes, user-first fallback and safe verification.
+- [ ] Preserve selection/recovery, rotation, invalidation and old-reader behavior.
+- [ ] Land source, documentation and changefile through normal review and CI.
+
+### Phase 3 - Release and acceptance
+- [ ] Confirm the implementation reaches the normal release branch.
+- [ ] Record native noninteractive synthetic proof and remaining adopter-owned rollout gates.
+
+## Validation Plan
+
+- [ ] Focused tests cover default-off, both primary formats, user-first ordering,
+  decryption-unavailable fallback, stale/corrupt/mismatched copies and ACL refusal.
+- [ ] Mutation tests cover interrupted publication, older writers, pending
+  replacement, invalidation and cache clearing without stale fallback.
+- [ ] Native Windows proof covers machine-scope roundtrip, creation-time DACL,
+  atomic replacement and the actual noninteractive token/session context.
+- [ ] Existing targeted cache/credential-read tests, lint and install contract pass.
+- [ ] Public artifacts remain generic; merged, released and deployed remain distinct.
+
+## Journal
+
+### 2026-11-16 - Proposal
+
+Claimed #13009 and resolved the portable cache owner. This proposal is pending
+review; no implementation or live cache change is claimed.

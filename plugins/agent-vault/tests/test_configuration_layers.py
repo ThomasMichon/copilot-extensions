@@ -205,6 +205,33 @@ def test_native_repository_database_path_retains_declaring_owner(tmp_path: Path,
     assert result.sources["kpdb"] == "repo"
 
 
+def test_cache_policy_uses_ordinary_precedence_and_each_declaring_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import cache_targets, extensions
+
+    base, knowledge, local, global_path, _report = setup(tmp_path, monkeypatch)
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    write(base, {"cache_entries": ["base"], "cache_manifests": ["base.conf"]})
+    write(knowledge, {"cache_entries": ["knowledge"], "cache_manifests": ["knowledge.conf"]})
+    policy = cache_targets.configured(str(base))
+    assert policy == {
+        "cache_entries": ["knowledge"], "cache_manifests": [str(knowledge / "knowledge.conf")],
+    }
+    data = json.loads(global_path.read_text())
+    data.update(cache_entries=["machine"], cache_manifests=["machine.conf"])
+    global_path.write_text(json.dumps(data))
+    assert cache_targets.configured(str(base)) == {
+        "cache_entries": ["machine"], "cache_manifests": [str(global_path.parent / "machine.conf")],
+    }
+    write(local, {"cache_entries": [], "cache_manifests": ["local.conf"]})
+    assert cache_targets.configured(str(base)) == {
+        "cache_entries": [], "cache_manifests": [str(local / "local.conf")],
+    }
+
+
 def test_native_project_scope_preserves_database_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_vault.invocation import use_configuration_root
 
@@ -323,6 +350,8 @@ def test_native_invocation_contract_is_read_only(monkeypatch: pytest.MonkeyPatch
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
+            "repository-cache-targets-v1",
+            *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
         ],
     }
 

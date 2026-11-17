@@ -8,14 +8,15 @@ import os
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
-from .cache_manifests import read_cache_manifest as _read_cache_manifest
-from .cache_recovery import status_command as cmd_cache_status
+from .cache_manifests import read_cache_manifest
+from .cache_targets import command_entries, status_command as cmd_cache_status
 from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,
@@ -27,7 +28,10 @@ from .terminal_input import (
     _has_controlling_tty as _has_controlling_tty,
     _read_password_from_tty as _read_password_from_tty,
 )
+from .transport_binding import MutationBinding, Sender
 from .winpipe import pipe_send
+
+_read_cache_manifest = read_cache_manifest
 
 
 def _detect_wsl() -> bool:
@@ -242,14 +246,27 @@ def send_command(
     *,
     strict_endpoint: bool = False,
     require_endpoint: bool = False,
+    binding: MutationBinding | None = None,
 ) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
+    if binding is not None:
+        binding.require_unselected()
+        if request.get("action") != "ping" or request.get("health_only") is not True:
+            raise ValueError("Transport binding requires a read-only health request")
     context = config.resolve_context()
     request = dict(request)
 
-    def _tag(result: dict[str, Any] | None, transport: str) -> dict[str, Any] | None:
+    def _tag(result: dict[str, Any] | None, transport: str, sender: Sender) -> dict[str, Any] | None:
         if result is not None:
             result["_transport"] = transport
+            if binding is not None:
+                binding.select(
+                    sender, single_attempt=True,
+                    defaults={
+                        key: request[key] for key in ("kpdb", "group", "vault")
+                        if key in request
+                    },
+                )
         return result
 
     from .extensions import TransportContext, get_registry
@@ -319,7 +336,12 @@ def send_command(
 
     # Extension transports registered before_builtin take precedence over the
     # local daemon (e.g. an SSH-tunnel that should reach the caller's own vault).
-    result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
+    result = (
+        get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
+        if binding is None else get_registry().try_transports(
+            request, timeout, ext_ctx, before_builtin=True, binding=binding,
+        )
+    )
     if result is not None:
         return result
 
@@ -335,32 +357,42 @@ def send_command(
 
     # Strict selection never falls back to another daemon after a failed dial.
     if discovered_pipe is not None and IS_WINDOWS:
-        result = pipe_send(discovered_pipe, request, timeout)
+        pipe_sender = partial(pipe_send, discovered_pipe)
+        result = pipe_sender(request, timeout)
         if result is not None or strict_endpoint:
-            return _tag(result, "discovered-pipe")
+            return _tag(result, "discovered-pipe", pipe_sender)
 
     # A discovered Unix socket (native, possibly non-default path) is dialed
     # ahead of the legacy fixed socket.
     if discovered_unix is not None and not IS_WINDOWS:
-        result = _send_socket(request, timeout, path=discovered_unix)
+        unix_sender = partial(_send_socket, path=discovered_unix)
+        result = unix_sender(request, timeout)
         if result is not None or strict_endpoint:
-            return _tag(result, "discovered-unix")
+            return _tag(result, "discovered-unix", unix_sender)
 
     if (
         discovered_unix is None and not IS_WINDOWS
         and context.sources.get("port") == "default"
         and not (strict_endpoint and discovered is not None)
     ):
-        result = _send_socket(request, timeout)
+        socket_sender = _send_socket
+        result = socket_sender(request, timeout)
         if result is not None:
-            return _tag(result, "unix-socket")
+            return _tag(result, "unix-socket", socket_sender)
 
-    result = _send_tcp(request, host, port, timeout)
+    tcp_connector = _send_tcp
+
+    def tcp_sender(payload: dict[str, Any], limit: float | None) -> dict[str, Any] | None:
+        return tcp_connector(payload, host, port, limit)
+
+    result = tcp_sender(request, timeout)
     if result is not None or strict_endpoint and discovered is not None:
         is_disc_tcp = discovered is not None and discovered.transport == "tcp"
-        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
+        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp", tcp_sender)
 
-    return get_registry().try_transports(request, timeout, ext_ctx)
+    if binding is None:
+        return get_registry().try_transports(request, timeout, ext_ctx)
+    return get_registry().try_transports(request, timeout, ext_ctx, binding=binding)
 
 
 # ---------------------------------------------------------------------------
@@ -1126,6 +1158,14 @@ def cmd_git_credential(args: Any) -> int:
 
 
 def cmd_import_key(args: Any) -> int:
+    if getattr(args, "create_only", False):
+        from .attachment_import_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
+        return 1
+
     import base64
 
     key_file = Path(args.key_file)
@@ -1286,38 +1326,14 @@ def cmd_cache_populate(args: Any) -> int:
     """Pre-warm the vault cache for a set of entries.
 
     Entries come from (deduped, in order): explicit ``--entry`` values, a
-    ``--manifest`` file, and every registered cache-source extension. Each entry
-    is fetched so the daemon caches it (and missing entries surface early).
+    ``--manifest`` file, declared targets, and registered cache-source extensions.
+    Each entry is fetched so the daemon caches it (and missing entries surface early).
     """
-    from .extensions import get_registry
-    from .credential_fields import canonical_field
-
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(entry: str, field: str) -> None:
-        pair = (entry, canonical_field(field or "password"))
-        if pair[0] and pair not in seen:
-            seen.add(pair)
-            pairs.append(pair)
-
-    for entry in (args.entry or []):
-        e, sep, f = entry.partition(":")
-        _add(e.strip(), (f.strip() if sep else "password"))
-
-    if args.manifest:
-        manifest = Path(args.manifest)
-        if not manifest.exists():
-            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
-            return 1
-        for e, f in _read_cache_manifest(manifest):
-            _add(e, f)
-
-    for e, f in get_registry().collect_cache_entries(args.machine):
-        _add(e, f)
-
+    pairs = command_entries(args)
+    if pairs is None:
+        return 1
     if not pairs:
-        print("No entries to cache (no --entry, --manifest, or cache-source extension).",
+        print("No entries to cache (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
@@ -1421,39 +1437,18 @@ def cmd_cache_clear(args: Any) -> int:
 def cmd_cache_verify(args: Any) -> int:
     """Check the persistent cache holds a set of entries without unlocking.
 
-    Entries come from ``--entry`` / ``--manifest`` / cache-source extensions,
+    Entries come from explicit selectors, declared targets and cache-source extensions,
     exactly like ``cache-populate``. Exits non-zero (2) if any are missing, so a
     launch-time gate can confirm an unattended box is primed while still locked.
     """
     from .cache import get_cache
-    from .credential_fields import attribute_name, canonical_field
+    from .credential_fields import attribute_name
 
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(entry: str, field: str) -> None:
-        pair = (entry, canonical_field(field or "password"))
-        if pair[0] and pair not in seen:
-            seen.add(pair)
-            pairs.append(pair)
-
-    for entry in (getattr(args, "entry", None) or []):
-        e, sep, f = entry.partition(":")
-        _add(e.strip(), (f.strip() if sep else "password"))
-    if getattr(args, "manifest", None):
-        manifest = Path(args.manifest)
-        if not manifest.exists():
-            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
-            return 1
-        for e, f in _read_cache_manifest(manifest):
-            _add(e, f)
-    from .extensions import get_registry
-
-    for e, f in get_registry().collect_cache_entries(getattr(args, "machine", None)):
-        _add(e, f)
-
+    pairs = command_entries(args)
+    if pairs is None:
+        return 1
     if not pairs:
-        print("No entries to verify (no --entry, --manifest, or cache-source extension).",
+        print("No entries to verify (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
@@ -1740,6 +1735,10 @@ def _main(argv: list[str] | None = None) -> int | None:
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("key_file", help="Path to private key file (.pub must exist alongside)")
+    p.add_argument("--create-only", action="store_true",
+                   help="Refuse an existing entry and retain partial/unknown creation without retry")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --create-only, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_import_key)
 
     p = sub.add_parser("export-key", help="Export key pair from entry")

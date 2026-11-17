@@ -7,18 +7,26 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+_CREATION_FLAGS = 0
+if sys.platform == "win32":
+    _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promote_release as pr
+from promotion_candidate import format_promotion_message
 
 _TOOLS = Path(__file__).resolve().parent
 _REQUIRED_TOOLS = (
     "accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py",
     "nested_uv_editable_ref.py",
     "standalone_consumers.py",
+    "promotion_source_archive.py", "promotion_complete_source.py", "promotion_unit_contract.py",
     "installer_engine_ref.py",
     "launch_wrapper_assets_ref.py",
     "materialize_installer_engine.py",
@@ -28,7 +36,7 @@ _REQUIRED_TOOLS = (
 
 
 @pytest.fixture(autouse=True)
-def no_ambient_git_identity(monkeypatch):
+def no_ambient_git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
 
@@ -36,7 +44,7 @@ def no_ambient_git_identity(monkeypatch):
 def _git(args: list[str], cwd: Path, check: bool = True) -> str:
     result = subprocess.run(
         ["git", *args], cwd=str(cwd), capture_output=True, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_CREATION_FLAGS,
     )
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
@@ -108,14 +116,14 @@ def repo(tmp_path: Path) -> Path:
     return root
 
 
-def test_promote_reports_no_change_when_dev_matches_main(repo: Path):
+def test_promote_reports_no_change_when_dev_matches_main(repo: Path) -> None:
     report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert report["promoted"] is False
     assert "no content change" in report["reason"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Git long-path checkout")
-def test_scratch_git_handles_long_paths_without_changing_repository_configuration(repo: Path):
+def test_scratch_git_handles_long_paths_without_changing_repository_configuration(repo: Path) -> None:
     from native_test_paths import native_test_path
 
     relative = Path("native") / ("x" * 80) / ("y" * 80) / "input.txt"
@@ -143,7 +151,7 @@ def test_scratch_git_handles_long_paths_without_changing_repository_configuratio
 
 
 def test_local_composition_uses_exact_inputs_and_main_versions(
-    repo: Path, tmp_path: Path, monkeypatch,
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import local_runtime_promotion as local
     from installer_engine_ref import PYTHON_FILES, SUPPORT_FILES
@@ -244,7 +252,7 @@ def test_local_composition_cleans_scratch_after_selection_failure(repo: Path) ->
 
 @pytest.mark.parametrize("kind", ["source", "seed", "unavailable"])
 def test_local_composition_refuses_unpinned_or_unavailable_commits(
-    repo: Path, monkeypatch, kind: str,
+    repo: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
 ) -> None:
     import local_runtime_promotion as local
 
@@ -257,7 +265,7 @@ def test_local_composition_refuses_unpinned_or_unavailable_commits(
         )
 
 
-def test_promotion_freezes_both_copy_owners_and_imports_exact_candidate(repo: Path, tmp_path: Path):
+def test_promotion_freezes_both_copy_owners_and_imports_exact_candidate(repo: Path, tmp_path: Path) -> None:
     from promotion_frozen_candidate import import_candidate
     from test_sync_installer_engine import _promotion_installer_source
 
@@ -363,10 +371,12 @@ def test_tree_filter_uses_candidate_index_without_changing_checkout(
 
 
 @pytest.mark.parametrize("long_message", [False, True])
-def test_promote_creates_wholesale_replace_commit(repo: Path, monkeypatch, long_message: bool):
+def test_promote_creates_wholesale_replace_commit(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, long_message: bool,
+) -> None:
     large_message = " typed \u00e9" * 8000
     if long_message:
-        formatter = pr.format_promotion_message
+        formatter = format_promotion_message
         monkeypatch.setattr(
             pr, "format_promotion_message",
             lambda **kwargs: formatter(**kwargs) + "\n" + large_message,
@@ -397,7 +407,7 @@ def test_promote_creates_wholesale_replace_commit(repo: Path, monkeypatch, long_
         assert large_message.strip() in pr._git(["show", "-s", "--format=%B", commit], cwd=repo)
         raw_commit = subprocess.run(
             ["git", "cat-file", "commit", commit], cwd=repo, capture_output=True, check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=_CREATION_FLAGS,
         ).stdout
         message_bytes = raw_commit.split(b"\n\n", 1)[1]
         assert b"\r" not in message_bytes
@@ -430,7 +440,7 @@ def test_promote_creates_wholesale_replace_commit(repo: Path, monkeypatch, long_
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
 
 
-def test_promote_refuses_when_a_pointer_does_not_resolve(repo: Path):
+def test_promote_refuses_when_a_pointer_does_not_resolve(repo: Path) -> None:
     # A malformed/dangling VENDOR_POINTER.json on dev (pointing at a lib
     # that doesn't exist in canonical libs/) must abort promotion, not ship
     # an unexpanded stub into main.
@@ -455,7 +465,7 @@ def test_promote_refuses_when_a_pointer_does_not_resolve(repo: Path):
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
 
 
-def test_promote_refuses_when_a_uv_editable_reference_does_not_resolve(repo: Path):
+def test_promote_refuses_when_a_uv_editable_reference_does_not_resolve(repo: Path) -> None:
     # A malformed/unresolvable uv-editable canonical reference on dev must
     # abort promotion the same way a dangling VENDOR_POINTER.json does.
     _git(["checkout", "-q", "dev"], repo)
@@ -478,7 +488,7 @@ def test_promote_refuses_when_a_uv_editable_reference_does_not_resolve(repo: Pat
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
 
 
-def test_promote_refuses_missing_already_local_dependency(repo: Path):
+def test_promote_refuses_missing_already_local_dependency(repo: Path) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "pyproject.toml").write_text(
         '[project]\nname = "demo-plugin"\nversion = "0.1.0-dev1"\n'
@@ -496,7 +506,7 @@ def test_promote_refuses_missing_already_local_dependency(repo: Path):
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
-def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
+def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path) -> None:
     origin = tmp_path / "origin.git"
     _git(["init", "-q", "--bare", str(origin)], tmp_path)
     _git(["remote", "add", "origin", str(origin)], repo)
@@ -520,7 +530,7 @@ def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
     assert report["tag"] in remote_tags
 
 
-def test_promote_with_candidate_branch_never_touches_main_directly(tmp_path: Path, repo: Path):
+def test_promote_with_candidate_branch_never_touches_main_directly(tmp_path: Path, repo: Path) -> None:
     """A protected main (personal-account rulesets have no Integration
     bypass -- see the effort's Journal) must never receive a direct push;
     promote() with candidate_branch pushes elsewhere and leaves main/the
@@ -563,16 +573,16 @@ def test_promote_with_candidate_branch_never_touches_main_directly(tmp_path: Pat
     assert report["commit"][:8] not in report["tag_stem"]
 
 
-def test_promote_message_lists_bumps_and_changefiles():
+def test_promote_message_lists_bumps_and_changefiles() -> None:
     summary = {
         "bumps": {"demo-plugin": ("0.1.0-dev1", "0.1.0-dev2")},
         "changefiles_consumed": ["20260101-test-abc123.json"],
     }
-    message = pr.format_promotion_message(dev_range=("aaaa" * 10, "bbbb" * 10), summary=summary)
+    message = format_promotion_message(dev_range=("aaaa" * 10, "bbbb" * 10), summary=summary)
     assert "demo-plugin: 0.1.0-dev1 -> 0.1.0-dev2" in message
 
 
-def test_promote_writes_pipeline_state_into_generated_commit(repo: Path):
+def test_promote_writes_pipeline_state_into_generated_commit(repo: Path) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
     dev_head = _commit(repo, "demo-plugin: a change")
@@ -591,7 +601,7 @@ def test_promote_writes_pipeline_state_into_generated_commit(repo: Path):
     assert state["paused"] is False
 
 
-def test_qualification_only_keeps_pause_and_uses_no_direct_tag_or_main_publication(repo: Path):
+def test_qualification_only_keeps_pause_and_uses_no_direct_tag_or_main_publication(repo: Path) -> None:
     _git(["checkout", "-q", "main"], repo)
     state = repo / pr.PIPELINE_STATE_PATH
     state.parent.mkdir(parents=True, exist_ok=True)
@@ -618,25 +628,25 @@ def test_qualification_only_keeps_pause_and_uses_no_direct_tag_or_main_publicati
     assert not _git(["tag", "--points-at", report["commit"]], repo)
 
 
-def test_qualification_only_refuses_the_direct_main_push_path(repo: Path):
+def test_qualification_only_refuses_the_direct_main_push_path(repo: Path) -> None:
     with pytest.raises(pr.PromotionError, match="normal candidate PR path"):
         pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=True, qualification_only=True)
 
 
-def test_promote_tag_stem_is_utc(repo: Path, monkeypatch):
+def test_promote_tag_stem_is_utc(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
     _commit(repo, "demo-plugin: a change")
     _git(["checkout", "-q", "main"], repo)
-    fixed = pr.time.struct_time((2026, 1, 2, 3, 4, 5, 4, 2, 0))
-    monkeypatch.setattr(pr.time, "gmtime", lambda *_: fixed)
+    fixed = time.struct_time((2026, 1, 2, 3, 4, 5, 4, 2, 0))
+    monkeypatch.setattr(time, "gmtime", lambda *_: fixed)
 
     report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
 
     assert report["tag_stem"] == "promote-20260102030405"
 
 
-def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Path):
+def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Path) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
     dev_head = _commit(repo, "demo-plugin: a change")
@@ -679,7 +689,7 @@ def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Pa
 
 def test_promote_refuses_a_coverage_baseline_measured_against_a_different_commit(
     tmp_path: Path, repo: Path,
-):
+) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
     _commit(repo, "demo-plugin: a change")
@@ -704,7 +714,7 @@ def test_promote_refuses_a_coverage_baseline_measured_against_a_different_commit
 
 def test_promote_refuses_a_coverage_baseline_whose_plugin_field_mismatches_its_filename(
     tmp_path: Path, repo: Path,
-):
+) -> None:
     """A baseline file named `<plugin>.json` whose embedded `plugin` field
     names a DIFFERENT plugin must be rejected, not silently accepted and
     checked in under a pointer whose `asset` name wouldn't match the file
@@ -734,7 +744,7 @@ def test_promote_refuses_a_coverage_baseline_whose_plugin_field_mismatches_its_f
 
 def test_promote_refuses_a_coverage_baseline_with_an_empty_plugin_field(
     tmp_path: Path, repo: Path,
-):
+) -> None:
     """A present-but-falsey `plugin` field (`""`, `None`, ...) must be
     treated as a real, rejectable value -- never silently treated the same
     as a genuinely absent key just because `bool(value)` is falsey."""
@@ -761,7 +771,7 @@ def test_promote_refuses_a_coverage_baseline_with_an_empty_plugin_field(
         )
 
 
-def test_promote_without_coverage_baselines_dir_writes_nothing(repo: Path):
+def test_promote_without_coverage_baselines_dir_writes_nothing(repo: Path) -> None:
     """Omitting coverage_baselines_dir entirely (the default, and every
     promotion today before this is wired into validate-and-promote.yml)
     must remain a fully valid promotion -- coverage-baseline collection is
@@ -781,7 +791,7 @@ def test_promote_without_coverage_baselines_dir_writes_nothing(repo: Path):
 
 def test_promote_preserves_an_existing_main_baseline_when_no_fresh_one_is_collected(
     tmp_path: Path, repo: Path,
-):
+) -> None:
     """A transient collection/upload/download failure (or simply a plugin
     not yet enrolled this run) must never drop an already-published
     baseline from a prior promotion -- `scratch` starts from `dev`, which
@@ -830,7 +840,7 @@ def test_promote_preserves_an_existing_main_baseline_when_no_fresh_one_is_collec
 
 def test_promote_a_second_time_with_only_a_coverage_baseline_change_is_a_no_op(
     tmp_path: Path, repo: Path,
-):
+) -> None:
     """A coverage-baseline update alone (no real dev content change) must
     never force a vacuous promotion -- baselines are written only after the
     no-op content check, mirroring the pipeline-state file's own exclusion."""
@@ -862,7 +872,7 @@ def test_promote_a_second_time_with_only_a_coverage_baseline_change_is_a_no_op(
     assert second["promoted"] is False
 
 
-def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path):
+def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path) -> None:
     """Re-running promote() against the SAME dev content a second time must
     not treat the previous commit's own state-file update as a real content
     change -- otherwise every promotion would spuriously "change" forever."""
@@ -879,7 +889,7 @@ def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path):
     assert second["promoted"] is False
 
 
-def test_new_development_commit_with_equal_payload_records_the_new_source_before_noop(repo: Path):
+def test_new_development_commit_with_equal_payload_records_the_new_source_before_noop(repo: Path) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins/demo-plugin/new-file.txt").write_text("source payload\n", encoding="utf-8")
     first_dev = _commit(repo, "first source")
@@ -909,7 +919,7 @@ def _write_changefile(repo: Path, name: str, plugin: str, bump_type: str) -> Non
     )
 
 
-def test_promote_bumps_packaged_manifest_receiver_without_repeating_bump(repo: Path):
+def test_promote_bumps_packaged_manifest_receiver_without_repeating_bump(repo: Path) -> None:
     for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1")):
         _write_plugin(repo, name, version)
     _write_marketplace(repo, {
@@ -954,7 +964,7 @@ def test_promote_bumps_packaged_manifest_receiver_without_repeating_bump(repo: P
         ], repo)
 
 
-def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path):
+def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path) -> None:
     """Regression: a promotion never mutates dev's own tree (by design), so
     an already-consumed changefile can keep sitting there indefinitely (the
     async dev-side cleanup PR is best-effort, not synchronous). Confirmed
@@ -1015,7 +1025,7 @@ def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path):
     ]
 
 
-def test_promote_preserves_shipped_version_when_no_new_changefile_at_all(repo: Path):
+def test_promote_preserves_shipped_version_when_no_new_changefile_at_all(repo: Path) -> None:
     """The exact regression this fix corrects: a promotion round with ZERO
     new changefiles (an already-consumed one is still physically present,
     but nothing genuinely new landed) must still carry main's actual
@@ -1056,7 +1066,7 @@ def test_promote_preserves_shipped_version_when_no_new_changefile_at_all(repo: P
     assert entry["version"] == "0.1.1-dev1"
 
 
-def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
+def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path) -> None:
     """The same regression as
     `test_promote_preserves_shipped_version_when_no_new_changefile_at_all`,
     but for a standalone, out-of-plugin consumer (mirroring
@@ -1099,7 +1109,7 @@ def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
     assert 'version = "0.1.1-dev1"' in pyproject
 
 
-def test_promote_aborts_rather_than_consuming_an_unapplied_bump(repo: Path):
+def test_promote_aborts_rather_than_consuming_an_unapplied_bump(repo: Path) -> None:
     """A computed bump that `apply()` could not actually write (here: a
     plugin present in `plugin.json` but missing from `marketplace.json`
     entirely, so `_write_marketplace_entry()` returns `False` and the
@@ -1122,7 +1132,7 @@ def test_promote_aborts_rather_than_consuming_an_unapplied_bump(repo: Path):
         pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
 
 
-def test_promote_refuses_when_paused(repo: Path):
+def test_promote_refuses_when_paused(repo: Path) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
     _commit(repo, "demo-plugin: a change")
@@ -1139,7 +1149,7 @@ def test_promote_refuses_when_paused(repo: Path):
         pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
 
 
-def test_main_cli_exits_zero_on_pause_not_one(repo: Path, capsys):
+def test_main_cli_exits_zero_on_pause_not_one(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (repo / ".github").mkdir(exist_ok=True)
     (repo / pr.PIPELINE_STATE_PATH).write_text(
         json.dumps({"paused": True, "pause_reason": "x"}), encoding="utf-8"
@@ -1150,7 +1160,7 @@ def test_main_cli_exits_zero_on_pause_not_one(repo: Path, capsys):
     assert "paused" in capsys.readouterr().out.lower()
 
 
-def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path):
+def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path) -> None:
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("bad\n", encoding="utf-8")
     dev_head = _commit(repo, "demo-plugin: a bad change")
@@ -1179,7 +1189,7 @@ def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path):
     assert report["promoted"] is True
 
 
-def test_promote_refuses_a_stale_out_of_order_candidate(repo: Path):
+def test_promote_refuses_a_stale_out_of_order_candidate(repo: Path) -> None:
     """Regression (caught in live review, 2026-09-29): `promote-trigger.yml`'s
     own dev-ancestry filter is deliberately unthrottled, so two dev commits'
     filter runs can dispatch out of order -- an older commit's promotion
@@ -1211,7 +1221,7 @@ def test_promote_refuses_a_stale_out_of_order_candidate(repo: Path):
         pr.promote(repo=repo, dev_ref=older_dev_head, main_ref="main", push=False)
 
 
-def test_promote_allows_a_genuine_forward_advancement_after_a_promotion(repo: Path):
+def test_promote_allows_a_genuine_forward_advancement_after_a_promotion(repo: Path) -> None:
     """The guard must not block ordinary forward progress: promoting a
     commit that IS a descendant of the last-promoted dev_head is fine."""
     _git(["checkout", "-q", "dev"], repo)
@@ -1240,7 +1250,7 @@ def test_promote_allows_a_genuine_forward_advancement_after_a_promotion(repo: Pa
     assert report["promoted"] is True
 
 
-def test_main_cli_exits_zero_on_stale_candidate_not_one(repo: Path, capsys):
+def test_main_cli_exits_zero_on_stale_candidate_not_one(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The stale-candidate guard is a benign, expected outcome (an
     out-of-order race), not a pipeline failure -- must exit 0 like the
     pause guard, or report-failure's watchdog would file a spurious
@@ -1268,9 +1278,9 @@ def test_main_cli_exits_zero_on_stale_candidate_not_one(repo: Path, capsys):
     assert "stale" in out or "descendant" in out
 
 
-def test_promote_no_changefiles_reports_none():
-    summary = {"bumps": {}, "changefiles_consumed": []}
-    message = pr.format_promotion_message(dev_range=("a" * 40, "b" * 40), summary=summary)
+def test_promote_no_changefiles_reports_none() -> None:
+    summary: dict[str, Any] = {"bumps": {}, "changefiles_consumed": []}
+    message = format_promotion_message(dev_range=("a" * 40, "b" * 40), summary=summary)
     assert "Version bumps: none" in message
     assert "Changefiles consumed: none" in message
 
@@ -1331,7 +1341,7 @@ def _write_enabled_settings(repo: Path, plugin: str) -> None:
     )
 
 
-def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Path):
+def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Path) -> None:
     """Regression for the #3378-recurrence found live on `main` 2026-09-25:
     a plugin's version bump must also re-render any instruction-projection
     file it owns (its rendered content embeds the plugin's version
@@ -1384,7 +1394,7 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
     assert f"[owner: {plugin}@0.1.0-dev1]" not in fallback
 
 
-def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Path):
+def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Path) -> None:
     """The sweep is best-effort, never a hard dependency: a tree with no
     plugins/customizing-copilot present at all (this shared fixture, and
     every other test in this file) must promote exactly as before."""
@@ -1399,7 +1409,7 @@ def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Pat
     assert report["projections_synced"] == []
 
 
-def test_required_tools_bundle_is_self_contained(tmp_path: Path):
+def test_required_tools_bundle_is_self_contained(tmp_path: Path) -> None:
     """Review finding (PR #4372): a scratch worktree's copied
     ``tools/materialize_main.py`` must import successfully using ONLY the
     files ``_REQUIRED_TOOLS`` actually copies -- never relying on the
