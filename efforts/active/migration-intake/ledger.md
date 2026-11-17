@@ -388,3 +388,28 @@ The separate audited tracker judgment retired #3442 `NOT_PLANNED` into that
 planned receiver. #954 remains OPEN; source discussions and the existing
 implementation claim remain intact. No new issue, second primary owner,
 executor, credential operation, native proof or resource transfer is created.
+
+## Complete six-category shared-core intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete shared dispatch, session/process ownership, launch policy, credentials, recovery and parity tests with genuine thin substrate adapters | Public #4227, complete original and all three eligible refinements | routed (proposed; effective after reviewed direct Plan acceptance) | [venue-parity](../venue-parity/README.md), P4227-1..8/V4227-1..3/G4227 through existing WS1/WS-D/WS-B/WS-E | Retain #4227 until reviewed delivery, complete current ROOT/source readback and separate source-specific judgment; no new issue, executor or resource effect |
+
+The existing Bridge-owned programme is the sole canonical domain owner;
+responsibility-owned packages may compose its reusable core. The direct
+Plan/global Validation retain all six categories, actual consumers,
+genuine lifecycle/endpoint/bootstrap/boot differences and restricted denial.
+#5837's now-#2709 pre-creation contract retains BOTH races and no-create/
+rejoin-only OR prior authorization alternatives; its tracker supersession
+does not imply implementation.
+
+Actual affected-P3 reconciliation remains planned work before dependent
+implementation, preserving the existing provider-capability/idle-restart
+reservation. It is not a new native/whole-parent or generic-ACK prerequisite
+to reviewing this complete plan. All incumbent #954 and inherited acceptance,
+P3442, #3507's literal OR condition and source/resource owners remain.
+The twelve new technical rows stay unchecked. Ledger publication alone is
+neither domain acceptance, tracker retirement nor implementation completion.

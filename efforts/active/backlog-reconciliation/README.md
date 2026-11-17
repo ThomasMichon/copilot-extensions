@@ -3421,6 +3421,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete shared-core receiving proposal](journal/2026/11.17-complete-shared-core-receiving.md)
+  maps #4227's six responsibilities into the existing venue-parity ROOT,
+  retaining affected-P3 reconciliation, inherited policy alternatives and
+  every incumbent gate before any separate source disposition.
   The [platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
   retain ten whole outcomes while prospectively correcting the actual
   #4163 citation-classifier barrier without releasing linked-source custody.
