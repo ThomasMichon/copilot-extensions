@@ -92,8 +92,55 @@ the [native coverage contract](../../plugins/agent-worktrees/docs/pr-observation
 This query never infers that support from a package version or an empty array.
 Synthetic tests with explicit complete evidence establish query mechanics, not
 qualification of a particular installed provider. Conversation-only follow-up
-causes, SSE/WebSocket feeds, round-robin/Dispatch activation and observational
+causes, round-robin/Dispatch activation and observational
 provider comparison also remain separate exits.
+
+## Local SSE subscriptions
+
+The same selected local ingress advertises `stream` protocol
+`agent-pull-requests.repository-stream/v1`. Older or filtered hosts do not
+advertise it. The finite Fleet connector does not claim streaming support.
+Create or reconcile an ordinary continuing registration first, then use:
+
+```text
+agent-pull-requests-service stream --socket /data/pr-cache/local.sock --namespace installation-a --target example-gitea --registration-id REGISTRATION_ID --reviewer reviewer-a --timeout 60
+```
+
+`POST /v1/repositories/TARGET/stream` uses the normal admitted JSON envelope.
+Its request requires `registration_id` and `reviewer`, with optional `limit`
+(1..16), `max_age_seconds` (1..86,400), `seconds` (1..3,600) and `interval`
+(1..300). The original ingress admission deadline is an independent ceiling,
+including header/body reads, transaction waits, frame writes and cleanup.
+The CLI emits JSON objects containing SSE `event`, `id` and `data`.
+
+Each atomic sample projects `status`, `pulls` and `next-actions` from the same
+cache transaction. Status includes registration expiry, delivery/ACK positions,
+inventory and bounded event identity/kind/PR summaries. Pulls and actions are
+bounded first pages with their existing explicit continuation semantics; they
+are not a complete unpaginated repository dump. Use the existing query/events
+operations for further pages or full retained event facts. A snapshot can be
+newer than the accompanying delivery batch; its independent current event and
+projection cursors remain visible. Streams reevaluate cached freshness/ranking
+without requiring a new durable event and never trigger forge acquisition.
+
+Reconnect with `--last-event-id ID` (HTTP `Last-Event-ID`) and the same
+registration, reviewer, page limit and freshness selection. The ID binds that
+selection and its delivered event position. Resume emits current first-page
+views again, not a replay archive of transient rankings; duplicate delivery is
+expected. Missing original registration refuses, changed selection returns 409,
+and an unavailable delivery position returns 410. After headers, an equivalent
+failure is an SSE error. Recovery is explicit; no new baseline/registration or
+expiry renewal is invented.
+
+Writing a frame records delivery only, **never ACK or handled feedback**.
+Existing explicit ACK and original-ID replay remain authoritative. Cancellation
+or registration expiry cannot admit new event delivery; already delivered
+unsettled identities stay protected. Eight shared ingress connections, 1-MiB
+frames, 16-MiB streams, 256 chunks and original admission expiry bound slow
+consumers. There is one sampled frame set per connection, no unbounded queue.
+Disconnect/withdrawal closes admission and joins any started disk operation
+before writer release. A premature EOF or cap closure retains IDs and is not
+reported as a successful handled action.
 
 ## Existing-envelope adoption
 
