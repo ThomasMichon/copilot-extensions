@@ -85,12 +85,13 @@ An absent, empty or whitespace-only author remains `author-unavailable`,
 including for author-owned rebase recommendations; it cannot establish that the
 selected reviewer is a different actor.
 
-The native body-only Gitea reader currently leaves `reviews_complete` unknown
-because hidden pending drafts can create empty intermediate pages.
-Consequently this source does **not** yet qualify real Gitea initial/new-verdict
-recommendations. Authoritative pagination evidence remains a separate native
-qualification. Synthetic tests with explicit complete evidence establish the
-query mechanics, not real-provider coverage. Conversation-only follow-up
+Body-only/prior Gitea readers leave `reviews_complete` unknown because hidden
+pending drafts can create empty intermediate pages. An explicitly selected native
+reader can instead supply qualified authoritative pagination evidence through
+the [native coverage contract](../../plugins/agent-worktrees/docs/pr-observation.md).
+This query never infers that support from a package version or an empty array.
+Synthetic tests with explicit complete evidence establish query mechanics, not
+qualification of a particular installed provider. Conversation-only follow-up
 causes, SSE/WebSocket feeds, round-robin/Dispatch activation and observational
 provider comparison also remain separate exits.
 
