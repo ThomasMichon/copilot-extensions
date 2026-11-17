@@ -375,3 +375,16 @@ Incumbent P0/P2 order, #954's whole-programme/P3 reservation, #3507's actual
 native-OR-complete-accepted-transfer condition, credential/relay and other
 source/resource custody remain. Planned intake is neither implementation
 nor issue disposition.
+
+## Both-provider auth-lifetime reviewed receipt (2026-11-17 UTC)
+
+#13106 merged the preceding complete direct WS-B domain amendment.
+Current receiving readback confirms all P3442-1..8/V3442-1..8/G3442 and
+continuing Coordination in venue-parity, with all seventeen technical rows
+unchecked. The proposed route is now accepted through the existing contract;
+this receipt appends rather than changes its history.
+
+The separate audited tracker judgment retired #3442 `NOT_PLANNED` into that
+planned receiver. #954 remains OPEN; source discussions and the existing
+implementation claim remain intact. No new issue, second primary owner,
+executor, credential operation, native proof or resource transfer is created.
