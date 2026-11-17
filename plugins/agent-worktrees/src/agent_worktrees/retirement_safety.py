@@ -18,11 +18,15 @@ class RetirementBlocker:
 
 
 def retains_artifact_metadata(record: WorktreeRecord) -> bool:
-    """Retained bytes need their existing ledger after checkout retirement."""
+    """Keep retained-byte custody and historical delivery receipts after retirement."""
     return any(
         claim.has_producer and isinstance(claim.producer, dict)
-        and claim.producer.get("lifetime") == "artifact-owned"
-        and claim.producer.get("phase") == "retained"
+        and (
+            claim.producer.get("lifetime") == "artifact-owned"
+            and claim.producer.get("phase") == "retained"
+            or claim.producer.get("lifetime") == "user-deliverable"
+            and claim.producer.get("phase") == "delivered"
+        )
         for claim in record.resources
     )
 
@@ -72,6 +76,7 @@ def delete_retired_pair(
 ) -> bool:
     """Keep both records until receiving conclusions survive their hard deletion."""
     from . import paired_claims, receiving_allocation, tracking
+    from . import tracking_save_notifications as save_notifications
 
     try:
         if sibling_path is None:
@@ -96,6 +101,6 @@ def delete_retired_pair(
     path.unlink(missing_ok=True)
     # Both removals must reach the resident; the save above announced only
     # ``record``'s path (delivered once the record holds release).
-    tracking.save_notifications.worktree_changed(record.worktree_path)
-    tracking.save_notifications.worktree_changed(sibling.worktree_path)
+    save_notifications.worktree_changed(record.worktree_path)
+    save_notifications.worktree_changed(sibling.worktree_path)
     return True

@@ -7,7 +7,7 @@ import { observePluginReadiness, readinessContextMatches } from "./plugin-readin
 const CONTRACT = "retained-inbox-v1";
 const PROTOCOL = 50;
 const RECHECK_MS = 30_000;
-const STAGES = new Set(["offered", "sending", "unknown", "sdk_accepted", "consumed"]);
+const STAGES = new Set(["offered", "sending", "unknown", "sdk_accepted", "consumed", "rejected"]);
 const nonblank = (value) => typeof value === "string" && value.trim().length > 0;
 const positive = (value) => Number.isSafeInteger(value) && value > 0;
 const time = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -37,7 +37,7 @@ function receiptValid(value, sid) {
     && STAGES.has(value.stage) && time(value.admitted_at)
     && nullableTime(value.handoff_started_at) && nullableTime(value.sdk_accepted_at)
     && nullableTime(value.consumed_at)
-    && (value.stage === "offered" ? value.handoff_started_at === null
+    && (["offered", "rejected"].includes(value.stage) ? value.handoff_started_at === null
       : time(value.handoff_started_at));
 }
 
@@ -70,6 +70,7 @@ export function createRetainedInbox({
   onConsumed = () => {},
   receivingApi,
   validateSendContext,
+  replayHistory,
 }) {
   if (receivingApi !== undefined && receivingApi !== "native-sdk-v1") {
     throw new Error("unsupported native receiving API");
@@ -202,7 +203,7 @@ export function createRetainedInbox({
     }
     let held = response.next_after !== null;
     for (const receipt of receipts) {
-      if (receipt.stage === "consumed") continue;
+      if (receipt.stage === "consumed" || receipt.stage === "rejected") continue;
       if (events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
         onConsumed(sid, receipt.message_id);
         await report(receipt, "consumed");
@@ -249,7 +250,10 @@ export function createRetainedInbox({
       after = 0;
       historyAt = 0;
     }
-    if (await recover(sid) || !sendAllowed(sid, allowSend)) return;
+    if (!sendAllowed(sid, allowSend)) {
+      await recover(sid);
+      return;
+    }
     const owner = { contract: CONTRACT, ...selector, consumer: context.consumer };
     if (!enrolled || frontendStale) {
       if (!negotiation) {
@@ -264,6 +268,10 @@ export function createRetainedInbox({
           binding: { installation: observed.binding.installation, epoch: observed.binding.epoch },
           expected_incarnation: observed.expected_incarnation,
         };
+        if (observed.message_base === 1) {
+          context.consumer = { ...context.consumer, message_base: 1 };
+          owner.consumer = context.consumer;
+        }
       } else if (frontendStale) {
         const observed = await request("POST", `${base(sid)}/negotiate`, owner);
         if (observed?.contract !== CONTRACT || !sameBinding(observed.binding, negotiation.binding)) {
@@ -290,6 +298,7 @@ export function createRetainedInbox({
       enrolled = true;
       frontendStale = false;
     }
+    if (await recover(sid) || !sendAllowed(sid, allowSend)) return;
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
     const poll = await currentRequest(sid, "poll", {
@@ -302,6 +311,57 @@ export function createRetainedInbox({
     }
     const [msg] = poll.messages;
     if (!msg) return;
+    if (context.consumer.message_base === 1) {
+      if (!positive(msg.id)) throw new Error("message correlation unavailable; no effects");
+      const disposition = (state, code, reason) => currentRequest(sid, "disposition", {
+        ...owner, binding: negotiation.binding, message_id: msg.id, state, code, reason,
+      });
+      const header = msg.message_contract;
+      const startupKind = /^startup:prompt:[1-9]\d*$/.test(msg.kind || "");
+      const supported = new Set(["prompt", "notify", "status-check", "reply", "control:replay-history"]);
+      let rejection = null;
+      if (!header || header.message_id !== msg.id || header.session_id !== sid
+          || header.receiver_incarnation !== context.consumer.incarnation
+          || header.sender !== msg.sender || header.type !== msg.kind || header.contract_error) {
+        rejection = ["invalid_contract", "The correlated message contract is malformed."];
+      } else if (header.base_version !== 1) {
+        rejection = ["unsupported_base_version", "This receiver does not support the message base version."];
+      } else if ((!supported.has(header.type) && !startupKind) || header.type_version !== 1) {
+        rejection = ["unsupported_message_version", "This receiver does not support the message type or revision."];
+      } else if (!Array.isArray(header.requires) || header.requires.length !== 0) {
+        rejection = ["unsupported_required_semantics", "This receiver cannot enforce the required message semantics."];
+      } else if (typeof msg.body !== "string" || !["steer", "queue"].includes(msg.delivery)) {
+        rejection = ["unsupported_payload", "This receiver cannot interpret the message payload or delivery mode."];
+      }
+      if (header?.type === "control:replay-history" && (msg.body !== "" || !replayHistory)) {
+        rejection = ["unsupported_history_replay", "Bounded history reconstruction is unavailable or has an unsupported payload."];
+      }
+      if (rejection) {
+        await disposition("rejected", ...rejection);
+        return;
+      }
+      if (header.type === "control:replay-history") {
+        await nativeContext(sid);
+        if (!sendAllowed(sid, allowSend)) return;
+        const grant = await disposition("started", "history_replay_started", "Bounded represented-history reconstruction admitted.");
+        if (grant?.begin !== true) return;
+        let completed = false;
+        try {
+          await nativeContext(sid);
+          if (!sendAllowed(sid, allowSend)) throw new Error("receiver changed before history reconstruction");
+          completed = await nativeCall(() => replayHistory(sid)) === true;
+        } catch (error) {
+          note(`history reconstruction outcome unknown: ${errorText(error)}`);
+        }
+        await disposition(
+          completed ? "completed" : "unknown",
+          completed ? "history_replay_completed" : "history_replay_unknown",
+          completed ? "Bounded represented history reconstructed; no prompt or tool was rerun."
+            : "History reconstruction may have started; no automatic replay is authorized.",
+        );
+        return;
+      }
+    }
     const startup = /^startup:prompt:[1-9]\d*$/.test(msg.kind || "");
     if (!positive(msg.id) || !nonblank(msg.handoff_id) || !STAGES.has(msg.handoff_stage)
         || typeof msg.body !== "string" || !["steer", "queue"].includes(msg.delivery)
@@ -316,7 +376,7 @@ export function createRetainedInbox({
     onPending(sid, [msg]);
     const receipt = {
       session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id,
-      consumer: compatible ? msg.consumer : context.consumer,
+      consumer: msg.consumer ?? context.consumer,
     };
     if (!consumerValid(receipt.consumer, sid, compatible)) {
       throw new Error("original handoff receiver unavailable");
@@ -340,7 +400,7 @@ export function createRetainedInbox({
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
     const grant = await currentRequest(sid, "begin", {
-      ...owner, consumer: receipt.consumer,
+      ...owner, consumer: context.consumer.message_base === 1 ? context.consumer : receipt.consumer,
       binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
     });
     if (grant?.begin !== true) {

@@ -7,10 +7,11 @@ import sys
 import time
 from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 
 
 @lru_cache(maxsize=1)
-def _owner():
+def _owner() -> ModuleType:
     from . import _daemon_instance_owner
 
     return _daemon_instance_owner
@@ -21,7 +22,9 @@ def mkdir(path: Path) -> None:
     _owner().mkdir_private(path, exist_ok=True)
 
 
-def _windows_check(path: Path, *, ancestor: bool, private: bool) -> None:
+def _windows_check(
+    path: Path, *, ancestor: bool, private: bool, bytecode_descendant: bool = False,
+) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -42,8 +45,13 @@ def _windows_check(path: Path, *, ancestor: bool, private: bool) -> None:
         ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
     ]
     advapi.GetAce.restype = wintypes.BOOL
-    current = owner._current_sids(os.getpid())[0]
+    current, token_owner = owner._current_sids(os.getpid())
     trusted = {current, "S-1-5-18", "S-1-5-32-544"}
+    allowed_owners = {current}
+    if bytecode_descendant and token_owner in trusted:
+        # CPython-created descendants use TokenOwner under an elevated launcher.
+        # Cache roots and metadata still require the exact user owner.
+        allowed_owners.add(token_owner)
     if ancestor:
         # Windows Modules Installer can own protected system ancestors.
         trusted.add("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
@@ -53,20 +61,22 @@ def _windows_check(path: Path, *, ancestor: bool, private: bool) -> None:
         ctypes.byref(descriptor),
     )
     if error:
-        raise ctypes.WinError(error)
+        raise getattr(ctypes, "WinError")(error)
     try:
-        if owner._sid_text(sid) not in (trusted if ancestor else {current}) or not acl:
+        if owner._sid_text(sid) not in (trusted if ancestor else allowed_owners) or not acl:
             raise PermissionError("bytecode cache ownership is not private")
         trusted.add("S-1-3-4")  # OWNER RIGHTS refers to the verified object owner.
         # ACL_SIZE_INFORMATION: AceCount, AclBytesInUse, AclBytesFree.
         info = (wintypes.DWORD * 3)()
         if not advapi.GetAclInformation(acl, info, ctypes.sizeof(info), 2):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         writes = 0xF00F01FF if private else 0x500D0140 if ancestor else 0x500D0156
         for index in range(info[0]):
             ace = ctypes.c_void_p()
             if not advapi.GetAce(acl, index, ctypes.byref(ace)):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
+            if ace.value is None:
+                raise PermissionError("bytecode cache has an invalid access rule")
             header = ctypes.string_at(ace, 8)
             kind = header[0]
             if ancestor and header[1] & 8:
@@ -131,7 +141,7 @@ def check(path: Path, *, ancestor: bool = False, private: bool = False) -> None:
         or getattr(info, "st_file_attributes", 0) & 0x400
     ):
         raise PermissionError("bytecode cache directory is not ordinary")
-    if os.name == "nt":
+    if sys.platform == "win32":
         _windows_check(path, ancestor=ancestor, private=private)
     else:
         allowed = {os.getuid(), 0} if ancestor else {os.getuid()}
@@ -156,7 +166,7 @@ def check_file(path: Path, *, private: bool = True) -> None:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise PermissionError("bytecode cache metadata is not ordinary")
-    if os.name == "nt":
+    if sys.platform == "win32":
         _windows_check(path, ancestor=False, private=private)
     elif info.st_uid != os.getuid() or info.st_mode & (0o077 if private else 0o022):
         raise PermissionError("bytecode cache metadata is not private")
@@ -191,7 +201,7 @@ def check_bytecode(path: Path, *, max_entries: int = 256, seconds: float = 0.05)
                 ):
                     raise PermissionError("bytecode cache descendant is not ordinary")
                 child = Path(entry.path)
-                _windows_check(child, ancestor=False, private=True)
+                _windows_check(child, ancestor=False, private=True, bytecode_descendant=True)
                 if stat.S_ISDIR(info.st_mode):
                     pending.append(child)
     if time.monotonic() >= deadline:

@@ -5,6 +5,25 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = [string[]]@($args)
+$readinessProbe = $false
+$skipProject = $false
+$projectOptions = @('--p', '--pr', '--pro', '--proj', '--proje', '--projec', '--project')
+foreach ($argument in $forwardArgs) {
+    if ($skipProject) { $skipProject = $false; continue }
+    $optionName = ([string]$argument -split '=', 2)[0]
+    if ($argument -ceq '-p' -or $argument -cin $projectOptions) {
+        $skipProject = $true
+    } elseif ($argument -cmatch '^-v+p(.*)$') {
+        $skipProject = $Matches[1] -ceq ''
+    } elseif ($optionName -cin $projectOptions -or $argument -clike '-p?*' -or
+              $argument -cmatch '^-v+$' -or
+              $argument -cin @('--v', '--ve', '--ver', '--verb', '--verbo', '--verbos', '--verbose')) {
+        continue
+    } elseif ($argument -cin @('installer-readiness', 'invocation-contract')) {
+        $readinessProbe = $true
+        break
+    } else { break }
+}
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_CODESPACES_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-codespaces] owning payload root is unavailable.')
@@ -261,15 +280,31 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        $pythonOptions = @()
+        $probeEntry = ''
+        if ($readinessProbe) {
+            $pythonOptions = @('-I', '-B', '-X', 'utf8')
+            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
+        }
         if ($PSVersionTable.PSVersion -lt [version]'7.3' -or
             (Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue) -eq 'Legacy') {
             # Legacy native argument passing retokenizes embedded quotes.
-            $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+            if ($probeEntry) {
+                $json = ConvertTo-Json -InputObject @{
+                    entry = $probeEntry
+                    arguments = @($forwardArgs)
+                } -Compress
+                $bootstrap = "import base64,json,runpy,sys;p=json.loads(base64.b64decode(sys.argv[1]));sys.argv=[p['entry'],'--plugin','agent-codespaces','--module','agent_codespaces','--']+p['arguments'];runpy.run_path(p['entry'],run_name='__main__')"
+            } else {
+                $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+                $bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
+            }
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
-            $bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
-            & $Python -c $bootstrap $encoded
+            & $Python @pythonOptions -c $bootstrap $encoded
+        } elseif ($probeEntry) {
+            & $Python @pythonOptions $probeEntry --plugin agent-codespaces --module agent_codespaces -- @forwardArgs
         } else {
-            & $Python -m agent_codespaces @forwardArgs
+            & $Python @pythonOptions -m agent_codespaces @forwardArgs
         }
     } finally {
         $ErrorActionPreference = $previousEap

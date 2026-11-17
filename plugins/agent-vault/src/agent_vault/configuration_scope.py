@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPO_CONFIG_NAME = ".agent-vault.json"
 _SERVICE_CONFIGURATION_ROOT: str | None = None
+_SERVICE_NATIVE_DEFAULT = False
 
 
 def configuration_root(cwd: str | None = None) -> str:
@@ -17,11 +18,21 @@ def configuration_source(cwd: str | None = None) -> str | None:
     return cwd if cwd is not None else _SERVICE_CONFIGURATION_ROOT
 
 
-def bind_service_configuration(root: str) -> None:
+def uses_native_default() -> bool:
+    return _SERVICE_NATIVE_DEFAULT
+
+
+def bind_service_configuration(root: str, *, native_default: bool = False) -> None:
     path = Path(root)
     if not path.is_absolute() or not path.is_dir():
         raise ValueError("service configuration root must be an existing absolute directory")
-    global _SERVICE_CONFIGURATION_ROOT
+    if native_default:
+        from .default_owner import configured_root
+
+        if path.resolve() != configured_root():
+            raise ValueError("service native default owner differs from its configured root")
+    global _SERVICE_CONFIGURATION_ROOT, _SERVICE_NATIVE_DEFAULT
     _SERVICE_CONFIGURATION_ROOT = str(path)
+    _SERVICE_NATIVE_DEFAULT = native_default
     # A launch projection is data for the caller, not resident-time authority.
     os.environ.pop("AGENT_CONFIGURATION_CONTEXT", None)

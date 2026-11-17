@@ -13,24 +13,28 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from email.message import Message
-from typing import BinaryIO
+from typing import Any, BinaryIO, cast
 from artifact_source_build import (
-    PromotionArtifactError, validate_static_build,
+    PromotionArtifactError as PromotionArtifactError,
+    data_file_sources, validate_entry_points, validate_static_build,
     validate_runtime_metadata as validate_runtime_metadata,
 )
 from promotion_bundle_members import _write_bundle_members, candidate_projects as candidate_projects
 from standalone_python_artifacts import COMPONENTS, artifact_label, project_key
-from artifact_attestation import INDEX_LIMIT as INDEX_LIMIT, INDEX_NAME, INDEX_SCHEMA as SCHEMA
+from artifact_attestation import (
+    INDEX_LIMIT as INDEX_LIMIT, INDEX_NAME as INDEX_NAME, INDEX_SCHEMA as SCHEMA,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_wheel_inputs import WheelLimits
 from runtime_wheel_inspection import inspect_wheel_facts
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # Python 3.10 uses the existing tooling backport.
+else:
     import tomli as tomllib
 
 _BUNDLES_NAME = "wheel-bundles.json"
@@ -43,7 +47,7 @@ _BUNDLE_LIMIT = 512 << 20
 _WHEEL_TAG_LIMIT = 10_000
 
 
-def _artifact_label(record: dict) -> str:
+def _artifact_label(record: dict[str, Any]) -> str:
     try:
         return artifact_label(record)
     except (KeyError, TypeError, ValueError) as exc:
@@ -51,9 +55,12 @@ def _artifact_label(record: dict) -> str:
 
 
 def _run(argv: list[str], *, cwd: Path | None = None) -> str:
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW
     result = subprocess.run(
         argv, cwd=cwd, capture_output=True, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=flags,
     )
     if result.returncode:
         raise PromotionArtifactError(
@@ -70,7 +77,7 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _bundle_filename(manifest: dict) -> str:
+def _bundle_filename(manifest: dict[str, Any]) -> str:
     plugin, version = _artifact_label(manifest), manifest["version"]
     artifact_id = manifest["artifact_id"]
     if (
@@ -84,14 +91,16 @@ def _bundle_filename(manifest: dict) -> str:
     return f"{plugin}-{version}-{artifact_id[7:]}.zip"
 
 
-def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
+def bundle_wheels(
+    manifest: dict[str, Any], wheel_dir: Path, out_dir: Path,
+) -> dict[str, Any]:
     """Bundle only the builder's declared first-party wheels and manifest."""
     filename = _bundle_filename(manifest)
     destination = out_dir / filename
 
     # Wheels are already compressed; storing them avoids zlib-version drift too.
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_STORED) as bundle:
-        def write_wheel(wheel, info):
+        def write_wheel(wheel: dict[str, Any], info: zipfile.ZipInfo) -> None:
             name = wheel["filename"]
             path = wheel_dir / name
             try:
@@ -118,9 +127,9 @@ def build_candidate_bundles(
     from application_sources import canonical_application
     from build_toolchain_lock import resolve_toolchain_lock
 
-    builder = promotion._load_module(
+    builder = cast(Any, promotion._load_module(
         Path(__file__).with_name("build_python_artifacts.py"), "trusted_promotion_builder",
-    )
+    ))
     builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = root, root / "plugins", root / "libs"
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -165,11 +174,11 @@ def build_candidate_bundles(
                 shutil.rmtree(wheel_dir)
                 continue
             standalone = plugin.startswith("standalone:")
-            component = plugin.split(":", 1)[1] if standalone else None
-            wheel_dir = out_dir / (f"standalone-{component}" if standalone else plugin)
+            component_name = plugin.split(":", 1)[1] if standalone else ""
+            wheel_dir = out_dir / (f"standalone-{component_name}" if standalone else plugin)
             manifest = (
                 build_standalone_artifacts(
-                    component, out_dir=wheel_dir, toolchain=toolchain, builder=builder,
+                    component_name, out_dir=wheel_dir, toolchain=toolchain, builder=builder,
                 ) if standalone else builder.build_plugin_artifacts(
                     plugin, out_dir=wheel_dir, toolchain=toolchain,
                 )
@@ -187,7 +196,7 @@ def export_artifacts(
     *, repo: Path, commit: str, content_tree: str, dev_head: str, main_before: str,
     out_dir: Path, source_policy: str = "governed", min_age_days: int | None = None,
     reuse_repository: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build in a disposable candidate checkout; never mutate the promoted tree."""
     import promote_release as promotion
 
@@ -270,7 +279,9 @@ def export_artifacts(
             shutil.rmtree(staging)
 
 
-def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = None) -> dict:
+def validate_bundle(
+    path: Path, entry: dict[str, Any], *, candidate_root: Path | None = None,
+) -> dict[str, Any]:
     """Inspect untrusted ZIP bytes without extracting or executing candidate code."""
     try:
         with zipfile.ZipFile(path) as bundle:
@@ -337,7 +348,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                         raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
                     archive.seek(0)
                     validate_wheel(
-                        archive, wheel,
+                        cast(BinaryIO, archive), wheel,
                         source_dir=candidate_root / wheel["source"] if candidate_root is not None else None,
                         component=(
                             next((key for key, source in COMPONENTS.items() if source == wheel["source"]), None)
@@ -356,7 +367,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
 
 
 def validate_wheel(
-    archive: BinaryIO, wheel: dict, *, source_dir: Path | None = None,
+    archive: BinaryIO, wheel: dict[str, Any], *, source_dir: Path | None = None,
     component: str | None = None, candidate_root: Path | None = None,
 ) -> None:
     """Validate wheel bytes, metadata and RECORD without extracting package code."""
@@ -377,7 +388,7 @@ def validate_wheel(
 
 
 def inspect_wheel(
-    archive: BinaryIO, wheel: dict, *, expected_generator: str | None = None,
+    archive: BinaryIO, wheel: dict[str, Any], *, expected_generator: str | None = None,
     max_unpacked_bytes: int = _BUNDLE_LIMIT, max_metadata_bytes: int = _MANIFEST_LIMIT,
     max_archive_bytes: int = _BUNDLE_LIMIT,
     record_algorithms: frozenset[str] = frozenset({"sha256", "sha384", "sha512"}),
@@ -416,7 +427,7 @@ def inspect_wheel(
 
 
 def validate_wheel_sources(
-    bundle: zipfile.ZipFile, hashes: dict[str, str], *, source_dir: Path, prefix: str,
+    bundle: zipfile.ZipFile, hashes: Mapping[str, str], *, source_dir: Path, prefix: str,
     metadata: Message,
     component: str | None = None, candidate_root: Path | None = None,
 ) -> None:
@@ -425,8 +436,10 @@ def validate_wheel_sources(
         injected = {}
         if component is not None:
             from standalone_python_artifacts import injected_resources, validate_build
-            data = validate_build(source_dir, component=component, root=candidate_root)
-            injected = injected_resources(component, candidate_root)
+            # Resource-free components do not dereference an omitted candidate root.
+            resource_root = cast(Path, candidate_root)
+            data = validate_build(source_dir, component=component, root=resource_root)
+            injected = injected_resources(component, resource_root)
         else:
             from plugin_runtime_resources import build_inputs
             data, injected = build_inputs(source_dir, root=candidate_root)
@@ -468,20 +481,25 @@ def validate_wheel_sources(
             "": str(base.relative_to(source_dir)),
         }:
             raise PromotionArtifactError("unsupported wheel source package-dir mapping")
+        installed_data = {
+            prefix.removesuffix(".dist-info/") + ".data/data/" + name: path
+            for name, path in data_file_sources(source_dir, settings).items()
+        }
         payload = {name for name in hashes if not name.startswith(prefix)}
-        if {name for name in payload if name.endswith(".py")} != required_python:
+        if {name for name in payload - installed_data.keys() if name.endswith(".py")} != required_python:
             raise PromotionArtifactError("wheel Python member set differs from candidate source")
         for name in payload:
-            path = injected.get(name, base / name)
+            path = installed_data.get(name, injected.get(name, base / name))
             if (
                 not path.resolve().is_relative_to(
-                    candidate_root.resolve() if name in injected else source_dir.resolve()
+                    candidate_root.resolve()
+                    if name in injected and candidate_root is not None else source_dir.resolve()
                 )
                 or not path.is_file() or path.is_symlink() or _digest(path) != hashes[name]
             ):
                 raise PromotionArtifactError(f"{name}: wheel payload differs from candidate source")
         package_data = settings.get("package-data", {})
-        if not isinstance(package_data, dict) or settings.get("exclude-package-data") or settings.get("data-files"):
+        if not isinstance(package_data, dict) or settings.get("exclude-package-data"):
             raise PromotionArtifactError("invalid wheel package-data configuration")
         required_data: set[str] = {name for name in injected if not name.endswith(".py")}
         for package, patterns in package_data.items():
@@ -500,39 +518,11 @@ def validate_wheel_sources(
                 path.relative_to(base).as_posix()
                 for root in roots for pattern in patterns for path in root.glob(pattern) if path.is_file()
             })
-        if payload != required_python | required_data:
+        if payload != required_python | required_data | installed_data.keys():
             raise PromotionArtifactError("wheel payload set differs from declared candidate members")
         project = data["project"]
         validate_runtime_metadata(project, metadata)
-        entries = project.get("entry-points", {})
-        if not isinstance(entries, dict) or any(
-            not isinstance(group, str) or not isinstance(values, dict) or any(
-                not isinstance(name, str) or not name or not isinstance(value, str) or not value
-                for name, value in values.items()
-            ) for group, values in entries.items()
-        ):
-            raise PromotionArtifactError("invalid candidate entry-point declarations")
-        expected_entries = dict(entries)
-        for field, group in (("scripts", "console_scripts"), ("gui-scripts", "gui_scripts")):
-            values = project.get(field, {})
-            if not isinstance(values, dict) or any(
-                not isinstance(name, str) or not name or not isinstance(value, str) or not value
-                for name, value in values.items()
-            ):
-                raise PromotionArtifactError("invalid candidate script declarations")
-            if values:
-                if group in expected_entries:
-                    raise PromotionArtifactError("ambiguous candidate entry-point group")
-                expected_entries[group] = values
-        entries_name = prefix + "entry_points.txt"
-        actual_entries = {}
-        if entries_name in hashes:
-            parser = configparser.ConfigParser(interpolation=None)
-            parser.optionxform = str
-            parser.read_string(bundle.read(entries_name).decode("utf-8"))
-            actual_entries = {section: dict(parser[section]) for section in parser.sections()}
-        if actual_entries != expected_entries:
-            raise PromotionArtifactError("wheel entry points differ from candidate source")
+        validate_entry_points(project, bundle, hashes, prefix)
         top_name = prefix + "top_level.txt"
         if top_name in hashes:
             expected_top = {name.split("/")[0].removesuffix(".py") for name in required_python}
@@ -564,12 +554,14 @@ def validate_wheel_sources(
         raise PromotionArtifactError(f"cannot bind wheel payload to candidate source: {exc}") from exc
 
 
-def validate_manifest(manifest: dict) -> None:
+def validate_manifest(manifest: dict[str, Any]) -> None:
     """Reuse trusted builder identity rules without resolving or running a toolchain."""
     from build_python_artifacts import (
         _assert_version_corresponds, overall_identity_tags, parse_wheel_filename,
     )
-    from build_toolchain_lock import ArtifactBuildError, ToolchainLock, _hash_fields
+    import build_toolchain_lock
+    from build_toolchain_lock import ToolchainLock, _hash_fields
+    ArtifactBuildError = cast(type[Exception], getattr(build_toolchain_lock, "ArtifactBuildError"))
 
     try:
         payload_hash = manifest.get("payload_hash")
@@ -647,7 +639,8 @@ def validate_manifest(manifest: dict) -> None:
                     label=label,
                 )
             source_matches = (
-                any(item["source"] == source and item["role"] == wheel["role"] for item in selection["projects"])
+                any(item["source"] == source and item["role"] == wheel["role"]
+                    for item in cast(dict[str, Any], selection)["projects"])
                 and isinstance(source, str) and (
                     source in COMPONENTS.values() if wheel["role"] == "standalone" else
                     len(source.split("/")) == 2 and source.startswith(
@@ -688,16 +681,19 @@ def validate_manifest(manifest: dict) -> None:
         raise PromotionArtifactError(f"invalid manifest provenance: {exc}") from exc
 
 
-def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: int = 1) -> None:
+def validate_source_binding(
+    manifest: dict[str, Any], root: Path, *, core_hash_workers: int = 1,
+) -> None:
     """Hash the trusted-discovered closure in candidate data, never import its code."""
     import promote_release as promotion
-    from build_toolchain_lock import ArtifactBuildError
+    import build_toolchain_lock
+    ArtifactBuildError = cast(type[Exception], getattr(build_toolchain_lock, "ArtifactBuildError"))
 
     if type(core_hash_workers) is not int or not 1 <= core_hash_workers <= 4:
         raise PromotionArtifactError("core source binding requires between one and four hash workers")
-    builder = promotion._load_module(
+    builder = cast(Any, promotion._load_module(
         Path(__file__).parent / "build_python_artifacts.py", "trusted_artifact_sources",
-    )
+    ))
     builder.REPO = root
     builder.PLUGINS_DIR = root / "plugins"
     builder.LIBS_DIR = root / "libs"
@@ -715,10 +711,10 @@ def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: in
             plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir, skip_test_runs=False) is not None
         ):
             raise PromotionArtifactError("artifact source tree contains a symlink")
-        resources = ()
+        resources: tuple[Path, ...] = ()
         if core:
-            from core_python_artifacts import payload_hash, source_closure
-            closure = source_closure(root, builder)
+            from core_python_artifacts import payload_hash, source_closure as core_source_closure
+            closure = core_source_closure(root, builder)
             directories = [directory for _role, directory in closure.projects]
             resources = closure.resources
             if (
@@ -730,8 +726,8 @@ def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: in
             ):
                 raise PromotionArtifactError("core manifest selection differs from candidate")
         elif standalone:
-            from standalone_python_artifacts import source_closure
-            plugin_dir, libs, resources = source_closure(manifest["component"], root, builder)
+            from standalone_python_artifacts import source_closure as standalone_source_closure
+            plugin_dir, libs, resources = standalone_source_closure(manifest["component"], root, builder)
             if manifest.get("build_resources") != [
                 path.relative_to(root).as_posix() for path in resources
             ]:
@@ -781,7 +777,7 @@ def validate_composed_artifacts(
     directory: Path, *, scratch: Path, content_tree: str,
     dev_head: str, main_before: str,
     source_policy: str | None = None, min_age_days: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Validate a composed index through its canonical checkout representation."""
     if not isinstance(content_tree, str) or not _SHA.fullmatch(content_tree):
         raise PromotionArtifactError("invalid composed source tree identity")
@@ -808,7 +804,7 @@ def validate_composed_artifacts(
 def validate_candidate_artifacts(
     directory: Path, *, repo: Path, dev_head: str, main_before: str,
     source_policy: str | None = None, min_age_days: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Recompose with trusted tools; candidate checkouts supply only source data."""
     import promote_release as promotion
 
@@ -841,7 +837,7 @@ def validate_artifacts(
     projects: dict[str, str] | None = None,
     candidate_root: Path | None = None,
     source_policy: str | None = None, min_age_days: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Validate transfer and exact composition binding, not signer authenticity."""
     try:
         index_path = directory / INDEX_NAME
@@ -959,7 +955,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
             return 1
         return 0
-    from build_toolchain_lock import ArtifactBuildError
+    import build_toolchain_lock
+    ArtifactBuildError = cast(type[Exception], getattr(build_toolchain_lock, "ArtifactBuildError"))
     try:
         build_candidate_bundles(
             args.repo, args.out_dir,

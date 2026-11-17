@@ -5,15 +5,59 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections.abc import Callable
+from functools import cache
 import json
 import os
 import platform
-import shutil
 import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+if TYPE_CHECKING:
+    from agent_index.configuration_layers import NativeConfiguration
+    from config_schema import ConfigError as ConfigError, _validate_config as _validate_config
+else:
+    _schema_path = Path(__file__).with_name("config_schema.py")
+    _schema = ModuleType(__name__ + "_schema")
+    _schema.__file__ = str(_schema_path)
+    exec(compile(_schema_path.read_bytes(), str(_schema_path), "exec"), _schema.__dict__)
+    ConfigError = _schema.ConfigError
+    _validate_config = _schema._validate_config
+
+
+class _LayerAdapter(Protocol):
+    def load_repository_candidate(
+        self, root: Path, native: NativeConfiguration, *, knowledge_root: Path | None = None,
+        compose_preferences: bool = True,
+    ) -> tuple[str, Path | None, dict[str, Any] | None]: ...
+
+    def knowledge_root_from_owner(self, root: Path) -> tuple[str, Path | None]: ...
+
+    def external_configuration_result(
+        self, root: Path, external_path: Path, native: NativeConfiguration,
+    ) -> dict[str, Any]: ...
+
+
+class _CommandAdapter(Protocol):
+    def path_command(self, name: str) -> str | None: ...
+    def run_git(self, git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None: ...
+
+
+class _CommandArguments(Protocol):
+    def __call__(self, command: str, *arguments: str) -> list[str]: ...
+
+
+class _ProbeSupport(Protocol):
+    def _readiness_support(self) -> ModuleType: ...
+    def refuse_unqualified(self, result: subprocess.CompletedProcess[str]) -> None: ...
+    def run_state_root(
+        self, command: str, environment: dict[str, str], *, cwd: Path | None,
+        project: str | None, argv: _CommandArguments,
+    ) -> subprocess.CompletedProcess[str] | None: ...
 
 CONFIG_FILENAME = "config.yaml"
 BASE_CONFIG_RELATIVE = Path(".agent-index") / CONFIG_FILENAME
@@ -29,10 +73,6 @@ WORKTREES_COMMAND_ENV = "AGENT_WORKTREES_COMMAND"
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_FORWARDED_CONFIG_BYTES = 16 * 1024
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
-
-
-class ConfigError(ValueError):
-    """The candidate configuration is present but unusable."""
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -267,8 +307,8 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
             if not remainder:
                 if index >= len(tokens) or tokens[index][0] <= indent:
                     raise ConfigError("list item is missing a value")
-                item, index = parse_block(index, tokens[index][0])
-                result.append(item)
+                nested_item, index = parse_block(index, tokens[index][0])
+                result.append(nested_item)
                 continue
             if ":" not in remainder:
                 result.append(_parse_scalar(remainder))
@@ -329,14 +369,17 @@ def _yaml_text_mapping(text: str) -> tuple[str, dict[str, Any] | None]:
     class UniqueKeyLoader(yaml.SafeLoader):
         pass
 
-    def construct_mapping(loader, node, deep=False):
+    def construct_mapping(
+        loader: yaml.SafeLoader, node: yaml.Node, deep: bool = False,
+    ) -> dict[Any, Any]:
         if not isinstance(node, yaml.MappingNode):
             raise ConstructorError(
                 None, None, "expected a mapping node", node.start_mark
             )
         mapping: dict[Any, Any] = {}
+        construct_object = cast(Callable[[yaml.Node, bool], object], loader.construct_object)
         for key_node, value_node in node.value:
-            key = loader.construct_object(key_node, deep=deep)
+            key = construct_object(key_node, deep)
             try:
                 duplicate = key in mapping
             except TypeError as exc:
@@ -353,7 +396,7 @@ def _yaml_text_mapping(text: str) -> tuple[str, dict[str, Any] | None]:
                     f"found duplicate key {key!r}",
                     key_node.start_mark,
                 )
-            mapping[key] = loader.construct_object(value_node, deep=deep)
+            mapping[key] = construct_object(value_node, deep)
         return mapping
 
     UniqueKeyLoader.add_constructor(
@@ -367,102 +410,6 @@ def _yaml_text_mapping(text: str) -> tuple[str, dict[str, Any] | None]:
     except Exception:
         return "invalid", None
     return ("ready", value) if isinstance(value, dict) else ("invalid", None)
-
-
-def _text(value: Any, field: str, *, required: bool = False) -> str | None:
-    if value is None and not required:
-        return None
-    if not isinstance(value, str):
-        raise ConfigError(f"{field} must be a string")
-    result = value.strip()
-    if not result or len(result) > 2048 or any(ord(char) < 32 for char in result):
-        raise ConfigError(f"{field} must be a safe non-empty string")
-    return result
-
-
-def _normalize_indexer(value: Any, field: str) -> dict[str, str]:
-    if not isinstance(value, dict):
-        raise ConfigError(f"{field} must be a mapping")
-    item = {"machine": _text(value.get("machine"), f"{field}.machine", required=True)}
-    for key in ("ssh", "endpoint", "shell"):
-        if key in value:
-            item[key] = _text(value.get(key), f"{field}.{key}", required=True)
-    ssh = item.get("ssh")
-    if ssh is not None and (
-        ssh.startswith("-")
-        or any(char.isspace() for char in ssh)
-        or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@:-" for char in ssh)
-    ):
-        raise ConfigError(
-            f"{field}.ssh must be a safe SSH host or configuration alias"
-        )
-    if item.get("shell") not in (None, "bash", "pwsh"):
-        raise ConfigError(f"{field}.shell must be bash or pwsh")
-    return {key: value for key, value in item.items() if value is not None}
-
-
-def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
-    indexers: list[dict[str, str]] = []
-    plural_present = "indexers" in data
-    singular_present = "indexer" in data
-    if plural_present:
-        raw = data["indexers"]
-        if not isinstance(raw, list) or not raw:
-            raise ConfigError("indexers must be a non-empty list")
-        indexers = [
-            _normalize_indexer(item, f"indexers[{index}]")
-            for index, item in enumerate(raw)
-        ]
-        machines = [item["machine"].casefold() for item in indexers]
-        if len(machines) != len(set(machines)):
-            raise ConfigError("indexers contains duplicate machine identities")
-    if singular_present:
-        singular = _normalize_indexer(data["indexer"], "indexer")
-        if indexers and singular != indexers[0]:
-            raise ConfigError("indexer conflicts with the primary indexers entry")
-        if not indexers:
-            indexers = [singular]
-
-    sources: list[dict[str, str]] = []
-    if "corpus" in data:
-        corpus = data["corpus"]
-        if not isinstance(corpus, dict):
-            raise ConfigError("corpus must be a mapping")
-        if "sources" in corpus:
-            raw_sources = corpus["sources"]
-            if not isinstance(raw_sources, list):
-                raise ConfigError("corpus.sources must be a list")
-            names: set[str] = set()
-            for index, raw in enumerate(raw_sources):
-                if not isinstance(raw, dict):
-                    raise ConfigError(f"corpus.sources[{index}] must be a mapping")
-                source = {
-                    "name": _text(
-                        raw.get("name"),
-                        f"corpus.sources[{index}].name",
-                        required=True,
-                    )
-                }
-                for key in ("repo", "trust_domain", "type"):
-                    if key in raw:
-                        source[key] = _text(
-                            raw.get(key),
-                            f"corpus.sources[{index}].{key}",
-                            required=True,
-                        )
-                folded = source["name"].casefold()
-                if folded in names:
-                    raise ConfigError("corpus.sources contains duplicate names")
-                names.add(folded)
-                sources.append(
-                    {key: value for key, value in source.items() if value is not None}
-                )
-
-    if not indexers and not sources:
-        raise ConfigError(
-            "configuration must declare indexer/indexers or corpus.sources"
-        )
-    return {"indexers": indexers, "sources": sources}
 
 
 def _load_candidate(path: Path, root: Path) -> tuple[str, dict[str, Any] | None]:
@@ -603,11 +550,12 @@ def _load_repo_candidate(
     root: Path, *, knowledge_root: Path | None = None, compose_preferences: bool = True,
 ) -> tuple[str, Path | None, dict[str, Any] | None]:
     return _layer_adapter().load_repository_candidate(
-        root, globals(), knowledge_root=knowledge_root, compose_preferences=compose_preferences,
+        root, cast("NativeConfiguration", globals()),
+        knowledge_root=knowledge_root, compose_preferences=compose_preferences,
     )
 
 
-def _layer_adapter():
+def _layer_adapter() -> _LayerAdapter:
     bundled = Path(__file__).parent / "configuration-layers" / "src"
     if bundled.is_dir():
         sys.path.insert(0, str(bundled))
@@ -617,7 +565,7 @@ def _layer_adapter():
     return configuration_layers
 
 
-def _parse_yaml_for_layers(text):
+def _parse_yaml_for_layers(text: str) -> dict[str, Any]:
     """Use the same strict native parser on every projected preference source."""
     state, value = _yaml_text_mapping(text)
     if state != "ready" or value is None:
@@ -625,33 +573,30 @@ def _parse_yaml_for_layers(text):
     return value
 
 
-def _configuration_knowledge_root(root):
+def _configuration_knowledge_root(root: Path) -> tuple[str, Path | None]:
     """Read the existing configuration owner, never a provisioning front door."""
     return _layer_adapter().knowledge_root_from_owner(root)
 
 
+@cache
+def _command_adapter() -> _CommandAdapter:
+    import importlib.util
+
+    path = Path(__file__).with_name("config_commands.py")
+    spec = importlib.util.spec_from_file_location("_index_config_commands", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index configuration commands are unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return cast(_CommandAdapter, module)
+
+
 def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            # `-c safe.bareRepository=all` only widens what `-C start` itself
-            # is explicitly allowed to inspect (an already-known, registered
-            # repository path from this machine's own repository registry --
-            # never an ambient/inherited cwd), so it doesn't reopen the
-            # ambient-bare-repo attack surface that setting guards against.
-            [git, "-c", "safe.bareRepository=all", "-C", str(start), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return _command_adapter().run_git(git, start, *args)
 
 
 def _git_root(start: Path) -> Path | None:
-    git = shutil.which("git")
+    git = _command_adapter().path_command("git")
     if not git:
         return None
     result = _run_git(git, start, "rev-parse", "--show-toplevel")
@@ -705,7 +650,7 @@ def _worktrees_command() -> str | None:
     if explicit is not None:
         value = explicit.strip()
         return value or None
-    return shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+    return _command_adapter().path_command("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
 
 
 def _load_peer_launch() -> Any:
@@ -734,11 +679,28 @@ def _validate_index_owner_or_refuse(raw_context: str) -> dict[str, Any]:
     peer_launch = _load_peer_launch()
     plugin_root = Path(__file__).resolve().parents[1]
     try:
-        return peer_launch.validate_owner("agent-index", plugin_root, raw_context)
+        return cast(dict[str, Any], peer_launch.validate_owner("agent-index", plugin_root, raw_context))
     except (OSError, ValueError, ImportError) as error:
         raise peer_launch.ContextRefused(
             f"agent-index installation context refused: {error}"
         ) from error
+
+
+@cache
+def _probe_support() -> _ProbeSupport:
+    import importlib.util
+
+    path = Path(__file__).with_name("resolve_effective_probe.py")
+    spec = importlib.util.spec_from_file_location("_index_probe_support", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("agent-index probe boundary is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return cast(_ProbeSupport, module)
+
+
+def _readiness_support() -> ModuleType:
+    return _probe_support()._readiness_support()
 
 
 def _run_state_root_same_cell(
@@ -777,6 +739,7 @@ def _run_state_root_same_cell(
             f"Same-cell worktrees state-root invocation failed: {error}"
         ) from error
     if result.returncode == 126:
+        _probe_support().refuse_unqualified(result)
         raise peer_launch.ContextRefused(
             result.stderr.strip() or "Same-cell worktrees context refused"
         )
@@ -785,7 +748,7 @@ def _run_state_root_same_cell(
 
 def _worktrees_argv(command: str, *arguments: str) -> list[str]:
     if os.name == "nt" and Path(command).suffix.casefold() == ".ps1":
-        shell = shutil.which("pwsh") or str(
+        shell = _command_adapter().path_command("pwsh") or str(
             Path(os.environ.get("SystemRoot", r"C:\Windows"))
             / "System32"
             / "WindowsPowerShell"
@@ -844,33 +807,14 @@ def _project_name_for_root(root: Path) -> str | None:
 def _run_state_root(
     command: str, environment: dict[str, str], *, cwd: Path | None, project: str | None
 ) -> subprocess.CompletedProcess[str] | None:
-    arguments = ("state-root", "--json") if project is None else (
-        "--project", project, "state-root", "--json",
+    return _probe_support().run_state_root(
+        command, environment, cwd=cwd, project=project, argv=_worktrees_argv,
     )
-    try:
-        return subprocess.run(
-            _worktrees_argv(command, *arguments),
-            cwd=str(cwd) if cwd is not None else None,
-            env=environment,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
-            # prefers .cmd over .ps1 on Windows), which Windows must interpret
-            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every runtime-resolution probe.
-            creationflags=(0x08000000 if os.name == "nt" else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def _external_state_root_runner(
     root: Path,
-) -> tuple[Any, None] | tuple[None, tuple[str, Path | None]]:
+) -> tuple[Callable[[Path | None, str | None], subprocess.CompletedProcess[str] | None], None] | tuple[None, tuple[str, Path | None]]:
     """Choose the same-cell peer boundary or the legacy ambient-PATH runner.
 
     Under an explicit installation context (and no test-only
@@ -887,10 +831,10 @@ def _external_state_root_runner(
         if not peer_root.exists() and not peer_root.is_symlink():
             return None, ("unavailable", None)
 
-        def run(cwd: Path | None, project: str | None) -> subprocess.CompletedProcess[str] | None:
+        def run_legacy(cwd: Path | None, project: str | None) -> subprocess.CompletedProcess[str] | None:
             return _run_state_root_same_cell(own, raw_context, cwd=cwd, project=project)
 
-        return run, None
+        return run_legacy, None
     command = _worktrees_command()
     if not command:
         return None, ("unavailable", None)
@@ -1108,7 +1052,9 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         and external_path is not None
         and external is not None
     ):
-        return _layer_adapter().external_configuration_result(root, external_path, globals())
+        return _layer_adapter().external_configuration_result(
+            root, external_path, cast("NativeConfiguration", globals()),
+        )
     return _result(
         opted_in=False,
         source="external-state-root",

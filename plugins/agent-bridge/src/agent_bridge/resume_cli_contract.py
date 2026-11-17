@@ -64,7 +64,10 @@ def cli_contracts() -> dict[str, Any]:
             },
             "agent-bridge.status": {
                 "version": 1,
-                "capabilities": ["health-json", "exact-session-worktree-writer", "retained-native-recovery"],
+                "capabilities": [
+                    "health-json", "exact-session-worktree-writer", "retained-native-recovery",
+                    "exact-session-absence",
+                ],
             },
             "agent-bridge.resume": {
                 "version": 1,

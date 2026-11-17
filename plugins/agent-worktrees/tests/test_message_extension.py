@@ -8,7 +8,7 @@ import subprocess
 from agent_procutil import no_window_kwargs
 
 
-def test_root_messages_persist_without_intent_and_ignore_usage_or_delegate_activity(tmp_path):
+def test_root_messages_persist_without_intent_and_ignore_usage_or_delegate_activity(tmp_path: Path) -> None:
     node = shutil.which("node")
     assert node, "message extension fixture requires Node"
     session = tmp_path / ".copilot" / "session-state" / "fixture-session"
@@ -28,10 +28,23 @@ const synthetic = values => new vm.SyntheticModule(Object.keys(values), function
 });
 const module = new vm.SourceTextModule(readFileSync(process.argv[1], "utf8"), {
   initializeImportMeta: meta => {meta.url = pathToFileURL(process.argv[1]).href;},
+  importModuleDynamically: async name => {
+    assert.match(name, /\/sdk-compat\.mjs$/);
+    const sdk = synthetic({
+      loadExtensionSdk: async () => ({
+        approveAll: () => true,
+        joinSession: async () => ({sessionId: "fixture-session", on: (key, fn) => handlers.set(key, fn),
+          send: async message => {prompts.push(message);}}),
+      }),
+    });
+    await sdk.link(() => assert.fail("synthetic SDK has no dependencies"));
+    await sdk.evaluate();
+    return sdk;
+  },
 });
 await module.link(async name => {
-  if (name === "@github/copilot-sdk") return synthetic({approveAll: () => true});
-  if (name === "@github/copilot-sdk/extension") return synthetic({
+  if (name === "@microsoft/copilot-sdk") return synthetic({approveAll: () => true});
+  if (name === "@microsoft/copilot-sdk/extension") return synthetic({
     joinSession: async () => ({sessionId: "fixture-session", on: (key, fn) => handlers.set(key, fn),
       send: async message => {prompts.push(message);}}),
   });

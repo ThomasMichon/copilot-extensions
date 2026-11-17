@@ -1,19 +1,29 @@
 import argparse
+from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 import yaml
-from configuration_layers import ConfigurationError
+from configuration_layers import ConfigurationError, LayerOwner
 
 from agent_ssh import configuration, mesh
 
 
-def write(root, values, *, local=False):
+class Report(TypedDict):
+    schema: str
+    version: int
+    context: dict[str, str]
+
+
+def write(root: Path, values: object, *, local: bool = False) -> None:
     path = root / ("config.yaml" if local else ".copilot-extensions/agent-ssh/config.yaml")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(values), encoding="utf-8")
 
 
-def setup(tmp_path, monkeypatch, binding="bound"):
+def setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binding: str = "bound",
+) -> tuple[Path, Path, Path, Path, Path]:
     base, knowledge, machine, local = (tmp_path / part for part in ("base", "knowledge", "machine", "local"))
     for root in (base, knowledge, machine, local):
         root.mkdir()
@@ -37,7 +47,9 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     return path, base, knowledge, machine, local
 
 
-def test_native_mesh_consumer_all_tiers_preserves_admission(tmp_path, monkeypatch):
+def test_native_mesh_consumer_all_tiers_preserves_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
     write(base, {"machines": {"logical": {"description": "base", "capabilities": ["base"]}}})
     write(knowledge, {"machines": {"logical": {"description": "knowledge", "capabilities": ["knowledge"]}}})
@@ -48,40 +60,52 @@ def test_native_mesh_consumer_all_tiers_preserves_admission(tmp_path, monkeypatc
     assert result.machines[0].capabilities == ["knowledge"]
     assert result.machines[0].ssh_ready is True
     assert result.machines[0].environments[0].alias == "native-ssh"
-    provenance = result.configuration_provenance["/machines/logical/description"]
+    provenance = cast(
+        dict[str, LayerOwner], getattr(result, "configuration_provenance"),
+    )["/machines/logical/description"]
     assert provenance["installation_cell"] == "cell"
     assert provenance["source"]["root"] == str(local)
 
 
-def test_explicit_native_source_does_not_graft(tmp_path, monkeypatch):
+def test_explicit_native_source_does_not_graft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
     write(knowledge, {"machines": {"logical": {"description": "knowledge"}}})
     assert mesh.load_mesh(path, strict=True).machines[0].description == "native"
 
 
-def test_unbound_and_unresolved_context_are_distinct(tmp_path, monkeypatch):
+def test_unbound_and_unresolved_context_are_distinct(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch, "unbound")
     write(knowledge, {"machines": {"logical": {"description": "excluded"}}})
     assert mesh.load_mesh(path, strict=True, preferences=True).machines[0].description == "native"
-    report, runtime = configuration.owner_report(base)
-    report["context"]["binding"] = "unresolved"
+    selected = configuration.owner_report(base)
+    assert selected is not None
+    report, runtime = selected
+    cast(dict[str, str], report["context"])["binding"] = "unresolved"
     with pytest.raises(ConfigurationError, match="unresolved"):
         mesh.load_mesh(path, strict=True, preferences=True)
 
 
 @pytest.mark.parametrize("protected", ["ssh", "hostname", "role", "dtssh", "authority"])
-def test_preferences_refuse_protected_native_fields(tmp_path, monkeypatch, protected):
+def test_preferences_refuse_protected_native_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, protected: str,
+) -> None:
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
     write(knowledge, {"machines": {"logical": {protected: {}}}})
     with pytest.raises(ValueError, match="topology or transport"):
         mesh.load_mesh(path, strict=True, preferences=True)
 
 
-def test_default_cli_producer_requests_preferences_but_explicit_path_does_not(tmp_path, monkeypatch, capsys):
+def test_default_cli_producer_requests_preferences_but_explicit_path_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_ssh import __main__ as cli
 
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
-    monkeypatch.setattr(cli.fragment_registry.FragmentRegistry, "refresh", lambda self: None)
+    monkeypatch.setattr("agent_ssh.__main__.fragment_registry.FragmentRegistry.refresh", lambda self: None)
     monkeypatch.setattr(mesh, "find_machines_file", lambda: path)
     write(knowledge, {"machines": {"logical": {"description": "knowledge"}}})
     args = argparse.Namespace(path=None, config_d=tmp_path / "fragments", json=True, summary=False)
@@ -92,8 +116,9 @@ def test_default_cli_producer_requests_preferences_but_explicit_path_does_not(tm
     assert '"description": "native"' in capsys.readouterr().out
 
 
-def test_actual_absent_owner_preserves_unbound_mesh_without_process(tmp_path, monkeypatch):
-    import configuration_context
+def test_actual_absent_owner_preserves_unbound_mesh_without_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import subprocess
 
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
@@ -102,18 +127,20 @@ def test_actual_absent_owner_preserves_unbound_mesh_without_process(tmp_path, mo
     path.write_text("machines:\n  standalone:\n    description: native\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    def no_process(*args, **kwargs):
-        if args[0][0] == "git":
-            return subprocess.CompletedProcess(args[0], 0, str(tmp_path), "")
+    def no_process(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[0] == "git":
+            return subprocess.CompletedProcess(argv, 0, str(tmp_path), "")
         pytest.fail("standalone mesh presentation must not bootstrap an optional owner")
 
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
     result = mesh.load_mesh(path, strict=True, preferences=True)
     assert result.machines[0].description == "native"
     assert sorted(item.name for item in tmp_path.iterdir()) == ["machines.yaml"]
 
 
-def test_native_unready_legacy_owner_preserves_mesh_without_process(tmp_path, monkeypatch):
+def test_native_unready_legacy_owner_preserves_mesh_without_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
     import shutil
     from pathlib import Path
@@ -144,7 +171,9 @@ def test_native_unready_legacy_owner_preserves_mesh_without_process(tmp_path, mo
 
 
 @pytest.mark.parametrize("outcome", ["matching", "repository-mismatch", "cell-mismatch", "refused", "cell-owned"])
-def test_deployed_legacy_resolver_requalifies_delivered_presentation(tmp_path, monkeypatch, outcome):
+def test_deployed_legacy_resolver_requalifies_delivered_presentation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     import copy
     import json
     import os
@@ -169,7 +198,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_presentation(tmp_path, m
     (python.parent.parent / ".install-complete.json").write_text(
         '{"version": "1.2.3", "completed_at": "2026-01-01", "pid": 0}',
     )
-    report = {"schema": "agent-worktrees.configuration", "version": 1, "context": {
+    report: Report = {"schema": "agent-worktrees.configuration", "version": 1, "context": {
         "repository_id": "selected-repository", "execution_machine": "worker",
         "installation_cell": "selected-cell", "binding": "unbound", "base_root": str(tmp_path),
     }}
@@ -181,7 +210,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_presentation(tmp_path, m
     actor = tmp_path / "owner.py"
     actor.write_text(
         "import json, os, sys\n"
-        "assert sys.argv[1:] == ['-I', '-X', 'utf8', '-B', '-m', 'agent_worktrees', "
+        "assert sys.argv[1:] == ['-I', '-B', '-X', 'utf8', '-m', 'agent_worktrees', "
         "'state-root', '--configuration', '--json']\n"
         "assert not any(key in os.environ for key in "
         "['AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'PYTHONPATH', 'GITHUB_TOKEN'])\n"
@@ -210,21 +239,27 @@ def test_deployed_legacy_resolver_requalifies_delivered_presentation(tmp_path, m
 
 @pytest.mark.parametrize("implicit", [False, True])
 @pytest.mark.parametrize("matching_cell", [False, True])
-def test_real_mesh_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+def test_real_mesh_loader_checks_delivered_cell_against_actual_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, implicit: bool, matching_cell: bool,
+) -> None:
     import json
 
     real_report = configuration.owner_report
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
-    report, machine_root = configuration.owner_report(base)
+    selected = configuration.owner_report(base)
+    assert selected is not None
+    report, machine_root = selected
     monkeypatch.setattr(configuration, "owner_report", real_report)
     write(knowledge, {"machines": {"logical": {"description": "knowledge"}}})
     cell = tmp_path / "marketplaces" / "current-cell"
     own_root = cell / "plugins" / "agent-ssh"
     own_root.mkdir(parents=True)
-    report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
-    calls = []
+    cast(dict[str, str], report["context"])["installation_cell"] = str(
+        cell if matching_cell else tmp_path / "foreign-cell",
+    )
+    calls: list[tuple[str, Path, str]] = []
 
-    def validate(owner, root, raw):
+    def validate(owner: str, root: Path, raw: str) -> dict[str, str]:
         calls.append((owner, root, raw))
         assert root == own_root
         assert raw == str(own_root / "install.json")
@@ -248,8 +283,8 @@ def test_real_mesh_loader_checks_delivered_cell_against_actual_owner(tmp_path, m
 @pytest.mark.parametrize("folder", [".agent-worktrees", "config", ".github"])
 @pytest.mark.parametrize("git_root", [False, True])
 def test_native_mesh_loader_keeps_repository_root_for_nested_conventional_source(
-    tmp_path, monkeypatch, folder, git_root,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, folder: str, git_root: bool,
+) -> None:
     import json
     import subprocess
 
@@ -276,23 +311,26 @@ def test_native_mesh_loader_keeps_repository_root_for_nested_conventional_source
     })
     monkeypatch.chdir(path.parent if git_root else base)
 
-    def selected_root(argv, **kwargs):
+    def selected_root(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert argv[0] == "git"
         return subprocess.CompletedProcess(argv, 0 if git_root else 1, str(base), "")
 
-    monkeypatch.setattr(mesh.subprocess, "run", selected_root)
+    monkeypatch.setattr(subprocess, "run", selected_root)
     result = mesh.load_mesh(path, strict=True, preferences=True)
     assert result.machines[0].description == "knowledge"
-    assert result.configuration_provenance["/machines/worker/description"]["source"]["root"] == str(knowledge)
+    provenance = cast(dict[str, LayerOwner], getattr(result, "configuration_provenance"))
+    assert provenance["/machines/worker/description"]["source"]["root"] == str(knowledge)
 
-    def no_selection(*args, **kwargs):
+    def no_selection(*args: object, **kwargs: object) -> None:
         pytest.fail("an explicit source must not trigger repository preference selection")
 
     monkeypatch.setattr(mesh, "_find_machines_source", no_selection)
     assert mesh.load_mesh(path, strict=True).machines[0].description == "native"
 
 
-def test_preference_loader_refuses_an_unrelated_selection_root(tmp_path, monkeypatch):
+def test_preference_loader_refuses_an_unrelated_selection_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import subprocess
 
     selected, unrelated = tmp_path / "selected", tmp_path / "unrelated"
@@ -302,7 +340,7 @@ def test_preference_loader_refuses_an_unrelated_selection_root(tmp_path, monkeyp
     path.parent.mkdir()
     path.write_text("machines: {worker: {description: native}}\n", encoding="utf-8")
     monkeypatch.chdir(unrelated)
-    monkeypatch.setattr(mesh.subprocess, "run", lambda argv, **kwargs:
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs:
                         subprocess.CompletedProcess(argv, 0, str(unrelated), ""))
     with pytest.raises(ValueError, match="selected topology repository root"):
         mesh.load_mesh(path, strict=True, preferences=True)
@@ -314,7 +352,9 @@ def test_preference_loader_refuses_an_unrelated_selection_root(tmp_path, monkeyp
     (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
     (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
 ])
-def test_optional_older_peer_preserves_native_mesh_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+def test_optional_older_peer_preserves_native_mesh_or_fails_real_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, diagnostic: str,
+) -> None:
     import subprocess
     real_report = configuration.owner_report
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
@@ -328,9 +368,11 @@ def test_optional_older_peer_preserves_native_mesh_or_fails_real_refusal(tmp_pat
     monkeypatch.setattr(configuration._worktrees, "validate_owner", lambda *args:
                         {"cellRoot": str(cell), "pluginRoot": str(own)})
     monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(
+        argv: list[str], **kwargs: object,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         if argv[0] == "git":
             return subprocess.CompletedProcess(argv, 0, str(base), "")
         assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
@@ -346,11 +388,15 @@ def test_optional_older_peer_preserves_native_mesh_or_fails_real_refusal(tmp_pat
     assert len(calls) == 1
 
 
-def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import json
     real_report = configuration.owner_report
     path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
-    report, machine_root = configuration.owner_report(base)
+    selected = configuration.owner_report(base)
+    assert selected is not None
+    report, machine_root = selected
     monkeypatch.setattr(configuration, "owner_report", real_report)
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_RT_ROOT"):
         monkeypatch.delenv(name, raising=False)

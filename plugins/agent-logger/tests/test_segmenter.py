@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import json
 import tracemalloc
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import agent_logger.segmenter.collate as collate
+import agent_logger.segmenter.digest as digest
 import agent_logger.segmenter.ramp_up as ramp_up
 import agent_logger.segmenter.read_digest as read_digest
 
@@ -26,18 +29,22 @@ def test_segmenter_mains_callable() -> None:
     assert callable(prepare_log.main)
 
 
-def test_collate_default_digest_root_honors_home(monkeypatch, tmp_path: Path) -> None:
+def test_collate_default_digest_root_honors_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
     root = collate._default_digest_root()
     assert Path(root) == tmp_path / "session-digests"
 
 
-def test_persistent_digest_root_honors_home(monkeypatch, tmp_path: Path) -> None:
+def test_persistent_digest_root_honors_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
     assert read_digest._persistent_digest_root() == tmp_path / "session-digests"
 
 
-def test_remote_store_root_optional(monkeypatch, tmp_path: Path) -> None:
+def test_remote_store_root_optional(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("AGENT_LOGGER_REMOTE_STORE", raising=False)
     assert read_digest._remote_store_root() is None
     monkeypatch.setenv("AGENT_LOGGER_REMOTE_STORE", str(tmp_path))
@@ -91,7 +98,9 @@ _SESSION_START = {
 }
 
 
-def _turn(user: str, ts: str, *messages: str, tool_calls: list | None = None) -> dict:
+def _turn(
+    user: str, ts: str, *messages: str, tool_calls: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {"user_message": user, "timestamp": _ts(ts),
             "assistant_messages": list(messages), "tool_calls": tool_calls or []}
 
@@ -124,7 +133,9 @@ def _write_session(session_dir: Path, events: list[object]) -> Path:
     ],
     ids=["all", "cutoff", "since", "window", "empty"],
 )
-def test_parse_events_turns(tmp_path: Path, cutoff, since, expected) -> None:
+def test_parse_events_turns(
+    tmp_path: Path, cutoff: str | None, since: str | None, expected: list[dict[str, Any]],
+) -> None:
     session_dir = _write_session(tmp_path / "s", _SESSION_EVENTS)
 
     parsed = collate.parse_events(session_dir, cutoff, 20, since=since)
@@ -180,7 +191,14 @@ def test_write_segments_streams_identically_to_a_turn_list(tmp_path: Path, segme
     assert "- **Branch:** main" in context
 
 
-def _legacy_digest(ws, session_start, checkpoints, turns, snapshots, max_total) -> str:
+def _legacy_digest(
+    ws: dict[str, str],
+    session_start: dict[str, Any],
+    checkpoints: list[dict[str, str]],
+    turns: list[dict[str, Any]],
+    snapshots: list[dict[str, Any]],
+    max_total: int,
+) -> str:
     """The pre-streaming digest: render everything, then truncate."""
     parts = [*collate._format_metadata(ws, session_start, None),
              *collate._format_checkpoints(checkpoints), "## Conversation Transcript\n"]
@@ -212,7 +230,9 @@ def test_format_digest_streams_identically_to_a_turn_list(tmp_path: Path, max_to
     assert expected.endswith(f"[digest truncated at {max_total} chars]") == (max_total != 10**9)
 
 
-def _failing_after(session_dir: Path, turns: int, exc: BaseException):
+def _failing_after(
+    session_dir: Path, turns: int, exc: BaseException,
+) -> Iterator[dict[str, Any]]:
     for i, turn in enumerate(collate.TurnStream(session_dir, None, 40)):
         if i == turns:
             raise exc
@@ -221,7 +241,7 @@ def _failing_after(session_dir: Path, turns: int, exc: BaseException):
 
 @pytest.mark.parametrize("exc", [RuntimeError("transcript read failed"), KeyboardInterrupt()])
 def test_write_segments_keeps_completed_segments_when_the_turn_stream_fails(
-    tmp_path: Path, capsys, exc: BaseException,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], exc: BaseException,
 ) -> None:
     session_dir = _many_turns_session(tmp_path / "s", 6)
     complete = tmp_path / "complete"
@@ -241,11 +261,13 @@ def test_write_segments_keeps_completed_segments_when_the_turn_stream_fails(
     assert "kept 3 completed segment(s)" in capsys.readouterr().err
 
 
-def test_write_to_nas_records_no_manifest_for_an_interrupted_digest(tmp_path: Path, monkeypatch) -> None:
+def test_write_to_nas_records_no_manifest_for_an_interrupted_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session_dir = _many_turns_session(tmp_path / "s", 6)
 
     class FailingStream(collate.TurnStream):
-        def __iter__(self):
+        def __iter__(self) -> Iterator[dict[str, Any]]:
             for i, turn in enumerate(super().__iter__()):
                 if i == 4:
                     raise OSError("archive member truncated")
@@ -267,7 +289,9 @@ def test_ramp_up_brief_from_a_tail_matches_the_full_turn_list(tmp_path: Path, ta
     session_dir = _many_turns_session(tmp_path / "s", 12)
     parsed = collate.parse_events(session_dir, None, 40)
     turns = parsed["turns"]
-    args = ({"id": "sid-1"}, {"cwd": "/repo"}, parsed["session_start"], [])
+    args: tuple[dict[str, str], dict[str, str], dict[str, Any], list[dict[str, str]]] = (
+        {"id": "sid-1"}, {"cwd": "/repo"}, parsed["session_start"], [],
+    )
 
     expected = ramp_up._render_brief(*args, turns, [], tail_turns, tmp_path / "d", 0)
     tail = turns[-tail_turns:] if tail_turns else []
@@ -276,6 +300,28 @@ def test_ramp_up_brief_from_a_tail_matches_the_full_turn_list(tmp_path: Path, ta
     )
 
     assert actual == expected
+
+
+def test_build_session_digest_gives_a_charter_its_view_in_the_same_pass(tmp_path: Path) -> None:
+    session_dir = _many_turns_session(tmp_path / "s", 9)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "99-turns.md").write_text("stale segment from an earlier run", encoding="utf-8")
+    seen: list[dict[str, Any]] = []
+
+    result = digest.build_session_digest(
+        session_dir, out, segment_size=400, max_tool_output=40, on_turn=seen.append,
+    )
+
+    stream = collate.TurnStream(session_dir, None, 40)
+    expected = collate.write_segments(
+        digest.read_workspace(session_dir), stream.session_start, digest.read_checkpoints(session_dir),
+        stream, digest.read_rewind_index(session_dir), None, tmp_path / "ref", 400, 40,
+    )
+    assert result.files == expected
+    assert _read_dir(out) == _read_dir(tmp_path / "ref")
+    assert [turn["user_message"] for turn in seen] == [f"q{i}" for i in range(9)]
+    assert (result.stats.turns, result.stats.failed_tool_calls, result.turn_count) == (9, 3, 9)
 
 
 def test_write_segments_memory_is_bounded_for_a_large_transcript(tmp_path: Path) -> None:

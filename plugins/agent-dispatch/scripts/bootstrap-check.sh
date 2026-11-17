@@ -146,7 +146,9 @@ EXPECTED_SLOT
       )"
       if [ -n "$resolved" ] &&
          { [ "$resolved" = "$InstallDir/versions/$selected/bin/python" ] ||
-           [ "$resolved" = "$InstallDir/versions/$selected/Scripts/python.exe" ]; }; then
+           [ "$resolved" = "$InstallDir/versions/$selected/Scripts/python.exe" ] ||
+           [ "$resolved" = "$InstallDir/versions/$selected/.venv/bin/python" ] ||
+           [ "$resolved" = "$InstallDir/versions/$selected/.venv/Scripts/python.exe" ]; }; then
         provisioned=1
       fi
     fi

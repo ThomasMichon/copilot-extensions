@@ -1,0 +1,7 @@
+{
+  "schema": "copilot-extensions.packaged-assets",
+  "version": 1,
+  "canonicalDir": "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
+  "payloadDir": "extensions/budget-guidance",
+  "files": ["sdk-compat.mjs"]
+}

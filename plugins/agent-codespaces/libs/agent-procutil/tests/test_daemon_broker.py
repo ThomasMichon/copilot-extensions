@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
 import json
 import os
 import secrets
@@ -11,13 +12,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Iterator, cast
 from unittest.mock import MagicMock, Mock
 
 import pytest
 
 import agent_procutil as pu
-from agent_procutil import daemon, daemon_broker as broker
+from agent_procutil import _job_scopes, daemon, daemon_broker as broker
 
 BrokerChannel = tuple[dict[int, Mock], list[dict[str, Any]]]
 BootstrapChannel = tuple[Mock, dict[str, Any]]
@@ -107,6 +108,23 @@ def test_durable_route_preserves_exact_arguments_and_environment(
     assert str(passed["stderr_log_path"]) == str(err)
     assert passed["instance_receipt"] is process.instance_receipt
     task.assert_not_called()
+
+
+def test_durable_route_forwards_scopes_without_inheriting_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    outer, supplied = _job_scopes.new_name(), _job_scopes.new_name()
+    monkeypatch.setenv(_job_scopes.ENVIRONMENT_KEY, outer)
+    _, launch = _durable_launch(monkeypatch)
+    pu.spawn_daemon(
+        ["fixture"], cwd=tmp_path, log_path=tmp_path / "out.log",
+        env={_job_scopes.ENVIRONMENT_KEY.lower(): supplied},
+    )
+    passed = launch.call_args.kwargs
+    assert _job_scopes.scope_names(passed["scope_environment"]) == (outer, supplied)
+    assert all(key.upper() != _job_scopes.ENVIRONMENT_KEY for key in passed["env"])
 
 
 def test_default_broker_missing_support_refuses_without_legacy_activation(tmp_path: Path) -> None:
@@ -472,7 +490,13 @@ def broker_channel(monkeypatch: pytest.MonkeyPatch) -> BrokerChannel:
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_job", Mock(return_value=True))
+    monkeypatch.setattr(broker, "_outside_caller_job", Mock(return_value=True))
+
+    @contextmanager
+    def queries(environment: dict[str, str]) -> Iterator[Callable[[Any], None]]:
+        yield lambda handle: None
+
+    monkeypatch.setattr(_job_scopes, "query_scopes", queries)
     monkeypatch.setattr(broker, "_send", Mock())
     responses: list[dict[str, Any]] = [
         {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 200},
@@ -526,23 +550,22 @@ def test_broker_preserves_resident_creation_flags(
     assert spec["creationflags"] == pu._CREATE_NO_WINDOW
 
 
-@pytest.mark.parametrize("bootstrap_in_provider_job", [False, True])
-@pytest.mark.parametrize("child_outside_any_job", [False, True])
-def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
+@pytest.mark.parametrize("child_in_caller_job", [False, True])
+def test_provider_job_membership_does_not_replace_caller_lifetime_check(
     monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
-    child_outside_any_job: bool, bootstrap_in_provider_job: bool,
+    child_in_caller_job: bool,
 ) -> None:
     processes, _ = broker_channel
     checked: list[int] = []
 
-    def outside_job(process: Mock) -> bool:
+    def outside_caller_job(process: Mock) -> bool:
         checked.append(process.pid)
-        if process.pid == 200:
-            return child_outside_any_job
-        return not bootstrap_in_provider_job
+        return not child_in_caller_job
 
-    monkeypatch.setattr(broker, "_outside_job", outside_job)
-    if child_outside_any_job:
+    any_job = Mock(return_value=False)
+    monkeypatch.setattr(broker, "_outside_job", any_job)
+    monkeypatch.setattr(broker, "_outside_caller_job", outside_caller_job)
+    if not child_in_caller_job:
         assert _launch(tmp_path) is processes[200]
         assert cast(Mock, broker._send).call_args_list[-1].args[1] == {"start": 200}
     else:
@@ -550,7 +573,60 @@ def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
             _launch(tmp_path)
         assert all(call.args[1] != {"start": 200} for call in cast(Mock, broker._send).call_args_list)
         processes[200].terminate.assert_called_once()
-    assert checked == [200], "a provider-Job bootstrap is allowed; only the resident must escape"
+    assert checked == [200]
+    any_job.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [None, "outer", "inner", "query", "close"])
+def test_suspended_admission_checks_every_tracked_scope_and_closes_queries(
+    monkeypatch: pytest.MonkeyPatch, broker_channel: BrokerChannel, tmp_path: Path,
+    failure: str | None,
+) -> None:
+    processes, _ = broker_channel
+    outer, inner = _job_scopes.new_name(), _job_scopes.new_name()
+    monkeypatch.setenv(_job_scopes.ENVIRONMENT_KEY, outer + ";" + inner)
+    events: list[Any] = []
+
+    @contextmanager
+    def queries(environment: dict[str, str]) -> Iterator[Callable[[Any], None]]:
+        assert _job_scopes.scope_names(environment) == (outer, inner)
+        if failure == "query":
+            raise OSError("scope unavailable")
+        try:
+            def verify(handle: Any) -> None:
+                assert handle is processes[200]._handle
+                for name, scope in (("outer", outer), ("inner", inner)):
+                    events.append(scope)
+                    if failure == name:
+                        raise OSError("daemon retained a launcher-owned cleanup Job")
+            yield verify
+        finally:
+            events.append("closed")
+            if failure == "close":
+                raise OSError("query handle close failed")
+
+    send = cast(Mock, broker._send)
+    original_send = send.side_effect
+
+    def sent(*args: Any) -> None:
+        if "start" in args[1]:
+            events.append("start")
+        if original_send is not None:
+            original_send(*args)
+
+    send.side_effect = sent
+    monkeypatch.setattr(_job_scopes, "query_scopes", queries)
+    if failure is None:
+        assert _launch(tmp_path) is processes[200]
+        assert events == [outer, inner, "closed", "start"]
+    else:
+        with pytest.raises(pu.DaemonSpawnError, match="child-adoption") as caught:
+            _launch(tmp_path)
+        assert isinstance(caught.value.__cause__, OSError)
+        assert caught.value.admission_sent is False
+        assert caught.value.cleanup_confirmed is True
+        assert "start" not in events
+        processes[200].terminate.assert_called_once()
 
 
 @pytest.mark.parametrize("hello", [
@@ -647,7 +723,7 @@ def test_partial_start_reaps_pinned_child_before_releasing_handles(
 ) -> None:
     processes, _ = broker_channel
     if failure == "contained":
-        monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+        monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
     elif failure == "confirmation":
         monkeypatch.setattr(broker, "_receive", Mock(side_effect=[
             {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 999},
@@ -687,7 +763,7 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+    monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
     with pytest.raises(pu.DaemonSpawnError) as caught:
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is (method == "close")
@@ -716,7 +792,7 @@ def test_failed_child_termination_transfers_live_process_control(
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+    monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
     with pytest.raises(pu.DaemonSpawnError) as caught:
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is False

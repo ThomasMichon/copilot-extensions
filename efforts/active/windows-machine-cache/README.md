@@ -9,7 +9,7 @@ logons when user-bound DPAPI is unavailable.
 - **Slug:** `windows-machine-cache`
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-16
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [independent cache](../../../visions/vault/README.md#independent-cache-and-standard-auth-providers)
 - **Umbrella issue:** [#13009](https://github.com/ThomasMichon/copilot-extensions/issues/13009)
 
@@ -102,27 +102,27 @@ Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/windows/win3
 ## Plan
 
 ### Phase 1 - Review the bounded proposal
-- [ ] Merge this proposal before implementing the portable behavior.
+- [x] Merge this proposal before implementing the portable behavior.
 
 ### Phase 2 - Implement and qualify
-- [ ] Add explicit opt-in, secure redundant writes, user-first fallback and safe verification.
-- [ ] Preserve selection/recovery, rotation, invalidation and old-reader behavior.
-- [ ] Land source, documentation and changefile through normal review and CI.
+- [x] Add explicit opt-in, secure redundant writes, user-first fallback and safe verification.
+- [x] Preserve selection/recovery, rotation, invalidation and old-reader behavior.
+- [x] Land source, documentation and changefile through normal review and CI.
 
 ### Phase 3 - Release and acceptance
 - [ ] Confirm the implementation reaches the normal release branch.
-- [ ] Record native noninteractive synthetic proof and remaining adopter-owned rollout gates.
+- [x] Record native noninteractive synthetic proof and remaining adopter-owned rollout gates.
 
 ## Validation Plan
 
-- [ ] Focused tests cover default-off, both primary formats, user-first ordering,
+- [x] Focused tests cover default-off, both primary formats, user-first ordering,
   decryption-unavailable fallback, stale/corrupt/mismatched copies and ACL refusal.
-- [ ] Mutation tests cover interrupted publication, older writers, pending
+- [x] Mutation tests cover interrupted publication, older writers, pending
   replacement, invalidation and cache clearing without stale fallback.
-- [ ] Native Windows proof covers machine-scope roundtrip, creation-time DACL,
+- [x] Native Windows proof covers machine-scope roundtrip, creation-time DACL,
   atomic replacement and the actual noninteractive token/session context.
-- [ ] Existing targeted cache/credential-read tests, lint and install contract pass.
-- [ ] Public artifacts remain generic; merged, released and deployed remain distinct.
+- [x] Existing targeted cache/credential-read tests, lint and install contract pass.
+- [x] Public artifacts remain generic; merged, released and deployed remain distinct.
 
 ## Journal
 
@@ -130,3 +130,117 @@ Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/windows/win3
 
 Claimed #13009 and resolved the portable cache owner. This proposal is pending
 review; no implementation or live cache change is claimed.
+
+### 2026-11-16 - Reviewed source gate
+
+Proposal #13011 merged after approval and required checks. Implementation is
+the next slice. An isolated native Windows process qualified two machine-DPAPI
+roundtrips in session 0 with NETWORK-token membership and owner/SYSTEM-only
+creation/replacement DACLs. This does not qualify reboot, another user's token
+or an installed consumer.
+
+### 2026-11-16 - Source qualification
+
+Implemented the additive copy and explicit preparation/verification boundary.
+The final bounded packet passed 289 tests with one file per subprocess,
+including real Windows DPAPI/DACL controls, both primary formats and rotation,
+invalidation, stale-source, ACL, schema and interrupted-publication cases.
+Lint and the install contract passed.
+
+A combined-process run exposed a cache-verify extraction bug: capturing the
+cache factory at import time lost the caller's selected factory. Restored
+operation-time lookup and verified the existing service/alias tests.
+Some combined-process native first writes also returned false intermittently;
+isolated native controls and the final module-isolated packet passed. The
+underlying native first-write discrepancy is not claimed resolved by that
+observation. Source delivery, release and adopter qualification remain open.
+
+### 2026-11-16 - Degraded-read and migration corrections
+
+A machine-copy miss must retain the user's decryption-unavailable state so
+ordinary selected-service reads skip impossible writeback, while cache-only and
+authoritative refresh preserve their refusals/reconciliation requirements.
+An absent redundant file has that same degraded state only after source, private
+directory and recovery checks pass. Other protection errors still refuse.
+Legacy plaintext-key migration refreshes the copy from the store reread under
+the migration lock, keeping its new wrapped-key digest current.
+
+The expanded bounded cache packet passed 303 tests, including 14 focused
+regressions for these cases. The owned PR's mechanical rebase also preserved
+the concurrent attachment-import capability and its admitted source inventory;
+77 affected actor-free units and 259 population/recovery/service cases passed.
+
+### 2026-11-16 - Bound ordinary opted-in reads
+
+Independent re-review confirmed the previous three corrections and identified
+unbounded primary/key reads before the redundant reader's size check. Opted-in
+stores now use the same bounded input reader before decryption and during key
+migration; default-off input handling is unchanged. The bounded packet passed
+308 tests, with one inapplicable wrapped-key case skipped for the native format.
+Whole-file strict typing passed both platform contracts and focused lint passed.
+
+### 2026-11-16 - Preserve concurrent maintenance ownership
+
+The source received a clean independent approval, then required a rebase onto
+the selected-service maintenance change in #13008. The extracted verifier
+retains that configured service route. Machine preparation and forced machine
+verification reject service-owned maintenance rather than reading or mutating
+an unrelated local store. Both capabilities and the upstream admitted unit
+inventory remain intact; only changed source witnesses are refreshed.
+
+The rebased packet passed 331 tests with one inapplicable native-format case
+skipped, plus 87 admitted transport/target/attachment units and 62 recovery/target
+cases. Nine-file strict typing passed both platform contracts. A concurrent
+test-environment preparation hit a Windows executable-sharing refusal; after
+the owned interpreter user completed, the bounded sequential retry passed.
+This does not change the separately disclosed native first-write observation.
+
+### 2026-11-16 - Source merged; release pending
+
+Implementation #13022 merged to `dev` as `809add5d69` after independent
+current-head approval and required checks. The final source packet passed
+331 cache cases with one inapplicable native-format case skipped, 87 admitted
+units and 62 recovery/target cases; strict typing passed both platform contracts.
+Normal release-branch promotion remains open. No installation, live credential
+copy, service restart or adopter acceptance is claimed by this source merge.
+
+### 2026-11-17 - Native release-gate prerequisite
+
+Promotion passed source qualification but remains blocked. After the tracked
+artifact-publication rate limit in #13052, the next run exposed the native
+Resume failures tracked by #12850, #10945 and #10946. The selected-runtime
+observer now uses a finite `--observe` invocation with JSON stdin; the native
+fixture owner still admitted only its older description invocation.
+
+The bounded fixture correction preserves the real observer, namespace,
+duplicate-creation fence and deadlines. Five native owner/transport/dependency
+controls pass, including actual observation-protocol stdin forwarding; strict
+typing passes both platform contracts. The full local packet also encountered
+the production census refusal for unrelated live servers outside its private
+root. Those three cold/reattach cases are not claimed qualified locally, and
+the fresh-runner native promotion gate remains required. No live sessions were
+changed to manufacture a passing result.
+
+The overlapping fixture correction landed independently in #13059 while the
+follow-up was awaiting its required checks. Rebase preserves that complete
+implementation and its typed native fixture. The remaining follow-up adds a
+separate real-executable refusal control that does not require the global
+absence census, plus these source/release records; it does not reapply or
+replace the already merged correction. Fresh native release qualification
+remains open.
+
+The next fresh producing run, 44052200417, passed observation forwarding and
+then reached the unchanged 3.4 creation-version gate. Its generated private
+adapter did not carry its selected backend's file-version resource. The bounded
+follow-up now projects that actual complete resource and refuses unreadable
+metadata, rather than advertising a guessed minimum. Four native controls pass,
+including real compiled below/above-floor versions with nonzero revisions,
+the original production guard and structured observation refusal. Full fresh
+native Resume qualification and release remain required.
+
+The metadata implementation also landed independently in #13070 during the
+follow-up's review window. Rebase preserves it completely, including its
+unversioned-adapter compatibility for unreadable backends and unchanged
+production refusal. The remaining follow-up supplies real compiled
+version-resource/creation-floor and observer-refusal controls, plus source
+completion records; neither independently merged repair is replaced.

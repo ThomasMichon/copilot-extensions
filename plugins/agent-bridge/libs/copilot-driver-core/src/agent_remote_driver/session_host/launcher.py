@@ -69,6 +69,8 @@ class _DaemonDecorator(Protocol):
     def __call__(self, function: _CallableT, /) -> _CallableT: ...
 
 if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
     daemon_entrypoint = cast(Callable[..., _DaemonDecorator], daemon_entrypoint)
 
 
@@ -159,7 +161,7 @@ def host_spawn_kwargs() -> dict[str, Any]:
 
 
 def _kill_host_process_tree(
-    proc: subprocess.Popen[Any], expected_identity: str | None,
+    proc: subprocess.Popen[Any] | WindowsDaemonProcess, expected_identity: str | None,
 ) -> None:
     """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
 
@@ -213,7 +215,7 @@ class HostHandle:
     child_pid: int
     port: int
     state_file: str
-    proc: subprocess.Popen[bytes]
+    proc: subprocess.Popen[bytes] | WindowsDaemonProcess
     protocol_version: int = proto.PROTOCOL_VERSION
     nonce: str = field(default="", repr=False)
 
@@ -566,7 +568,7 @@ async def _spawn_child(
     # hard host kill -- the Linux counterpart to the Windows kill-on-close job,
     # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)
     # on Windows, where preexec_fn is unsupported.
-    preexec = cast(Callable[[], Callable[[], None] | None], child_preexec)()
+    preexec = child_preexec()
     spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
     admission = child_env.pop(_ACQUISITION_ENV, None)
     if admission is not None:

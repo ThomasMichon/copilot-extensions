@@ -6,8 +6,7 @@
 // Uses the session.usage_info event for accurate context window monitoring
 // (currentTokens / tokenLimit) instead of heuristic turn counting.
 //
-// Integration points (all via observable session events -- the native runtime
-// removed SDK callback hooks, so no `hooks` object is passed to joinSession):
+// Integration points (via observable session events, without callback hooks):
 // 1. generate_handoff_prompt tool -- on-demand structured handoff data
 // 2. save_handoff_prompt tool -- persist composed handoff to machine-local state
 // 3. session.usage_info event -- real-time context utilization monitoring
@@ -33,8 +32,12 @@ import {
 } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
-import { joinSession } from "@github/copilot-sdk/extension";
+const { loadExtensionSdk } = await import(
+  existsSync(new URL("./sdk-compat.mjs", import.meta.url))
+    ? new URL("./sdk-compat.mjs", import.meta.url).href
+    : new URL("../../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs", import.meta.url).href
+);
+const { joinSession, approveAll } = await loadExtensionSdk();
 import {
   agentDispatchAvailable,
   agentWorktreesGet,
@@ -104,7 +107,7 @@ import {
 // This extension has been observed, on at least one machine, to reach the
 // harness's "ready" state (successful tool registration over the joinSession
 // IPC channel) and then terminate with exit code 1 and NO captured stderr.
-// See crash-diagnostics.mjs (an isolated, @github/copilot-sdk-free module,
+// See crash-diagnostics.mjs (an isolated, @microsoft/copilot-sdk-free module,
 // so it can be exercised directly by subprocess tests -- see
 // tests/crash-diagnostics.test.mjs) for the full rationale and the
 // uninstall-capable implementation. `uninstall()` itself is never called:

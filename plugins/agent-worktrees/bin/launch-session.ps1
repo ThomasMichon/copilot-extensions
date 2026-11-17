@@ -16,8 +16,6 @@
 # when called via 'pwsh -File'.
 $CopilotArgs = @($args)
 $script:LaunchProject = $null
-$script:AwMuxObservationPython = $null
-$script:AwMuxObservationProvider = $null
 
 $ErrorActionPreference = 'Stop'
 
@@ -1005,32 +1003,13 @@ function Invoke-AwMuxCoreProcess {
 
 function Get-AwMuxObservation {
     param([string]$Session, [int]$TimeoutMilliseconds = 3000)
-    if ($script:AwMuxObservationPython -ne $VenvPython) {
-        $script:AwMuxObservationPython = $VenvPython
-        $script:AwMuxObservationProvider = $null
-        $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
-            '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_observation', '--describe-contract'
-        ) -TimeoutMilliseconds $TimeoutMilliseconds
-        if ($reply.code -eq 0) {
-            $candidate = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
-            if ($candidate.contract -eq 'copilot-driver.mux-observation' -and
-                $candidate.version -eq 1 -and 'psmux-observe' -in $candidate.operations -and
-                [IO.Path]::IsPathFullyQualified([string]$candidate.python) -and
-                [IO.Path]::IsPathFullyQualified([string]$candidate.entrypoint) -and
-                (Test-Path -LiteralPath $candidate.python -PathType Leaf) -and
-                (Test-Path -LiteralPath $candidate.entrypoint -PathType Leaf)) {
-                $script:AwMuxObservationProvider = $candidate
-            }
-        }
-    }
-    $provider = $script:AwMuxObservationProvider
-    if (-not $provider) {
+    $request = ConvertTo-Json -Compress -InputObject @{ version = 1; session = $Session }
+    $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
+        '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_observation', '--observe'
+    ) -InputText $request -TimeoutMilliseconds $TimeoutMilliseconds
+    if ($reply.code -ne 0 -and [string]::IsNullOrWhiteSpace($reply.output)) {
         return [pscustomobject]@{ status = 'unsupported'; reason = 'selected-runtime-unsupported' }
     }
-    $request = ConvertTo-Json -Compress -InputObject @{ version = 1; session = $Session }
-    $reply = Invoke-AwMuxCoreProcess -Python $provider.python -Arguments @(
-        '-I', '-X', 'utf8', [string]$provider.entrypoint, '--observe'
-    ) -InputText $request -TimeoutMilliseconds $TimeoutMilliseconds
     $result = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
     if ($result.contract -ne 'copilot-driver.mux-observation' -or $result.version -ne 1 -or
         $result.status -notin @('present', 'absent', 'unknown', 'unsupported') -or
@@ -1040,10 +1019,16 @@ function Get-AwMuxObservation {
     return $result
 }
 
+function Test-AwPlannedMuxJoin {
+    return ($null -ne $plan.PSObject.Properties['mux_join_existing'] -and
+        $plan.mux_join_existing -is [bool] -and $plan.mux_join_existing)
+}
+
 function Test-AwJoiningLiveSession {
     # No-mux launches always (re)start Copilot directly -- the update is relevant.
     $noMuxNow = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
     if ($noMuxNow) { return $false }
+    if (Test-AwPlannedMuxJoin) { return $true }
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     # `.` is the window/pane separator in a mux target -- keep in sync with
     # `sessions.mux_session_name` (and the bash launcher).
@@ -1765,6 +1750,9 @@ function Test-AwMuxCreationSession {
     param([string]$Session, [int]$TimeoutMilliseconds = 2000)
     $observed = Get-AwMuxObservation $Session -TimeoutMilliseconds $TimeoutMilliseconds
     if ($observed.status -notin @('present', 'absent')) {
+        if ($observed.status -eq 'unknown') {
+            throw "PSMux presence is unknown ($($observed.reason)); refusing duplicate creation. Existing sessions were not changed."
+        }
         throw 'PSMux presence is unknown; refusing duplicate creation. Use a runtime with native mux observation.'
     }
     return $observed.status -eq 'present'
@@ -1883,6 +1871,20 @@ function Resolve-AwMuxCore {
     return $contract
 }
 
+function Get-AwPsmuxCreationVersion {
+    try {
+        return [Diagnostics.FileVersionInfo]::GetVersionInfo($script:AwPsmuxBin).FileVersion
+    } catch { return $null }
+}
+
+function Assert-AwPsmuxCreationVersion {
+    . (Join-Path $PSScriptRoot 'psmux-path.ps1')
+    $version = Get-AwPsmuxCreationVersion
+    if (-not (Test-AwPsmuxVersionCompatible -Version $version -MinimumVersion '3.4.0')) {
+        throw 'New PSMux sessions require version 3.4.0 or newer with readable file metadata. Existing sessions were not changed.'
+    }
+}
+
 function Invoke-AwMuxCoreCreation {
     param($Core, [string]$Session, [string[]]$CommandArgs)
     $request = ConvertTo-Json -Compress -Depth 4 -InputObject @{
@@ -1936,7 +1938,6 @@ function Join-AwExistingPsmuxSession {
     exit $attachExit
 }
 if (-not $noMux) {
-    $muxCore = Resolve-AwMuxCore
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     # `.` is the window/pane separator in a mux target -- keep in sync with
     # `sessions.mux_session_name` (and the bash launcher).
@@ -1957,10 +1958,12 @@ if (-not $noMux) {
 
     # If a psmux session already exists for this worktree, join it.
     # Note: psmux does not support tmux's "=" exact-match prefix on -t.
-    if (Test-AwMuxCreationSession $sessName) {
+    if ((Test-AwPlannedMuxJoin) -or (Test-AwMuxCreationSession $sessName)) {
         Join-AwExistingPsmuxSession
     }
 
+    Assert-AwPsmuxCreationVersion
+    $muxCore = Resolve-AwMuxCore
     # Build -e flags for env propagation into the psmux server.
     # Merge plan.env with launcher-owned vars; launcher values win. Identity
     # vars (WORKTREE_PROJECT/WORKTREE_ID) are deliberately NOT injected -- the

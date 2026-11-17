@@ -19,6 +19,7 @@ import threading
 import time
 import traceback
 from types import SimpleNamespace
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 from fastapi.testclient import TestClient
@@ -39,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[3]
 CHILD = Path(__file__).parent / "fixtures" / "portable-mux-sdk.mjs"
 
 
-def _cli(argv, payload=None):
+def _cli(argv: list[str], payload: str | None = None) -> subprocess.CompletedProcess[str]:
     output = io.StringIO()
     errors = io.StringIO()
     stream = io.TextIOWrapper(io.BytesIO((payload or "").encode()), encoding="utf-8")
@@ -51,16 +52,23 @@ def _cli(argv, payload=None):
                 core.main(argv)
                 code = 0
             except SystemExit as exc:
-                code = exc.code
+                code = cast(int, exc.code)
         finally:
             sys.stdin = saved
     return subprocess.CompletedProcess(argv, code, output.getvalue(), errors.getvalue())
 
 
 class Consumer:
-    def __init__(self, client, environment, cwd, *, duplicate, core_command):
+    def __init__(
+        self, client: Any, environment: dict[str, str], cwd: str, *,
+        duplicate: bool, core_command: list[str],
+    ) -> None:
+        assert NODE is not None
         self.client = client
-        self.calls, self.effects, self.errors, self.logs = [], [], [], []
+        self.calls: list[dict[str, Any]] = []
+        self.effects: list[dict[str, Any]] = []
+        self.errors: list[str] = []
+        self.logs: list[str] = []
         self.ready = threading.Event()
         self.consumed = threading.Event()
         self.refused = threading.Event()
@@ -68,7 +76,7 @@ class Consumer:
         # A synthetic Copilot parent preserves the extension-worker parent PID.
         supervisor = (
             "const {spawn}=require('node:child_process');"
-            "const child=spawn(process.execPath,[process.argv[1],process.argv[2]],"
+            "const child=spawn(process.execPath,['--experimental-vm-modules',process.argv[1],process.argv[2]],"
             "{stdio:'inherit',windowsHide:true});"
             "child.on('error',()=>process.exit(1));"
             "child.on('exit',code=>process.exit(code??1));"
@@ -85,7 +93,12 @@ class Consumer:
             *core_command[boundary + 2:],
         ]
         self.state_file = Path(core_command[core_command.index("--state-file") + 1])
-        self.process = self.job = self.carrier = self.messages = self.reader = self.stderr = None
+        self.process: Any = None
+        self.job: Any = None
+        self.carrier: Any = None
+        self.messages: Any = None
+        self.reader: Any = None
+        self.stderr: Any = None
         try:
             self.process, self.job = spawn_sync_in_kill_on_close_job(
                 command, require_job=os.name == "nt", allow_breakaway=False,
@@ -104,27 +117,27 @@ class Consumer:
             try:
                 self._settle()
             except BaseException as cleanup:
-                cleanup.consumer = self
+                setattr(cleanup, "consumer", self)
                 raise cleanup from error
             raise
         finally:
             listener.close()
 
-    def running(self):
+    def running(self) -> bool:
         if self.job is not None:
             return self.process.poll() is None
         from agent_procutil.owned_process import _observe_unreaped
 
         return _observe_unreaped(self.process) is None
 
-    def _wait_for_return(self, timeout):
+    def _wait_for_return(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
         while self.running():
             if time.monotonic() >= deadline:
                 raise subprocess.TimeoutExpired(self.process.args, timeout)
             time.sleep(.02)
 
-    def _settle(self):
+    def _settle(self) -> None:
         if self.process is not None:
             if self.job is not None:
                 self.job.terminate_and_wait(10)
@@ -152,11 +165,11 @@ class Consumer:
             if stream is not None:
                 stream.close()
 
-    def broker_state(self):
+    def broker_state(self) -> dict[str, Any]:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             if self.state_file.exists():
-                state = json.loads(self.state_file.read_text(encoding="utf-8"))
+                state: dict[str, Any] = json.loads(self.state_file.read_text(encoding="utf-8"))
                 if state["state"] == "running":
                     assert state["host_pid"] == self.process.pid
                     assert state["child_pid"] != state["host_pid"]
@@ -166,17 +179,17 @@ class Consumer:
             time.sleep(.02)
         pytest.fail("The selected common broker did not reach running")
 
-    def _stderr(self):
+    def _stderr(self) -> None:
         for line in self.process.stderr:
             self.logs.append(line)
             if "duplicated" in line:
                 self.refused.set()
 
-    def _write(self, value):
+    def _write(self, value: dict[str, Any]) -> None:
         with self.writer:
             self.carrier.sendall((json.dumps(value) + "\n").encode())
 
-    def _read(self):
+    def _read(self) -> None:
         try:
             for line in self.messages:
                 message = json.loads(line)
@@ -209,10 +222,10 @@ class Consumer:
             self.errors.append(traceback.format_exc())
             self.ready.set()
 
-    def close(self, *, timeout=10):
+    def close(self, *, timeout: float = 10) -> None:
         from agent_procutil._daemon_instance_identity import birth_identity
 
-        def live_birth(pid):
+        def live_birth(pid: int) -> str | None:
             try:
                 return birth_identity(pid)
             except ProcessLookupError:
@@ -239,7 +252,9 @@ class Consumer:
 
 
 @pytest.mark.parametrize("phase", ["construction", "stop"])
-def test_carrier_failures_settle_owned_tree_and_streams(tmp_path, monkeypatch, phase):
+def test_carrier_failures_settle_owned_tree_and_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
     from agent_procutil._daemon_instance_identity import birth_identity
 
     marker = tmp_path / "child.json"
@@ -262,16 +277,19 @@ child.once('message',message=>{
 });
 setTimeout(()=>{},60000);
 """
-    spawned, births, listeners, pinned = [], [], [], []
+    spawned: list[Any] = []
+    births: list[tuple[int, str]] = []
+    listeners: list[socket.socket] = []
+    pinned: list[Any] = []
     spawn = spawn_sync_in_kill_on_close_job
     accept = socket.socket.accept
 
-    def capture(*args, **kwargs):
+    def capture(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
         process, job = spawn(*args, **kwargs)
         spawned.append(process)
         return process, job
 
-    def timeout(listener):
+    def timeout(listener: socket.socket) -> Any:
         listeners.append(listener)
         if phase == "stop":
             connected = accept(listener)
@@ -290,7 +308,8 @@ setTimeout(()=>{},60000);
 
     monkeypatch.setattr(sys.modules[__name__], "spawn_sync_in_kill_on_close_job", capture)
     monkeypatch.setattr(socket.socket, "accept", timeout)
-    def construct():
+    def construct() -> Consumer:
+        assert NODE is not None
         return Consumer(
             None, dict(os.environ), str(tmp_path), duplicate=False,
             core_command=[
@@ -325,8 +344,9 @@ setTimeout(()=>{},60000);
 @pytest.mark.parametrize("duplicate", [False, True], ids=["one-admitted-send", "duplicate-loadout-holds"])
 @pytest.mark.parametrize("installation", ["namespaced"], indirect=True)
 def test_bridge_provider_receiver_and_extensions_share_one_conversation(
-    installation, tmp_db, tmp_path, tmp_path_factory, monkeypatch, duplicate,
-):
+    installation: Any, tmp_db: Any, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch, duplicate: bool,
+) -> None:
     # Cross-plugin composition lives in this opt-in packet, not either runtime's imports.
     for source in (
         ROOT / "plugins/agent-codespaces/src",
@@ -336,7 +356,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
         monkeypatch.syspath_prepend(str(source))
     from agent_codespaces import bridge_receiving, config, copilot_detach as detach
     from agent_codespaces import portable_mux_launch as launch, session_forwards, worktrees
-    from agent_codespaces import copilot_venue
+    from agent_codespaces import connection_owner, copilot_venue
     from repository_policy.receiving import build_receiving_policy_check
     from repository_policy import validate_hosting_result
 
@@ -357,21 +377,21 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
     assert headers["Authorization"].endswith("synthetic-secret")
 
     with TestClient(app, headers=headers, client=("127.0.0.1", 12345)) as client:
-        def selected(*, ensure=True):
+        def selected(*, ensure: bool = True) -> BridgeClient:
             bridge = BridgeClient("http://127.0.0.1:12001", "synthetic-secret")
 
-            def request(method, path, body=None, **kwargs):
+            def request(method: str, path: str, body: Any = None, **kwargs: Any) -> Any:
                 response = client.request(method, path, json=body, params=kwargs.get("params"))
                 if not response.is_success:
                     raise BridgeClientError(response.status_code, response.json().get("detail"))
                 return response.json()
 
-            bridge._request = request
+            monkeypatch.setattr(bridge, "_request", request)
             return bridge
 
         monkeypatch.setattr(core, "_get_client", selected)
         monkeypatch.setattr(worktrees, "validate_context", lambda: None)
-        def bridge_run(self, argv, **kwargs):
+        def bridge_run(self: Any, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             result = _cli(argv[1:], kwargs.get("input"))
             if "send" in argv:
                 state.sends.append(result.stdout + result.stderr)
@@ -391,27 +411,27 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
         monkeypatch.setattr(launch, "model_copilot_args", lambda args: [])
         monkeypatch.setattr(launch, "require_owner", lambda: None)
         monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda *a, **k: None)
-        monkeypatch.setattr(launch.owner, "ensure_owner_running", lambda config: True)
-        monkeypatch.setattr(launch.owner, "get_pending_delivery", lambda *a: copy.deepcopy(state.pending))
-        monkeypatch.setattr(launch.owner, "record_pending_delivery", lambda name, tenant, value: setattr(
+        monkeypatch.setattr(connection_owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(connection_owner, "get_pending_delivery", lambda *a: copy.deepcopy(state.pending))
+        monkeypatch.setattr(connection_owner, "record_pending_delivery", lambda name, tenant, value: setattr(
             state, "pending", copy.deepcopy(value),
         ))
-        monkeypatch.setattr(launch.owner, "get_hold", lambda *a: SimpleNamespace(
+        monkeypatch.setattr(connection_owner, "get_hold", lambda *a: SimpleNamespace(
             sessions={state.meta["tenant"]: state.meta},
         ) if state.meta else None)
 
-        def hold(name, tenant, **kwargs):
+        def hold(name: str, tenant: str, **kwargs: Any) -> None:
             state.meta = {"tenant": tenant, **kwargs}
 
-        monkeypatch.setattr(launch.owner, "hold", hold)
-        monkeypatch.setattr(launch.owner, "release", lambda *a, **k: pytest.fail("native custody released"))
+        monkeypatch.setattr(connection_owner, "hold", hold)
+        monkeypatch.setattr(connection_owner, "release", lambda *a, **k: pytest.fail("native custody released"))
 
-        async def forward(*args, **kwargs):
+        async def forward(*args: Any, **kwargs: Any) -> bool:
             return True
 
         monkeypatch.setattr(session_forwards, "await_owner_bridge_forward", forward)
 
-        def policy(request, support):
+        def policy(request: dict[str, Any], support: Path) -> None:
             checked = subprocess.run(
                 [
                     sys.executable, "-I", "-S", "-c",
@@ -428,7 +448,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
         monkeypatch.setattr(receiving_mux, "_mux_binary", lambda: "fixture-tmux")
         monkeypatch.setattr(receiving_mux, "_socket_identity", lambda path: {"device": 1, "inode": 2})
 
-        def require_core(support):
+        def require_core(support: Path) -> None:
             selected = subprocess.run(
                 [*receiving_mux._core_executable(support), "--support-json"],
                 capture_output=True, text=True, timeout=15, **no_window_kwargs(),
@@ -445,7 +465,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
         monkeypatch.setattr(receiving_mux, "_require_core", require_core)
         create_mux = receiving_mux._create_mux
 
-        def native(request, support):
+        def native(request: dict[str, Any], support: Path) -> dict[str, str]:
             state.native.append(request)
             assert state.consumer is None
             assert request["binary"] == "fixture-tmux"
@@ -469,10 +489,10 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
                     "-c", request["cwd"], *request["command"],
                 ]
             attempt = Path(request["command"][-1])
-            captured = []
+            captured: list[tuple[Any, ...]] = []
             with monkeypatch.context() as child_patch:
                 child_patch.chdir(request["cwd"])
-                child_patch.setattr(receiving_mux.os, "execvpe", lambda *args: captured.append(args))
+                child_patch.setattr(os, "execvpe", lambda *args: captured.append(args))
                 receiving_mux.child(attempt)
             executable, arguments, environment = captured[0]
             assert executable == "bash" and arguments[2:4] == [
@@ -491,7 +511,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
                 state.consumer.logs,
                 state.consumer.state_file.read_text() if state.consumer.state_file.exists() else "no core state",
             )
-            assert not state.consumer.errors
+            assert not state.consumer.errors, "".join(state.consumer.logs)
             return native_identity
 
         monkeypatch.setattr(receiving_mux, "_create_mux", native)
@@ -500,7 +520,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
             lambda *a, **k: pytest.fail("No direct mux creation after core selection"),
         )
 
-        def probe(name, directory, context, remote):
+        def probe(name: str, directory: str, context: str, remote: Any) -> str:
             command, payload = build_receiving_policy_check("/portable-fixture/workspace", context)
             words = shlex.split(command)
             argv = words[words.index("python3"):]
@@ -516,7 +536,10 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
 
         monkeypatch.setattr(launch, "_probe", probe)
 
-        def ssh(args, *, remote_cmd_builder, remote_input_builder, receiving_context, result_sink, **kwargs):
+        def ssh(
+            args: Any, *, remote_cmd_builder: Any, remote_input_builder: Any,
+            receiving_context: Any, result_sink: Any, **kwargs: Any,
+        ) -> Any:
             args.plugin_prepared_context["plugin_context"] = {
                 "version": 1, "cwd": str(workspace), "plugins": [],
             }
@@ -540,9 +563,9 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
                 output = "present\n"
             return result_sink(SimpleNamespace(exit_code=0, stdout=output))
 
-        provider_calls = []
+        provider_calls: list[list[str]] = []
 
-        def provider(argv, **kwargs):
+        def provider(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             provider_calls.append(argv)
             assert argv[1:3] == ["copilot", "fixture-venue"]
             import argparse

@@ -63,12 +63,13 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 
 from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, EntryStatus, Finding, scan_directory
 from plugin_activation import ActivationReport, resolve_active_plugins
 
-from ._peer_launch import PEERS
+from ._peer_launch import ContextRefused, PEERS
 from .claim_kinds_registry import installed_plugins_dir
 from . import peer_launch_adapter
 
@@ -370,6 +371,8 @@ def _classify(
         return _inactive(path, "not-enabled", detail=f"{source} is not enabled")
     if decision.status is EntryStatus.INDETERMINATE:
         return _indeterminate(path, detail=f"{source} activation is indeterminate")
+    if decision.value is None:
+        return _indeterminate(path, detail=f"{source} activation has no selected identity")
     expected_roots = {selected.root for selected in decision.value.live_roots}
     try:
         canonical_root = plugin_root.resolve(strict=True)
@@ -634,7 +637,7 @@ def _provider_plugin_id(provider: ClaimProviderManifest) -> str:
     return root_name or provider.plugin
 
 
-def _note_failure(failure: dict | None, detail: object) -> None:
+def _note_failure(failure: dict[str, Any] | None, detail: object) -> None:
     """Record a bounded, non-authoritative explanation of a callback failure."""
     if failure is None or not isinstance(detail, str):
         return
@@ -646,7 +649,7 @@ def _note_failure(failure: dict | None, detail: object) -> None:
 def _run_legacy_command(
     command: tuple[str, ...], *, timeout: float, cwd: str | None = None,
     no_self_provision_env: str | None = None,
-    failure: dict | None = None,
+    failure: dict[str, Any] | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     env = peer_env()
     if no_self_provision_env is not None:
@@ -677,7 +680,7 @@ def _run_provider_process(
     timeout: float,
     cwd: str | None = None,
     kind: str = "status",
-    failure: dict | None = None,
+    failure: dict[str, Any] | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     if kind not in ("status", "reclaim"):
         raise ValueError("provider callback kind must be status or reclaim")
@@ -699,7 +702,7 @@ def _run_provider_process(
             proc = peer_launch_adapter.run(
                 plugin_id, *command[1:], *callback_args, timeout=timeout, cwd=cwd,
             )
-        except peer_launch_adapter.ContextRefused as error:
+        except ContextRefused as error:
             _note_failure(failure, str(error) or "same-cell peer context refused")
             return None
         if proc is None:
@@ -721,8 +724,8 @@ def _run_callback(
     required_bool_field: str,
     cwd: str | None = None,
     kind: str = "status",
-    failure: dict | None = None,
-) -> dict | None:
+    failure: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     proc = _run_provider_process(
         provider,
         callback_args=callback_args,
@@ -793,7 +796,7 @@ def resolve_claim_status(
     plugins_root: str | os.PathLike[str] | None = None,
     timeout: float = _CALLBACK_TIMEOUT_SECONDS,
     native_restart_policy: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Best-effort claim status via the registered claim provider for ``ref``'s
     namespace. Never raises -- degrades to ``{"available": False, "reason":
     "..."}"`` on any absence, malformed manifest, or callback failure.
@@ -811,6 +814,11 @@ def resolve_claim_status(
             return {"available": False, "reason": "scratch does not implement native restart policy"}
         from .artifact_scratch import callback_status
         return callback_status(ref)
+    if namespace == "worktree-output":
+        if native_restart_policy:
+            return {"available": False, "reason": "user output does not implement native restart policy"}
+        from .artifact_output import callback_status
+        return callback_status(ref)
     providers, _findings = discover_claim_providers(plugins_root)
     provider = providers.get(namespace)
     if provider is None:
@@ -825,7 +833,7 @@ def resolve_claim_status(
         }
     if native_restart_policy and provider.no_self_provision_env is None:
         return {"available": False, "reason": "restart policy requires a no-self-provision callback"}
-    callback_args = ("claim-status", identifier)
+    callback_args: tuple[str, ...] = ("claim-status", identifier)
     if native_restart_policy:
         callback_args += ("--native-restart-policy",)
     legacy_command = build_provider_argv_for_manifest(
@@ -837,7 +845,7 @@ def resolve_claim_status(
     )
     if legacy_command is None:
         return {"available": False, "reason": f"{provider.plugin} claim-status callback failed"}
-    failure: dict = {}
+    failure: dict[str, Any] = {}
     result = _run_callback(
         provider,
         callback_args=callback_args,
@@ -863,7 +871,7 @@ def resolve_claim_reclaim(
     apply: bool,
     plugins_root: str | os.PathLike[str] | None = None,
     timeout: float = _RECLAIM_CALLBACK_TIMEOUT_SECONDS,
-) -> dict:
+) -> dict[str, Any]:
     """Best-effort claim reclaim via the registered claim provider for
     ``ref``'s namespace. Never raises -- degrades to ``{"available": False,
     "reason": "..."}"`` on any absence, malformed manifest, or callback

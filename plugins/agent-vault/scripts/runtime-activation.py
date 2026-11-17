@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ def main() -> int:
     parser.add_argument("--context")
     parser.add_argument("--invocation-cwd")
     parser.add_argument("--retain-native-selector", action="store_true")
+    parser.add_argument("--explicit-configuration-root", action="store_true")
     args = parser.parse_args()
     payload = Path(__file__).resolve().parents[1]
     sys.path[:0] = [
@@ -24,13 +26,14 @@ def main() -> int:
         str(payload / "scripts" / "configuration-layers" / "src"),
     ]
     reason = None
-    missing_context_errors = ()
+    missing_context_errors: tuple[type[Exception], ...] = ()
     try:
         from configuration_context import RepositoryContextRequired
 
         missing_context_errors = (RepositoryContextRequired,)
         from agent_vault.config import _global_config_path, home_dir
         from agent_vault.configuration import runtime_enabled
+        from agent_vault.invocation import use_configuration_root
 
         context = args.context if args.context is not None else os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
         if args.context is not None:
@@ -45,7 +48,11 @@ def main() -> int:
         os.environ["AGENT_VAULT_HOME"] = runtime
         selected = _global_config_path(invocation_directory=args.invocation_cwd or args.cwd)
         os.environ["AGENT_VAULT_CONFIG"] = str(selected)
-        enabled = runtime_enabled(args.cwd)
+        with (
+            use_configuration_root(args.cwd) if args.explicit_configuration_root
+            else nullcontext()
+        ):
+            enabled = runtime_enabled(args.cwd)
         state = "configured" if enabled else "configuration-empty"
         detail = (
             "Agent Vault runtime participation is explicitly configured."

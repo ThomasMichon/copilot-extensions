@@ -130,6 +130,9 @@ it is not serving. No other service or process is killed.
 Every command below connects only to the selected Unix HTTP socket. It does not
 start the service, load provider credentials, read the state file or fetch a
 forge. Namespace and target are explicit expected bindings.
+The separately documented [comparison command](EVALUATION.md) uses these same
+reads and a caller-supplied native reference; it does not subscribe or fetch a
+provider.
 
 ```text
 agent-pull-requests-service list --socket /data/pr-cache/local.sock --namespace installation-a
@@ -183,7 +186,7 @@ The operation's request fields match the CLI. Scope comes from OS admission,
 not the expected-binding fields. Missing/prior support refuses; clients never
 fall back to one-shot watch, a state-file read or an ambient account.
 The separately selected [reviewer-action capability](REVIEWER.md) adds
-`next-actions` under this same envelope.
+`next-actions` and finite local SSE subscriptions under this same envelope.
 
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and

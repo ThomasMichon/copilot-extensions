@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import AliasPath, BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from .inbox_custody import InboxConsumer
 from .live_inbox_runtime import InboxBinding
 from .live_message_models import LiveMessage
 
 INBOX_CONTRACT: Literal["retained-inbox-v1"] = "retained-inbox-v1"
-InboxStage = Literal["offered", "sending", "unknown", "sdk_accepted", "consumed"]
+InboxStage = Literal["offered", "sending", "unknown", "sdk_accepted", "consumed", "rejected"]
 
 
 class InboxConsumerInfo(BaseModel):
@@ -19,15 +19,18 @@ class InboxConsumerInfo(BaseModel):
 
     session_id: str = Field(min_length=1)
     incarnation: str = Field(min_length=1)
+    message_base: Literal[1] | None = None
     pid: int | None = Field(default=None, gt=0)
     process_started_at: float | None = Field(default=None, gt=0)
     portable_launch: str | None = Field(default=None, pattern=r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 
     @model_serializer(mode="wrap")
-    def serialize(self, handler):
-        value = handler(self)
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
         if self.portable_launch is None:
             value.pop("portable_launch", None)
+        if self.message_base is None:
+            value.pop("message_base", None)
         return value
 
     def observation(self) -> InboxConsumer:
@@ -50,16 +53,19 @@ class InboxNegotiateRequest(BaseModel):
     contract: Literal["retained-inbox-v1"]
     consumer: InboxConsumerInfo
     receiving_api: Literal["native-sdk-v1"] | None = None
+    message_base: Literal[1] | None = None
 
     @model_serializer(mode="wrap")
-    def serialize(self, handler):
-        value = handler(self)
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
         if self.receiving_api is None:
             value.pop("receiving_api", None)
+        if self.message_base is None:
+            value.pop("message_base", None)
         return value
 
     @model_validator(mode="after")
-    def legacy_observations(self):
+    def legacy_observations(self) -> InboxNegotiateRequest:
         if self.receiving_api is None and (
             self.consumer.pid is None or self.consumer.process_started_at is None
         ):
@@ -71,6 +77,7 @@ class InboxNegotiationInfo(BaseModel):
     contract: Literal["retained-inbox-v1"] = INBOX_CONTRACT
     binding: InboxBindingInfo
     expected_incarnation: str | None
+    message_base: Literal[1] = 1
 
 
 class InboxCurrentRequest(InboxNegotiateRequest):
@@ -100,16 +107,29 @@ class InboxOutcomeRequest(InboxNegotiateRequest):
 class RetainedInboxMessage(LiveMessage):
     model_config = ConfigDict(populate_by_name=True)
 
-    handoff_id: str = Field(validation_alias=AliasPath("handoff", "id"))
+    handoff_id: str | None = Field(default=None, validation_alias=AliasPath("handoff", "id"))
     handoff_stage: InboxStage
+    message_contract: dict[str, object] | None = None
+    control: bool = False
     consumer: InboxConsumerInfo | None = None
 
     @model_serializer(mode="wrap")
-    def serialize(self, handler):
-        value = handler(self)
+    def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
         if self.consumer is None:
             value.pop("consumer", None)
+        if self.message_contract is None:
+            value.pop("message_contract", None)
+        if not self.control:
+            value.pop("control", None)
         return value
+
+
+class InboxDispositionRequest(InboxCurrentRequest):
+    message_id: int = Field(gt=0)
+    state: Literal["rejected", "started", "completed", "unknown"]
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    reason: str = Field(min_length=1, max_length=1024)
 
 
 class InboxPollResult(BaseModel):
@@ -140,6 +160,7 @@ class InboxHandoffReceipt(BaseModel):
     handoff_started_at: float | None
     sdk_accepted_at: float | None
     consumed_at: float | None
+    disposition: dict[str, object] | None = None
 
 
 class InboxRecoveryResult(BaseModel):

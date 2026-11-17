@@ -184,6 +184,7 @@ def open_wheel_bundle_snapshot(
 
 def _unchanged(
     path: Path, before: os.stat_result, stream: BinaryIO, *, opened: os.stat_result | None = None,
+    allow_hardlinks: bool = False,
 ) -> os.stat_result:
     after = os.fstat(stream.fileno())
     changed = []
@@ -191,7 +192,7 @@ def _unchanged(
         changed.append("handle identity")
     if os.name != "nt" and opened is not None and after.st_ctime_ns != opened.st_ctime_ns:
         changed.append("handle change time")
-    if _identity(_ordinary(path)) != _identity(before):
+    if _identity(_ordinary(path, allow_hardlinks=allow_hardlinks)) != _identity(before):
         changed.append("path identity")
     if changed:
         raise WheelError("wheel snapshot input changed: " + ", ".join(changed))

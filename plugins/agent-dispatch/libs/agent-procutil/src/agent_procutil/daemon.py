@@ -9,15 +9,22 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, BinaryIO, TYPE_CHECKING, TypeVar, cast
 
 from .daemon_broker import WindowsDaemonProcess
+
+if TYPE_CHECKING:
+    from .daemon_instances import DaemonInstanceReceipt, DaemonInstanceSpec
+
+_DaemonProcess = subprocess.Popen[Any] | WindowsDaemonProcess
+_ProcessT = TypeVar("_ProcessT", bound=_DaemonProcess)
 
 
 def spawn_brokered_daemon(
     command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
     log_path: str, stderr_log_path: str | None,
-    instance_receipt=None,
+    instance_receipt: DaemonInstanceReceipt | None = None,
 ) -> WindowsDaemonProcess:
     """Read the installed consumer's Task adoption; never install one.
 
@@ -35,11 +42,11 @@ def spawn_brokered_daemon(
             "Windows launch broker: owning installation requires windows-broker support",
             process_created=False, admission_sent=False,
         ) from error
-    return spawn(
+    return cast(WindowsDaemonProcess, spawn(
         command, cwd=cwd, env=env, creationflags=creationflags,
         log_path=log_path, stderr_log_path=stderr_log_path,
         instance_receipt=instance_receipt,
-    )
+    ))
 
 
 def _validated_daemon_argv(argv: object) -> list[str]:
@@ -50,7 +57,7 @@ def _validated_daemon_argv(argv: object) -> list[str]:
             "spawn_daemon argv must be a sequence of arguments, not a single "
             f"{type(argv).__name__}; pass [executable, *args]"
         )
-    command = [os.fspath(part) for part in argv]  # type: ignore[union-attr]
+    command = [os.fspath(part) for part in cast(Sequence[str | os.PathLike[str]], argv)]
     if not command:
         raise ValueError("spawn_daemon requires a non-empty argv")
     return command
@@ -77,7 +84,9 @@ def _resolve_posix_executable(executable: str, cwd: str, environment: Mapping[st
     return targets.pop()
 
 
-def _automatic_instance(command: list[str], cwd: str, environment: Mapping[str, str]):
+def _automatic_instance(
+    command: list[str], cwd: str, environment: Mapping[str, str],
+) -> DaemonInstanceSpec:
     from .daemon_instances import DaemonInstanceSpec
 
     if os.name == "nt":
@@ -107,10 +116,10 @@ def spawn_daemon(
     extra_creationflags: int = 0,
     display: str | None = None,
     stderr_log_path: str | os.PathLike[str] | None = None,
-    instance=None,
+    instance: DaemonInstanceSpec | None = None,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
     stdio_fds: tuple[int, int, int] | None = None,
-) -> subprocess.Popen | WindowsDaemonProcess:
+) -> _DaemonProcess:
     """Launch a windowless resident daemon from an explicit durable cwd.
 
     Output is appended to absolute, non-payload log paths with a safe launch
@@ -146,9 +155,9 @@ def spawn_daemon(
         )
     except BaseException as error:
         if not creation[0]:
-            error.process_created = False
-            error.cleanup_confirmed = True
-            error.admission_sent = False
+            setattr(error, "process_created", False)
+            setattr(error, "cleanup_confirmed", True)
+            setattr(error, "admission_sent", False)
         raise
 
 
@@ -165,11 +174,11 @@ def _spawn_daemon(
     extra_creationflags: int,
     display: str | None,
     stderr_log_path: str | os.PathLike[str] | None,
-    instance,
+    instance: DaemonInstanceSpec | None,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
     stdio_fds: tuple[int, int, int] | None = None,
     _creation: list[bool],
-) -> subprocess.Popen | WindowsDaemonProcess:
+) -> _DaemonProcess:
     import agent_procutil as pu
 
     command = _validated_daemon_argv(argv)
@@ -222,14 +231,16 @@ def _spawn_daemon(
     if automatic:
         instance = _automatic_instance(command, cwd_path, child_env)
 
-    def refused():
+    def refused() -> bool:
         try:
             cancel_instance_reservation(receipt, creation_refused=True)
             return True
         except (OSError, ValueError, KeyError):
             return False
 
-    def failed(identity, *, exited, admission_possible):
+    def failed(
+        identity: tuple[int, str] | None, *, exited: bool, admission_possible: bool,
+    ) -> bool:
         try:
             return finish_failed_launch(
                 receipt, identity, exit_confirmed=exited,
@@ -238,7 +249,7 @@ def _spawn_daemon(
         except (OSError, ValueError, KeyError):
             return False
 
-    def commit(process):
+    def commit(process: _ProcessT) -> _ProcessT:
         identity = created_process_identity(process)
         try:
             if identity is None:
@@ -258,11 +269,11 @@ def _spawn_daemon(
                 "daemon instance commit failed", cleanup_confirmed=settled,
                 process_created=True, process_identity=identity,
             )
-            failure.instance_receipt = receipt
+            setattr(failure, "instance_receipt", receipt)
             if not settled:
-                failure.process = process
+                setattr(failure, "process", process)
             raise failure from error
-        process.instance_receipt = receipt
+        setattr(process, "instance_receipt", receipt)
         return process
     # A contained-test child environment keeps the launch contained even when
     # the launcher itself is not in contained test mode. Windows environment
@@ -275,7 +286,7 @@ def _spawn_daemon(
         extra_creationflags=extra_creationflags,
     )
     @contextlib.contextmanager
-    def diagnostic_stream(path):
+    def diagnostic_stream(path: str) -> Iterator[BinaryIO]:
         manager = pu._open_daemon_log(path)
         stream = manager.__enter__()
         try:
@@ -305,9 +316,9 @@ def _spawn_daemon(
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         write_logs(pu._daemon_log_header(stamp, cwd_path, command[0], display))
 
-        def reserve():
+        def reserve() -> DaemonInstanceReceipt:
             try:
-                return reserve_instance(instance, environment=child_env)
+                return reserve_instance(cast("DaemonInstanceSpec", instance), environment=child_env)
             except Exception as error:
                 code = getattr(error, "errno", None)
                 report_logs(
@@ -316,7 +327,7 @@ def _spawn_daemon(
                 )
                 raise
 
-        popen_kwargs = {
+        popen_kwargs: dict[str, Any] = {
             "cwd": cwd_path,
             "env": child_env,
             "stdin": subprocess.DEVNULL,
@@ -350,11 +361,11 @@ def _spawn_daemon(
                 refused()
                 raise
         child_env.update(instance_environment(receipt))
-        process = None
+        process: _DaemonProcess | None = None
         creation_attempted = False
         creation_refused = False
 
-        def create():
+        def create() -> subprocess.Popen[Any]:
             nonlocal creation_attempted, creation_refused
             launch_command = command
             if (
@@ -370,9 +381,9 @@ def _spawn_daemon(
                 return subprocess.Popen(launch_command, **popen_kwargs, **kwargs)  # noqa: S603
             except (OSError, ValueError, TypeError) as error:
                 creation_refused = True
-                error.process_created = False
-                error.cleanup_confirmed = True
-                error.admission_sent = False
+                setattr(error, "process_created", False)
+                setattr(error, "cleanup_confirmed", True)
+                setattr(error, "admission_sent", False)
                 raise
 
         resume_attempted = False
@@ -385,7 +396,7 @@ def _spawn_daemon(
                         report_logs(f"{stamp} spawn_daemon: creating-suspended\n".encode())
                         process = create()
                         report_logs(f"{stamp} spawn_daemon: created-suspended\n".encode())
-                        verify(process._handle)
+                        verify(getattr(process, "_handle"))
                         report_logs(f"{stamp} spawn_daemon: caller-jobs-verified\n".encode())
                     resume_attempted = True
                     if not pu._resume_suspended_process(process.pid):
@@ -417,16 +428,14 @@ def _spawn_daemon(
                     )
                 else:
                     settled = refused()
-                if (
-                    process is None and creation_attempted and settled
-                    and not pu._breakaway_denied(error, kwargs)
-                ):
+                denied = (
+                    process is None and creation_attempted and isinstance(error, OSError)
+                    and pu._breakaway_denied(error, kwargs)
+                )
+                if process is None and creation_attempted and settled and not denied:
                     raise
                 if not isinstance(error, (OSError, ValueError)) and cleanup_confirmed and settled:
                     raise
-                denied = (
-                    process is None and creation_attempted and pu._breakaway_denied(error, kwargs)
-                )
                 reason = (
                     "the caller's Job object forbids breakaway; daemon not started"
                     if denied else "native daemon launch could not escape launcher-owned cleanup Jobs"
@@ -441,9 +450,9 @@ def _spawn_daemon(
                         cleanup_confirmed=cleanup_confirmed, process_created=process is not None,
                         admission_sent=resume_attempted, process_identity=identity,
                     )
-                    failure.instance_receipt = receipt
+                    setattr(failure, "instance_receipt", receipt)
                     if not cleanup_confirmed:
-                        failure.process = process
+                        setattr(failure, "process", process)
                     raise failure from error
                 note = "spawn_daemon: explicit contained_fallback accepts caller-owned lifetime"
                 pu.log.warning("%s (%s)", note, command[0])
@@ -470,12 +479,14 @@ def _spawn_daemon(
         if stdio_fds is not None:
             import msvcrt
 
-            handles = tuple(msvcrt.get_osfhandle(fd) for fd in stdio_fds)
+            get_osfhandle: Any = getattr(msvcrt, "get_osfhandle")
+            handles = tuple(get_osfhandle(fd) for fd in stdio_fds)
         try:
             process = _durable_windows_launch(
                 command, cwd=cwd_path, env=dict(child_env), creationflags=flags,
                 log_path=log_file, stderr_log_path=err_file,
                 instance_receipt=receipt, stdio_handles=handles,
+                scope_environment=scope_environment,
             )
         except BaseException as error:
             if not isinstance(error, pu.DaemonSpawnError):
@@ -507,9 +518,9 @@ def _spawn_daemon(
                     process_created=created, admission_sent=getattr(error, "admission_sent", True),
                     process_identity=identity,
                 )
-                failure.instance_receipt = receipt
+                setattr(failure, "instance_receipt", receipt)
                 if getattr(error, "process", None) is not None:
-                    failure.process = error.process
+                    setattr(failure, "process", getattr(error, "process"))
                 raise failure from error
             note = "spawn_daemon: explicit contained_fallback accepts caller-owned lifetime"
             pu.log.warning("%s (%s)", note, command[0])
@@ -536,7 +547,7 @@ def _child_env_contained(child_env: dict[str, str]) -> bool:
     return child_env.get(name) == "1"
 
 
-def _durable_windows_launch(command, **kwargs) -> WindowsDaemonProcess:
+def _durable_windows_launch(command: list[str], **kwargs: Any) -> WindowsDaemonProcess:
     from . import daemon_broker
 
     return daemon_broker.spawn_brokered_daemon(command, **kwargs)

@@ -454,6 +454,7 @@ def spawn_brokered_daemon(
     command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
     log_path: str, stderr_log_path: str | None,
     instance_receipt: Any = None, stdio_handles: tuple[int, int, int] | None = None,
+    scope_environment: dict[str, str] | None = None,
 ) -> WindowsDaemonProcess:
     """Durably launch a resident daemon through WMI ``Win32_Process.Create``.
 
@@ -462,11 +463,13 @@ def spawn_brokered_daemon(
     caller tree-kill nor closing a kill-on-close Job can end the daemon. WMI
     inherits nothing, so the environment, cwd, logs and optional stdio handles
     are passed explicitly. The actual child is pinned by handle, PID and
-    creation time and must be outside every Job before it is resumed. Use it
+    creation time and must escape the caller's immediate Job and every tracked
+    launcher-owned cleanup Job before it is resumed. Unrelated provider Jobs
+    do not establish caller ownership. Use it
     only for daemons that must outlive their launcher; bounded and
     tool-to-tool children keep normal creation and their caller's Jobs.
     """
-    from . import DaemonSpawnError
+    from . import DaemonSpawnError, _job_scopes
 
     deadline = time.monotonic() + _TIMEOUT
     child = bootstrap = None
@@ -477,8 +480,16 @@ def spawn_brokered_daemon(
     stage = "activation"
     activation_detail = ""
     problems = []
+    cause: BaseException | None = None
     interrupted: BaseException | None = None
     try:
+        scopes = _job_scopes.child_environment(
+            env if scope_environment is None else scope_environment,
+        )
+        env = {
+            key: value for key, value in env.items()
+            if key.upper() != _job_scopes.ENVIRONMENT_KEY
+        }
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             listener.listen(_BACKLOG)
@@ -496,9 +507,8 @@ def spawn_brokered_daemon(
             bootstrap = WindowsDaemonProcess(pid, argv)
             stage = "bootstrap-identity"
             with _accept_bootstrap(listener, cookie, pid, deadline) as connection:
-                # WMI may place the bootstrap in its provider host's quota Job
-                # (never a caller Job). Only the resident child, created with
-                # breakaway, must be outside every Job; that is checked below.
+                # WMI provider Jobs are not the launcher's cleanup boundary.
+                # Verify the suspended actual child against the owning scopes.
                 stage = "child-staging"
                 handles = (
                     None if stdio_handles is None
@@ -519,8 +529,10 @@ def spawn_brokered_daemon(
                 from ._daemon_instance_identity import created_process_identity
                 child_identity = created_process_identity(child)
                 stage = "child-adoption"
-                if not _outside_job(child):
-                    raise OSError("daemon broker child still belongs to a Job")
+                with _job_scopes.query_scopes(scopes) as verify:
+                    verify(child._handle)
+                    if not _outside_caller_job(child):
+                        raise OSError("daemon broker child retained the caller's Job")
                 if instance_receipt is not None:
                     from ._daemon_instance_store import bind_process
                     if child_identity is None:
@@ -534,7 +546,8 @@ def spawn_brokered_daemon(
             stage = "bootstrap-exit"
             if bootstrap.wait(timeout=_remaining(deadline)) != 0:
                 raise OSError("daemon broker did not finish successfully")
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        cause = error
         problems.append(stage)
     except BaseException as error:
         # Cancellation (KeyboardInterrupt, SystemExit) still runs the bounded
@@ -578,7 +591,7 @@ def spawn_brokered_daemon(
         if interrupted is not None:
             setattr(interrupted, "daemon_spawn_failure", failure)
             raise interrupted
-        raise failure from None
+        raise failure from cause
     if child is None:
         raise DaemonSpawnError("spawn_daemon: Windows lifetime broker did not return a child")
     return child

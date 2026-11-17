@@ -5,9 +5,54 @@
 - **Branch(es):** independent, serial per-slice PRs targeting `dev`
 - **Created:** 2026-10-08
 - **Status:** Active
+- **Owner:** `curious-bolt` for the Mux-launch continuation
 - **Vision:** `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient; `visions/plugins/context-handoff/README.md` - host-agnostic trigger and durable recovery
 - **Tracking issues:** #5579, #5664, #2619
 - **Related, separately driven mitigation:** #5637
+
+## Goal
+
+Make affirmative lifecycle transitions do the work without retaining wait-only
+Python forwarding processes or weakening recovery, process ownership, terminal
+behavior or handoff mode gates. The current Mux-launch continuation raises the
+source-declared compatible minimum and preferred PSMux version to 3.4.0, while
+preserving 3.3.5 observation/coexistence for existing live sessions. No forced
+upgrade or provider replacement under live sessions is authorized. The current
+attach-path repair must recognize an existing live mux and attach through the
+existing owner rather than refuse it because an unrelated native process
+identity cannot be read; incomplete evidence must still refuse duplicate
+creation. The reported live session is not an authorized diagnostic target.
+The approved source scope also includes repairing the blocking validation
+contracts, deduplicating other owners first: the changed-file strict typing
+gate, legacy workflow and installer fixture contracts, and the legacy-plan
+cold-start control. No deployment, deadline widening or live-session changes
+are included.
+The parent retains its broader shim/PowerShell depth outcome and the grouped
+process diagnostic's delivered-or-tracked-deferral outcome. This source slice
+does not close those gates or transfer #8669's separate custody and installed
+acceptance obligations.
+The operator subsequently directed this owner to identify the blocking PR's
+agent through Bridge, have that owner drive its gates and notify this owner,
+and not remain blocked on the PR if no Bridge owner can be identified. This
+changes dependency handling, not contributor custody or review/CI authority.
+Keep this Mux change independently qualified rather than incorporating or
+superseding another contributor's unmerged fixture repair.
+
+### Current-owner charter
+
+| Field | Current assignment |
+|-------|--------------------|
+| Root goal | "Diagnose the launcher root cause and fix it in source (ThomasMichon/copilot-extensions) with tests and a PR driven through review/CI to merge." Reliable Mux launch remains the outcome, not completion of a validation detour. The broader lifecycle Goal above remains open. |
+| Kind | Completion. |
+| Acceptance | Qualify the launch and attach repairs through real consumer controls, required strict typing, review and CI, then verify the source PR merged. Preserve legacy-session coexistence, unknown-observation refusal, process custody, seed admission and unchanged deadlines. |
+| Finalization criterion | Source merge verified, canonical outcome records published and this source worktree's claims settled through its native owner. Keep broader parent and separately owned installed-acceptance gates open unless completed or explicitly transferred to a tracked owner. |
+| Now | The independently qualified Mux source repair merged in #12981 after current-head approval and green CI. Its outcome is recorded in the journal below; source-worktree settlement follows publication of this record. The contributor-owned #12880 repair was not incorporated or superseded. |
+| Return | Keep LS5579-P1/P2/V1 and all other pre-existing parent validation, release and installed-acceptance gates open under their existing owners. Source merge grants no rollout, retained-session restoration or live diagnostic authority. |
+
+This charter records existing authority only. It grants no deployment, installed
+edits, service restart, deadline widening, retained-session restoration or
+diagnostic access to the reported live session. The private continuation record
+retains the original operator wording and all superseding limits.
 
 ## Guiding Intent
 
@@ -40,6 +85,108 @@ scope. It grants no competing shared-module implementation or ownership
 transfer; silence neither abandons #8669's scope nor accepts a transfer of its
 custody. Existing
 single-writer and installed lifecycle obligations keep their original scope.
+
+### Mux-launch ownership continuation
+
+The released launch-lifecycle responsibility is accepted by `curious-bolt`.
+The immediate slice is diagnosing native Windows mux creation that returns a
+session assignment without reaching the pane command or Copilot invocation,
+then qualifying a focused source repair through the existing launch owners.
+The parent Plan and Validation Plan remain open; this is not installed
+acceptance or completion of the effort.
+
+The separate compatibility-first messaging implementation remains with its
+own coordination issue, #12487. This continuation does not take over that WIP,
+its failing checks, retained resources or another driver's delivery repair.
+No deployment, service restart or retained-session relaunch is authorized.
+
+The subsequent attach-path report describes a known live mux being refused
+during native observation and then treated as unknown during attachment.
+The source investigation and regression controls must preserve that live
+session without probing it through effectful provider commands or modifying
+it. The unabstracted operator report is retained privately; this public-safe
+capture does not add operational authority.
+
+The attach correction reuses an authenticated positive target observation in
+the same interactive launch plan. Manager uses its typed boolean hint only for
+the existing join path and does not resolve creation support first. Failed
+attachment terminates; absent, malformed or false hints retain observation and
+the duplicate-creation fence. This removes redundant helper startup from the
+positive attach path without changing process custody or seed admission.
+Legacy plans still invoke the selected runtime's canonical observation module,
+now once per observation rather than starting a separate contract-description
+process first. Its response retains contract/version/status validation and
+unsupported-runtime refusal; the existing deadlines are unchanged.
+
+The operator selected the following source-only compatibility amendment:
+
+> raise minimum and preferred to 3.4.0 in source
+>
+> Keep 3.3.5 legacy observation/coexistence working for live sessions; no forced
+> upgrade or provider replacement under live sessions.
+
+The existing manifest command transport is retained. Isolated native startup
+reproduced failures on 3.3.5, while the same transport and focused regressions
+passed against a private 3.4.0 fixture. This is not qualification of an installed
+upgrade, every provider operation or the parent effort's remaining acceptance.
+
+The source candidate additionally detaches creation stdin and retains bounded
+client failure diagnostics without replaying uncertain creation. Its installer
+uses passive process absence, not legacy provider CLI reads, before replacement;
+missing PATH entries do not bypass the live/unknown activity hold.
+Focused validation passed 24 native/core cases, 12 compatibility/installer
+guards and 41 current native release-gate source controls. Legacy observation
+controls also passed; source lint, version consistency and the install contract
+are green. The declaration was regenerated through its existing owner.
+
+Publication remains pending reconciliation of broader validation failures.
+The adjacent legacy workflow controls tracked by #9348 now use an inert,
+bounded historical CI recipe for their old guard/refusal contracts while
+current workflow assertions retain the actual unit-only declarations and
+read-only qualification permissions. All 71 controls in that file pass; this
+does not close the issue's other historical qualification fixtures.
+The three Windows extended-prefix self-install failures are repaired
+by canonicalizing ordinary file-root spellings in the launcher renderer, without
+changing other device namespaces or root authority. Five focused controls,
+including real CMD front doors at short and long owned roots, pass; the full
+Manager self-install file passes 125 cases with two existing skips. Fresh
+provider-install policy is covered with isolated fake-package controls, not a
+real installed upgrade or a complete clean-room installation. Operational
+deployment and retained-session restoration remain unapproved.
+The canonical mux creation module, root renderer, observation adapter, launch
+planner and independent regression fixtures now pass whole-file strict checks
+for both declared analysis platforms. The observation and passive installer
+packet passes 75 cases; creation admission passes 18; the final focused launch
+consumer packet passes 43. The six opt-in native creation cases were collected
+but skipped in the typing-only run, not requalified natively. The attach
+consumer's 11 legacy-plan controls passed with the original deadlines after
+retaining its masked failure diagnostics; one passing run is not proof of a
+timing fix. The prior candidate's strict gate reported 205 errors in the
+separately owned seed-delivery fixture; those were not grandfathered.
+The seed receiving-fixture and typing correction tracked by #12879 has a
+separate contributor owner. Do not publish a competing fixture repair or
+incorporate its unmerged implementation. The Mux-specific producer assertions
+now live in an independent typed test file; the seed-delivery test file is
+unchanged from the comparison base. Both new join-hint/prompt-custody cases
+pass, and the complete 16-file, five-project strict ratchet passes both declared
+analysis platforms. This removes the source dependency on #12880 without
+claiming that its historical fixture failures are repaired or waived here.
+A wider resolve packet initially reported 106 passes and 19 failures: 17 adjacent
+receiving-ledger fixture mismatches in preview/handoff controls, one stale
+topology stub and one nonexistent-workspace policy fixture. Those observations
+were coordinated on the contributor's #12880 without changing its open
+implementation or weakening the production checks. The independent adjacent
+repair was claimed on #12879 after its owner confirmed that it remained outside
+the contributor's scope. Those four fixture files now pass whole-file strict
+typing on both declared analysis platforms and lint. Seventy unaffected controls
+passed in the complete packet; after the final assertion correction all 13
+handoff controls also pass, including distinct foreign-platform and
+same-platform foreign-namespace refusals. The repaired preview packet includes
+its real CLI subprocess and unchanged read-only snapshots. The fixtures use
+the actual receiving-ledger location, declared checkout namespace and reporter
+context; no production admission check is mocked away or relaxed by this repair.
+This resolves the adjacent 19-case blocker, not #12880's separate seed fixture.
+The remaining gate is this candidate's normal review, required CI and merge.
 
 ## Context
 
@@ -131,6 +278,10 @@ Focused mini-effort: [Picker Launch Handoff](picker-launch-handoff.md).
   terminal attachment, and ownership/reaping semantics; do not replace
   the waiters with a detached unowned process.
 - [x] Land code, lifecycle regression tests, docs, and required changefiles.
+- [x] Qualify the independent Windows PSMux creation/attachment repair through
+  current-head review and CI, then verify #12981 merged. See the
+  [source outcome](journal/2026/11.17-mux-source-outcome.md); this closes no
+  broader shim, diagnostic, release or installed-acceptance item.
 
 Phase 3's source slice landed in #9936. The changed boundary is ordinary
 Windows foreground preparation and terminal-owned attachment; unchanged
@@ -233,6 +384,10 @@ _(Agent-recommended validation detail: zero wait-only Python workers in the
 two measured forwarding roles, with live process-tree evidence.)_
 
 ## Journal
+
+### 2026-11-17 - Mux source repair merged
+
+[Source outcome, validation limits and retained parent gates](journal/2026/11.17-mux-source-outcome.md).
 
 ### 2026-11-15 - Broader shim scope and diagnostic wish retained
 

@@ -1,6 +1,8 @@
 """Capability-selected delivery observation, separate from sending another turn."""
 
 from __future__ import annotations
+import argparse
+from typing import Any
 
 from .client_protocol_floor import protocol_floored_request
 from .live_delivery_state import CAPABILITY
@@ -16,17 +18,24 @@ def wait_seconds(value: str) -> float:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def send_and_wait(client, session_id: str, *, timeout: float, **message) -> dict:
+def send_and_wait(
+    client: Any, session_id: str, *, timeout: float, **message: Any,
+) -> dict[str, Any]:
     seconds = validate_live_reply_timeout(timeout)
     body = SendMessageRequest(**message).model_dump()
-    request = protocol_floored_request(client, 1, capabilities={CAPABILITY: 1})
+    capabilities = {CAPABILITY: 1}
+    if "message_version" in body or "message_requires" in body:
+        capabilities["versioned_messages"] = 1
+    request = protocol_floored_request(client, 1, capabilities=capabilities)
     return request(
         "POST", f"/api/v1/live-sessions/{session_id}/delivery",
         {"message": body, "timeout": seconds}, request_timeout=seconds + 15.0,
     ) or {}
 
 
-def observe(client, session_id: str, message_id: int, *, timeout: float = 0.0) -> dict:
+def observe(
+    client: Any, session_id: str, message_id: int, *, timeout: float = 0.0,
+) -> dict[str, Any]:
     seconds = validate_live_reply_timeout(timeout)
     request = protocol_floored_request(client, 1, capabilities={CAPABILITY: 1})
     return request(
@@ -35,7 +44,7 @@ def observe(client, session_id: str, message_id: int, *, timeout: float = 0.0) -
     ) or {}
 
 
-def command(args) -> None:
+def command(args: argparse.Namespace) -> None:
     import json
     from . import __main__ as core
 

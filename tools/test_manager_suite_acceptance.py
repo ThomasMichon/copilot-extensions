@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 import importlib.util
 import json
@@ -10,19 +11,25 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 import xml.etree.ElementTree as ET
 
 import pytest
 import yaml
 
+if TYPE_CHECKING:
+    from plugin_test_containment import Limits
+
 _SPEC = importlib.util.spec_from_file_location(
     "manager_suite_acceptance", Path(__file__).with_name("run-manager-suite-acceptance.py"),
 )
+assert _SPEC is not None and _SPEC.loader is not None
 runner = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(runner)
 _ADAPTER_SPEC = importlib.util.spec_from_file_location(
     "manager_adapter_acceptance", Path(__file__).with_name("run-manager-runtime-acceptance.py"),
 )
+assert _ADAPTER_SPEC is not None and _ADAPTER_SPEC.loader is not None
 adapter_runner = importlib.util.module_from_spec(_ADAPTER_SPEC)
 _ADAPTER_SPEC.loader.exec_module(adapter_runner)
 
@@ -30,31 +37,34 @@ _ADAPTER_SPEC.loader.exec_module(adapter_runner)
 @pytest.mark.parametrize("outcome", (
     "success", "controls", "constructed", "legacy", "finish", "assertions", "exception", "launch",
 ))
-def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_path, monkeypatch, outcome):
-    calls = []
-    children = []
+def test_runtime_inputs_overlap_construction_and_settle_before_consumers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    calls: list[str] = []
 
     class Controls:
-        returncode = None
+        returncode: int | None = None
 
-        def __init__(self, label):
+        def __init__(self, label: str) -> None:
             self.label = label
             self.settled = False
 
-        def wait(self, **kwargs):
+        def wait(self, **kwargs: object) -> int:
             calls.append(("settle:" if kwargs else "wait:") + self.label)
             self.returncode = int(outcome == self.label)
             self.settled = True
             return self.returncode
 
-        def poll(self):
+        def poll(self) -> int | None:
             return self.returncode
 
-        def terminate(self):
+        def terminate(self) -> None:
             calls.append("terminate:" + self.label)
             self.returncode = -1
 
-    def launch(command, **kwargs):
+    children: list[Controls] = []
+
+    def launch(command: list[str], **kwargs: object) -> Controls:
         assert kwargs["stdout"] is sys.stdout and kwargs["stderr"] is sys.stderr
         if "--prepare-step" in command:
             label = command[-1]
@@ -72,7 +82,7 @@ def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_pat
         children.append(child)
         return child
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
         assert kwargs["stdout"] is sys.stdout and kwargs["stderr"] is sys.stderr
         if "--prepare" in command:
             assert calls[:5] == [
@@ -102,7 +112,7 @@ def test_runtime_inputs_overlap_construction_and_settle_before_consumers(tmp_pat
     assert ("finish" in calls) is (outcome not in {"constructed", "legacy", "launch"})
 
 
-def _adapter_report(path, fault=None):
+def _adapter_report(path: Path, fault: str | None = None) -> None:
     root = ET.Element("testsuite")
     for node in adapter_runner._application_adapter_nodes():
         ET.SubElement(root, "testcase", {
@@ -112,7 +122,7 @@ def _adapter_report(path, fault=None):
     if fault == "missing":
         root.remove(root[-1])
     elif fault == "duplicate":
-        root[-1].set("name", root[0].get("name"))
+        root[-1].set("name", cast(str, root[0].get("name")))
     elif fault == "foreign":
         root[-1].set("classname", "unrelated")
     elif fault:
@@ -121,13 +131,15 @@ def _adapter_report(path, fault=None):
 
 
 @pytest.mark.parametrize("fault", [None, "missing", "duplicate", "foreign", "skipped", "failure", "error"])
-def test_adapter_acceptance_requires_every_unique_successful_phase(tmp_path, fault):
+def test_adapter_acceptance_requires_every_unique_successful_phase(
+    tmp_path: Path, fault: str | None,
+) -> None:
     report = tmp_path / "report.xml"
     _adapter_report(report, fault)
     assert adapter_runner._application_adapter_complete(report) is (fault is None)
 
 
-def test_adapter_acceptance_never_reuses_previous_reports(tmp_path, monkeypatch):
+def test_adapter_acceptance_never_reuses_previous_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     report = tmp_path / "application-adapter-result.json"
     report.write_text('{"complete":true}')
     monkeypatch.setattr(adapter_runner, "acquire", lambda *args: pytest.fail("stale acceptance"))
@@ -137,14 +149,16 @@ def test_adapter_acceptance_never_reuses_previous_reports(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("outcome", ["complete", "partial", "exception", "cleanup-overrun"])
-def test_adapter_group_retains_one_bound_and_cleans_up_on_every_outcome(tmp_path, monkeypatch, outcome):
+def test_adapter_group_retains_one_bound_and_cleans_up_on_every_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     root = tmp_path / "evidence"
     root.mkdir()
     venv = tmp_path / "venvs" / "agent-worktrees"
     python = venv / ("Scripts/python.exe" if adapter_runner.os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
     python.touch()
-    settled = []
+    settled: list[str] = []
     clock = [0.0]
     monkeypatch.setattr(adapter_runner, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(adapter_runner, "acquire", lambda *args: SimpleNamespace(
@@ -152,7 +166,7 @@ def test_adapter_group_retains_one_bound_and_cleans_up_on_every_outcome(tmp_path
     ))
 
     @contextmanager
-    def sandbox(**kwargs):
+    def sandbox(**kwargs: object) -> Iterator[Path]:
         assert kwargs["dir"] == adapter_runner.REPO
         private = root / "sandbox"
         private.mkdir()
@@ -163,7 +177,7 @@ def test_adapter_group_retains_one_bound_and_cleans_up_on_every_outcome(tmp_path
             if outcome == "cleanup-overrun":
                 clock[0] = 301.0
 
-    def execute(command, *, limits, **kwargs):
+    def execute(command: list[str], *, limits: Limits, **kwargs: object) -> int:
         assert 0 < limits.wall_seconds <= 300
         assert "--timeout=30" in command
         nodes = adapter_runner._application_adapter_nodes()
@@ -184,10 +198,11 @@ def test_adapter_group_retains_one_bound_and_cleans_up_on_every_outcome(tmp_path
     assert result["complete"] is (outcome == "complete")
 
 
-def test_adapter_later_phase_refuses_before_native_work(tmp_path, monkeypatch):
+def test_adapter_later_phase_refuses_before_native_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     spec = importlib.util.spec_from_file_location(
         "application_adapter_partial_control", Path(__file__).with_name("test_application_adapter_journey.py"),
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     state = SimpleNamespace(variant="plugin", directory=tmp_path, completed=[])
@@ -197,8 +212,9 @@ def test_adapter_later_phase_refuses_before_native_work(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("failed", ("prepare", "exercise", "assertions", None))
+@pytest.mark.parametrize("mode", ("normal", "repair", "fresh"))
 def test_native_stage_failure_always_settles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed: str | None,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed: str | None, mode: str,
 ) -> None:
     calls = []
 
@@ -206,22 +222,27 @@ def test_native_stage_failure_always_settles(
         stage = next((name for name in ("prepare", "exercise", "settle")
                       if "--" + name in argv), "assertions")
         calls.append(stage)
+        if mode == "fresh":
+            assert str(runner.FRESH_FIXTURE) in argv
+        assert timeout == {"prepare": 1800, "exercise": 900, "assertions": 300, "settle": 90}[stage]
         return int(stage == failed)
 
     monkeypatch.setattr(runner, "_run", run)
     monkeypatch.setenv("MANAGER_SUITE_ACCEPTANCE_DATA", "previous-owner")
-    assert runner.qualify(tmp_path, "repair", Path(sys.executable)) == int(failed is not None)
-    assert calls == {
+    assert runner.qualify(tmp_path, mode, Path(sys.executable)) == int(failed is not None)
+    expected: dict[str | None, list[str]] = {
         "prepare": ["prepare", "settle"],
         "exercise": ["prepare", "exercise", "settle"],
-    }.get(failed, ["prepare", "exercise", "assertions", "settle"])
+    }
+    assert calls == expected.get(failed, ["prepare", "exercise", "assertions", "settle"])
     assert runner.os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] == "previous-owner"
-    report = json.loads((tmp_path / "repair-runner.json").read_text(encoding="utf-8"))
+    report = json.loads((tmp_path / f"{mode}-runner.json").read_text(encoding="utf-8"))
     assert report["stages"]["settle"] == 0
 
 
+@pytest.mark.parametrize("mode", ("normal", "fresh"))
 def test_preparation_timeout_still_settles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
     calls = []
 
@@ -232,7 +253,7 @@ def test_preparation_timeout_still_settles(
         return 0
 
     monkeypatch.setattr(runner, "_run", run)
-    assert runner.qualify(tmp_path, "normal", Path(sys.executable)) == 1
+    assert runner.qualify(tmp_path, mode, Path(sys.executable)) == 1
     assert calls == ["prepare", "settle"]
 
 
@@ -315,9 +336,9 @@ def test_process_observer_report_is_retained_by_the_actual_native_job() -> None:
         encoding="utf-8",
     ))
     upload = next(step for step in workflow["jobs"]["manager-suite-windows"]["steps"]
-                  if step.get("name") == "Retain synthetic qualification diagnostics")
+                  if step.get("uses") == "actions/upload-artifact@v4")
     paths = upload["with"]["path"].splitlines()
-    for mode in ("normal", "repair"):
+    for mode in ("normal", "repair", "fresh"):
         report = Path(".v") / f"{mode}-process-trace.json"
         assert any(report.match(pattern.strip()) for pattern in paths), str(report)
 
@@ -332,9 +353,9 @@ def test_isolated_stage_diagnostics_use_explicit_utf8(
         if "--prepare" not in argv:
             return 0
         prefix = argv[:argv.index(str(runner.FIXTURE))]
-        return execute([
+        return cast(int, execute([
             *prefix, "-c", "import sys; assert sys.flags.utf8_mode == 1; print(chr(0x2014))",
-        ], timeout=30)
+        ], timeout=30))
 
     monkeypatch.setattr(runner, "_run", run)
     assert runner.qualify(tmp_path, "normal", Path(sys.executable)) == 0

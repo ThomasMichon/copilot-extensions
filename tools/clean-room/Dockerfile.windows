@@ -57,9 +57,9 @@ RUN $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine'); \
 # mode never loads extensions at all -- see the Linux
 # context-handoff-connection-race scenario's own docs/finding). Same release
 # artifact and checksum-verification the repo's own CI uses
-# (.github/workflows/ci.yml's "Install psmux" step) for parity.
-ARG PSMUX_VERSION=3.3.8
-ARG PSMUX_SHA256=1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe
+# (.github/workflows/validate-and-promote.yml's native lane) for parity.
+ARG PSMUX_VERSION=3.4.0
+ARG PSMUX_SHA256=a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721
 RUN $ErrorActionPreference = 'Stop'; \
     Invoke-WebRequest -Uri ('https://github.com/psmux/psmux/releases/download/v' + $env:PSMUX_VERSION + '/psmux-v' + $env:PSMUX_VERSION + '-windows-x64.zip') -OutFile C:\psmux.zip; \
     $actual = (Get-FileHash -Algorithm SHA256 C:\psmux.zip).Hash.ToLowerInvariant(); \

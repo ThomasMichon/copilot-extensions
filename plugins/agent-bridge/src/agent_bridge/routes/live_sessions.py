@@ -11,10 +11,11 @@ is reaped by staleness rather than relying on a clean deregister.
 from __future__ import annotations
 
 import asyncio as asyncio
+from collections.abc import AsyncIterator
 import json
 import math
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -61,14 +62,12 @@ from ..live_representation import (
     derive_turn_state,
     translate_reconnect_cursor,
 )
-from ..result_tokens import retarget
+from ..result_tokens import retarget, ResultHistoryChangedError, ResultTokenError
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
-    ResultHistoryChangedError,
-    ResultTokenError,
     build_represented_result_snapshot,
     expand_represented_result_ref,
 )
@@ -81,7 +80,6 @@ _TURN_STALL_SECONDS = 90.0
 
 if TYPE_CHECKING:
     from ..db import Database
-    from ..events import EventLog
     from ..live_representation import LiveEventStore
 
 router = APIRouter(prefix="/api/v1/live-sessions", tags=["live-sessions"])
@@ -116,17 +114,17 @@ def _db(request: Request) -> Database:
     db = getattr(request.app.state, "db", None)
     if db is None:
         raise HTTPException(status_code=503, detail="database not ready")
-    return db
+    return cast("Database", db)
 
 
 def _store(request: Request) -> LiveEventStore:
     store = getattr(request.app.state, "live_event_store", None)
     if store is None:
         raise HTTPException(status_code=503, detail="live event store not ready")
-    return store
+    return cast("LiveEventStore", store)
 
 
-def _result_history(request: Request, session_id: str):
+def _result_history(request: Request, session_id: str) -> tuple[EventLog | None, dict[str, tuple[str, dict[int, int]]]]:
     """The log and its merge map from one snapshot (see ``snapshot``); a merge
     still copying events is a retryable 503, never a stale-history answer."""
     from ..live_representation import MergePendingError
@@ -173,7 +171,7 @@ def _live_liveness(row: dict[str, Any], *, now: float | None = None) -> str | No
         if isinstance(last, (int, float)) and ts - last > _TURN_STALL_SECONDS:
             return "stalled"
         return "active"
-    return turn_state
+    return cast(str, turn_state)
 
 
 def _parse_progress(raw: Any) -> dict[str, Any] | None:
@@ -442,7 +440,7 @@ def get_live_result_snapshot(
     max_text_chars: int = Query(
         default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
     ),
-):
+) -> DelegatedResultSnapshot:
     """Return a bounded reduced-fidelity result for a represented session."""
     db = _db(request)
     row = _resolve_registration(db, session_ref)
@@ -476,7 +474,7 @@ def get_live_result_detail(
     session_ref: str,
     request: Request,
     ref: str = Query(max_length=2048),
-):
+) -> dict[str, Any]:
     """Resolve a process-lifetime represented result detail reference."""
     db = _db(request)
     row = _resolve_registration(db, session_ref)
@@ -566,7 +564,7 @@ async def deregister_live_session(
     return {"ok": True, "session_id": session_id}
 
 
-@router.post("/{session_id}/events", response_model=IngestLiveEventsResult)
+@router.post("/{session_id}/events", response_model=IngestLiveEventsResult, response_model_exclude_none=True)
 async def ingest_live_events(
     session_id: str, body: IngestLiveEventsRequest, request: Request, replay: bool = False
 ) -> IngestLiveEventsResult:
@@ -586,11 +584,11 @@ async def ingest_live_events(
     session_id = registration["session_id"]
     store = _store(request)
     raw = [e.model_dump() for e in body.events]
-    ingested = _backfill.ingest(request, registration, raw, replay=replay)  # held while a replay is awaited
+    ingested, accepted = _backfill.ingest(request, registration, raw, replay=replay)
     record_consumption(db, session_id, raw)
     if replay:  # an older history, replayed: it never re-derives the session's current state
         return IngestLiveEventsResult(session_id=session_id, ingested=ingested,
-                                      last_id=_backfill.latest_id(store, session_id))
+                                      last_id=_backfill.latest_id(store, session_id), replay_accepted=accepted)
     from ..status_producers import represented
     represented(db, session_id, raw)
     # Phase 7 Channel A: fold the raw batch into a coarse turn_state so the
@@ -661,7 +659,7 @@ async def stream_live_events(
     # continuity with its first event, which must then be announced in-band.
     initial_continuity = log.continuity_id
 
-    async def _announcing_continuity(stream):
+    async def _announcing_continuity(stream: AsyncIterator[str]) -> AsyncIterator[str]:
         announced = initial_continuity
         async for chunk in stream:
             following = getattr(shim.event_log, "followed_continuity_id", announced)
@@ -695,7 +693,7 @@ async def stream_live_events(
     )
 
 
-def _existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> str | None:
+def _existing_startup_kind(db: Database, key: str, expectation: PluginReadinessRequest) -> str | None:
     return live_startup_controls.existing_startup_kind(db, key, expectation)
 
 

@@ -32,19 +32,19 @@ if (
     _BASH = None
 
 
-def test_hook_scripts_exist():
+def test_hook_scripts_exist() -> None:
     assert _PS1.is_file()
     assert _SH.is_file()
 
 
-def test_ps1_has_no_opt_in_gate():
+def test_ps1_has_no_opt_in_gate() -> None:
     text = _PS1.read_text(encoding="utf-8")
     assert "optInKey" not in text
     assert "optedIn" not in text
     assert "background reconcile SKIPPED" not in text
 
 
-def test_sh_has_no_opt_in_gate():
+def test_sh_has_no_opt_in_gate() -> None:
     text = _SH.read_text(encoding="utf-8")
     assert "optInKey" not in text
     assert "optedIn" not in text
@@ -96,7 +96,10 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     )
     source = plugin_dir / "src" / "agent_vault"
     source.mkdir(parents=True)
-    for filename in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "invocation.py", "_peer_launch.py"):
+    for filename in (
+        "__init__.py", "config.py", "configuration.py", "configuration_scope.py",
+        "default_owner.py", "invocation.py", "_peer_launch.py",
+    ):
         shutil.copyfile(_PLUGIN_ROOT / "src" / "agent_vault" / filename, source / filename)
     (root / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
     (scripts_dir / "install.sh").write_text(
@@ -172,7 +175,7 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
-def test_clean_environment_retains_only_explicit_vault_inputs(tmp_path, monkeypatch):
+def test_clean_environment_retains_only_explicit_vault_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for key in ("KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"):
         monkeypatch.setenv(key, "foreign-fixture-selection")
     environment = _clean_env({"HOME": str(tmp_path)})
@@ -183,9 +186,10 @@ def test_clean_environment_retains_only_explicit_vault_inputs(tmp_path, monkeypa
 
 
 @pytest.mark.skipif(os.name == "nt" or _BASH is None, reason="POSIX bootstrap; Windows uses PowerShell")
-def test_sh_reconciles_without_any_opt_in_config(tmp_path):
+def test_sh_reconciles_without_any_opt_in_config(tmp_path: Path) -> None:
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
+    assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -215,10 +219,11 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt" or _BASH is None, reason="POSIX bootstrap; Windows uses PowerShell")
-def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
+def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path: Path) -> None:
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
     now inert."""
+    assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"

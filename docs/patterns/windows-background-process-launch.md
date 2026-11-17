@@ -175,8 +175,15 @@ insufficient for a restrictive nested ancestor. A small bootstrap creates the da
 suspended with its logs attached, pins its identity by PID and creation time,
 returns a handle to the caller's `WindowsDaemonProcess` and then resumes it, so
 instance descriptors and admission receipts keep their existing contract.
-The resident child must still pass the independent outside-every-Job check
-before admission; flags alone never establish durable lifetime.
+Before admission the resident child must pass independent native checks against
+the caller's immediate Job and every tracked launcher-owned cleanup scope.
+Retain the complete scope chain separately from the child's environment and
+close temporary query handles before sending start admission. Membership in an
+unrelated provider Job is not evidence that the launcher can terminate the
+child; `IsProcessInJob(child, NULL)` must not veto admission by itself. Unknown
+or unavailable tracked scope objects still refuse, as does a retained outer
+cleanup scope even after immediate-Job escape. This does not claim independence
+from arbitrary external supervisors; flags alone never establish lifetime.
 
 WMI process creation can be blocked by policy, notably the Microsoft Defender
 attack surface reduction rule "Block process creations originating from PSExec

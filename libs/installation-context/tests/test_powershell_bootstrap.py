@@ -456,7 +456,8 @@ exit $LASTEXITCODE
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
          "-Transport", str(SCRIPT.with_name("shell-caller-owned.ps1")), "-Worker", str(worker)],
-        capture_output=True, text=True, timeout=20,
+        # Preserve the transport's 30-second admission and bounded retirement diagnostics.
+        capture_output=True, text=True, timeout=45,
         env={
             **os.environ,
             "PREPARED_ARCHIVE": str(SCRIPT.with_name("daemon_instance_runtime.pyz")),

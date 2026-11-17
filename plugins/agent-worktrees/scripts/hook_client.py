@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import math
 import os
 import re
 import signal
@@ -16,6 +15,15 @@ import sys
 import time
 from functools import cache
 from pathlib import Path
+from types import ModuleType
+from typing import TypedDict, cast
+
+Payload = dict[str, object]
+
+
+class _ProcessGroupOptions(TypedDict, total=False):
+    start_new_session: bool
+    creationflags: int
 
 _CONNECT_TIMEOUT_S = 0.5
 _SESSION_START_TIMEOUT_S = 12.0
@@ -28,7 +36,7 @@ _SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
 _COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
 _GUIDANCE_HEADER = "# Agent Worktrees session guidance\n\n"
 
-def _read_json(path: Path) -> dict | None:
+def _read_json(path: Path) -> Payload | None:
     try:
         value = json.loads(path.read_text("utf-8"))
     except (OSError, UnicodeError, ValueError, TypeError):
@@ -36,7 +44,7 @@ def _read_json(path: Path) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def _selected_registry_context(home: Path) -> dict | None:
+def _selected_registry_context(home: Path) -> Payload | None:
     if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
         return None
     helper = _load_sibling("registry_root.py")
@@ -67,7 +75,7 @@ def _selected_runtime_root(home: Path) -> Path | None:
         return None
 
 
-def _lock_matches_context(lock: dict, home: Path) -> bool:
+def _lock_matches_context(lock: Payload, home: Path) -> bool:
     context = _selected_registry_context(home)
     if context is None:
         return not (
@@ -84,7 +92,7 @@ def _lock_matches_context(lock: dict, home: Path) -> bool:
     )
 
 
-def _request(kind: str, payload: dict, home: Path) -> dict | None:
+def _request(kind: str, payload: Payload, home: Path) -> Payload | None:
     runtime = _selected_runtime_root(home)
     if runtime is None:
         return None
@@ -102,7 +110,7 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
     if lifecycle and not lifecycle.admitted(
         kind, source_aware, endpoint.get("hook_capabilities"), preflight=True,
     ):
-        return lifecycle.unavailable(kind)
+        return cast(Payload, lifecycle.unavailable(kind))
     address = str(endpoint.get("hook_endpoint") or "")
     host, sep, port_text = address.rpartition(":")
     token = endpoint.get("hook_token")
@@ -164,7 +172,7 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
     if lifecycle and not lifecycle.admitted(
         kind, source_aware, value.get("capabilities"), preflight=False,
     ):
-        return lifecycle.unavailable(kind) if source_aware or kind == "sessionEnd" else None
+        return cast(Payload, lifecycle.unavailable(kind)) if source_aware or kind == "sessionEnd" else None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
 
@@ -187,7 +195,7 @@ def _plugin_version() -> str:
     return version if isinstance(version, str) else ""
 
 
-def _enrich_session_payload(payload: dict) -> dict:
+def _enrich_session_payload(payload: Payload) -> Payload:
     enriched = dict(payload)
     enriched["_agentWorktrees"] = {
         "pluginVersion": _plugin_version(),
@@ -203,7 +211,7 @@ def _enrich_session_payload(payload: dict) -> dict:
     return enriched
 
 
-def _capture_native_source() -> dict:
+def _capture_native_source() -> Payload:
     path = Path(__file__).resolve().with_name("native_source_context.py")
     if not path.is_file():
         path = Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / path.name
@@ -213,7 +221,7 @@ def _capture_native_source() -> dict:
             raise ImportError("Native source metadata helper is unavailable")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module.capture()
+        return cast(Payload, module.capture())
     except (OSError, ImportError, SyntaxError, AttributeError, ValueError) as exc:
         sys.stderr.write(f"[agent-worktrees] Native lifecycle source unavailable: {exc}\n")
         return {"version": 1, "qualified": False, "reason": "native-source-unavailable"}
@@ -224,13 +232,13 @@ _POST_TOOL_ENV_KEYS = ("AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
                        "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES")
 
 
-def _enrich_post_tool_payload(payload: dict) -> dict:
+def _enrich_post_tool_payload(payload: Payload) -> Payload:
     """Forward this session's nudge switches; the resident's env is not ours."""
     env = {key: os.environ[key] for key in _POST_TOOL_ENV_KEYS if key in os.environ}
     return {**payload, "_agentWorktrees": {"environment": env}}
 
 
-def _enrich_session_end_payload(payload: dict) -> dict:
+def _enrich_session_end_payload(payload: Payload) -> Payload:
     return {
         **payload,
         "_agentWorktrees": {
@@ -245,32 +253,32 @@ def _enrich_session_end_payload(payload: dict) -> dict:
     }
 
 
-def _source_aware_lifecycle(payload: dict) -> bool:
+def _source_aware_lifecycle(payload: Payload) -> bool:
     metadata = payload.get("_agentWorktrees")
     return isinstance(metadata, dict) and "nativeSource" in metadata
 
 
-def _probe_terminal() -> dict:
+def _probe_terminal() -> Payload:
     """Best-effort terminal facts from the deployed probe; never raises."""
     try:
         probe = _load_sibling("terminal_probe.py")
-        return probe.probe() if probe is not None else {}
+        return cast(Payload, probe.probe()) if probe is not None else {}
     except Exception:
         return {}
 
 
-def _session_launch_key(payload: dict) -> str:
+def _session_launch_key(payload: Payload) -> str:
     if _RUNTIME is None:
         raise RuntimeError("Runtime hook helper is unavailable.")
-    return _RUNTIME.session_launch_key(payload)
+    return cast(str, _RUNTIME.session_launch_key(payload))
 
 
 def _read_bounded_text(path: Path, limit: int = _MAX_RESPONSE) -> str | None:
-    return _RUNTIME.read_bounded_text(path, limit=limit)
+    return cast(str | None, _RUNTIME.read_bounded_text(path, limit=limit))
 
 
 def _snapshot_context(
-    payload: dict, home: Path, *, snapshot_name: str,
+    payload: Payload, home: Path, *, snapshot_name: str,
 ) -> str:
     launch_key = _session_launch_key(payload)
     if not launch_key:
@@ -288,7 +296,7 @@ def _snapshot_context(
             and state.get("launchKey") == launch_key
             and isinstance(state.get("output"), str)
         ):
-            return _RUNTIME.additional_context(state["output"])
+            return cast(str, _RUNTIME.additional_context(state["output"]))
     except (OSError, UnicodeError, ValueError, TypeError):
         pass
 
@@ -298,19 +306,19 @@ def _snapshot_context(
         return ""
     stored_key, separator, output = raw.partition("\n")
     return (
-        _RUNTIME.additional_context(output)
+        cast(str, _RUNTIME.additional_context(output))
         if separator and stored_key == launch_key
         else ""
     )
 
 
-def _registration_context(payload: dict, home: Path) -> str:
+def _registration_context(payload: Payload, home: Path) -> str:
     return _snapshot_context(payload, home, snapshot_name="register-session")
 
 
-def _machine_context(payload: dict, home: Path) -> str:
+def _machine_context(payload: Payload, home: Path) -> str:
     context = _snapshot_context(payload, home, snapshot_name="machine-context")
-    return _RUNTIME.machine_context(context, hostname=socket.gethostname())
+    return cast(str, _RUNTIME.machine_context(context, hostname=socket.gethostname()))
 
 
 def _command_catalog_context() -> str:
@@ -362,7 +370,7 @@ def _guidance_degraded_reason(error: BaseException | None = None) -> str:
     return "session-start-error"
 
 
-def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
+def _guidance_content(enriched: Payload, home: Path, decision_context: str) -> str:
     registration = _registration_context(enriched, home)
     metadata = enriched.get("_agentWorktrees")
     catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
@@ -379,16 +387,16 @@ def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
         if not isinstance(catalog, str) or not catalog.startswith(_COMMAND_CATALOG_HEADING):
             catalog = _command_catalog_context()
         if not catalog:
-            catalog = floor = _RUNTIME.guidance_floor(
+            catalog = floor = cast(str, _RUNTIME.guidance_floor(
                 _guidance_degraded_reason(), Path(__file__).resolve().parent
-            )
+            ))
         for context in (catalog, registration):
             if context and context not in contexts:
                 contexts.append(context)
     if decision_context and decision_context not in contexts:
         contexts.append(decision_context)
     machine = _machine_context(enriched, home)
-    marker = _RUNTIME.guidance_marker(enriched)
+    marker = cast(str, _RUNTIME.guidance_marker(enriched))
     content = _GUIDANCE_HEADER + "\n\n".join([*contexts, machine]) + "\n" + marker
     if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
         content = (
@@ -403,7 +411,7 @@ def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
 
 
 def _write_session_guidance(
-    payload: dict,
+    payload: Payload,
     *,
     home: Path | None = None,
     decision_context: str = "",
@@ -425,20 +433,20 @@ def _write_session_guidance(
         target = _RUNTIME.guidance_target(home, session_id)
         if target is None:
             return False
-        return _RUNTIME.write_guidance(
+        return cast(bool, _RUNTIME.write_guidance(
             target, lambda: _render_guidance(enriched, home, decision_context),
             enriched, claim_launch=claim_launch,
-        )
+        ))
     except (OSError, RuntimeError, ValueError):
         return False
 
 
-def _floor_document(reason: str, payload: dict) -> str:
+def _floor_document(reason: str, payload: Payload) -> str:
     floor = _RUNTIME.guidance_floor(reason, Path(__file__).resolve().parent)
-    return _GUIDANCE_HEADER + floor + "\n" + _RUNTIME.guidance_marker(payload)
+    return _GUIDANCE_HEADER + cast(str, floor) + "\n" + cast(str, _RUNTIME.guidance_marker(payload))
 
 
-def _render_guidance(enriched: dict, home: Path, decision_context: str) -> str:
+def _render_guidance(enriched: Payload, home: Path, decision_context: str) -> str:
     try:
         return _guidance_content(enriched, home, decision_context)
     except Exception as error:
@@ -448,7 +456,7 @@ def _render_guidance(enriched: dict, home: Path, decision_context: str) -> str:
         return _floor_document(reason, enriched)
 
 
-def _write_guidance_floor(payload: dict, reason: str, *, home: Path | None = None) -> bool:
+def _write_guidance_floor(payload: Payload, reason: str, *, home: Path | None = None) -> bool:
     """Publish the minimal guidance floor after session-start enrichment failed."""
     sys.stderr.write(f"[agent-worktrees] Session guidance degraded (reason: {reason}).\n")
     session_id = payload.get("sessionId")
@@ -464,14 +472,14 @@ def _write_guidance_floor(payload: dict, reason: str, *, home: Path | None = Non
     }
     try:
         target = _RUNTIME.guidance_target(home or Path.home(), session_id)
-        return target is not None and _RUNTIME.write_guidance(
+        return target is not None and cast(bool, _RUNTIME.write_guidance(
             target, lambda: _floor_document(reason, owned), owned, claim_launch=True,
-        )
+        ))
     except Exception:
         return False
 
 
-def _resident_started(payload: dict, home: Path) -> bool:
+def _resident_started(payload: Payload, home: Path) -> bool:
     launch_key = _session_launch_key(payload)
     if not launch_key:
         return False
@@ -480,7 +488,7 @@ def _resident_started(payload: dict, home: Path) -> bool:
         return False
     if _RUNTIME is None:
         raise RuntimeError("Runtime hook helper is unavailable.")
-    return _RUNTIME.resident_started(runtime, launch_key)
+    return cast(bool, _RUNTIME.resident_started(runtime, launch_key))
 
 
 def _runtime_python(home: Path) -> Path | None:
@@ -489,23 +497,23 @@ def _runtime_python(home: Path) -> Path | None:
         return None
     if _RUNTIME is None:
         raise RuntimeError("Runtime hook helper is unavailable.")
-    return _RUNTIME.runtime_python(runtime)
+    return cast(Path | None, _RUNTIME.runtime_python(runtime))
 
 
-def _version_key(version: str) -> tuple:
+def _version_key(version: str) -> tuple[int | str, ...]:
     if _RUNTIME is None:
         raise RuntimeError("Runtime hook helper is unavailable.")
-    return _RUNTIME.version_key(version)
+    return cast(tuple[int | str, ...], _RUNTIME.version_key(version))
 
 
-def _bootstrap_first_install(payload: dict) -> dict:
+def _bootstrap_first_install(payload: Payload) -> Payload:
     """Compatibility entry: missing runtime installation is never hook work."""
     return {}
 
 
 def _fallback_legacy_session_start(
-    payload: dict, *, skip_reconcile: bool = False, report_only: bool = False,
-) -> dict:
+    payload: Payload, *, skip_reconcile: bool = False, report_only: bool = False,
+) -> Payload:
     """Run non-install hooks; the legacy skip argument has no remaining install work."""
     scripts = Path(__file__).resolve().parent
     if os.name == "nt":
@@ -532,7 +540,7 @@ def _fallback_legacy_session_start(
     python = _runtime_python(Path.home())
     if python is not None:
         _RUNTIME.configure_python_cache_environment(python, environment)
-    group_kwargs = (
+    group_kwargs: _ProcessGroupOptions = (
         {"start_new_session": True}
         if os.name == "posix"
         else {
@@ -571,7 +579,7 @@ def _fallback_legacy_session_start(
         except OSError:
             continue
     deadline = time.monotonic() + _SESSION_START_TIMEOUT_S
-    result: dict = {}
+    result: Payload = {}
     for process in processes:
         try:
             stdout, stderr = process.communicate(
@@ -581,9 +589,9 @@ def _fallback_legacy_session_start(
         except subprocess.TimeoutExpired:
             try:
                 if os.name == "posix":
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    getattr(os, "killpg")(getattr(os, "getpgid")(process.pid), getattr(signal, "SIGKILL"))
                 else:
-                    process.send_signal(signal.CTRL_BREAK_EVENT)
+                    process.send_signal(getattr(signal, "CTRL_BREAK_EVENT"))
             except (OSError, ProcessLookupError):
                 process.kill()
             try:
@@ -611,54 +619,17 @@ def _fallback_legacy_session_start(
 
 
 def _external_update_driver_active(home: Path, python: Path) -> bool:
-    """Defer only to a live update stage, not an installed Manager.
-
-    Manager's launch wrapper drives ``stage-update`` through the engine. Its
-    ``update_stage.acquire_lock`` records PID/birth identity in ``updater.lock``
-    while it holds the native lease and removes the record before release.
-    Read that ownership
-    signal directly, without invoking the stale runtime or a provider command.
-    A completed stage or a cached ``skipped: locked`` status owns no work.
-    """
     runtime = _selected_runtime_root(home)
     if runtime is None:
         return False
     lock = _read_json(runtime / "updater.lock")
-    if not lock:
-        return False
-    pid, started = lock.get("pid"), lock.get("started")
-    now = time.time()
-    if (
-        type(pid) is not int
-        or pid <= 0
-        or type(started) not in (int, float)
-        or (type(started) is float and not math.isfinite(started))
-        or not 0 <= started <= now
-    ):
-        return False
-    helper = _load_sibling("versioned_runtime.py")
-    if helper is None:
-        return False
-    try:
-        recorded = lock.get("start_time")
-        if recorded:
-            identity = _load_sibling("hook_process_identity.py")
-            if identity is None:
-                return False
-            current = identity.process_start_time(pid)
-            if current is None or str(recorded) != current:
-                return False
-        image = _RUNTIME.update_driver_image(helper, pid)
-        return bool(
-            image
-            and Path(image).resolve() == python.resolve()
-            and helper._pid_alive(pid)
-        )
-    except Exception:
-        return False
+    return cast(bool, _RUNTIME.external_update_driver_active(
+        lock, python, load_sibling=_load_sibling, now=time.time,
+        image=_RUNTIME.update_driver_image,
+    ))
 
 
-def _fallback_session_start(payload: dict, home: Path) -> dict:
+def _fallback_session_start(payload: Payload, home: Path) -> Payload:
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     python = _runtime_python(home)
     if python is None:
@@ -705,12 +676,12 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         timeout=_SESSION_START_TIMEOUT_S, decision_timeout=_SESSION_START_DECISION_S,
         python_arguments=["-I", *_RUNTIME.python_cache_arguments(python)],
     )
-    return result if result is not None else (
+    return cast(Payload, result) if result is not None else (
         {} if contextual else _fallback_legacy_session_start(payload)
     )
 
 
-def _fallback_session_end(payload: dict, home: Path) -> dict:
+def _fallback_session_end(payload: Payload, home: Path) -> Payload:
     python = _runtime_python(home)
     if python is None:
         return {"_stderr": "[agent-worktrees] SessionEnd runtime is unavailable; closure is unconfirmed.\n"}
@@ -725,18 +696,18 @@ def _fallback_session_end(payload: dict, home: Path) -> dict:
     helper = _load_sibling("hook_lifecycle_runtime.py")
     if helper is None:
         return {"_stderr": "[agent-worktrees] Lifecycle transport is unavailable.\n"}
-    return helper.run_end(
+    return cast(Payload, helper.run_end(
         python, payload, timeout=_SESSION_END_TIMEOUT_S,
         python_arguments=["-I", *_RUNTIME.python_cache_arguments(python)],
-    )
+    ))
 
 
-def _load_sibling(name: str):
+def _load_sibling(name: str) -> ModuleType | None:
     return _load_file(Path(__file__).resolve().with_name(name))
 
 
 @cache
-def _load_file(path: Path):
+def _load_file(path: Path) -> ModuleType | None:
     try:
         spec = importlib.util.spec_from_file_location(
             f"_agent_worktrees_hook_{path.stem}", path
@@ -750,10 +721,14 @@ def _load_file(path: Path):
         return None
 
 
-_RUNTIME = _load_sibling("hook_runtime.py")
+if __name__ == "__main__":
+    # Standalone hook reads cannot write into their admitted payload.
+    sys.dont_write_bytecode = True
+
+_RUNTIME = cast(ModuleType, _load_sibling("hook_runtime.py"))
 
 
-def _merge_pre_decisions(current: dict, new: dict) -> dict:
+def _merge_pre_decisions(current: Payload, new: Payload) -> Payload:
     result = dict(current)
     contexts = [
         str(value)
@@ -776,7 +751,7 @@ def _merge_pre_decisions(current: dict, new: dict) -> dict:
     return result
 
 
-def _pre_unavailable(boundary: str) -> dict:
+def _pre_unavailable(boundary: str) -> Payload:
     return {"additionalContext": (
         f"[agent-worktrees pre-tool] Boundary: {boundary}. "
         "Effect: this component could not evaluate policy; missing evidence is not authorization. This hook did not execute the tool; independent policy decisions remain in force. Next: inspect the selected installation pre-tool files and existing repairing-worktrees guidance; use its catalog command read-only doctor only if available. Retry: do not repeat the tool solely for this warning; inspect its result first, and retry evaluation only after this boundary changes."
@@ -784,36 +759,36 @@ def _pre_unavailable(boundary: str) -> dict:
 
 
 def _fallback_pre(
-    payload: dict, home: Path, *, require_policy: bool = False,
-    initial_decision=None, only_observations=False,
-) -> dict:
+    payload: Payload, home: Path, *, require_policy: bool = False,
+    initial_decision: Payload | None = None, only_observations: bool = False,
+) -> Payload:
     policy = _load_file(Path(__file__).resolve().with_name("hook_pre_policy.py"))
     decide_policy = getattr(policy, "decide", None)
     if not callable(decide_policy):
         return _pre_unavailable("hook_pre_policy.py unavailable")
-    return decide_policy(
+    return cast(Payload, decide_policy(
         payload, home=home, load_sibling=_load_sibling, merge_decisions=_merge_pre_decisions,
         budget_seconds=_FALLBACK_PRE_BUDGET_S, require_policy=require_policy,
         initial_decision=initial_decision, only_observations=only_observations,
-    )
+    ))
 
 
-def _fallback_post(payload: dict, home: Path) -> dict:
+def _fallback_post(payload: Payload, home: Path) -> Payload:
     contexts = []
     nudge = _load_sibling("nudge_status.py")
     tracking_lookup = None
     find_tracking = getattr(nudge, "_find_tracking_yaml", None)
     if callable(find_tracking):
-        records = {}
+        records: dict[str, tuple[str, Path]] = {}
 
-        def tracking_lookup(cwd, home):
+        def tracking_lookup(cwd: str | None, home: Path) -> tuple[str, Path] | None:
             key = cwd or os.getcwd()
             if key not in records:
                 found = find_tracking(cwd, home)
                 # The legacy resolver also returns None for resolution failures.
                 if found is None:
                     return None
-                records[key] = found
+                records[key] = cast(tuple[str, Path], found)
             return records[key]
 
     if nudge is not None:
@@ -837,17 +812,17 @@ def _fallback_post(payload: dict, home: Path) -> dict:
     )
 
 
-def _managed_session_admitted(payload: dict, home: Path | None = None) -> bool:
+def _managed_session_admitted(payload: object, home: Path | None = None) -> bool:
     helper = _load_sibling("managed_session.py")
     try:
-        return helper is not None and helper.admitted(payload, home=home)
+        return helper is not None and cast(bool, helper.admitted(payload, home=home))
     except Exception:
         return False
 
 
 def decide(
-    kind: str, payload: dict, *, home: Path | None = None, require_policy: bool = False,
-) -> dict:
+    kind: str, payload: Payload, *, home: Path | None = None, require_policy: bool = False,
+) -> Payload:
     home = home or Path.home()
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     if kind == "preToolUse" and not isinstance(payload, dict):
@@ -935,7 +910,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
         initial = None
         if strict_policy and "--only-pr-observations" in argv:
-            payload, initial = _load_sibling("hook_pre_policy.py").deferred_frame(payload)
+            policy = cast(ModuleType, _load_sibling("hook_pre_policy.py"))
+            payload, initial = policy.deferred_frame(payload)
         if kind == "sessionStart":
             try:
                 payload = _enrich_session_payload(payload)
@@ -960,7 +936,7 @@ def main(argv: list[str] | None = None) -> int:
                 execute = getattr(helper, "execute_owned_observations", None)
                 handled = execute(payload, raw, _load_sibling, _merge_pre_decisions) if callable(execute) else None
                 if handled is not None:
-                    return handled
+                    return cast(int, handled)
             result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:

@@ -1,12 +1,14 @@
 """Portable exact-node admission and sequential cohorts for the contained runner."""
 from __future__ import annotations
 
+import importlib
 import json
 from collections.abc import Iterable
 import fnmatch
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 
 EXTERNAL_TEST_ROOTS = {
     "worktree-manager": Path("worktree-manager"),
@@ -17,6 +19,7 @@ EXTERNAL_TEST_ROOTS = {
     "repository-policy": Path("libs/repository-policy"),
     "update-driver": Path("libs/update-driver"),
     "agent-procutil": Path("libs/agent-procutil"),
+    "configuration-layers": Path("libs/configuration-layers"),
     "plugin-activation": Path("libs/plugin-activation"),
     "ssh-manager": Path("libs/ssh-manager"),
     "venue-copilot": Path("libs/venue-copilot"),
@@ -59,7 +62,7 @@ def plan_test_groups(
     """Partition expensive owned cohorts without widening their shared deadline."""
     target = plugin_root / _CODESPACES_NATIVE_FILE
     historical = plugin_root / _BRIDGE_HISTORICAL_FILE
-    plan = []
+    plan: list[tuple[list[Path], str | None]] = []
     for group in groups:
         if name == "agent-bridge" and historical in group:
             other_files = [path for path in group if path != historical]
@@ -126,11 +129,11 @@ class TestSelection:
     nodes: tuple[str, ...]
     files: tuple[str, ...]
     include_guards: bool
-    coverage_profile: dict | None = None
-    coverage_exclusions: dict | None = None
+    coverage_profile: dict[str, Any] | None = None
+    coverage_exclusions: dict[str, Any] | None = None
 
-    def as_dict(self) -> dict:
-        result = {
+    def as_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "version": 1, "plugin": self.plugin, "nodes": list(self.nodes),
             "files": list(self.files), "include_guards": self.include_guards,
         }
@@ -190,7 +193,7 @@ def selection_from_payload(payload: object, plugin: str, plugin_root: Path) -> T
     selection.collection_files(plugin_root)
     return selection
 def default_collection_files(root: Path) -> tuple[Path, ...]:
-    import tomllib
+    tomllib = importlib.import_module("tomllib")
 
     project = root / "pyproject.toml"
     config = tomllib.loads(project.read_text(encoding="utf-8")) if project.is_file() else {}

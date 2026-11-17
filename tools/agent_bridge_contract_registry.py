@@ -24,6 +24,7 @@ CHUNK_BYTES = 256 << 10
 MAX_CHUNKS = 256
 CHUNK_SCHEMA = "agent-bridge.contract-provenance"
 Read = Callable[[str], bytes]
+ReadMany = Callable[[list[str]], dict[str, bytes]]
 
 
 def encode(value: Any) -> bytes:
@@ -36,7 +37,7 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _pairs(items: list[tuple[str, Any]]) -> dict:
+def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
     result = {}
     for key, value in items:
         if key in result:
@@ -49,7 +50,7 @@ def _constant(value: str) -> None:
     raise ValueError(f"non-finite registry JSON value: {value}")
 
 
-def decode(data: bytes) -> dict:
+def decode(data: bytes) -> dict[str, Any]:
     if len(data) > MAX_ARTIFACT_BYTES:
         raise ValueError("contract metadata exceeds the unchanged 1 MiB guard")
     value = json.loads(data, object_pairs_hook=_pairs, parse_constant=_constant)
@@ -75,22 +76,26 @@ def _chunk_path(contract: str, sha256: str) -> str:
     return f"{PROVENANCE}{contract}/{sha256}.json"
 
 
-def _chunk(
-    root: Path, contract: str, offset: int, descriptor: dict, read: Read,
-) -> tuple[str, bytes, list]:
+def _chunk_location(contract: str, descriptor: dict[str, Any]) -> str:
     _keys(descriptor, {"contract", "path", "sha256", "record_count"}, "provenance chunk")
-    sha256, count = descriptor["sha256"], descriptor["record_count"]
+    sha256, count, path = descriptor["sha256"], descriptor["record_count"], descriptor["path"]
     if (
         descriptor["contract"] != contract
         or not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256)
         or type(count) is not int or not 1 <= count <= MAX_ARTIFACT_BYTES
-        or descriptor["path"] != _chunk_path(contract, sha256)
+        or not isinstance(path, str) or path != _chunk_path(contract, sha256)
     ):
         raise ValueError("invalid provenance chunk identity/count/path")
-    path = descriptor["path"]
+    return path
+
+
+def _chunk(
+    root: Path, contract: str, offset: int, descriptor: dict[str, Any], read: Read,
+) -> tuple[str, bytes, list[dict[str, Any]]]:
+    path = _chunk_location(contract, descriptor)
     safe(root, path)
     data = read(path)
-    if digest(data) != sha256:
+    if digest(data) != descriptor["sha256"]:
         raise ValueError(f"provenance chunk hash mismatch: {path}")
     value = decode(data)
     _keys(value, {"schema", "schema_version", "contract", "record_offset", "provenance"}, path)
@@ -99,7 +104,7 @@ def _chunk(
         or value["schema_version"] != 1 or value["contract"] != contract
         or type(value["record_offset"]) is not int or value["record_offset"] != offset
         or not isinstance(value["provenance"], list)
-        or len(value["provenance"]) != count
+        or len(value["provenance"]) != descriptor["record_count"]
         or any(not isinstance(row, dict) for row in value["provenance"])
         or encode(value) != data
     ):
@@ -111,8 +116,8 @@ def _chunk(
 class Snapshot:
     """Pinned raw inputs and complete history, without granting write authority."""
 
-    index: dict
-    materialized: dict
+    index: dict[str, Any]
+    materialized: dict[str, Any]
     inputs: dict[str, bytes]
 
     def verify(self, root: Path) -> None:
@@ -121,7 +126,9 @@ class Snapshot:
                 raise ValueError(f"contract metadata changed during capture: {path}")
 
 
-def load(root: Path, *, read: Read | None = None) -> Snapshot:
+def load(
+    root: Path, *, read: Read | None = None, read_many: ReadMany | None = None,
+) -> Snapshot:
     reader = read if read is not None else lambda path: read_file(root, path)
     safe(root, REGISTRY)
     data = reader(REGISTRY)
@@ -156,9 +163,20 @@ def load(root: Path, *, read: Read | None = None) -> Snapshot:
         total_chunks += len(chunks)
         if total_chunks > MAX_CHUNKS:
             raise ValueError("provenance chunk inventory exceeds its bounded limit")
-        prefix = []
+        chunk_reader = reader
+        if read_many is not None and chunks:
+            paths = [_chunk_location(name, descriptor) for descriptor in chunks]
+            for path in paths:
+                safe(root, path)
+            if len(set(paths)) != len(paths):
+                raise ValueError("duplicate provenance chunk reference")
+            contents = read_many(paths)
+            if contents.keys() != set(paths):
+                raise ValueError("provenance chunk batch inventory mismatch")
+            chunk_reader = contents.__getitem__
+        prefix: list[dict[str, Any]] = []
         for descriptor in chunks:
-            path, content, archived = _chunk(root, name, len(prefix), descriptor, reader)
+            path, content, archived = _chunk(root, name, len(prefix), descriptor, chunk_reader)
             if path in inputs:
                 raise ValueError(f"duplicate provenance chunk reference: {path}")
             inputs[path] = content
@@ -171,7 +189,7 @@ def load(root: Path, *, read: Read | None = None) -> Snapshot:
     return Snapshot(index, result, inputs)
 
 
-def plan(root: Path, original: Snapshot, updated: dict) -> dict[str, bytes]:
+def plan(root: Path, original: Snapshot, updated: dict[str, Any]) -> dict[str, bytes]:
     """Encode a complete materialization without changing any archived prefix."""
     registry = copy.deepcopy(updated)
     if registry.get("schema_version") != 1 or any(
@@ -183,7 +201,7 @@ def plan(root: Path, original: Snapshot, updated: dict) -> dict[str, bytes]:
     for contract in registry["contracts"]:
         chunks = copy.deepcopy(old.get(contract["id"], {}).get("provenance_chunks", []))
         count = sum(chunk["record_count"] for chunk in chunks)
-        before = next(
+        before: list[dict[str, Any]] = next(
             (c["provenance"] for c in original.materialized["contracts"]
              if c["id"] == contract["id"]), [],
         )
@@ -200,7 +218,7 @@ def plan(root: Path, original: Snapshot, updated: dict) -> dict[str, bytes]:
             if not rows:
                 continue
             chunks = contract.setdefault("provenance_chunks", [])
-            batch: list[dict] = []
+            batch: list[dict[str, Any]] = []
             offset = sum(chunk["record_count"] for chunk in chunks)
 
             def archive() -> None:

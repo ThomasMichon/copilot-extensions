@@ -340,9 +340,10 @@ def _activate_after_bootstrap_update(
     python = runtime.slot_python(root, slot.name)
     if python is None:
         raise RuntimeError("Constructed Manager has no activation interpreter")
+    native: Callable[[Path], str] = getattr(engine, "_native_retained_path")
     command = [
-        str(python), "-I", "-S", "-B", "-X", "utf8",
-        str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+        native(python), "-I", "-S", "-B", "-X", "utf8",
+        native(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager.bootstrap_activation", "--root", str(root),
     ]
     if start_if_missing:
@@ -351,6 +352,7 @@ def _activate_after_bootstrap_update(
         command, executable=command[0], stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8",
+        cwd=slot.anchor if os.name == "nt" else None,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         **_installation_child_options(),
     )

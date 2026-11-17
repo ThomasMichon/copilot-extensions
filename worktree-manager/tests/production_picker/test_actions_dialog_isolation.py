@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Iterator
 from copy import deepcopy
+from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -14,7 +18,7 @@ from worktree_manager.production_picker.picker_tui.engine_worktree_actions impor
 )
 
 
-def record(source="local", wid="example-win-row"):
+def record(source: str = "local", wid: str = "example-win-row") -> dict[str, Any]:
     return {
         "source_kind": "machine-ssh",
         "source_id": f"machine-ssh:{'example' if source == 'local' else source}:win",
@@ -25,52 +29,68 @@ def record(source="local", wid="example-win-row"):
 
 
 class ScreenHost:
-    screen = None
+    screen: Any = None
+    callback: Callable[[Any], None]
 
-    def push_screen(self, screen, callback):
+    def push_screen(self, screen: Any, callback: Callable[[Any], None]) -> None:
         self.screen, self.callback = screen, callback
 
-    def close(self):
+    def close(self) -> None:
         callback, self.screen = self.callback, None
         callback(None)
 
 
 class Picker(PickerScreenWorktreeActionsMixin):
-    def __init__(self, rec):
+    _wt_submenu_ext: dict[str, Any]
+
+    def __init__(self, rec: dict[str, Any]) -> None:
         self.rec = rec
         self.data = [rec]
-        self.src = SimpleNamespace(LOCAL=("example", "Win"))
-        self._source_local = ("example", "Win")
+        self.src: Any = SimpleNamespace(LOCAL=("example", "Win"))
+        self._source_local: tuple[str, str] | None = ("example", "Win")
         self._setup_epoch = 1
         self.real_ops = True
-        self.wt_actions = []
-        self.requests = []
-        self.app = ScreenHost()
+        self.wt_actions: list[Any] = []
+        self.requests: list[tuple[Callable[[], Any], Callable[[Any], None]]] = []
+        self.app: Any = ScreenHost()
 
-    def _submenu_target(self):
+    def _submenu_target(self) -> dict[str, Any]:
         return self.rec
 
-    def _worker_menu_verbs(self, rec):
+    def _worker_menu_verbs(self, rec: dict[str, Any]) -> tuple[list[Any], dict[str, Any]]:
         return [], {}
 
-    def _run_bg(self, label, work, done, **kwargs):
+    def _run_bg(
+        self, label: str, work: Callable[[], Any], done: Callable[[Any], None],
+        **kwargs: Any,
+    ) -> None:
         self.requests.append((work, done))
+
+    def _open_submenu(self) -> None:
+        cast(Callable[[Any], None], PickerScreenWorktreeActionsMixin._open_submenu)(self)
+
+    def _refresh_wt_submenu(self, *args: Any, **kwargs: Any) -> None:
+        cast(Callable[..., None], PickerScreenWorktreeActionsMixin._refresh_wt_submenu)(
+            self, *args, **kwargs,
+        )
 
 
 @pytest.fixture
-def bound(monkeypatch):
+def bound(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(context, "_project", "example")
     monkeypatch.setattr(context, "_bootstrap", None)
 
 
-def test_cold_actions_pushes_before_any_discovery(bound, monkeypatch):
+def test_cold_actions_pushes_before_any_discovery(
+    bound: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     picker = Picker(record())
     picker._source_local = None
-    calls = []
+    calls: list[str] = []
 
     class ColdSource:
         @property
-        def LOCAL(self):
+        def LOCAL(self) -> tuple[str, str]:
             calls.append("local")
             raise RuntimeError("provider not ready")
 
@@ -95,7 +115,7 @@ def test_cold_actions_pushes_before_any_discovery(bound, monkeypatch):
     "close", "close-open-other", "close-reopen", "source", "source-id",
     "epoch", "project", "bootstrap",
 ])
-def test_late_actions_result_cannot_change_another_lifetime(bound, change):
+def test_late_actions_result_cannot_change_another_lifetime(bound: None, change: str) -> None:
     original = record()
     picker = Picker(original)
     picker._open_submenu()
@@ -134,7 +154,9 @@ def test_late_actions_result_cannot_change_another_lifetime(bound, change):
 
 
 @pytest.mark.parametrize("result", [(None, None), (None, True), (None, False)])
-def test_missing_or_failed_verification_preserves_cached_snapshot(bound, result):
+def test_missing_or_failed_verification_preserves_cached_snapshot(
+    bound: None, result: tuple[None, bool | None],
+) -> None:
     original = record()
     picker = Picker(original)
     picker._open_submenu()
@@ -148,7 +170,9 @@ def test_missing_or_failed_verification_preserves_cached_snapshot(bound, result)
     assert not menu._rec.get("session_lock_live")
 
 
-def test_remote_source_never_reconciles_local_tracking(bound, monkeypatch):
+def test_remote_source_never_reconciles_local_tracking(
+    bound: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     picker = Picker(record("remote"))
     picker.rec["machine"] = "remote"
     monkeypatch.setattr(project_config, "tracking_dir",
@@ -161,18 +185,26 @@ def test_remote_source_never_reconciles_local_tracking(bound, monkeypatch):
     assert picker.app.screen._rec["is_local"] is False
 
 
-def test_worker_uses_source_local_alias_canonicalization(bound, monkeypatch, tmp_path):
+def test_worker_uses_source_local_alias_canonicalization(
+    bound: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     picker = Picker(record())
-    calls = []
+    calls: list[tuple[str, str]] = []
+
+    def is_local(machine: str, env: str) -> bool:
+        calls.append((machine, env))
+        return True
+
     picker.src = SimpleNamespace(
         LOCAL=("raw-hostname", "Win"),
-        is_local=lambda machine, env: calls.append((machine, env)) or True,
+        is_local=is_local,
     )
     (tmp_path / "example-win-row.yaml").write_text("id: example-win-row\n")
     monkeypatch.setattr(project_config, "tracking_dir", lambda project: tmp_path)
     monkeypatch.setattr(engine_group_c, "picker_reconcile_local",
-                        lambda *a, **kw: SimpleNamespace(rows=[{
+                        lambda *a, **kw: SimpleNamespace(summary={"mux_scan_ok": True}, rows=[{
                             "id": "example-win-row", "session_lock_live": True,
+                            "mux_session": None, "mux_clients": 0, "mux_attached": False,
                         }]))
     picker._source_local = ("raw-hostname", "Win")
     picker._open_submenu()
@@ -184,11 +216,17 @@ def test_worker_uses_source_local_alias_canonicalization(bound, monkeypatch, tmp
     assert picker.app.screen._rec["session_lock_live"] is True
 
 
-def test_worker_uses_captured_project_and_missing_record_skips_probe(bound, monkeypatch, tmp_path):
+def test_worker_uses_captured_project_and_missing_record_skips_probe(
+    bound: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     picker = Picker(record())
-    calls = []
-    monkeypatch.setattr(project_config, "tracking_dir",
-                        lambda project: calls.append(project) or tmp_path)
+    calls: list[str] = []
+
+    def tracking_dir(project: str) -> Path:
+        calls.append(project)
+        return tmp_path
+
+    monkeypatch.setattr(project_config, "tracking_dir", tracking_dir)
     monkeypatch.setattr(engine_group_c, "picker_reconcile_local",
                         lambda *a, **kw: pytest.fail("missing record reconciled"))
     picker._open_submenu()
@@ -200,10 +238,12 @@ def test_worker_uses_captured_project_and_missing_record_skips_probe(bound, monk
     assert picker.app.screen._loading
 
 
-def test_callback_uses_its_own_action_maps(bound):
+def test_callback_uses_its_own_action_maps(bound: None, monkeypatch: pytest.MonkeyPatch) -> None:
     picker = Picker(record())
-    seen = []
-    picker._wt_submenu_dispatch = lambda rec, result, **maps: seen.append(maps)
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        picker, "_wt_submenu_dispatch", lambda rec, result, **maps: seen.append(maps),
+    )
     picker._open_submenu()
     callback = picker.app.callback
     menu = picker.app.screen
@@ -214,10 +254,12 @@ def test_callback_uses_its_own_action_maps(bound):
     assert seen[0]["ext"] == seen[0]["workers"] == {}
 
 
-def test_superseded_dialog_callback_does_not_dispatch(bound):
+def test_superseded_dialog_callback_does_not_dispatch(
+    bound: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     picker = Picker(record())
-    seen = []
-    picker._wt_submenu_dispatch = lambda *a, **kw: seen.append(a)
+    seen: list[Any] = []
+    monkeypatch.setattr(picker, "_wt_submenu_dispatch", lambda *a, **kw: seen.append(a))
     picker._open_submenu()
     callback = picker.app.callback
     picker._open_submenu()
@@ -225,7 +267,7 @@ def test_superseded_dialog_callback_does_not_dispatch(bound):
     assert seen == []
 
 
-def test_refinement_preserves_applicable_modifiers_and_clears_removed_ones():
+def test_refinement_preserves_applicable_modifiers_and_clears_removed_ones() -> None:
     rec = {**record(), "is_local": True}
     menu = SubMenuScreen(rec, ["Resume"])
     menu._no_mux = menu._ahp = True
@@ -235,7 +277,7 @@ def test_refinement_preserves_applicable_modifiers_and_clears_removed_ones():
     assert not menu.no_mux and not menu.ahp
 
 
-def test_repeated_out_of_order_completions_preserve_newest_menu(bound):
+def test_repeated_out_of_order_completions_preserve_newest_menu(bound: None) -> None:
     picker = Picker(record())
     for _ in range(3):
         picker._open_submenu()
@@ -243,7 +285,10 @@ def test_repeated_out_of_order_completions_preserve_newest_menu(bound):
         picker.app.close()
         picker._open_submenu()
         _, new_done = picker.requests[-1]
-        new_done(({"id": "example-win-row", "session_lock_live": True}, True))
+        new_done(({
+            "id": "example-win-row", "session_lock_live": True,
+            "mux_session": None, "mux_clients": 0, "mux_attached": False,
+        }, True))
         menu = picker.app.screen
         accepted = deepcopy(menu._rec)
         old_done(({"id": "example-win-row", "session_lock_live": False}, True))
@@ -253,15 +298,20 @@ def test_repeated_out_of_order_completions_preserve_newest_menu(bound):
 
 
 @pytest.mark.parametrize("failure", ["exception", "empty", "wrong-row"])
-def test_provider_failure_does_not_verify_cached_row(bound, monkeypatch, tmp_path, failure):
+def test_provider_failure_does_not_verify_cached_row(
+    bound: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str,
+) -> None:
     picker = Picker(record())
     (tmp_path / "example-win-row.yaml").write_text("id: example-win-row\n")
     monkeypatch.setattr(project_config, "tracking_dir", lambda project: tmp_path)
 
-    def reconcile(*args, **kwargs):
+    def reconcile(*args: Any, **kwargs: Any) -> SimpleNamespace:
         if failure == "exception":
             raise RuntimeError("provider unavailable")
-        return SimpleNamespace(rows=[] if failure == "empty" else [{"id": "other"}])
+        return SimpleNamespace(
+            summary={"mux_scan_ok": True},
+            rows=[] if failure == "empty" else [{"id": "other"}],
+        )
 
     monkeypatch.setattr(engine_group_c, "picker_reconcile_local", reconcile)
     picker._open_submenu()
@@ -272,11 +322,11 @@ def test_provider_failure_does_not_verify_cached_row(bound, monkeypatch, tmp_pat
     assert not picker.app.screen._loading
 
 
-def test_real_modal_updates_header_verbs_and_unknown_footer_together(bound):
-    from textual.app import App
-    from textual.widgets import Static
+def test_real_modal_updates_header_verbs_and_unknown_footer_together(bound: None) -> None:
+    App = import_module("textual.app").App
+    Static = import_module("textual.widgets").Static
 
-    async def run():
+    async def run() -> None:
         picker = Picker(record())
         app = App()
         picker.app = app
@@ -284,8 +334,12 @@ def test_real_modal_updates_header_verbs_and_unknown_footer_together(bound):
             picker._open_submenu()
             await pilot.pause()
             menu = app.screen
+            assert isinstance(menu, SubMenuScreen)
             _, done = picker.requests.pop()
-            done(({"id": "example-win-row", "session_lock_live": True}, True))
+            done(({
+                "id": "example-win-row", "session_lock_live": True,
+                "mux_session": None, "mux_clients": 0, "mux_attached": False,
+            }, True))
             await pilot.pause()
             assert not menu._loading
             assert "Reclaim" in menu._actions
@@ -303,11 +357,11 @@ def test_real_modal_updates_header_verbs_and_unknown_footer_together(bound):
 
 
 @pytest.mark.parametrize("outcome", ["unbound", "error", "missing", "success"])
-def test_pre_mount_refinement_keeps_verification_status(bound, outcome):
-    from textual.app import App
-    from textual.widgets import Static
+def test_pre_mount_refinement_keeps_verification_status(bound: None, outcome: str) -> None:
+    App = import_module("textual.app").App
+    Static = import_module("textual.widgets").Static
 
-    async def run():
+    async def run() -> None:
         picker = Picker(record())
         app = App()
         picker.app = app
@@ -316,10 +370,14 @@ def test_pre_mount_refinement_keeps_verification_status(bound, outcome):
                 context.reset()
             picker._open_submenu()
             menu = app.screen
+            assert isinstance(menu, SubMenuScreen)
             assert not menu.is_mounted
             if outcome != "unbound":
                 _, done = picker.requests.pop()
-                row = {"id": "example-win-row", "session_lock_live": True}
+                row = {
+                    "id": "example-win-row", "session_lock_live": True,
+                    "mux_session": None, "mux_clients": 0, "mux_attached": False,
+                }
                 done((row, True) if outcome == "success" else (None, None))
             await pilot.pause()
             assert menu.is_mounted and not menu._loading
@@ -333,21 +391,21 @@ def test_pre_mount_refinement_keeps_verification_status(bound, outcome):
     asyncio.run(run())
 
 
-def test_refinement_after_composition_is_replayed_on_mount():
-    from textual.app import App
-    from textual.widgets import Static
+def test_refinement_after_composition_is_replayed_on_mount(monkeypatch: pytest.MonkeyPatch) -> None:
+    App = import_module("textual.app").App
+    Static = import_module("textual.widgets").Static
 
-    async def run():
+    async def run() -> None:
         app = App()
         menu = SubMenuScreen(record(), ["Resume"], loading=True)
         compose = menu.compose
 
-        def refine_after_compose():
+        def refine_after_compose() -> Iterator[Any]:
             yield from compose()
             menu._rec["title"] = "Refined title"
             menu.refresh_actions(["Reclaim"], status="cached · liveness not verified")
 
-        menu.compose = refine_after_compose
+        monkeypatch.setattr(menu, "compose", refine_after_compose)
         async with app.run_test() as pilot:
             app.push_screen(menu)
             await pilot.pause()

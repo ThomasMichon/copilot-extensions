@@ -5,19 +5,20 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from agent_procutil.owned_process import run_caller_owned
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
 from configuration_context.runtime import deployed_runtime_python
-from configuration_layers import ConfigurationError, compose
+from configuration_layers import ConfigurationError, Layer, compose
 
-from . import _peer_launch
-from .manifest import ManifestError, resolve_for_machine
+from . import _peer_launch as _peer_launch
+from .manifest import ManifestError, RequirementPackage, resolve_for_machine
 
 FIELDS = {"model", "effortLevel"}
 
 
-def _legacy_report(root: Path) -> dict | None:
+def _legacy_report(root: Path) -> dict[str, Any] | None:
     legacy = Path.home() / ".agent-machines"
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or legacy)
     peer = Path.home() / ".agent-worktrees"
@@ -37,12 +38,14 @@ def _legacy_report(root: Path) -> dict | None:
     if not prefix:
         return None
     return read_owner_context(
-        [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
+        prefix, root,
         environment=environment,
     )
 
 
-def _checked_report(report, own):
+def _checked_report(
+    report: dict[str, Any] | None, own: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if report is not None and own is not None and (
         context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
     ):
@@ -50,7 +53,7 @@ def _checked_report(report, own):
     return report
 
 
-def owner_report(root: Path) -> dict | None:
+def owner_report(root: Path) -> dict[str, Any] | None:
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or (Path.home() / ".agent-machines"))
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
     if not raw and (
@@ -91,10 +94,13 @@ def owner_report(root: Path) -> dict | None:
     ), own)
 
 
-def eligible_values(package):
+def eligible_values(
+    package: RequirementPackage,
+) -> tuple[dict[str, str | bool | int | float | None], list[list[str]]]:
     if package.authority_declared:
         return {}, []
-    values, contributors = {}, []
+    values: dict[str, str | bool | int | float | None] = {}
+    contributors: list[list[str]] = []
     for key, spec in sorted(package.manage.items()):
         if not (key == "copilot.settings" or key.startswith("copilot.settings.")):
             continue
@@ -112,7 +118,10 @@ def eligible_values(package):
     return values, contributors
 
 
-def prepare_defaults(packages, machine, accepted_machines=None):
+def prepare_defaults(
+    packages: list[RequirementPackage], machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[RequirementPackage]:
     """Read native packages, compose default selection, leave package union intact."""
     from . import discover
 
@@ -169,14 +178,15 @@ def prepare_defaults(packages, machine, accepted_machines=None):
             ):
                 raise ManifestError("repository-machine defaults cannot change native hard constraints")
             selected.append((package, "repository_machine", "repository_machine", Path(local_root)))
-    layers = [{"id": "machines-defaults", "tier": "defaults", "origin": "defaults", "values": {}}]
-    contributors = []
+    layers: list[Layer] = [{"id": "machines-defaults", "tier": "defaults", "origin": "defaults", "values": {}}]
+    contributors: list[list[str]] = []
     for index, (package, tier, origin, root) in enumerate(selected):
         resolved = resolve_for_machine(package, machine, accepted_machines)
         values, owners = eligible_values(resolved)
         if not values:
             continue
-        layer = {
+        assert package.source_path is not None
+        layer: Layer = {
             "id": f"machines-{origin}-{index}", "tier": tier, "origin": origin, "values": values,
             "source": {"root": str(root.resolve()), "path": str(package.source_path.resolve().relative_to(root.resolve()))},
         }
@@ -193,7 +203,7 @@ def prepare_defaults(packages, machine, accepted_machines=None):
     return packages
 
 
-def selected_defaults(packages):
+def selected_defaults(packages: list[RequirementPackage]) -> dict[str, Any] | None:
     packets = [package.ordinary_defaults for package in packages if package.ordinary_defaults]
     if not packets:
         return None

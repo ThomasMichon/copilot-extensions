@@ -214,6 +214,12 @@ def test_repeated_staging_preserves_active_selection_and_disposable_slot_state(
 def test_candidates_remain_retained_through_setup_and_release_on_settlement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_setup: bool,
 ) -> None:
+    import update_driver
+
+    monkeypatch.setenv("UPDATE_DRIVER_WITNESS", "ambient-control")
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "scoped-control"},
+    )
     source = application_set(tmp_path, [
         ("consumer", "2.0", ["provider"]), ("provider", "1.0", []),
     ])
@@ -225,10 +231,16 @@ def test_candidates_remain_retained_through_setup_and_release_on_settlement(
         for application in applications:
             with installer.runtime._cleanup_lease(application.root, application.version) as removable:
                 assert not removable
-        current = next(app for app in applications if app.slot == options["cwd"])
+        current = next(app for app in applications if app.root == options["runtime_root"])
+        assert options["cwd"] == (Path(current.slot.anchor) if os.name == "nt" else current.slot)
+        if os.name == "nt":
+            assert command[3] == str(current.slot / "bin" / "setup.ps1")
         assert options["runtime_root"] == current.root
         assert options["runtime_version"] == current.version
         assert options["runtime_path"] == Path(installer.runtime.__file__)
+        environment = options["env"]
+        assert isinstance(environment, dict)
+        assert environment["UPDATE_DRIVER_WITNESS"] == "scoped-control"
         if os.name != "nt":
             descriptor = options["construction_fd"]
             assert isinstance(descriptor, int)

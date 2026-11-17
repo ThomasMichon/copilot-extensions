@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-mcp"
-version = "0.2.290-dev1"
+version = "0.2.291-dev1"
 description = "MCP swiss-army bridge -- wrap an upstream MCP server and apply auth + a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate)"
 readme = "README.md"
 license = "MIT"
@@ -62,6 +62,9 @@ agent-mcp = "agent_mcp.__main__:console_entry"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_mcp" = ["readiness-isolation.json"]
 
 [tool.setuptools.package-data]
 "agent_mcp" = ["incoming-contract.json", "owner_section.cs"]

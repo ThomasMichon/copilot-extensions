@@ -14,6 +14,7 @@ from .creation_worktree_writer import JOURNAL_KEY, _binding, _read, retained
 from .models import RetainedRecoveryRequest
 from .retained_metadata_lineage import adoption, native_for
 from .session_status import SessionStatus
+from .workspace_transport_identity import identity as transport_identity
 
 CAPABILITY = "retained_worktree_resume"
 
@@ -68,7 +69,7 @@ async def resume(
     config = resolver.agents.get(owner)
     if (
         entry is None or config is None or entry.path != scope.worktree_path
-        or config.project != scope.project or getattr(config, "host", None) is not None
+        or config.project != scope.project or transport_identity(resolver, owner) != ("local", None)
     ):
         raise _held("The discovered workspace does not match its original keyed owner")
     def ready() -> bool:

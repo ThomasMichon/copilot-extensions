@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any
 
-from . import resource_producer as producer, tracking
+from . import resource_producer as producer
+from .tracking_claims import parse_claim_ref
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,7 @@ def qualified_owner(value: object) -> bool:
     """Accept only an exact qualified worktree ref, without a session."""
     if not isinstance(value, str):
         return False
-    parsed = tracking.parse_claim_ref(value)
+    parsed = parse_claim_ref(value)
     return bool(
         parsed and parsed.is_qualified and not parsed.session
         and parsed.canonical() == value
@@ -40,7 +42,7 @@ def issue(code: str, subject: str, message: str) -> dict[str, str]:
     return {"code": code, "subject": subject, "message": message}
 
 
-def _immutable(metadata: dict) -> str:
+def _immutable(metadata: dict[str, Any]) -> str:
     return producer.canonical_json({
         key: value for key, value in metadata.items()
         if key not in {"phase", "closeout", "transfer"}
@@ -68,7 +70,7 @@ def _resolve_group(
     def resolve(value: str) -> str | None:
         if value in by_owner:
             return value
-        ref = tracking.parse_claim_ref(value) if qualified_owner(value) else None
+        ref = parse_claim_ref(value) if qualified_owner(value) else None
         if ref is None:
             return None
         key = ref.project, ref.worktree_id
@@ -96,7 +98,7 @@ def _resolve_group(
         incoming[consumer] += 1
     creator = resolve(metadata_by_owner[first.owner]["creator"])
     roots = [owner for owner in by_owner if not incoming[owner]]
-    if roots != [creator] or any(count > 1 for count in incoming.values()):
+    if creator is None or roots != [creator] or any(count > 1 for count in incoming.values()):
         issues.append(issue("transfer-ambiguous", subject, "ownership is not a single creator-rooted chain"))
         return None
     seen: set[str] = set()
@@ -108,7 +110,10 @@ def _resolve_group(
             if len(seen) != len(group):
                 break
             return owner
-        owner = resolve(metadata["transfer"]["consumer"])
+        following = resolve(metadata["transfer"]["consumer"])
+        if following is None:
+            break
+        owner = following
     issues.append(issue("transfer-ambiguous", subject, "transfer chain is cyclic or disconnected"))
     return None
 
@@ -116,8 +121,8 @@ def _resolve_group(
 def ownership_snapshot(
     rows: list[ObservedClaim], scan_issues: list[dict[str, str]], *,
     owner: str | None = None, kind: str | None = None,
-    namespace: str | None = None, identity: dict | None = None,
-) -> dict:
+    namespace: str | None = None, identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Project a local observational snapshot; filters never hide uncertainty."""
     issues = list(scan_issues)
     groups: dict[str, list[ObservedClaim]] = defaultdict(list)
@@ -174,7 +179,7 @@ def ownership_snapshot(
             terminal_row = next(item for item in groups[metadata["token"]] if item.owner == terminal)
             terminal_metadata = terminal_row.metadata
             assert isinstance(terminal_metadata, dict)
-            if terminal_metadata["phase"] != "closed":
+            if terminal_metadata["phase"] not in {"closed", "delivered"}:
                 current_owner = terminal
             resolution = "current" if row.owner == current_owner else "history"
         entries.append({

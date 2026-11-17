@@ -15,9 +15,12 @@ const source = readFileSync(new URL("../../../libs/copilot-driver-core/src/agent
 async function load(selected, version = 50, {
   exact = false, nativeId = "native-a", driver = false, headed = false, headedRefused = false,
   snapshot, send, muted = false, eventFailure, compatible = true,
+  historyReplay = false,
+  historyResponse = { replay_accepted: true, ingested: 1 },
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const shutdowns = new Map();
+  const controlStarts = new Set();
   let closed = 0;
   let consumer;
   let joined;
@@ -44,17 +47,30 @@ async function load(selected, version = 50, {
     if (route === "/health") result = {
       protocol_version: version, capabilities: compatible ? { compatible_native_inbox: 1 } : {},
     };
+    else if (route.endsWith("/events?replay=true")) result = { session_id: nativeId, ...historyResponse };
     else if (route.includes("/recovery?")) result = { messages: [], next_after: null };
     else if (route.endsWith("/negotiate")) result = {
       contract: "retained-inbox-v1", binding, expected_incarnation: null,
+      ...(historyReplay ? { message_base: 1 } : {}),
     };
     else if (route.endsWith("/enroll")) {
       consumer = body.consumer;
       result = { contract: "retained-inbox-v1", binding, expected_incarnation: null };
+    } else if (route.endsWith("/disposition")) {
+      const begin = body.state === "started" && !controlStarts.has(body.message_id);
+      if (begin) controlStarts.add(body.message_id);
+      result = { ...body, begin };
     } else if (route.endsWith("/poll")) result = {
       contract: "retained-inbox-v1", binding, consumer, messages: [{
         id: 1, body: "synthetic message", sender: "peer", kind: "prompt",
         delivery: "steer", handoff_id: "handoff-a", handoff_stage: "offered", consumer,
+        ...(historyReplay ? {
+          body: "", kind: "control:replay-history", control: true,
+          message_contract: {
+            base_version: 1, type: "control:replay-history", type_version: 1, requires: [],
+            message_id: 1, session_id: nativeId, receiver_incarnation: consumer.incarnation, sender: "peer",
+          },
+        } : {}),
       }],
     };
     else if (route.endsWith("/begin")) result = { begin: true };
@@ -83,18 +99,28 @@ async function load(selected, version = 50, {
     },
     fetch: () => { throw new Error("real network forbidden"); },
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return { unref() {} }; },
-    clearInterval: () => {}, setTimeout,
+    clearInterval: () => {}, setTimeout, Buffer,
   });
   const dependencies = {
     "node:fs": {
       existsSync: (file) => file.endsWith("auth.yaml"),
       readFileSync: () => "token: synthetic-secret",
     },
-    "node:fs/promises": { open: () => { throw new Error("real transcript reads forbidden"); } },
+    "node:fs/promises": { open: async () => {
+      if (!historyReplay) throw new Error("real transcript reads forbidden");
+      const transcript = JSON.stringify({
+        id: "history-one", type: "assistant.message", data: { content: "represented history" },
+      }) + "\n";
+      return {
+        stat: async () => ({ size: Buffer.byteLength(transcript) }),
+        read: async (buffer) => { buffer.write(transcript); },
+        close: async () => {},
+      };
+    } },
     "node:path": path,
     "node:os": { homedir: () => "/synthetic-home" },
-    "@github/copilot-sdk": { approveAll: () => {} },
-    "@github/copilot-sdk/extension": { joinSession: async (config) => { joined = config; return session; } },
+    "@microsoft/copilot-sdk": { approveAll: () => {} },
+    "@microsoft/copilot-sdk/extension": { joinSession: async (config) => { joined = config; return session; } },
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
     "./questions.mjs": questions,
@@ -154,7 +180,7 @@ async function load(selected, version = 50, {
   );
   assert.doesNotMatch(linked, /^import\s/m, "unsupported extension import syntax");
   await new vm.Script(`(async () => {\n${linked}\nawait activateBridgeExtension({
-    joinSession: __dependencies["@github/copilot-sdk/extension"].joinSession,
+    joinSession: __dependencies["@microsoft/copilot-sdk/extension"].joinSession,
     pluginRoot: process.cwd(),
   });\n})()`).runInContext(context);
   await settle();
@@ -163,6 +189,43 @@ async function load(selected, version = 50, {
   poll.fn();
   await settle();
   return { calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined, closed: () => closed };
+}
+
+test("actual retained activation reconstructs represented transcript without sending a prompt", async () => {
+  const f = await load("1", 50, { historyReplay: true });
+  assert.equal(f.sends.length, 0);
+  const replay = f.calls.find((call) => call.route.endsWith("/events?replay=true"));
+  assert.ok(replay, f.logs.join("\n"));
+  assert.equal(replay.body.events.length, 1);
+  assert.equal(replay.body.events[0].id, "history-one");
+  assert.ok(f.calls.some((call) => call.route.endsWith("/disposition") && call.body.state === "completed"));
+  assert.equal(f.calls.some((call) => call.route.endsWith("/begin")), false);
+});
+
+test("accepted empty or deduplicated replay still completes with zero ingested events", async () => {
+  const f = await load("1", 50, {
+    historyReplay: true, historyResponse: { replay_accepted: true, ingested: 0 },
+  });
+  assert.equal(f.sends.length, 0);
+  assert.ok(f.calls.some((call) => call.route.endsWith("/disposition") && call.body.state === "completed"));
+});
+
+for (const [label, historyResponse] of [
+  ["expired", { replay_accepted: false, ingested: 0 }],
+  ["missing acceptance", { ingested: 0 }],
+  ["malformed acceptance", { replay_accepted: "true", ingested: 1 }],
+  ["different context", { session_id: "another-session", replay_accepted: true, ingested: 1 }],
+]) {
+  test(`HTTP success for ${label} history never falsely completes the retained control`, async () => {
+    const f = await load("1", 50, { historyReplay: true, historyResponse });
+    assert.ok(f.calls.some((call) => call.route.endsWith("/events?replay=true")));
+    assert.equal(f.sends.length, 0);
+    assert.equal(f.calls.some((call) => call.route.endsWith("/disposition") && call.body.state === "completed"), false);
+    assert.ok(f.calls.some((call) => call.route.endsWith("/disposition") && call.body.state === "unknown"));
+    f.poll.fn();
+    await settle();
+    assert.equal(f.calls.filter((call) => call.route.endsWith("/events?replay=true")).length, 1);
+  });
 }
 
 test("actual extension default still uses legacy inbox, ACK and controls", async () => {

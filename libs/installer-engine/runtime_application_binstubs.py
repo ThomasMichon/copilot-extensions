@@ -105,15 +105,52 @@ def slot_binstubs(
     return result
 
 
+def _launcher_root(root: Path) -> Path:
+    value = str(root)
+    if value.startswith("\\\\?\\"):
+        ordinary = value[4:]
+        if ordinary[:4].casefold() == "unc\\":
+            candidate = "\\\\" + ordinary[4:]
+            components = ordinary[4:].split("\\")
+            if len(components) < 2 or not all(components[:2]):
+                return root
+        elif re.match(r"[A-Za-z]:\\", ordinary):
+            candidate = ordinary
+            components = ordinary[3:].split("\\")
+        else:
+            return root
+        if components[-1] == "":
+            components.pop()
+        for component in components:
+            if (
+                not component or component in {".", ".."} or component.endswith((".", " "))
+                or re.search(r'[<>:"/|?*\x00-\x1f]', component)
+                or re.fullmatch(
+                    r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]"
+                    r"|LPT[1-9\u00b9\u00b2\u00b3])(?:[ .].*)?",
+                    component, re.IGNORECASE,
+                )
+            ):
+                return root
+        return Path(candidate)
+    return root
+
+
 def global_binstubs(
     name: str, root_environment: str, default_directory: str, *, root: Path | None = None,
+    slot_directory: str = "",
 ) -> dict[str, str]:
     """Globals only resolve the current marker and invoke the slot-local app."""
     if (
         not _NAME.fullmatch(name) or not _ENVIRONMENT.fullmatch(root_environment)
         or not re.fullmatch(r"\.[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*", default_directory)
+        or (slot_directory != "" and not _NAME.fullmatch(slot_directory))
     ):
         raise ValueError("global launchers require an ordinary app and root binding")
+    command = f"{slot_directory}/{name}" if slot_directory else name
+    windows_command = command.replace("/", "\\")
+    if root is not None:
+        root = _launcher_root(root)
     shell_root = (
         f'root="${{{root_environment}:-$HOME/{default_directory}}}"\n' if root is None else
         f'root="${{{root_environment}:-}}"\n'
@@ -135,7 +172,7 @@ def global_binstubs(
         "echo 'Invalid current application version' >&2; exit 1;; esac\n"
         'case "$version" in ""|*[!0-9A-Za-z._+-]*) '
         "echo 'Invalid current application version' >&2; exit 1;; esac\n"
-        f'exec "$root/versions/$version/{name}.sh" "$@"\n'
+        f'exec "$root/versions/$version/{command}.sh" "$@"\n'
     )
     return {
         name: shell,
@@ -147,7 +184,7 @@ def global_binstubs(
             "$version = [IO.File]::ReadAllText((Join-Path $root 'current-version')).Trim()\n"
             "if ($version -notmatch '^[0-9][0-9A-Za-z._+-]*$') { throw 'Invalid current application version' }\n"
             "$slot = Join-Path (Join-Path $root 'versions') $version\n"
-            f"& (Join-Path $slot '{name}.ps1') @args\n"
+            f"& (Join-Path $slot '{windows_command}.ps1') @args\n"
             "exit $LASTEXITCODE\n"
         ),
         name + ".cmd": (
@@ -171,7 +208,7 @@ def global_binstubs(
             '%%I in ("!VERSION!") do exit /b 1\r\n'
             'for /f "delims=" %%I in ("!VERSION!") do (\r\n'
             '    endlocal\r\n    set "VERSION=%%I"\r\n)\r\n'
-            f'"%ROOT%\\versions\\%VERSION%\\{name}.cmd" %*\r\n'
+            f'"%ROOT%\\versions\\%VERSION%\\{windows_command}.cmd" %*\r\n'
         ),
     }
 

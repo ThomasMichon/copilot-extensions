@@ -7,10 +7,10 @@ exclude-newer = "7 days"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.7.124-dev1"
+version = "0.7.125-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
-license = "MIT"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 authors = [{ name = "Thomas Michon" }]
 # Textual is the visual-wizard toolkit the Phase 4 configurator UI uses; declared

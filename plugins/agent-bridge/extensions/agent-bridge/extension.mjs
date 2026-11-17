@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { joinSession } from "@github/copilot-sdk/extension";
 
 const packaged = new URL("./core/extension.mjs", import.meta.url);
 // Promotion projects the canonical Core assets into this plugin. A source
@@ -10,6 +9,8 @@ const implementation = existsSync(new URL("./core/", import.meta.url)) ? package
   import.meta.url,
 );
 const { activateBridgeExtension } = await import(implementation.href);
+const { loadExtensionSdk } = await import(new URL("./sdk-compat.mjs", implementation).href);
+const { joinSession } = await loadExtensionSdk();
 await activateBridgeExtension({
   joinSession, pluginRoot: fileURLToPath(new URL("../..", import.meta.url)),
 });

@@ -6,9 +6,41 @@ import os
 import shutil
 import subprocess
 import time
+import uuid
 
 from agent_procutil import no_window_kwargs
 from .credential_fields import attribute_name
+
+
+def _staging_title() -> str:
+    return f".agent-vault-tmp-{uuid.uuid4().hex[:12]}"
+
+
+def _parse_attachment_names(output: str) -> list[str] | None:
+    """Parse ``show -a Title --show-attachments`` output into attachment names.
+
+    The CLI prints the title, a blank line, a header translated into its
+    configured language (so its text is not matched) and one indented
+    ``name (size)`` line per attachment. Returns None when the output does
+    not have that shape, so callers fail closed instead of dropping
+    attachments.
+    """
+    lines = output.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    end = len(lines)
+    while end and lines[end - 1].startswith("  "):
+        end -= 1
+    header = end - 1
+    if header < 2 or not lines[header].strip() or lines[header - 1].strip():
+        return None
+    names: list[str] = []
+    for line in lines[end:]:
+        name, sep, size = line[2:].rpartition(" (")
+        if not sep or not name or not size.endswith(")"):
+            return None
+        names.append(name)
+    return names
 
 
 class PasswordMutationAmbiguous(RuntimeError):
@@ -284,7 +316,8 @@ class KeePassXCBackend:
                 return True, "Entry created"
             return False, r.stderr.strip() or "keepassxc-cli add failed"
         except Exception as e:
-            return False, str(e)
+            # str() of e.g. TimeoutExpired embeds the full argv.
+            return False, f"keepassxc-cli add failed: {type(e).__name__}"
 
     def edit_password(
         self,
@@ -499,6 +532,76 @@ class KeePassXCBackend:
             return True, "Entry removed"
         return False, r.stderr.strip() or "keepassxc-cli rm failed"
 
+    def group_exists(self, kpdb: str, group_path: str) -> bool:
+        """Return True when ``group_path`` names an existing group."""
+        if not group_path.strip("/"):
+            return True
+        r = self._run(kpdb, ["ls", "-q", kpdb, group_path])
+        return bool(r and r.returncode == 0)
+
+    def _run_raw(self, kpdb: str, args: list[str]) -> subprocess.CompletedProcess[bytes] | None:
+        """Like ``_run`` but returns undecoded output, so line endings survive."""
+        if not self._cli_path or not self.has_password(kpdb):
+            return None
+        try:
+            return subprocess.run(
+                [self._cli_path, *args],
+                input=(self._master_pass[kpdb] + "\n").encode("utf-8"),
+                capture_output=True,
+                timeout=10,
+                **no_window_kwargs(),
+            )
+        except Exception:
+            return None
+
+    def _read_fields_raw(
+        self, kpdb: str, entry_path: str, attrs: tuple[str, ...],
+    ) -> dict[str, str] | None:
+        """Read attributes exactly, or None when they cannot be read losslessly.
+
+        The CLI appends a platform line terminator to each value. It is learned
+        from the entry's known title so that only it is removed, keeping any
+        carriage return that belongs to the value itself.
+        """
+        title = self._split_path(entry_path)[1].encode("utf-8")
+        probe = self._run_raw(kpdb, ["show", "-q", kpdb, entry_path, "-a", "Title"])
+        if probe is None or probe.returncode != 0 or not probe.stdout.startswith(title):
+            return None
+        terminator = probe.stdout[len(title):]
+        if terminator not in (b"\n", b"\r\n"):
+            return None
+        values: dict[str, str] = {}
+        for attr in attrs:
+            r = self._run_raw(kpdb, ["show", "-q", "-s", kpdb, entry_path, "-a", attr])
+            if r is None or r.returncode != 0 or not r.stdout.endswith(terminator):
+                return None
+            try:
+                values[attr] = r.stdout[:-len(terminator)].decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+        return values
+
+    def list_attachments(self, kpdb: str, entry_path: str) -> list[str] | None:
+        """Return attachment names for an entry, or None on failure."""
+        r = self._run(
+            kpdb, ["show", "-q", "--show-attachments", "-a", "Title", kpdb, entry_path],
+        )
+        if r is None or r.returncode != 0:
+            return None
+        return _parse_attachment_names(r.stdout)
+
+    def _split_path(self, entry_path: str) -> tuple[str, str]:
+        parent, _, title = entry_path.rstrip("/").rpartition("/")
+        return parent, title
+
+    def _rename_entry(self, kpdb: str, entry_path: str, title: str) -> tuple[bool, str]:
+        r = self._run(kpdb, ["edit", "-q", kpdb, entry_path, "-t", title])
+        if r is None:
+            return False, "CLI not available or vault locked"
+        if r.returncode == 0:
+            return True, "Entry renamed"
+        return False, r.stderr.strip() or "keepassxc-cli edit failed"
+
     def move_entry(self, kpdb: str, entry_path: str, dest_group: str) -> tuple[bool, str]:
         """Move an entry to a different group. Returns (success, message)."""
         r = self._run(kpdb, ["mv", "-q", kpdb, entry_path, dest_group])
@@ -507,3 +610,91 @@ class KeePassXCBackend:
         if r.returncode == 0:
             return True, "Entry moved"
         return False, r.stderr.strip() or "keepassxc-cli mv failed"
+
+    def copy_entry(
+        self, kpdb: str, entry_path: str, dest_path: str, *,
+        skip_notes: bool = False, skip_url: bool = False,
+    ) -> tuple[bool, str]:
+        """Copy an entry to a new full entry path. Returns (success, message).
+
+        Refuses an existing destination. Copies the title (from ``dest_path``),
+        username, password, URL and attachments into a staged entry, then
+        renames it into place. keepassxc-cli
+        only accepts notes and URLs as command-line arguments, which other
+        local users may be able to read, so a non-empty value is refused unless
+        ``skip_notes``/``skip_url`` asks to copy without it.
+        keepassxc-cli cannot write custom attributes, so those (and TOTP, tags,
+        expiry, icons and history) are not copied.
+        """
+        if self.has_entry(kpdb, dest_path):
+            return False, f"Destination entry '{dest_path}' already exists"
+        fields = self._read_fields_raw(kpdb, entry_path, ("UserName", "Password", "URL", "Notes"))
+        if fields is None:
+            return False, f"Could not read the fields of '{entry_path}' exactly"
+        if fields["Notes"] and not skip_notes:
+            return False, (
+                f"'{entry_path}' has notes, which cannot be copied without exposing "
+                "them on a command line; resend with skip_notes to copy without them")
+        if any(c in fields[a] for a in ("UserName", "Password") for c in "\r\n"):
+            # add_entry() sends the password through a line-oriented prompt,
+            # which would silently drop a line break or carriage return.
+            return False, (
+                f"'{entry_path}' has a multi-line or carriage-return username or "
+                "password, which cannot be copied intact; copy it manually")
+        if fields["URL"] and not skip_url:
+            return False, (
+                f"'{entry_path}' has a URL, which cannot be copied without exposing "
+                "it on a command line; resend with skip_url to copy without it")
+        attachments = self.list_attachments(kpdb, entry_path)
+        if attachments is None:
+            return False, f"Could not list attachments of '{entry_path}'"
+        dest_parent, _ = self._split_path(dest_path)
+        temp = _staging_title()
+        staged = f"{dest_parent}/{temp}" if dest_parent else temp
+        ok, msg = self.add_entry(
+            kpdb, staged,
+            username=fields["UserName"] or None,
+            password=fields["Password"] or None,
+        )
+        if not ok:
+            # A timeout can follow a committed add, so clear any staged copy.
+            return False, msg + self._discard_staged(kpdb, staged)
+        error = None
+        for name in attachments:
+            data, emsg = self.export_attachment(kpdb, entry_path, name)
+            if data is None:
+                error = f"Attachment '{name}' export failed: {emsg}"
+                break
+            ok, imsg = self.import_attachment(kpdb, staged, name, data)
+            if not ok:
+                error = f"Attachment '{name}' import failed: {imsg}"
+                break
+        if error is None:
+            dest_title = self._split_path(dest_path)[1]
+            ok, msg = self._rename_entry(kpdb, staged, dest_title)
+            if ok:
+                return True, "Entry copied"
+            # A timeout can follow a committed rename; the group listing settles it.
+            titles = self._group_titles(kpdb, dest_parent)
+            if titles is not None and dest_title in titles and temp not in titles:
+                return True, "Entry copied"
+            error = f"Rename failed: {msg}"
+        return False, error + self._discard_staged(kpdb, staged)
+
+    def _discard_staged(self, kpdb: str, staged: str) -> str:
+        """Remove a staged copy; return a note naming it unless it is gone."""
+        removed, _ = self.remove_entry(kpdb, staged)
+        if removed:
+            return ""
+        parent, title = self._split_path(staged)
+        titles = self._group_titles(kpdb, parent)
+        if titles is not None and title not in titles:
+            return ""
+        return f"; a staged copy may remain at '{staged}' and should be removed"
+
+    def _group_titles(self, kpdb: str, group: str) -> set[str] | None:
+        """Return the entry and subgroup names listed in ``group``, or None."""
+        r = self._run(kpdb, ["ls", "-q", kpdb, group or "/"])
+        if r is None or r.returncode != 0:
+            return None
+        return set(r.stdout.splitlines())

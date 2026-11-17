@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import argparse
 import sys
+from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .client import BridgeClient
+    from .live_peer_address import LivePeerAddress
 
 
-def deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
-                            *, core, remote_address=None) -> None:
+def deliver_to_live_session(
+    client: BridgeClient, args: argparse.Namespace, session_id: str, prompt: str,
+    *, core: ModuleType, remote_address: LivePeerAddress | None = None,
+) -> None:
     from .client import BridgeClientError
     from .live_message_models import validate_live_reply_timeout
     from .send_outcome import SendRefused, emit, live_outcome, refusal_from_live_error
@@ -92,6 +100,9 @@ def deliver_to_live_session(client, args: argparse.Namespace, session_id: str, p
     )
     receipt = result.get("receipt") or {}
     print(f"    receipt: {receipt.get('stage') or 'unavailable (delivery evidence unavailable)'}")
+    disposition = receipt.get("disposition")
+    if disposition:
+        print(f"    {disposition['code']}: {disposition['reason']}")
     observation = result.get("delivery_observation")
     if observation:
         attention = observation["attention"]

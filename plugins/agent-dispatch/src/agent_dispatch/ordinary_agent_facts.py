@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
+from typing import Any
 
 from .queue_records import TaskError
 from .worktree_attribution import foreign_task_id
@@ -23,7 +24,7 @@ def native_conflict(native: str, known: list[str], retired: list[str]) -> bool:
     return native in retired or any(item != native and item not in retired for item in known)
 
 
-def validate_created(info: dict, *, project: str | None = None) -> dict:
+def validate_created(info: dict[str, Any], *, project: str | None = None) -> dict[str, Any]:
     """Require actual creation readiness, never synthesize it for a resume."""
     if not isinstance(info, dict):
         raise TaskError("ordinary bridge creation must be a JSON object")
@@ -41,7 +42,7 @@ def validate_created(info: dict, *, project: str | None = None) -> dict:
     return info
 
 
-def validate_resumed(info: dict, *, project: str | None = None) -> dict:
+def validate_resumed(info: dict[str, Any], *, project: str | None = None) -> dict[str, Any]:
     """Validate real ready-to-send SessionInfo, not a created-agent receipt."""
     if not isinstance(info, dict) or any(
         not isinstance(info.get(field), str) or not info[field]
@@ -63,7 +64,7 @@ def validate_resumed(info: dict, *, project: str | None = None) -> dict:
     return info
 
 
-def identity(info: dict) -> AgentIdentity:
+def identity(info: dict[str, Any]) -> AgentIdentity:
     if info.get("fact_kind") == "resumed":
         validate_resumed(info)
         return AgentIdentity(
@@ -78,7 +79,9 @@ def identity(info: dict) -> AgentIdentity:
     )
 
 
-def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
+def owner_record(
+    data: dict[str, Any], reservation: dict[str, Any], task_id: str, *, allow_native: str | None = None,
+) -> dict[str, Any]:
     """Require the exact active owner record in the stored execution repository."""
     allocation_task = task_id
     if reservation.get("allocation_reservation_key") is not None:
@@ -129,6 +132,7 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
         raise TaskError("ground worktree dispatch attribution is opaque or invalid")
     if record["status"] == "finalizing":
         raise TaskError("ground workspace finalization is in progress; retry the assignment")
+    own_native = isinstance(allow_native, str) and bool(allow_native) and record.get("last_session_id") == allow_native
     if (
         record["id"] != reservation.get("worktree")
         or record["repo"] != reservation.get("allocation_project")
@@ -136,8 +140,11 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
         and record["path"] != reservation["worktree_path"]
         or record.get("status") not in {"active", "pushed"}
         or foreign_task_id(record, allocation_task)
-        or record.get("session_live") is True
-        or record.get("native_liveness") not in (None, "stopped", "gone")
+        or record.get("session_live") is True and not own_native
+        or record.get("native_liveness") not in (
+            (None, "stopped", "gone", "active", "live", "running")
+            if own_native else (None, "stopped", "gone")
+        )
         or record.get("session_retired") is True
     ):
         raise TaskError("ground worktree identity, holder, or native history is unproven")
@@ -149,7 +156,7 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
     return record
 
 
-def sessionless(record: dict) -> bool:
+def sessionless(record: dict[str, Any]) -> bool:
     """Only positively indexed-empty history permits a first conversation."""
     return (
         record.get("status") == "active"

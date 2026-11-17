@@ -58,7 +58,7 @@ from .rendezvous import write_endpoint as write_endpoint
 from .service_endpoints import advertised_endpoint as advertised_endpoint
 from .service_connections import Closable as PipeServer, VaultConnections, settle_owned
 from .service_runtime import serve as _serve
-from . import cache_maintenance, service_cache
+from . import cache_maintenance, service_cache, service_copy
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration as ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
@@ -84,7 +84,7 @@ PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
-    "move", "mv", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
+    "move", "mv", "copy", "cp", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
 })
 _DISPATCH_WITHOUT_CREDENTIAL_LOCK = frozenset({
     "ping", "stop", "handoff-export", "git-credential", "seal", "unseal", "kek-list",
@@ -611,9 +611,7 @@ class VaultService:
                     return self._dispatch_request(request, peer, transport)
                 with self._credential_lock, contextlib.ExitStack() as custody:
                     self._check_password_ttl()
-                    if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
-                        kpdb = request.get("kpdb") or resolve_kpdb(required=False)
-                        custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
+                    custody.enter_context(service_cache.custody(request, resolve_kpdb, get_cache))
                     return self._dispatch_request(request, peer, transport)
             except service_cache.ServiceCacheUnavailable:
                 return {"ok": False, "error": service_cache.UNAVAILABLE}
@@ -1004,6 +1002,8 @@ class VaultService:
                 log.info("Moved entry %s -> %s", entry, dest_group)
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
+        if action in ("copy", "cp"):
+            return service_copy.handle(self, kpdb, group, vault_name, reason, request, get_cache)
         if action == "stop":
             self._shutdown = True
             return {"ok": True}

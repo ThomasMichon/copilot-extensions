@@ -13,13 +13,76 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import cache
 from pathlib import Path
+from types import ModuleType
+from typing import TypedDict, cast
 
 
-def update_driver_image(helper, pid: int) -> str | None:
-    image = helper._pid_image_path(pid)
+class _GuidanceOwner(TypedDict):
+    launchKey: str
+    timestamp: int | float
+
+
+class _CatalogCommand(TypedDict):
+    id: str
+    argv: list[str]
+    shell: str
+    purpose: str
+    availability: str
+
+
+def external_update_driver_active(
+    lock: dict[str, object] | None, python: Path, *,
+    load_sibling: Callable[[str], ModuleType | None], now: Callable[[], float],
+    image: Callable[[ModuleType, int], str | None],
+) -> bool:
+    """Defer only to a live update stage, not an installed Manager.
+
+    Manager's launch wrapper drives ``stage-update`` through the engine. Its
+    ``update_stage.acquire_lock`` records PID/birth identity in ``updater.lock``
+    while it holds the native lease and removes the record before release.
+    Read that ownership signal without invoking the stale runtime or a provider.
+    A completed stage or a cached ``skipped: locked`` status owns no work.
+    """
+    if not lock:
+        return False
+    pid, started = lock.get("pid"), lock.get("started")
+    current_time = now()
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or not isinstance(started, (int, float))
+        or type(started) not in (int, float)
+        or (type(started) is float and not math.isfinite(started))
+        or not 0 <= started <= current_time
+    ):
+        return False
+    helper = load_sibling("versioned_runtime.py")
+    if helper is None:
+        return False
+    try:
+        recorded = lock.get("start_time")
+        if recorded:
+            identity = load_sibling("hook_process_identity.py")
+            if identity is None:
+                return False
+            current = identity.process_start_time(pid)
+            if current is None or str(recorded) != current:
+                return False
+        selected_image = image(helper, pid)
+        return bool(
+            selected_image
+            and Path(selected_image).resolve() == python.resolve()
+            and helper._pid_alive(pid)
+        )
+    except Exception:
+        return False
+
+
+def update_driver_image(helper: ModuleType, pid: int) -> str | None:
+    image = cast(str | None, helper._pid_image_path(pid))
     if image or sys.platform != "darwin":
         return image
     import ctypes
@@ -34,7 +97,7 @@ def update_driver_image(helper, pid: int) -> str | None:
     return os.fsdecode(buffer.value) or None
 
 
-def guidance_marker(payload: dict) -> str:
+def guidance_marker(payload: dict[str, object]) -> str:
     key = session_launch_key(payload)
     if not key:
         return ""
@@ -45,7 +108,7 @@ def guidance_marker(payload: dict) -> str:
     )
 
 
-def _guidance_owner(content: str) -> dict | None:
+def _guidance_owner(content: str) -> _GuidanceOwner | None:
     match = re.search(
         r"\n<!-- agent-worktrees:session-guidance (\{[^\r\n]*\}) -->\n?$",
         content,
@@ -65,11 +128,11 @@ def _guidance_owner(content: str) -> dict | None:
         or not math.isfinite(value["timestamp"])
     ):
         return None
-    return value
+    return cast(_GuidanceOwner, value)
 
 
 @contextmanager
-def _guidance_lock(target: Path):
+def _guidance_lock(target: Path) -> Iterator[None]:
     lock_path = target.with_name(".session-guidance.lock")
     if lock_path.is_symlink():
         raise OSError("Guidance lock cannot be a symbolic link")
@@ -84,11 +147,13 @@ def _guidance_lock(target: Path):
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    getattr(msvcrt, "locking")(handle.fileno(), getattr(msvcrt, "LK_NBLCK"), 1)
                 else:
                     import fcntl
 
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    getattr(fcntl, "flock")(
+                        handle.fileno(), getattr(fcntl, "LOCK_EX") | getattr(fcntl, "LOCK_NB"),
+                    )
                 break
             except OSError:
                 if time.monotonic() >= deadline:
@@ -101,15 +166,15 @@ def _guidance_lock(target: Path):
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                getattr(msvcrt, "locking")(handle.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
             else:
                 import fcntl
 
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                getattr(fcntl, "flock")(handle.fileno(), getattr(fcntl, "LOCK_UN"))
 
 
 def write_guidance(
-    target: Path, render: Callable[[], str], payload: dict, *, claim_launch: bool,
+    target: Path, render: Callable[[], str], payload: dict[str, object], *, claim_launch: bool,
 ) -> bool:
     temporary = None
     try:
@@ -182,7 +247,7 @@ def guidance_target(home: Path, session_id: str) -> Path | None:
     return target_dir / "session-guidance.instructions.md"
 
 
-def payload_commands(scripts: Path) -> tuple[str, list[dict]]:
+def payload_commands(scripts: Path) -> tuple[str, list[_CatalogCommand]]:
     windows = os.name == "nt"
     script = scripts / ("emit-command-catalog.ps1" if windows else "emit-command-catalog.sh")
     # The generated declaration is shared with the native catalog emitter.
@@ -205,7 +270,7 @@ def payload_commands(scripts: Path) -> tuple[str, list[dict]]:
         shell = "direct" if shim == "powershell" else "cmd"
     root = scripts.parent
     installer = scripts / ("install.ps1" if windows else "install.sh")
-    commands = []
+    commands: list[_CatalogCommand] = []
     for command in contract["commands"]:
         path = root / (command["relativePath"] + suffix)
         ready = path.is_file() and installer.is_file()
@@ -307,7 +372,7 @@ def resident_started(runtime: Path, launch_key: str) -> bool:
     )
 
 
-def _load_runtime_file(path: Path, name: str):
+def _load_runtime_file(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Runtime helper unavailable: {path.name}")
@@ -323,7 +388,7 @@ def _load_runtime_file(path: Path, name: str):
 
 
 @cache
-def _versioned_runtime():
+def _versioned_runtime() -> ModuleType:
     return _load_runtime_file(
         Path(__file__).with_name("versioned_runtime.py"), "_hook_versioned_runtime",
     )
@@ -331,10 +396,10 @@ def _versioned_runtime():
 
 def complete_runtime_python(runtime: Path, version: str) -> Path | None:
     helper = _versioned_runtime()
-    return helper.slot_python(runtime, version) if helper.is_complete(runtime, version) else None
+    return cast(Path | None, helper.slot_python(runtime, version)) if helper.is_complete(runtime, version) else None
 
 
-def version_key(version: str) -> tuple:
+def version_key(version: str) -> tuple[int | str, ...]:
     match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
     if match:
         major, minor, patch, dev = match.groups()
@@ -343,7 +408,7 @@ def version_key(version: str) -> tuple:
 
 
 def runtime_python(runtime: Path) -> Path | None:
-    return _versioned_runtime().resolve_python(runtime)
+    return cast(Path | None, _versioned_runtime().resolve_python(runtime))
 
 
 def _site_packages(python: Path) -> list[Path]:
@@ -414,7 +479,7 @@ def configure_python_cache_environment(python: Path, environment: dict[str, str]
         environment["PYTHONPYCACHEPREFIX"] = arguments[1].split("=", 1)[1]
 
 
-def session_launch_key(payload: dict) -> str:
+def session_launch_key(payload: dict[str, object]) -> str:
     metadata = payload.get("_agentWorktrees")
     if not isinstance(metadata, dict):
         return ""

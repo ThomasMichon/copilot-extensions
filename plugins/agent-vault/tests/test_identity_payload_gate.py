@@ -12,6 +12,8 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
+from collections.abc import Mapping
 
 import pytest
 
@@ -22,20 +24,21 @@ PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 
 
-def load_module(path, name):
+def load_module(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def write_json(path, value):
+def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def prepare_payload(root, mode):
+def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
     write_json(root / ".agent-vault.json", {"enabled": True})
     home = root / "home"
     payload = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
@@ -90,7 +93,7 @@ def prepare_payload(root, mode):
     return home, payload, runtime, installation_id, context
 
 
-def prepare_runtime(runtime, payload):
+def prepare_runtime(runtime: Path, payload: Path) -> None:
     slot = runtime / "versions" / "fixture"
     subprocess.run(
         [sys.executable, "-m", "venv", "--without-pip", "--system-site-packages", str(slot)],
@@ -115,21 +118,97 @@ def prepare_runtime(runtime, payload):
     (runtime / "current-version").write_text("fixture\n", encoding="utf-8")
 
 
-def launcher(payload):
+def launcher(payload: Path) -> list[str]:
     if os.name == "nt":
         return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c",
                 str(payload / "bin" / "agent-vault.cmd")]
     return [str(payload / "bin" / "agent-vault")]
 
 
-def invoke(payload, env, cwd, *args):
+def invoke(
+    payload: Path, env: Mapping[str, str], cwd: Path, *args: str,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [*launcher(payload), *args], env=env, cwd=cwd,
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90,
     )
 
 
-def test_shared_payload_pin_validator_rejects_foreign_cell_and_invalid_json(tmp_path):
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("host", ["native", "pwsh"])
+@pytest.mark.parametrize("qualification", ["payload-missing", "runtime-missing", "qualified"])
+def test_installed_readiness_does_not_import_checkout_module(tmp_path: Path, host: str, qualification: str) -> None:
+    from agent_procutil import no_window_kwargs
+
+    if host == "pwsh" and os.name != "nt":
+        pytest.skip("the POSIX native gate covers this platform")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, **no_window_kwargs())
+    home, payload, runtime, _, context = prepare_payload(tmp_path, "namespaced")
+    prepare_runtime(runtime, payload)
+    declaration = {
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-vault", "module": "agent_vault",
+    }
+    if qualification != "payload-missing":
+        write_json(payload / "readiness-isolation.json", declaration)
+    if qualification == "qualified":
+        write_json(runtime / "versions" / "fixture" / "share" / "copilot-extensions" / "agent_vault" /
+                   "readiness-isolation.json", declaration)
+    activation_marker = tmp_path / "activation-reader-executed"
+    activation = payload / "scripts" / "runtime-activation.py"
+    activation.write_text(
+        activation.read_text(encoding="utf-8").replace(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n"
+            f"from pathlib import Path\nPath({str(activation_marker)!r}).touch()\n",
+        ), encoding="utf-8",
+    )
+    marker = tmp_path / "checkout-module-executed"
+    (tmp_path / "agent_vault.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('shadow')\n"
+        "print('{\"state\":\"ready\",\"detail\":\"checkout module\"}')\n",
+        encoding="utf-8",
+    )
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_VAULT", "VAULT_", "IDENTITY_", "COPILOT_EXTENSIONS_"))
+        and key not in {"KPDB", "PYTHONPATH", "PYTHONHOME", "COPILOT_PLUGIN_ROOT"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_VAULT_NO_SELFPROVISION="1",
+        AGENT_VAULT_HOME=str(runtime), AGENT_VAULT_PAYLOAD_ROOT=str(payload),
+        COPILOT_PLUGIN_ROOT=str(payload), COPILOT_EXTENSIONS_CONTEXT=context,
+    )
+    if host == "pwsh":
+        shell = shutil.which("pwsh")
+        if shell is None:
+            pytest.skip("PowerShell 7 unavailable")
+        command = [shell, "-NoProfile", "-File", str(payload / "bin/agent-vault.ps1")]
+    else:
+        command = launcher(payload)
+    result = subprocess.run(
+        [*command, "installer-readiness"], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert not marker.exists(), result.stdout + result.stderr
+    assert result.stdout, (result.returncode, result.stderr)
+    observed = json.loads(result.stdout)
+    if qualification != "qualified":
+        assert observed["schema"] == "copilot-extensions.probe-compatibility"
+        assert observed["status"] == "unknown"
+        assert observed["recovery"] == "update-owning-installation"
+        assert result.returncode == 126, result.stderr
+        assert not activation_marker.exists()
+        return
+    assert activation_marker.exists()
+    assert observed["schema"] == "copilot-extensions.module-readiness"
+    assert observed["module"] == "agent-vault/runtime"
+    assert observed["state"] == "failed", observed
+    assert result.returncode == 1
+
+
+def test_shared_payload_pin_validator_rejects_foreign_cell_and_invalid_json(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     database = tmp_path / "fixture.kdbx"
     pin = json.dumps({
@@ -154,7 +233,7 @@ def test_shared_payload_pin_validator_rejects_foreign_cell_and_invalid_json(tmp_
     reason="opt-in native payload-launcher contract",
 )
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
-def test_actual_payload_cache_only_reader_preserves_two_database_scopes(tmp_path, monkeypatch, mode):
+def test_actual_payload_cache_only_reader_preserves_two_database_scopes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     if os.name != "nt":
         pytest.importorskip("Cryptodome.Cipher.AES", reason="POSIX cache reads require the cache extra")
     home, payload, runtime, installation_id, context = prepare_payload(tmp_path, mode)
@@ -213,7 +292,7 @@ def test_actual_payload_cache_only_reader_preserves_two_database_scopes(tmp_path
     ("ssh-key", "prepare", "--entry", "SSH/node-a"),
     ("ssh-key", "install", "--entry", "SSH/node-a", "--directory", "unused"),
 ])
-def test_actual_first_touch_require_running_never_provisions(tmp_path, mode, command):
+def test_actual_first_touch_require_running_never_provisions(tmp_path: Path, mode: str, command: tuple[str, ...]) -> None:
     home, payload, runtime, _installation_id, context = prepare_payload(tmp_path, mode)
     env = {
         name: value for name, value in os.environ.items()
@@ -236,7 +315,7 @@ def test_actual_first_touch_require_running_never_provisions(tmp_path, mode, com
     reason="opt-in actual payload/KeePass proof",
 )
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
-def test_actual_payload_live_setup_and_stopped_service_refusal(tmp_path, mode):
+def test_actual_payload_live_setup_and_stopped_service_refusal(tmp_path: Path, mode: str) -> None:
     live = load_module(PLUGIN / "tests" / "test_identity_key_keepass_live.py", "vault_gate_live")
     home, payload, runtime, installation_id, context = prepare_payload(tmp_path, mode)
     prepare_runtime(runtime, payload)

@@ -12,22 +12,44 @@ import subprocess
 import sys
 import time
 import venv
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from collections.abc import Iterator, Mapping, Sequence
+from typing import TypedDict, cast
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ImportError:
+else:
     import tomli as tomllib
 
 _PLUGIN = Path(__file__).resolve().parents[1]
 _REPO = _PLUGIN.parents[1]
 
 
-def load(path, name):
+class Snapshot(TypedDict):
+    schema: str
+    state_root: str
+    topology: dict[str, str]
+    profiles: dict[str, str]
+    aliases: list[dict[str, str]]
+    captured_at: str
+    connectivity: str
+    effective_routes: str
+
+
+class DeadlineResult(TypedDict):
+    phase: str
+    seconds: float
+    deadline_seconds: int
+    exception: str
+    descendant_reaped: bool
+
+
+def load(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -38,14 +60,14 @@ launcher = load(_PLUGIN / "scripts" / "snapshot_runtime.py", "snapshot_launcher_
 writer = load(_PLUGIN / "scripts" / "write_session_guidance.py", "snapshot_writer_test")
 
 
-def _functional_profile():
+def _functional_profile() -> bool:
     profile = os.environ.get("AGENT_SSH_SNAPSHOT_TEST_PROFILE", "standard")
     if profile not in ("standard", "busy-host-functional"):
         raise ValueError(f"Unknown SSH snapshot test profile: {profile}")
     return profile == "busy-host-functional"
 
 
-def _optional_functional_prelude():
+def _optional_functional_prelude() -> str:
     if not _functional_profile():
         return ""
     return (
@@ -55,7 +77,7 @@ def _optional_functional_prelude():
     )
 
 
-def _functional_writer(monkeypatch):
+def _functional_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep actual bootstrap/runtime dispatch; widen only the test's positive calls."""
     if not _functional_profile():
         return
@@ -75,51 +97,55 @@ def _functional_writer(monkeypatch):
         "raise SystemExit(main())\n"
     )
 
-    def argv(root, stem):
+    def argv(root: Path, stem: str) -> list[str] | None:
         command = contributor_argv(root, stem)
         if command and stem == "emit-mesh-pointer" and command[-1] == "snapshot":
             return [*command[:-2], "-c", driver, command[-2]]
-        return command
+        return cast(list[str] | None, command)
 
-    def owned(*args, **kwargs):
+    def owned(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         kwargs["timeout"] = 60
-        return run_owned(*args, **kwargs)
+        return cast(subprocess.CompletedProcess[str], run_owned(*args, **kwargs))
 
     monkeypatch.setattr(writer, "_contributor_argv", argv)
     monkeypatch.setattr(writer, "_run_owned_contributor", owned)
 
 
-def _evidence_profile():
+def _evidence_profile() -> dict[str, str]:
     return {
         "test_profile": "busy-host-functional" if _functional_profile() else "standard",
         "original_budget_performance": "unqualified",
     }
 
 
-def test_windowless_parent_retains_native_pipe_delivery(tmp_path, monkeypatch):
+def test_windowless_parent_retains_native_pipe_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(writer.sys, "executable", str(tmp_path / "pythonw.exe"))
     argv = writer._contributor_argv(_PLUGIN, "emit-mesh-pointer")
     assert argv[0] == str(tmp_path / "python.exe")
     assert argv[1:4] == ["-I", "-X", "utf8"]
 
 
-def test_legacy_decision_and_slot_selection_belong_to_packaged_owners(tmp_path, monkeypatch):
-    calls = []
+def test_legacy_decision_and_slot_selection_belong_to_packaged_owners(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
     python = tmp_path / "versions" / "1.0.0" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text("not executed")
 
     class Primitive:
-        def probe_legacy_entrypoint(self, **kwargs):
+        def probe_legacy_entrypoint(self, **kwargs: object) -> dict[str, object]:
             calls.append(kwargs)
             return {"probeReason": "legacy-active", "legacy": {"root": str(tmp_path)}}
 
     class Runtime:
-        def resolve_python(self, root):
+        def resolve_python(self, root: Path) -> Path:
             assert root == tmp_path
             return python
 
-        def versions_root(self, root):
+        def versions_root(self, root: Path) -> Path:
             return root / "versions"
 
     monkeypatch.setattr(
@@ -145,12 +171,14 @@ def test_legacy_decision_and_slot_selection_belong_to_packaged_owners(tmp_path, 
 @pytest.mark.parametrize(
     "reason", ["migration-required", "maintenance-active", "foreign-environment"]
 )
-def test_nonlegacy_decision_never_selects_a_legacy_runtime(tmp_path, monkeypatch, reason):
+def test_nonlegacy_decision_never_selects_a_legacy_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str,
+) -> None:
     class Primitive:
-        def probe_legacy_entrypoint(self, **_):
+        def probe_legacy_entrypoint(self, **_: object) -> dict[str, object]:
             return {"probeReason": reason, "context": None}
 
-    def imported(path, _):
+    def imported(path: Path, _: str) -> Primitive:
         assert path.name != "versioned_runtime.py", "refusal fell back to legacy"
         return Primitive()
 
@@ -159,12 +187,14 @@ def test_nonlegacy_decision_never_selects_a_legacy_runtime(tmp_path, monkeypatch
         launcher.runtime_command(tmp_path, "agent-ssh", {})
 
 
-def test_missing_completed_runtime_cannot_fall_back_to_running_interpreter(tmp_path, monkeypatch):
+def test_missing_completed_runtime_cannot_fall_back_to_running_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class Primitive:
-        def probe_legacy_entrypoint(self, **_):
+        def probe_legacy_entrypoint(self, **_: object) -> dict[str, object]:
             return {"probeReason": "legacy-active", "legacy": {"root": str(tmp_path)}}
 
-        def resolve_python(self, _):
+        def resolve_python(self, _: Path) -> None:
             return None
 
     monkeypatch.setattr(launcher, "load", lambda *_: Primitive())
@@ -173,7 +203,9 @@ def test_missing_completed_runtime_cannot_fall_back_to_running_interpreter(tmp_p
 
 
 @pytest.mark.parametrize("changed", ["generation", "governance"])
-def test_optional_runtime_selection_revalidates_caller_binding(tmp_path, monkeypatch, changed):
+def test_optional_runtime_selection_revalidates_caller_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
     root = tmp_path / "durable" / "marketplaces" / "sample" / "plugins" / "agent-ssh"
     cell = root.parent.parent
     (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
@@ -183,10 +215,13 @@ def test_optional_runtime_selection_revalidates_caller_binding(tmp_path, monkeyp
         "invocationGovernance": {"actualMode": "namespaced"},
     }
     active = {key: value for key, value in own.items() if key != "invocationGovernance"}
-    governance = dict(own["invocationGovernance"])
-    calls = []
+    governance = dict(cast(dict[str, str], own["invocationGovernance"]))
+    calls: list[str] = []
 
-    def context(_primitive, _receipt, _durable, plugin, _cell, _environment):
+    def context(
+        _primitive: object, _receipt: Path, _durable: Path, plugin: str,
+        _cell: Path, _environment: Mapping[str, str],
+    ) -> dict[str, object]:
         calls.append(plugin)
         return dict(active) if plugin == "agent-ssh" else {"payloadRoot": str(tmp_path)}
 
@@ -196,9 +231,9 @@ def test_optional_runtime_selection_revalidates_caller_binding(tmp_path, monkeyp
         peer_environment=lambda *_args: {},
     )
     monkeypatch.setattr(launcher, "load", lambda *_args: peer)
-    monkeypatch.setitem(sys.modules, "_owner_installation_context", object())
+    monkeypatch.setitem(sys.modules, "_owner_installation_context", cast(ModuleType, object()))
 
-    def runtime(*_args):
+    def runtime(*_args: object) -> tuple[list[str], dict[str, str]]:
         calls.append("runtime")
         if changed == "generation":
             active["generation"] = 2
@@ -212,12 +247,12 @@ def test_optional_runtime_selection_revalidates_caller_binding(tmp_path, monkeyp
     assert calls[-2:] == ["runtime", "agent-ssh"]
 
 
-def _slot_command(root, monkeypatch):
+def _slot_command(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     runtime = load(_PLUGIN / "scripts" / "versioned_runtime.py", "snapshot_slot_authority")
     original = launcher.load
 
     class Primitive:
-        def probe_legacy_entrypoint(self, **_):
+        def probe_legacy_entrypoint(self, **_: object) -> dict[str, object]:
             return {"probeReason": "legacy-active", "legacy": {"root": str(root)}}
 
     monkeypatch.setattr(
@@ -247,7 +282,9 @@ def _slot_command(root, monkeypatch):
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_redirected_interpreter_directory_is_refused(tmp_path, monkeypatch, nested):
+def test_redirected_interpreter_directory_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
+) -> None:
     slot = _slot_command(tmp_path / "owner", monkeypatch)
     environment = slot / ".venv" if nested else slot
     environment.mkdir(exist_ok=True)
@@ -270,7 +307,9 @@ def test_redirected_interpreter_directory_is_refused(tmp_path, monkeypatch, nest
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch, nested):
+def test_interpreter_leaf_is_never_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
+) -> None:
     slot = _slot_command(tmp_path / "owner", monkeypatch)
     binary = (slot / ".venv" if nested else slot) / "bin"
     binary.mkdir(parents=True)
@@ -278,9 +317,9 @@ def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch, nested):
     python.write_text("not executed")
     original = Path.resolve
 
-    def resolve(path, *args, **kwargs):
+    def resolve(path: Path, strict: bool = False) -> Path:
         assert path != python, "interpreter leaf was resolved"
-        return original(path, *args, **kwargs)
+        return original(path, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", resolve)
     argv, _ = launcher.runtime_command(tmp_path, "agent-ssh", {})
@@ -289,7 +328,9 @@ def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch, nested):
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX venv interpreter symlink")
 @pytest.mark.parametrize("nested", [False, True])
-def test_posix_interpreter_leaf_symlink_remains_supported(tmp_path, monkeypatch, nested):
+def test_posix_interpreter_leaf_symlink_remains_supported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
+) -> None:
     slot = _slot_command(tmp_path / "owner", monkeypatch)
     binary = (slot / ".venv" if nested else slot) / "bin"
     binary.mkdir(parents=True)
@@ -299,7 +340,7 @@ def test_posix_interpreter_leaf_symlink_remains_supported(tmp_path, monkeypatch,
     assert argv[0] == str(python)
 
 
-def _purelib(python, *, scheme=None):
+def _purelib(python: str | Path, *, scheme: str | None = None) -> Path:
     code = (
         "import json,sys,sysconfig; "
         "options={'scheme':sys.argv[1]} if len(sys.argv)>1 else {}; "
@@ -319,7 +360,7 @@ def _purelib(python, *, scheme=None):
     return path
 
 
-def _compile_native_fixture(python, paths):
+def _compile_native_fixture(python: Path, paths: Sequence[Path]) -> None:
     result = run_caller_owned(
         [str(python), "-I", "-m", "compileall", "-q", *(str(path) for path in paths)],
         timeout=60 if _functional_profile() else 30,
@@ -329,7 +370,9 @@ def _compile_native_fixture(python, paths):
     assert result.returncode == 0, result.stderr
 
 
-def test_native_fixture_compilation_does_not_use_the_runner_cache(tmp_path, monkeypatch):
+def test_native_fixture_compilation_does_not_use_the_runner_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source = tmp_path / "module.py"
     source.write_text("value = 'native fixture'\n", encoding="utf-8")
     monkeypatch.setattr(sys, "pycache_prefix", str(tmp_path / "runner-cache"))
@@ -337,7 +380,7 @@ def test_native_fixture_compilation_does_not_use_the_runner_cache(tmp_path, monk
     assert list((tmp_path / "__pycache__").glob("module.*.pyc"))
 
 
-def _older_snapshot_slot():
+def _older_snapshot_slot() -> Path:
     root = Path.home() / ".agent-ssh"
     slot = root / "versions" / "0.9.0"
     shutil.copytree(
@@ -368,7 +411,7 @@ def _older_snapshot_slot():
     return python
 
 
-def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch):
+def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch: pytest.MonkeyPatch) -> None:
     selected_python = sys.executable
     selected_version = sys.version_info
     runner_minor = 10 if selected_version.minor != 10 else 11
@@ -388,8 +431,8 @@ def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch):
     assert f"python3.{runner_minor}/" not in path.as_posix()
 
 
-def _fixture_source_roots(source):
-    pending, visited = [source], set()
+def _fixture_source_roots(source: Path) -> Iterator[Path]:
+    pending, visited = [source], set[Path]()
     while pending:
         project = pending.pop().resolve()
         if project in visited:
@@ -405,8 +448,8 @@ def _fixture_source_roots(source):
 
 
 def test_native_fixture_selects_transitive_declared_sources_without_unrelated_trees(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setitem(globals(), "_REPO", tmp_path)
     for name, dependency in (
         ("caller", "dependency"), ("dependency", "transitive"),
@@ -424,7 +467,10 @@ def test_native_fixture_selects_transitive_declared_sources_without_unrelated_tr
     }
 
 
-def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
+def _cell(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, host_context: bool = False,
+    legacy: bool = False, nested: bool = False, cold_payload: bool = False,
+) -> tuple[dict[str, Path], dict[str, Path]]:
     original_home = Path.home()
     original_peer_site = None
     original_peer_python = None
@@ -489,8 +535,8 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
         "snapshot_fixture_primitive",
     )
     durable = root / "durable"
-    contexts = {}
-    payloads = {}
+    contexts: dict[str, Path] = {}
+    payloads: dict[str, Path] = {}
     for plugin in ("agent-ssh", "agent-worktrees"):
         payload = (
             home / ".copilot" / "installed-plugins" / "snapshot-tools" / plugin
@@ -498,8 +544,9 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
             else root / "payloads" / plugin
         )
         source = _REPO / "plugins" / plugin
-        shutil.copytree(source / "scripts", payload / "scripts")
-        shutil.copytree(source / "src", payload / "src")
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc") if cold_payload else None
+        shutil.copytree(source / "scripts", payload / "scripts", ignore=ignore)
+        shutil.copytree(source / "src", payload / "src", ignore=ignore)
         shutil.copyfile(source / "plugin.json", payload / "plugin.json")
         shutil.copytree(source / "bin", payload / "bin")
         procutil = payload / "libs" / "agent-procutil" / "src" / "agent_procutil"
@@ -557,12 +604,13 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
         environment_root = slot / ".venv" if nested else slot
         native_peer = host_context and plugin == "agent-worktrees"
         if native_peer:
+            assert original_peer_site is not None and original_peer_python is not None
             subprocess.run(
                 [str(original_peer_python), "-m", "venv", "--without-pip", str(environment_root)],
                 check=True,
                 capture_output=True,
                 timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
             )
             site = environment_root / original_peer_site.relative_to(original_peer_python.parent.parent)
             # Preserve the independent peer's installed package/dependency bytes
@@ -610,7 +658,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
         )
         _compile_native_fixture(
             environment_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
-            [site / "agent_worktrees" if native_peer else site, *payload_inputs],
+            [site / "agent_worktrees" if native_peer else site, *([] if cold_payload else payload_inputs)],
         )
         (slot / ".install-complete.json").write_text(
             json.dumps(
@@ -633,7 +681,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
     return contexts, payloads
 
 
-def _snapshot(home):
+def _snapshot(home: Path) -> Snapshot:
     content = (
         home
         / ".copilot"
@@ -645,7 +693,10 @@ def _snapshot(home):
     ).read_text(encoding="utf-8")
     assert "session command catalog" in content
     assert len(content.encode("utf-8")) <= 4096
-    values = [json.loads(part.split("\n```", 1)[0]) for part in content.split("```json\n")[1:]]
+    values = [
+        cast(Snapshot, json.loads(part.split("\n```", 1)[0]))
+        for part in content.split("```json\n")[1:]
+    ]
     return next(
         value
         for value in values
@@ -653,7 +704,7 @@ def _snapshot(home):
     )
 
 
-def _configured_caller(root):
+def _configured_caller(root: Path) -> tuple[Path, Path]:
     repo = root / "caller"
     state = root / "state"
     for path in (repo, state):
@@ -661,7 +712,7 @@ def _configured_caller(root):
         subprocess.run(
             ["git", "init", "-q", str(path)],
             check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     (repo / ".agent-worktrees").mkdir()
     (repo / ".agent-worktrees" / "config.yaml").write_text(
@@ -737,21 +788,21 @@ def _configured_caller(root):
 
 @pytest.mark.timeout(300 if _functional_profile() else 150)
 def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
-    tmp_path, monkeypatch, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     _, payloads = _cell(tmp_path / "cell", monkeypatch, legacy=True)
     home = tmp_path / "output"
     home.mkdir()
     repo, machines = _configured_caller(tmp_path)
     assert not (Path.home() / ".agent-worktrees" / "payload-dir").exists()
     monkeypatch.setenv("AGENT_SSH_NO_SELFPROVISION", "1")
-    observed_calls = []
+    observed_calls: list[tuple[float, int | str]] = []
     owned = writer._run_owned_contributor
 
-    def observed(*args, **kwargs):
+    def observed(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         started = time.monotonic()
         try:
-            result = owned(*args, **kwargs)
+            result = cast(subprocess.CompletedProcess[str], owned(*args, **kwargs))
             observed_calls.append((round(time.monotonic() - started, 3), result.returncode))
             return result
         except Exception as error:
@@ -895,7 +946,9 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
 
 @pytest.mark.timeout(300 if _functional_profile() else 150)
 @pytest.mark.parametrize("nested", [False, True])
-def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch, capsys, nested):
+def test_explicit_native_owner_and_foreign_context_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], nested: bool,
+) -> None:
     from agent_ssh import _worktrees
 
     home = tmp_path / "home"
@@ -911,6 +964,7 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
     assert Path(command[0]).is_relative_to(contexts["agent-ssh"].parent / "versions")
     assert environment["COPILOT_EXTENSIONS_CONTEXT"] == str(contexts["agent-ssh"])
     active = _worktrees.validate_context()
+    assert active is not None
     repo, machines = _configured_caller(tmp_path)
     from agent_procutil.owned_process import run_caller_owned
 
@@ -941,7 +995,9 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
     shutil.rmtree(home / ".agent-worktrees")
     shutil.rmtree(home / ".caller")
 
-    def native_state_root(cwd, own):
+    def native_state_root(
+        cwd: Path, own: Mapping[str, object] | None,
+    ) -> tuple[Path | None, str]:
         result = run_caller_owned(
             [
                 *command[:-2], "-c",
@@ -969,7 +1025,7 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
                 f"native optional state-root request refused: {result.stderr}"
             )
         assert result.returncode == 0, result.stderr
-        path, status = json.loads(result.stdout)
+        path, status = cast(tuple[str | None, str], json.loads(result.stdout))
         return Path(path) if path else None, status
 
     samples = []
@@ -1028,32 +1084,36 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
 
 
 @pytest.mark.timeout(150)
-def test_native_optional_deadline_reaps_actual_adapter_descendants(tmp_path, monkeypatch):
+def test_native_optional_deadline_reaps_actual_adapter_descendants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, payloads = _cell(tmp_path / "cell", monkeypatch, legacy=True)
     repo, _ = _configured_caller(tmp_path)
     _optional_deadline_controls(tmp_path, payloads, repo)
 
 
-def test_optional_deadline_teardown_never_signals_a_reused_pid(tmp_path, monkeypatch):
+def test_optional_deadline_teardown_never_signals_a_reused_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_ssh import _worktrees
 
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "snapshot_runtime.py").write_text("# disposable resolver\n", encoding="utf-8")
     cleanup = tmp_path / "cleanup"
-    checks = {}
+    checks: dict[int, int] = {}
     phases = iter(("resolution", "execution"))
 
-    def running(pid):
+    def running(pid: int) -> bool:
         checks[pid] = checks.get(pid, 0) + 1
         # The owned child is gone; a later PID-only lookup sees its replacement.
         return checks[pid] > 1
 
-    def expired(argv, **kwargs):
+    def expired(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         phase = next(phases)
         pid = 12345 if phase == "resolution" else 23456
         (cleanup / f"{phase}.pid").write_text(str(pid), encoding="utf-8")
-        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        raise subprocess.TimeoutExpired(argv, cast(float, kwargs["timeout"]))
 
     monkeypatch.setattr(
         sys.modules[__name__], "load", lambda *_: SimpleNamespace(_pid_running=running)
@@ -1065,7 +1125,9 @@ def test_optional_deadline_teardown_never_signals_a_reused_pid(tmp_path, monkeyp
     assert all(result["descendant_reaped"] for result in results)
 
 
-def _optional_deadline_controls(tmp_path, payloads, repo):
+def _optional_deadline_controls(
+    tmp_path: Path, payloads: Mapping[str, Path], repo: Path,
+) -> list[DeadlineResult]:
     from unittest.mock import patch
 
     from agent_ssh import _worktrees
@@ -1077,14 +1139,21 @@ def _optional_deadline_controls(tmp_path, payloads, repo):
     controls = load(
         _PLUGIN / "tests" / "test_write_session_guidance.py", "snapshot_cleanup_controls"
     )
-    results = []
+    results: list[DeadlineResult] = []
     run_owned = _worktrees.run_caller_owned
-    expirations = []
+    expirations: list[float | None] = []
 
-    def observed(*args, **kwargs):
-        assert kwargs["timeout"] == 5
+    def observed(
+        argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float,
+        max_stdout_bytes: int, max_stderr_bytes: int, input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 5
         try:
-            return run_owned(*args, **kwargs)
+            return run_owned(
+                argv, cwd=cwd, env=env, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                **({"input_text": input_text} if input_text is not None else {}),
+            )
         except subprocess.TimeoutExpired as exc:
             expirations.append(exc.timeout)
             raise
@@ -1133,7 +1202,9 @@ def _optional_deadline_controls(tmp_path, payloads, repo):
     reason="requires an explicitly selected, configured native caller",
 )
 @pytest.mark.timeout(300 if _functional_profile() else 150)
-def test_native_configured_external_state_source_consumer(tmp_path, monkeypatch, capsys):
+def test_native_configured_external_state_source_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     caller = Path(os.environ["AGENT_SSH_NATIVE_CALLER"]).resolve(strict=True)
     assert caller.is_dir()
     _cell(tmp_path / "cell", monkeypatch, host_context=True, legacy=True)

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from configuration_layers import ConfigurationError
+from .readiness import ProbeContractError, required
 
 READ_ONLY_CONTRACT = b"# Trace contract: normal/read-only/ready-v1"
 MAX_RESOLVER_BYTES = 64 * 1024
@@ -42,6 +43,10 @@ def deployed_runtime_python(
         raise ConfigurationError("configuration runtime resolver could not be read") from error
     if len(header) > MAX_RESOLVER_BYTES or READ_ONLY_CONTRACT not in header.splitlines():
         raise ConfigurationError("configuration runtime resolver lacks its read-only contract")
+    if required(environment):
+        raise ProbeContractError(
+            "Deployed shell resolver has no qualified probe provenance; update the owning installation."
+        )
     rebound = dict(environment)
     rebound.update({
         "AGENT_RT_ROOT": str(runtime_root),

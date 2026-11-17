@@ -55,6 +55,17 @@ def test_absent_resolver_never_starts_anything(tmp_path: Path, monkeypatch: pyte
     ) is None
 
 
+def test_readonly_tree_refuses_unqualified_deployed_resolver_before_process(tmp_path: Path) -> None:
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+
+    root, resolver = deploy(tmp_path)
+    with pytest.raises(ProbeContractError, match="no qualified probe provenance"):
+        runtime.deployed_runtime_python(
+            root, resolver=resolver, environment={PROBE_ENV: PROBE_CONTRACT},
+            runner=lambda *args, **kwargs: pytest.fail("unqualified resolver executed"),
+        )
+
+
 def test_undeclared_read_only_resolver_fails_before_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resolver = tmp_path / "resolver"
     resolver.write_text("echo unsafe", encoding="utf-8")

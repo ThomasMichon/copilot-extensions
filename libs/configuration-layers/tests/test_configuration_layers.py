@@ -215,6 +215,14 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(sdk.ConfigurationError):
             sdk.read_source(str(self.base), "list.json", parser=lambda _: {1: "not-json"})
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires native FIFOs")
+    def test_named_pipe_is_not_a_configuration_document(self) -> None:
+        getattr(os, "mkfifo")(self.base / "pipe.json")
+        request = {"action": "read", "root": str(self.base), "path": "pipe.json"}
+        self.assertTrue(node([request])[0]["error"])
+        with self.assertRaisesRegex(sdk.ConfigurationError, "ordinary file"):
+            sdk.read_source(str(self.base), "pipe.json")
+
     def test_winning_path_must_remain_source_owned(self) -> None:
         (self.base / "assets").mkdir()
         (self.base / "assets" / "file").write_text("asset", encoding="utf-8")
