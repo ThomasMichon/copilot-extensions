@@ -62,8 +62,12 @@ directly incorporated #5174 clauses under the existing recipe/registrar/
 base-engine/provider/source/resource custodians. #8300's bounded reservation
 is explicitly complete, not expired or reopened. Optional Phase5/#2570,
 catalog and motivating-consumer work retain separate owners and gates;
-they are not prerequisites for this finite origin repair. The OPEN umbrella
-and this Active effort remain until their own complete gates resolve.
+they are not prerequisites for this finite origin repair. Preserve the
+umbrella's whole acceptance until technical delivery OR reviewed complete
+direct receiving, current entire ROOT/source/custody readback and separate
+source-specific judgment permit administrative supersession. This Active
+effort still requires its own complete Plan/Validation resolution; neither
+tracker retirement nor planned receiving completes its technical work.
 Normal review, actual complete delivery and full current receiving/source/
 custody readback precede any separate administrative judgment; no script,
 engine, provider, lease, task or runtime operation is authorized here.
@@ -615,6 +619,19 @@ that union. #8300's bounded claim stays complete; #8363, archived recipe/
 provider receipts and independent #5731/#2570/catalog/consumer work keep their
 scope and owners. No engine/script/provider/queue/task/lease/native action,
 implementation appointment, tracker retirement or custody transfer.
+
+### 2026-11-17 - Whole-receiving versus umbrella-open wording clarified
+
+The whole RC1..4/RCV1..3 receiving amendment merged in #13138 after
+current-head approval and required CI. Complete current readback exposed
+an older continuing-OPEN sentence whose wording did not distinguish
+technical completion from administrative supersession after complete
+accepted receiving. The Coordination amendment prospectively makes that
+distinction explicit without dropping any criterion or changing the
+Active effort's own completion gate. #4959 remains open pending this
+clarification's review, current complete readback and separate judgment.
+All incumbent checks, actual source/resource owners and completed #8300
+claim remain unchanged; no implementation or operational effect.
 
 ### 2026-10-30 - Finite inherited-script defining-origin clarification
 

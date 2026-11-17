@@ -510,3 +510,25 @@ queue/task/lease/native operations. All twelve new technical rows remain
 unchecked. The old taxonomy scope exclusion is prospectively reconciled to
 the already-incorporated whole source, not a reversal of historical credit.
 Ledger publication alone is neither domain acceptance nor source retirement.
+
+## Whole fork-consent reviewed receipt and composition condition (2026-11-17 UTC)
+
+#13138 merged both direct domain amendments after current-head Copilot
+approval and required CI. Complete current account/composability ROOT and
+source/custody readback confirms all whole-source Plan, local Validation
+and actual global gates. Earlier proposed routes and history remain.
+
+The separate audited judgment retired #4756 `NOT_PLANNED` as redundant
+tracking. Its original and both earlier discussions remain exact; all
+seven new technical rows stay unchecked, with all 46 incumbent checkbox
+lines and Draft/temporary-token/source/resource conditions unchanged.
+The whole consent/publish outcome remains separate from #5791.
+
+#4959 remains OPEN. Its complete RC1..4/RCV1..3 Plan union is reviewed, but
+post-merge readback exposed an older umbrella-open sentence needing
+prospective clarification before separate administrative judgment.
+The proposed clarification preserves the Active effort's full technical
+completion gate, every incumbent checkbox and actual owner; it does not
+reopen #8300's completed claim or waive native/source/resource conditions.
+No implementation, new claimant, credential/provider/script/native effect
+or source/resource transfer follows from either receipt.
