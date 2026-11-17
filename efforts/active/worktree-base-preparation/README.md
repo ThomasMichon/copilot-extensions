@@ -18,12 +18,12 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** qualify the corrected repository-custody, pre-write mapping and public
-fetch paths against all current controls and the existing preservation packet.
-The unchanged-runtime packet reproduced 12 behavior failures with 22 passing
-controls. Earlier qualified sources and resolved threads remain historical
-evidence, not acceptance of these open findings. No production authority or
-another contributor's seed-delivery files are changed.
+**Now:** publish the qualified custody/refspec correction to the same
+implementation PR, respond to its current findings and obtain genuine
+final-head review plus required CI before actual merge. The unchanged-runtime
+packet reproduced 12 behavior failures; the corrected complete consumer packet
+qualifies 177 passed with no failures/skips. No production authority or another
+contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -118,7 +118,7 @@ custody remain independent.
   failure and stale-declared-hop findings with real-Git regressions.
 - [x] Resolve the later deadline/authentication, unavailable-policy-probe,
   aliased-tracking-source and truthful caller-warning findings.
-- [ ] Resolve current repository custody, pre-write policy conflicts, effective
+- [x] Resolve current repository custody, pre-write policy conflicts, effective
   refspecs and cached-bootstrap findings while preserving existing fetch callers.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
@@ -151,9 +151,9 @@ custody remain independent.
   after the shared deadline; unavailable policy probes are not certified
   absent; aliased policy tracking refs retain their configured sources; the
   actual caller reports a refreshed base accurately after policy-only failure.
-- [ ] **Repository and policy authority:** inherited Git selectors cannot redirect
+- [x] **Repository and policy authority:** inherited Git selectors cannot redirect
   any preparation stage; conflicting sources cannot overwrite the actual policy ref.
-- [ ] **Effective refs:** normalize equivalent sources, apply exclusions before
+- [x] **Effective refs:** normalize equivalent sources, apply exclusions before
   ambiguity, reuse a matching refreshed base, refresh a surviving cached-bootstrap
   hop, and preserve the public fetch/reload consumer.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
