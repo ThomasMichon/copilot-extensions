@@ -61,8 +61,9 @@ def test_installed_console_and_service_dependencies_do_not_require_source_or_cop
             ignore=shutil.ignore_patterns("tests", "__pycache__", "*.egg-info"),
         )
     for project in sorted(projects):
+        print(f"Building first-party wheel: {project.relative_to(repo)}", flush=True)
         run([
-            uv, "build", "--offline", "--no-build-isolation", "--python", sys.executable,
+            uv, "--quiet", "build", "--offline", "--no-build-isolation", "--python", sys.executable,
             "--wheel", "--out-dir", wheels, copied / project.relative_to(repo),
         ])
     slot = tmp_path / "application"
@@ -120,5 +121,25 @@ def test_installed_console_and_service_dependencies_do_not_require_source_or_cop
     )
     assert refused.returncode == 1 and refused.stderr == ""
     assert json.loads(refused.stdout)["effect_completion"] == "not_inferred"
+    checkout = tmp_path / "checkout"
+    shadow = checkout / "agent_pull_requests"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text(
+        'from pathlib import Path\n'
+        'Path(__file__).with_name("imported").write_text("unexpected")\n'
+        'raise RuntimeError("checkout-controlled package imported")\n', encoding="utf-8",
+    )
+    for source in ("cwd", "pythonpath"):
+        # Isolate the frontdoor so the nested worker is the boundary under test.
+        isolated = run_caller_owned(
+            [str(python), "-I", "-m", "agent_pull_requests", "workspace",
+             "--client-profile", "missing", "capabilities"],
+            cwd=checkout if source == "cwd" else home,
+            env={**environment, **({"PYTHONPATH": str(checkout)} if source == "pythonpath" else {})},
+            timeout=60, max_stdout_bytes=8192, max_stderr_bytes=8192,
+        )
+        assert isolated.returncode == 1 and isolated.stderr == "", source
+        assert json.loads(isolated.stdout)["effect_completion"] == "not_inferred"
+        assert not (shadow / "imported").exists()
     assert not (home / ".copilot").exists()
     assert not (home / "application-config").exists()

@@ -120,7 +120,7 @@ def run(args, *, host=None):
     }
     try:
         result = run_caller_owned(
-            [sys.executable, "-m", __name__, repr(budget.execution_deadline),
+            [sys.executable, "-I", "-m", __name__, repr(budget.execution_deadline),
              json.dumps(selection, allow_nan=False)],
             timeout=INVOCATION_SECONDS, budget=budget, capture=False,
             stdin_stream=sys.stdin.buffer if selection["request"] == "-" else None,
