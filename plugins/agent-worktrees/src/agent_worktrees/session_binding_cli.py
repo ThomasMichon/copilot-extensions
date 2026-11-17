@@ -294,51 +294,12 @@ def _emit_handoff_claim_stages(
     wt_id: str, session_id: str, linked_handoff: tracking.SessionHandoff | None,
     *, launch_id: str | None = None,
 ) -> None:
-    """Emit Stage 10 (claimed) always; Stage 11 (predecessor closing) only if
-    the resident-monitor's own retire flow hasn't already recorded it.
+    from .session_handoff_reporting import emit_claim_stages
 
-    ``linked_handoff`` is ``tracking.register_session()``'s return: the
-    ``SessionHandoff`` it *just* linked (head authoritatively transferred), or
-    ``None`` for no fresh transfer. The monitor's `handoff_predecessor_retire`
-    (outcome="gone") is ALSO mapped to Stage 11 (Phase 1) and can fire before
-    this call site (retirement is gated on candidate presence, not on this
-    link) -- checking for it first prevents a double Stage-11 record for the
-    same token while still covering the common case where that outcome never
-    fires (observed "left-running", not "gone" -- Phase 4's open question).
-    """
-    if linked_handoff is None:
-        return
-    from . import handoff_diagnostics
-
-    activity.log_event(
-        "handoff_successor_claimed",
-        worktree_id=wt_id,
-        session_id=session_id,
-        handoff_token=linked_handoff.token,
-        predecessor_session_id=linked_handoff.predecessor,
-        successor_session_id=session_id,
-        launch_id=launch_id,
+    emit_claim_stages(
+        wt_id, session_id, linked_handoff,
+        launch_id=launch_id, emit_stage_13=_maybe_emit_stage_13,
     )
-    already_retired = any(
-        str(e.get("handoff_token") or "").strip() == linked_handoff.token
-        and e.get("outcome") == "gone"
-        for e in activity.read_events(worktree_id=wt_id, event="handoff_predecessor_retire")
-    )
-    if not already_retired:
-        activity.log_event(
-            "handoff_pickup_confirmed_predecessor_closing",
-            worktree_id=wt_id,
-            session_id=linked_handoff.predecessor,
-            successor_session_id=session_id,
-            handoff_token=linked_handoff.token,
-            launch_id=launch_id,
-        )
-    handoff_diagnostics.stamp_session_state_handoff(
-        linked_handoff.predecessor,
-        handoff_token=linked_handoff.token,
-        successor_session_id=session_id,
-    )
-    _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
 @retained_record_writer.command
