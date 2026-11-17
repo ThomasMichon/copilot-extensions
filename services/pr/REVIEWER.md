@@ -12,6 +12,12 @@ Set `"reviewer_actions": true` in the trusted `repository-local/v1` host
 configuration. The default is false. Parsing remains passive; this is not a
 service launch, provider qualification or deployment grant.
 
+The distinct generation-three `repository-filtered/v1` profile remains
+unchanged and does not advertise reviewer actions. Selecting this view with
+filtered storage refuses before acquisition or state adoption; the query
+cannot bypass a registration's filtered visibility through the broader
+repository route.
+
 The running target's capabilities then include `reviewer_actions` with
 protocol `agent-pull-requests.reviewer-actions/v1`, storage
 `repository_activity_version:1`, operation `next-actions`, `effects: none`

@@ -53,6 +53,7 @@ class _CacheValidation(Protocol):
 class _LegacyQualify(Protocol):
     def __call__(self, binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None: ...
 
+
 class WatchService:
     """One host-local writer, connector and bounded, non-overlapping observation.
 
@@ -128,8 +129,6 @@ class WatchService:
                 handler=self.gateway.handle_local, operation_seconds=operation_seconds,
             )
         else:
-            if slot is None or gateway_origin is None:
-                raise ValueError("Gateway profile requires its slot and origin")
             self.connector = ServiceConnector(
                 slot=cast(str, slot), gateway_origin=cast(str, gateway_origin),
                 access_token_callback=access_token_callback, proof_key=proof_key,

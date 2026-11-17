@@ -18,11 +18,31 @@ from agent_pull_requests_service.local_client import LocalClient
 from agent_pull_requests_service.local_config import LocalHostConfig, load_service_config
 
 if TYPE_CHECKING:
+    from services.pr.tests.test_filtered_foreground import selected_config
     from services.pr.tests.test_local_repository import NATIVE, configuration
 else:
+    from test_filtered_foreground import selected_config
     from test_local_repository import NATIVE, configuration
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux private Unix ingress")
+
+
+def test_filtered_profile_does_not_advertise_or_adopt_unfiltered_reviewer_activity(tmp_path: Path) -> None:
+    from agent_pull_requests_service.local_config import core
+    from agent_pull_requests.filtered_subscriptions import contract
+
+    path, value, _state, log = selected_config(tmp_path, sponsor=False)
+    selected = load_service_config(path)
+    selected.provision()
+    before = selected.store().path.read_bytes()
+    assert "reviewer_actions" not in contract()
+    value["reviewer_actions"] = True
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="core/SDK unsupported"):
+        load_service_config(path)
+    with pytest.raises(ValueError, match="core/SDK unsupported"):
+        core(filtered=True, reviewer_actions=True)
+    assert selected.store().path.read_bytes() == before and not log.exists()
 
 
 def test_default_profile_retains_prior_replay_constructor(

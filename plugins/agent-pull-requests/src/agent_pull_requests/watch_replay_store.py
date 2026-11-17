@@ -234,10 +234,6 @@ class ReplayStore:
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
         cache = "repository_cache_version" in document
         if cache:
-            if self.repository_filtered:
-                from .filtered_state import validate as validate_cache
-            else:
-                from .repository_state import validate as validate_cache
             if not self.repository_cache or type(document["repository_cache_version"]) is not int or (
                 document["repository_cache_version"] != (
                     3 if self.repository_filtered else 2 if self.repository_continuing else 1
@@ -254,11 +250,13 @@ class ReplayStore:
             if activity:
                 names.add("repository_activity_version")
             if self.repository_filtered:
-                validate_cache(
+                from .filtered_state import validate as validate_filtered
+                validate_filtered(
                     document.get("repository_cache"), self.namespace,
                     version=document["repository_cache_version"],
                 )
             else:
+                from .repository_state import validate as validate_cache
                 validate_cache(
                     document.get("repository_cache"), self.namespace,
                     version=document["repository_cache_version"], activity=activity,
@@ -796,7 +794,7 @@ class ReplayStore:
             from .terminal_retention import replay_epoch
             assert document is not None
             return tuple(
-                replace(target, retention_epoch=replay_epoch(cast(Document, document), target))
+                replace(target, retention_epoch=replay_epoch(document, target))
                 for target in core.observation_targets()
             )
 

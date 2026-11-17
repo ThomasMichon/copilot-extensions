@@ -71,6 +71,27 @@ def verdict(**changes: Any) -> dict[str, Any]:
     }
 
 
+def test_activity_selection_cannot_reinterpret_filtered_storage(tmp_path: Path) -> None:
+    filtered = ReplayStore(
+        tmp_path, "test", repository_cache=True,
+        repository_continuing=True, repository_filtered=True,
+    )
+    filtered.provision()
+    before = filtered.path.read_bytes()
+    with pytest.raises(ValueError, match="unfiltered continuing cache"):
+        ReplayStore(
+            tmp_path, "test", repository_cache=True, repository_continuing=True,
+            repository_filtered=True, repository_activity=True,
+        )
+    unfiltered = ReplayStore(
+        tmp_path, "test", repository_cache=True, repository_continuing=True,
+        repository_activity=True,
+    )
+    with pytest.raises(ReplayStoreInvalid):
+        unfiltered.adopt_repository_activity(lifecycle_checkpoint=lambda: None, expires_at=2**52)
+    assert filtered.path.read_bytes() == before
+
+
 def test_adoption_retains_complete_envelope_and_original_unacknowledged_delivery(tmp_path: Path) -> None:
     selected = setup(tmp_path, activity=False)
     observe(selected, reviews=[verdict()])

@@ -168,8 +168,7 @@ class ReplayObserver:
         if result["status"] == "uncertain":
             return result
         waiting = self.store.observation_targets(**authority)
-        repositories = self.repositories
-        if repositories is None:
+        if self.repositories is None:
             return self._consume(waiting, **authority)
         repositories = cast(_LegacyProjection, self.repositories)
         inventories: dict[str, Document] = {}

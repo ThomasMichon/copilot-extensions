@@ -39,7 +39,8 @@ def core(*, filtered: bool = False, reviewer_actions: bool = False) -> None:
         ):
             raise ValueError
         if reviewer_actions:
-            capability = contract(reviewer_actions=True).get("reviewer_actions")
+            from agent_pull_requests.repository_subscriptions import contract as reviewer_contract
+            capability = reviewer_contract(reviewer_actions=True).get("reviewer_actions")
             if not isinstance(capability, dict) or (
                 capability.get("protocol") != "agent-pull-requests.reviewer-actions/v1"
                 or capability.get("page_cursor") != "projection-sha256"
