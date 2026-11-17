@@ -1,17 +1,30 @@
 import argparse
+from collections.abc import Callable
 import copy
 import json
+import subprocess
 from pathlib import Path
+from typing import Any, NoReturn, TypedDict, cast
 import pytest
 import yaml
 from configuration_layers import ConfigurationError
 
-from agent_machines import __main__ as cli, configuration, discover, reconcile
-from agent_machines.manifest import ManifestError
+from agent_machines import __main__ as cli, _layout, configuration, discover, reconcile
+from agent_machines.manifest import ManifestError, RequirementPackage
 from agent_machines.surfaces import apply_surfaces
+from agent_machines.surfaces._common import SurfaceResult
 
 
-def write(root, name, values, *, extra=None):
+class OwnerReport(TypedDict):
+    schema: str
+    version: int
+    context: dict[str, str]
+    repository_machine_root: str
+
+
+def write(
+    root: Path, name: str, values: dict[str, Any], *, extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     path = root / ".copilot-extensions" / "agent-machines" / "all" / f"{name}.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     raw = {
@@ -23,12 +36,14 @@ def write(root, name, values, *, extra=None):
     return raw
 
 
-def setup(tmp_path, monkeypatch, binding="bound"):
+def setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binding: str = "bound",
+) -> tuple[Path, Path, Path, Path, OwnerReport]:
     base, knowledge, local, home = (tmp_path / part for part in ("base", "knowledge", "local", "home"))
     for root in (base, knowledge, local, home):
         root.mkdir()
     monkeypatch.setattr(discover, "home", lambda: home)
-    monkeypatch.setattr(cli._layout, "resolve_cwd_repo", lambda: ("base-native", base, base))
+    monkeypatch.setattr(_layout, "resolve_cwd_repo", lambda: ("base-native", base, base))
     candidates = [discover.RepoCandidate(name="base-native", path=base)]
     if binding == "bound":
         candidates.append(discover.RepoCandidate(name="knowledge-native", path=knowledge, required_by=("base-native",)))
@@ -39,7 +54,7 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     }
     if binding == "bound":
         context["knowledge_root"] = str(knowledge)
-    report = {
+    report: OwnerReport = {
         "schema": "agent-worktrees.configuration", "version": 1,
         "context": context, "repository_machine_root": str(local),
     }
@@ -47,14 +62,17 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     return base, knowledge, local, home, report
 
 
-def collect():
+def collect() -> list[RequirementPackage]:
     packages, scope = cli._collect_reconcile_packages(
         argparse.Namespace(all_projects=False, repo=None), "logical-worker",
     )
     return packages
 
 
-def effective(packages, home, live=None, *, apply=False):
+def effective(
+    packages: list[RequirementPackage], home: Path, live: dict[str, Any] | None = None,
+    *, apply: bool = False,
+) -> tuple[dict[str, Any], list[RequirementPackage]]:
     home.mkdir(exist_ok=True)
     if live is not None:
         (home / "settings.json").write_text(json.dumps(live), encoding="utf-8")
@@ -64,7 +82,7 @@ def effective(packages, home, live=None, *, apply=False):
     return {item["key"]: item["after"] for item in changes}, resolved
 
 
-def test_real_default_collector_to_native_surface_all_tiers(tmp_path, monkeypatch):
+def test_real_default_collector_to_native_surface_all_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     original = write(base, "base-package", {"model": "base", "effortLevel": "low", "list": ["base"]},
                      extra={"resources": [{"type": "file", "path": "$HOME/protected", "content": "native"}]})
@@ -88,7 +106,7 @@ def test_real_default_collector_to_native_surface_all_tiers(tmp_path, monkeypatc
     assert values["effortLevel"] == "high"
     assert {package.name for package in packages} == {"base-package", "knowledge-package"}
     assert resolved[0].resources == original["resources"]
-    assert packages[0].ordinary_defaults["provenance"]["/model"]["installation_cell"] == "cell-one"
+    assert cast(dict[str, Any], packages[0].ordinary_defaults)["provenance"]["/model"]["installation_cell"] == "cell-one"
     first_touch = tmp_path / "first-touch"
     effective(packages, first_touch, apply=True)
     assert json.loads((first_touch / "settings.json").read_text())["model"] == "local"
@@ -102,7 +120,7 @@ def test_real_default_collector_to_native_surface_all_tiers(tmp_path, monkeypatc
     assert not (home / "not-applied").exists()
 
 
-def test_enforce_remains_independent_and_conflicting_enforce_still_refuses(tmp_path, monkeypatch):
+def test_enforce_remains_independent_and_conflicting_enforce_still_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     write(base, "base-default", {"model": "default"})
     write(knowledge, "knowledge-default", {"model": "knowledge"})
@@ -120,7 +138,7 @@ def test_enforce_remains_independent_and_conflicting_enforce_still_refuses(tmp_p
         reconcile.restore(collect(), "logical-worker", dry_run=True, only=["settings"])
 
 
-def test_unbound_unresolved_and_native_per_machine_schema(tmp_path, monkeypatch):
+def test_unbound_unresolved_and_native_per_machine_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch, "unbound")
     write(base, "base-default", {"model": "base"}, extra={
         "per-machine": {"logical-worker": {"manage": {"copilot.settings": {"values": {"model": "per-machine"}}}}},
@@ -132,7 +150,7 @@ def test_unbound_unresolved_and_native_per_machine_schema(tmp_path, monkeypatch)
         collect()
 
 
-def test_repository_machine_defaults_cannot_supply_hard_constraints(tmp_path, monkeypatch):
+def test_repository_machine_defaults_cannot_supply_hard_constraints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     write(base, "base-default", {"model": "base"})
     write(local, "invalid-local", {"model": "local"}, extra={"authority": 10})
@@ -140,21 +158,21 @@ def test_repository_machine_defaults_cannot_supply_hard_constraints(tmp_path, mo
         collect()
 
 
-def test_actual_absent_owner_leaves_native_defaults_without_bootstrap(tmp_path, monkeypatch):
-    import configuration_context
-
+def test_actual_absent_owner_leaves_native_defaults_without_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
         monkeypatch.delenv(name, raising=False)
 
-    def no_process(*args, **kwargs):
+    def no_process(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("an absent optional owner must not bootstrap or launch")
 
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
     assert configuration.prepare_defaults([], "explicit-logical-selector") == []
     assert list(tmp_path.iterdir()) == []
 
 
-def portable(tmp_path, monkeypatch):
+def portable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, OwnerReport, Path, dict[str, Any], Path]:
     from agent_machines import preferences
 
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
@@ -181,7 +199,7 @@ def portable(tmp_path, monkeypatch):
     return base, home, report, state, accepted, target
 
 
-def test_portable_floor_normal_cli_preview_apply_and_withdrawal(tmp_path, monkeypatch, capsys):
+def test_portable_floor_normal_cli_preview_apply_and_withdrawal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_machines import preferences
 
     base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
@@ -211,7 +229,7 @@ def test_portable_floor_normal_cli_preview_apply_and_withdrawal(tmp_path, monkey
     assert json.loads(target.read_text())["model"] == "local-model"
 
 
-def test_portable_floors_retain_live_native_defaults_and_enforce(tmp_path, monkeypatch):
+def test_portable_floors_retain_live_native_defaults_and_enforce(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.preference_copilot import adopt
 
     base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
@@ -232,7 +250,7 @@ def test_portable_floors_retain_live_native_defaults_and_enforce(tmp_path, monke
     }
 
 
-def test_portable_confirmation_is_stable_across_scalar_field_iteration(tmp_path, monkeypatch):
+def test_portable_confirmation_is_stable_across_scalar_field_iteration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.preference_copilot import adopt
 
     base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
@@ -246,7 +264,7 @@ def test_portable_confirmation_is_stable_across_scalar_field_iteration(tmp_path,
 
 
 @pytest.mark.parametrize("change", ["accepted", "local", "native", "live", "context", "policy"])
-def test_portable_apply_refuses_changed_preview_inputs(tmp_path, monkeypatch, change):
+def test_portable_apply_refuses_changed_preview_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
     from agent_machines import preferences
     from agent_machines.preference_copilot import adopt
 
@@ -278,7 +296,7 @@ def test_portable_apply_refuses_changed_preview_inputs(tmp_path, monkeypatch, ch
     assert (target.read_bytes() if target.exists() else None) == before
 
 
-def test_portable_apply_rechecks_at_native_settings_write(tmp_path, monkeypatch):
+def test_portable_apply_rechecks_at_native_settings_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines import preferences
     from agent_machines.preference_copilot import adopt
     from agent_machines.surfaces import settings
@@ -287,10 +305,14 @@ def test_portable_apply_rechecks_at_native_settings_write(tmp_path, monkeypatch)
     proposed = adopt(state)
     original = settings.apply
 
-    def changed(*args, **kwargs):
-        if not kwargs.get("dry_run", True):
+    def changed(
+        contributions: list[tuple[str, dict[str, Any]] | tuple[str, dict[str, Any], str]],
+        home: Path | None = None, dry_run: bool = True,
+        precondition: Callable[[dict[str, Any]], None] | None = None,
+    ) -> SurfaceResult:
+        if not dry_run:
             report["context"]["execution_machine"] = "changed-worker"
-        return original(*args, **kwargs)
+        return original(contributions, home=home, dry_run=dry_run, precondition=precondition)
 
     monkeypatch.setattr(settings, "apply", changed)
     with pytest.raises(preferences.PreferenceError, match="preview-changed"):
@@ -299,7 +321,7 @@ def test_portable_apply_rechecks_at_native_settings_write(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("invalid", ["{", "[]", '{"model":"first","model":"second"}'])
-def test_portable_apply_never_repairs_invalid_live_settings(tmp_path, monkeypatch, invalid):
+def test_portable_apply_never_repairs_invalid_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str) -> None:
     from agent_machines import preferences
     from agent_machines.preference_copilot import adopt
 
@@ -315,7 +337,7 @@ def test_portable_apply_never_repairs_invalid_live_settings(tmp_path, monkeypatc
     ("context", "native-context-unavailable"), ("accepted", "input-unavailable"),
     ("policy", "domain-not-permitted"),
 ])
-def test_portable_requires_accepted_policy_and_native_context(tmp_path, monkeypatch, missing, reason):
+def test_portable_requires_accepted_policy_and_native_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str, reason: str) -> None:
     from agent_machines import preferences
     from agent_machines.preference_copilot import adopt
 
@@ -333,7 +355,7 @@ def test_portable_requires_accepted_policy_and_native_context(tmp_path, monkeypa
     assert not target.exists()
 
 
-def test_portable_conflicting_native_enforce_still_refuses(tmp_path, monkeypatch):
+def test_portable_conflicting_native_enforce_still_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines import preferences
     from agent_machines.preference_copilot import adopt
 
@@ -348,12 +370,12 @@ def test_portable_conflicting_native_enforce_still_refuses(tmp_path, monkeypatch
     assert not target.exists()
 
 
-def test_portable_cli_sanitizes_native_owner_refusal(tmp_path, monkeypatch, capsys):
+def test_portable_cli_sanitizes_native_owner_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_machines._peer_launch import ContextRefused
 
     base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
 
-    def refused(_root):
+    def refused(_root: Path) -> NoReturn:
         raise ContextRefused("private native owner detail")
 
     monkeypatch.setattr(configuration, "owner_report", refused)
@@ -366,8 +388,8 @@ def test_portable_cli_sanitizes_native_owner_refusal(tmp_path, monkeypatch, caps
 
 @pytest.mark.parametrize("source", ["user", "repository-machine"])
 def test_portable_empty_native_union_refuses_instead_of_skipping_machine_defaults(
-    tmp_path, monkeypatch, source,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str,
+) -> None:
     from agent_machines import preferences
     from agent_machines.preference_copilot import adopt
 
@@ -394,8 +416,8 @@ def test_portable_empty_native_union_refuses_instead_of_skipping_machine_default
 @pytest.mark.parametrize("source", ["gate", "directory", "overlay"])
 @pytest.mark.parametrize("guest", [False, True])
 def test_portable_retains_alias_gated_native_enforce_without_host_guest_leak(
-    tmp_path, monkeypatch, source, guest,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, guest: bool,
+) -> None:
     from agent_machines.preference_copilot import adopt
 
     base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
@@ -436,7 +458,7 @@ def test_portable_retains_alias_gated_native_enforce_without_host_guest_leak(
     assert json.loads(target.read_text())["model"] == "alias-enforced"
 
 
-def test_independent_cells_keep_default_provenance_and_recompute_native_plan(tmp_path, monkeypatch):
+def test_independent_cells_keep_default_provenance_and_recompute_native_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     write(base, "base-default", {"model": "base"})
     write(local, "local-default", {"model": "selected"})
@@ -449,14 +471,14 @@ def test_independent_cells_keep_default_provenance_and_recompute_native_plan(tmp
     report["context"]["installation_cell"] = "cell-two"
     second_packages = configuration.prepare_defaults(first_packages, "logical-worker")
     second_plan = reconcile.plan(second_packages, "logical-worker")
-    assert first_plan.ordinary_defaults["values"] == second_plan.ordinary_defaults["values"]
+    assert cast(dict[str, Any], first_plan.ordinary_defaults)["values"] == cast(dict[str, Any], second_plan.ordinary_defaults)["values"]
     assert first_plan.provenance_hash != second_plan.provenance_hash
-    assert first_plan.ordinary_defaults["provenance"]["/model"]["installation_cell"] == "cell-one"
-    assert second_plan.ordinary_defaults["provenance"]["/model"]["installation_cell"] == "cell-two"
-    assert first_packages[0].ordinary_defaults["provenance"]["/model"]["source"]["root"] == str(local)
+    assert cast(dict[str, Any], first_plan.ordinary_defaults)["provenance"]["/model"]["installation_cell"] == "cell-one"
+    assert cast(dict[str, Any], second_plan.ordinary_defaults)["provenance"]["/model"]["installation_cell"] == "cell-two"
+    assert cast(dict[str, Any], first_packages[0].ordinary_defaults)["provenance"]["/model"]["source"]["root"] == str(local)
 
 
-def test_native_unready_legacy_owner_never_bootstraps(tmp_path, monkeypatch):
+def test_native_unready_legacy_owner_never_bootstraps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import os
     import shutil
     from pathlib import Path
@@ -483,7 +505,7 @@ def test_native_unready_legacy_owner_never_bootstraps(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("outcome", ["matching", "repository-mismatch", "cell-mismatch", "refused", "cell-owned"])
-def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, monkeypatch, outcome):
+def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str) -> None:
     import os
     import shlex
     import shutil
@@ -506,7 +528,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, 
     (python.parent.parent / ".install-complete.json").write_text(
         '{"version": "1.2.3", "completed_at": "2026-01-01", "pid": 0}',
     )
-    report = {"schema": "agent-worktrees.configuration", "version": 1, "context": {
+    report: dict[str, Any] = {"schema": "agent-worktrees.configuration", "version": 1, "context": {
         "repository_id": "selected-repository", "execution_machine": "worker",
         "installation_cell": "selected-cell", "binding": "unbound", "base_root": str(tmp_path),
     }}
@@ -518,7 +540,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, 
     actor = tmp_path / "owner.py"
     actor.write_text(
         "import json, os, sys\n"
-        "assert sys.argv[1:] == ['-I', '-X', 'utf8', '-B', '-m', 'agent_worktrees', "
+        "assert sys.argv[1:] == ['-I', '-B', '-X', 'utf8', '-m', 'agent_worktrees', "
         "'state-root', '--configuration', '--json']\n"
         "assert not any(key in os.environ for key in "
         "['AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'PYTHONPATH', 'GITHUB_TOKEN'])\n"
@@ -545,7 +567,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_configuration(tmp_path, 
     assert not (own / "scripts").exists()
 
 
-def test_legacy_resolver_timeout_retires_its_actual_descendant(tmp_path, monkeypatch):
+def test_legacy_resolver_timeout_retires_its_actual_descendant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import shlex
     import subprocess
     import sys
@@ -569,14 +591,20 @@ def test_legacy_resolver_timeout_retires_its_actual_descendant(tmp_path, monkeyp
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
         monkeypatch.delenv(key, raising=False)
 
-    def short_owned(argv, **kwargs):
-        assert kwargs["timeout"] == 15
-        return run_caller_owned(argv, **{**kwargs, "timeout": 0.5})
+    def short_owned(
+        argv: list[str], *, env: dict[str, str], timeout: float,
+        max_stdout_bytes: int, max_stderr_bytes: int, binary: bool,
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert timeout == 15
+        return run_caller_owned(
+            argv, env=env, timeout=0.5, max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes, binary=binary,
+        )
 
     monkeypatch.setattr(configuration, "run_caller_owned", short_owned)
     with pytest.raises(ConfigurationError, match="read failed") as failure:
         configuration._legacy_report(tmp_path)
-    cause = failure.value
+    cause: BaseException = failure.value
     while cause.__cause__ is not None:
         cause = cause.__cause__
     assert isinstance(cause, subprocess.TimeoutExpired)
@@ -590,7 +618,7 @@ def test_legacy_resolver_timeout_retires_its_actual_descendant(tmp_path, monkeyp
 
 @pytest.mark.parametrize("implicit", [False, True])
 @pytest.mark.parametrize("matching_cell", [False, True])
-def test_real_collector_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+def test_real_collector_checks_delivered_cell_against_actual_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, implicit: bool, matching_cell: bool) -> None:
     real_report = configuration.owner_report
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(configuration, "owner_report", real_report)
@@ -602,7 +630,7 @@ def test_real_collector_checks_delivered_cell_against_actual_owner(tmp_path, mon
     report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
     calls = []
 
-    def validate(owner, root, raw):
+    def validate(owner: str, root: Path, raw: str) -> dict[str, str]:
         calls.append((owner, root, raw))
         assert root == own_root
         assert raw == str(own_root / "install.json")
@@ -630,7 +658,7 @@ def test_real_collector_checks_delivered_cell_against_actual_owner(tmp_path, mon
     (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
     (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
 ])
-def test_optional_older_peer_preserves_native_plan_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+def test_optional_older_peer_preserves_native_plan_or_fails_real_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, diagnostic: str) -> None:
     import subprocess
     real_report = configuration.owner_report
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
@@ -648,7 +676,7 @@ def test_optional_older_peer_preserves_native_plan_or_fails_real_refusal(tmp_pat
     monkeypatch.chdir(base)
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
         calls.append(argv)
         return subprocess.CompletedProcess(argv, code, b"{bad-json", diagnostic.encode())
@@ -662,7 +690,7 @@ def test_optional_older_peer_preserves_native_plan_or_fails_real_refusal(tmp_pat
     assert len(calls) == 1
 
 
-def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     real_report = configuration.owner_report
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(configuration, "owner_report", real_report)

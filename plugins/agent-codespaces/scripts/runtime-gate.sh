@@ -4,6 +4,29 @@ set -euo pipefail
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 
+READINESS_PROBE=0
+SKIP_PROJECT=0
+for ARGUMENT in "$@"; do
+    if [[ "$SKIP_PROJECT" == 1 ]]; then SKIP_PROJECT=0; continue; fi
+    case "$ARGUMENT" in
+        --p|--pr|--pro|--proj|--proje|--projec|--project|-p) SKIP_PROJECT=1 ;;
+        --p=*|--pr=*|--pro=*|--proj=*|--proje=*|--projec=*|--project=*|-p?*) ;;
+        --v|--ve|--ver|--verb|--verbo|--verbos|--verbose) ;;
+        -v*)
+            SHORT_ARGUMENT="${ARGUMENT#-}"
+            while [[ "$SHORT_ARGUMENT" == v* ]]; do SHORT_ARGUMENT="${SHORT_ARGUMENT#v}"; done
+            case "$SHORT_ARGUMENT" in
+                '') ;;
+                p) SKIP_PROJECT=1 ;;
+                p?*) ;;
+                *) break ;;
+            esac
+            ;;
+        installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
+        *) break ;;
+    esac
+done
+
 PAYLOAD_ROOT="${AGENT_CODESPACES_PAYLOAD_ROOT:-}"
 [[ "$PAYLOAD_ROOT" == /* && -d "$PAYLOAD_ROOT" ]] || {
     printf '[agent-codespaces] owning payload root is unavailable.\n' >&2
@@ -60,6 +83,9 @@ apply_runtime_env() {
 
 run_runtime() {
     apply_runtime_env
+    if [[ "$READINESS_PROBE" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-codespaces --module agent_codespaces -- "$@"
+    fi
     exec "$AGENT_RT_PY" -m agent_codespaces "$@"
 }
 

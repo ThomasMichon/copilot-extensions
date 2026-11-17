@@ -13,15 +13,16 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from typing import cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
 if TYPE_CHECKING:
-    import test_bootstrap_check_reconcile_always_on as _bootstrap_helpers
-    import test_bootstrap_driver as _driver_helpers
-    import test_identity_payload_gate as _identity_helpers
-    import test_install_snapshot_ps1 as _snapshot_helpers
+    from . import test_bootstrap_check_reconcile_always_on as _bootstrap_helpers
+    from . import test_bootstrap_driver as _driver_helpers
+    from . import test_identity_payload_gate as _identity_helpers
+    from . import test_install_snapshot_ps1 as _snapshot_helpers
 
     _clean_env: Callable[..., dict[str, str]] = _bootstrap_helpers._clean_env
     _make_fake_plugin: Callable[..., Path] = _bootstrap_helpers._make_fake_plugin
@@ -42,13 +43,24 @@ else:
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+def _prepare_qualified_runtime(runtime: Path, payload: Path) -> None:
+    prepare_runtime(runtime, payload)
+    for directory in (
+        payload,
+        runtime / "versions" / "fixture" / "share" / "copilot-extensions" / "agent_vault",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PLUGIN / "readiness-isolation.json", directory / "readiness-isolation.json")
+
+
 @pytest.mark.parametrize("package", [False, True])
-def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, package: bool) -> None:
+@pytest.mark.parametrize("command", ["installer-readiness", "--help"])
+def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, package: bool, command: str) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected repository"
     project.mkdir()
     (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
-    prepare_runtime(runtime, payload)
+    _prepare_qualified_runtime(runtime, payload)
     marker = tmp_path / "shadow-executed"
     target = project / "agent_vault.py"
     if package:
@@ -66,11 +78,14 @@ def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, pa
         "AGENT_VAULT_NO_SELFPROVISION": "1",
     })
 
-    result = invoke(payload, env, project, "installer-readiness")
+    result = invoke(payload, env, project, command)
 
     assert not marker.exists(), result.stdout + result.stderr
     assert result.returncode != 73
-    assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    if command == "installer-readiness":
+        assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
     assert not (runtime / "run").exists()
 
 
@@ -136,7 +151,7 @@ def test_native_batch_reads_real_cache_without_service(tmp_path: Path, monkeypat
 
 
 @pytest.mark.parametrize("environment_database", [False, True])
-def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, environment_database: Any) -> None:
+def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, environment_database: bool) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected repository"
     project.mkdir()
@@ -152,7 +167,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, en
     (project / "native.json").write_text(
         json.dumps({"enabled": False}), encoding="utf-8",
     )
-    prepare_runtime(runtime, payload)
+    _prepare_qualified_runtime(runtime, payload)
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
         "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
@@ -190,7 +205,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, en
 
 
 @pytest.mark.parametrize("enabled,code", [(False, 2), (True, 1)])
-def test_native_cold_configuration_root_respects_scope_and_no_provisioning(tmp_path: Path, enabled: Any, code: int) -> None:
+def test_native_cold_configuration_root_respects_scope_and_no_provisioning(tmp_path: Path, enabled: bool, code: int) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected"
     project.mkdir()
@@ -298,7 +313,7 @@ def test_native_cold_scope_rejects_drive_relative_before_provisioning(tmp_path: 
     (["installer-readiness"], False, 0, "configuration-empty"),
 ])
 def test_native_scoped_admission_preserves_no_provisioning_commands(
-    tmp_path: Path, arguments: list[str], enabled: Any, code: int, diagnostic: str,
+    tmp_path: Path, arguments: list[str], enabled: bool, code: int, diagnostic: str,
 ) -> None:
     home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
     if not enabled:
@@ -366,7 +381,10 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     assert built.returncode == 0, built.stdout + built.stderr
     (runtime / "payload-dir").write_text(str(payload), encoding="utf-8")
     if prepared:
-        prepare_runtime(runtime, payload)
+        if operation == "contract":
+            _prepare_qualified_runtime(runtime, payload)
+        else:
+            prepare_runtime(runtime, payload)
         (project / ".agent-vault.json").write_text(
             '{"enabled": true, "group": "selected"}', encoding="utf-8",
         )
@@ -488,7 +506,7 @@ def test_native_cold_activation_qualifies_reader_without_installing(tmp_path: Pa
     launcher_path = tmp_path / "launcher" / "py.exe"
     physical = Path(getattr(sys, "_base_executable"))
 
-    def literal(value: Any) -> str:
+    def literal(value: object) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
     candidates = {
@@ -656,7 +674,7 @@ def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Pat
      (["--install-dir"], 1, "--install-dir requires a directory")],
 )
 def test_native_installer_rejects_arguments_before_activation(
-    tmp_path: Path, configuration: Any, arguments: list[str], code: int, message: str,
+    tmp_path: Path, configuration: bool | str, arguments: list[str], code: int, message: str,
 ) -> None:
     home, payload, _runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     (tmp_path / ".agent-vault.json").write_text(
@@ -730,7 +748,7 @@ def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path: Path,
 
 @pytest.mark.parametrize("configuration", [None, False, "invalid", "malformed"])
 @pytest.mark.parametrize("entry", ["bootstrap", "readiness", "update"])
-def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path: Path, configuration: Any, entry: str) -> None:
+def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path: Path, configuration: bool | str | None, entry: str) -> None:
     home = tmp_path / "home"
     project = tmp_path / "project"
     home.mkdir()
@@ -752,7 +770,9 @@ def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path: Path, c
     })
     suffix = "ps1" if os.name == "nt" else "sh"
     if entry == "bootstrap":
-        argv = native_bootstrap(payload, project, project)
+        argv = cast(Callable[[Path, Path, Path], list[str]], native_bootstrap)(
+            payload, project, project,
+        )
     else:
         filename = ("installer-readiness." if entry == "readiness" else "install.") + suffix
         shutil.copyfile(PLUGIN / "scripts" / filename, payload / "scripts" / filename)
@@ -866,9 +886,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path: Pat
             ignore=shutil.ignore_patterns("__pycache__"),
         )
     for package in (agent_procutil, configuration_context, configuration_layers):
-        assert package.__file__ is not None
+        location = package.__file__
+        assert location is not None
         shutil.copytree(
-            Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
+            Path(location).parent, packages["agent-vault"] / package.__name__,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
     if layout == "service-cwd":
@@ -876,9 +897,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path: Pat
 
         for name in ("zdd", "single_instance_lease", "update_driver"):
             package = importlib.import_module(name)
-            assert package.__file__ is not None
+            location = package.__file__
+            assert location is not None
             shutil.copytree(
-                Path(package.__file__).parent, packages["agent-vault"] / name,
+                Path(location).parent, packages["agent-vault"] / name,
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
     if layout not in ("deployed", "mixed-owner"):
@@ -1053,9 +1075,10 @@ def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path: Path, l
             for source in (PLUGIN / "src" / name).glob("_installation_context*.py"):
                 shutil.copyfile(source, package / source.name)
             for dependency in (configuration_context, configuration_layers):
-                assert dependency.__file__ is not None
+                location = dependency.__file__
+                assert location is not None
                 shutil.copytree(
-                    Path(dependency.__file__).parent, site / dependency.__name__,
+                    Path(location).parent, site / dependency.__name__,
                     ignore=shutil.ignore_patterns("__pycache__"),
                 )
         else:
@@ -1122,6 +1145,8 @@ def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path: Path, shell
             "--cwd", str(project),
         ]
     else:
+        executable = shutil.which(shell)
+        assert executable is not None
         entry = tmp_path / "read-activation.ps1"
         entry.write_text(
             "param($Reader, $Project, $Python)\n"
@@ -1133,7 +1158,7 @@ def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path: Path, shell
         shell_path = shutil.which(shell)
         assert shell_path is not None
         argv = [
-            shell_path, "-NoProfile", "-NonInteractive", "-File", str(entry),
+            executable, "-NoProfile", "-NonInteractive", "-File", str(entry),
             str(payload / "scripts" / "runtime-activation.ps1"), str(project), sys.executable,
         ]
     result = subprocess.run(
@@ -1215,10 +1240,7 @@ def test_relative_config_survives_actual_marketplace_self_staging(tmp_path: Path
 @pytest.mark.skipif(os.name != "nt", reason="native installed-payload schedule staging")
 @pytest.mark.parametrize("selection", ["repo-opt-in", "invalid-config", "unavailable-project"])
 def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tmp_path: Path, selection: str) -> None:
-    if TYPE_CHECKING:
-        from test_payload_invocation import _installer_function
-    else:
-        from .test_payload_invocation import _installer_function
+    from .test_payload_invocation import _installer_function
 
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
@@ -1283,10 +1305,10 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$De
         " Set-Content -LiteralPath $env:FIXTURE_SCHEDULE_REPORT\n",
         encoding="utf-8-sig",
     )
-    shell_path = shutil.which("powershell")
-    assert shell_path is not None
+    shell = shutil.which("powershell")
+    assert shell is not None
     result = subprocess.run(
-        [shell_path, "-NoProfile", "-NonInteractive", "-File",
+        [shell, "-NoProfile", "-NonInteractive", "-File",
          str(payload / "scripts" / "install.ps1"), "schedule", "-InstallDir", str(runtime)],
         cwd=project, env=env, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
     )

@@ -13,6 +13,7 @@ _aw_update_caller="$0"
 _aw_update_payload=1
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 _aw_passive_observation=0
+_aw_readiness_entry=0
 _aw_skip_project=0
 _aw_worktrees_alias=0
 _aw_first_argument=1
@@ -34,6 +35,10 @@ for _aw_arg in "$@"; do
             ;;
         worktree-observations|worktree-observation-history|worktree-data-read)
             _aw_passive_observation=1
+            break
+            ;;
+        installer-readiness|invocation-contract)
+            _aw_readiness_entry=1
             break
             ;;
         *) break ;;
@@ -280,6 +285,9 @@ run_runtime() {
         export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
     else
         unset COPILOT_EXTENSIONS_CONTEXT
+    fi
+    if [[ "$_aw_readiness_entry" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-worktrees --module agent_worktrees -- "$@"
     fi
     local selector_root selected_cache
     local -a cache_arguments=(-B)

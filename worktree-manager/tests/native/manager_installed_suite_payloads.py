@@ -6,6 +6,7 @@ native cleanup. Its command executor must be the witness's bounded native owner.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 import hashlib
 import http.server
@@ -18,9 +19,17 @@ import sys
 import tempfile
 import threading
 import time
-import tomllib
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 import urllib.request
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+if TYPE_CHECKING:
+    from manager_installed_suite_runtimes import CommandRunner
 
 REPO = Path(__file__).resolve().parents[3]
 _PROVENANCE = runpy.run_path(
@@ -32,8 +41,9 @@ _PROFILE = runpy.run_path(
 
 
 def selected_profile(
-    artifact: Path, candidate_commit: str, repository_config: dict, *, transport: dict | None = None,
-) -> dict:
+    artifact: Path, candidate_commit: str, repository_config: dict[str, Any], *,
+    transport: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Verify the complete frozen artifact before deriving its enabled roster."""
     if not artifact.is_absolute():
         raise ValueError("Select the absolute frozen artifact path")
@@ -57,7 +67,7 @@ def selected_profile(
     manager = tomllib.loads(
         (artifact / "worktree-manager" / "pyproject.toml").read_text(encoding="utf-8"),
     )
-    profile = _PROFILE(
+    profile: dict[str, Any] = _PROFILE(
         catalog, manifests, marketplace_root=str(artifact),
         manager_version=manager["project"]["version"], repository_config=repository_config,
     )
@@ -83,9 +93,9 @@ def selected_profile(
 
 
 def prepare_git_transport(
-    artifact: Path, candidate_commit: str, *, environment: dict, project: Path,
-    diagnostics: Path, deadline: float, run,
-) -> dict:
+    artifact: Path, candidate_commit: str, *, environment: dict[str, str], project: Path,
+    diagnostics: Path, deadline: float, run: CommandRunner,
+) -> dict[str, str]:
     """Serialize frozen artifact bytes for a real copied Git install, not a release."""
     _PROVENANCE["verify"](artifact, candidate_commit)
     repository = project.parent / "suite-transport.git"
@@ -157,39 +167,39 @@ def prepare_git_transport(
 
 @contextmanager
 def serve_git_transport(
-    transport: dict, *, environment: dict, project: Path, diagnostics: Path,
-    deadline: float, run,
-):
+    transport: dict[str, Any], *, environment: dict[str, str], project: Path,
+    diagnostics: Path, deadline: float, run: CommandRunner,
+) -> Iterator[dict[str, Any]]:
     """Serve actual Git object data for the caller's bounded acquisition scope."""
     from plugin_test_containment import UnreapedProcessError
 
     repository = Path(transport["repository"])
     prefix = "/suite-transport.git"
-    failures = []
+    failures: list[BaseException] = []
     requests = 0
 
     @contextmanager
-    def request_directory():
+    def request_directory() -> Iterator[Path]:
         path = Path(tempfile.mkdtemp(prefix="git-http-", dir=repository.parent))
         # Preserve response data when backend custody or delivery fails.
         yield path
         shutil.rmtree(path)
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def setup(self):
+        def setup(self) -> None:
             super().setup()
             self.connection.settimeout(5)
 
-        def log_message(self, *_):
+        def log_message(self, format: str, *args: Any) -> None:
             pass
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             self.git_request()
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             self.git_request()
 
-        def git_request(self):
+        def git_request(self) -> None:
             nonlocal requests
             location = urlsplit(self.path)
             suffix = location.path.removeprefix(prefix)
@@ -238,7 +248,8 @@ def serve_git_transport(
                         timeout=min(20, remaining),
                     )
                     with target.open("rb") as response:
-                        headers, status = [], 200
+                        headers: list[tuple[str, str]] = []
+                        status = 200
                         for _ in range(32):
                             line = response.readline(8193)
                             if line in (b"\r\n", b"\n"):
@@ -261,7 +272,18 @@ def serve_git_transport(
                 failures.append(error)
                 self.close_connection = True
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    port = 0
+    if "url" in transport:
+        location = urlsplit(transport["url"])
+        if (
+            location.scheme != "http" or location.hostname != "127.0.0.1"
+            or not location.port or location.path != prefix
+            or location.username is not None or location.password is not None
+            or location.query or location.fragment
+        ):
+            raise ValueError("A resumed frozen transport must retain its private loopback endpoint")
+        port = location.port
+    server = http.server.HTTPServer(("127.0.0.1", port), Handler)
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
     started = False
     try:
@@ -287,14 +309,16 @@ def serve_git_transport(
                 raise UnreapedProcessError("The private Git transport did not stop")
         except BaseException as error:
             failures.append(error)
-        for error in failures:
-            if isinstance(error, UnreapedProcessError):
-                raise error
+        for failure in failures:
+            if isinstance(failure, UnreapedProcessError):
+                raise failure
         if failures:
             raise failures[0]
 
 
-def payload_manifest_difference(expected: dict, actual: dict) -> dict:
+def payload_manifest_difference(
+    expected: dict[str, dict[str, Any]], actual: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     """Describe a bounded sample of manifest differences without file contents."""
     missing = expected.keys() - actual.keys()
     extra = actual.keys() - expected.keys()
@@ -302,7 +326,7 @@ def payload_manifest_difference(expected: dict, actual: dict) -> dict:
         path for path in expected.keys() & actual.keys() if expected[path] != actual[path]
     }
 
-    def metadata(row):
+    def metadata(row: dict[str, Any] | None) -> dict[str, Any] | None:
         if row is None:
             return None
         return {
@@ -311,7 +335,7 @@ def payload_manifest_difference(expected: dict, actual: dict) -> dict:
             if key in {"kind", "sha256", "executable", "target"}
         }
 
-    samples = []
+    samples: list[dict[str, Any]] = []
     for kind, paths in (("missing", missing), ("extra", extra), ("changed", changed)):
         for path in sorted(paths)[:20 - len(samples)]:
             samples.append({
@@ -327,10 +351,10 @@ def payload_manifest_difference(expected: dict, actual: dict) -> dict:
 
 
 def install_payload_closure(
-    artifact: Path, candidate_commit: str, *, repository_config: dict,
-    copilot: Path, engine: Path, environment: dict, project: Path,
-    diagnostics: Path, transport: dict, run,
-) -> dict:
+    artifact: Path, candidate_commit: str, *, repository_config: dict[str, Any],
+    copilot: Path, engine: Path, environment: dict[str, str], project: Path,
+    diagnostics: Path, transport: dict[str, Any], run: CommandRunner,
+) -> dict[str, Any]:
     """Acquire every declared payload with the actual CLI, then verify its bytes."""
     from manager_suite_fixture import require_venue
 
@@ -368,7 +392,7 @@ def install_payload_closure(
     marketplace = next(iter(profile["settings"]["extraKnownMarketplaces"]))
     names = sorted(profile["inventory"])
 
-    def verify_transport(phase):
+    def verify_transport(phase: str) -> None:
         observed = run(
             ["git", "--git-dir", transport["repository"], "rev-parse", "HEAD", "HEAD^{tree}"],
             environment, project, diagnostics, "suite-transport-" + phase, timeout=30,
@@ -404,7 +428,7 @@ def install_payload_closure(
         raise ValueError("Installed discovery returned an incomplete suite")
     closure = {}
     expected_tree = _PROVENANCE["content_manifest"](artifact / "plugins")
-    installed_trees = {}
+    installed_trees: dict[Path, dict[str, dict[str, Any]]] = {}
     for name in names:
         payload = Path(observed[name])
         if (

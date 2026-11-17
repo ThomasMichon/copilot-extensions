@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import json
@@ -13,13 +14,20 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import TypedDict
 
-from plugin_test_containment import no_window_kwargs
-from agent_procutil import contained_test_mode
+from agent_procutil import contained_test_mode, no_window_kwargs
 from agent_procutil.owned_process import run_installation_owned
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURE = REPO / "worktree-manager" / "tests" / "native" / "test_manager_suite_replacement.py"
+FRESH_FIXTURE = FIXTURE.with_name("manager_installed_suite_fixture.py")
+
+
+class _SuiteReport(TypedDict):
+    mode: str
+    stages: dict[str, int]
+    errors: list[str]
 
 
 def _run(argv: list[str], *, timeout: float) -> int:
@@ -33,12 +41,17 @@ def _run(argv: list[str], *, timeout: float) -> int:
 
 
 @contextmanager
-def _observe_processes(root: Path, mode: str, script):
+def _observe_processes(
+    root: Path, mode: str, script: Callable[[Path, Path, Path, Path], str],
+) -> Iterator[None]:
     ready = root / f"{mode}-process-trace.ready"
     stop = root / f"{mode}-process-trace.stop"
     report = root / f"{mode}-process-trace.json"
+    executable = shutil.which("pwsh")
+    if executable is None:
+        raise FileNotFoundError("The native process observer requires PowerShell 7")
     command = [
-        shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+        executable, "-NoProfile", "-NonInteractive", "-Command",
         script(root / mode / "h", ready, stop, report),
     ]
     with ThreadPoolExecutor(max_workers=1) as observer:
@@ -63,13 +76,14 @@ def _observe_processes(root: Path, mode: str, script):
 
 def qualify(root: Path, mode: str, python: Path) -> int:
     """Keep cleanup independent of success, assertion failure and stage timeout."""
-    report: dict = {"mode": mode, "stages": {}, "errors": []}
+    report: _SuiteReport = {"mode": mode, "stages": {}, "errors": []}
     previous_data = os.environ.get("MANAGER_SUITE_ACCEPTANCE_DATA")
+    fixture = FRESH_FIXTURE if mode == "fresh" else FIXTURE
     try:
         for stage in ("prepare", "exercise"):
             print(f"Manager suite {mode}: {stage}", flush=True)
             code = _run(
-                [str(python), "-I", "-X", "utf8", "-B", str(FIXTURE), "--" + stage, str(root), "--mode", mode],
+                [str(python), "-I", "-X", "utf8", "-B", str(fixture), "--" + stage, str(root), "--mode", mode],
                 timeout=1800 if stage == "prepare" else 900,
             )
             report["stages"][stage] = code
@@ -77,10 +91,16 @@ def qualify(root: Path, mode: str, python: Path) -> int:
                 break
         if all(report["stages"].get(stage) == 0 for stage in ("prepare", "exercise")):
             os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] = str(root)
-            report["stages"]["assertions"] = _run([
+            assertions = [
                 sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
                 "--test-file", "tests/native/test_manager_suite_replacement.py", "-k", mode,
-            ], timeout=300)
+            ]
+            if mode == "fresh":
+                assertions = [
+                    str(python), "-I", "-X", "utf8", "-B", str(fixture),
+                    "--assertions", str(root), "--mode", mode,
+                ]
+            report["stages"]["assertions"] = _run(assertions, timeout=300)
     except Exception as error:
         report["errors"].append(f"{type(error).__name__}: {error}")
     finally:
@@ -90,7 +110,7 @@ def qualify(root: Path, mode: str, python: Path) -> int:
             os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] = previous_data
         try:
             report["stages"]["settle"] = _run([
-                str(python), "-I", "-X", "utf8", "-B", str(FIXTURE), "--settle", str(root), "--mode", mode,
+                str(python), "-I", "-X", "utf8", "-B", str(fixture), "--settle", str(root), "--mode", mode,
             ], timeout=90)
         except Exception as error:
             report["errors"].append(f"settlement: {type(error).__name__}: {error}")
@@ -106,7 +126,7 @@ def qualify(root: Path, mode: str, python: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--mode", choices=("normal", "repair"), required=True)
+    parser.add_argument("--mode", choices=("normal", "repair", "fresh"), required=True)
     args = parser.parse_args()
     fixture = runpy.run_path(str(FIXTURE.with_name("manager_suite_fixture.py")))
     fixture["require_venue"]()

@@ -21,8 +21,10 @@
         "tools/typecheck_catalog_views.py",
         "tools/typecheck_bootstrap_views.py",
         "tools/typecheck_new_code.py",
+        "tools/typecheck_programs.py",
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
+        "tools/test_typecheck_programs.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
@@ -431,7 +433,8 @@
         "plugins/agent-containers"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-dispatch",
@@ -466,7 +469,8 @@
         "plugins/agent-machines"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-mcp",
@@ -474,7 +478,8 @@
         "plugins/agent-mcp"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-pull-requests",
@@ -511,7 +516,8 @@
         "plugins/agent-ssh"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-runner-requirements.txt"
     },
     {
       "name": "agent-vault",
@@ -520,7 +526,7 @@
       ],
       "import_roots": [
         "fleet-manager/tests",
-        "plugins/agent-vault/tests"
+        "plugins/agent-vault"
       ],
       "exclude": [],
       "level": "pending",
@@ -534,6 +540,24 @@
       "import_roots": [
         "worktree-manager/tests",
         "plugins/agent-worktrees/tests"
+      ],
+      "program_roots": [
+        {
+          "root": "plugins/agent-worktrees/scripts/_runtime_admission",
+          "import_roots": [
+            "plugins/agent-worktrees/scripts/_runtime_admission/tools",
+            "plugins/agent-worktrees/scripts/_runtime_admission/worktree-manager/src",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/agent-procutil/src",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/installation-context",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/installer-engine",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/plugin-resolve/src",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/single-instance-lease/src",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-driver/src",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-telemetry/src",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
+            "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src"
+          ]
+        }
       ],
       "exclude": [],
       "level": "pending",
@@ -693,8 +717,10 @@
         "tools/typecheck_catalog_views.py",
         "tools/typecheck_bootstrap_views.py",
         "tools/typecheck_new_code.py",
+        "tools/typecheck_programs.py",
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
+        "tools/test_typecheck_programs.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
@@ -706,14 +732,16 @@
       "include": [
         "worktree-manager"
       ],
-      "import_roots": [
-        "worktree-manager/tests",
-        "worktree-manager/tests/native",
-        "tools"
-      ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-toml-requirements.txt"
+      "import_roots": [
+        "tools",
+        "libs/installer-engine",
+        "libs/versioned-runtime",
+        "worktree-manager/tests",
+        "worktree-manager/tests/native"
+      ],
+      "requirements": "tools/typecheck-runner-requirements.txt"
     }
   ]
 }

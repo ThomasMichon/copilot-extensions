@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve cold standalone posture-cue payloads without changing provider refresh or budget decisions",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}
