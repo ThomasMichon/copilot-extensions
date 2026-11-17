@@ -103,6 +103,22 @@ def test_decoder_preserves_optional_target_and_accepts_prior_snapshots():
     assert decode_snapshot(legacy, "project/repo", 7).native_snapshot["base_sha"] == ""
 
 
+def test_decoder_preserves_review_coverage_without_inventing_legacy_completeness():
+    value = report()
+    assert "reviews_complete" not in decode_snapshot(value, "project/repo", 7).native_snapshot
+    value.update(reviews_complete=True, updated_at="2026-01-01T00:00:00Z", reviews=[])
+    decoded = decode_snapshot(value, "project/repo", 7).native_snapshot
+    assert decoded["reviews_complete"] is True and decoded["reviews"] == []
+    assert decoded["updated_at"] == value["updated_at"]
+    for malformed in ("true", 1, {}, []):
+        value["reviews_complete"] = malformed
+        with pytest.raises(ValueError, match="details"):
+            decode_snapshot(value, "project/repo", 7)
+    value.update(reviews_complete=None, updated_at=None)
+    with pytest.raises(ValueError, match="details"):
+        decode_snapshot(value, "project/repo", 7)
+
+
 @pytest.mark.parametrize("target", [None, 42, "main", "bad", "g" * 40])
 def test_decoder_rejects_malformed_optional_target(target):
     value = {**report(), "base_sha": target}

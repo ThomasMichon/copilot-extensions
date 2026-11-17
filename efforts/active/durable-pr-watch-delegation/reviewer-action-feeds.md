@@ -94,8 +94,10 @@ erase existing CI/follow-up/merge distinctions.
 
 ## Serial plan and exits
 
-- [ ] **Review the contract.** Land this extension before runtime behavior;
-  retain all broader M1/Author/Reviewer/provider/client/fleet outcomes.
+- [x] **Review the contract.** Merged in #12958 (`a11c70f0c2`) after
+  current-head Copilot approval and successful required CI;
+  [review and next-slice record](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md).
+  Retain all broader M1/Author/Reviewer/provider/client/fleet outcomes.
 - [ ] **Qualify activity evidence and the cache read.** Select the minimal
   existing native/projection seam, then expose a bounded reviewer-perspective
   `next_actions` page through the actual service and local client. This is the

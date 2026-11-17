@@ -61,6 +61,15 @@ provider/endpoint/repository/observe binding before every request. It cannot
 use that credential object for a forge mutation. Credential loss is not
 retried as an unrelated transient provider failure.
 
+The native snapshot may also carry `reviews_complete` and `updated_at`.
+The snapshot decoder preserves these additive fields, leaving absent review
+coverage unknown. Gitea's complete review traversal rejects malformed or
+overlapping pages and terminates on an empty page, not a server-clamped short
+page. Coverage is not atomic PR/review evidence or reviewer policy, and a PR
+mutation timestamp does not identify an author update. The current version-1/2
+repository projection does not retain these extra fields; reviewer-action
+projection/adoption remains a separate source slice.
+
 ## Storage and backend identity
 
 `RepositoryIdentity` binds namespace, provider, canonical HTTPS endpoint,

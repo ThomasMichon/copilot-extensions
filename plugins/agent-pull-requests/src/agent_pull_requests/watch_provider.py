@@ -74,6 +74,9 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
             for name in ("api_base", "author", "cursor"))
         or "checks_complete" in data and data["checks_complete"] is not None
         and type(data["checks_complete"]) is not bool
+        or "reviews_complete" in data and data["reviews_complete"] is not None
+        and type(data["reviews_complete"]) is not bool
+        or "updated_at" in data and not isinstance(data["updated_at"], str)
         or "check_failures" in data and (
             not isinstance(data["check_failures"], list)
             or any(not isinstance(failure, dict) for failure in data["check_failures"])
@@ -126,6 +129,7 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
                 "observation",
                 "reviews",
                 "api_base", "author", "cursor", "checks_complete", "check_failures",
+                "reviews_complete", "updated_at",
             ) if field in data
         },
     )

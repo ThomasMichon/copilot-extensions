@@ -54,6 +54,18 @@ correct admitted scope rather than substitute `base_ref`. Existing watch
 cursors, transition criteria and merge policy are unchanged; exporting this
 field does not silently add a target-movement transition.
 
+The optional `reviews_complete` reports review-page coverage. Gitea sets it to
+`true` only after every requested review page is a valid list of valid metadata
+rows and the traversal reaches an empty page. A short nonempty page does not
+prove completion because servers can clamp the requested page size. Malformed, oversized or
+overlapping pages fail the whole read rather than yielding empty or partial
+success. Unsupported providers and earlier executables leave coverage unknown
+(`null` or absent). This is not atomic multi-page evidence, a submitted verdict,
+reviewer-specific completeness or permission to act. The additive `updated_at`
+retains the PR mutation timestamp from the same PR object; it does not identify
+the actor or kind of mutation. Neither field adds a provider request, and older
+version-1 consumers may ignore them.
+
 On-demand `threads` reads return discussion bodies, stable comment identities and
 comparison-round context; persisted watch snapshots contain metadata only.
 Each readable thread also reports a reply fingerprint or an explicit

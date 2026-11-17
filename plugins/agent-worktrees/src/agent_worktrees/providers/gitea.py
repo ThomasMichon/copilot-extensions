@@ -617,54 +617,9 @@ class GiteaProvider:
     def _all_review_objs(
         self, repo: str, number: int, api_base: str, token: str
     ) -> tuple[Review, ...]:
-        """Fetch every review, paging the endpoint, as ``pr_contract.Review``s.
-
-        Gitea paginates ``/pulls/{n}/reviews`` (default ~30) in ascending id
-        order; the watcher keys off the highest review id, so a missed later
-        page would make the newest reviews invisible and hang the wait.  Pages
-        with an explicit limit until an empty (or short) page.
-        """
-        reviews: list[Review] = []
-        page = 1
-        page_size = 50
-        while True:
-            status, body = self._curl_with_retry(
-                "GET",
-                self._api(
-                    api_base,
-                    f"/repos/{repo}/pulls/{number}/reviews?limit={page_size}&page={page}",
-                ),
-                token,
-            )
-            if status != 200:
-                raise ProviderError(
-                    f"Gitea reviews lookup failed (HTTP {status}) on page {page} "
-                    f"for {repo}#{number}",
-                    transient=_is_transient(status),
-                )
-            try:
-                batch = json.loads(body)
-            except json.JSONDecodeError as exc:
-                raise ProviderError(f"Gitea returned non-JSON reviews: {exc}") from exc
-            if not isinstance(batch, list) or not batch:
-                break
-            for r in batch:
-                if not isinstance(r, dict):
-                    continue
-                reviews.append(
-                    Review(
-                        id=int(r.get("id", 0)),
-                        state=str(r.get("state", "")),
-                        user=str((r.get("user") or {}).get("login", "")),
-                        submitted_at=str(r.get("submitted_at", "")),
-                        commit_id=str(r.get("commit_id", "") or ""),
-                        dismissed=bool(r.get("dismissed", False)),
-                    )
-                )
-            if len(batch) < page_size:
-                break
-            page += 1
-        return tuple(reviews)
+        """Fetch complete review-page coverage through the existing transport."""
+        from .gitea_reviews import all_reviews
+        return all_reviews(self, repo, number, api_base, token)
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
