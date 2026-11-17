@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-import types
+import platform
+import shutil
+import subprocess
 import typing
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import Mock
 
-import pytest
 import agent_procutil
+import pytest
+from plugin_resolve.git import resolve_git
 
+from agent_worktrees import push_timeout
+from agent_worktrees.git_errors import GitError
 from agent_worktrees.git_ops import (
-    GitError,
     WorktreeState,
     WorktreeStateInfo,
     git,
@@ -20,31 +28,117 @@ from agent_worktrees.git_ops import (
     resolve_to_anchor,
     worktree_suffix,
 )
+from agent_worktrees.github_credentials import GitAuthArgs
+
+
+@dataclass
+class _GitResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class _GitCall(typing.TypedDict, total=False):
+    args: tuple[str, ...]
+    no_hooks: bool
+    isolated_repository: bool
+    auth_acquisition: bool
+    timeout: float | None
+
+
+class _ObservedTimeout(subprocess.TimeoutExpired):
+    observation_started: bool = True
+
 
 # ---------------------------------------------------------------------------
 # git() wrapper
 # ---------------------------------------------------------------------------
 
 class TestGitWrapper:
-    def test_successful_command(self, tmp_path: Path):
+    @pytest.mark.parametrize("selection", [
+        "bin", "explicit",
+        pytest.param("", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX empty PATH entry")),
+    ])
+    def test_relative_path_preserves_platform_child_lookup_and_explicit_launcher(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selection: str,
+    ) -> None:
+        caller, child = tmp_path / "caller", tmp_path / "child"
+        name = "git.exe" if os.name == "nt" else "git"
+        for root in (caller, child):
+            folder = root / "bin" if selection else root
+            folder.mkdir(parents=True)
+            executable = folder / name
+            executable.touch()
+            executable.chmod(0o755)
+        monkeypatch.chdir(caller)
+        monkeypatch.delenv("AGENT_GIT_DISCOVERED_EXECUTABLE", raising=False)
+        monkeypatch.delenv("AGENT_GIT_EXECUTABLE", raising=False)
+        monkeypatch.setenv("PATH", "bin" if selection else "")
+        if selection == "explicit":
+            monkeypatch.setenv("AGENT_GIT_EXECUTABLE", str(Path("bin") / name))
+        observed: list[list[str]] = []
+
+        def run(cmd: list[str], **kwargs: typing.Any) -> subprocess.CompletedProcess[str]:
+            observed.append(cmd)
+            assert kwargs["cwd"] == child
+            return subprocess.CompletedProcess(cmd, 0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", run)
+        assert git("status", cwd=child).stdout == "ok"
+        root = caller if selection == "explicit" or os.name == "nt" else child
+        expected = root / "bin" / name if selection else root / name
+        assert observed == [[str(expected), "status"]]
+        assert Path.cwd() == caller
+
+    @pytest.mark.parametrize("error", [
+        FileNotFoundError("missing executable"),
+        NotADirectoryError("missing cwd"),
+        subprocess.TimeoutExpired(["git"], 1),
+    ])
+    def test_launch_or_timeout_is_never_replayed(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception,
+    ) -> None:
+        import agent_worktrees.git_ops as go
+        calls = []
+
+        def fail(*args: typing.Any, **kwargs: typing.Any) -> typing.NoReturn:
+            calls.append(args)
+            raise error
+
+        monkeypatch.setattr(go, "resolve_git", lambda **kw: str(Path("git.exe").absolute()))
+        monkeypatch.setattr(subprocess, "run", fail)
+        with pytest.raises(type(error)):
+            go.git("status")
+        assert len(calls) == 1
+
+    def test_successful_command(self, tmp_path: Path) -> None:
         """git() should capture stdout from a successful command."""
         # Use a real git command that works without a repo
         result = git("--version")
         assert result.returncode == 0
         assert "git version" in result.stdout
 
-    def test_raises_git_error_on_failure(self, tmp_path: Path):
+    def test_raises_git_error_on_failure(self, tmp_path: Path) -> None:
         """git() should raise GitError when check=True and command fails."""
         with pytest.raises(GitError) as exc_info:
             git("log", cwd=str(tmp_path))  # valid dir, not a git repo
         assert exc_info.value.returncode != 0
 
-    def test_no_raise_when_check_false(self, tmp_path: Path):
+    def test_no_raise_when_check_false(self, tmp_path: Path) -> None:
         """git() with check=False should return result even on failure."""
         result = git("log", cwd=str(tmp_path), check=False)
         assert result.returncode != 0
 
-    def test_git_error_attributes(self, tmp_path: Path):
+    def test_binary_failure_decodes_stderr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_run(cmd: list[str], **kwargs: typing.Any) -> subprocess.CompletedProcess[bytes]:
+            return subprocess.CompletedProcess(cmd, 1, b"", b"bad\xff")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with pytest.raises(GitError) as exc_info:
+            git("hash-object", "--stdin", input_data=b"x")
+        assert exc_info.value.stderr == "bad\ufffd"
+
+    def test_git_error_attributes(self, tmp_path: Path) -> None:
         try:
             git("log", cwd=str(tmp_path))
         except GitError as e:
@@ -70,22 +164,24 @@ class TestPythonRuntimeEnvScrub:
         "__PYVENV_LAUNCHER__": r"C:\fake\stale\launcher.exe",
     }
 
-    def test_git_scrubs_python_runtime_vars(self, monkeypatch):
+    def test_git_scrubs_python_runtime_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import agent_worktrees.git_ops as go
         for name, value in self._LEAKED.items():
             monkeypatch.setenv(name, value)
-        captured = {}
+        captured: dict[str, dict[str, str]] = {}
 
-        def fake_run(cmd, **kw):
-            captured["env"] = kw.get("env")
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        def fake_run(cmd: list[str], **kw: typing.Any) -> _GitResult:
+            captured["env"] = kw["env"]
+            return _GitResult(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        monkeypatch.setattr(subprocess, "run", fake_run)
         go.git("--version")
         for name in self._LEAKED:
             assert name not in captured["env"]
 
-    def test_repository_identity_env_scrubs_python_runtime_vars(self, monkeypatch):
+    def test_repository_identity_env_scrubs_python_runtime_vars(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import agent_worktrees.git_ops as go
         for name, value in self._LEAKED.items():
             monkeypatch.setenv(name, value)
@@ -94,7 +190,9 @@ class TestPythonRuntimeEnvScrub:
             assert name not in env
 
     @pytest.mark.parametrize("isolated", [False, True])
-    def test_git_repository_selection_is_explicitly_isolated(self, monkeypatch, isolated):
+    def test_git_repository_selection_is_explicitly_isolated(
+        self, monkeypatch: pytest.MonkeyPatch, isolated: bool,
+    ) -> None:
         poisoned = {
             "GIT_DIR": "foreign",
             "GIT_WORK_TREE": "wrong",
@@ -108,11 +206,11 @@ class TestPythonRuntimeEnvScrub:
             monkeypatch.setenv(name, value)
         captured = {}
 
-        def fake_run(cmd, **kw):
+        def fake_run(cmd: list[str], **kw: typing.Any) -> _GitResult:
             captured.update(kw["env"])
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        monkeypatch.setattr(subprocess, "run", fake_run)
         go.git("--version", isolated_repository=isolated)
         for name, value in poisoned.items():
             assert captured.get(name) == (None if isolated else value)
@@ -128,36 +226,38 @@ class TestNoHooks:
     guard run, so it never disables hooks -- see the ``TestPush`` class
     below."""
 
-    def _capture(self, monkeypatch):
+    def _capture(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
         import subprocess as _sp
         seen = {}
 
-        def fake_run(cmd, **kw):
+        def fake_run(cmd: list[str], **kw: typing.Any) -> subprocess.CompletedProcess[str]:
             seen["cmd"] = cmd
             return _sp.CompletedProcess(cmd, 0, "", "")
 
-        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        monkeypatch.setattr(subprocess, "run", fake_run)
         return seen
 
-    def test_no_hooks_prepends_config(self, monkeypatch):
+    def test_no_hooks_prepends_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen = self._capture(monkeypatch)
         go.git("commit", "-m", "x", no_hooks=True)
-        assert seen["cmd"][:3] == ["git", "-c", f"core.hooksPath={go._NO_HOOKS_PATH}"]
+        assert seen["cmd"][:3] == [resolve_git(), "-c", f"core.hooksPath={go._NO_HOOKS_PATH}"]
         assert seen["cmd"][3:] == ["commit", "-m", "x"]
 
-    def test_default_keeps_hooks_enabled(self, monkeypatch):
+    def test_default_keeps_hooks_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen = self._capture(monkeypatch)
         go.git("commit", "-m", "x")
-        assert seen["cmd"] == ["git", "commit", "-m", "x"]
+        assert seen["cmd"] == [resolve_git(), "commit", "-m", "x"]
         assert "core.hooksPath" not in " ".join(seen["cmd"])
 
-    def test_squash_recommit_bypasses_hooks(self, monkeypatch):
+    def test_squash_recommit_bypasses_hooks(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # The squash re-commit must run with hooks disabled (the #3707 root
         # cause: a branch-guard pre-commit blocking the soft-reset re-commit).
         calls = []
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False,
+        ) -> _GitResult:
             calls.append((args, no_hooks))
             # merge-base / rev-list --count 2 so we reach the commit path.
             if args[:1] == ("rev-list",):
@@ -168,7 +268,7 @@ class TestNoHooks:
                 out = "cafef00d"
             else:
                 out = ""
-            return types.SimpleNamespace(returncode=0, stdout=out, stderr="")
+            return _GitResult(returncode=0, stdout=out, stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         ok, reason = go.squash_branch("origin/master", "squashed", cwd=".")
@@ -176,12 +276,14 @@ class TestNoHooks:
         commit_calls = [c for c in calls if c[0][:1] == ("commit",)]
         assert commit_calls and all(nh for _, nh in commit_calls)
 
-    def test_rebase_bypasses_hooks(self, monkeypatch):
-        seen = {}
-        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout=None, no_hooks=False: (
-            seen.update(args=a, no_hooks=no_hooks),
-            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+    def test_rebase_bypasses_hooks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: _GitCall = {}
+
+        def fake_git(*args: str, no_hooks: bool = False, **kwargs: object) -> _GitResult:
+            seen.update({"args": args, "no_hooks": no_hooks})
+            return _GitResult(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
         assert go.rebase("origin/master", cwd=".") is True
         assert seen["args"][:1] == ("rebase",)
         assert seen["no_hooks"] is True
@@ -193,38 +295,48 @@ class TestPush:
     release guard (e.g. ``check-changefile-presence.py``) must be allowed to
     run and block a non-compliant push."""
 
-    def test_push_does_not_bypass_hooks(self, monkeypatch):
+    def test_push_does_not_bypass_hooks(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
-        seen = {}
-        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout=None, no_hooks=False,
-                            kill_tree=False, isolated_repository=False: (
-            seen.update(args=a, no_hooks=no_hooks, isolated_repository=isolated_repository),
-            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        seen: _GitCall = {}
+
+        def fake_git(
+            *args: str, no_hooks: bool = False, isolated_repository: bool = False,
+            **kwargs: object,
+        ) -> _GitResult:
+            seen.update({
+                "args": args, "no_hooks": no_hooks,
+                "isolated_repository": isolated_repository,
+            })
+            return _GitResult(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".")) is True
         assert seen["args"][:1] == ("push",)
         assert seen["no_hooks"] is False
         assert seen["isolated_repository"] is True
 
-    def test_push_retry_also_does_not_bypass_hooks(self, monkeypatch):
+    def test_push_retry_also_does_not_bypass_hooks(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The auth-fallback retry push (#900) must not bypass hooks either --
         it's still the same terminal publish action, just retried without the
         injected cross-account token."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: go.GitAuthArgs(
+            lambda remote, *, cwd: GitAuthArgs(
                 ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
             ),
         )
         monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         no_hooks_seen: list[bool] = []
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> _GitResult:
             no_hooks_seen.append(no_hooks)
             injected = "http.extraheader=AUTHORIZATION: basic x" in args
             rc = 1 if injected else 0
-            return types.SimpleNamespace(returncode=rc, stdout="", stderr="")
+            return _GitResult(returncode=rc, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".")) is True
@@ -241,70 +353,86 @@ class TestPushTimeout:
     exactly the failure mode that drove agents to bypass ``create-pr`` for a
     raw ``git push`` + ``gh pr create``, silently losing PR attribution."""
 
-    def test_push_passes_default_timeout(self, monkeypatch):
+    def test_push_passes_default_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> _GitResult:
             captured["timeout"] = timeout
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".")) is True
-        assert captured["timeout"] == go.push_timeout.DEFAULT_PUSH_TIMEOUT
+        assert captured["timeout"] == push_timeout.DEFAULT_PUSH_TIMEOUT
 
-    def test_push_timeout_override(self, monkeypatch):
+    def test_push_timeout_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> _GitResult:
             captured["timeout"] = timeout
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".", timeout=5)) is True
         assert captured["timeout"] == 5
 
-    def test_push_none_timeout_preserves_unbounded(self, monkeypatch):
+    def test_push_none_timeout_preserves_unbounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> _GitResult:
             captured["timeout"] = timeout
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".", timeout=None)) is True
         assert captured["timeout"] is None
 
-    def test_push_kills_tree_on_stall(self, monkeypatch):
+    def test_push_kills_tree_on_stall(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """push() must ask git() to kill the WHOLE process tree on a stall
         (Copilot review finding on PR #4600), not just rely on the default
         (tree-preserving) behavior every other git() caller gets."""
         captured = {}
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> _GitResult:
             captured["kill_tree"] = kill_tree
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".")) is True
         assert captured["kill_tree"] is True
 
-    def test_push_stall_becomes_result_not_hang(self, monkeypatch):
+    def test_push_stall_becomes_result_not_hang(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A stall past the bound surfaces as a failed (falsy) PushResult the
         existing create-pr/push-changes error-reporting path already knows
         how to render -- never an unbounded hang."""
         import subprocess
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> typing.NoReturn:
+            assert timeout is not None
             raise subprocess.TimeoutExpired(
                 cmd=["git", *args], timeout=timeout,
                 output="", stderr="[agent-worktrees] runtime not provisioned...",
@@ -320,7 +448,7 @@ class TestPushTimeout:
         assert "runtime not provisioned" in result.stderr
         assert "silently skip PR attribution" in result.stderr
 
-    def test_push_stall_forwards_stdout_too(self, monkeypatch):
+    def test_push_stall_forwards_stdout_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Copilot review finding on PR #4600: a hook's STDOUT (not just
         stderr) must also be forwarded -- git() captures both streams, so
         discarding stdout would silently drop diagnostic content some hook
@@ -328,8 +456,12 @@ class TestPushTimeout:
         import subprocess
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> typing.NoReturn:
+            assert timeout is not None
             raise subprocess.TimeoutExpired(
                 cmd=["git", *args], timeout=timeout,
                 output="stdout: provisioning uv venv...",
@@ -342,24 +474,30 @@ class TestPushTimeout:
         assert "stdout: provisioning uv venv..." in result.stderr
         assert "stderr: runtime not provisioned" in result.stderr
 
-    def test_push_retry_stall_also_becomes_result_not_hang(self, monkeypatch):
+    def test_push_retry_stall_also_becomes_result_not_hang(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """The auth-fallback retry (#900) must be bounded too -- it is still
         the same terminal publish action, just retried without the injected
         cross-account token."""
         import subprocess
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: go.GitAuthArgs(
+            lambda remote, *, cwd: GitAuthArgs(
                 ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
             ),
         )
         monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, kill_tree=False, isolated_repository=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False, kill_tree: bool = False,
+            isolated_repository: bool = False,
+        ) -> _GitResult:
             injected = "http.extraheader=AUTHORIZATION: basic x" in args
             if injected:
-                return types.SimpleNamespace(returncode=1, stdout="", stderr="403")
+                return _GitResult(returncode=1, stdout="", stderr="403")
+            assert timeout is not None
             raise subprocess.TimeoutExpired(cmd=["git", *args], timeout=timeout)
 
         monkeypatch.setattr(go, "git", fake_git)
@@ -375,9 +513,10 @@ class TestPushTimeoutTreeKill:
     this since the whole point is real OS-level process/descendant lifetime.
     """
 
-    def test_run_bounded_kills_grandchild_on_timeout(self, tmp_path, monkeypatch):
+    def test_run_bounded_kills_grandchild_on_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import os
-        import platform
         import subprocess
         import sys
         import time
@@ -438,7 +577,9 @@ class TestPushTimeoutTreeKill:
 
         original_spawn = agent_procutil.spawn_sync_in_kill_on_close_job
 
-        def ready_spawn(*args, **kwargs):
+        def ready_spawn(
+            *args: typing.Any, **kwargs: typing.Any,
+        ) -> tuple[subprocess.Popen[typing.Any], agent_procutil.JobHandle | None]:
             proc, job = original_spawn(*args, **kwargs)
             try:
                 # Qualify the fixture before the one-second timeout/cleanup assertion.
@@ -501,7 +642,7 @@ class TestPushTimeoutTreeKill:
                 and pid_alive(grandchild_pid)
                 and process_start_time(grandchild_pid) == grandchild_start_time
             ):
-                if platform.system() == "Windows":
+                if sys.platform == "win32":
                     subprocess.run(
                         ["taskkill", "/F", "/PID", str(grandchild_pid)],
                         capture_output=True, check=False,
@@ -513,7 +654,7 @@ class TestPushTimeoutTreeKill:
                     except (ProcessLookupError, PermissionError):
                         pass
 
-    def test_kill_tree_kills_root_via_handle(self, monkeypatch):
+    def test_kill_tree_kills_root_via_handle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Copilot review finding on PR #4600: the root process must be
         terminated via its own Popen handle (``proc.kill()``), never a bare
         PID string alone -- a handle can't be confused by PID reuse, since
@@ -522,14 +663,17 @@ class TestPushTimeoutTreeKill:
         from agent_worktrees import push_timeout
 
         calls: list[str] = []
-        fake_proc = types.SimpleNamespace(
-            pid=999999, poll=lambda: None, kill=lambda: calls.append("kill"),
+        fake_proc = Mock(
+            spec=subprocess.Popen, pid=999999,
+            poll=Mock(return_value=None), kill=Mock(side_effect=lambda: calls.append("kill")),
         )
         monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: True)
         push_timeout._kill_tree(fake_proc)
         assert calls == ["kill"], "root must be killed via its own Popen handle"
 
-    def test_kill_tree_refuses_pid_sweep_for_already_exited_process(self, monkeypatch):
+    def test_kill_tree_refuses_pid_sweep_for_already_exited_process(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Copilot review finding on PR #4600 ("add a direct regression
         proving a stale or mismatched identity is refused"): once
         ``proc.poll()`` shows the process has ALREADY exited on its own,
@@ -544,32 +688,36 @@ class TestPushTimeoutTreeKill:
         monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
         sweep_called = []
         monkeypatch.setattr(
-            push_timeout.subprocess, "run",
+            subprocess, "run",
             lambda *a, **k: sweep_called.append(True),
         )
-        fake_proc = types.SimpleNamespace(pid=999999, poll=lambda: 0, kill=lambda: None)
+        fake_proc = Mock(spec=subprocess.Popen, pid=999999, poll=Mock(return_value=0))
         push_timeout._kill_tree(fake_proc)
         assert sweep_called == [], "a PID whose process already exited must not be swept"
 
-    def test_kill_tree_sweeps_pid_tree_for_still_running_process(self, monkeypatch):
+    def test_kill_tree_sweeps_pid_tree_for_still_running_process(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """The complement of the above: a CONFIRMED-still-running process
         (``poll() is None``) is safe to sweep by PID, since our own open
         handle guarantees that exact PID hasn't been reused."""
         from agent_worktrees import push_timeout
 
         monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
-        monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(platform, "system", lambda: "Windows")
         sweep_called = []
         monkeypatch.setattr(
-            push_timeout.subprocess, "run",
+            subprocess, "run",
             lambda *a, **k: sweep_called.append(a),
         )
-        fake_proc = types.SimpleNamespace(pid=999999, poll=lambda: None, kill=lambda: None)
+        fake_proc = Mock(spec=subprocess.Popen, pid=999999, poll=Mock(return_value=None))
         push_timeout._kill_tree(fake_proc)
         assert sweep_called, "a confirmed-still-running process should be swept by PID"
         assert "999999" in sweep_called[0][0]
 
-    def test_kill_tree_skips_group_sweep_under_test_containment(self, monkeypatch):
+    def test_kill_tree_skips_group_sweep_under_test_containment(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Copilot review finding on PR #4600: under
         COPILOT_EXTENSIONS_TEST_CONTAINED=1, detached_kwargs() deliberately
         leaves a POSIX child in the CALLER's own process group -- a killpg
@@ -582,10 +730,10 @@ class TestPushTimeoutTreeKill:
         monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: True)
         sweep_called = []
         monkeypatch.setattr(
-            push_timeout.subprocess, "run",
+            subprocess, "run",
             lambda *a, **k: sweep_called.append(True),
         )
-        fake_proc = types.SimpleNamespace(pid=999999, poll=lambda: None, kill=lambda: None)
+        fake_proc = Mock(spec=subprocess.Popen, pid=999999, poll=Mock(return_value=None))
         push_timeout._kill_tree(fake_proc)
         assert sweep_called == [], "PID-based sweep must not run under test containment"
 
@@ -595,28 +743,47 @@ class TestPushTimeoutTreeKill:
 # ---------------------------------------------------------------------------
 
 class TestPathHelpers:
-    def test_is_cwd_inside_same_dir(self, tmp_path: Path, monkeypatch):
+    @pytest.mark.parametrize("bare", [False, True])
+    def test_anchor_discovery_uses_selected_git_under_stale_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bare: bool,
+    ) -> None:
+        selected = resolve_git()
+        repository, linked = tmp_path / "source", tmp_path / "linked"
+        git("init", "--initial-branch=main", str(repository))
+        git("-C", str(repository), "-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "commit", "--allow-empty", "-m", "fixture")
+        anchor = tmp_path / "bare.git" if bare else repository
+        if bare:
+            git("clone", "--bare", str(repository), str(anchor))
+        prefix = ("--git-dir", str(anchor)) if bare else ("-C", str(anchor))
+        git(*prefix, "worktree", "add", "--detach", str(linked))
+        monkeypatch.setenv("PATH", str(tmp_path / "missing-path"))
+        monkeypatch.setenv("AGENT_GIT_EXECUTABLE", selected)
+        assert resolve_to_anchor(linked) == anchor
+
+    def test_is_cwd_inside_same_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         assert is_cwd_inside(str(tmp_path)) is True
 
-    def test_is_cwd_inside_subdir(self, tmp_path: Path, monkeypatch):
+    def test_is_cwd_inside_subdir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         subdir = tmp_path / "sub"
         subdir.mkdir()
         monkeypatch.chdir(subdir)
         assert is_cwd_inside(str(tmp_path)) is True
 
-    def test_is_cwd_outside(self, tmp_path: Path, monkeypatch):
+    def test_is_cwd_outside(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         other = tmp_path / "other"
         other.mkdir()
         monkeypatch.chdir(other)
         assert is_cwd_inside(str(tmp_path / "elsewhere")) is False
 
-    def test_resolve_to_anchor_with_git_dir(self, tmp_path: Path):
+    def test_resolve_to_anchor_with_git_dir(self, tmp_path: Path) -> None:
         """If .git is a directory, return path unchanged."""
         (tmp_path / ".git").mkdir()
         assert resolve_to_anchor(tmp_path) == tmp_path
 
-    def test_resolve_to_anchor_no_git(self, tmp_path: Path):
+    def test_resolve_to_anchor_no_git(self, tmp_path: Path) -> None:
         """If no .git at all, return path unchanged (fallback)."""
         assert resolve_to_anchor(tmp_path) == tmp_path
 
@@ -637,7 +804,7 @@ class TestCrossAccountAuth:
         ("https://gitlab.com/owner/repo.git", None),
         ("/local/path/repo", None),
     ])
-    def test_parse_github_owner(self, url, owner):
+    def test_parse_github_owner(self, url: str, owner: str | None) -> None:
         assert go._parse_github_owner(url) == owner
 
     @pytest.mark.parametrize("url,slug", [
@@ -655,57 +822,61 @@ class TestCrossAccountAuth:
         ("git@ssh.dev.azure.com:v3/your-org/Developer/example-marketplace",
          "Developer/example-marketplace"),
     ])
-    def test_remote_slug(self, monkeypatch, url, slug):
+    def test_remote_slug(self, monkeypatch: pytest.MonkeyPatch, url: str, slug: str) -> None:
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: url)
         assert go.remote_slug("origin", cwd=".") == slug
 
-    def test_remote_slug_none_when_no_url(self, monkeypatch):
+    def test_remote_slug_none_when_no_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: None)
         assert go.remote_slug("origin", cwd=".") is None
 
-    def test_auth_args_empty_when_no_token(self, monkeypatch):
+    def test_auth_args_empty_when_no_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/Owner/r.git")
         monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
         monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: None)
         assert go._auth_config_args("origin", cwd=".") == []
 
-    def test_auth_args_empty_for_non_github(self, monkeypatch):
+    def test_auth_args_empty_for_non_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://gitlab.com/o/r.git")
         assert go._auth_config_args("origin", cwd=".") == []
 
-    def test_auth_args_injects_header_with_token(self, monkeypatch):
+    def test_auth_args_injects_header_with_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import base64
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/Owner/r.git")
         # Owner differs from the active account -> cross-account: inject.
         monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
-        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        monkeypatch.setattr(go, "gh_token_for_target", lambda selection: "ghp_secret")
         args = go._auth_config_args("origin", cwd=".")
         assert args[0] == "-c"
         expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
         assert args[1] == f"http.extraheader=AUTHORIZATION: basic {expected}"
 
-    def test_auth_args_for_url_injects_before_any_checkout_exists(self, monkeypatch):
+    def test_auth_args_for_url_injects_before_any_checkout_exists(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """The URL-based variant backs the initial 'git clone' itself, which
         runs before any repo/remote exists for _auth_config_args's
         cwd-based remote-name lookup to resolve."""
         import base64
         monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
-        monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
+        monkeypatch.setattr(go, "gh_token_for_target", lambda selection: "ghp_secret")
         args = go._auth_config_args_for_url("https://github.com/Owner/r.git")
         expected = base64.b64encode(b"x-access-token:ghp_secret").decode()
         assert args == ["-c", f"http.extraheader=AUTHORIZATION: basic {expected}"]
 
-    def test_auth_args_for_url_empty_for_non_github(self, monkeypatch):
+    def test_auth_args_for_url_empty_for_non_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
         assert go._auth_config_args_for_url("https://gitlab.com/o/r.git") == []
 
-    def test_auth_args_for_url_empty_for_plain_http(self, monkeypatch):
+    def test_auth_args_for_url_empty_for_plain_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The injected header would otherwise carry the bearer token over
         an unencrypted connection for a plain http:// GitHub remote."""
         monkeypatch.setattr(go, "_active_gh_account", lambda: "DifferentUser")
         monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
         assert go._auth_config_args_for_url("http://github.com/Owner/r.git") == []
 
-    def test_auth_args_empty_for_plain_http_via_remote_name(self, monkeypatch):
+    def test_auth_args_empty_for_plain_http_via_remote_name(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Same guarantee through the remote-name entry point used by the
         existing fetch/push paths, not only the URL-based clone path."""
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "http://github.com/Owner/r.git")
@@ -713,7 +884,9 @@ class TestCrossAccountAuth:
         monkeypatch.setattr(go, "_gh_token_for_owner", lambda owner: "ghp_secret")
         assert go._auth_config_args("origin", cwd=".") == []
 
-    def test_auth_args_empty_when_owner_is_active_account(self, monkeypatch):
+    def test_auth_args_empty_when_owner_is_active_account(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """#900: when the repo owner *is* the active gh account, skip injection
         so the working credential helper isn't overridden by a possibly
         push-scopeless OAuth token. Case-insensitive."""
@@ -724,7 +897,7 @@ class TestCrossAccountAuth:
                             lambda owner: pytest.fail("should not be called"))
         assert go._auth_config_args("origin", cwd=".") == []
 
-    def test_auth_args_honors_account_override(self, monkeypatch):
+    def test_auth_args_honors_account_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An explicit repos.yaml account: overrides the derived remote owner,
         so the injected credential authenticates as the account (not the org)."""
         import base64
@@ -737,7 +910,7 @@ class TestCrossAccountAuth:
         monkeypatch.setattr(go, "_active_gh_account", lambda: "example-org")
         seen: list[str] = []
 
-        def _tok(account):
+        def _tok(account: str) -> str:
             seen.append(account)
             return "acct_secret"
 
@@ -748,7 +921,7 @@ class TestCrossAccountAuth:
         expected = base64.b64encode(b"x-access-token:acct_secret").decode()
         assert args == ["-c", f"http.extraheader=AUTHORIZATION: basic {expected}"]
 
-    def test_active_gh_account_parses_active_marker(self, monkeypatch):
+    def test_active_gh_account_parses_active_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
         out = (
             "github.com\n"
             "  \u2713 Logged in to github.com account WorkAcct (keyring)\n"
@@ -757,26 +930,26 @@ class TestCrossAccountAuth:
             "  - Active account: true\n"
         )
         go._active_gh_account.cache_clear()
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         monkeypatch.setattr(
-            go.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=out, stderr=""),
+            subprocess, "run",
+            lambda *a, **k: _GitResult(returncode=0, stdout=out, stderr=""),
         )
         assert go._active_gh_account() == "PersonalAcct"
         go._active_gh_account.cache_clear()
 
-    def test_active_gh_account_single_account_fallback(self, monkeypatch):
+    def test_active_gh_account_single_account_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         out = "github.com\n  \u2713 Logged in to github.com account Solo (keyring)\n"
         go._active_gh_account.cache_clear()
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         monkeypatch.setattr(
-            go.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=out, stderr=""),
+            subprocess, "run",
+            lambda *a, **k: _GitResult(returncode=0, stdout=out, stderr=""),
         )
         assert go._active_gh_account() == "Solo"
         go._active_gh_account.cache_clear()
 
-    def test_list_gh_accounts_parses_all(self, monkeypatch):
+    def test_list_gh_accounts_parses_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
         out = (
             "github.com\n"
             "  \u2713 Logged in to github.com account ThomasMichon (keyring)\n"
@@ -785,51 +958,53 @@ class TestCrossAccountAuth:
             "  \u2713 Logged in to github.com account example-operator (keyring)\n"
             "  - Active account: false\n"
         )
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         monkeypatch.setattr(
-            go.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=out, stderr=""),
+            subprocess, "run",
+            lambda *a, **k: _GitResult(returncode=0, stdout=out, stderr=""),
         )
         # EMU logins with underscores must survive.
         assert go.list_gh_accounts() == ["ThomasMichon", "example-operator"]
 
-    def test_list_gh_accounts_empty_without_gh(self, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: None)
+    def test_list_gh_accounts_empty_without_gh(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: None)
         assert go.list_gh_accounts() == []
 
 
-    def test_push_falls_back_to_plain_when_injected_auth_403s(self, monkeypatch):
+    def test_push_falls_back_to_plain_when_injected_auth_403s(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """#900: a token-injected push that fails must retry once *without* the
         override so the default credential helper can authenticate."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: go.GitAuthArgs(
+            lambda remote, *, cwd: GitAuthArgs(
                 ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
             ),
         )
         monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         calls: list[bool] = []
 
-        def fake_git(*args, **kwargs):
+        def fake_git(*args: str, **kwargs: typing.Any) -> _GitResult:
             injected = "http.extraheader=AUTHORIZATION: basic x" in args
             calls.append(injected)
             # Injected push 403s; plain push (no override) succeeds.
             rc = 1 if injected else 0
-            return types.SimpleNamespace(returncode=rc, stdout="", stderr="")
+            return _GitResult(returncode=rc, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "master", cwd=".")) is True
         assert calls == [True, False]  # injected first, then plain fallback
 
-    def test_push_no_fallback_when_no_injected_auth(self, monkeypatch):
+    def test_push_no_fallback_when_no_injected_auth(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When no override was injected, a failed push must NOT silently
         retry -- it simply returns a falsy PushResult carrying the stderr."""
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         calls: list[int] = []
 
-        def fake_git(*args, **kwargs):
+        def fake_git(*args: str, **kwargs: typing.Any) -> _GitResult:
             calls.append(1)
-            return types.SimpleNamespace(
+            return _GitResult(
                 returncode=1, stdout="",
                 stderr="remote: version-consistency violations\n"
                        "error: failed to push some refs")
@@ -843,11 +1018,11 @@ class TestCrossAccountAuth:
         assert "version-consistency" in res.stderr
         assert res.retryable is False
 
-    def test_push_nonff_failure_is_retryable(self, monkeypatch):
+    def test_push_nonff_failure_is_retryable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """#993: a non-fast-forward rejection IS a race the caller should
         fetch+rebase+retry -- classified retryable from git's stderr."""
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
-        monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(
+        monkeypatch.setattr(go, "git", lambda *a, **k: _GitResult(
             returncode=1, stdout="",
             stderr=" ! [rejected]        master -> master (fetch first)\n"
                    "error: failed to push some refs"))
@@ -855,7 +1030,7 @@ class TestCrossAccountAuth:
         assert bool(res) is False
         assert res.retryable is True
 
-    def test_push_stale_info_failure_is_retryable(self):
+    def test_push_stale_info_failure_is_retryable(self) -> None:
         res = go.PushResult(
             ok=False,
             stderr=" ! [rejected]        pr/head -> pr/head (stale info)\n"
@@ -863,7 +1038,9 @@ class TestCrossAccountAuth:
         )
         assert res.retryable is True
 
-    def test_push_with_lease_expect_refuses_when_not_ancestor(self, monkeypatch):
+    def test_push_with_lease_expect_refuses_when_not_ancestor(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """#5298 follow-up: an expected-old-object lease only checks the
         REMOTE still equals the expected SHA -- it says nothing about the
         LOCAL side being pushed. A locally rebased/reset branch could
@@ -871,8 +1048,11 @@ class TestCrossAccountAuth:
         commits it claims to carry forward incrementally; refuse instead."""
         monkeypatch.setattr(go, "is_commit_ancestor", lambda *a, **k: False)
         git_calls = []
-        monkeypatch.setattr(go, "git", lambda *a, **k: git_calls.append(a) or types.SimpleNamespace(
-            returncode=1, stdout="", stderr=""))
+        def fake_git(*args: str, **kwargs: typing.Any) -> _GitResult:
+            git_calls.append(args)
+            return _GitResult(returncode=1, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
         res = go.push(
             "origin", "pr/head", cwd=".", force_with_lease_expect="deadbeef",
         )
@@ -881,35 +1061,42 @@ class TestCrossAccountAuth:
         assert "ancestor" in res.stderr
         assert git_calls == []  # refused before ever attempting the push
 
-    def test_push_with_lease_expect_proceeds_when_ancestor(self, monkeypatch):
+    def test_push_with_lease_expect_proceeds_when_ancestor(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         monkeypatch.setattr(go, "is_commit_ancestor", lambda *a, **k: True)
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         git_calls = []
 
-        def fake_git(*args, **kwargs):
+        def fake_git(*args: str, **kwargs: typing.Any) -> _GitResult:
             git_calls.append(args)
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         res = go.push("origin", "pr/head", cwd=".", force_with_lease_expect="deadbeef")
         assert bool(res) is True
         assert any("--force-with-lease=pr/head:deadbeef" in a for a in git_calls[0])
 
-    def test_push_with_lease_expect_targets_refspec_dest(self, monkeypatch):
+    def test_push_with_lease_expect_targets_refspec_dest(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """``branch`` may be a ``src:dest`` refspec -- the lease must target
         ``dest`` (what the remote actually sees) while the ancestry check
         verifies ``src`` (what's actually being pushed)."""
         seen = {}
 
-        def fake_is_commit_ancestor(expect, ref, *, cwd):
+        def fake_is_commit_ancestor(expect: str, ref: str, *, cwd: str | Path | None) -> bool:
             seen["expect"], seen["ref"] = expect, ref
             return True
 
         monkeypatch.setattr(go, "is_commit_ancestor", fake_is_commit_ancestor)
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         git_calls = []
-        monkeypatch.setattr(go, "git", lambda *a, **k: git_calls.append(a) or types.SimpleNamespace(
-            returncode=0, stdout="", stderr=""))
+        def fake_git(*args: str, **kwargs: typing.Any) -> _GitResult:
+            git_calls.append(args)
+            return _GitResult(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
         res = go.push(
             "origin", "worktree/x:refs/heads/pr/head", cwd=".",
             force_with_lease_expect="deadbeef",
@@ -918,22 +1105,22 @@ class TestCrossAccountAuth:
         assert seen == {"expect": "deadbeef", "ref": "worktree/x"}
         assert any("--force-with-lease=refs/heads/pr/head:deadbeef" in a for a in git_calls[0])
 
-    def test_push_success_returns_truthy_no_stderr(self, monkeypatch):
+    def test_push_success_returns_truthy_no_stderr(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
-        monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(
+        monkeypatch.setattr(go, "git", lambda *a, **k: _GitResult(
             returncode=0, stdout="", stderr=""))
         res = go.push("origin", "master", cwd=".")
         assert bool(res) is True
         assert res.retryable is False
 
-    def test_push_captures_stdout_not_just_stderr(self, monkeypatch):
+    def test_push_captures_stdout_not_just_stderr(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A pre-push hook's own check output commonly lands on stdout (a
         plain print()/echo), not stderr -- only git's OWN protocol message
         does. Confirmed live: a module-size-cap violation's full `[FAIL]
         ...` detail was silently dropped across six retries because only
         stderr was ever captured into the PushResult."""
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
-        monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(
+        monkeypatch.setattr(go, "git", lambda *a, **k: _GitResult(
             returncode=1,
             stdout="[FAIL] module size (1000-line cap, shrink-only baseline):\n"
                    "  - some/module.py: 1200 lines, exceeds its ceiling of 1000",
@@ -944,7 +1131,7 @@ class TestCrossAccountAuth:
         assert "[FAIL] module size" in res.stdout
         assert "error: failed to push some refs" in res.stderr
 
-    def test_failure_detail_includes_both_streams(self):
+    def test_failure_detail_includes_both_streams(self) -> None:
         res = go.PushResult(
             ok=False,
             stdout="[FAIL] module size (1000-line cap, shrink-only baseline):\n"
@@ -958,20 +1145,20 @@ class TestCrossAccountAuth:
         assert "stdout" in detail
         assert "stderr" in detail
 
-    def test_failure_detail_omits_empty_streams(self):
+    def test_failure_detail_omits_empty_streams(self) -> None:
         assert go.PushResult(ok=False).failure_detail == ""
         assert go.PushResult(ok=False, stderr="   ").failure_detail == ""
         only_stdout = go.PushResult(ok=False, stdout="[FAIL] something")
         assert "stdout" in only_stdout.failure_detail
         assert "stderr" not in only_stdout.failure_detail
 
-    def test_redact_args_strips_extraheader(self):
+    def test_redact_args_strips_extraheader(self) -> None:
         cmd = ["git", "-c", "http.extraheader=AUTHORIZATION: basic c2VjcmV0", "push"]
         redacted = go._redact_args(cmd)
         assert "http.extraheader=<redacted>" in redacted
         assert not any("c2VjcmV0" in a for a in redacted)
 
-    def test_git_error_message_redacts_token(self):
+    def test_git_error_message_redacts_token(self) -> None:
         err = GitError(
             ["git", "-c", "http.extraheader=AUTHORIZATION: basic c2VjcmV0", "push"],
             1, "denied",
@@ -989,7 +1176,7 @@ class TestPinGitCredential:
     client resolves the correct login."""
 
     @pytest.fixture(autouse=True)
-    def _no_active_gh_account_by_default(self, monkeypatch):
+    def _no_active_gh_account_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Determinism guard: without this, ``pin_git_credential`` calls
         ``_active_gh_account()``, which shells out to the REAL ``gh auth
         status`` on whatever machine runs this suite. A test using a
@@ -1001,8 +1188,10 @@ class TestPinGitCredential:
         their own ``monkeypatch.setattr(go, "_active_gh_account", ...)``."""
         monkeypatch.setattr(go, "_active_gh_account", lambda: None)
 
-    def test_noop_when_login_or_host_empty(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+    def test_noop_when_login_or_host_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         assert go.pin_git_credential(tmp_path, "") is False
         assert go.pin_git_credential(tmp_path, "someone", host="") is False
 
@@ -1016,12 +1205,12 @@ class TestPinGitCredential:
         "safelogin\n",  # a trailing newline must not slip past a "^...$" match
     ])
     def test_noop_when_login_has_unsafe_characters(
-        self, tmp_path: Path, monkeypatch, login: str,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, login: str,
+    ) -> None:
         """The helper is a ``!``-prefixed shell script; login/host are never
         escaped, only allowlisted -- an unsafe character must be rejected
         outright rather than risk a shell-injected credential helper."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
@@ -1032,32 +1221,34 @@ class TestPinGitCredential:
         "gh;evil.com", "gh evil.com", "gh$(x).com", "github.com\n",
     ])
     def test_noop_when_host_has_unsafe_characters(
-        self, tmp_path: Path, monkeypatch, host: str,
-    ):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str,
+    ) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
         assert go.pin_git_credential(repo, "someone", host=host) is False
 
-    def test_allows_underscore_login(self, tmp_path: Path, monkeypatch):
+    def test_allows_underscore_login(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """EMU-mapped logins in this codebase use underscores (e.g.
         'operator_enterprise'), which is not a real GitHub username character
         but must still be allowed -- only shell metacharacters are rejected."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
         assert go.pin_git_credential(repo, "operator_enterprise") is True
 
-    def test_skips_when_login_is_active_account(self, tmp_path: Path, monkeypatch):
+    def test_skips_when_login_is_active_account(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """#900's own rationale, reapplied here: when login IS the active gh
         account, the inherited default helper already authenticates
         correctly -- forcing a gh-auth-token-backed helper risks a
         scope-limited OAuth token turning a working plain push into a 403."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -1072,8 +1263,10 @@ class TestPinGitCredential:
         )
         assert result.returncode != 0  # never written
 
-    def test_pins_when_login_differs_from_active_account(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+    def test_pins_when_login_differs_from_active_account(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         monkeypatch.setattr(go, "_active_gh_account", lambda: "SomeUser")
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -1081,13 +1274,15 @@ class TestPinGitCredential:
         sp.run(["git", "init", "-q", str(repo)], check=True)
         assert go.pin_git_credential(repo, "other-user") is True
 
-    def test_clears_stale_pin_when_login_becomes_active_account(self, tmp_path: Path, monkeypatch):
+    def test_clears_stale_pin_when_login_becomes_active_account(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A repo previously pinned to 'other-user', whose account_map is
         later corrected to what is now the active gh account, must not keep
         forcing the stale login -- the config must actually be cleared, not
         just left untouched, or 'the active helper already works' would be
         false for this checkout."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
@@ -1112,22 +1307,46 @@ class TestPinGitCredential:
         )
         assert helpers.returncode != 0 or helpers.stdout.strip() == ""  # stale helper cleared
 
-    def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: None)
+    def test_noop_when_gh_unavailable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: None)
         assert go.pin_git_credential(tmp_path, "someone") is False
 
-    def test_noop_when_path_not_a_directory(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+    def test_noop_when_path_not_a_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         assert go.pin_git_credential(tmp_path / "does-not-exist", "someone") is False
 
-    def test_noop_when_not_a_git_working_tree(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+    def test_noop_when_not_a_git_working_tree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        record_property: Callable[[str, object], None],
+    ) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         plain_dir = tmp_path / "not-a-repo"
         plain_dir.mkdir()
-        assert go.pin_git_credential(plain_dir, "someone") is False
+        calls: list[list[str]] = []
 
-    def test_pins_local_config_on_a_real_repo(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        def absent_repository(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            assert command[-2:] == ["rev-parse", "--git-dir"]
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 128, "", "not a repository")
+
+        # A caller's basetemp may be inside a real checkout; this negative unit
+        # must never let Git discover and modify that enclosing repository.
+        monkeypatch.setattr(subprocess, "run", absent_repository)
+        for name in (
+            "HOME", "USERPROFILE", "AGENT_HOME", "COPILOT_HOME",
+            "AGENT_WORKTREES_PROJECTS_YAML", "AGENT_WORKTREES_REPOS_YAML",
+            "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GH_CONFIG_DIR",
+        ):
+            record_property(name, os.environ.get(name, ""))
+        assert go.pin_git_credential(plain_dir, "someone") is False
+        assert len(calls) == 1
+
+    def test_pins_local_config_on_a_real_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
@@ -1153,10 +1372,12 @@ class TestPinGitCredential:
         assert "operator_enterprise" in helpers[-1]
         assert "gh auth token" in helpers[-1]
 
-    def test_idempotent_on_repeated_calls(self, tmp_path: Path, monkeypatch):
+    def test_idempotent_on_repeated_calls(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Re-pinning (e.g. a re-run of the backfill command) must not pile up
         duplicate helper entries."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
@@ -1172,12 +1393,14 @@ class TestPinGitCredential:
         ).stdout.splitlines()
         assert helpers == ["", helpers[-1]]
 
-    def test_concurrent_pins_never_interleave(self, tmp_path: Path, monkeypatch):
+    def test_concurrent_pins_never_interleave(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Two threads racing to pin the same checkout to different logins
         must leave a self-consistent result: the on-disk username always
         matches the login embedded in the (single) surviving helper entry,
         never a mix of one thread's username with another's helper."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         monkeypatch.setattr(go, "_active_gh_account", lambda: None)
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -1224,8 +1447,8 @@ class TestPinGitCredential:
         assert helpers == ["", helpers[-1]]
         assert username in helpers[-1]
 
-    def test_pins_for_custom_host(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+    def test_pins_for_custom_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
@@ -1239,14 +1462,14 @@ class TestPinGitCredential:
         ).stdout.strip()
         assert username == "acct"
 
-    def test_pins_a_bare_repository(self, tmp_path: Path, monkeypatch):
+    def test_pins_a_bare_repository(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A bare anchor (agent-worktrees' own pattern -- a normal ``git
         init``/``clone`` layout with ``core.bare`` forced ``true`` afterward,
         so it can never be edited directly) has no work tree to be "inside",
         but a plain fetch/pull can still run there directly (an unattended
         machine-maintenance task might do exactly this) and needs the same
         pin."""
-        monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "bare-repo"
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
@@ -1266,18 +1489,21 @@ class TestFetchTimeout:
     """#1709: a network ``fetch`` is bounded so an unreachable remote can't
     hang push-changes / create-pr / pr-status / sync indefinitely."""
 
-    def test_fetch_passes_default_timeout(self, monkeypatch):
+    def test_fetch_passes_default_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
-        captured = {}
+        captured: _GitCall = {}
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, isolated_repository=False, auth_acquisition=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, no_hooks: bool = False,
+            isolated_repository: bool = False, auth_acquisition: bool = False,
+        ) -> _GitResult:
             captured["timeout"] = timeout
             captured["args"] = args
             captured["isolated_repository"] = isolated_repository
             captured["auth_acquisition"] = auth_acquisition
             captured["no_hooks"] = no_hooks
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
         go.fetch("origin", cwd=".")
@@ -1290,25 +1516,29 @@ class TestFetchTimeout:
         assert captured["isolated_repository"] is True
         assert captured["no_hooks"] is True
 
-    def test_fetch_timeout_override(self, monkeypatch):
+    def test_fetch_timeout_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
-        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout=None, isolated_repository=False,
-                            auth_acquisition=False: (
-            captured.__setitem__("timeout", timeout),
-            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        def fake_git(*args: str, timeout: float | None = None, **kwargs: typing.Any) -> _GitResult:
+            captured["timeout"] = timeout
+            return _GitResult(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
         go.fetch("origin", cwd=".", timeout=5)
         assert captured["timeout"] == 5
 
-    def test_fetch_stall_becomes_giterror_not_hang(self, monkeypatch):
+    def test_fetch_stall_becomes_giterror_not_hang(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A stall past the bound surfaces as a GitError (rc 124) the
         best-effort callers already handle -- never an unbounded hang."""
         import subprocess
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     isolated_repository=False, auth_acquisition=False):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, isolated_repository: bool = False,
+            auth_acquisition: bool = False,
+        ) -> typing.NoReturn:
+            assert timeout is not None
             raise subprocess.TimeoutExpired(cmd=["git", *args], timeout=timeout)
 
         monkeypatch.setattr(go, "git", fake_git)
@@ -1317,14 +1547,16 @@ class TestFetchTimeout:
         assert exc.value.returncode == 124
         assert "timed out" in str(exc.value)
 
-    def test_fetch_none_timeout_preserves_unbounded(self, monkeypatch):
+    def test_fetch_none_timeout_preserves_unbounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
-        monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout="sentinel", isolated_repository=False,
-                            auth_acquisition=False: (
-            captured.__setitem__("timeout", timeout),
-            types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
+        def fake_git(
+            *args: str, timeout: float | str | None = 'sentinel', **kwargs: typing.Any,
+        ) -> _GitResult:
+            captured["timeout"] = timeout
+            return _GitResult(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
         go.fetch("origin", cwd=".", timeout=None)
         assert captured["timeout"] is None
 
@@ -1334,12 +1566,12 @@ class TestFetchTimeout:
 # ---------------------------------------------------------------------------
 
 class TestDataModels:
-    def test_worktree_state_values(self):
-        assert WorktreeState.ACTIVE == "active"
-        assert WorktreeState.COMPLETED == "completed"
-        assert WorktreeState.GONE == "gone"
+    def test_worktree_state_values(self) -> None:
+        assert typing.cast(str, WorktreeState.ACTIVE) == "active"
+        assert typing.cast(str, WorktreeState.COMPLETED) == "completed"
+        assert typing.cast(str, WorktreeState.GONE) == "gone"
 
-    def test_worktree_state_info_defaults(self):
+    def test_worktree_state_info_defaults(self) -> None:
         info = WorktreeStateInfo(state=WorktreeState.ACTIVE)
         assert info.ahead == 0
         assert info.behind == 0
@@ -1351,24 +1583,24 @@ class TestDataModels:
 class TestRefineStateWithSession:
     """The CONVO refinement shared by the status bar and list --classify."""
 
-    def test_convo_is_canonical_state(self):
+    def test_convo_is_canonical_state(self) -> None:
         # CONVO must be a first-class enum value so every surface (status bar,
         # `list --json --classify`) reports the same vocabulary.
-        assert WorktreeState.CONVO == "convo"
+        assert typing.cast(str, WorktreeState.CONVO) == "convo"
 
-    def test_unused_with_turns_becomes_convo(self):
+    def test_unused_with_turns_becomes_convo(self) -> None:
         assert (
             refine_state_with_session(WorktreeState.UNUSED, 7)
             == WorktreeState.CONVO
         )
 
-    def test_unused_without_turns_stays_unused(self):
+    def test_unused_without_turns_stays_unused(self) -> None:
         assert (
             refine_state_with_session(WorktreeState.UNUSED, 0)
             == WorktreeState.UNUSED
         )
 
-    def test_other_states_unaffected_by_turns(self):
+    def test_other_states_unaffected_by_turns(self) -> None:
         for st in (
             WorktreeState.DIRTY,
             WorktreeState.WIP,
@@ -1388,22 +1620,22 @@ class TestClassifyGitTimeout:
     that one worktree -- never a fabricated concrete state, never a raised
     timeout that hangs the picker's per-worktree loop."""
 
-    def test_git_passes_timeout_through(self, monkeypatch):
+    def test_git_passes_timeout_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import subprocess
 
         from agent_worktrees import git_ops as go
 
         captured = {}
 
-        def fake_run(cmd, **kw):
+        def fake_run(cmd: list[str], **kw: typing.Any) -> subprocess.CompletedProcess[str]:
             captured.update(kw)
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
-        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        monkeypatch.setattr(subprocess, "run", fake_run)
         go.git("status", "--porcelain", timeout=7)
         assert captured["timeout"] == 7
 
-    def test_git_default_timeout_is_none(self, monkeypatch):
+    def test_git_default_timeout_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Callers that don't opt in keep the historical unbounded behavior."""
         import subprocess
 
@@ -1411,22 +1643,27 @@ class TestClassifyGitTimeout:
 
         captured = {}
 
-        def fake_run(cmd, **kw):
+        def fake_run(cmd: list[str], **kw: typing.Any) -> subprocess.CompletedProcess[str]:
             captured.update(kw)
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
-        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        monkeypatch.setattr(subprocess, "run", fake_run)
         go.git("status")
         assert captured["timeout"] is None
 
-    def test_classify_worktree_timeout_reports_unknown(self, tmp_path, monkeypatch):
+    def test_classify_worktree_timeout_reports_unknown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import subprocess
 
         from agent_worktrees import git_ops as go
 
         (tmp_path / ".git").mkdir()
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, **options: typing.Any,
+        ) -> subprocess.CompletedProcess[str]:
             # Branch detection succeeds so classification reaches the git ops.
             if args[:2] == ("rev-parse", "--abbrev-ref"):
                 return subprocess.CompletedProcess(
@@ -1445,8 +1682,8 @@ class TestClassifyGitTimeout:
         assert info.fetch_failed is False  # fetch=False was never requested
 
     def test_classify_worktree_timeout_with_fetch_reports_fetch_failed(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # worktree-finality-and-obligations Phase 5 follow-up: a timeout
         # gives no confirmation the requested fetch ever completed (it may
         # have stalled on the fetch itself or a later git call) -- so
@@ -1458,13 +1695,15 @@ class TestClassifyGitTimeout:
 
         (tmp_path / ".git").mkdir()
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, **options: typing.Any,
+        ) -> subprocess.CompletedProcess[str]:
             if args[:2] == ("rev-parse", "--abbrev-ref"):
                 return subprocess.CompletedProcess(
                     ["git", *args], 0, "worktree/x\n", "")
-            error = subprocess.TimeoutExpired(
+            error = _ObservedTimeout(
                 cmd=["git", *args], timeout=timeout or go._CLASSIFY_GIT_TIMEOUT)
-            error.observation_started = True
             raise error
 
         monkeypatch.setattr(go, "git", fake_git)
@@ -1479,10 +1718,15 @@ class TestClassifyGitProcessCount:
     """Classification avoids separate merge-base and rev-list count spawns."""
 
     @staticmethod
-    def _run(monkeypatch, responses):
+    def _run(
+        monkeypatch: pytest.MonkeyPatch, responses: typing.Callable[[tuple[str, ...]], _GitResult],
+    ) -> tuple[WorktreeStateInfo, list[tuple[str, ...]]]:
         calls = []
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, **options: typing.Any,
+        ) -> _GitResult:
             calls.append(args)
             return responses(args)
 
@@ -1499,16 +1743,18 @@ class TestClassifyGitProcessCount:
         )
         return info, calls
 
-    def test_dirty_ahead_path_gets_counts_without_merge_base(self, monkeypatch):
-        def responses(args):
+    def test_dirty_ahead_path_gets_counts_without_merge_base(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def responses(args: tuple[str, ...]) -> _GitResult:
             if args[:1] == ("status",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout=" M changed.txt\n", stderr="")
             if args[:1] == ("rev-list",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="2\t0\n", stderr="")
             if args[:2] == ("--no-pager", "log"):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="Pending work\n", stderr="")
             raise AssertionError(f"unexpected git call: {args}")
 
@@ -1524,16 +1770,18 @@ class TestClassifyGitProcessCount:
             "worktree/x...origin/main",
         )
 
-    def test_diverged_orphan_still_requires_failed_merge_base(self, monkeypatch):
-        def responses(args):
+    def test_diverged_orphan_still_requires_failed_merge_base(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def responses(args: tuple[str, ...]) -> _GitResult:
             if args[:1] == ("status",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="", stderr="")
             if args[:1] == ("rev-list",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="1 4\n", stderr="")
             if args[:1] == ("merge-base",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=1, stdout="", stderr="")
             raise AssertionError(f"unexpected git call: {args}")
 
@@ -1544,16 +1792,16 @@ class TestClassifyGitProcessCount:
             "status", "rev-list", "merge-base",
         ]
 
-    def test_failed_count_preserves_orphan_detection(self, monkeypatch):
-        def responses(args):
+    def test_failed_count_preserves_orphan_detection(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def responses(args: tuple[str, ...]) -> _GitResult:
             if args[:1] == ("status",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="", stderr="")
             if args[:1] == ("rev-list",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=128, stdout="", stderr="bad revision")
             if args[:1] == ("merge-base",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=1, stdout="", stderr="bad revision")
             raise AssertionError(f"unexpected git call: {args}")
 
@@ -1565,8 +1813,8 @@ class TestClassifyGitProcessCount:
         ]
 
     def test_failed_count_with_shared_history_reports_unknown_not_completed(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A transient `rev-list` failure (lock contention, a racing fetch
         from a sibling worktree of the same repo) must never be conflated
         with "genuinely zero commits ahead" -- that conflation previously
@@ -1575,15 +1823,15 @@ class TestClassifyGitProcessCount:
         Worktree Manager between MERGED and WIP with no real state change.
         A resolvable merge-base means this isn't ORPHAN either; the honest
         answer is UNKNOWN, re-resolved by a later, uncontended pass."""
-        def responses(args):
+        def responses(args: tuple[str, ...]) -> _GitResult:
             if args[:1] == ("status",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="", stderr="")
             if args[:1] == ("rev-list",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=128, stdout="", stderr="fatal: lock contention")
             if args[:1] == ("merge-base",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=0, stdout="deadbeef\n", stderr="")
             raise AssertionError(f"unexpected git call: {args}")
 
@@ -1595,9 +1843,9 @@ class TestClassifyGitProcessCount:
         ]
 
     def test_patch_equivalent_ahead_branch_never_needs_merge_base(
-        self, monkeypatch,
-    ):
-        def responses(args):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def responses(args: tuple[str, ...]) -> _GitResult:
             if args[:1] == ("status",):
                 stdout = ""
             elif args[:1] == ("rev-list",):
@@ -1608,7 +1856,7 @@ class TestClassifyGitProcessCount:
                 stdout = "- deadbeef\n- cafef00d\n"
             else:
                 raise AssertionError(f"unexpected git call: {args}")
-            return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+            return _GitResult(returncode=0, stdout=stdout, stderr="")
 
         info, calls = self._run(monkeypatch, responses)
 
@@ -1624,10 +1872,16 @@ class TestClassifyGitStateFetchFailed:
     proceeds on the stale local refs (#discussion_r4008048471)."""
 
     @staticmethod
-    def _run(monkeypatch, *, fetch_returncode, responses):
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
+    def _run(
+        monkeypatch: pytest.MonkeyPatch, *, fetch_returncode: int,
+        responses: typing.Callable[[tuple[str, ...]], _GitResult],
+    ) -> WorktreeStateInfo:
+        def fake_git(
+            *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
+            timeout: float | None = None, **options: typing.Any,
+        ) -> _GitResult:
             if args[:1] == ("fetch",):
-                return types.SimpleNamespace(
+                return _GitResult(
                     returncode=fetch_returncode, stdout="", stderr="",
                 )
             return responses(args)
@@ -1644,18 +1898,20 @@ class TestClassifyGitStateFetchFailed:
             drift=False,
         )
 
-    def _clean_completed_responses(self, args):
+    def _clean_completed_responses(self, args: tuple[str, ...]) -> _GitResult:
         if args[:1] == ("status",):
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return _GitResult(returncode=0, stdout="", stderr="")
         if args[:1] == ("rev-list",):
-            return types.SimpleNamespace(returncode=0, stdout="0 0\n", stderr="")
+            return _GitResult(returncode=0, stdout="0 0\n", stderr="")
         if args[:2] == ("--no-pager", "reflog"):
-            return types.SimpleNamespace(
+            return _GitResult(
                 returncode=0, stdout="commit: init\n", stderr="",
             )
         raise AssertionError(f"unexpected git call: {args}")
 
-    def test_successful_fetch_reports_fetch_failed_false(self, monkeypatch):
+    def test_successful_fetch_reports_fetch_failed_false(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         info = self._run(
             monkeypatch, fetch_returncode=0,
             responses=self._clean_completed_responses,
@@ -1664,7 +1920,7 @@ class TestClassifyGitStateFetchFailed:
         assert info.fetch_requested is True
         assert info.fetch_failed is False
 
-    def test_failed_fetch_reports_fetch_failed_true(self, monkeypatch):
+    def test_failed_fetch_reports_fetch_failed_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
         info = self._run(
             monkeypatch, fetch_returncode=1,
             responses=self._clean_completed_responses,
@@ -1675,7 +1931,7 @@ class TestClassifyGitStateFetchFailed:
         assert info.fetch_requested is True
         assert info.fetch_failed is True
 
-    def test_no_fetch_requested_always_reports_false(self, monkeypatch):
+    def test_no_fetch_requested_always_reports_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         info, _calls = TestClassifyGitProcessCount._run(
             monkeypatch, self._clean_completed_responses,
         )
@@ -1688,17 +1944,17 @@ class TestClassifyGitStateFetchFailed:
 # ---------------------------------------------------------------------------
 
 class TestWorktreeSuffix:
-    def test_extracts_trailing_dash_token(self):
+    def test_extracts_trailing_dash_token(self) -> None:
         assert worktree_suffix("example-host-20260917-125245-3a94") == "3a94"
 
-    def test_no_dash_id_is_not_returned_verbatim(self):
+    def test_no_dash_id_is_not_returned_verbatim(self) -> None:
         """No trailing token to extract -- must still never publish the raw
         (potentially identifying) id verbatim."""
         wid = "nodashesatall"
         suffix = worktree_suffix(wid)
         assert suffix != wid
 
-    def test_no_dash_id_is_deterministic(self):
+    def test_no_dash_id_is_deterministic(self) -> None:
         wid = "nodashesatall"
         assert worktree_suffix(wid) == worktree_suffix(wid)
 
@@ -1715,7 +1971,7 @@ class TestMergeSquash:
         git("commit", "-m", "initial", cwd=repo)
         return repo
 
-    def test_commit_message_never_contains_the_raw_worktree_id(self, tmp_path: Path):
+    def test_commit_message_never_contains_the_raw_worktree_id(self, tmp_path: Path) -> None:
         repo = self._repo(tmp_path)
         git("checkout", "-b", "feature", cwd=repo)
         (repo / "b.txt").write_text("two\n")
