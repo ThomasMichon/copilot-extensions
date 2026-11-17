@@ -34,12 +34,15 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO, TYPE_CHECKING, cast
 
 from agent_procutil import JobHandle, contained_test_mode, no_window_kwargs, spawn_sync_in_kill_on_close_job
 from agent_procutil.streaming import SyncProcessOutput
 
 from . import push_timeout
+
+if TYPE_CHECKING:
+    from agent_procutil.owned_process import UnreapedChild
 
 #: How long to wait for a killed tree's root to be reaped before reporting.
 _REAP_GRACE_S = 30.0
@@ -60,7 +63,7 @@ class InstallerCleanupError(RuntimeError):
     """Post-launch failure; retain native custody when cleanup is unverified."""
 
     def __init__(
-        self, message: str, *, process: subprocess.Popen | None = None,
+        self, message: str, *, process: UnreapedChild | None = None,
         job: JobHandle | None = None,
     ) -> None:
         super().__init__(message)
@@ -79,22 +82,24 @@ class InstallerActivityError(RuntimeError):
 def _spawn(
     argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], capture: bool,
     output_fd: int | None = None, *, require_tree_exit: bool = False,
-):
+) -> tuple[subprocess.Popen[Any], JobHandle | None]:
     # Keep channels distinct while observing their raw bytes for progress.
-    stdio = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
-             "encoding": "utf-8", "errors": "replace"} if capture else {}
+    stdio: dict[str, Any] = {
+        "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
+        "encoding": "utf-8", "errors": "replace",
+    } if capture else {}
     if output_fd is not None:
         stdio = {"stdout": output_fd, "stderr": output_fd}
     if os.name == "nt":
         # Without a Job the deadline could not own the tree, so refuse to run.
-        strict = (
+        strict: dict[str, Any] = (
             {"allow_breakaway": False, **no_window_kwargs()}
             if require_tree_exit else {}
         )
         return spawn_sync_in_kill_on_close_job(
             list(argv), cwd=cwd, env=dict(env), require_job=True, **strict, **stdio)
     # Contained test mode keeps the child in the harness's own group.
-    session = {} if contained_test_mode() else {"start_new_session": True}
+    session: dict[str, Any] = {} if contained_test_mode() else {"start_new_session": True}
     return subprocess.Popen(list(argv), cwd=cwd, env=dict(env), **session, **stdio), None
 
 
@@ -127,9 +132,10 @@ def _start_time(pid: int) -> str | None:
 def _session_census(sid: int) -> dict[int, str]:
     """``{pid: start time}`` of every live process in session ``sid``."""
     census = {}
+    getsid: Callable[[int], int] = getattr(os, "getsid")
     for pid in _all_pids():
         try:
-            if pid == os.getpid() or os.getsid(pid) != sid:
+            if pid == os.getpid() or getsid(pid) != sid:
                 continue
         except OSError:
             continue
@@ -167,7 +173,7 @@ def _bind(pid: int, started: str) -> _Member | None:
 def _send(member: _Member, sig: int) -> None:
     try:
         if member.pidfd is not None:
-            signal.pidfd_send_signal(member.pidfd, sig)
+            getattr(signal, "pidfd_send_signal")(member.pidfd, sig)
         elif _start_time(member.pid) == member.started:
             os.kill(member.pid, sig)
     except OSError:
@@ -176,12 +182,13 @@ def _send(member: _Member, sig: int) -> None:
 
 def _still_member(member: _Member, sid: int) -> bool:
     try:
-        return os.getsid(member.pid) == sid and _start_time(member.pid) == member.started
+        getsid: Callable[[int], int] = getattr(os, "getsid")
+        return getsid(member.pid) == sid and _start_time(member.pid) == member.started
     except OSError:
         return False
 
 
-def _kill_session(proc: subprocess.Popen) -> None:
+def _kill_session(proc: subprocess.Popen[Any]) -> None:
     """Kill every process in the installer's session.
 
     The installers' self-stage watchdog runs the staged copy under ``set -m``,
@@ -200,9 +207,12 @@ def _kill_session(proc: subprocess.Popen) -> None:
             break
         try:
             for member in members:
-                _send(member, signal.SIGSTOP)
+                _send(member, getattr(signal, "SIGSTOP"))
             for member in members:
-                _send(member, signal.SIGKILL if _still_member(member, sid) else signal.SIGCONT)
+                _send(
+                    member, getattr(signal, "SIGKILL") if _still_member(member, sid)
+                    else getattr(signal, "SIGCONT"),
+                )
         finally:
             for member in members:
                 if member.pidfd is not None:
@@ -213,7 +223,7 @@ def _kill_session(proc: subprocess.Popen) -> None:
         pass
 
 
-def _sweep_exited_session(proc: subprocess.Popen) -> None:
+def _sweep_exited_session(proc: subprocess.Popen[Any]) -> None:
     """After the installers' own watchdog kill (exit 124), clear what is left.
 
     The watchdog signals only the staged installer's group, so a descendant
@@ -225,7 +235,9 @@ def _sweep_exited_session(proc: subprocess.Popen) -> None:
         _kill_session(proc)
 
 
-def _kill_tree(proc: subprocess.Popen, job, capture: SyncProcessOutput | None = None) -> str:
+def _kill_tree(
+    proc: subprocess.Popen[Any], job: JobHandle | None, capture: SyncProcessOutput | None = None,
+) -> str:
     """Kill the whole tree; return whatever captured output remains."""
     if job is not None:
         job.close()
@@ -243,18 +255,18 @@ def _kill_tree(proc: subprocess.Popen, job, capture: SyncProcessOutput | None = 
         if capture is not None:
             raise InstallerCleanupError("installer output did not settle after process-tree retirement") from None
         out = None
-    return out or ""
+    return cast(str, out or "")
 
 
 def _settle_strict_tree(
-    proc: subprocess.Popen, job: JobHandle | None, capture: SyncProcessOutput | None,
+    proc: subprocess.Popen[Any], job: JobHandle | None, capture: SyncProcessOutput | None,
 ) -> None:
     if job is None:
         raise RuntimeError("owned Windows Job is unavailable")
     deadline = time.monotonic() + _REAP_GRACE_S
     job.terminate_and_wait(_REAP_GRACE_S)
     if capture is not None:
-        capture.finish(max(0, deadline - time.monotonic()))
+        capture.finish(max(0, deadline - time.monotonic()), stop_at_idle=True)
     else:
         proc.communicate(timeout=max(0, deadline - time.monotonic()))
 
@@ -314,7 +326,7 @@ def run_installer(
     with ExitStack() as resources:
         try:
             spools = {
-                name: resources.enter_context(tempfile.TemporaryFile())
+                name: cast(BinaryIO, resources.enter_context(tempfile.TemporaryFile()))
                 for name in ("stdout", "stderr")
             } if log is not None else None
         except Exception as error:
@@ -337,8 +349,10 @@ def run_installer(
 
 
 def _run_posix_owned(
-    argv, *, cwd, env, deadline_s, target_version, receipt, log,
-    output_fd, spools, on_settled,
+    argv: Sequence[str], *, cwd: Path | None, env: Mapping[str, str], deadline_s: float,
+    target_version: str | None, receipt: Callable[[], str | None] | None,
+    log: Callable[[str], None] | None, output_fd: int | None,
+    spools: Mapping[str, BinaryIO] | None, on_settled: Callable[[], None] | None,
 ) -> InstallerRun:
     from agent_procutil import SyncProcessLaunchError
     from agent_procutil.owned_process import OwnedCleanupError, _PreparationTimeout, run_owned
@@ -374,6 +388,7 @@ def _run_posix_owned(
     except SyncProcessLaunchError as error:
         raise InstallerLaunchError(str(error)) from error
     for spool in (spools or {}).values():
+        assert log is not None
         spool.seek(0)
         reader = io.TextIOWrapper(spool, encoding="utf-8", errors="replace", newline="\n")
         try:
@@ -449,6 +464,7 @@ def _run_installer(
                     log(line.rstrip("\r"))
 
     def deliver_output() -> None:
+        assert capture is not None
         capture.deliver()
         for name, spool in (output_spools or {}).items():
             spool.seek(0)
@@ -476,12 +492,12 @@ def _run_installer(
             output_fds={name: fd for name, fd in descriptors.items() if fd is not None},
             capture=False,
         )
-        activity = {}
+        activity: dict[str, Any] = {}
         if native_write_deadline is not None:
             from agent_procutil.job_activity import JobWriteActivity
 
             activity = {
-                "activity_observer": JobWriteActivity(job),
+                "activity_observer": JobWriteActivity(cast(JobHandle, job)),
                 "deadline": native_write_deadline,
             }
         try:
@@ -503,7 +519,9 @@ def _run_installer(
                 failure = InstallerCleanupError(
                     f"process-tree cleanup unverified: {cleanup_error}", process=proc, job=job,
                 )
-                failure.add_note(f"cleanup failed after {type(exc).__name__}: {exc}")
+                add_note = getattr(failure, "add_note", None)
+                if callable(add_note):
+                    add_note(f"cleanup failed after {type(exc).__name__}: {exc}")
                 job = None
                 raise failure from exc
         else:
@@ -513,7 +531,9 @@ def _run_installer(
             try:
                 deliver_output()
             except BaseException as delivery_error:
-                exc.add_note(f"deferred output delivery failed: {delivery_error}")
+                add_note = getattr(exc, "add_note", None)
+                if callable(add_note):
+                    add_note(f"deferred output delivery failed: {delivery_error}")
         if native_write_deadline is not None:
             from agent_procutil.job_activity import JobActivityError
 
