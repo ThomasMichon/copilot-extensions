@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify reviewer intake failures, accepted-result accounting and owned sunset procedures.",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
