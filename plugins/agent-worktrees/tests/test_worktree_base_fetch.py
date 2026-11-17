@@ -227,8 +227,9 @@ def test_preparation_refreshes_base_despite_unavailable_policy_head(
         assert "using last-known 'origin/trunk'" not in warning
 
 
+@pytest.mark.parametrize("mapping", ["exact", "wildcard", "source-only", "ambiguous", "base-collision"])
 def test_preparation_preserves_policy_head_alias_mapping(
-    local_repositories: tuple[Path, Path],
+    local_repositories: tuple[Path, Path], mapping: str,
 ) -> None:
     seed, anchor = local_repositories
     policy_path = ".agent-worktrees/config.yaml"
@@ -246,6 +247,25 @@ def test_preparation_preserves_policy_head_alias_mapping(
         "+refs/heads/production:refs/remotes/origin/stable", cwd=anchor,
     )
     _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stable", cwd=anchor)
+    old_policy = _git("rev-parse", "origin/stable", cwd=anchor)
+    if mapping == "wildcard":
+        _git(
+            "config", "--replace-all", "remote.origin.fetch",
+            "+refs/heads/production*:refs/remotes/origin/stable*", cwd=anchor,
+        )
+    elif mapping == "source-only":
+        _git("config", "--add", "remote.origin.fetch", "refs/heads/side", cwd=anchor)
+    elif mapping == "ambiguous":
+        _git(
+            "config", "--add", "remote.origin.fetch",
+            "+refs/heads/stable:refs/remotes/origin/stable", cwd=anchor,
+        )
+    elif mapping == "base-collision":
+        _git(
+            "config", "--replace-all", "remote.origin.fetch",
+            "+refs/heads/production:refs/remotes/origin/trunk", cwd=anchor,
+        )
+        _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk", cwd=anchor)
     _git("checkout", "production", cwd=seed)
     new_policy = _commit(seed, policy_path, "default_branch: trunk\nmarker: refreshed\n")
     _git("push", "origin", "production", cwd=seed)
@@ -258,8 +278,12 @@ def test_preparation_preserves_policy_head_alias_mapping(
     )
 
     assert prepared.fetched is True
-    assert prepared.fetch_error is None
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    if mapping in {"ambiguous", "base-collision"}:
+        assert prepared.fetch_error is not None
+        assert _git("rev-parse", "origin/stable", cwd=anchor) == old_policy
+        return
+    assert prepared.fetch_error is None
     assert _git("rev-parse", "origin/stable", cwd=anchor) == new_policy
     discovered = inrepo_config_source.load_inrepo_config_from_committed_ref(
         anchor, (Path(policy_path),),
