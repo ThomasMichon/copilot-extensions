@@ -218,7 +218,11 @@ def _record_agent(
         ):
             raise TaskError("ordinary agent does not match retained allocation provenance")
         if worktree_record is not None:
-            record = owner_record(worktree_record, dict(row), task.id)
+            from .ordinary_control_invocation import CONTROL
+            record = owner_record(
+                worktree_record, dict(row), task.id,
+                **({"allow_native": actual.native} if resumed and CONTROL in agent_info else {}),
+            )
             if (startup_invocation is not None and startup_invocation["binding"]["creation_nonce"]
                     != record["creation_nonce"]):
                 raise TaskError("ordinary invocation incarnation changed")
@@ -249,6 +253,13 @@ def _record_agent(
             json.loads(row["agent_info"]) if row["agent_info"] else None,
             agent_info, dict(row), resumed=resumed,
         )
+        from .ordinary_control_invocation import CONTROL, protect, retain
+        retain(
+            json.loads(row["agent_info"]) if row["agent_info"] else None,
+            agent_info, dict(row), task_generation,
+        )
+        if CONTROL in agent_info:
+            protect(conn)
         if HISTORY in agent_info:
             protect_history(conn)
         if not row["agent_info"] and row["session_handle"] and row["session_handle"] != handle:

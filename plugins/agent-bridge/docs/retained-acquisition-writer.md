@@ -424,6 +424,20 @@ present birth records and qualified handoff successors retain their ordinary
 paths. Source tests cover lost replies and concurrent retries against the real
 resume front door without a second native load.
 
+The executing CLI advertises `exact-session-absence` for full JSON status.
+An exact session's 404 returns a typed `refused_unavailable` result naming
+`native_session_unavailable` and the target, retaining exit status 1. Other
+failures and compact status keep their existing behavior; transport failure is
+not session absence.
+
+`retained_keyed_native_admission: 1` advertises that a later keyed prompt
+re-enters the original creation writer through its existing continuation owner.
+The exact resumed workspace/head check and prompt admission share that compatible
+writer context; they do not substitute the currently selected default writer.
+Receipt-only observation and an already-retained receipt remain non-mutating
+and do not need to reconstruct the writer. This capability admits no old key
+into an adopted epoch and does not replace the caller's current task admission.
+
 ### Target inventory and metadata-only lookup
 
 `agent-bridge targets --json` consumes `target_inventory: 1` and returns the

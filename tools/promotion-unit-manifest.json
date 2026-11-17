@@ -5264,7 +5264,19 @@
         "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[key]",
         "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[predecessor]",
         "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[holder]",
-        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[version]"
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[version]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_has_distinct_bytes_and_retains_birth_and_unknown_history",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[key]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[prompt]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[turn]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[revision]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[generation]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[bridge]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[history]",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_full_json_status_distinguishes_absence_from_other_failures[404]",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_full_json_status_distinguishes_absence_from_other_failures[409]",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_full_json_status_distinguishes_absence_from_other_failures[503]",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[null]"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/config.py",
@@ -5608,7 +5620,9 @@
         "plugins/agent-vault/src/agent_vault/attachment_export_cli.py",
         "tools/typecheck_programs.py",
         "tools/bridge_capture_progress.py",
-        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py"
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -5914,9 +5928,9 @@
         "plugins/agent-bridge/src/agent_bridge/reader_admission.py": "3114cdb53c6f11f82f2c01e1cf4d46b4afaeebd28aa34e2d7f8459bb7fcc23c3",
         "plugins/agent-bridge/src/agent_bridge/remote_timeouts.py": "cee6d8bc5c99a7a3de0eb7bdd98972f04bdb0a0df56f7dae851bb80fea03ed0c",
         "plugins/agent-bridge/src/agent_bridge/restart_worktree_cli.py": "48b8609a31397a5d6498c10e90b3506385685ceecfe496479342c430520c671e",
-        "plugins/agent-bridge/src/agent_bridge/resume_cli_contract.py": "296b62fd78877e2a4cb89cfb3108d0e6afc651129d6d28ad20ed1388a060e59d",
+        "plugins/agent-bridge/src/agent_bridge/resume_cli_contract.py": "33af76d2cf7d63ccd72d3257069e71e4da5398e93c8a84f928ecde62296a38b9",
         "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py": "9e2ff36e303541c3161df638c01ce8fbc764f263716af53a7a015628ce7b6cad",
-        "plugins/agent-bridge/src/agent_bridge/service_start_cli.py": "4b05ed4da46e89d5d9c965f6f5e12e16b0f4944f7cdd73a1088e7b06431cf9ba",
+        "plugins/agent-bridge/src/agent_bridge/service_start_cli.py": "9addcc773952a25143b96857265bf94977eb27119d97c2fb2ea7846f6da74759",
         "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "fbd359cd4b5fe8e37867404564271626f5aef7fb3661eea5b0c0fa426e102104",
         "plugins/agent-bridge/src/agent_bridge/retained_writer_transport.py": "9f9650498eb7e1c8a76b05fa0ada7fecdb0aaccb9a8e783606b2223fa2583208",
         "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "d66ea76d0fee8984060abf78f57ca2e88974d4eaed28c303dc45cea58257ea8e",
@@ -6097,7 +6111,7 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py": "ac64dc4928031f649da7132f716fe4a508788f8c6321304902cfbf29d01c8817",
         "tools/promotion_unit_tests/test_release_helper_loaders.py": "20b0d0453e193a6ad94a5bd4ab4c8f16db8f5dcb526e52f81113b3f0f16644d6",
         "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
-        "tools/promotion_unit_tests/test_resume_cli_contract.py": "2615c3ab4ad187d478f590417c64dc118c517feea867e2a25145c1b7493335e8",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py": "62fe9245c62c67bc0e084a2a8424ec6afadc461a43708165c2222b8e9fd043bf",
         "tools/promotion_unit_tests/test_runtime_profile_intent.py": "3acf18c4310d56d92c43b0c8e5f46a076b928ae301bf3dfc7ae828ed55cb630a",
         "tools/promotion_unit_tests/test_runtime_profile_wheels.py": "f9396c823e5e76fc627e318a0adfe39d2eebd2164ab4f9e8b02c2593afce009e",
         "tools/promotion_unit_tests/test_runtime_regressions.py": "66807c6f66306c6b6c4c14944660808ef8a8f0cca4186945a45202777f92549b",
@@ -6265,7 +6279,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py": "8e0643ceac1313c70aef03a66704b9109b89662493ce69d3f7d4bec260a21303",
         "plugins/agent-dispatch/src/agent_dispatch/worktree_owner_launch.py": "ae30f2fba563d9b42a894243a497a41838246af681c098bc7fcc71e750e90f90",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py": "d096be83cbfad3d1f1b35e56dc3ea6bca10c4150a0dad28d20f84515f5ecd5b8",
-        "plugins/agent-dispatch/src/agent_dispatch/ordinary_agent_facts.py": "807a4fc8b03ce20794f47829078c3f4353854782bcc93eb7f9e6ada212c2ac22",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_agent_facts.py": "f4c781be45a3a08c71f769c58144bf5b86d2e04fc8767249e712748143149ddd",
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "fa59ad840f2a9c4a5c2a77c0a9d4fd22f9124e352ec310042b07d0d7d2873271",
@@ -6433,6 +6447,9 @@
         "tools/bridge_capture_progress.py": "70eb1d041b7594e81249f7233f208ebea634cb4eb64e3cc58225a06e4c30f6d3",
         "tools/promotion_unit_tests/test_capture_progress.py": "6b38d8cf02b468d07e29ee94382097d3fc54e5b895f0b447a0b801c22c501637",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py": "3daea0666f7d4a4bff3dcf8a060db841668c86d54034f084aa0f1f3b57554834",
-        "tools/promotion_unit_tests/test_ordinary_control_adoption.py": "03492bbacca2e6be98395ce37dee932a3818ca92b983e2085bd3592e7853f2d7"
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py": "03492bbacca2e6be98395ce37dee932a3818ca92b983e2085bd3592e7853f2d7",
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py": "3961660093fbbc40de69cad35f6ca9b7be8d5db0b1e6bfcb481020bf1c5b38e7",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py": "18bf1ff704db6aefb593947f1b46c669f564d002669a2df4e816524df2ad57d9",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py": "f8180ab97c95b608991360ad33dc5a1d0678ba713bcbbc2cd80ab222b526f13e"
     }
 }

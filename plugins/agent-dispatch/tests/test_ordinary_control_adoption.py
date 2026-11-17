@@ -103,9 +103,9 @@ def test_control_adoption_commits_history_without_task_or_startup_acceptance(ado
     assert asdict(queue.get(task["id"])) == original_task
     assert calls == []
     assert _record(adopting).agent_info == stored.agent_info
-    with pytest.raises(BridgeCarriedSessionBusy, match="excluded after control adoption"):
+    with pytest.raises(BridgeCarriedSessionBusy, match="CLI lacks exact retained resume support"):
         _start(assigned)
-    assert not calls
+    assert calls == ["version"]
     with pytest.raises(TaskError, match="predecessor control epoch"):
         ordinary_bridge.record_session_info(queue, before["key"], {
             "session_id": "adopted-bridge",
