@@ -26,6 +26,10 @@ def metadata_boundary(boundary: Any, tmp_path: Path, monkeypatch: pytest.MonkeyP
     boundary.request.app.state.ready = True
     cache = worktrees.WorktreeDiscoveryCache()
     cache._cache = {"example": [boundary.entry]}
+    config = boundary.request.app.state.resolver.agents["example"]
+    config.managed, config.spawn_command = False, None
+    cache._refresh.bind(("fixture",), ["example"], available=True)
+    cache._refresh.published(cache._refresh.epoch, {"example": None})
     boundary.request.app.state.worktree_discovery_cache = cache
     boundary.state["record"].update(
         creation_nonce="original-allocation", session_count=1, sessions_indexed=True,
@@ -67,6 +71,68 @@ async def test_concurrent_hydration_retains_one_original_native_without_a_load(m
     assert not bound.db.execute_read(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='acquisition_launch_gates'",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("managed", [False, True])
+async def test_loopback_owner_reuses_metadata_and_lists_its_actual_local_transport(
+    metadata_boundary: Any, monkeypatch: pytest.MonkeyPatch, managed: bool,
+) -> None:
+    from agent_bridge import agent_registry
+    from agent_bridge.routes import worktrees
+    from agent_bridge.topology import MachineConfig, SshEnvironment
+
+    bound = metadata_boundary
+    machine = MachineConfig(
+        key="fixture-machine", display_name="Fixture", ssh_ready=True,
+        ssh_environments=[SshEnvironment(name="linux", alias="fixture-loopback")],
+    )
+    agents = agent_registry.parse_agent_registry({"example": {
+        "host": machine.key, "ssh_environment": "linux",
+        "project": "example-project", "cwd": bound.entry.path,
+    }})
+    monkeypatch.setattr(agent_registry, "_detect_local_machine", lambda *_args: (machine, "linux"))
+    resolver = agent_registry.AgentResolver(agents, {machine.key: machine})
+    bound.request.app.state.resolver = resolver
+    assert agents["example"].host == machine.key
+    assert resolver.resolve("example").type == "local"
+    expected = None
+    if managed:
+        first = await worktree_native_resume.hydrate_worktree(bound.entry.id, bound.request)
+        second = await worktree_native_resume.hydrate_worktree(bound.entry.id, bound.request)
+        value = json.loads(bytes(first.body))
+        expected = value["session_id"]
+        assert json.loads(bytes(second.body))["session_id"] == expected
+    cache = bound.request.app.state.worktree_discovery_cache
+    cache._resolver = resolver
+    cache._sync_sources(resolver)
+    cache._cache = {"example": [bound.entry]}
+    cache._refresh.published(cache._refresh.epoch, {"example": None})
+    monkeypatch.setattr(
+        resolver, "resolve", lambda *_args: pytest.fail("cached render resolved a launch configuration"),
+    )
+    listing = await worktrees.list_worktrees(bound.request, render=True, refresh=False)
+    assert listing["groups"]["example"][0]["session_id"] == expected
+    assert len(bound.manager.list_sessions()) == int(managed)
+    bound.manager.start_session.assert_not_called()
+    bound.manager.resume_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hydration_requires_complete_owner_discovery(metadata_boundary: Any) -> None:
+    bound = metadata_boundary
+    cache = bound.request.app.state.worktree_discovery_cache
+    cache._refresh.bind(("fixture-incomplete",), ["example", "hidden"], available=True)
+    cache._refresh.published(cache._refresh.epoch, {"example": None, "hidden": "unavailable"})
+    with pytest.raises(HTTPException) as held:
+        await worktree_native_resume.hydrate_worktree(bound.entry.id, bound.request)
+    detail = held.value.detail
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "target_inventory_incomplete"
+    assert not bound.calls
+    assert not bound.manager.list_sessions()
+    bound.manager.start_session.assert_not_called()
+    bound.manager.resume_session.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -7,12 +7,13 @@ event stream still sits on disk at
 ``~/.copilot/session-state/<id>/events.jsonl``. This tool lets a *fresh*
 session ramp up into that dormant session's situation and pick up the torch.
 
-It deliberately reuses the segmenter engine wholesale -- the same
-``collate-session`` machinery that turns ``events.jsonl`` into a digest -- and
-adds only the one primitive the digest system lacked: **worktree -> session
-discovery**. ``collate-session`` can resolve ``"current"`` only for its own
-repo root; ramp-up resolves the most recent session for *any* worktree you
-name, then:
+It deliberately reuses the segmenter engine wholesale -- the shared
+:mod:`agent_logger.segmenter.digest` engine that also backs
+``collate-session`` -- and adds only the one primitive the digest system
+lacked: **worktree -> session discovery**, plus its own takeover-brief charter
+on top of the engine's renderers. ``collate-session`` can resolve
+``"current"`` only for its own repo root; ramp-up resolves the most recent
+session for *any* worktree you name, then:
 
   1. collates it into an ephemeral digest (segments written under
      ``$TEMP/session-digest/<id>/`` so ``read-session-digest`` can read them
@@ -45,34 +46,35 @@ import os
 import subprocess
 import sys
 from collections import deque
+from collections.abc import Iterator
+from io import TextIOWrapper
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 
 from agent_logger import sessions
 from agent_logger.segmenter.collate import (
-    DEFAULT_MAX_TOOL_OUTPUT,
-    DEFAULT_SEGMENT_SIZE,
     SESSION_STATE_SUBDIR,
-    TurnStats,
-    _format_checkpoints,
-    _format_metadata,
-    _format_turn,
-    _format_turn_stats,
     _is_quip_session,
     _normalize_cwd,
     _workspace_cwd,
     find_copilot_dir,
-    fmt_ts,
-    read_checkpoints,
-    read_rewind_index,
-    read_workspace,
     session_archive_stores,
-    write_segments,
+)
+from agent_logger.segmenter.digest import (
+    DEFAULT_MAX_TOOL_OUTPUT,
+    DEFAULT_SEGMENT_SIZE,
+    TurnStats,
+    build_session_digest,
+    fmt_ts,
+    format_checkpoints,
+    format_metadata,
+    format_turn,
+    format_turn_stats,
+    read_workspace,
 )
 from agent_logger.segmenter.platform import detect_machine
-from agent_logger.segmenter.turn_stream import TurnStream
 
 DEFAULT_TAIL_TURNS = 6
 
@@ -87,7 +89,7 @@ def _session_state_root() -> Path:
     return find_copilot_dir() / SESSION_STATE_SUBDIR
 
 
-def _iter_sessions():
+def _iter_sessions() -> Iterator[tuple[Path, dict[str, str], str, Path]]:
     """Yield ``(dir, workspace, cwd, events_path)`` for every real session.
 
     A "real" session has an ``events.jsonl`` and is not a quip/sub-agent temp
@@ -303,15 +305,15 @@ def _render_brief(
     parts.append("")
 
     # Metadata (reuse the collate formatter; drop its leading "# Session Digest").
-    meta = _format_metadata(workspace, session_start, cutoff_time=None)
+    meta = format_metadata(workspace, session_start, cutoff_time=None)
     parts.extend(m for m in meta if not m.startswith("# Session Digest"))
 
     # Checkpoints are the CLI's own pre-compaction summaries -- the single best
     # signal of accumulated work.
-    parts.extend(_format_checkpoints(checkpoints))
+    parts.extend(format_checkpoints(checkpoints))
 
     stats = turn_stats if turn_stats is not None else TurnStats.of(turns)
-    parts.extend(_format_turn_stats(stats, checkpoints, snapshots))
+    parts.extend(format_turn_stats(stats, checkpoints, snapshots))
 
     # The tail: the last few turns, verbatim from the transcript.
     total = stats.turns
@@ -329,7 +331,7 @@ def _render_brief(
         )
         for i in range(first, total + 1):
             # ``turns`` ends with turn ``total`` whether it is complete or a tail.
-            parts.append(_format_turn(turns[len(turns) - 1 - (total - i)], i))
+            parts.append(format_turn(turns[len(turns) - 1 - (total - i)], i))
             parts.append("")
 
     # Deep-dive pointer.
@@ -431,8 +433,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stdout).reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stderr).reconfigure(encoding="utf-8", errors="replace")
 
     ref = args.worktree
 
@@ -460,20 +462,21 @@ def main() -> None:
     # ── Resolve the target session(s) locally ──
     sessions: list[dict[str, Any]] = []
     worktree_root: str | None = None
+    chosen: dict[str, Any]
 
     if args.session:
-        session_dir = _session_dir_by_id(args.session)
-        if session_dir is None:
+        resolved_session_dir = _session_dir_by_id(args.session)
+        if resolved_session_dir is None:
             print(
                 f"error: session not found: {args.session}\n"
                 f"  checked: {_session_state_root() / args.session}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        ws = read_workspace(session_dir)
+        ws = read_workspace(resolved_session_dir)
         chosen = {
-            "id": session_dir.name,
-            "dir": session_dir,
+            "id": resolved_session_dir.name,
+            "dir": resolved_session_dir,
             "cwd": ws.get("cwd", ""),
             "branch": ws.get("branch", ""),
             "name": ws.get("name", ""),
@@ -530,38 +533,22 @@ def main() -> None:
     session_dir: Path = chosen["dir"]
     session_id: str = chosen["id"]
 
-    # ── Collate (reuse the segmenter engine) into an ephemeral digest ──
+    # ── Collate (the shared digest engine) into an ephemeral digest ──
     out_dir = Path(args.output_dir) if args.output_dir else _default_output_dir(session_id)
-    if out_dir.exists():
-        for f in out_dir.iterdir():
-            if f.is_file() and (f.name.endswith(".md") or f.name == "manifest.yaml"):
-                f.unlink()
-
-    workspace = read_workspace(session_dir)
-    checkpoints = read_checkpoints(session_dir)
-    snapshots = read_rewind_index(session_dir)
-    stream = TurnStream(session_dir, cutoff=None, max_tool_output=args.max_tool_output)
-    # Stream turns into the digest, keeping only the counts and the brief's tail.
-    stats = TurnStats()
+    # Stream turns into the digest, keeping only the brief's tail; the engine
+    # keeps the whole-session counts.
     tail: deque[dict[str, Any]] = deque(maxlen=max(args.tail_turns, 0))
-
-    def _observed_turns():
-        for turn in stream:
-            stats.add(turn)
-            tail.append(turn)
-            yield turn
-
-    write_segments(
-        workspace=workspace,
-        session_start=stream.session_start,
-        checkpoints=checkpoints,
-        turns=_observed_turns(),
-        snapshots=snapshots,
-        cutoff_time=None,
-        output_dir=out_dir,
+    digest = build_session_digest(
+        session_dir,
+        out_dir,
         segment_size=args.segment_size,
         max_tool_output=args.max_tool_output,
+        on_turn=tail.append,
     )
+    workspace = digest.workspace
+    checkpoints = digest.checkpoints
+    snapshots = digest.snapshots
+    stats = digest.stats
 
     if args.json:
         print(
@@ -590,7 +577,7 @@ def main() -> None:
         _render_brief(
             session=chosen,
             workspace=workspace,
-            session_start=stream.session_start,
+            session_start=digest.session_start,
             checkpoints=checkpoints,
             turns=list(tail),
             snapshots=snapshots,

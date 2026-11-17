@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 from itertools import product
 import json
@@ -37,6 +37,7 @@ from tools.typecheck_bootstrap_views import (  # noqa: E402
     SELECTOR_INPUTS, powershell_selector_view, posix_selector_view,
 )
 from tools.typecheck_new_code import select_new_code  # noqa: E402
+from tools.typecheck_programs import Program, ProgramError, ProgramInputs, independent_programs  # noqa: E402
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -58,6 +59,7 @@ class Project:
     requirements: str
     additional_python_versions: tuple[str, ...] = ()
     import_roots: tuple[str, ...] = ()
+    program_roots: tuple[Program, ...] = ()
 
     def owns(self, path: str) -> bool:
         """Match exact files or complete directory prefixes, not filename globs."""
@@ -120,7 +122,7 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
     defaults = {key: manifest[key] for key in ("python_version", "platforms", "requirements")}
     for value in rows:
         row = _object(value)
-        if not required <= set(row) <= required | set(defaults) | {"additional_python_versions", "import_roots"}:
+        if not required <= set(row) <= required | set(defaults) | {"additional_python_versions", "import_roots", "program_roots"}:
             raise TypecheckError("Invalid project fields")
         row = {**defaults, **row}
         name, level, python_version, requirements = (
@@ -149,6 +151,23 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
         )
         for path in import_roots:
             _import_directory(root, path)
+        program_rows = row.get("program_roots", [])
+        if not isinstance(program_rows, list):
+            raise TypecheckError("program_roots must be a list of independent programs")
+        program_roots: list[Program] = []
+        for value in program_rows:
+            program = _object(value)
+            if set(program) != {"root", "import_roots"} or not isinstance(program["root"], str):
+                raise TypecheckError("Invalid independent program fields")
+            directory = _relative(program["root"])
+            program_imports = tuple(_relative(path) for path in _strings(
+                program["import_roots"], "program import_roots",
+            ))
+            for path in (directory, *program_imports):
+                _import_directory(root, path)
+            if any(path != directory and not path.startswith(directory + "/") for path in program_imports):
+                raise TypecheckError("Independent program imports must stay within its root")
+            program_roots.append(Program(directory, program_imports))
         platforms = _strings(row["platforms"], "platforms")
         if any(platform not in ("linux", "win32", "darwin") for platform in platforms):
             raise TypecheckError(f"{name}: unsupported platform")
@@ -156,6 +175,7 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
             name, include, exclude, cast(Level, level), python_version, platforms,
             _relative(requirements), additional,
             import_roots=import_roots,
+            program_roots=tuple(program_roots),
         ))
     if len({project.name for project in projects}) != len(projects) or not projects:
         raise TypecheckError("Project names must be unique and the portfolio nonempty")
@@ -632,6 +652,44 @@ def check_project(
     root: Path, project: Project, files: tuple[str, ...], *,
     all_paths: tuple[str, ...], strict: bool = False,
 ) -> int:
+    """Check all independent programs under the same physical owner and strict policy."""
+    if not project.program_roots:
+        return _check_program(root, project, files, all_paths=all_paths, strict=strict)
+    try:
+        programs = independent_programs(
+            files, all_paths, tuple(program.root for program in project.program_roots), project.owns,
+        )
+        if not programs:
+            raise ProgramError("Independent programs have no selected Python files")
+        captured = ProgramInputs.capture(root, files, _import_identity)
+        failure = 0
+        for index, program in enumerate(programs, 1):
+            declaration = next(
+                (item for item in project.program_roots if program[0].startswith(item.root + "/")), None,
+            )
+            member_project = replace(project, import_roots=declaration.import_roots) if declaration else project
+            member_paths = tuple(
+                path for path in all_paths if path.startswith(declaration.root + "/")
+            ) if declaration else all_paths
+            captured.verify()
+            print(f"Independent program {index}/{len(programs)}: {project.name}")
+            try:
+                result = _check_program(
+                    root, member_project, program, all_paths=member_paths, strict=strict,
+                    program_root=declaration.root if declaration else None,
+                )
+                failure = failure or result
+            finally:
+                captured.verify()
+        return failure
+    except ProgramError as error:
+        raise TypecheckError(str(error)) from error
+
+
+def _check_program(
+    root: Path, project: Project, files: tuple[str, ...], *,
+    all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
+) -> int:
     """Check one declared scope; never execute product or test code."""
     if not files:
         raise TypecheckError(f"{project.name}: selected scope has no Python files")
@@ -653,12 +711,13 @@ def check_project(
     try:
         if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
             raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
-        imports = {str(root), str(root / "libs" / "installer-engine")}
+        base = root / program_root if program_root else root
+        imports = {str(base), str(base / "libs" / "installer-engine")}
         imports.update(
             str(root.joinpath(*file.split("/")[:file.split("/").index("src") + 1]))
             for file in all_paths if "src" in file.split("/")
         )
-        ordered_imports = sorted(imports)
+        ordered_imports = [] if program_root else sorted(imports)
         if project.import_roots:
             import_inputs = _import_inputs(root, project.import_roots, all_paths)
         for relative in project.import_roots:
@@ -781,7 +840,7 @@ def check_project(
             print(views.diagnostics(result.stdout), end="")
             print(views.diagnostics(result.stderr), end="", file=sys.stderr)
             if result.returncode:
-                if not project.additional_python_versions:
+                if not project.additional_python_versions and not project.program_roots:
                     return result.returncode
                 failure = failure or result.returncode
         return failure

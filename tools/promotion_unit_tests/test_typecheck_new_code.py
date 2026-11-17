@@ -9,6 +9,39 @@ import pytest
 from tools import typecheck
 from tools.typecheck_new_code import select_new_code
 from tools.typecheck_source_views import SourceViewError
+from tools.typecheck_programs import ProgramError, independent_programs
+
+
+def test_independent_programs_preserve_complete_owner_selection() -> None:
+    project = typecheck.Project(
+        "sample", ("ordinary", "retained"), (), "pending", "3.10",
+        ("linux", "win32"), "requirements.txt",
+    )
+    files = ("ordinary/first.py", "retained/first.py", "ordinary/second.py")
+    assert independent_programs(files, files, ("retained",), project.owns) == (
+        (files[0], files[2]), (files[1],),
+    )
+    assert independent_programs((files[1],), files, ("retained",), project.owns) == ((files[1],),)
+
+
+@pytest.mark.parametrize("roots", [
+    ("retained", "retained"), ("retained", "retained/nested"), ("missing",),
+], ids=["duplicate-root", "nested-root", "empty-root"])
+def test_independent_programs_refuse_ambiguous_or_empty_declarations(roots: tuple[str, ...]) -> None:
+    files = ("ordinary/contract.py", "retained/contract.py")
+    with pytest.raises(ProgramError, match="(overlap|no owned)"):
+        independent_programs(files, files, roots, lambda _path: True)
+
+
+@pytest.mark.parametrize("selected", [
+    ("ordinary/contract.py", "ordinary/contract.py"), ("unowned.py",), ("retained/missing.py",),
+], ids=["duplicate-file", "unowned-file", "missing-file"])
+def test_independent_programs_refuse_noninventoried_or_unowned_selection(
+    selected: tuple[str, ...],
+) -> None:
+    files = ("ordinary/contract.py", "retained/contract.py")
+    with pytest.raises(ProgramError, match="unique inventoried owner"):
+        independent_programs(selected, files, ("retained",), lambda path: path in files)
 
 
 @pytest.mark.parametrize("level", ["pending", "basic", "strict"])

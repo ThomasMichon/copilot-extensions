@@ -71,6 +71,14 @@ selected profiles keep their independent dimension. Slot `runtime-profile.json`
 binds profile, original source, package version and canonical completion hash.
 Evidence is created only before completion and verified without rewriting on reuse.
 Native start/status resolve the active interpreter read-only, not desired policy.
+Windows native start uses that interpreter's CLI readiness path even when an
+enabled Scheduled Task exists; task activation alone is not success. A disabled
+task still refuses startup, and the CLI's exit code and project context survive.
+The invocation binds the requested installation's state and IPC paths, task
+name and installation identity, then restores the caller's environment.
+It also mirrors the service launcher's port policy: tagged installations use
+port zero rather than accepting a healthy unrelated legacy TCP listener;
+untagged installations retain normal configured-port discovery.
 Common PATH/pruning finalization also runs after retained profile construction.
 Bootstrap currentness binds the marker and full original source receipt to the
 incoming payload's exact generation, including unselected prepared-source base.
@@ -150,7 +158,7 @@ Prompt helpers are in `src/agent_vault/cli.py` and `src/agent_vault/prompt.py`. 
 
 The daemon supports the actions registered in `VaultService.handle_request`:
 
-- Entry reads and mutations: `get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv`.
+- Entry reads and mutations: `get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv`, `copy`/`cp`.
 - SSH key attachment import/export: `import-key`, `export-key`.
 - Whole-pair preparation: `ssh-key-prepare`, exposed as
   [`ssh-key prepare`](ssh-key-preparation.md); optional `ssh` cryptographic extra,
@@ -163,6 +171,28 @@ The daemon supports the actions registered in `VaultService.handle_request`:
 - Extension actions registered with `register_action`.
 
 `remove` and `move` are scoped to the resolved vault group unless the caller passes `--force`.
+
+`copy` takes a destination that is either a group (an existing group, or any
+path ending in `/`), which keeps the source title, or a full destination entry
+path. A bare destination name resolves under the vault group like any other
+bare name. `copy` is not group-scoped because it never discards the source,
+and it refuses an existing destination entry rather than replacing it.
+The service revokes cached values for the destination before the backend
+runs. The backend stages the copy under a unique temporary title in the
+destination group and renames it to the destination title only after every
+field and attachment is copied; on failure the staged entry is removed.
+
+`copy` duplicates username, password and attachments. The backend command
+line cannot write custom attributes, so custom attributes, TOTP settings,
+tags, expiry, icons and history are not copied. It accepts notes and URLs
+only as process arguments, which other local users may be able to observe, so
+`copy` refuses a source with notes or a URL unless `skip_notes`
+(`--skip-notes`) or `skip_url` (`--skip-url`) asks to copy without them. A
+password is sent through a line-oriented prompt, so a username or password
+containing a line break or carriage return is refused rather than altered;
+fields are read as raw bytes and only the CLI's own line terminator, learned
+from the entry title, is removed. When a failed copy cannot confirm that its
+staged entry is gone, the error names it for manual removal.
 The unchanged pure group-boundary predicate lives beside entry normalization
 in `config.py`; the service retains its compatibility alias.
 

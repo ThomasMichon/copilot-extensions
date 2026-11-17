@@ -143,6 +143,12 @@ test("native pressure defers checkpoint persistence and ordering to the host", (
 });
 
 async function runExtensionFixture(fixtureName, configText) {
+  for (const namespace of ["@microsoft/copilot-sdk", "@github/copilot-sdk"]) {
+    await runSdkExtensionFixture(fixtureName, configText, namespace);
+  }
+}
+
+async function runSdkExtensionFixture(fixtureName, configText, namespace) {
   const root = await mkdtemp(join(tmpdir(), "native-extension-"));
   try {
     await mkdir(join(root, ".git"));
@@ -156,10 +162,11 @@ async function runExtensionFixture(fixtureName, configText) {
       ["--experimental-loader", loader, fixture, extension], {
         cwd: root, encoding: "utf8", windowsHide: true, timeout: 15000,
         env: { ...process.env, COPILOT_HOME: root, HOME: root, USERPROFILE: root,
-          COPILOT_AGENT_SESSION_ID: "" },
+          COPILOT_AGENT_SESSION_ID: "", FIXTURE_SDK_NAMESPACE: namespace },
       });
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.status, 0,
+      `${namespace}: ${result.error?.message || result.stderr || result.stdout}`);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
@@ -172,6 +179,12 @@ test("production extension registers durable capture, reset replay and the compl
 });
 
 test("bound config overrides launch config, reloads live, and emergency store skips Goal discovery", async () => {
+  for (const namespace of ["@microsoft/copilot-sdk", "@github/copilot-sdk"]) {
+    await runBoundExtensionFixture(namespace);
+  }
+});
+
+async function runBoundExtensionFixture(namespace) {
   const root = await mkdtemp(join(tmpdir(), "intent-bound-"));
   try {
     const bound = join(root, "bound");
@@ -194,12 +207,13 @@ test("bound config overrides launch config, reloads live, and emergency store sk
         env: { ...process.env, COPILOT_HOME: root, HOME: root, USERPROFILE: root,
           FIXTURE_BOUND_CWD: bound, FIXTURE_DELAYED_ID: variant === "immediate" ? "" : "true",
           FIXTURE_CONSUME: ["file", "task", "checkpoint"].includes(variant) ? variant : "",
-          COPILOT_AGENT_SESSION_ID: "" },
+          COPILOT_AGENT_SESSION_ID: "", FIXTURE_SDK_NAMESPACE: namespace },
       });
-      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(result.status, 0,
+        `${namespace}/${variant}: ${result.error?.message || result.stderr || result.stdout}`);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
-});
+}
 
 test("native-selected sessions defer automatic pressure nudges to the host by default", async () => {
   await runExtensionFixture("native-defer-extension.mjs", "mode: auto\n");

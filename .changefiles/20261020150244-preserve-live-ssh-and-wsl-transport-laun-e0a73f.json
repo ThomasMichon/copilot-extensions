@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve live SSH and WSL transport launcher ancestry during orphan-shell cleanup.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

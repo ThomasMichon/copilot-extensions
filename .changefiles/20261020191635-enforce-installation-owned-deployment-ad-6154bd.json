@@ -1,9 +1,0 @@
-{
-  "comment": "Enforce installation-owned deployment admission before cell staging and retained runtime publication",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

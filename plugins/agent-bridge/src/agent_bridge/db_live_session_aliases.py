@@ -15,12 +15,13 @@ CANONICAL_SESSION_SQL = (
 # routing aliases. Binds the requested id three times.
 MESSAGE_TARGET_SQL = (
     "(CASE WHEN exact_session=1 OR runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL "
+    "OR disposition_json IS NOT NULL "
     f"THEN ? ELSE {CANONICAL_SESSION_SQL} END)"
 )
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from .db_core import LIVE_SESSION_STALE_SECONDS, local_pid_alive
 from .owner_membership_signal import commit
@@ -363,11 +364,12 @@ def _fold_in_predecessor(
         # Retained custody belongs to the original native context, not its
         # temporary routing alias. Legacy messages still follow the rename.
         "UPDATE live_messages SET session_id=? WHERE session_id=? "
-        "AND exact_session=0 AND runtime_custody_json IS NULL AND handoff_json IS NULL",
+        "AND exact_session=0 AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+        "AND disposition_json IS NULL",
         (session_id, predecessor_id),
     )
     conn.execute(
         "DELETE FROM live_sessions WHERE session_id=?",
         (predecessor_id,),
     )
-    return predecessor_id
+    return cast(str, predecessor_id)

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native configuration, catalog and session-scope probes from writing bytecode into immutable payloads.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

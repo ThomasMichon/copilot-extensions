@@ -103,14 +103,29 @@ run_runtime() {
     apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
     if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
         local validated_cache
+        local validator_args=(-I "$SCRIPT_DIR/validate_identity_cache_context.py")
+        case "${command_arguments[0]:-}" in
+            installer-readiness|invocation-contract)
+                validator_args=(-I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py"
+                    --plugin agent-vault --module agent_vault
+                    --script "$SCRIPT_DIR/validate_identity_cache_context.py" --) ;;
+        esac
         validated_cache="$(
-            "$AGENT_RT_PY" -I "$SCRIPT_DIR/validate_identity_cache_context.py" \
+            "$AGENT_RT_PY" "${validator_args[@]}" \
                 "--runtime-root=$RUNTIME_ROOT" "--installation-id=$INSTALLATION_ID" \
                 "--source-home=$IDENTITY_SOURCE_HOME" "--source-id=$IDENTITY_SOURCE_ID" \
                 "--cache-dir=$IDENTITY_CACHE_DIR"
-        )" || exit 126
+        )" || {
+            case "${command_arguments[0]:-}" in
+                installer-readiness|invocation-contract) printf '%s\n' "$validated_cache" ;;
+            esac
+            exit 126
+        }
         export AGENT_VAULT_CACHE_DIR="$validated_cache"
     fi
+    case "${command_arguments[0]:-}" in
+        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py" --plugin agent-vault --module agent_vault -- "$@" ;;
+    esac
     exec "$AGENT_RT_PY" -I -X utf8 -m agent_vault "$@"
 }
 
@@ -225,6 +240,10 @@ if [[ -z "$CONTEXT" ]]; then
     fi
 fi
 
+case "${command_arguments[0]:-}" in
+    installer-readiness|invocation-contract)
+        export COPILOT_EXTENSIONS_READONLY_PROBE=isolated-imports-v1 ;;
+esac
 resolve_runtime
 if [[ "${command_arguments[0]:-}" == invocation-contract ]]; then
     if [[ "$command_argument_count" != 2 || "${command_arguments[1]:-}" != --json ]]; then
@@ -250,6 +269,9 @@ if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
             printf '%s\n' "$activation" >&2
             exit 2
         fi
+    elif [[ "$activation_code" == 126 ]]; then
+        printf '%s\n' "$activation"
+        exit 126
     elif [[ "$activation_code" != 0 ]]; then
         if [[ "$(json_get "$activation" "$(json_path reason)" 2>/dev/null || true)" == repository-context-missing ]]; then
             printf "%s\n" "[agent-vault] repository context is missing. Run from an adopted repository or use '<repo> vault unlock' from any directory." >&2

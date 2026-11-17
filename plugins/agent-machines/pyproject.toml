@@ -72,6 +72,9 @@ agent-machines = "agent_machines.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_machines" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 agent_machines = ["installation-repair-v1.json", "health-collection-v1.json", "preferences-repositories-v1.json"]
 

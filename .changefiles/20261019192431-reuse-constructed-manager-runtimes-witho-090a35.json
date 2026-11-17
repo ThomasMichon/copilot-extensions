@@ -1,9 +1,0 @@
-{
-  "comment": "Adopt canonical Manager runtime construction and installed-origin health before selection; recover an attributable broken adoption during normal unified update through its selected source, retain prior runtimes on failure and activate under the constructed interpreter.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

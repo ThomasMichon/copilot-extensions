@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from types import ModuleType
+from typing import Any
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -88,7 +90,7 @@ def _peek_iso(ts: object) -> str:
     return s[:19].replace("T", " ") if s else "-"
 
 
-def _peek_target(args: argparse.Namespace):
+def _peek_target(args: argparse.Namespace) -> tuple[dict[str, Any], str, str, str | None, dict[str, Any] | None]:
     """Resolve ``args.target`` to a session and read its transcript snapshot over
     its own transport: ``(session, session_id, agent, acp_session_id, snapshot)``, with
     ``snapshot`` None when Copilot hasn't written a transcript yet. Exits 1 when
@@ -202,10 +204,11 @@ def _cmd_presence(args: argparse.Namespace) -> None:
     print(f"  {sid}  ({agent}): {presence.get('state')}{when} -- {presence.get('reason')}{mode}")
 
 
-def _usage_line(usage: dict) -> str:
+def _usage_line(usage: dict[str, Any]) -> str:
     if not usage.get("reported"):
         return f"not reported ({usage.get('reason') or 'no usage in the transcript'})"
-    shown = lambda v: "not reported" if v is None else v  # noqa: E731
+    def shown(value: Any) -> Any:
+        return "not reported" if value is None else value
     tokens = usage.get("tokens")
     toks = (", tokens " + " ".join(f"{k}={shown(v)}" for k, v in tokens.items())) if tokens else ""
     newest = (usage.get("reported_at"), usage.get("source"))
@@ -239,11 +242,11 @@ def _cmd_usage(args: argparse.Namespace) -> None:
         rows.append({"session_id": sid, "agent": agent, "acp_session_id": acp, "usage": usage})
     reported = [r["usage"] for r in rows if r["usage"].get("reported")]
 
-    def total(key):
+    def total(key: str) -> dict[str, Any]:
         values = [u.get(key) for u in reported if u.get(key) is not None]
         return {"value": sum(values) if values else None, "coverage": f"{len(values)}/{len(rows)}"}
 
-    rollup = {"premium_requests": total("premium_requests"), "nano_aiu": total("nano_aiu"),
+    rollup: dict[str, Any] = {"premium_requests": total("premium_requests"), "nano_aiu": total("nano_aiu"),
               "sessions": len(rows), "reported": len(reported)}
     if args.json:
         core._json_out({"sessions": rows, "rollup": rollup})
@@ -325,7 +328,17 @@ def _cmd_session_usage(args: argparse.Namespace) -> None:
         print(f"Updated:  {core._short_dt(last_at)}")
 
 
-def register_session_maintenance_commands(sub: argparse._SubParsersAction) -> None:
+def register_session_maintenance_commands(sub: argparse._SubParsersAction[Any]) -> None:
+    from .target_resolution_cli import command as targets_command
+
+    targets_p = sub.add_parser(
+        "targets", help="List registered sessions and every discovered workspace",
+        allow_abbrev=False,
+    )
+    targets_p.add_argument("--refresh", action="store_true", help="Refresh workspace discovery")
+    targets_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    targets_p.set_defaults(func=targets_command)
+
     sessions_p = sub.add_parser("sessions", help="List sessions")
     sessions_p.add_argument("--status", help="Filter by status")
     sessions_p.set_defaults(func=_cmd_sessions)

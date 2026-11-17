@@ -1,4 +1,7 @@
 import json
+import subprocess
+from pathlib import Path
+from typing import NoReturn, TypedDict, cast
 
 import pytest
 import yaml
@@ -7,7 +10,16 @@ from configuration_layers import ConfigurationError
 from agent_mcp import config, configuration
 
 
-def setup(tmp_path, monkeypatch, binding="bound"):
+class OwnerReport(TypedDict):
+    schema: str
+    version: int
+    context: dict[str, str]
+    repository_machine_root: str
+
+
+def setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binding: str = "bound",
+) -> tuple[Path, Path, Path, Path, Path, OwnerReport]:
     base, knowledge, local, machine = (tmp_path / part for part in ("base", "knowledge", "local", "machine"))
     for root in (base, knowledge, local, machine):
         root.mkdir()
@@ -19,7 +31,7 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     }
     if binding == "bound":
         context["knowledge_root"] = str(knowledge)
-    report = {
+    report: OwnerReport = {
         "schema": "agent-worktrees.configuration", "version": 1, "context": context,
         "repository_machine_root": str(local),
     }
@@ -28,13 +40,13 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     return selected, base, knowledge, local, machine, report
 
 
-def write(root, values):
+def write(root: Path, values: dict[str, object]) -> None:
     path = root / ".copilot-extensions" / "agent-mcp" / "bridges" / "selected.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(values), encoding="utf-8")
 
 
-def test_native_mcp_loader_all_tiers_and_protected_source(tmp_path, monkeypatch):
+def test_native_mcp_loader_all_tiers_and_protected_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
     write(base, {"timeout": 20, "retries": 2})
     write(knowledge, {"timeout": 30, "retries": 3})
@@ -45,11 +57,12 @@ def test_native_mcp_loader_all_tiers_and_protected_source(tmp_path, monkeypatch)
     assert result.server.url == "https://example.invalid/mcp"
     assert result.headers == {"X-Native": "retained"}
     assert result.source_path == selected
-    assert result.configuration_provenance["/timeout"]["installation_cell"] == "cell"
-    assert result.configuration_provenance["/timeout"]["source"]["root"] == str(local)
+    metadata = cast(configuration.ConfigurationMetadata, result)
+    assert metadata.configuration_provenance["/timeout"]["installation_cell"] == "cell"
+    assert metadata.configuration_provenance["/timeout"]["source"]["root"] == str(local)
 
 
-def test_native_kn_then_machine_precedence(tmp_path, monkeypatch):
+def test_native_kn_then_machine_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
     write(knowledge, {"timeout": 30})
     assert config.load_config(str(selected)).timeout == 30
@@ -57,7 +70,7 @@ def test_native_kn_then_machine_precedence(tmp_path, monkeypatch):
     assert config.load_config(str(selected)).timeout == 40
 
 
-def test_native_unbound_default_and_explicit_path(tmp_path, monkeypatch):
+def test_native_unbound_default_and_explicit_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch, "unbound")
     write(knowledge, {"timeout": 999})
     assert config.load_config(str(selected)).timeout == 10
@@ -67,26 +80,26 @@ def test_native_unbound_default_and_explicit_path(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("protected", ["auth", "server", "headers", "routing", "decorators", "tools"])
-def test_portable_timing_cannot_change_native_protected_schema(tmp_path, monkeypatch, protected):
+def test_portable_timing_cannot_change_native_protected_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, protected: str) -> None:
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
     write(knowledge, {protected: {}})
     with pytest.raises(ValueError, match="cannot change"):
         config.load_config(str(selected))
 
 
-def test_native_environment_idle_selector_preserved(tmp_path, monkeypatch):
+def test_native_environment_idle_selector_preserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
     monkeypatch.setenv("AGENT_MCP_BRIDGE_IDLE_TIMEOUT", "17")
     result = config.load_config(str(selected))
     assert result.idle_timeout == 17
-    assert "/idle_timeout" not in result.configuration_provenance
-    assert result.configuration_selectors == {"idle_timeout": "AGENT_MCP_BRIDGE_IDLE_TIMEOUT"}
+    metadata = cast(configuration.ConfigurationMetadata, result)
+    assert "/idle_timeout" not in metadata.configuration_provenance
+    assert metadata.configuration_selectors == {"idle_timeout": "AGENT_MCP_BRIDGE_IDLE_TIMEOUT"}
     write(knowledge, {"idle_timeout": 18})
     assert config.load_config(str(selected)).idle_timeout == 18
 
 
-def test_actual_absent_owner_preserves_unbound_explicit_bridge_without_bootstrap(tmp_path, monkeypatch):
-    import configuration_context
+def test_actual_absent_owner_preserves_unbound_explicit_bridge_without_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
         monkeypatch.delenv(name, raising=False)
@@ -94,19 +107,18 @@ def test_actual_absent_owner_preserves_unbound_explicit_bridge_without_bootstrap
     selected = tmp_path / "standalone.yaml"
     selected.write_text("server:\n  url: https://example.invalid/mcp\n", encoding="utf-8")
 
-    def no_process(*args, **kwargs):
+    def no_process(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("native config loading must not install or launch an optional owner")
 
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
     result = config.load_config(str(selected))
     assert (result.timeout, result.retries) == (30.0, 1)
     assert sorted(item.name for item in tmp_path.iterdir()) == ["standalone.yaml"]
 
 
-def test_native_unready_legacy_owner_preserves_bridge_defaults(tmp_path, monkeypatch):
+def test_native_unready_legacy_owner_preserves_bridge_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import shutil
     from pathlib import Path
-    import configuration_context
 
     home = tmp_path / "home"
     scripts = home / ".agent-mcp" / "scripts"
@@ -125,10 +137,10 @@ def test_native_unready_legacy_owner_preserves_bridge_defaults(tmp_path, monkeyp
     selected = tmp_path / "bridge.yaml"
     selected.write_text("server:\n  url: https://example.invalid/mcp\n", encoding="utf-8")
 
-    def no_process(*args, **kwargs):
+    def no_process(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("an unready optional owner must not bootstrap")
 
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
     assert config.load_config(str(selected)).timeout == 30.0
     assert (scripts / "versioned_runtime.py").is_file()
     assert configuration._legacy_report(tmp_path) is None
@@ -136,7 +148,7 @@ def test_native_unready_legacy_owner_preserves_bridge_defaults(tmp_path, monkeyp
 
 @pytest.mark.parametrize("implicit", [False, True])
 @pytest.mark.parametrize("matching_cell", [False, True])
-def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, implicit: bool, matching_cell: bool) -> None:
     real_report = configuration.owner_report
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(configuration, "owner_report", real_report)
@@ -147,7 +159,7 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
     report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
     calls = []
 
-    def validate(owner, root, raw):
+    def validate(owner: str, root: Path, raw: str) -> dict[str, str]:
         calls.append((owner, root, raw))
         assert root == own_root
         assert raw == str(own_root / "install.json")
@@ -175,7 +187,7 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
     (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
     (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
 ])
-def test_optional_older_peer_preserves_native_bridge_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+def test_optional_older_peer_preserves_native_bridge_or_fails_real_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, diagnostic: str) -> None:
     import subprocess
     real_report = configuration.owner_report
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
@@ -191,7 +203,7 @@ def test_optional_older_peer_preserves_native_bridge_or_fails_real_refusal(tmp_p
     monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
         calls.append(argv)
         return subprocess.CompletedProcess(argv, code, b"{bad-json", diagnostic.encode())
@@ -205,7 +217,7 @@ def test_optional_older_peer_preserves_native_bridge_or_fails_real_refusal(tmp_p
     assert len(calls) == 1
 
 
-def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     real_report = configuration.owner_report
     selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(configuration, "owner_report", real_report)
@@ -220,7 +232,7 @@ def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, m
 
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("delivered", [False, True])
-def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, nested, delivered):
+def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool, delivered: bool) -> None:
     import shutil
     import subprocess
     import sys
@@ -262,13 +274,15 @@ def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, ne
     monkeypatch.setenv("GH_TOKEN", "must-not-reach-peer")
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         assert argv == [
-            str(python), "-I", "-X", "utf8", "-B", "-m", "agent_worktrees",
+            str(python), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
             "state-root", "--configuration", "--json",
         ]
         assert kwargs["cwd"] == base
-        assert not set(kwargs["env"]) & {
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        assert not set(environment) & {
             "AGENT_CONFIGURATION_CONTEXT", "AGENT_RT_ROOT", "AGENT_WORKTREES_ROOT", "GH_TOKEN",
         }
         calls.append(argv)
@@ -298,7 +312,26 @@ def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, ne
         config.load_config(str(selected))
 
 
-def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
+def test_readonly_configuration_refuses_mutable_resolver_before_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from pathlib import Path
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+    from agent_mcp import configuration
+
+    home = tmp_path / "home"
+    resolver = home / ".agent-mcp" / "scripts" / "versioned_runtime.py"
+    resolver.parent.mkdir(parents=True)
+    resolver.write_text("raise AssertionError('unqualified resolver imported')\n", encoding="utf-8")
+    (home / ".agent-worktrees").mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "non-retained"))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(home / ".agent-mcp"))
+    monkeypatch.setenv(PROBE_ENV, PROBE_CONTRACT)
+    with pytest.raises(ProbeContractError, match="unqualified"):
+        configuration._legacy_report(tmp_path)
+
+
+def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path: Path) -> None:
     import os
     import shutil
     import subprocess
@@ -325,7 +358,7 @@ def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
         },
     }
 
-    def environment(root):
+    def environment(root: Path) -> tuple[Path, Path, Path]:
         prefix = root / "versions" / "1.0.0"
         venv.EnvBuilder(with_pip=False).create(prefix)
         python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -341,7 +374,9 @@ def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
     import agent_mcp
 
     for package in (agent_mcp, yaml, configuration_context, configuration_layers):
-        source = Path(package.__file__).parent
+        location = package.__file__
+        assert location is not None
+        source = Path(location).parent
         shutil.copytree(source, packages / source.name, ignore=shutil.ignore_patterns("__pycache__"))
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir()

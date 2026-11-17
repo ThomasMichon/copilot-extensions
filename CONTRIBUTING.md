@@ -658,6 +658,12 @@ impact** statement in the PR description and follow
    directions, new/new behavior, rollback and truthful incompatibility errors.
    Do not add exhaustive matrices to required PR CI.
 
+Retained message retirement additionally documents and tests conversion or
+explicit terminal rejection for each supported stored revision; never strand
+an inbox or block valid receiver enrollment on payload compatibility. Preserve
+original correlation, idempotency and uncertain effects. See the
+[retained message contract](plugins/agent-bridge/docs/retained-sdk-consumer.md#message-contracts-migration-and-rejection).
+
 Reviewers treat an unsupported mandatory new invocation, a silent downgrade of
 required behavior, or an omitted/inaccurate assessment as unfinished work.
 This requirement governs changed boundaries; a guidance-only PR must distinguish

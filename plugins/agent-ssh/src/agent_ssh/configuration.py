@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import yaml
 from agent_procutil.owned_process import run_caller_owned
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
 from configuration_context.runtime import deployed_runtime_python
-from configuration_layers import ConfigurationError, compose, read_source
+from configuration_layers import ConfigurationError, Layer, compose, read_source
 
-from . import _peer_launch, _worktrees
+from . import _peer_launch as _peer_launch, _worktrees as _worktrees
+
+if TYPE_CHECKING:
+    from .mesh import Mesh
 
 FIELDS = {"display_name", "description", "capabilities"}
 RELPATH = Path(".copilot-extensions") / "agent-ssh" / "config.yaml"
 
 
-def _legacy_report(root: Path) -> tuple[dict, Path] | None:
+def _legacy_report(root: Path) -> tuple[dict[str, object], Path] | None:
     legacy = Path.home() / ".agent-ssh"
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or legacy)
     peer = Path.home() / ".agent-worktrees"
@@ -37,13 +41,13 @@ def _legacy_report(root: Path) -> tuple[dict, Path] | None:
     if not prefix:
         return None
     report = read_owner_context(
-        [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
+        prefix, root,
         environment=environment,
     )
     return (report, legacy) if report is not None else None
 
 
-def owner_report(root: Path) -> tuple[dict, Path] | None:
+def owner_report(root: Path) -> tuple[dict[str, object], Path] | None:
     own = _worktrees.validate_context()
     report = delivered_context(repository_root=root)
     if report is not None:
@@ -57,13 +61,13 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
             ):
                 raise ConfigurationError("delivered configuration has no matching qualified owner")
             return fresh
-        machine_root = Path(own["pluginRoot"]) if own else (
+        machine_root = Path(cast(str, own["pluginRoot"])) if own else (
             Path.home() / ".agent-ssh"
         )
         return report, machine_root
     if own is None:
         return _legacy_report(root)
-    peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    peer = Path(cast(str, own["cellRoot"])) / "plugins" / "agent-worktrees"
     try:
         peer.lstat()
     except FileNotFoundError:
@@ -71,17 +75,19 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
     except OSError as error:
         raise ConfigurationError("optional Worktrees installation could not be inspected") from error
     prefix = _peer_launch.launch_prefix(
-        "agent-ssh", Path(own["pluginRoot"]),
-        os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(Path(own["pluginRoot"]) / "install.json"),
+        "agent-ssh", Path(cast(str, own["pluginRoot"])),
+        os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(
+            Path(cast(str, own["pluginRoot"])) / "install.json",
+        ),
         "agent-worktrees",
     )
     report = read_owner_context(prefix, root, environment=os.environ.copy())
     if report is not None and context_from_owner(report)["installation_cell"] != str(own["cellRoot"]):
         raise ConfigurationError("SSH configuration belongs to another installation cell")
-    return (report, Path(own["pluginRoot"])) if report is not None else None
+    return (report, Path(cast(str, own["pluginRoot"]))) if report is not None else None
 
 
-def _values(raw: object) -> dict:
+def _values(raw: object) -> dict[str, object]:
     if not isinstance(raw, dict) or set(raw) - {"machines"}:
         raise ValueError("SSH presentation config supports only machines")
     machines = raw.get("machines", {})
@@ -99,13 +105,13 @@ def _values(raw: object) -> dict:
     return raw
 
 
-def apply_preferences(mesh, root: Path):
+def apply_preferences(mesh: Mesh, root: Path) -> Mesh:
     selected = owner_report(root)
     if selected is None:
         return mesh
     report, machine_root = selected
     context = context_from_owner(report)
-    layers = [{
+    layers: list[Layer] = [{
         "id": "ssh-defaults", "tier": "defaults", "origin": "defaults",
         "values": {"machines": {
             item.key: {"display_name": "", "description": "", "capabilities": []}
@@ -125,7 +131,7 @@ def apply_preferences(mesh, root: Path):
     sources.append((str(machine_root), Path("config.yaml"), "machine", "local_machine"))
     if report.get("repository_machine_root"):
         sources.append((
-            report["repository_machine_root"], RELPATH, "repository_machine", "repository_machine",
+            cast(str, report["repository_machine_root"]), RELPATH, "repository_machine", "repository_machine",
         ))
     for source_root, relative, tier, origin in sources:
         if not Path(source_root).exists():
@@ -133,7 +139,7 @@ def apply_preferences(mesh, root: Path):
         document = read_source(source_root, str(relative), parser=yaml.safe_load)
         if document is None:
             continue
-        layer = {
+        layer: Layer = {
             "id": f"ssh-{origin}", "tier": tier, "origin": origin,
             "values": _values(document["values"]), "source": document["source"],
         }
@@ -147,5 +153,5 @@ def apply_preferences(mesh, root: Path):
     for machine in mesh.machines:
         for field, value in result["values"]["machines"][machine.key].items():
             setattr(machine, field, value)
-    mesh.configuration_provenance = result["provenance"]
+    setattr(mesh, "configuration_provenance", result["provenance"])
     return mesh

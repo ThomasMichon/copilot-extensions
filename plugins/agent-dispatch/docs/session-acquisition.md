@@ -44,6 +44,67 @@ A handleless inherited retirement marker permits only current-head inspection
 when all known retired identities are attributable. Exact resumed-agent storage
 can atomically clear that current derived marker for a different unretired
 head; historical retirement evidence is unchanged. It never permits creation.
+
+The existing resumed-agent recorder also advertises
+`ordinary_control_adoption_versions: [1]` through the pool-placement contract.
+A compatible supervisor may supply Bridge's `retained_metadata_adoption` and
+executing `worktree_writer_observation` in actual resumed `SessionInfo`.
+It permits a different **managed control ID** only for the same original
+native, workspace, project, path, creation key and retained writer incarnation.
+The current task generation, reservation admission, pool, exclusivity and
+ground-owner checks remain unchanged. Older coordinators are rejected before
+the client posts adoption-bearing facts.
+
+The reservation atomically records `retained_control_history`, containing the
+entire predecessor agent record and the explicit unavailable-history boundary.
+Original invocation, receipts, unknown outcomes and excluded operations remain
+historical; they are not successful sends in the adopted epoch. Refreshes cannot
+erase or replace that evidence, and a competing different adoption refuses.
+The first adoption installs a persistent SQLite update guard in that same
+transaction. It preserves the predecessor snapshot, adoption and original
+invocation even if an older coordinator refreshes ordinary SessionInfo after
+rollback; unsupported replacement fails rather than erasing the replay fence.
+Legacy startup receipt/send composition is explicitly refused after adoption:
+the original key and turn position must not be replayed into the new stream.
+Any later work-bearing prompt uses its current owner's separately admitted,
+fenced same-native continuation and existing retry budget. Recording these
+facts neither advances the task to `STARTED` nor resets policy clocks or startup
+revisions. Native execution and installed rollout remain separate qualification
+steps.
+
+The ordinary initial-start caller now negotiates
+`ordinary_control_delivery_versions: [1]` in addition to adoption storage,
+the executing CLI's exact-worktree resume and exact-session absence contracts,
+and the receiving Bridge's retained resume, adoption and keyed-admission
+capabilities. An unavailable historical receipt alone does not permit recovery:
+the exact predecessor must be positively absent. A present controller with
+unproven history remains held.
+
+After ordinary workspace resume, the recorder retains a separate
+`current_control_invocation` before any prompt. Its key binds the current
+reservation, task generation, startup revision, adopted controller and immutable
+birth key. The new epoch's exact turn position is independent of the lost
+predecessor stream. Delivery first observes this new operation's receipt; only
+its qualified missing-receipt result permits submission. Lost replies reuse
+the persisted operation, never its predecessor key or a replacement key.
+A persistent update guard prevents older recorders from erasing these bytes.
+Even receipt-only lookup rechecks the operation's current reservation,
+generation and startup revision: carrying old agent facts is not admission of
+that old receipt for a later attempt.
+An observed live workspace is admissible only for this same retained native,
+with the existing writer, incarnation and adoption evidence.
+If the resume reply is lost before controller storage commits, the recovery
+read may reconcile that original live head without a stored current operation.
+It still proves predecessor absence and the actual writer/adoption through
+Bridge before recording or sending; a foreign live head remains inadmissible.
+
+This migration covers an otherwise admitted initial `reserving` attempt at its
+original task generation. It does not attach failed or released historical
+reservations, reinterpret a different generation's birth admission, reset a
+startup budget or enable production allocation. Successful resume is not startup
+delivery; successful delivery is not acceptance. The original worker must still
+affirmatively start the current task through its ordinary negotiated operation.
+
 Assigned keyed reservations missing project/path metadata defer through normal
 supervisor retry without probing or launching a native session.
 Reconciliation preserves explicit prior workspace ownership;

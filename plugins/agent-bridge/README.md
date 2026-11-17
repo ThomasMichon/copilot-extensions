@@ -2,6 +2,12 @@
 
 [Configuration reference](docs/configuration.md)
 
+`targets --json` lists the union of registered sessions and discovered
+workspaces without launching a conversation. Workspace-handle operations can
+hydrate missing Bridge metadata from the authoritative head; dormant raw sends
+require explicit resume. See
+[target discovery and hydration](docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup).
+
 Exact-session `status/inspect --json` provides
 [layered read-only inspection](docs/transport-diagnostics.md#exact-session-inspection)
 through the standalone Core without attaching another controller or adding a
@@ -149,6 +155,15 @@ Ordinary daemon launch still uses its
 existing default, and never installs a broker as a spawn fallback. This source
 integration does not establish full cold-construction, desktop or rollout
 qualification.
+
+Persistent Bridge service starts, command-triggered ensures and watchdog
+replacements require an independently owned daemon lifetime. If the canonical
+Windows durable launch refuses, they propagate that failure rather than retrying
+inside the caller's cleanup Job. A failed watchdog launch records
+`replacement-failed`, not `replacement-scheduled`; the wedged frontend still
+exits to release its singleton lock. Direct starts and passive generations
+retain the same strict policy. Contained test mode remains deliberately
+contained and does not qualify production caller-exit survival.
 
 Source-qualified application startup resolves an unset installation-root override
 from its installed physical slot. Before selection/publication it hydrates

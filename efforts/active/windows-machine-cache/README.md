@@ -107,11 +107,11 @@ Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/windows/win3
 ### Phase 2 - Implement and qualify
 - [x] Add explicit opt-in, secure redundant writes, user-first fallback and safe verification.
 - [x] Preserve selection/recovery, rotation, invalidation and old-reader behavior.
-- [ ] Land source, documentation and changefile through normal review and CI.
+- [x] Land source, documentation and changefile through normal review and CI.
 
 ### Phase 3 - Release and acceptance
 - [ ] Confirm the implementation reaches the normal release branch.
-- [ ] Record native noninteractive synthetic proof and remaining adopter-owned rollout gates.
+- [x] Record native noninteractive synthetic proof and remaining adopter-owned rollout gates.
 
 ## Validation Plan
 
@@ -122,7 +122,7 @@ Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/windows/win3
 - [x] Native Windows proof covers machine-scope roundtrip, creation-time DACL,
   atomic replacement and the actual noninteractive token/session context.
 - [x] Existing targeted cache/credential-read tests, lint and install contract pass.
-- [ ] Public artifacts remain generic; merged, released and deployed remain distinct.
+- [x] Public artifacts remain generic; merged, released and deployed remain distinct.
 
 ## Journal
 
@@ -194,3 +194,53 @@ cases. Nine-file strict typing passed both platform contracts. A concurrent
 test-environment preparation hit a Windows executable-sharing refusal; after
 the owned interpreter user completed, the bounded sequential retry passed.
 This does not change the separately disclosed native first-write observation.
+
+### 2026-11-16 - Source merged; release pending
+
+Implementation #13022 merged to `dev` as `809add5d69` after independent
+current-head approval and required checks. The final source packet passed
+331 cache cases with one inapplicable native-format case skipped, 87 admitted
+units and 62 recovery/target cases; strict typing passed both platform contracts.
+Normal release-branch promotion remains open. No installation, live credential
+copy, service restart or adopter acceptance is claimed by this source merge.
+
+### 2026-11-17 - Native release-gate prerequisite
+
+Promotion passed source qualification but remains blocked. After the tracked
+artifact-publication rate limit in #13052, the next run exposed the native
+Resume failures tracked by #12850, #10945 and #10946. The selected-runtime
+observer now uses a finite `--observe` invocation with JSON stdin; the native
+fixture owner still admitted only its older description invocation.
+
+The bounded fixture correction preserves the real observer, namespace,
+duplicate-creation fence and deadlines. Five native owner/transport/dependency
+controls pass, including actual observation-protocol stdin forwarding; strict
+typing passes both platform contracts. The full local packet also encountered
+the production census refusal for unrelated live servers outside its private
+root. Those three cold/reattach cases are not claimed qualified locally, and
+the fresh-runner native promotion gate remains required. No live sessions were
+changed to manufacture a passing result.
+
+The overlapping fixture correction landed independently in #13059 while the
+follow-up was awaiting its required checks. Rebase preserves that complete
+implementation and its typed native fixture. The remaining follow-up adds a
+separate real-executable refusal control that does not require the global
+absence census, plus these source/release records; it does not reapply or
+replace the already merged correction. Fresh native release qualification
+remains open.
+
+The next fresh producing run, 44052200417, passed observation forwarding and
+then reached the unchanged 3.4 creation-version gate. Its generated private
+adapter did not carry its selected backend's file-version resource. The bounded
+follow-up now projects that actual complete resource and refuses unreadable
+metadata, rather than advertising a guessed minimum. Four native controls pass,
+including real compiled below/above-floor versions with nonzero revisions,
+the original production guard and structured observation refusal. Full fresh
+native Resume qualification and release remain required.
+
+The metadata implementation also landed independently in #13070 during the
+follow-up's review window. Rebase preserves it completely, including its
+unversioned-adapter compatibility for unreadable backends and unchanged
+production refusal. The remaining follow-up supplies real compiled
+version-resource/creation-floor and observer-refusal controls, plus source
+completion records; neither independently merged repair is replaced.

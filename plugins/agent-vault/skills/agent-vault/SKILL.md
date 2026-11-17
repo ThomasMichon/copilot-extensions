@@ -130,8 +130,15 @@ redirect/echo refusals, exit codes and version-skew behavior.
 <agent-vault catalog argv[0]> set-username "API/OpenAI" alice
 <agent-vault catalog argv[0]> remove "API/OpenAI" -f
 <agent-vault catalog argv[0]> move "API/OpenAI" Archive -f
+<agent-vault catalog argv[0]> copy "API/OpenAI" "Team/Shared/OpenAI"
 <agent-vault catalog argv[0]> lock
 ```
+
+`copy` accepts a destination group (existing, or ending in `/`) or a full entry
+path; an existing destination is refused. It does not carry custom
+attributes, TOTP, tags, expiry or history, refuses a source with notes or a URL
+unless `--skip-notes` / `--skip-url` is passed, and refuses a username or
+password containing a line break or carriage return.
 
 ### SSH keys
 

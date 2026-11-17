@@ -1,0 +1,9 @@
+{
+  "comment": "Retain same-native control adoption and predecessor evidence in ordinary reservation storage",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

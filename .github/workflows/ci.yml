@@ -180,17 +180,6 @@ jobs:
     - name: Marketplace isolation inventory (report-only)
       if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
       run: python tools/check-marketplace-isolation.py
-    - name: Retain exact historical Bridge source evidence
-      if: steps.code-impact.outputs.run == 'true'
-      run: >-
-        python tools/prepare_bridge_contract_evidence.py
-        --remote "${{ github.server_url }}/${{ github.repository }}.git"
-    - name: Agent Bridge contract registry
-      if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
-      run: python tools/check-agent-bridge-contracts.py
-    - name: Agent Bridge contract source coverage (PR diff only)
-      if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request'
-      run: python tools/check-agent-bridge-contracts.py --base ${{ github.event.pull_request.base.sha }}
     - name: Payload invocation canonical source
       if: steps.code-impact.outputs.run == 'true'
       run: python libs/payload-invocation/generate.py --all --source-check

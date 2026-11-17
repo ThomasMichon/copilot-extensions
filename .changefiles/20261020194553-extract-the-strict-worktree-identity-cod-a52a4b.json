@@ -1,9 +1,0 @@
-{
-  "comment": "Extract the strict worktree identity codec into a dependency-free shared library while preserving existing imports.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

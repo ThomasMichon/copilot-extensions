@@ -25,8 +25,9 @@ def test_generated_native_fixture_supports_namespace_only_loader(
     sdk = tmp_path / "node_modules" / namespace / "copilot-sdk"
     sdk.mkdir(parents=True)
     (sdk / "package.json").write_text(json.dumps({
-        "type": "module", "exports": {"./extension": "./extension.mjs"},
+        "type": "module", "exports": {".": "./root.mjs", "./extension": "./extension.mjs"},
     }), encoding="utf-8")
+    (sdk / "root.mjs").write_text("export {};\n", encoding="utf-8")
     (sdk / "extension.mjs").write_text(
         f"export async function joinSession() {{ return {json.dumps(namespace)}; }}\n",
         encoding="utf-8",

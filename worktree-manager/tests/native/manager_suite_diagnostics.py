@@ -1,17 +1,19 @@
-"""Read installed planning facts and retain bounded advertised request logs."""
+"""Read installed planning facts and retain bounded case-owned request logs."""
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import json
 import hashlib
+from itertools import islice
 import os
 from pathlib import Path
 import re
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
 MAX_LOG_BYTES = 4 * 1024 * 1024
 _ACTIVATION_PROBE = r"""
@@ -54,10 +56,10 @@ MARKERS = {
 
 
 @contextmanager
-def _consumer_demand(name: str, root: Path):
-    endpoint = None
+def _consumer_demand(name: str, root: Path) -> Iterator[Callable[[], None]]:
+    endpoint: tuple[str, int, str] | None = None
     next_refresh = 0.0
-    client_id = None
+    client_id: str | None = None
 
     def refresh() -> None:
         nonlocal endpoint, next_refresh, client_id
@@ -88,7 +90,7 @@ def _consumer_demand(name: str, root: Path):
     finally:
         if endpoint is not None:
             from work_coalescing_singleton import client
-            client.release(*endpoint, client_id, timeout=1)
+            client.release(*endpoint, cast(str, client_id), timeout=1)
 
 
 def _record(root: Path, name: str) -> tuple[dict[str, Any], int]:
@@ -123,20 +125,20 @@ def _resident_probe(name: str, root: Path, expected_pid: int) -> dict[str, Any]:
     if record["pid"] != expected_pid:
         raise RuntimeError("Resident changed before health observation")
     if name == "worktree-manager":
-        from worktree_manager import mux_daemon_cutover as control
-        route = control.routed_endpoint(root)
+        from worktree_manager import mux_daemon_cutover as manager_control
+        route = manager_control.routed_endpoint(root)
         if route is None or route.pid != expected_pid:
             raise RuntimeError("Manager route does not name the observed PID")
-        status = control.ControlClient(route.base_url, root=root, timeout=1).health()
+        status = manager_control.ControlClient(route.base_url, root=root, timeout=1).health()
         ready = status.get("status") == "ready"
         generation = status.get("runtime_generation")
     elif name == "agent-worktrees":
-        from agent_worktrees import status_monitor_cutover as control
+        from agent_worktrees import status_monitor_cutover as worktree_control
         from zdd.routing import read_active_endpoint
-        route = read_active_endpoint(control.routing_dir(root))
+        route = read_active_endpoint(worktree_control.routing_dir(root))
         if route is None or route.pid != expected_pid:
             raise RuntimeError("Worktrees route does not name the observed PID")
-        status = control.ControlClient(route.base_url, config_dir=root, timeout=1).health()
+        status = worktree_control.ControlClient(route.base_url, config_dir=root, timeout=1).health()
         ready = status.get("status") == "ready"
         generation = status.get("runtime_generation")
     elif name == "agent-bridge":
@@ -159,17 +161,17 @@ def _resident_probe(name: str, root: Path, expected_pid: int) -> dict[str, Any]:
         route = read_active_endpoint(config.routing_dir())
         if route is None or route.pid != expected_pid:
             raise RuntimeError("Dispatch route does not name the observed PID")
-        with DispatchClient(route.base_url, token=config.client_token(), timeout=1) as client:
-            status = client.health()
+        with DispatchClient(route.base_url, token=config.client_token(), timeout=1) as dispatch_client:
+            status = dispatch_client.health()
         ready = status.get("status") == "ok" and not status.get("draining")
         if status.get("slot", {}).get("pid") != expected_pid:
             raise RuntimeError("Dispatch health PID mismatch")
         generation = str(route.generation)
     elif name == "agent-index":
-        from agent_index import config
+        from agent_index import config as index_config
         from agent_index.__main__ import _owned_service_client
         from zdd.routing import read_active_endpoint
-        route = read_active_endpoint(config.routing_dir())
+        route = read_active_endpoint(index_config.routing_dir())
         if route is None or route.pid != expected_pid:
             raise RuntimeError("Index route does not name the observed PID")
         status, _client = _owned_service_client(route.base_url, timeout=1)
@@ -179,7 +181,7 @@ def _resident_probe(name: str, root: Path, expected_pid: int) -> dict[str, Any]:
         generation = status.get("runtimeVersion", status.get("version"))
     elif name == "agent-vault":
         from agent_vault.service import send_command
-        status = send_command({"action": "ping"})
+        status = cast(dict[str, Any], send_command({"action": "ping"}))
         ready = isinstance(status, dict) and status.get("ok") is True
         if not ready or status.get("pid") != expected_pid:
             raise RuntimeError("Vault ping did not authenticate the observed service PID")
@@ -249,6 +251,8 @@ def _engine_probe() -> dict[str, Any]:
 
     config.set_active_project("example")
     payload = reconcile.core_installed_payload_dir("agent-worktrees")
+    if payload is None:
+        raise RuntimeError("The installed suite planner has no selected Worktrees payload")
     targets = update_runtime._registered_plugin_targets()
     engine, modules, registered = update_runtime_plan.plan_portfolio(
         payload, "windows", None, force=True, targets=targets, force_runtimes=(),
@@ -267,13 +271,31 @@ def _engine_probe() -> dict[str, Any]:
 
 def retain_driver_logs(case: Path, output: str) -> None:
     identifiers = sorted(set(re.findall(r"\bUpdate request ([0-9a-f]{32})\b", output)))
-    if not identifiers:
-        return
     root = case / "h" / ".copilot-extensions" / "update-driver"
+    if not identifiers:
+        try:
+            if (
+                not root.is_dir() or root.is_symlink()
+                or not root.resolve().is_relative_to(case.resolve())
+            ):
+                return
+            for path in islice(root.iterdir(), 128):
+                if (
+                    re.fullmatch(r"[0-9a-f]{32}\.log", path.name)
+                    and not path.is_symlink() and path.is_file()
+                ):
+                    identifiers.append(path.stem)
+                    if len(identifiers) == 8:
+                        break
+        except OSError as error:
+            print(f"Case request log discovery failed: {error}", file=sys.stderr)
+            return
+        if not identifiers:
+            return
     destination = case / "driver-logs"
     records = []
     for identifier in identifiers:
-        record: dict = {"request_id": identifier}
+        record: dict[str, Any] = {"request_id": identifier}
         try:
             source = root / (identifier + ".log")
             if source.is_symlink() or not source.resolve().is_relative_to(case.resolve()):

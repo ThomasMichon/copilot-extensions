@@ -18,13 +18,10 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** resolve the next final-head review's deadline, unavailable-read,
-tracking-alias and freshness-diagnostic findings locally while retaining the
-unchanged-runtime negative candidate. Both negative and positive consumer
-qualification, followed by exact-source review/CI, remain publication gates.
-The expanded positive packet now qualifies the separate creation fixture
-correction. Finish qualification of the native Git short-source mapping form,
-then publish the exact tested correction and obtain fresh review/CI. No
+**Now:** publish the qualified correction to the same implementation PR, resolve
+its four remaining review threads with the causal proof, and obtain genuine
+final-head review plus required CI before actual merge. Negative and positive
+consumer qualification are complete; source acceptance remains open. No
 production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
@@ -412,6 +409,25 @@ typing exemption or pending-project admission.
   retain their existing error/preservation behavior. That final compatibility
   refinement still requires exact-source positive qualification before the
   pending PR update.
+
+### 2026-11-17 - Final compatibility candidate qualifies
+
+- [Run 44083131020](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44083131020)
+  qualifies exact source `eb34a1fc53c9676b0cd81035b57fc23b33b57ff1`:
+  **163 passed, zero failed/skipped**, all three phases passed. All20 preparation
+  cases include the actual short-source alias, delayed authentication,
+  unavailable reads and truthful caller-warning controls; all53 selected
+  creation controls still pass.
+- All ten changed Python files pass whole-file strict checks on Linux and
+  Windows/Python3.10, with fatal lint,821 source bindings and unchanged exact
+  unit nodes/coverage/budgets, installation contract, version and effort
+  structure checks. The final size gate caught two excess caller lines;
+  removing only redundant comments restores1000 lines with its AST unchanged.
+  The original Git module remains under its1747-line ceiling.
+- This journal changes no qualified runtime or test input. Publish through the
+  existing managed PR, preserve source attribution and verify tested blobs
+  through reconciliation. Fresh final-head review, required CI, actual merge
+  and finite claim/issue acceptance remain open.
 
 ### 2026-11-17 - Finite correction validated locally
 

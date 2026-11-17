@@ -410,6 +410,12 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
             return
         st = client.get_session_status(sid, caller_id=core._caller_id_for(args))
     except BridgeClientError as exc:
+        if exc.status == 404 and getattr(args, "json", False) and getattr(args, "full", False):
+            core._json_out({
+                "outcome": "refused_unavailable", "reason": "native_session_unavailable",
+                "target": sid,
+            })
+            sys.exit(1)
         if exc.status == 404:
             print(f"[FAIL] Session {sid} not found", file=sys.stderr)
         else:

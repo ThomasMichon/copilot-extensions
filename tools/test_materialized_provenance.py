@@ -1,7 +1,8 @@
 """Whole-marketplace candidate build/verification without containers or live state."""
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 import importlib.util
 import io
 import json
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from typing import NoReturn
 
 import pytest
 
@@ -87,7 +89,9 @@ def test_manifest_refuses_unreadable_subtree(
 
 
 @pytest.mark.parametrize("inside", [False, True], ids=["outside", "inside"])
-def test_manifest_refuses_hardlinks_before_read(tmp_path, monkeypatch, inside):
+def test_manifest_refuses_hardlinks_before_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inside: bool,
+) -> None:
     root = tmp_path / "tree"
     root.mkdir()
     artifact = root / "file"
@@ -96,7 +100,7 @@ def test_manifest_refuses_hardlinks_before_read(tmp_path, monkeypatch, inside):
     os.link(artifact, alias)
     assert artifact.stat().st_nlink == 2
 
-    def refuse_read(path):
+    def refuse_read(path: Path) -> NoReturn:
         raise AssertionError(f"hardlinked content must not be read: {path}")
 
     monkeypatch.setattr(Path, "read_bytes", refuse_read)
@@ -148,6 +152,7 @@ def source(tmp_path: Path) -> tuple[Path, str]:
     (root / "tools").mkdir()
     for name in (
         "materialize_main.py", "materialize_installer_engine.py",
+        "materialize_payload_invocation.py",
         "materialize_launch_wrapper_assets.py", "nested_uv_editable_ref.py",
         "uv_editable_ref.py", "launch_wrapper_assets_ref.py",
         "installer_engine_ref.py", "standalone_consumers.py",
@@ -161,11 +166,14 @@ def source(tmp_path: Path) -> tuple[Path, str]:
 
 
 def test_canonical_entrypoint_builds_committed_standalone_tree(
-    source: tuple[Path, str], tmp_path: Path, monkeypatch, capsys,
+    source: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     root, head = source
     # Older supported tarfile APIs have no filter keyword; never call extractall.
-    def old_extractall(self, path=".", members=None, *, numeric_owner=False):
+    def old_extractall(
+        self: tarfile.TarFile, path: str | os.PathLike[str] = ".",
+        members: Iterable[tarfile.TarInfo] | None = None, *, numeric_owner: bool = False,
+    ) -> NoReturn:
         raise AssertionError("candidate builder must not use extractall")
     monkeypatch.setattr(tarfile.TarFile, "extractall", old_extractall)
     (root / "docs/shared.md").write_text("uncommitted tamper\n")
@@ -189,7 +197,9 @@ def test_canonical_entrypoint_builds_committed_standalone_tree(
         PROVENANCE.build(dest, source_root=root)
 
 
-def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeypatch):
+def test_builder_does_not_inherit_repository_selection(
+    source: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, head = source
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong.git"))
     monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "wrong-tree"))
@@ -199,8 +209,85 @@ def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeyp
     assert PROVENANCE.verify(dest, head) == head
 
 
+@pytest.mark.parametrize("autocrlf", ["true", "false"])
+def test_builder_does_not_project_ambient_git_line_endings(
+    source: tuple[Path, str], tmp_path: Path, autocrlf: str,
+) -> None:
+    root, _head = source
+    plugin = root / "plugins" / "example"
+    (plugin / ".gitattributes").write_bytes(b"*.txt text\n")
+    (plugin / ".gitignore").write_bytes(b"generated/\ncache/\n")
+    (plugin / "plain.txt").write_bytes(b"frozen first line\nfrozen second line\n")
+    _git(root, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "add", ".")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--quiet", "-m", "committed line endings")
+    head = _git(root, "rev-parse", "HEAD")
+    _git(root, "config", "core.autocrlf", autocrlf)
+    _git(root, "config", "core.eol", "crlf")
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+    assert (dest / "plugins" / "example" / ".gitignore").read_bytes() == b"generated/\ncache/\n"
+    assert (dest / "plugins" / "example" / "plain.txt").read_bytes() == (
+        b"frozen first line\nfrozen second line\n"
+    )
+    assert _git(root, "config", "core.autocrlf") == autocrlf
+    assert _git(root, "config", "core.eol") == "crlf"
+
+
+def test_builder_canonicalizes_its_allocated_source_root_before_extraction(
+    source: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, head = source
+    allocate = PROVENANCE.tempfile.TemporaryDirectory
+    extract = PROVENANCE.extract_source
+
+    @contextmanager
+    def aliased_temporary_directory(*, prefix: str) -> Iterator[str]:
+        with allocate(prefix=prefix, dir=tmp_path) as raw:
+            alias = Path(raw) / "existing-child"
+            alias.mkdir()
+            yield str(alias / "..")
+
+    def extract_canonical(tree: tarfile.TarFile, snapshot: Path) -> None:
+        assert snapshot == snapshot.resolve(strict=True)
+        extract(tree, snapshot)
+
+    monkeypatch.setattr(PROVENANCE.tempfile, "TemporaryDirectory", aliased_temporary_directory)
+    monkeypatch.setattr(PROVENANCE, "extract_source", extract_canonical)
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+    assert (dest / "plugins/example/docs/shared.md").read_text() == "# Materialized\n"
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+def test_builder_retains_bounded_unresolved_source_reasons_without_receipt(
+    source: tuple[Path, str], tmp_path: Path, oversized: bool,
+) -> None:
+    root, _head = source
+    log = ["SKIP plugins/example: canonical source missing"]
+    if oversized:
+        log += ["SKIP " + "x" * 2000] * 20
+    (root / "tools/materialize_main.py").write_text(
+        "def build(dest, **kwargs):\n    dest.mkdir()\n    return " + repr(log) + "\n",
+    )
+    _git(root, "add", ".")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--quiet", "-m", "unresolved committed materializer")
+    dest = tmp_path / "candidate"
+    with pytest.raises(ValueError, match="unresolved source") as caught:
+        PROVENANCE.build(dest, source_root=root)
+    assert "plugins/example: canonical source missing" in str(caught.value)
+    assert f"({len(log)})" in str(caught.value)
+    assert len(str(caught.value)) < 3400
+    assert not (dest / PROVENANCE.RECEIPT).exists()
+
+
 @pytest.mark.parametrize("module", ["materialize_main.py", "uv_editable_ref.py"])
-def test_builder_uses_committed_materializer_code_not_working_tree(source, tmp_path, module, monkeypatch):
+def test_builder_uses_committed_materializer_code_not_working_tree(
+    source: tuple[Path, str], tmp_path: Path, module: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, head = source
     (root / "tools" / module).write_text(
         "raise AssertionError('dirty transformation code must never execute')\n",
@@ -213,12 +300,14 @@ def test_builder_uses_committed_materializer_code_not_working_tree(source, tmp_p
     assert "dirty transformation" not in (dest / "tools" / module).read_text()
 
 
-def test_builder_refuses_destination_created_during_archive_preparation(source, tmp_path, monkeypatch):
+def test_builder_refuses_destination_created_during_archive_preparation(
+    source: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, _ = source
     dest = tmp_path / "candidate"
     original = PROVENANCE.extract_source
 
-    def extract(tree, snapshot):
+    def extract(tree: tarfile.TarFile, snapshot: Path) -> None:
         original(tree, snapshot)
         dest.mkdir()
         (dest / "sentinel").write_bytes(b"not owned by the builder")
@@ -230,7 +319,9 @@ def test_builder_refuses_destination_created_during_archive_preparation(source, 
     assert not (dest / PROVENANCE.RECEIPT).exists()
 
 
-def test_missing_committed_helper_has_no_ambient_fallback(source, tmp_path):
+def test_missing_committed_helper_has_no_ambient_fallback(
+    source: tuple[Path, str], tmp_path: Path,
+) -> None:
     root, _ = source
     (root / "tools/uv_editable_ref.py").unlink()
     _git(root, "add", "-u")
@@ -243,7 +334,9 @@ def test_missing_committed_helper_has_no_ambient_fallback(source, tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["fifo", "hardlink"])
-def test_receipt_special_or_multiple_link_file_fails_before_read(source, tmp_path, kind):
+def test_receipt_special_or_multiple_link_file_fails_before_read(
+    source: tuple[Path, str], tmp_path: Path, kind: str,
+) -> None:
     root, head = source
     dest = tmp_path / "candidate"
     PROVENANCE.build(dest, source_root=root)
@@ -259,7 +352,9 @@ def test_receipt_special_or_multiple_link_file_fails_before_read(source, tmp_pat
         PROVENANCE.verify(dest, head)
 
 
-def test_candidate_verification_refuses_external_hardlink_without_byte_changes(source, tmp_path):
+def test_candidate_verification_refuses_external_hardlink_without_byte_changes(
+    source: tuple[Path, str], tmp_path: Path,
+) -> None:
     root, head = source
     dest = tmp_path / "candidate"
     PROVENANCE.build(dest, source_root=root)
@@ -339,7 +434,9 @@ def test_unresolved_materialization_never_emits_receipt(
     "C:/escape", "safe/./escape", "safe//escape", "symlink", "hardlink",
     "character", "block", "fifo",
 ])
-def test_archive_validation_rejects_unsafe_members_before_extraction(tmp_path, fault):
+def test_archive_validation_rejects_unsafe_members_before_extraction(
+    tmp_path: Path, fault: str,
+) -> None:
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tree:
         good = tarfile.TarInfo("good")
@@ -363,7 +460,7 @@ def test_archive_validation_rejects_unsafe_members_before_extraction(tmp_path, f
     assert sentinel.read_bytes() == b"unchanged"
 
 
-def test_archive_validation_rejects_preexisting_root_escape(tmp_path):
+def test_archive_validation_rejects_preexisting_root_escape(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     outside = tmp_path / "outside"

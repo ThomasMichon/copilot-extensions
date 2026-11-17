@@ -67,7 +67,7 @@ class KeyedNativePrompt(BaseModel):
 
 
 def stored_receipt(
-    db: Any, session_id: str, request: KeyedNativePrompt | NativeSendPrompt, *, connection=None,
+    db: Any, session_id: str, request: KeyedNativePrompt | NativeSendPrompt, *, connection: Any = None,
 ) -> dict[str, Any] | None:
     sql = ("SELECT session_id,turn_index,prompt,native_admission_json FROM turns "
            "WHERE acquisition_delivery_id=?")
@@ -170,31 +170,49 @@ async def submit(
         if manager.is_draining:
             from .session_manager import DaemonDrainingError
             raise DaemonDrainingError("turn")
-        validate_holder(manager, session_id, session, request)
         if binding["origin_kind"] == "resumed":
-            from .acquisition_authority import read_worktree_record, worktree_command
-            from .worktree_head import parse_head_payload
-            record = await read_worktree_record(binding["worktree_id"], binding["project"])
-            head = parse_head_payload(json.dumps(await worktree_command(
-                ["head-session", "--worktree-id", binding["worktree_id"], "--json"],
-                binding["project"],
-            )))
-            if (
-                record.get("status") != "active" or not record.get("sessions_indexed")
-                or record.get("execution_leg_opaque") or record.get("session_backend_opaque")
-                or record.get("execution_leg") is not None or record.get("session_backend") is not None
-                or record.get("creation_nonce") != binding["creation_nonce"]
-                or record.get("path") != binding["path"]
-                or not head.tracked or head.head_session != request.expected_native_session_id
-                or head.occupied and head.state != "active"
-            ):
-                raise ValueError("native_workspace_binding_changed")
-            validate_holder(manager, session_id, session, request)
-        await manager._submit_prompt_locked(
-            session_id, request.prompt, no_resume=True,
-            delivery_id=request.delivery_id(), native_admission=request,
-        )
-        saved = stored_receipt(manager.db, session_id, request)
-        if saved is None:
-            raise ValueError("native_admission_history_unproven")
-        return saved
+            from .creation_worktree_writer import continue_session
+
+            handled, result = await continue_session(
+                manager, session, _submit_qualified, session_id, (request,), {},
+            )
+            if handled:
+                if not isinstance(result, dict):
+                    raise ValueError("native_admission_history_unproven")
+                return result
+        return await _submit_qualified(manager, session_id, request)
+
+
+async def _submit_qualified(manager: Any, session_id: str, request: KeyedNativePrompt) -> dict[str, Any]:
+    session = manager.get_session(session_id)
+    if session is None:
+        raise KeyError("native_session_unavailable")
+    validate_holder(manager, session_id, session, request)
+    binding = request.binding.model_dump(mode="json")
+    if binding["origin_kind"] == "resumed":
+        from .acquisition_authority import read_worktree_record, worktree_command
+        from .worktree_head import parse_head_payload
+        record = await read_worktree_record(binding["worktree_id"], binding["project"])
+        head = parse_head_payload(json.dumps(await worktree_command(
+            ["head-session", "--worktree-id", binding["worktree_id"], "--json"],
+            binding["project"],
+        )))
+        if (
+            record.get("status") != "active" or not record.get("sessions_indexed")
+            or record.get("execution_leg_opaque") or record.get("session_backend_opaque")
+            or record.get("execution_leg") is not None or record.get("session_backend") is not None
+            or record.get("creation_nonce") != binding["creation_nonce"]
+            or record.get("path") != binding["path"]
+            or not head.tracked or head.head_session != request.expected_native_session_id
+            or head.occupied and head.state != "active"
+        ):
+            raise ValueError("native_workspace_binding_changed")
+        validate_holder(manager, session_id, session, request)
+    await manager._submit_prompt_locked(
+        session_id, request.prompt, no_resume=True,
+        delivery_id=request.delivery_id(), native_admission=request,
+    )
+    saved = stored_receipt(manager.db, session_id, request)
+    if saved is None:
+        raise ValueError("native_admission_history_unproven")
+    return saved

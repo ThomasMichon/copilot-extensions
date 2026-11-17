@@ -663,6 +663,10 @@ tomli==2.5.0 \
     #   -r tools/typecheck-service-index-requirements.txt
     #   mypy
     #   pytest
+types-psutil==7.2.2.20260906 \
+    --hash=sha256:93abf22cf9a62b915f724e433bde702995ac274865425fd4a76d1d9b5828da1a \
+    --hash=sha256:db00baf7f96c3f63421c4d3d68d373923094a0dfddf13e922c5c5fbc42488159
+    # via -r tools/typecheck-bridge-requirements.in
 types-pyyaml==6.0.12.20250915 \
     --hash=sha256:0f8b54a528c303f0e6f7165687dd33fafa81c807fcac23f632b63aa624ced1d3 \
     --hash=sha256:e7d4d9e064e89a3b3cae120b4990cd370874d2bf12fa5f46c97018dd5d3c9ab6

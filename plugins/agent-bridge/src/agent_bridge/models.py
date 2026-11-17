@@ -11,21 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from .acquisition_contract import WorktreeWriterRequirement
 
 from .cli_mode_models import (  # noqa: F401 -- re-exported public models
-    CliModeReservationInfo,
-    CreateCliModeReservationRequest,
-    LiveSessionVenue,
-    RegisterLiveSessionRequest,
+    CliModeReservationInfo as CliModeReservationInfo,
+    CreateCliModeReservationRequest as CreateCliModeReservationRequest,
+    LiveSessionVenue as LiveSessionVenue,
+    RegisterLiveSessionRequest as RegisterLiveSessionRequest,
 )
 from .install_paths import effective_config_dir
 from .live_message_models import (  # noqa: F401 -- re-exported public models
-    AckMessagesRequest,
-    AckMessagesResult,
-    LiveMessage,
+    AckMessagesRequest as AckMessagesRequest,
+    AckMessagesResult as AckMessagesResult,
+    LiveMessage as LiveMessage,
     LiveMessageDelivery,
-    LiveMessageListResponse,
-    LiveMessageReceipt,
-    SendMessageRequest,
-    SendMessageResult,
+    LiveMessageListResponse as LiveMessageListResponse,
+    LiveMessageReceipt as LiveMessageReceipt,
+    SendMessageRequest as SendMessageRequest,
+    SendMessageResult as SendMessageResult,
 )
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 from .preference_models import PreferencePolicyFields, SessionModes
@@ -521,6 +521,7 @@ class IngestLiveEventsResult(BaseModel):
     session_id: str
     ingested: int
     last_id: int
+    replay_accepted: bool | None = None
 
 
 class LiveProgressRequest(BaseModel):

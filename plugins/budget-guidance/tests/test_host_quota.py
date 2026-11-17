@@ -1,11 +1,12 @@
 """Exercise the actual payload entry with an isolated, credential-free SDK."""
 
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any
 
+from agent_procutil import no_window_kwargs
 import pytest
 
 from budget_guidance.cli import main
@@ -14,30 +15,44 @@ from budget_guidance.cli import main
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def _marker(result, marker):
+def _marker(result: subprocess.CompletedProcess[str], marker: str) -> dict[str, Any]:
     matches = [line.split(marker, 1)[1] for line in result.stdout.splitlines() if marker in line]
     assert len(matches) == 1, (
         f"expected exactly one {marker} marker, got {len(matches)}\n"
         f"{result.stdout}\n{result.stderr}"
     )
-    return json.loads(matches[0])
+    value: dict[str, Any] = json.loads(matches[0])
+    return value
 
 
 @pytest.mark.parametrize("output", ["", "MARKER={}\nMARKER={}\n"])
-def test_host_quota_marker_diagnoses_missing_or_duplicate_output(output):
+def test_host_quota_marker_diagnoses_missing_or_duplicate_output(output: str) -> None:
     result = subprocess.CompletedProcess([], 0, output, "synthetic-stderr")
     with pytest.raises(AssertionError, match="expected exactly one MARKER="):
         _marker(result, "MARKER=")
 
 
-def test_host_quota_entry_and_boundaries(tmp_path, capsys):
+@pytest.mark.parametrize("layout", ["source", "packaged"])
+def test_host_quota_entry_and_boundaries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], layout: str,
+) -> None:
     node = shutil.which("node")
     assert node is not None, "Node.js is required for the extension contract tests"
-    # This test process runs only under the repository's bounded test runner.
+    selected = PLUGIN
+    if layout == "packaged":
+        selected = tmp_path / "fixture"
+        shutil.copytree(PLUGIN / "extensions", selected / "extensions")
+        shutil.copyfile(
+            PLUGIN.parents[1] / "libs" / "copilot-driver-core" / "src"
+            / "agent_remote_driver" / "bridge_extension" / "sdk-compat.mjs",
+            selected / "extensions" / "budget-guidance" / "sdk-compat.mjs",
+        )
+        (selected / "tests" / "fixtures").mkdir(parents=True)
+        for relative in ("tests/host-quota.test.mjs", "tests/fixtures/host-sdk.mjs"):
+            shutil.copyfile(PLUGIN / relative, selected / relative)
     result = subprocess.run(
-        [node, "--test", str(PLUGIN / "tests" / "host-quota.test.mjs")],
-        cwd=PLUGIN, text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        [node, "--test", str(selected / "tests" / "host-quota.test.mjs")],
+        cwd=selected, text=True, capture_output=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     capture = _marker(result, "ENTRY_CAPTURE=")

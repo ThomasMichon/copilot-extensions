@@ -3421,6 +3421,49 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [bootstrap, reporting and generation checkpoint](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
+  retains three complete canonical contracts without mistaking partial owner
+  evidence, eventual transport or consolidated tracking for whole acceptance.
+  The [provider-first delivery reconciliation](journal/2026/11.17-provider-first-delivery-boundaries.md)
+  maps #12947's complete contract against the finite comparison client and
+  retains independent storage, native, provider and operational acceptance.
+  The [copy-source and custody continuation](journal/2026/11.17-vault-followups-and-custody-gap.md)
+  records three distinct Vault follow-ups and the public #12717 gap notice;
+  source delivery is not completion of their remaining acceptance.
+  The [ordinary Windows test-custody reconciliation](journal/2026/11.17-ordinary-windows-test-custody.md)
+  preserves partial delivery and the remaining admitted-controller custody gap;
+  #12717, #12111 and #12696 remain open.
+  The [delivery, presentation and native failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
+  record actual #13073 delivery and six complete-original judgments, retaining
+  Draft user-output delivery, installed presentation acceptance, distinct
+  post-identity teardown versus pre-preparation context failures, controller
+  activation and removed relocation-fence obligations. The complete census
+  observes 878 whole open, 149 above fixed 729, following two arrivals and no
+  departures or new campaign closure credit. All incumbent checkbox states,
+  explicit holds and custody remain unchanged.
+  The [filtered-population source reconciliation](journal/2026/11.17-filtered-population-source-completion.md)
+  records actual #13067/#13072 delivery, the complete #12159 source-only
+  original-to-merged-delivery crosswalk and its audited COMPLETED closure,
+  while retaining #12175's claimed bounded-batching repair and all broader
+  parent, release and resource gates. The complete post-closure census is
+  876 whole open, 147 above fixed 729, with one verified campaign departure
+  and no arrivals or external departures.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
+  The [complete workflow, delivery and native-consumer contracts](journal/2026/11.17-complete-workflow-delivery-and-native-consumer-contracts.md)
+  record actual #13064 delivery and twenty-three complete-original judgments,
+  retaining disabled native prototypes, keyed-creation replay distinctions,
+  design-only role/observation proposals and the original OPEN delivery claim.
+  The complete census remains 877 whole open, 148 above fixed 729, with no
+  arrivals, departures or new campaign closure credit. All incumbent checkbox
+  states, explicit holds and custody remain unchanged.
+  The [complete typing, guidance and observation contracts](journal/2026/11.17-complete-typing-guidance-and-observation-contracts.md)
+  record actual #13053 delivery and fourteen complete-original judgments,
+  preserving nonexpiring claims, stopped failed-version retries, separately
+  tracked timeout observations and passive per-project freshness acceptance.
+  The publication-time complete census is 877 whole open, 148 above fixed 729:
+  an excluded metadata-only arrival and no departures since the previous
+  876-open observation yield no new campaign closure credit.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
   The [complete qualification and recovery boundaries](journal/2026/11.16-complete-qualification-and-recovery-boundaries.md)
   record actual #13049 delivery and twenty complete-original judgments,
   retaining original native/recovery acceptance, actual OPEN delivery PRs,

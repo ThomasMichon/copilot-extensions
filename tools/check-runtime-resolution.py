@@ -48,6 +48,12 @@ _LINK_PY = re.compile(
     r"""(?<![\w.])\.?venv[\\/](?:bin[\\/]python(?:3(?:\.\d+)?)?|Scripts[\\/]python(?:w)?\.exe)""",
     re.IGNORECASE,
 )
+# Canonical selected-slot layout comparisons do not launch a venv link.
+_SELECTED_SLOT_COMPARISON = re.compile(
+    r'\[\s*"\$resolved"\s*=\s*"\$InstallDir/versions/\$selected/$'
+    r'|\$AgentRtPy\s+-eq\s+\(Join-Path\s+\$InstallDir\s+"versions[\\/]\$cv[\\/]$',
+    re.IGNORECASE,
+)
 # Resolving a plugin's **console script** through the same link (e.g.
 # `$LINK_DIR/bin/agent-bridge`). Same defect as `_LINK_PY`, different spelling,
 # and the one that actually shipped: `activate --no-link` leaves no link at all,
@@ -148,7 +154,10 @@ def _violations(path: Path) -> list[tuple[int, str, str]]:
         if any(x in low for x in _EXCLUDE_PATH):
             continue
         report = line.strip()[:160]
-        if _LINK_PY.search(code):
+        if any(
+            not _SELECTED_SLOT_COMPARISON.search(code[:match.start()])
+            for match in _LINK_PY.finditer(code)
+        ):
             found.append((n, "venv-link", report))
         elif _LINK_SCRIPT.search(code):
             found.append((n, "venv-link-script", report))
