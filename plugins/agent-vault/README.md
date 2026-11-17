@@ -316,6 +316,47 @@ Supported built-in command groups:
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
 
+## Create-only attachment import
+
+On POSIX, the opt-in form requires an already-running, unlocked selected owner:
+
+```text
+agent-vault import-key Example/new-key /path/to/private.key --create-only --require-running
+```
+
+The executing CLI advertises `key-attachment-create-only-v1`. Within an already
+prepared runtime, this form uses an additive daemon action that older services
+refuse; it never falls back to ordinary import, starts a service, invokes an
+unlock provider or prompts. Prevent cold payload self-provisioning independently
+with `AGENT_VAULT_NO_SELFPROVISION=1`; the flag does not authorize or suppress an
+installer that ran before CLI dispatch.
+The existing health reply must advertise `key_attachment_import_versions`
+containing integer `1` and accept work before private bytes are sent.
+Missing/withdrawn support refuses without mutation; rollback between discovery
+and execution still cannot invoke the older mutating action.
+The entry and all parent groups must be unambiguous, the parents must already
+exist, and any existing entry or group at the destination refuses before an add.
+The existing local database creation lock serializes cooperating local writers;
+it is not a distributed lock across synchronized copies.
+
+Private input must already be an owned ordinary `0600` file, without links or
+special-file ancestry. Its public companion is `<private filename>.pub`.
+Both inputs are bounded to 16 KiB and checked for changes during reading.
+Option-looking root entries and nonportable or oversized attachment filenames
+refuse before a backend mutation.
+These are opaque attachment bytes: this operation neither generates keys nor
+proves that they form a cryptographic pair. Windows refuses this opt-in form
+until its native input-custody contract is supported; ordinary import is unchanged.
+
+The new entry and its two non-overwriting attachment writes are not one atomic
+database transaction. Secret-free errors distinguish `not_started` from an
+`unknown` effect. Retain the operation and inspect the authoritative owner after
+an unknown/partial result; never blindly retry, pick another entry or delete
+partial state. Backend temporary-file and privileged-consumer custody require
+their own qualification; failed temporary-file cleanup cannot produce a
+successful create-only receipt. Ordinary `import-key` and `export-key` keep their
+existing activation and overwrite behavior.
+
 ## Batch reads
 
 `agent-vault batch-get` reads an array of entry/field objects from JSON stdin

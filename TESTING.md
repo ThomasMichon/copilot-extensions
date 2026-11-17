@@ -7502,6 +7502,14 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The create-only attachment controls in `test_vault_attachment_import.py` execute
+the actual import-owner, CLI-dispatch and backend bodies with inert storage,
+lock, transport and temporary-file owners. Collision, failed/unknown creation,
+partial attachment outcomes, old-service refusal and unchanged legacy force
+behavior remain distinct; no database, key, service or process is created.
+The plugin's separate `test_attachment_import_files.py` source packet exercises
+POSIX ordinary-file custody using synthetic non-key bytes. Neither packet
+qualifies a live credential owner, native key pair or privileged materializer.
 Seven Vault read/transport units execute the actual `read_credential` and
 `send_command` bodies with substituted context, discovery, extension and native
 owners. Preferred extensions retain authority even with invalid endpoint state;

@@ -322,6 +322,8 @@ class KeePassXCBackend:
         entry_path: str,
         attachment_name: str,
         data: bytes,
+        *,
+        overwrite: bool = True,
     ) -> tuple[bool, str]:
         """Import an attachment into an entry. Returns (success, message)."""
         import tempfile
@@ -338,7 +340,7 @@ class KeePassXCBackend:
                     self._cli_path,
                     "attachment-import",
                     "-q",
-                    "-f",
+                    *(["-f"] if overwrite else []),
                     kpdb,
                     entry_path,
                     attachment_name,
@@ -357,8 +359,18 @@ class KeePassXCBackend:
             return False, str(e)
         finally:
             if tmp_path:
-                with contextlib.suppress(OSError):
+                try:
                     os.unlink(tmp_path)
+                except OSError:
+                    if not overwrite:
+                        raise
+
+    def import_attachment_create_only(
+        self, kpdb: str, entry_path: str, attachment_name: str, data: bytes,
+    ) -> tuple[bool, str]:
+        return self.import_attachment(
+            kpdb, entry_path, attachment_name, data, overwrite=False,
+        )
 
     def export_attachment(
         self,

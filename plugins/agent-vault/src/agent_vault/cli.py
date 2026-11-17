@@ -1128,6 +1128,14 @@ def cmd_git_credential(args: Any) -> int:
 
 
 def cmd_import_key(args: Any) -> int:
+    if getattr(args, "create_only", False):
+        from .attachment_import_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
+        return 1
+
     import base64
 
     key_file = Path(args.key_file)
@@ -1697,6 +1705,10 @@ def _main(argv: list[str] | None = None) -> int | None:
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("key_file", help="Path to private key file (.pub must exist alongside)")
+    p.add_argument("--create-only", action="store_true",
+                   help="Refuse an existing entry and retain partial/unknown creation without retry")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --create-only, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_import_key)
 
     p = sub.add_parser("export-key", help="Export key pair from entry")

@@ -573,6 +573,9 @@ class VaultService:
             "runtime_generation": PROCESS_GENERATION,
             "generation_protocol": PROTOCOL,
             "accepting_work": self._runtime_can_work,
+            "key_attachment_import_versions": (
+                [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []
+            ),
             "auth_handoff_versions": supported_versions(),
             "auth_handoff_receiver": (
                 self._generation.handoff_advertisement()
@@ -815,6 +818,11 @@ class VaultService:
             if not password:
                 return {"ok": False, "error": "No password provided"}
             return self._set_password(kpdb, entry, password, vault_name, reason)
+
+        if action == "import-key-create-only":
+            from .attachment_import import handle_request
+
+            return handle_request(self.cli, kpdb, group, request)
 
         if action == "import-key":
             import base64
