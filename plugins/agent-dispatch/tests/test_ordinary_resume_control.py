@@ -290,6 +290,29 @@ def test_current_control_rollback_cannot_erase_the_new_operation(restoring: Any)
     assert queue.get_reservation(before["key"]).agent_info == retained
 
 
+@pytest.mark.parametrize("changed", ["reservation", "generation", "startup-revision"])
+def test_carried_control_receipt_cannot_complete_a_different_admission(restoring: Any, changed: str) -> None:
+    from agent_dispatch.ordinary_resume_control import deliver
+
+    assigned, before, _, _, _, _ = restoring
+    queue, task, client, _, _, _ = assigned
+    _qualified_start(assigned)
+    retained = asdict(queue.get_reservation(before["key"]))
+    task = dict(task)
+    if changed == "reservation":
+        retained["key"] = "different-reservation"
+    elif changed == "generation":
+        task["generation"] += 1
+    else:
+        retained["startup_revision"] += 1
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a prior admission's receipt must not be queried")
+
+    with pytest.raises(TaskError):
+        deliver(forbidden, client, task, retained, retained["agent_info"], observe_only=True)
+
+
 @pytest.mark.parametrize("unsupported", ["cli", "daemon", "storage", "present", "native"])
 def test_recovery_refuses_unsupported_or_changed_owner_before_resume(restoring: Any, monkeypatch: Any, unsupported: str) -> None:
     assigned, before, _, effects, state, run = restoring

@@ -120,9 +120,15 @@ def deliver(
 ) -> dict[str, Any] | None:
     """Receipt-first delivery of only the persisted new operation, never its birth key."""
     from .ordinary_assignment import current_task
+    from .ordinary_control_invocation import prepare
 
     actual = identity(info)
     invocation = info[CONTROL]["invocation"]
+    expected = prepare(
+        task, reservation, info, turn=invocation["binding"]["expected_turn_index"],
+    )
+    if not same_facts(info[CONTROL], expected):
+        raise TaskError("ordinary current-control invocation admission changed")
     arguments = [
         "--json", "send", actual.bridge, "--expected-native-session-id", actual.native,
         "--native-invocation-file", "-", "--no-wait", "--no-resume",

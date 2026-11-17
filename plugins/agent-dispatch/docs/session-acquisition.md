@@ -88,6 +88,9 @@ predecessor stream. Delivery first observes this new operation's receipt; only
 its qualified missing-receipt result permits submission. Lost replies reuse
 the persisted operation, never its predecessor key or a replacement key.
 A persistent update guard prevents older recorders from erasing these bytes.
+Even receipt-only lookup rechecks the operation's current reservation,
+generation and startup revision: carrying old agent facts is not admission of
+that old receipt for a later attempt.
 An observed live workspace is admissible only for this same retained native,
 with the existing writer, incarnation and adoption evidence.
 If the resume reply is lost before controller storage commits, the recovery
