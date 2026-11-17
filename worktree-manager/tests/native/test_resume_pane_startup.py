@@ -1,28 +1,71 @@
 """Real Windows Resume-plan consumer; engine resolution and Copilot are fixtures."""
 
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
 import time
-from contextlib import ExitStack
+from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager, ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, TypedDict
 from uuid import uuid4
 
 import pytest
-import yaml
 from _manager_process_fixture import boundary_runtime
 from _native_python_owner import native_python_owner
+from _terminal_console_fixture import Console as NativeConsole
+from agent_remote_driver.mux_observation_types import Observation, ObservationUnavailable
 from test_launch_admission_ordering import _fixture
 from test_pane_args_file import PWSH, WRAPPER, _test_env
-from test_pane_startup import _copied_setup
+from test_pane_startup import _copied_setup as untyped_copied_setup
+
+if TYPE_CHECKING:
+    from tools.plugin_test_command_safety import private_mux_args
+else:
+    from plugin_test_command_safety import private_mux_args
 
 pytestmark = [
     pytest.mark.skipif(os.name != "nt", reason="Native Windows PSMux consumer"),
     pytest.mark.timeout(180),
 ]
 ROOT = WRAPPER.parents[2]
+CREATE_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+
+class Console(Protocol):
+    output: bytearray
+
+    def wait(self, timeout: int = 15000) -> int: ...
+    def send(self, value: bytes) -> None: ...
+    def pin(self, pid: int) -> int: ...
+    def exited(self, handle: int, timeout: int = 0) -> bool: ...
+
+
+class ConsoleFactory(Protocol):
+    def __call__(
+        self, argv: list[str], *, env: dict[str, str], cwd: Path,
+    ) -> AbstractContextManager[Console]: ...
+
+
+console_factory: ConsoleFactory = NativeConsole
+_copied_setup: Callable[[Path], Path] = untyped_copied_setup
+
+
+class LaunchDiagnostics(TypedDict):
+    root: Path
+    name: str
+    env: dict[str, str]
+
+
+class ResumeLaunch(LaunchDiagnostics):
+    argv: list[str]
+    target: Path
+    capture: Path
+    expected: list[str]
+    state: Path
 
 OWNER = r'''
 import json, os, subprocess, sys
@@ -31,11 +74,18 @@ from pathlib import Path
 args = sys.argv[1:]
 if (
     len(args) == 6 and args[:4] == ["-I", "-X", "utf8", "-m"]
-    and args[4] in {"agent_remote_driver.mux_creation", "agent_remote_driver.mux_observation"}
-    and args[5] == "--describe-contract"
+    and (
+        args[4] in {"agent_remote_driver.mux_creation", "agent_remote_driver.mux_observation"}
+        and args[5] == "--describe-contract"
+        or args[4] == "agent_remote_driver.mux_observation" and args[5] == "--observe"
+    )
 ):
+    input_options = (
+        {"input": sys.stdin.buffer.read()} if args[5] == "--observe"
+        else {"stdin": subprocess.DEVNULL}
+    )
     result = subprocess.run(
-        [sys.executable, *args], stdin=subprocess.DEVNULL, timeout=25,
+        [sys.executable, *args], **input_options, timeout=25,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     raise SystemExit(result.returncode)
@@ -80,7 +130,10 @@ else:
 '''
 
 
-def _wait_for(check, label, consoles, launches=()):
+def _wait_for(
+    check: Callable[[], bool], label: str, consoles: Sequence[Console],
+    launches: Sequence[LaunchDiagnostics] = (),
+) -> None:
     deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
         if check():
@@ -100,7 +153,7 @@ def _wait_for(check, label, consoles, launches=()):
     raise AssertionError(f"{label}\n{output}")
 
 
-def _native_observation_diagnostics(launches):
+def _native_observation_diagnostics(launches: Sequence[LaunchDiagnostics]) -> str:
     """Retain bounded fixed-query replies, never authentication or pane argv."""
     from agent_remote_driver import mux_inventory, mux_observation
 
@@ -126,12 +179,12 @@ def _native_observation_diagnostics(launches):
                 launches[0]["env"]["PSMUX_DATA_DIR"],
             ))
             output += f"\ncomplete-native-inventory: {result!r}"
-        except mux_observation.ObservationUnavailable as error:
+        except ObservationUnavailable as error:
             output += f"\ncomplete-native-inventory: {error}"
     return output
 
 
-def _private_psmux(root, binary, namespace, env):
+def _private_psmux(root: Path, binary: str, namespace: str, env: dict[str, str]) -> None:
     """Keep the original launcher on a real executable with private mux routing."""
     compiler = next((
         Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework / "v4.0.30319/csc.exe"
@@ -181,7 +234,7 @@ class PrivateMux {
     result = subprocess.run(
         [str(compiler), "/nologo", "/target:exe", "/out:" + str(shim), str(source)],
         env=env, capture_output=True, text=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     env["PATH"] = str(root) + os.pathsep + env["PATH"]
@@ -189,10 +242,7 @@ class PrivateMux {
 
 
 @pytest.mark.parametrize("adapter", [False, True])
-def test_private_mux_transport_reaches_its_child(tmp_path, adapter):
-    from _terminal_console_fixture import Console
-    from plugin_test_command_safety import private_mux_args
-
+def test_private_mux_transport_reaches_its_child(tmp_path: Path, adapter: bool) -> None:
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
     env = _test_env(tmp_path)
@@ -210,7 +260,9 @@ def test_private_mux_transport_reaches_its_child(tmp_path, adapter):
         encoding="utf-8",
     )
     env.update(TEST_CAPTURE=str(tmp_path / "ready"), TEST_RELEASE=str(tmp_path / "release"))
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    def quote(value: str | Path) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
     start = tmp_path / "start.ps1"
     start.write_text(
         "& " + " ".join(map(quote, [
@@ -218,7 +270,7 @@ def test_private_mux_transport_reaches_its_child(tmp_path, adapter):
             "pwsh.exe", "-NoProfile", "-NoLogo", "-File", quote(child),
         ])) + "\nexit $LASTEXITCODE\n", encoding="utf-8",
     )
-    with Console([PWSH, "-NoProfile", "-File", str(start)], env=env, cwd=tmp_path) as console:
+    with console_factory([PWSH, "-NoProfile", "-File", str(start)], env=env, cwd=tmp_path) as console:
         try:
             _wait_for(
                 lambda: (tmp_path / "ready").is_file(), "Private mux child did not start",
@@ -230,11 +282,14 @@ def test_private_mux_transport_reaches_its_child(tmp_path, adapter):
             subprocess.run(
                 [psmux, *namespace, "kill-session", "-t", "fixture"], env=env, cwd=tmp_path,
                 capture_output=True, text=True, timeout=10, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=CREATE_NO_WINDOW,
             )
 
 
-def _resume_fixture(root, shared_env, manager_bin, index):
+def _resume_fixture(
+    root: Path, shared_env: dict[str, str], manager_bin: Path, index: int,
+) -> ResumeLaunch:
+    assert PWSH, "PowerShell 7 is required for the native Resume fixture"
     root.mkdir()
     env, target, _ = _fixture(root)
     shutil.copytree(
@@ -317,10 +372,7 @@ def _resume_fixture(root, shared_env, manager_bin, index):
     }
 
 
-def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
-    from _terminal_console_fixture import Console
-    from plugin_test_command_safety import private_mux_args
-
+def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path: Path) -> None:
     env = _test_env(tmp_path)
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
@@ -333,7 +385,7 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
          "import json,sys; print(json.dumps([sys.argv[1:], sys.stdin.read()]))", *argv],
         input="native stdin\n", cwd=launch["target"], env=launch["env"],
         capture_output=True, text=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [argv, "native stdin\n"]
@@ -341,7 +393,7 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
         [str(launch["root"] / "owner.exe"), "-c", "raise SystemExit(17)"],
         input="", cwd=launch["target"], env=launch["env"],
         capture_output=True, text=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW,
     )
     assert rejected.returncode == 17, rejected.stdout + rejected.stderr
     probe = subprocess.run(
@@ -349,7 +401,7 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
          "agent_remote_driver.mux_creation", "--describe-contract"],
         stdin=subprocess.DEVNULL, cwd=launch["target"], env=launch["env"],
         capture_output=True, text=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW,
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     contract = json.loads(probe.stdout)
@@ -357,6 +409,18 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
     assert "windows-psmux-create-or-join" in contract["operations"]
     assert Path(contract["python"]).resolve() == Path(sys.executable).resolve()
     assert Path(contract["entrypoint"]).is_file()
+    observed = subprocess.run(
+        [str(launch["root"] / "owner.exe"), "-I", "-X", "utf8", "-m",
+         "agent_remote_driver.mux_observation", "--observe"],
+        input=json.dumps({"version": 1, "session": launch["name"]}),
+        cwd=launch["target"], env=launch["env"],
+        capture_output=True, text=True, timeout=20, check=False,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    observation = json.loads(observed.stdout)
+    assert observation["contract"] == "copilot-driver.mux-observation"
+    assert observation["status"] == "absent"
     script = launch["root"] / "pipeline.ps1"
     script.write_text(
         "$VenvPython = '" + str(launch["root"] / "owner.exe").replace("'", "''") + "'\n"
@@ -381,7 +445,7 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
         "[Console]::WriteLine('pipeline stdin')\nexit 0\n",
         encoding="utf-8",
     )
-    with Console([PWSH, "-NoProfile", "-File", str(script)],
+    with console_factory([PWSH, "-NoProfile", "-File", str(script)],
                  env=launch["env"], cwd=launch["target"]) as console:
         exit_code = console.wait()
     output = console.output.decode("utf-8", "replace")
@@ -390,8 +454,12 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
 
 
 @pytest.mark.parametrize("use_fixture_dependency", [False, True])
-def test_resume_fixture_supplies_the_session_shell_dependency(tmp_path, use_fixture_dependency):
+def test_resume_fixture_supplies_the_session_shell_dependency(
+    tmp_path: Path, use_fixture_dependency: bool,
+) -> None:
     env = _test_env(tmp_path)
+    yaml_spec = importlib.util.find_spec("yaml")
+    assert yaml_spec is not None and yaml_spec.origin is not None
     launch = _resume_fixture(tmp_path / "launch", env, tmp_path / "manager-bin", 0)
     runtime_lib = Path(launch["env"]["AGENT_RT_ROOT"]) / "lib"
     source_dependencies = sorted(
@@ -423,10 +491,10 @@ assert Path(work_coalescing_singleton.__file__).resolve().is_relative_to(Path(ru
 """
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", bootstrap,
-         str(Path(yaml.__file__).parent), str(launch["root"] / "owner.py"), str(runtime_lib),
+         str(Path(yaml_spec.origin).parent), str(launch["root"] / "owner.py"), str(runtime_lib),
          *source_dependencies],
         cwd=launch["target"], env=launch["env"], capture_output=True, text=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW,
     )
     if use_fixture_dependency:
         assert result.returncode == 0, result.stdout + result.stderr
@@ -436,10 +504,9 @@ assert Path(work_coalescing_singleton.__file__).resolve().is_relative_to(Path(ru
 
 
 @pytest.mark.parametrize("prewarm", [False, True])
-def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_path, prewarm):
-    from _terminal_console_fixture import Console
-    from plugin_test_command_safety import private_mux_args
-
+def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(
+    tmp_path: Path, prewarm: bool,
+) -> None:
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
     env = _test_env(tmp_path)
@@ -455,26 +522,26 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
     shutil.copytree(WRAPPER.parent, binary)
     launches = [_resume_fixture(tmp_path / f"launch-{index}", env, binary, index)
                 for index in range(4)]
-    consoles = []
+    consoles: list[Console] = []
 
-    def mux(*args):
+    def mux(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [psmux, *namespace, *args], env=env, cwd=env["USERPROFILE"],
             capture_output=True, text=True, timeout=10, check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=CREATE_NO_WINDOW,
         )
 
     with ExitStack() as stack:
         try:
             for launch in launches:
                 consoles.append(stack.enter_context(
-                    Console(launch["argv"], env=launch["env"], cwd=launch["target"]),
+                    console_factory(launch["argv"], env=launch["env"], cwd=launch["target"]),
                 ))
             _wait_for(
                 lambda: all(b"RESUME-FIXTURE-READY" in console.output for console in consoles),
                 "Launcher did not complete its pane acknowledgment", consoles, launches,
             )
-            owners = []
+            owners: list[tuple[Console, int, int]] = []
             for console, launch in zip(consoles, launches, strict=True):
                 captured = json.loads(launch["capture"].read_text("utf-8-sig"))
                 assert captured["argv"] == launch["expected"]
@@ -489,13 +556,15 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
                 assert console.wait() == 0, console.output.decode("utf-8", "replace")
             for launch in launches:
                 assert mux("has-session", "-t", launch["name"]).returncode == 0
-            assert all(not console.exited(handle) for console, *handles in owners for handle in handles)
+            assert all(not console.exited(handle)
+                       for console, child, pane in owners for handle in (child, pane))
             for launch in launches:
                 (launch["root"] / "release").touch()
             _wait_for(
                 lambda: all(mux("has-session", "-t", launch["name"]).returncode == 1
                             for launch in launches)
-                and all(console.exited(handle) for console, *handles in owners for handle in handles),
+                and all(console.exited(handle)
+                        for console, child, pane in owners for handle in (child, pane)),
                 "Owned pane/child processes did not retire after release", consoles, launches,
             )
         finally:
@@ -505,11 +574,10 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
 
 
 def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
-    tmp_path, monkeypatch, record_property,
-):
-    from _terminal_console_fixture import Console
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    record_property: Callable[[str, object], None],
+) -> None:
     from agent_remote_driver.mux_observation import observe_psmux
-    from plugin_test_command_safety import private_mux_args
     from worktree_manager import mux_attached_clients, mux_discovery
 
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
@@ -533,11 +601,11 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
     )
     name = launch["name"]
     ident = name.removeprefix("wt-")
-    consoles = []
+    consoles: list[Console] = []
     with ExitStack() as stack:
         try:
             started = time.monotonic()
-            first = stack.enter_context(Console(
+            first = stack.enter_context(console_factory(
                 launch["argv"], env=launch["env"], cwd=launch["target"],
             ))
             consoles.append(first)
@@ -549,17 +617,19 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
             record_property("cold_open_seconds", time.monotonic() - started)
             original = launch["capture"].read_bytes()
             child = first.pin(json.loads(original.decode("utf-8-sig"))["pid"])
-            def clients(count):
+            observed: Observation | None = None
+
+            def clients(count: int) -> bool:
                 nonlocal observed
                 result = observe_psmux(name)
                 observed = result
                 return result.status == "present" and result.clients == count
 
-            observed = None
             _wait_for(lambda: clients(1), "First attachment was not observed", consoles, [launch])
+            assert observed is not None
             incarnation, panes = observed.incarnation, observed.panes
             started = time.monotonic()
-            second = stack.enter_context(Console(
+            second = stack.enter_context(console_factory(
                 launch["argv"], env=launch["env"], cwd=launch["target"],
             ))
             consoles.append(second)
@@ -602,5 +672,5 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
             subprocess.run(
                 [psmux, *namespace, "kill-session", "-t", name],
                 env=env, cwd=env["USERPROFILE"], capture_output=True, text=True,
-                timeout=10, check=False, creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10, check=False, creationflags=CREATE_NO_WINDOW,
             )
