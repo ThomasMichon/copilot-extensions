@@ -11,6 +11,7 @@ import pytest
 
 from agent_worktrees import __main__ as main, artifact_output_cli as cli, claims_cli, config_sources, state_root
 from agent_worktrees import config as cfg, tracking, worktree_ops_cli
+from agent_worktrees.tracking_claims import format_claim_ref, parse_claim_ref
 from test_artifact_output import Destination, destination as destination
 from test_resource_producer import owner as owner
 
@@ -43,7 +44,7 @@ def test_real_main_resolves_produces_and_retries_delivery(
         monkeypatch.setattr(cfg, "project_name", lambda: "p")
         monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: path.parent)
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "fixture-session")
-        resolved = tracking.parse_claim_ref(worktree_ops_cli._resolve_owner_ref() or "")
+        resolved = parse_claim_ref(worktree_ops_cli._resolve_owner_ref() or "")
         assert resolved is not None and resolved.session == "fixture-session"
     context = {
         "repository_id": "repo-example", "execution_machine": "m", "installation_cell": "test-cell",
@@ -88,7 +89,7 @@ def test_explicit_session_qualified_owner_is_not_normalized(
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"token":"fixture"}')))
     args = argparse.Namespace(
         operation="inspect", json=True,
-        owner_ref=tracking.format_claim_ref("m", "p", "owner", "fixture-session"),
+        owner_ref=format_claim_ref("m", "p", "owner", "fixture-session"),
     )
     assert cli.cmd_user_output(args) == 1
     assert "exact qualified local owner" in json.loads(capfd.readouterr().out)["message"]
