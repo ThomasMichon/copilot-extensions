@@ -51,15 +51,17 @@ def _relay_port_path() -> Path:
     return _primary_config_dir() / _RELAY_PORT_FILE
 
 
-def set_live_relay_port(port: int | None) -> None:
+def set_live_relay_port(port: int | None, *, strict: bool = False) -> None:
     """Record (or clear) the port the in-process credential relay is bound to.
 
     Also publishes it to the primary config dir so sibling/elevated sub-daemons
-    that reuse this relay can discover it. Best-effort: a publish failure never
-    breaks relay startup (callers still have the in-process value).
+    that reuse this relay can discover it. The compatible default is best-effort.
+    Strict activation callers propagate publication failure and retain the prior
+    in-process value until the cross-daemon write is confirmed.
     """
     global _live_relay_port
-    _live_relay_port = port
+    if not strict:
+        _live_relay_port = port
     try:
         path = _relay_port_path()
         if port:
@@ -67,7 +69,11 @@ def set_live_relay_port(port: int | None) -> None:
         else:
             path.unlink(missing_ok=True)
     except OSError as exc:
+        if strict:
+            raise
         log.debug("Could not publish live relay port to %s: %s", _RELAY_PORT_FILE, exc)
+    if strict:
+        _live_relay_port = port
 
 
 def get_live_relay_port() -> int | None:

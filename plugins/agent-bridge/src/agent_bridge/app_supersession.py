@@ -7,17 +7,23 @@ import functools
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+from zdd import process_exit
+from zdd.routing import Endpoint
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
+    from .session_host.host_index import HostIndex
 
 log = logging.getLogger("agent-bridge")
 _SOURCE_RETIRE_DRAIN = "source-self-retire"
 
 
-def release_own_host_claims(manager) -> list[str]:
+def release_own_host_claims(manager: SessionManager) -> list[str]:
     """Release only this frontend generation's claims as its transport exits."""
-    index = getattr(manager, "_host_index", None)
+    index: HostIndex | None = getattr(manager, "_host_index", None)
     generation = getattr(manager, "_generation_id", None)
     if index is None or not generation:
         return []
@@ -28,17 +34,22 @@ def release_own_host_claims(manager) -> list[str]:
         return []
 
 
-def _source_successor_ready(endpoint) -> bool:
+def _source_successor_ready(endpoint: Endpoint) -> bool:
     from .install_paths import install_dir
     from .source_start import _check_selection, _core, _healthy_selected
 
+    if endpoint.version is None:
+        return False
     _check_selection(install_dir(), endpoint.version)
     return _healthy_selected(
         _core(), endpoint.version, pid=endpoint.pid, port=endpoint.port,
     )
 
 
-async def source_self_retire_ready(app, generation: int, *, ready_successor=None) -> bool | None:
+async def source_self_retire_ready(
+    app: FastAPI, generation: int, *,
+    ready_successor: Callable[[Endpoint], bool] | None = None,
+) -> bool | None:
     """Use the outgoing owner's ordinary host-preserving drain for Source handoff."""
     from .config import config_dir
     from .source_build import is_source_build_version
@@ -46,7 +57,7 @@ async def source_self_retire_ready(app, generation: int, *, ready_successor=None
 
     manager = app.state.session_manager
 
-    def release_drain():
+    def release_drain() -> None:
         owned = getattr(app.state, "source_retire_drain", None)
         if owned is None:
             return
@@ -60,7 +71,8 @@ async def source_self_retire_ready(app, generation: int, *, ready_successor=None
     successor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
     if (
         successor is None or successor.pid == os.getpid()
-        or successor.generation <= generation or not is_source_build_version(successor.version)
+        or successor.generation <= generation or successor.version is None
+        or not is_source_build_version(successor.version)
     ):
         release_drain()
         return None
@@ -107,13 +119,13 @@ async def source_self_retire_ready(app, generation: int, *, ready_successor=None
 
 async def retire_previous_daemon(
     app: FastAPI,
-    previous,
-    successor,
+    previous: Endpoint,
+    successor: Endpoint,
     *,
-    make_client,
+    make_client: Any,
     drain_timeout: float,
     retirement_timeout: float,
-    initial_recovery_task: asyncio.Task | None,
+    initial_recovery_task: asyncio.Task[Any] | None,
     recover_owned_cold: Callable[..., Awaitable[int]],
     run_in_daemon_thread: Callable[..., Awaitable[Any]],
     drain_poll: float,
@@ -123,6 +135,37 @@ async def retire_previous_daemon(
 ) -> None:
     """Retire a predecessor with native exit evidence before owned cold recovery."""
     from zdd import process_exit
+
+    async def recover_after_exit() -> None:
+        if self_retire_only:
+            from .config import config_dir
+            from zdd import routing
+
+            table = await asyncio.to_thread(routing.read_table, config_dir())
+            raw = table.get("active") if isinstance(table, dict) else None
+            active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            server = getattr(app.state, "uvicorn_server", None)
+            if (
+                active != successor or not owns_generation(active, successor)
+                or getattr(app.state, "shutting_down", False)
+                or getattr(server, "should_exit", False)
+            ):
+                return
+            app.state.cold_recovery_ready = True
+            config = getattr(app.state, "config", None)
+            if (
+                getattr(app.state, "ready", False)
+                and getattr(config, "enable_credential_relay", False)
+                and not getattr(app.state, "credential_relay_ready", False)
+            ):
+                try:
+                    await app.state.adopt_relay()
+                except Exception:
+                    log.warning("Post-exit relay adoption deferred", exc_info=True)
+        await recover_owned_cold(
+            app, successor, initial_recovery_task=initial_recovery_task,
+            predecessor_exited=True,
+        )
 
     reference = None
     if previous.pid and previous.process_start_time:
@@ -137,10 +180,7 @@ async def retire_previous_daemon(
                 log.warning("Predecessor original-exit evidence is unavailable; recovery fenced", exc_info=True)
                 return
             if exited:
-                await recover_owned_cold(
-                    app, successor, initial_recovery_task=initial_recovery_task,
-                    predecessor_exited=True,
-                )
+                await recover_after_exit()
             return
         except (OSError, ValueError, NotImplementedError):
             log.warning("Predecessor native identity could not be pinned; retirement refused", exc_info=True)
@@ -154,7 +194,7 @@ async def retire_previous_daemon(
             from .app_lifecycle import settled_thread_call
             from zdd import routing
 
-            while not getattr(app.state, "shutting_down", False):
+            if not getattr(app.state, "shutting_down", False):
                 table = await asyncio.to_thread(routing.read_table, config_dir())
                 raw = table.get("active") if isinstance(table, dict) else None
                 active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
@@ -166,11 +206,41 @@ async def retire_previous_daemon(
                     log.warning("Predecessor native exit is unavailable; cold recovery remains fenced", exc_info=True)
                     return
                 if exited:
-                    await recover_owned_cold(
-                        app, successor, initial_recovery_task=initial_recovery_task,
-                        predecessor_exited=True,
-                    )
+                    await recover_after_exit()
                     return
+                from .central_retirement import retire_predecessor
+                from .client import BridgeClient
+
+                if make_client is None:
+                    make_client = lambda endpoint: BridgeClient(
+                        endpoint.base_url, app.state.auth_token,
+                        timeout=2, connect_grace=0,
+                    )
+                cleanup = await settled_thread_call(
+                    retire_predecessor, config_dir(), previous, successor,
+                    make_client=make_client,
+                )
+                app.state.predecessor_cleanup = cleanup
+                if cleanup.get("exit_confirmed") is True:
+                    await recover_after_exit()
+                else:
+                    log.warning("Central predecessor retirement remains unconfirmed: %s", cleanup)
+                    # The existing post-publication task retains native exit
+                    # observation, not another control attempt or readiness gate.
+                    while not getattr(app.state, "shutting_down", False):
+                        table = await asyncio.to_thread(routing.read_table, config_dir())
+                        raw = table.get("active") if isinstance(table, dict) else None
+                        active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                        if active != successor or not owns_generation(active, successor):
+                            return
+                        try:
+                            exited = await settled_thread_call(reference.wait, 1.0)
+                        except (OSError, ValueError, NotImplementedError):
+                            log.warning("Late predecessor exit observation unavailable", exc_info=True)
+                            return
+                        if exited:
+                            await recover_after_exit()
+                            return
             return
         if reference is not None and reference.wait(0):
             await recover_owned_cold(
@@ -192,8 +262,9 @@ async def retire_previous_daemon(
 
 
 async def _retire_previous_daemon_control(
-    app: FastAPI, previous, successor, *, make_client, drain_timeout: float,
-    retirement_timeout: float, previous_exit, initial_recovery_task: asyncio.Task | None,
+    app: FastAPI, previous: Endpoint, successor: Endpoint, *, make_client: Any, drain_timeout: float,
+    retirement_timeout: float, previous_exit: process_exit.ProcessExitReference | None,
+    initial_recovery_task: asyncio.Task[Any] | None,
     recover_owned_cold: Callable[..., Awaitable[int]],
     run_in_daemon_thread: Callable[..., Awaitable[Any]], drain_poll: float,
     owns_generation: Callable[[Any, Any], bool],
@@ -205,7 +276,7 @@ async def _retire_previous_daemon_control(
     from zdd import routing
     from zdd.routing import Endpoint
 
-    def read_active():
+    def read_active() -> Endpoint | None:
         table = routing.read_table(config_dir())
         raw = table.get("active") if isinstance(table, dict) else None
         return Endpoint.from_dict(raw) if isinstance(raw, dict) else None
