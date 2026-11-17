@@ -18,11 +18,11 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** reproduce the authenticated-probe timeout diagnostic and configured-HEAD
-identity findings before correcting their owning paths. Published `0b7ce1b150`
-contains the 189-case qualified correction; its genuine review accepts the four
-preceding findings but reports these two blockers. A separate native-environment
-case refinement is also under qualification. Source acceptance remains open.
+**Now:** qualify the credential-free probe diagnostic and configured-HEAD
+identity correction. The unchanged-runtime packet executes three meaningful
+failures and 46 passing controls. Published `0b7ce1b150` remains blocked by those
+two findings; the separate environment-case refinement passes 191 selected
+controls but does not qualify this new correction. Source acceptance remains open.
 No production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
@@ -201,6 +201,9 @@ without restoring repository selectors. Git, rather than a blanket branch
 prefix, defines short source identity: narrowly resolve explicitly configured
 short names when needed within the same acquisition deadline. The ordinary
 committed reader remains offline; no default-branch discovery is introduced.
+For explicitly configured HEAD, retain its native exclusion name while resolving
+its symbolic identity for conflict checks and fetch selection. Probe timeouts
+must never expose injected credential arguments.
 
 ## Journal
 

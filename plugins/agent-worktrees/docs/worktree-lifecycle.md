@@ -120,7 +120,10 @@ ambiguity is assessed; an already
 refreshed matching base can be reused despite its ordinary fetch exclusion.
 An explicitly configured short source can require a narrow advertisement lookup
 of its possible full names, cached only for this operation within the same
-deadline. HEAD, fully qualified names and object IDs need no such lookup.
+deadline. An explicitly configured HEAD uses a narrow symbolic-target lookup
+for source identity and fetch selection; exclusions still match its native HEAD
+name. Fully qualified names and object IDs need no such lookup. Authenticated
+probe timeouts report credential-free diagnostics rather than command arguments.
 Before a potentially shared base/policy destination is written, conflicting
 remote/source identities are detected using actual destination refs, including
 overlapping remote names. Conflicting or unavailable preflight mappings leave

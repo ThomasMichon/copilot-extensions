@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import re
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from dropin_registry import ScanAuthority
 
 from . import config, config_acquisition, git_ops, inrepo_config_source as source
 from .git_acquisition_budget import acquisition_budget
+from .git_errors import GitError
 from .git_repository_environment import repository_identity_scope
 
 
@@ -85,6 +87,43 @@ class _RemoteSources:
         self.remote = remote
         self.cache: dict[str, str | None] = {}
 
+    def _advertise(self, *patterns: str, symref: bool = False) -> subprocess.CompletedProcess[str]:
+        options = ["--symref"] if symref else []
+        try:
+            return git_ops.git(
+                *git_ops._auth_config_args(self.remote, cwd=self.anchor),
+                "ls-remote", *options, self.remote, *patterns, cwd=self.anchor,
+                timeout=git_ops.DEFAULT_FETCH_TIMEOUT, isolated_repository=True,
+                auth_acquisition=True,
+            )
+        except subprocess.TimeoutExpired:
+            raise GitError(
+                ["git", "ls-remote", *options, self.remote, *patterns], 124,
+                f"policy source lookup from '{self.remote}' timed out",
+            ) from None
+
+    def identity(self, ref: str) -> str:
+        if ref != "HEAD":
+            return ref
+        if ref not in self.cache:
+            self.cache[ref] = None
+            result = self._advertise("HEAD", symref=True)
+            symbolic: str | None = None
+            object_id: str | None = None
+            for line in result.stdout.splitlines():
+                value, separator, name = line.partition("\t")
+                if not separator or name != "HEAD":
+                    continue
+                if value.startswith("ref: refs/"):
+                    symbolic = value.removeprefix("ref: ")
+                elif re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value):
+                    object_id = value
+            self.cache[ref] = symbolic or object_id
+        selected = self.cache[ref]
+        if selected is None:
+            raise ValueError("configured policy HEAD source is unavailable")
+        return selected
+
     def resolve(self, ref: str) -> str:
         if not ref:
             raise ValueError("committed policy fetch mapping has no source")
@@ -98,12 +137,7 @@ class _RemoteSources:
                 ref, f"refs/{ref}", f"refs/tags/{ref}", f"refs/heads/{ref}",
                 f"refs/remotes/{ref}", f"refs/remotes/{ref}/HEAD",
             )
-            result = git_ops.git(
-                *git_ops._auth_config_args(self.remote, cwd=self.anchor),
-                "ls-remote", self.remote, *candidates, cwd=self.anchor,
-                timeout=git_ops.DEFAULT_FETCH_TIMEOUT, isolated_repository=True,
-                auth_acquisition=True,
-            )
+            result = self._advertise(*candidates)
             advertised = {
                 name for line in result.stdout.splitlines()
                 if "\t" in line for _, name in [line.split("\t", 1)]
@@ -143,10 +177,14 @@ class _FetchRules:
 
     def source(
         self, target: str, fallback: str, resolve: Callable[[str], str], *,
+        identity: Callable[[str], str],
         refreshed_source: str | None = None,
     ) -> str:
         candidates, eligible = self.sources(target, fallback, resolve)
-        if not eligible and candidates == {refreshed_source}:
+        if (
+            not eligible and refreshed_source is not None
+            and {identity(candidate) for candidate in candidates} == {refreshed_source}
+        ):
             eligible = candidates
         if not eligible:
             raise ValueError("committed policy fetch mapping excludes its source")
@@ -218,11 +256,16 @@ def _refresh_sources(
                 rules = _fetch_rules(anchor, policy_remote)
                 resolver = _RemoteSources(anchor, policy_remote)
                 if base_target.startswith("refs/remotes/origin/"):
-                    branch = base_target.removeprefix("refs/remotes/origin/")
-                    candidates, eligible = rules.sources(
-                        base_target, f"refs/heads/{branch}", resolver.resolve,
-                    )
-                    if policy_remote != remote or (eligible or candidates) != {base_source}:
+                    matches_base = False
+                    if policy_remote == remote:
+                        branch = base_target.removeprefix("refs/remotes/origin/")
+                        candidates, eligible = rules.sources(
+                            base_target, f"refs/heads/{branch}", resolver.resolve,
+                        )
+                        matches_base = {
+                            resolver.identity(candidate) for candidate in eligible or candidates
+                        } == {base_source}
+                    if not matches_base:
                         return _FetchPreparation(
                             False, "creation base conflicts with its configured policy source", False,
                         )
@@ -239,9 +282,10 @@ def _refresh_sources(
                 try:
                     selected = rules.source(
                         target, f"refs/heads/{branch}", resolver.resolve,
+                        identity=resolver.identity,
                         refreshed_source=matching_base,
                     )
-                    _refresh(policy_remote, selected, target)
+                    _refresh(policy_remote, resolver.identity(selected), target)
                 except Exception as exc:
                     errors.append(exc)
 
