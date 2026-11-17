@@ -446,3 +446,21 @@ actual custody. This Draft receiver retains all technical checks, inherited
 #989 and distinct #1460/#1138/#1454 ownership. No new issue, implementation
 owner, activation, credential operation, native proof or resource transfer
 is created. Ledger publication is not domain acceptance or tracker retirement.
+
+## Complete hosted-session reviewed receipt (2026-11-17 UTC)
+
+#13133 merged the complete direct AHP domain amendment after current-head
+Copilot approval and required CI. Complete current ROOT/source/custody
+readback confirms all four Plan, four Validation, one global gate and
+six-component crosswalk clauses. The proposed route is now accepted
+through the existing contract; this receipt appends rather than rewriting
+its proposed-route row or any earlier conditional pass.
+
+The separate audited judgment retired #4229 `NOT_PLANNED` as redundant
+tracking. Its original and both earlier discussions remain unchanged;
+#1266 stays OPEN under the same actual assignee. All nine direct technical
+rows remain unchecked, the AHP effort remains Draft, and actual held
+implementation/source/resource responsibilities remain unchanged.
+The campaign-origin extra receipt veto is prospectively corrected, not a
+waiver of actual owner custody. No keeper-body edit, implementation,
+activation, credential operation, native proof or resource transfer follows.
