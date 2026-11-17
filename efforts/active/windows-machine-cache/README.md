@@ -178,3 +178,19 @@ stores now use the same bounded input reader before decryption and during key
 migration; default-off input handling is unchanged. The bounded packet passed
 308 tests, with one inapplicable wrapped-key case skipped for the native format.
 Whole-file strict typing passed both platform contracts and focused lint passed.
+
+### 2026-11-16 - Preserve concurrent maintenance ownership
+
+The source received a clean independent approval, then required a rebase onto
+the selected-service maintenance change in #13008. The extracted verifier
+retains that configured service route. Machine preparation and forced machine
+verification reject service-owned maintenance rather than reading or mutating
+an unrelated local store. Both capabilities and the upstream admitted unit
+inventory remain intact; only changed source witnesses are refreshed.
+
+The rebased packet passed 331 tests with one inapplicable native-format case
+skipped, plus 87 admitted transport/target/attachment units and 62 recovery/target
+cases. Nine-file strict typing passed both platform contracts. A concurrent
+test-environment preparation hit a Windows executable-sharing refusal; after
+the owned interpreter user completed, the bounded sequential retry passed.
+This does not change the separately disclosed native first-write observation.

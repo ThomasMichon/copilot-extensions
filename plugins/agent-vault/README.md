@@ -819,6 +819,11 @@ rewrites the user cache. An empty store can opt in before ordinary population.
 No new environment variable selects this policy: the private directory retains
 the explicit opt-in for that selected store.
 
+These machine-copy commands require local cache-maintenance ownership.
+Ordinary `cache-verify` retains configured `selected-service` routing;
+machine preparation and forced machine verification refuse that policy rather
+than reading or changing an unrelated caller-side store.
+
 Capable writers update the machine copy through the shared protected-store
 writer, including explicit population, unlock warming, service records,
 rotation journals and invalidation. Readers prefer the primary; only a

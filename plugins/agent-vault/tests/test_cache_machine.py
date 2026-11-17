@@ -281,7 +281,10 @@ def test_verify_machine_path_exposes_only_counts_and_never_uses_user_dpapi(
     protected.state.user_unavailable = True
     protected.state.calls.clear()
     monkeypatch.setattr(cache, "get_cache", protected.open)
-    monkeypatch.setattr(cache_machine_cli, "command_entries", lambda _args: [("token", "password")])
+    monkeypatch.setattr(
+        cache_machine_cli, "command_plan",
+        lambda _args: SimpleNamespace(entries=[("token", "password")], service_owned=False),
+    )
     monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(group="Allowed"))
     assert cache_machine_cli.cmd_cache_verify(
         SimpleNamespace(machine_fallback=True, json=True),

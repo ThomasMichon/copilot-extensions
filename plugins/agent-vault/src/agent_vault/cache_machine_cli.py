@@ -9,9 +9,10 @@ from typing import Any
 
 from . import config
 from .cache_dpapi import CacheProtectionError
-from .cache_targets import command_entries
+from .cache_targets import command_plan, configured
 from .credential_fields import attribute_name
 from .credential_reads import legacy_cache_entry
+from .invocation import cache_maintenance_owner
 
 
 def cmd_cache_machine_prepare(args: Any) -> int:
@@ -24,6 +25,9 @@ def cmd_cache_machine_prepare(args: Any) -> int:
               file=sys.stderr)
         return 2
     try:
+        if cache_maintenance_owner(configured()) != "local":
+            print("Error: machine cache preparation requires local cache ownership", file=sys.stderr)
+            return 1
         result = prepare(get_cache())
     except (OSError, RuntimeError, ValueError, ImportError):
         print("Error: machine cache preparation failed; primary retained", file=sys.stderr)
@@ -45,13 +49,21 @@ def register_prepare(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
 def cmd_cache_verify(args: Any) -> int:
     """Verify selected cache entries without exposing values or starting a service."""
     from .cache import get_cache
-    pairs = command_entries(args)
-    if pairs is None:
+    plan = command_plan(args)
+    if plan is None:
         return 1
+    pairs = plan.entries
     if not pairs:
         print("No entries to verify (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
+    if plan.service_owned:
+        if getattr(args, "machine_fallback", False):
+            print("Error: machine fallback verification requires local cache ownership", file=sys.stderr)
+            return 1
+        from .cache_maintenance_client import command
+
+        return command(args, pairs, "verify")
     cache = get_cache()
     present = 0
     missing: list[str] = []

@@ -291,6 +291,22 @@ def test_incompatible_population_flags_refuse_before_service_contact(
     assert cli.main(["--configuration-root", str(repository), "cache-populate", flag]) == 1
 
 
+@pytest.mark.parametrize("command", [
+    ["cache-verify", "--machine-fallback"],
+    ["cache-machine-prepare", "--accept-machine-scope"],
+])
+def test_local_machine_operations_cannot_bypass_selected_service_ownership(
+    selected: SelectedFixture, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], command: list[str],
+) -> None:
+    repository = configure(selected, monkeypatch)
+    monkeypatch.setattr(
+        cli, "send_command", lambda *_a, **_kw: pytest.fail("local operation contacted service"),
+    )
+    assert cli.main(["--configuration-root", str(repository), *command]) == 1
+    assert "requires local cache ownership" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("value", [True, None, [], "unknown"])
 def test_invalid_maintenance_policy_refuses_before_extensions_or_local_cache(
     selected: SelectedFixture, monkeypatch: pytest.MonkeyPatch, value: object,

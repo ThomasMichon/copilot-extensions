@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from functools import partial
 import json
 import os
 import subprocess
