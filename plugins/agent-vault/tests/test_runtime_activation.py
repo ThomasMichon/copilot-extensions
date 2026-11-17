@@ -43,7 +43,7 @@ class _Invoke(Protocol):
 
 
 # The shared legacy fixtures expose these concrete native-launch interfaces.
-prepare_payload = cast(Callable[[Path, str], tuple[Path, Path, Path, str, str]], _prepare_payload)
+_prepare_payload_fixture = cast(Callable[[Path, str], tuple[Path, Path, Path, str, str]], _prepare_payload)
 prepare_runtime = cast(Callable[[Path, Path], None], _prepare_runtime)
 invoke = cast(_Invoke, _invoke)
 launcher = cast(Callable[[Path], list[str]], _launcher)
@@ -52,6 +52,12 @@ load_module = cast(Callable[[Path, str], ModuleType], _load_module)
 _installer_function = cast(Callable[[str], str], _raw_installer_function)
 
 PLUGIN = Path(__file__).resolve().parents[1]
+
+
+def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
+    result = _prepare_payload_fixture(root, mode)
+    shutil.copy2(PLUGIN / "readiness-isolation.json", result[1] / "readiness-isolation.json")
+    return result
 
 
 def _prepare_qualified_runtime(runtime: Path, payload: Path) -> None:
