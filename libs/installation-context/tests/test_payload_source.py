@@ -182,6 +182,35 @@ def test_directory_source_is_catalog_attributable(
     assert _snapshot(tmp_path) == before
 
 
+@pytest.mark.parametrize("operation", ["resolve_payload_source", "resolve_context"])
+def test_isolated_copilot_home_retains_installed_source(
+    tmp_path: Path, context_module: _PayloadModule, operation: str,
+) -> None:
+    copilot, payload = _installed(
+        tmp_path, {"source": "github", "repo": "example/marketplace"},
+    )
+    arguments = {
+        "payload_root": payload, "plugin_id": "agent-worktrees",
+        "environment": {"HOME": str(tmp_path / "account"), "COPILOT_HOME": str(copilot)},
+    }
+    if operation == "resolve_context":
+        arguments["durable_home"] = tmp_path / "durable"
+    before = _snapshot(tmp_path)
+    resolve = getattr(context_module, operation)
+    source = resolve(**arguments)
+    assert source["source"]["canonical"] == "github:example/marketplace"
+    assert source["locator"]["copilotHome"] == str(copilot.resolve())
+    assert _snapshot(tmp_path) == before
+
+    # Explicit management selection wins over an unrelated or invalid ambient home.
+    arguments["copilot_home"] = copilot
+    arguments["environment"]["COPILOT_HOME"] = "relative/foreign"
+    assert resolve(**arguments) == source
+    del arguments["copilot_home"]
+    with pytest.raises(context_module.InstallationContextError, match="must be absolute"):
+        resolve(**arguments)
+
+
 def test_explicit_management_source_is_not_an_installation_receipt(
     tmp_path: Path, context_module: _PayloadModule,
 ) -> None:
