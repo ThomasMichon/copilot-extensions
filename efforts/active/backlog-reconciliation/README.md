@@ -3430,6 +3430,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   source judgment precede tracking retirement. The same journal records actual
   #12951 delivery, whole-original canonical discriminators, distinct inflow
   and the complete 864-issue census, 135 above fixed 729.
+  The [complete claims-ownership receiving reconciliation](journal/2026/11.16-complete-claims-ownership-receiving.md)
+  records actual #12960 delivery and verified #4307 tracking retirement, with
+  all eight Linux technical rows unchecked. Existing final-OPEN #12957 now
+  directly retains complete #12955 cross-project/PR-URL matching and #12956
+  terminal-claim/cache/completeness acceptance alongside all six original gaps.
+  Full current receiving readback preceded both verified `NOT_PLANNED`
+  source retirements; all fourteen CO/COV rows remain unchecked. The complete
+  00:41:22 UTC census is 861 whole open, 132 above fixed 729, with two campaign
+  departures and no new arrivals or unrelated departures since 863.
   The [complete standalone-consumer receiving proposal](journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md)
   directly retains #3439's exact Dispatch-only plugin composition, local alias,
   real empty inbox, subsequent same-coordinator dynamic health/version and
