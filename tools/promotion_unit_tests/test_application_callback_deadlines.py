@@ -143,3 +143,45 @@ def test_existing_ssh_receiver_accepts_the_actual_unchanged_base_contract(
             probe()
     else:
         assert Path(probe().__file__ or "") == helper
+
+
+@pytest.mark.parametrize("support", ["current", "old", "malformed"])
+def test_publication_selection_reads_actual_helper_without_executing(
+    tmp_path: Path, support: str,
+) -> None:
+    helper = tmp_path / "install.py"
+    helper.write_text(
+        "APPLICATION_INSTALL_CAPABILITIES = (\n" if support == "malformed"
+        else "pass\n" if support == "old"
+        else "APPLICATION_INSTALL_CAPABILITIES = ('global-bin/v1',)\n"
+             "raise AssertionError('metadata discovery must not execute helpers')\n",
+    )
+    if support == "current":
+        application.require_publication_selection(helper)
+    else:
+        with pytest.raises(ValueError, match="selected application helper lacks global-bin/v1"):
+            application.require_publication_selection(helper)
+
+
+def test_publication_cli_keeps_callback_separator_and_refuses_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def install(_slot: Path, **options: Any) -> dict[str, str]:
+        calls.append(options)
+        return {"state": "installed"}
+
+    monkeypatch.setattr(application, "install", install)
+    selected = tmp_path / "commands"
+    assert application.main([
+        "--global-bin", str(selected), "--", "--global-bin", "callback-value",
+    ]) == 0
+    assert calls == [{
+        "stage": False, "global_bin": selected,
+        "arguments": ("--global-bin", "callback-value"),
+    }]
+    with pytest.raises(SystemExit) as error:
+        application.main(["--global-bin", str(selected), "--stage"])
+    assert error.value.code == 2 and len(calls) == 1
+    assert not selected.exists()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 import importlib.util
@@ -20,6 +21,46 @@ from typing import Any, Callable, Iterator, NamedTuple, cast
 
 _QUALIFICATION_TIMEOUT = 600
 _PUBLICATION_ALLOWANCE = 60
+APPLICATION_INSTALL_CAPABILITIES = ("global-bin/v1",)
+
+
+def publication_directory(directory: Path) -> Path:
+    """Validate an explicit publication selection without creating its ancestry."""
+    if (
+        not directory.is_absolute() or ".." in directory.parts
+        or any(char in str(directory) for char in "\r\n\0")
+    ):
+        raise ValueError("application command directory must be an absolute ordinary path")
+    for parent in reversed((directory, *directory.parents)):
+        try:
+            info = parent.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("application command directory must have ordinary directory ancestry")
+    return directory
+
+
+def require_publication_selection(helper: Path) -> None:
+    """Read support from the selected helper, without executing a preflight."""
+    try:
+        content = _read(helper, limit=1 << 20)
+        body = ast.parse(content if content is not None else b"").body
+        declarations = [
+            node.value for node in body if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "APPLICATION_INSTALL_CAPABILITIES"
+                    for target in node.targets)
+        ]
+        capabilities = ast.literal_eval(declarations[0]) if len(declarations) == 1 else ()
+        supported = (
+            isinstance(capabilities, (tuple, list))
+            and all(isinstance(value, str) for value in capabilities)
+            and "global-bin/v1" in capabilities
+        )
+    except (SyntaxError, ValueError, TypeError) as error:
+        raise ValueError("selected application helper lacks global-bin/v1 support") from error
+    if not supported:
+        raise ValueError("selected application helper lacks global-bin/v1 support")
 
 
 class ApplicationStartupUncertain(RuntimeError):
@@ -578,6 +619,10 @@ def install(
     arguments: tuple[str, ...] = (),
 ) -> dict[str, str]:
     """UV has synchronized the environment before this entry runs."""
+    if global_bin is not None:
+        if stage:
+            raise ValueError("application command directory cannot be selected with --stage")
+        publication_directory(global_bin)
     slot = slot.resolve()
     if (
         not (slot / ".venv" / "pyvenv.cfg").is_file()
@@ -702,16 +747,20 @@ def install(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--stage", action="store_true")
+    parser.add_argument("--global-bin", type=Path, help="command publication directory (regular install)")
     parser.add_argument(
         "arguments", nargs=argparse.REMAINDER,
         help="application-owned setup/start arguments after -- (regular installation only)",
     )
     arguments = parser.parse_args(argv)
+    if arguments.stage and arguments.global_bin is not None:
+        parser.error("--global-bin cannot be selected with --stage")
     forwarded = arguments.arguments
     if forwarded[:1] == ["--"]:
         forwarded = forwarded[1:]
     print(json.dumps(install(
         Path(__file__).parent, stage=arguments.stage, arguments=tuple(forwarded),
+        **({"global_bin": arguments.global_bin} if arguments.global_bin is not None else {}),
     )))
     return 0
 
