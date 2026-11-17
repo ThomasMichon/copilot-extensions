@@ -15,8 +15,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def workflow(name: str) -> dict[str, Any]:
-    value: dict[str, Any] = yaml.safe_load(
+def workflow(name: str) -> dict[object, Any]:
+    value: dict[object, Any] = yaml.safe_load(
         (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"),
     )
     return value
@@ -25,6 +25,7 @@ def workflow(name: str) -> dict[str, Any]:
 def test_hosted_resume_uses_exact_candidate_and_existing_native_contract() -> None:
     value = workflow("resume-pane-windows.yml")
     trigger = value.get("on", value.get(True))
+    assert isinstance(trigger, dict)
     assert set(trigger) == {"pull_request", "workflow_dispatch"}
     assert trigger["pull_request"]["branches"] == ["dev"]
     assert ".github/workflows/resume-pane-windows.yml" in trigger["pull_request"]["paths"]
