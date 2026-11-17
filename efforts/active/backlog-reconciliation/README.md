@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [copy-source and custody continuation](journal/2026/11.17-vault-followups-and-custody-gap.md)
+  records three distinct Vault follow-ups and the public #12717 gap notice;
+  source delivery is not completion of their remaining acceptance.
   The [ordinary Windows test-custody reconciliation](journal/2026/11.17-ordinary-windows-test-custody.md)
   preserves partial delivery and the remaining admitted-controller custody gap;
   #12717, #12111 and #12696 remain open.
