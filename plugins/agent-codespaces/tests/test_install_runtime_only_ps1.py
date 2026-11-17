@@ -40,11 +40,33 @@ def native_shell(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
     return shell
 
 
+def _environment(tmp_path: Path) -> dict[str, str]:
+    environment = installer._env(tmp_path)
+    root = str(tmp_path / "runtime")
+    environment.update(
+        AGENT_CODESPACES_HOME=root, AGENT_CODESPACES_INSTALL_DIR=root,
+        COPILOT_EXTENSIONS_HUMAN_UTF8="0",
+    )
+    return environment
+
+
 def _call(script: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     result: subprocess.CompletedProcess[str] = installer._run(
-        "ps1", script, tmp_path, installer._env(tmp_path),
+        "ps1", script, tmp_path, _environment(tmp_path),
     )
     return result
+
+
+def _admission_entry(tmp_path: Path, continuation: str, *, lose_guard: bool = False) -> Path:
+    source = (installer.PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    header = source.split("$NativeWheelSelection = $null", 1)[0]
+    if lose_guard:
+        guard = "if ($NoService -and ("
+        assert header.count(guard) == 1
+        header = header.replace(guard, "if ($false -and (", 1)
+    entry = tmp_path / "admission.ps1"
+    entry.write_text(header + "\n" + continuation + "\n", encoding="utf-8")
+    return entry
 
 
 @pytest.mark.parametrize("case", [
@@ -150,7 +172,9 @@ if ($global:fixtureRequestedHold) { $arguments.NoService=$true }
 def test_runtime_only_rejects_incomplete_or_incompatible_requests_before_effects(
     tmp_path: Path, native_shell: str, arguments: str,
 ) -> None:
-    entry = str(installer.PLUGIN / "scripts" / "install.ps1").replace("'", "''")
+    entry = str(_admission_entry(
+        tmp_path, "throw 'fixture: installation effects blocked'",
+    )).replace("'", "''")
     root = tmp_path / "runtime"
     quoted_root = str(root).replace("'", "''")
     script = (
@@ -160,14 +184,52 @@ def test_runtime_only_rejects_incomplete_or_incompatible_requests_before_effects
     result = _call(script, tmp_path)
     assert result.returncode != 0
     assert "requires complete closed wheels" in result.stdout + result.stderr
+    assert "fixture: installation effects blocked" not in result.stdout + result.stderr
     assert not root.exists()
+
+
+def test_refusal_guard_regression_cannot_reach_installation(
+    tmp_path: Path, native_shell: str,
+) -> None:
+    entry = str(_admission_entry(
+        tmp_path, "throw 'fixture: installation effects blocked'", lose_guard=True,
+    )).replace("'", "''")
+    root = str(tmp_path / "runtime").replace("'", "''")
+    result = _call(
+        f"$ErrorActionPreference='Stop'\n& '{entry}' update -NoService -InstallDir '{root}'\n",
+        tmp_path,
+    )
+    assert result.returncode != 0
+    assert "fixture: installation effects blocked" in result.stdout + result.stderr
+    assert not (tmp_path / "runtime").exists()
+
+
+@pytest.mark.parametrize("action", ["install", "update"])
+def test_declared_runtime_only_capability_reaches_the_native_parser(
+    tmp_path: Path, native_shell: str, action: str,
+) -> None:
+    descriptor = json.loads(
+        (installer.PLUGIN / "scripts" / "installer-contract.json").read_text(encoding="utf-8"),
+    )
+    assert descriptor["schema"] == "agent-codespaces.native-installer" and descriptor["version"] == 1
+    capability = descriptor["capabilities"]["runtime-only-v1"]
+    assert action in capability["actions"]
+    entry = str(_admission_entry(tmp_path, "[bool]$NoService | ConvertTo-Json")).replace("'", "''")
+    options = " ".join(f"{name} fixture" for name in capability["required_options"])
+    result = _call(
+        f"& '{entry}' {action} {capability['entrypoints']['install.ps1']} {options}\n",
+        tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip()) is True
+    assert not (tmp_path / "runtime").exists()
 
 
 def _reentry(
     tmp_path: Path, shell: str, boundary: str, action: str,
-    monkeypatch: pytest.MonkeyPatch, *, lose_hold: bool = False,
+    monkeypatch: pytest.MonkeyPatch, *, requested: bool = True, lose_hold: bool = False,
 ) -> tuple[int, dict[str, object]]:
-    environment = installer._env(tmp_path)
+    environment = _environment(tmp_path)
     assert environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
     home = Path(environment["USERPROFILE"])
     home.mkdir(parents=True, exist_ok=True)
@@ -198,7 +260,8 @@ def _reentry(
         "[CmdletBinding()]" + parameters
         + "\n$ErrorActionPreference='Stop'\nSet-StrictMode -Version Latest\n"
         + installer._function("ps1", "Copy-InstallerStageDirectory")
-        + staging + "\n" + functions + r"""
+        + staging + "\n" + functions
+        + f"\n$fixtureAllowDefault=${str(not requested).lower()}\n" + r"""
 $script:events=[Collections.Generic.List[string]]::new()
 $ServiceName='fixture'
 $LocalBin=Join-Path $InstallDir 'commands'
@@ -214,14 +277,24 @@ function Deploy-Package { $script:events.Add('package'); return $true }
 function Invoke-VersionedActivate { $script:events.Add('activate'); return $true }
 function Deploy-VersionedRuntimeHelper { $script:events.Add('helpers') }
 function Deploy-SelfProvisioningBinstub { $script:events.Add('bindings') }
-function Invoke-FixturePython { $script:events.Add('migrate'); $global:LASTEXITCODE=0 }
+function Invoke-FixturePython {
+    $script:events.Add($(if ($args -contains 'config-migrate') {'migrate'} else {'owner-start'}))
+    $global:LASTEXITCODE=0
+}
 function Write-CodespacesDeployManifest { $script:events.Add('manifest') }
 function Test-CodespacesRuntime { $script:events.Add('verify'); return $true }
 function Get-WindowsScheduledTaskPolicy {
     $script:events.Add('service-policy')
+    if ($fixtureAllowDefault) { return 'preserve' }
     throw 'Unexpected service/task effect'
 }
-function Get-ConnectionOwnerConfig { throw 'Unexpected Owner query' }
+function Get-ScheduledTask {}
+function Get-OwnerScheduledTask { $script:events.Add('task-read'); return $null }
+function Get-ConnectionOwnerConfig {
+    if (-not $fixtureAllowDefault) { throw 'Unexpected Owner query' }
+    $script:events.Add('config-read')
+    return @{Known=$true;Enabled=$true;Interval=15}
+}
 try {
     if ($Action -eq 'install') { Invoke-Install } else { Invoke-Update }
 } finally {
@@ -230,7 +303,8 @@ try {
         staged_from=$env:COPILOT_PLUGIN_STAGED_FROM
         script_root=$PSScriptRoot; events=@($script:events)
         wheels=@($WheelProfile,$WheelDirectory,$WheelPython,$WheelUv)
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:USERPROFILE 'reentry.json')
+    } | ConvertTo-Json -Depth 4 |
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $env:USERPROFILE 'reentry.json')
 }
 """,
         encoding="utf-8",
@@ -245,10 +319,11 @@ try {
             "Action": action, "InstallDir": str(runtime), "WheelProfile": wheels[0],
             "WheelDirectory": wheels[1], "WheelPython": wheels[2], "WheelUv": wheels[3],
         }
+        hold = " -NoService" if requested else ""
         invocation = "\n".join(
             f"${name}='{value.replace(chr(39), chr(39) * 2)}'"
             for name, value in {"entry": str(entry), **arguments}.items()
-        ) + "\n& $entry -Action $Action -InstallDir $InstallDir -NoService " \
+        ) + f"\n& $entry -Action $Action -InstallDir $InstallDir{hold} " \
             "-WheelProfile $WheelProfile -WheelDirectory $WheelDirectory " \
             "-WheelPython $WheelPython -WheelUv $WheelUv\nexit $LASTEXITCODE\n"
         result = installer._run("ps1", invocation, tmp_path, environment)
@@ -275,7 +350,8 @@ try {
         monkeypatch.setattr(owner, "default_root", lambda: execution)
         args = SimpleNamespace(
             payload=payload, root=runtime, plugin="agent-codespaces", shell=Path(shell),
-            action=action, options=["NoService"], check_native=False, remove_broker=False,
+            action=action, options=["NoService"] if requested else [],
+            check_native=False, remove_broker=False,
             wheel_profile=Path(wheels[0]), wheel_directory=Path(wheels[1]),
             wheel_python=Path(wheels[2]), wheel_uv=Path(wheels[3]),
         )
@@ -317,15 +393,20 @@ try {
 
 @pytest.mark.parametrize("boundary", ["participant", "self-stage"])
 @pytest.mark.parametrize("action", ["install", "update"])
+@pytest.mark.parametrize("requested", [False, True])
 def test_runtime_only_reentry(
     tmp_path: Path, native_shell: str, boundary: str, action: str,
-    monkeypatch: pytest.MonkeyPatch,
+    requested: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    code, report = _reentry(tmp_path, native_shell, boundary, action, monkeypatch)
+    code, report = _reentry(
+        tmp_path, native_shell, boundary, action, monkeypatch, requested=requested,
+    )
     assert code == 0, report
-    assert report["no_service"] is True
+    assert report["no_service"] is requested
     expected = ["select", "venv", "package", "activate", "helpers", "bindings", "migrate", "manifest"]
-    assert report["events"] == expected + (["verify"] if action == "install" else [])
+    expected += ["verify"] if action == "install" else []
+    expected += [] if requested else ["service-policy", "task-read", "config-read", "owner-start"]
+    assert report["events"] == expected
 
 
 @pytest.mark.parametrize("boundary", ["participant", "self-stage"])

@@ -1,0 +1,20 @@
+{
+  "schema": "agent-codespaces.native-installer",
+  "version": 1,
+  "capabilities": {
+    "runtime-only-v1": {
+      "actions": ["install", "update"],
+      "entrypoints": {
+        "install.ps1": "-NoService"
+      },
+      "required_options": [
+        "-WheelProfile",
+        "-WheelDirectory",
+        "-WheelPython",
+        "-WheelUv"
+      ],
+      "incompatible_options": ["-DryRun"],
+      "unsupported_provider": "refuse-runtime-only-before-effects"
+    }
+  }
+}

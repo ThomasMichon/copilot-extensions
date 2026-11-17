@@ -80,8 +80,16 @@ The caller owns stopping, restoring and verifying any previously running Owner.
 Success in this mode proves runtime preparation, not serving or whole-update readiness.
 
 Omitting the flag preserves normal startup and disabled-task/configuration holds.
-Callers must establish support on the actual incoming installer before using
-the option; older installers without it do not provide an equivalent lifecycle hold.
+The adjacent `scripts/installer-contract.json` declares
+`agent-codespaces.native-installer` version 1 and capability `runtime-only-v1`,
+including actions, entrypoint, required wheel inputs and incompatible options.
+Before stopping the Owner, callers must inspect that descriptor from the exact
+incoming installer payload they will execute, not a newer payload or a package
+version. A missing descriptor, unknown contract version or missing capability
+does not establish the required hold: refuse runtime-only work before lifecycle
+effects and obtain a capable released provider. Legacy ordinary invocations
+without the flag retain their existing behavior; they are not a fallback for
+a required hold. This provider expansion does not itself migrate external callers.
 
 ## Overview
 
