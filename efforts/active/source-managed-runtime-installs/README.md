@@ -64,8 +64,9 @@ The [repository-suite association adapter](repository-suite-association.md)
 defines the separate consuming-repository/configuration boundary before shared
 caller changes. It reuses Manager's existing configuration owner and the
 declaration reader, without absorbing ordinary update, construction, independent
-source policies or content delivery. Its receiving design is not installed
-association or convergence evidence.
+source policies or content delivery. The explicit configuration provider merged
+in #13012; declaration observation is its next separate adapter slice. Neither
+source delivery is installed association or convergence evidence.
 
 The [current lifetime clarification](update-service-lifetimes.md) is part of
 this Goal: ordinary updates are foreground-owned and cancellable, while accepted

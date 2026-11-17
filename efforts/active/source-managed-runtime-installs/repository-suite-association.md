@@ -67,7 +67,9 @@ production, execution custody and all operational holds.
 ## Current boundary
 
 The receiving contract is reviewed; the isolated Manager module/API and its
-explicit association operations are implemented. The native Windows packet
+explicit association operations merged in #13012 as
+`59077d83c93c750a8ad4af5cbb1bd83b11199ac4` after exact-head approval and
+passing required CI. The native Windows packet
 passes 23 controls, including actual cold-module inspect/propose/apply/replace/
 clear, expected-root revalidation under the shared lock, failed publication,
 input bounds and unrelated-policy retention. The two changed Python files pass
@@ -82,3 +84,15 @@ association yet, and no operator installation was configured by the source
 tests. There is no new bootstrap request version, installed pin, migration,
 repository write or rollout. Old-caller negotiation, actual source convergence
 and native installation/adoption gates remain open in the parent.
+
+The separate read-only `repository_suite_declaration` module now connects the
+addressed association to the existing declaration reader and native
+source-locator validation. Its independent capability/schema prevents an
+old association-only provider from advertising declaration support. Nine native
+controls cover actual current/changed intent, unavailable-adopter identity,
+malformed policy, secret-free rejection and a cold first-party package with
+explicitly available or absent parser dependencies. Both changed Python files
+pass whole-file strict analysis on Linux/Windows Python 3.10 targets.
+These are source controls, not actual Python 3.10 execution or an installed
+consumer. Ordinary callers and the native immutable preparation owners remain
+unchanged; no source is acquired by declaration observation.
