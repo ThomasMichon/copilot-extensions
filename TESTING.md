@@ -5878,6 +5878,18 @@ third-party backend request. Compressed wheel-tag alternatives pass through the
 existing bounded canonicalizer before filename parsing; a regression repeats
 each alternative 128 times and asserts the parser receives only one combination.
 
+An explicit `max_diagnostic_bytes` on `retain_source_wheel_lock` opts into
+bounded selection diagnostics from that same native compile. Its dated-feed
+cases offer universal and native wheels, exercise base/extra and repeated warm
+requests, and use raising first-party/helper metadata backends to detect
+unexpected execution. Pure `test_source_witness.py` cases reject missing,
+ambiguous, malformed and mismatched native selections without retaining URLs.
+The existing optional `wheel_inputs=true` source-profile lanes run those native
+compile cases and `tools/test_runtime_source_witness.py` on Linux, Windows and
+macOS. Dual-stream inclusive limits, overflow, deadlines and delayed descendants
+exercise the existing process owner's settlement before cleanup. These remain
+controlled-source checks, not source authentication, feed admission or rollout.
+
 `tools/test_runtime_source_authentication.py` composes actual installation-owned
 fallback intent with the existing configured-runtime-source acquisition and
 canonical preparation paths. Real local Git repositories exercise exact

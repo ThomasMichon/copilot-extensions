@@ -371,6 +371,7 @@
     "caller-contained": {
       "m:owner_bootstrap.py::_windows_start::Popen": 1,
       "t:run-manager-runtime-acceptance.py::_runtime_group::Popen": 1,
+      "t:runtime_source_capture.py::_capture::Popen": 1,
       "cd:headed/auth_wait.py::AuthWaitReceiver.serve::start_server": 1,
       "v:authenticated_curl.py::execute::create_subprocess_exec": 1,
       "r:plugins/agent-index/scripts/historical_registration_owner.py::NativeTaskOwner.__enter__::Popen": 1,
