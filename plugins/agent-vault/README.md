@@ -374,6 +374,39 @@ their own qualification; failed temporary-file cleanup cannot produce a
 successful create-only receipt. Ordinary `import-key` and `export-key` keep their
 existing activation and overwrite behavior.
 
+## Non-activating attachment export provider
+
+The running service's health reply advertises `key_attachment_export_versions`
+containing integer `1` when its existing backend supports bounded attachment
+reads. `key_attachment_export_owner` identifies the same service incarnation
+as the import owner. This is provider expansion only: no exclusive-file CLI
+mode or executing-CLI capability is enabled yet.
+
+The additive `export-key-nonactivating` action takes `entry`, `key_name`,
+the selected database/group context and `expected_export_owner`. A mismatched
+incarnation refuses before backend access; the reply echoes the actual owner.
+The existing service admission refuses a draining owner. An already-locked
+owner returns `needs_unlock` without starting a service, resolving an unlock
+provider or prompting; `allow_prompt: true` refuses. Absent or empty group
+selects root explicitly instead of loading the daemon's ambient group.
+Names follow the create-only import's validation.
+
+Both opaque attachments (`key_name` and its `.pub` companion) must be nonempty
+and at most 16 KiB each. Backend reads stop at the bound plus one byte; failed
+reads, oversized material and failed temporary-file cleanup cannot produce
+success or a partial-material response. The successful response contains
+base64 `key_data` and `pub_data`, without key generation or pair validation.
+This bounds returned material and read allocation, not KeePass's temporary
+file size while its existing ten-second export subprocess runs.
+
+Future consumers must discover this contract from their selected running
+owner, bind its context and incarnation, and refuse missing/withdrawn support
+without falling back to ordinary export. New destination creation and
+privileged temporary-file/materializer custody remain separate contracts;
+this provider does not qualify them. Ordinary `export-key` and backend
+`export_attachment` defaults retain their activation/overwrite and cleanup
+behavior. No existing form is deprecated or removed.
+
 ## Batch reads
 
 `agent-vault batch-get` reads an array of entry/field objects from JSON stdin
