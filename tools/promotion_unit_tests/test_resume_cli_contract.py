@@ -436,6 +436,7 @@ def test_executing_cli_disclosure_matches_actual_parser(
             "agent-bridge.status": {
                 "version": 1, "capabilities": [
                     "health-json", "exact-session-worktree-writer", "retained-native-recovery",
+                    "exact-session-absence",
                 ],
             },
             "agent-bridge.resume": {
@@ -478,6 +479,26 @@ def test_human_health_output_keeps_legacy_format(boundary: ResumeBoundary, capsy
         "[OK] agent-bridge is running -- agent-bridge (http://example.invalid)\n"
     )
     assert boundary.calls == [("GET", "/health", {})]
+
+
+@pytest.mark.parametrize("status", [404, 409, 503])
+def test_full_json_status_distinguishes_absence_from_other_failures(
+    boundary: ResumeBoundary, capsys: Any, status: int,
+) -> None:
+    boundary.failures.append(boundary.errors.BridgeClientError(status, "unavailable"))
+    with pytest.raises(SystemExit) as error:
+        boundary.invoke("--json", "status", "owned-123", "--full")
+    assert error.value.code == 1
+    captured = capsys.readouterr()
+    if status == 404:
+        assert json.loads(captured.out) == {
+            "outcome": "refused_unavailable", "reason": "native_session_unavailable",
+            "target": "owned-123",
+        }
+        assert not captured.err
+    else:
+        assert not captured.out and captured.err
+    assert boundary.calls == [("GET", "/api/v1/sessions/owned-123", {})]
 
 
 def test_health_json_keeps_legacy_provider_support_unknown(

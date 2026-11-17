@@ -32,6 +32,47 @@ Native `http_bindings` selects the opt-in credential-injection policy for
 cannot replace that policy. Its complete schema and matching rules live in the
 HTTP reference.
 
+## Native default configuration owner
+
+The native machine JSON may set `default_configuration_root` to an existing
+absolute source directory containing `.agent-vault.json`. This is an explicit
+machine-local choice, not a path inferred from an installer snapshot, another
+project, the current user name, or a conventional checkout location.
+
+The executing runtime advertises `native-default-owner-v1`. Qualify that
+capability before adopting the setting; a package version or delivered payload
+does not prove an independently installed runtime understands it.
+
+An explicit CLI `--configuration-root`, resident source, delivered configuration
+context, or nearest caller `.agent-vault.json` remains authoritative. Otherwise,
+the native default supplies the configuration source for neutral-directory and
+minimal-PATH callers without starting Worktrees or executing Git. Process cwd,
+relative native file selectors and database/cache/installation custody do not
+change. The selected default source is standalone configuration data; it does
+not implicitly bind a knowledge repository or invent a Worktrees context report.
+Its file may contain only `enabled`, `vault` and `group`; named database records,
+cache keys, service endpoints and protected runtime settings stay native.
+
+Selection provenance is retained through cold activation and resident launch.
+Accepted first-use requests also retain an explicit source across a different
+queue worker and installer staging; this transient operation metadata is not
+a machine default or a fabricated Worktrees configuration report.
+Explicit, resident and caller-file roots still resolve their qualified layers
+even when their path equals the configured default. Only an actual fallback
+uses the standalone-data restriction and bypasses the optional peer.
+Retained native defaults revalidate that exact file and its allowed fields on
+every read; removing it cannot redirect a resident to an ancestor's file.
+Queued cache warming retains that provenance alongside its root and revalidates
+it in the worker. Removal or protected-field replacement refuses the work;
+an explicitly selected root keeps its existing non-default semantics.
+
+A malformed, missing or unsafe selected default refuses rather than selecting
+another database; an unrelated default cannot veto an explicit owner.
+Without this setting, existing repository and optional-peer
+behavior is unchanged. This explicit native source is a bounded part of
+[#12042](https://github.com/ThomasMichon/copilot-extensions/issues/12042), not
+automatic discovery or aggregation of all registered project owners.
+
 ## Dependency selection
 
 The native installer's `-Profile` / `--profile` selection accepts `base`, `ssh`,

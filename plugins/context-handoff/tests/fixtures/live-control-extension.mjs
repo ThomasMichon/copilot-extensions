@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
+const commands = session.config.interaction?.commands ?? session.config.commands;
 const emit = async (type, data = {}, agentId) =>
   session.handlers.get(type)?.({ data, agentId });
 const usage = (currentTokens) => ({
@@ -11,7 +12,7 @@ const usage = (currentTokens) => ({
 });
 const configPath = join(process.cwd(), ".context-handoff", "config.yaml");
 const writeConfig = (text) => writeFile(configPath, text);
-const command = session.config.commands.find((entry) => entry.name === "handoff-pressure");
+const command = commands.find((entry) => entry.name === "handoff-pressure");
 const status = async () => {
   const before = session.logs.length;
   await command.handler({ args: "status" });

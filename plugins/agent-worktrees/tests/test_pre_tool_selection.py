@@ -10,7 +10,9 @@ import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any
 
+from agent_procutil import no_window_kwargs
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -18,18 +20,26 @@ MODES = [None, "", "command", "resident", "RESIDENT", "both"]
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_cached_command_entry_selects_only_command_policy(mode, monkeypatch, capsys):
+def test_cached_command_entry_selects_only_command_policy(
+    mode: str | None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     spec = importlib.util.spec_from_file_location("selection_client", PLUGIN / "scripts" / "hook_client.py")
+    assert spec is not None and spec.loader is not None
     client = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(client)
     if mode is None:
         monkeypatch.delenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", raising=False)
     else:
         monkeypatch.setenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", mode)
-    calls = []
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def decide(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((args, kwargs))
+        return {}
+
     monkeypatch.setattr(client, "_managed_session_admitted", lambda payload: True)
     monkeypatch.setattr(client, "_load_sibling", lambda name: SimpleNamespace(is_active=lambda: False))
-    monkeypatch.setattr(client, "decide", lambda *a, **k: calls.append((a, k)) or {})
+    monkeypatch.setattr(client, "decide", decide)
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
     assert client.main(["preToolUse"]) == 0
     assert len(calls) == (0 if mode == "resident" else 1)
@@ -42,15 +52,19 @@ def test_cached_command_entry_selects_only_command_policy(mode, monkeypatch, cap
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_extension_registers_only_selected_policy(mode, tmp_path):
+@pytest.mark.parametrize("modern", [False, True])
+def test_extension_registers_only_selected_policy(mode: str | None, modern: bool, tmp_path: Path) -> None:
     node = shutil.which("node")
     assert node, "resident selection requires Node"
     plugin = tmp_path / "plugin"
     extension = plugin / "extensions" / "agent-worktrees"
-    extension.mkdir(parents=True)
-    for name in ("extension.mjs", "resident-pre-tool.mjs", "managed-session.mjs"):
-        shutil.copyfile(PLUGIN / "extensions" / "agent-worktrees" / name, extension / name)
-    sdk = plugin / "node_modules" / "@github" / "copilot-sdk"
+    shutil.copytree(PLUGIN / "extensions" / "agent-worktrees", extension)
+    shutil.copyfile(
+        PLUGIN.parents[1] / "libs" / "copilot-driver-core" / "src"
+        / "agent_remote_driver" / "bridge_extension" / "sdk-compat.mjs",
+        extension / "sdk-compat.mjs",
+    )
+    sdk = plugin / "node_modules" / ("@microsoft" if modern else "@github") / "copilot-sdk"
     sdk.mkdir(parents=True)
     (sdk / "package.json").write_text(
         '{"type":"module","exports":{".":"./mock.mjs","./extension":"./mock.mjs"}}',
@@ -71,10 +85,11 @@ const [entry, sdk] = process.argv.slice(2);
 const { calls } = await import(pathToFileURL(sdk));
 await import(pathToFileURL(entry));
 assert.equal(calls.length, 1);
-assert.equal(typeof calls[0].onPermissionRequest, "function");
+assert.equal(typeof (calls[0].permissions?.onRequest ?? calls[0].onPermissionRequest), "function");
 const resident = process.env.AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION === "resident";
-assert.equal(Boolean(calls[0].hooks?.onPreToolUse), resident);
-if (resident) assert.deepEqual(await calls[0].hooks.onPreToolUse({
+const hooks = calls[0].hooks?.handlers ?? calls[0].hooks;
+assert.equal(Boolean(hooks?.onPreToolUse), resident);
+if (resident) assert.deepEqual(await hooks.onPreToolUse({
   sessionId: "fixture-session", workingDirectory: process.cwd(), toolName: "edit",
 }), {}, "unadmitted sessions never activate policy");
 """
@@ -83,18 +98,19 @@ if (resident) assert.deepEqual(await calls[0].hooks.onPreToolUse({
     env["AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON"] = str(tmp_path / "absent-python")
     if mode is not None:
         env["AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION"] = mode
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     result = subprocess.run(
         [node, "--input-type=module", "-", str(extension / "extension.mjs"), str(sdk / "mock.mjs")],
         input=script, capture_output=True, text=True, encoding="utf-8", timeout=15,
-        creationflags=flags, env=env, cwd=tmp_path,
+        **no_window_kwargs(), env=env, cwd=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh"])
-def test_powershell_wrapper_runs_only_selected_command(mode, shell_name, tmp_path, native_powershell):
+def test_powershell_wrapper_runs_only_selected_command(
+    mode: str | None, shell_name: str, tmp_path: Path, native_powershell: str,
+) -> None:
     shell = shutil.which(shell_name)
     if shell is None:
         pytest.skip(f"{shell_name} is unavailable")
@@ -112,40 +128,39 @@ def test_powershell_wrapper_runs_only_selected_command(mode, shell_name, tmp_pat
     env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
     if mode is not None:
         env["AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION"] = mode
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
         input="{}", capture_output=True, text=True, timeout=15, env=env,
-        creationflags=flags,
+        **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert marker.exists() == (mode != "resident")
 
 
-def test_direct_native_and_cached_python_resident_entries_do_no_work(tmp_path, native_powershell):
+def test_direct_native_and_cached_python_resident_entries_do_no_work(
+    tmp_path: Path, native_powershell: str,
+) -> None:
     env = os.environ.copy()
     env["AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION"] = "resident"
     env["USERPROFILE"] = str(tmp_path / "absent-home")
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     for command in (
         [native_powershell, "-NoProfile", "-NonInteractive", "-File", str(PLUGIN / "scripts" / "pre-tool-hook.ps1")],
         [sys.executable, "-B", str(PLUGIN / "scripts" / "hook_client.py"), "preToolUse"],
     ):
         result = subprocess.run(command, input="not-json", capture_output=True, text=True,
-                                env=env, timeout=15, creationflags=flags)
+                                env=env, timeout=15, **no_window_kwargs())
         assert result.returncode == 0, result.stderr
         assert result.stdout == "" and result.stderr == ""
     for name in (".agent-worktrees", ".copilot-extensions"):
         assert not (tmp_path / "absent-home" / name).exists()
 
 
-def test_posix_wrapper_skips_before_command_resolution(tmp_path, native_bash):
+def test_posix_wrapper_skips_before_command_resolution(tmp_path: Path, native_bash: str) -> None:
     entry = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
     env = os.environ.copy()
     env.update(AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION="resident", HOME=str(tmp_path / "absent-home"))
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     result = subprocess.run([native_bash, "-c", entry["bash"]], input="not-json",
                             capture_output=True, text=True, env=env, timeout=15,
-                            creationflags=flags)
+                            **no_window_kwargs())
     assert result.returncode == 0, result.stderr
     assert result.stdout == "" and result.stderr == ""

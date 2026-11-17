@@ -1,19 +1,6 @@
 import { createConnection } from "node:net";
+import { existsSync } from "node:fs";
 import { createHeadedAdapter } from "./acp-adapter.mjs";
-
-async function importExtensionSdk(subpath = "") {
-  try {
-    return await import(`@microsoft/copilot-sdk${subpath}`);
-  } catch (error) {
-    if (error?.code !== "ERR_MODULE_NOT_FOUND" ||
-        !error.message?.startsWith("Cannot find package '@microsoft/copilot-sdk' imported from ")) {
-      throw error;
-    }
-    return import(`@github/copilot-sdk${subpath}`);
-  }
-}
-
-const { joinSession } = await importExtensionSdk("/extension");
 
 const binding = JSON.parse(process.env.COPILOT_DRIVER_HEADED_BINDING || "null");
 delete process.env.COPILOT_DRIVER_HEADED_BINDING;
@@ -25,6 +12,12 @@ if (!binding || binding.version !== 1 || !Number.isInteger(binding.port) ||
 }
 
 // No tools, permission callback, hooks or environment-access declarations.
+const { loadExtensionSdk } = await import(
+  existsSync(new URL("./sdk-compat.mjs", import.meta.url))
+    ? new URL("./sdk-compat.mjs", import.meta.url).href
+    : new URL("../bridge_extension/sdk-compat.mjs", import.meta.url).href
+);
+const { joinSession } = await loadExtensionSdk();
 const session = await joinSession();
 if (session.sessionId !== binding.sessionId) throw new Error("Native session binding changed");
 const socket = createConnection({ host: "127.0.0.1", port: binding.port });

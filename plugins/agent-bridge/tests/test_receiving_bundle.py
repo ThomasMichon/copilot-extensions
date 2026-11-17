@@ -237,11 +237,15 @@ def _assert_sdk_facade_loads(
     resources.mkdir(parents=True, exist_ok=True)
     for name, contents in sources:
         (resources / name).write_bytes(contents)
-    sdk = selected / f"node_modules/{sdk_namespace}/copilot-sdk"
+    sdk = tmp_path / f"node_modules/{sdk_namespace}/copilot-sdk"
     sdk.mkdir(parents=True)
     (sdk / "package.json").write_text(json.dumps({
-        "type": "module", "exports": {"./extension": "./extension.mjs"},
+        "type": "module", "exports": {".": "./index.mjs", "./extension": "./extension.mjs"},
     }), encoding="utf-8")
+    (sdk / "index.mjs").write_text(
+        "export const approveAll = () => { throw Error('permission callback must not be added'); };\n",
+        encoding="utf-8",
+    )
     (sdk / "extension.mjs").write_text(
         "export const joinSession = globalThis.__joinSession;\n", encoding="utf-8",
     )
@@ -261,9 +265,12 @@ let joins = 0, subscriptions = 0;
 globalThis.fetch = () => assert.fail("an absent Bridge must not cause network or provisioning");
 globalThis.__joinSession = async (options) => {
   joins++;
-  assert.deepEqual(Object.keys(options).sort(), ["commands", "hooks"]);
-  assert.deepEqual(Object.keys(options.hooks).sort(), ["onPostToolUse", "onPostToolUseFailure"]);
-  assert.deepEqual(options.commands.map(command => command.name), ["peer"]);
+  const modern = process.argv[5] === "@microsoft";
+  assert.deepEqual(Object.keys(options).sort(), modern ? ["hooks", "interaction"] : ["commands", "hooks"]);
+  const hooks = modern ? options.hooks.handlers : options.hooks;
+  const commands = modern ? options.interaction.commands : options.commands;
+  assert.deepEqual(Object.keys(hooks).sort(), ["onPostToolUse", "onPostToolUseFailure"]);
+  assert.deepEqual(commands.map(command => command.name), ["peer"]);
   return {sessionId: sid, on: () => {subscriptions++;}, log: async () => {}};
 };
 if (process.argv[4] === "partial-payload") {
@@ -283,7 +290,7 @@ console.log("one Core registration/delivery activation; no suite service");
     config.mkdir()
     result = run_caller_owned(
         [node, "--input-type=module", "--eval", script,
-         str(selected), str(config), str(entrypoint), layout],
+         str(selected), str(config), str(entrypoint), layout, sdk_namespace],
         timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
     )
     assert result.returncode == 0, result.stderr

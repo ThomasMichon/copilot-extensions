@@ -1580,6 +1580,10 @@ def _main(argv: list[str] | None = None) -> int | None:
                    help="Allow moving an entry outside the vault group")
     p.set_defaults(func=cmd_move)
 
+    from .copy_command import add_copy_parser
+
+    add_copy_parser(sub)
+
     p = sub.add_parser("git-credential",
                        help="git credential helper (delegates allowlisted hosts to GCM)")
     p.add_argument("op", choices=["get", "store", "erase"], help="git credential operation")

@@ -3,29 +3,32 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess as subprocess
 import logging
 import time
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from .bridge import BridgeCarriedSessionBusy, BridgeUnavailable
+from .bridge import BridgeCarriedSessionBusy as BridgeCarriedSessionBusy, BridgeUnavailable
 from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 from .queue_records import SpawnReservation, TaskError
 from .ordinary_agent_facts import (
     identity, native_conflict, sessionless, validate_created, validate_resumed,
 )
-from .ordinary_agent_storage import record_created_agent, record_resumed_agent
+from .ordinary_agent_storage import (
+    record_created_agent as record_created_agent, record_resumed_agent as record_resumed_agent,
+)
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
     from .client import DispatchClient
 
 
 def reserve_for_backend(
-    client: DispatchClient, task: dict, supervisor_id: str, *, ordinary: bool,
+    client: DispatchClient, task: dict[str, Any], supervisor_id: str, *, ordinary: bool,
     restricted: bool = False, instance: tuple[str, str, str] | None = None,
     startup_timeout: float = 600, pool_driver: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Record the selected ordinary backend before its nontransactional create."""
     if instance is not None and task.get("source") != "ci-repair":
         from .supervisor_pool_allocator import reserve
@@ -55,7 +58,7 @@ class CreatedAgentUnrecorded(BridgeCarriedSessionBusy):
     """Creation may have occurred but storage is unproven; retain the reservation."""
 
 
-def _json_result(result: subprocess.CompletedProcess[str]) -> dict:
+def _json_result(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     # Ordinary create/resume can emit progress lines before their JSON result.
     text = result.stdout
     for offset, character in enumerate(text):
@@ -69,11 +72,11 @@ def _json_result(result: subprocess.CompletedProcess[str]) -> dict:
     raise BridgeCarriedSessionBusy("ordinary bridge returned no complete JSON result")
 
 
-def register_routes(app: Any, queue: Any, bus: Any) -> None:
+def register_routes(app: FastAPI, queue: Any, bus: Any) -> None:
     from fastapi import HTTPException
 
     @app.post("/spawn-reservations/{key}/created-agent")
-    def record_created(key: str, body: dict[str, Any]) -> dict:
+    def record_created(key: str, body: dict[str, Any]) -> dict[str, Any]:
         if (
             not {"task_generation", "agent_info"} <= set(body)
             or set(body) - {"task_generation", "agent_info", "worktree_record", "startup_invocation", "execution_machine"}
@@ -92,7 +95,7 @@ def register_routes(app: Any, queue: Any, bus: Any) -> None:
         return result
 
     @app.post("/spawn-reservations/{key}/resumed-agent")
-    def record_resumed(key: str, body: dict[str, Any]) -> dict:
+    def record_resumed(key: str, body: dict[str, Any]) -> dict[str, Any]:
         if (
             not {"task_generation", "session_info", "worktree_record"} <= set(body)
             or set(body) - {"task_generation", "session_info", "worktree_record", "startup_invocation", "execution_machine"}
@@ -112,7 +115,7 @@ def register_routes(app: Any, queue: Any, bus: Any) -> None:
         return result
 
 
-def record_session_info(queue: Any, key: str, session_info: dict) -> SpawnReservation:
+def record_session_info(queue: Any, key: str, session_info: dict[str, Any]) -> SpawnReservation:
     """Store the ordinary send result without inventing agent execution state."""
     with queue._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -120,9 +123,13 @@ def record_session_info(queue: Any, key: str, session_info: dict) -> SpawnReserv
         if not row or not row["agent_info"]:
             raise TaskError("ordinary send result requires stored created-agent facts")
         info = json.loads(row["agent_info"])
+        from .ordinary_control_adoption import HISTORY
+        from .ordinary_control_invocation import CONTROL
+        if HISTORY in info and CONTROL not in info:
+            raise TaskError("original ordinary send belongs to the retained predecessor control epoch")
         if session_info.get("session_id") != info["session_id"]:
             raise TaskError("ordinary send result does not match retained agent")
-        invocation = info.get("startup_invocation")
+        invocation = info[CONTROL]["invocation"] if CONTROL in info else info.get("startup_invocation")
         if invocation is not None and (
             session_info.get("version") != 1
             or session_info.get("invocation_key") != invocation["invocation_key"]
@@ -153,7 +160,7 @@ def legacy_bound(queue: Any, task_id: str, worktree: str | None) -> bool:
 
 
 def carry_agent(conn: Any, task: Any, worktree: str | None, session: str | None,
-                ownership: str | None, retired: bool, *, creation_key: str) -> tuple:
+                ownership: str | None, retired: bool, *, creation_key: str) -> tuple[Any, ...]:
     """Carry stored identity after a retry, including tasks without exclusivity."""
     row = conn.execute(
         "SELECT * FROM spawn_reservations WHERE creation_key=? AND agent_info IS NOT NULL "
@@ -174,9 +181,9 @@ def carry_agent(conn: Any, task: Any, worktree: str | None, session: str | None,
     return row["worktree"], row["session_handle"], "reused", json.dumps(info, sort_keys=True)
 
 
-def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
+def reconcile_created(supervisor: Any, reservation: dict[str, Any], task: dict[str, Any]) -> int:
     """Recover an ordinary startup using existing reservation/liveness fences."""
-    from .client import DispatchError
+    from .client_errors import DispatchError
     log = logging.getLogger(__name__)
     if (
         reservation.get("reserved_by") != supervisor.supervisor_id
@@ -218,13 +225,13 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
 
 
 def start(
-    task: dict, *, client: Any, agent: str, prompt: str,
+    task: dict[str, Any], *, client: Any, agent: str, prompt: str,
     project: str | None = None, charter: str | None = None,
-    timeout: float = 180, no_pair: bool = False, worktree_writer: dict | None = None,
-) -> dict:
+    timeout: float = 180, no_pair: bool = False, worktree_writer: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Create without a prompt, durably store, then send to the retained handle."""
     prefix = agent_bridge_launch_prefix()
-    from .client import DispatchError
+    from .client_errors import DispatchError
     if not prefix:
         raise BridgeUnavailable("ordinary agent-bridge capability is unavailable")
     key = task.get("spawn_reservation_key")
@@ -247,14 +254,14 @@ def start(
     )
 
     def run(
-        argv: list[str], *, prompt_input: str | None = None, read_only: bool = False,
+        arguments: list[str], *, prompt_input: str | None = None, read_only: bool = False,
         execution_prefix: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         from .ordinary_bridge_diagnostics import run as observed_run
 
         diagnostics.secrets["BRIDGE_INPUT_SECRET"] = prompt_input or ""
         return observed_run(
-            execution_prefix or prefix, argv, diagnostics=diagnostics, runner=subprocess.run,
+            execution_prefix or prefix, arguments, diagnostics=diagnostics, runner=subprocess.run,
             prompt_input=prompt_input, read_only=read_only, timeout=timeout,
         )
 
@@ -371,7 +378,7 @@ def start(
         except SpawnPreparationRetained as exc:
             raise CreatedAgentUnrecorded(str(exc)) from exc
 
-    def resumed_info(session_id: str) -> dict:
+    def resumed_info(session_id: str) -> dict[str, Any]:
         if writer_admission is not None:
             response = writer_admission.inspect_session(run, info)
         else:
@@ -385,9 +392,15 @@ def start(
         return {**response, "fact_kind": "resumed"}
 
     from .ordinary_assignment import current_task, read_owner
-    def assignment_record() -> dict:
+    def assignment_record(*, allow_native: str | None = None) -> dict[str, Any]:
         current_task(client, task)
-        record = read_owner(reservation, task["id"], timeout=timeout)
+        from .ordinary_control_invocation import CONTROL
+        if allow_native is None and info and CONTROL in info:
+            allow_native = identity(info).native
+        record = read_owner(
+            reservation, task["id"], timeout=timeout,
+            **({"allow_native": allow_native} if allow_native is not None else {}),
+        )
         if writer_admission is not None:
             writer_admission.check_record(record)
         if reservation.get("worktree_path") is None:
@@ -435,6 +448,10 @@ def start(
         from .bridge_remote import normalize_host
         if (
             not isinstance(readback, dict) or not same_facts(readback.get("startup_invocation"), invocation)
+            or "current_control_invocation" in info and (
+                not same_facts(readback.get("current_control_invocation"), info["current_control_invocation"])
+                or "retained_control_history" not in readback
+            )
             or writer_admission is not None and (
                 writer_requirement(readback.get(REQUIREMENT)) != writer_admission.requirement
             )
@@ -450,7 +467,43 @@ def start(
         with diagnostics.stage("ordinary_store_readback"):
             _store_info()
 
+    def restore_control() -> dict[str, Any]:
+        nonlocal info, assigned
+        from .ordinary_resume_control import deliver, resume
+        from .ordinary_control_invocation import CONTROL, prepare
+
+        try:
+            if writer_admission is None:
+                raise TaskError("ordinary control recovery requires its original writer")
+            if CONTROL in info:
+                observed = deliver(run, client, task, reservation, info, observe_only=True)
+                if observed is not None:
+                    return observed
+            original_info = info
+            current_task(client, task)
+            current = resume(
+                run, client, reservation, original_info, writer_admission,
+                read_record=lambda: assignment_record(allow_native=identity(original_info).native),
+            )
+            current["startup_invocation"] = original_info["startup_invocation"]
+            if CONTROL in original_info:
+                current[CONTROL] = original_info[CONTROL]
+            else:
+                current[CONTROL] = prepare(task, reservation, current)
+            info, assigned = current, True
+            store_info()
+            delivered = deliver(run, client, task, reservation, info)
+            if delivered is None:
+                raise TaskError("ordinary current-control delivery is unconfirmed")
+            return delivered
+        except (TaskError, DispatchError, TypeError, OSError, subprocess.TimeoutExpired,
+                BridgeCarriedSessionBusy) as exc:
+            raise CreatedAgentUnrecorded(f"ordinary control recovery retained: {exc}") from exc
+
     if info:
+        from .ordinary_control_adoption import HISTORY
+        if HISTORY in info:
+            return restore_control()
         try:
             actual = identity(info)
             if actual.project != project:
@@ -493,7 +546,7 @@ def start(
             return {"session": f"local-body:{session_id}", "worktree": actual.worktree,
                     "native_session_id": actual.native, "mode": "acp", "session_info": response}
         if response.get("reason") != "native_receipt_missing":
-            raise BridgeCarriedSessionBusy("ordinary receipt history is unavailable")
+            return restore_control()
         if reservation.get("conversation_retired") is not False:
             raise BridgeUnavailable("retained ordinary agent has retired or unknown conversation authority")
         try:
@@ -515,8 +568,8 @@ def start(
                     resume_args += ["--worktree-writer-file", "-"]
                 resumed = run(
                     resume_args,
-                    **({"prompt_input": json.dumps(writer_admission.requirement)}
-                       if writer_admission is not None else {}),
+                    prompt_input=(json.dumps(writer_admission.requirement)
+                                  if writer_admission is not None else None),
                 )
                 response = _json_result(resumed)
                 if resumed.returncode or response.get("session_id") != session_id:
@@ -660,7 +713,7 @@ def start(
     }
 
 
-def observe(handle: dict, *, timeout: float = 180) -> subprocess.CompletedProcess[str]:
+def observe(handle: dict[str, Any], *, timeout: float = 180) -> subprocess.CompletedProcess[str]:
     """Wait after durable send publication; observation never reallocates an agent."""
     prefix = agent_bridge_launch_prefix()
     if not prefix:

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from . import config
 from .cache import PersistentCache, cache_enabled, get_cache as _raw_get_cache
@@ -43,6 +43,27 @@ def get_cache() -> PersistentCache:
         return _raw_get_cache()
     except (OSError, RuntimeError, ValueError, ImportError) as exc:
         raise ServiceCacheUnavailable(UNAVAILABLE) from exc
+
+
+# Backend mutations that change what a cached path names share one cross-service custody.
+BACKEND_CUSTODY_ACTIONS = frozenset({
+    "add", "set-username", "remove", "rm", "move", "mv", "copy", "cp",
+})
+
+
+def custody(
+    request: dict[str, Any], resolve_kpdb: Callable[..., str | None],
+    selected_cache: Callable[[], PersistentCache],
+) -> contextlib.AbstractContextManager[None]:
+    """Return the backend custody a request needs, or a no-op context.
+
+    The service passes its own kpdb resolver and cache selector so both stay
+    patchable at the service module.
+    """
+    if request.get("action") not in BACKEND_CUSTODY_ACTIONS:
+        return contextlib.nullcontext()
+    kpdb = request.get("kpdb") or resolve_kpdb(required=False)
+    return backend_custody(selected_cache(), kpdb)
 
 
 @contextlib.contextmanager

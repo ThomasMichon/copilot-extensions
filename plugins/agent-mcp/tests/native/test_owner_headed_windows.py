@@ -1,12 +1,14 @@
 """Opt-in actual copied headed receiver and actual native CLI overlay reader."""
 
 import asyncio
+import importlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any, Protocol
 from uuid import uuid4
 
 import pytest
@@ -23,7 +25,13 @@ pytestmark = [
 ]
 
 
-async def _settle_mux(mux, identity):
+class _Mux(Protocol):
+    target: str
+
+    def query(self, *args: str) -> subprocess.CompletedProcess[str]: ...
+
+
+async def _settle_mux(mux: _Mux, identity: str | None) -> None:
     for _ in range(100):
         present = await asyncio.to_thread(mux.query, "has-session", "-t", mux.target)
         if present.returncode == 1:
@@ -38,28 +46,33 @@ async def _settle_mux(mux, identity):
             continue
         assert identity and observation.returncode == 0 and observation.stdout.strip() == identity
         stopped = await asyncio.to_thread(mux.query, "kill-session", "-t", mux.target)
+        if stopped.returncode:
+            remaining = await asyncio.to_thread(mux.query, "has-session", "-t", mux.target)
+            if remaining.returncode == 1:
+                return
+            assert remaining.returncode == 0, remaining.stderr
         assert stopped.returncode == 0, stopped.stderr
         return
     pytest.fail("Exact fixture mux settlement remains unconfirmed")
 
 
-def _inherit(transfer):
-    startup = subprocess.STARTUPINFO()
+def _inherit(transfer: OverlayPipe) -> Any:
+    startup = getattr(subprocess, "STARTUPINFO")()
     startup.lpAttributeList = {"handle_list": [transfer.inherited_handle]}
     return startup
 
 
-def test_native_file_reader_receives_private_overlay_and_exact_creation_identity(tmp_path):
+def test_native_file_reader_receives_private_overlay_and_exact_creation_identity(tmp_path: Path) -> None:
     configuration = {"mcpServers": {"chosen": {"env": {"SYNTHETIC": "private-fixture"}}}}
     transfer = OverlayPipe(configuration)
     child, job = None, None
     try:
         child, job = spawn_sync_in_kill_on_close_job(
-            [sys._base_executable, "-I", "-S", "-c",
+            [getattr(sys, "_base_executable"), "-I", "-S", "-c",
              "import json,sys;from pathlib import Path;print(json.dumps(json.loads("
              "Path(sys.argv[1]).read_bytes())),flush=True)", transfer.path],
             require_job=True, allow_breakaway=False,
-            on_suspended=lambda process: transfer.bind(int(process._handle), process.pid),
+            on_suspended=lambda process: transfer.bind(int(getattr(process, "_handle")), process.pid),
             startupinfo=_inherit(transfer), close_fds=True,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
@@ -73,26 +86,27 @@ def test_native_file_reader_receives_private_overlay_and_exact_creation_identity
             job.terminate_and_wait(5)
         if child is not None:
             child.wait(timeout=5)
+            assert child.stdout is not None and child.stderr is not None
             child.stdout.close()
             child.stderr.close()
         transfer.close()
 
 
-def test_wrong_native_reader_cannot_receive_overlay_bytes():
+def test_wrong_native_reader_cannot_receive_overlay_bytes() -> None:
     transfer = OverlayPipe({"synthetic": "must-not-reach-the-other-reader"})
-    owners = []
+    owners: list[tuple[subprocess.Popen[bytes], Any]] = []
     try:
         expected, job = spawn_sync_in_kill_on_close_job(
-            [sys._base_executable, "-I", "-S", "-c", "import sys;sys.stdin.buffer.read()"],
+            [getattr(sys, "_base_executable"), "-I", "-S", "-c", "import sys;sys.stdin.buffer.read()"],
             require_job=True, allow_breakaway=False,
-            on_suspended=lambda process: transfer.bind(int(process._handle), process.pid),
+            on_suspended=lambda process: transfer.bind(int(getattr(process, "_handle")), process.pid),
             startupinfo=_inherit(transfer), close_fds=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         )
         owners.append((expected, job))
         other, job = spawn_sync_in_kill_on_close_job(
-            [sys._base_executable, "-I", "-S", "-c",
+            [getattr(sys, "_base_executable"), "-I", "-S", "-c",
              "import sys;from pathlib import Path;sys.stdout.buffer.write("
              "Path(sys.argv[1]).read_bytes())", transfer.path],
             require_job=True, allow_breakaway=False,
@@ -119,7 +133,7 @@ def test_wrong_native_reader_cannot_receive_overlay_bytes():
 
 
 @pytest.mark.parametrize("delivered", [False, True], ids=["cancel-before-open", "consumed-overlay"])
-def test_pipe_name_is_reserved_until_original_native_owner_settles(delivered):
+def test_pipe_name_is_reserved_until_original_native_owner_settles(delivered: bool) -> None:
     transfer = OverlayPipe({"synthetic": "private-configuration"})
     child, job = None, None
     api = Native()
@@ -134,13 +148,14 @@ def test_pipe_name_is_reserved_until_original_native_owner_settles(delivered):
             + "sys.stdin.buffer.read()"
         )
         child, job = spawn_sync_in_kill_on_close_job(
-            [sys._base_executable, "-I", "-S", "-c", script, transfer.path],
+            [getattr(sys, "_base_executable"), "-I", "-S", "-c", script, transfer.path],
             require_job=True, allow_breakaway=False,
-            on_suspended=lambda process: transfer.bind(int(process._handle), process.pid),
+            on_suspended=lambda process: transfer.bind(int(getattr(process, "_handle")), process.pid),
             startupinfo=_inherit(transfer), close_fds=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         )
+        assert child.stdout is not None
         if delivered:
             transfer.send()
             assert json.loads(child.stdout.readline()) == {"synthetic": "private-configuration"}
@@ -174,21 +189,23 @@ def test_pipe_name_is_reserved_until_original_native_owner_settles(delivered):
 
 
 @pytest.mark.asyncio
-async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(tmp_path, monkeypatch):
+async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     driver_tests = Path(__file__).resolve().parents[3] / "agent-remote-driver" / "tests" / "native"
     monkeypatch.syspath_prepend(str(driver_tests))
     monkeypatch.syspath_prepend(str(Path(__file__).parent))
-    from test_owner_bootstrap_copilot_windows import _provider, _environment
+    bootstrap = importlib.import_module("test_owner_bootstrap_copilot_windows")
     monkeypatch.syspath_prepend(str(driver_tests.parent))
-    from headed_mux_fixture import FixtureMux
+    fixture_mux = importlib.import_module("headed_mux_fixture").FixtureMux
     from agent_remote_driver.session_host.client import SessionHostClient
     from agent_remote_driver.session_host.osutil import pid_alive
 
     home, workspace = tmp_path / "home", tmp_path / "workspace"
     workspace.mkdir()
-    environment = _environment(home)
+    environment = bootstrap._environment(home)
     assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
     environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
     copilot_home = Path(environment["COPILOT_HOME"])
@@ -199,7 +216,9 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         executable=executable, home=copilot_home, workspace=workspace,
         env=environment, logs=tmp_path / "logs",
     )
-    mux, identity, state = None, None, None
+    mux: _Mux | None = None
+    identity: str | None = None
+    state: dict[str, Any] | None = None
     try:
         (native.home / "settings.json").write_text(
             json.dumps({"screenReader": True}), encoding="utf-8",
@@ -207,7 +226,7 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         (native.home / "config.json").write_text(
             json.dumps({"trustedFolders": [str(native.workspace)]}), encoding="utf-8",
         )
-        provider = _provider(tmp_path / "provider")
+        provider = bootstrap._provider(tmp_path / "provider")
         configuration = tmp_path / "mcp.json"
         receipt = tmp_path / "mcp-owner.json"
         configuration.write_text(json.dumps({"mcpServers": {"owner-fixture": {
@@ -232,12 +251,13 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         )
         binary = os.environ.get("PSMUX_TEST_BIN")
         assert binary, "Select the existing native test mux executable"
-        mux = FixtureMux(binary, native.home, {
+        mux = fixture_mux(binary, native.home, {
             **native.env,
             "PSMUX_DATA_DIR": str(tmp_path / "private-mux"), "PSMUX_CONFIG_FILE": os.devnull,
             "PSMUX_NO_WARM": "1",
         })
-        async def query(*args):
+        async def query(*args: str) -> subprocess.CompletedProcess[str]:
+            assert mux is not None
             return await asyncio.to_thread(mux.query, *args)
         assert (await query("has-session", "-t", mux.target)).returncode == 1
         launched = await query(
@@ -265,6 +285,7 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
                 f"Native MCP receiver did not bind; state={state!r}; pane={pane.stdout!r}; "
                 + logs
             )
+        assert state is not None
         observed = json.loads(receipt.read_text())
         assert observed["owner_pid"] == state["child_pid"] != state["host_pid"]
         assert observed["owner_birth"] == "windows:" + state["child_process_start_time"]

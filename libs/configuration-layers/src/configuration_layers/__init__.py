@@ -9,6 +9,7 @@ import math
 import ntpath
 import os
 from pathlib import Path
+import stat
 from typing import Any, TypeAlias, TypedDict, cast
 
 
@@ -300,7 +301,14 @@ def read_source(
         if lexical.is_symlink() and not lexical.exists():
             raise ConfigurationError("broken source link")
         try:
-            text = target.read_text(encoding="utf-8")
+            descriptor = os.open(target, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            try:
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise ConfigurationError("selected source must be an ordinary file")
+                with os.fdopen(descriptor, encoding="utf-8", closefd=False) as stream:
+                    text = stream.read()
+            finally:
+                os.close(descriptor)
         except FileNotFoundError:
             if optional and not os.path.lexists(lexical):
                 return None

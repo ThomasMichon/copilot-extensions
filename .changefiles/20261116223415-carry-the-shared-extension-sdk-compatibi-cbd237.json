@@ -1,0 +1,17 @@
+{
+  "comment": "Carry the shared extension SDK compatibility closure in Core and its independent consumers",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    }
+  ]
+}

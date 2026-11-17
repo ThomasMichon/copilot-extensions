@@ -1,0 +1,9 @@
+{
+  "comment": "Correct current extension SDK namespace and callback authoring guidance",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

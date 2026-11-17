@@ -6,7 +6,9 @@ at the retained-task boundary of
 [#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
 **Status: plan reviewed in #12929; metadata owner accepted in #12953;
 ordinary worktree-resume and target-inventory provider accepted in #13007.
-CLI/Dispatch consumer integration and runtime qualification remain open.**
+Typed-union CLI consumer accepted in #13043; Dispatch's rollback-safe reservation
+storage provider accepted in #13084. Ordinary supervisor integration and runtime
+qualification remain open.**
 Source acceptance is not runtime recovery authority.
 
 ## Existing boundary
@@ -162,6 +164,14 @@ contract guard accepts both contracts and all 1,141 registered fixtures. This
 adds controlled source qualification, not native or installed acceptance.
 
 ## Next consumer slice: ordinary supervised resume
+
+The initial-admission consumer is now implemented and under qualification.
+It negotiates the original owners, resumes the exact workspace only after
+typed predecessor absence, records a separate immutable current-controller
+operation, and leaves acceptance to the worker. Its admitted scope and remaining
+failed-attempt/generation boundary are documented in
+[session acquisition](../../../plugins/agent-dispatch/docs/session-acquisition.md).
+This does not complete the broader native, rollback, rollout or lifecycle gates.
 
 The normal caller should remain the existing supervisor-to-Bridge resume path.
 Dispatch retains the current assignment and reservation before launch, Bridge

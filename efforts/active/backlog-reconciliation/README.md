@@ -3421,6 +3421,21 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [serving and typing checkpoint](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+  preserves #6389's complete canonical acceptance, credits delivered slices
+  and separates #10931's canonical-source and consumer-fixture qualification.
+  The [bootstrap, reporting and generation checkpoint](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
+  retains three complete canonical contracts without mistaking partial owner
+  evidence, eventual transport or consolidated tracking for whole acceptance.
+  The [provider-first delivery reconciliation](journal/2026/11.17-provider-first-delivery-boundaries.md)
+  maps #12947's complete contract against the finite comparison client and
+  retains independent storage, native, provider and operational acceptance.
+  The [copy-source and custody continuation](journal/2026/11.17-vault-followups-and-custody-gap.md)
+  records three distinct Vault follow-ups and the public #12717 gap notice;
+  source delivery is not completion of their remaining acceptance.
+  The [ordinary Windows test-custody reconciliation](journal/2026/11.17-ordinary-windows-test-custody.md)
+  preserves partial delivery and the remaining admitted-controller custody gap;
+  #12717, #12111 and #12696 remain open.
   The [delivery, presentation and native failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
   record actual #13073 delivery and six complete-original judgments, retaining
   Draft user-output delivery, installed presentation acceptance, distinct
