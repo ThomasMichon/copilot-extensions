@@ -21,7 +21,8 @@ from .test_runtime_profile import (
 
 PROVIDER = '''
 def provider(context):
-    raise AssertionError("construction must not invoke an unlock provider")
+    # Escape the registry's fail-open Exception handler.
+    raise SystemExit(93)
 
 def register(registry):
     registry.register_unlock_provider(provider, name="example-adapter", priority=1)
@@ -30,7 +31,7 @@ def register(registry):
 PROBE = '''
 import importlib.metadata, json, pathlib, sys
 import agent_vault
-from agent_vault.extensions import get_registry
+from agent_vault.extensions import UnlockContext, get_registry
 slot = pathlib.Path(sys.prefix).resolve()
 assert slot == pathlib.Path(sys.argv[1]).resolve()
 assert pathlib.Path(agent_vault.__file__).resolve().is_relative_to(slot)
@@ -42,6 +43,9 @@ providers = [item for item in registry.unlock_providers if item.name == "example
 assert len(providers) == 1
 module = sys.modules[providers[0].fn.__module__]
 assert pathlib.Path(module.__file__).resolve().is_relative_to(slot)
+if len(sys.argv) > 2:
+    registry.provide_unlock(UnlockContext("synthetic-vault"), lambda _value: True)
+    raise AssertionError("registry swallowed the provider-invocation sentinel")
 print(json.dumps({"installed_provider": True, "unlock_invoked": False}))
 '''
 
@@ -76,6 +80,13 @@ with install_source.wheel_inputs(profile, wheels) as inputs:
                 **no_window_kwargs(),
             )
             observations.append(json.loads(probe.stdout))
+            if not expected_reuse:
+                sentinel = subprocess.run(
+                    [str(python), "-I", "-B", str(probe_file), str(candidate.slot), "invoke"],
+                    cwd=home, capture_output=True, text=True, timeout=30,
+                    **no_window_kwargs(),
+                )
+                assert sentinel.returncode == 93, "registry swallowed the provider-invocation sentinel"
             assert not (root / "current-version").exists()
             assert not (root / "deploy-manifest.json").exists()
             assert not (home / ".local" / "bin").exists()

@@ -342,6 +342,8 @@ A separately packaged provider can be another explicit root in an admitted
 The [contained construction case](../tests/native/test_runtime_extension_package.py)
 builds and reuses an immutable candidate, then discovers its installed entry point
 without activating a service, invoking the provider or publishing commands.
+An independent negative-control child deliberately invokes the synthetic provider
+through the registry to verify that its nonzero exit cannot be swallowed.
 This qualifies construction and discovery, not feed/release approval, Source
 association, persistent adopter selection across updates, or live adoption.
 Those remain the existing installation and lifecycle owners' responsibilities;
