@@ -13,6 +13,16 @@ from .registrar import RegistrarError
 _TIMEOUT_SECONDS = 30
 
 
+def command_group(args: tuple[str, ...]) -> str:
+    """Classify a GitHub operation without exposing its arguments."""
+    groups: dict[tuple[str, ...], str] = {
+        ("api", "user"): "api user", ("api", "graphql"): "api graphql",
+        ("issue", "view"): "issue view", ("issue", "comment"): "issue comment",
+        ("issue", "edit"): "issue edit",
+    }
+    return groups.get(args[:2], "api" if args[:1] == ("api",) else "other")
+
+
 def run_repository_command(
     argv: list[str], *, timeout: float = _TIMEOUT_SECONDS,
     env: Mapping[str, str] | None = None,

@@ -37,7 +37,7 @@ from .issue_loop_markers import (
     _parse_marker,
     latest_reservations as _latest_reservations,
 )
-from .repository_github_auth import _TIMEOUT_SECONDS, repository_environment, run_repository_command, validate_auth
+from .repository_github_auth import _TIMEOUT_SECONDS, command_group, repository_environment, run_repository_command, validate_auth
 from .repository_issue_selection import eligible_issues, validate_issue_numbers
 from .repository_issue_declarations import expand_repository_issue_loop as expand_repository_issue_loop
 from .repository_issue_task_contracts import (
@@ -541,8 +541,7 @@ class GitHubProvider:
 
     def __init__(
         self,
-        expected_login: str,
-        runner: Callable[..., Any] | None = None,
+        expected_login: str, runner: Callable[..., Any] | None = None,
         *,
         repository: str | None = None,
         auth: str = "ambient",
@@ -550,9 +549,7 @@ class GitHubProvider:
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
         self.expected_login = expected_login
-        self.runner: Callable[..., Any] = runner or (
-            run_repository_command if auth == "repository" else subprocess.run
-        )
+        self.runner: Callable[..., Any] = runner or (run_repository_command if auth == "repository" else subprocess.run)
         if auth not in {"ambient", "repository"} or (auth == "repository" and not repository):
             raise ValueError("repository authentication requires a repository")
         self.repository = repository or ""
@@ -568,9 +565,7 @@ class GitHubProvider:
         return repository_environment(self.repository, self.expected_login, runner=self.runner)
 
     def _gh(self, *args: str, env: Mapping[str, str] | None = None) -> Any:
-        options: dict[str, Any] = {}
-        if args[:2] == ("api", "graphql"):
-            options["encoding"] = "utf-8"
+        options: dict[str, Any] = {"encoding": "utf-8"} if args[:2] == ("api", "graphql") else {}
         if self.auth == "repository":
             options["env"] = env if env is not None else repository_environment(
                 self.repository, self.expected_login, runner=self.runner,
@@ -585,12 +580,7 @@ class GitHubProvider:
         )
         if int(completed.returncode) != 0:
             if self.auth == "repository":
-                groups: dict[tuple[str, ...], str] = {
-                    ("api", "user"): "api user", ("api", "graphql"): "api graphql",
-                    ("issue", "view"): "issue view", ("issue", "comment"): "issue comment",
-                    ("issue", "edit"): "issue edit",
-                }
-                group = groups.get(args[:2], "api" if args[:1] == ("api",) else "other")
+                group = command_group(args)
                 raise RuntimeError(
                     f"Repository GitHub operation failed ({group}, exit {int(completed.returncode)})"
                 )
@@ -1436,17 +1426,12 @@ def run_tick(
                 if own
                 else None
             )
-            claimed_task_id = own.get("task_id") if own else None
-            if own and own.get("state") == "claimed":
-                matching_task = (
-                    tasks_by_id.get(claimed_task_id)
-                    if isinstance(claimed_task_id, str) else None
-                )
-            else:
-                matching_task = (
-                    tasks_by_origin.get(reservation_origin)
-                    if reservation_origin is not None else None
-                )
+            task_index, task_key = (
+                (tasks_by_id, own.get("task_id"))
+                if own and own.get("state") == "claimed"
+                else (tasks_by_origin, reservation_origin)
+            )
+            matching_task = task_index.get(task_key) if isinstance(task_key, str) else None
             if (
                 matching_task is not None
                 and matching_task.get("origin_ref") != reservation_origin
