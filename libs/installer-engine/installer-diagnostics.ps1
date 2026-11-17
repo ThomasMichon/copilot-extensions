@@ -230,10 +230,12 @@ function Save-InstallerDiagnosticPresentationState([switch]$Archive) {
             $path = [IO.Path]::Combine($script:InstallerDiagnostic.Directory, 'presentation-loss.json')
             Test-InstallerDiagnosticsPath $path
             $record = Microsoft.PowerShell.Utility\ConvertTo-Json -InputObject @($loss) -Compress
+            Initialize-InstallerDiagnosticFile $path
             [IO.File]::WriteAllText($path, $record)
             if ($Archive) {
                 $history = [IO.Path]::Combine($script:InstallerDiagnostic.Directory, 'presentation-loss.history.jsonl')
                 Test-InstallerDiagnosticsPath $history
+                Initialize-InstallerDiagnosticFile $history
                 [IO.File]::AppendAllText($history, ($record + "`n"), [Text.UTF8Encoding]::new($false))
             }
         } catch { Write-InstallerDiagnosticsWarning -DeferPresentation }
@@ -387,6 +389,7 @@ function Write-InstallerDiagnosticsWarning([switch]$DeferPresentation) {
         try {
             $path = [IO.Path]::Combine($script:InstallerDiagnostic.Directory, 'missing-diagnostics.json')
             Test-InstallerDiagnosticsPath $path
+            Initialize-InstallerDiagnosticFile $path
             [IO.File]::WriteAllText($path, '{"missing_diagnostics":true}')
         } catch {}
     }
@@ -445,6 +448,55 @@ function New-InstallerDiagnosticsDirectory([string]$Path) {
     }
 }
 
+function New-InstallerDiagnosticFileStream(
+    [string]$Path, [IO.FileShare]$Share = ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+) {
+    Test-InstallerDiagnosticsPath $Path
+    # Private inheritance does not stop TokenOwner from defaulting to Administrators.
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $security.SetOwner($sid)
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $sid, 'FullControl', 'Allow'))
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        return [IO.FileStream]::new($Path, [IO.FileMode]::CreateNew,
+            [Security.AccessControl.FileSystemRights]::FullControl, $Share, 4096,
+            [IO.FileOptions]::None, $security)
+    }
+    return [IO.FileSystemAclExtensions]::Create([IO.FileInfo]::new($Path),
+        [IO.FileMode]::CreateNew, [Security.AccessControl.FileSystemRights]::FullControl,
+        $Share, 4096, [IO.FileOptions]::None, $security)
+}
+
+function Initialize-InstallerDiagnosticFile([string]$Path) {
+    Test-InstallerDiagnosticsPath $Path
+    if (-not [IO.File]::Exists($Path)) {
+        $stream = New-InstallerDiagnosticFileStream $Path
+        $stream.Dispose()
+    }
+    $file = [IO.FileInfo]::new($Path)
+    $acl = if ($PSVersionTable.PSVersion.Major -lt 7) {
+        $file.GetAccessControl()
+    } else { [IO.FileSystemAclExtensions]::GetAccessControl($file) }
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid) {
+        throw 'Diagnostics file is not owned by the current user.'
+    }
+    $access = 0
+    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne 'Allow' -or $rule.IdentityReference.Value -ne $sid -or
+            ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly)) {
+            throw 'Diagnostics file grants foreign or unsupported access.'
+        }
+        $access = $access -bor $rule.FileSystemRights
+    }
+    $full = [Security.AccessControl.FileSystemRights]::FullControl
+    if (($access -band $full) -ne $full) {
+        throw 'Diagnostics file must grant the current user full access.'
+    }
+}
+
 function ConvertTo-InstallerDiagnosticText([string]$Text) {
     if ($Text -cmatch 'UPDATE_DRIVER_WITNESS|--governance-generation|COPILOT_EXTENSIONS_CONTEXT') {
         return '[sensitive diagnostic record omitted]'
@@ -468,6 +520,7 @@ function Write-InstallerDiagnostic([string]$Message) {
         $path = $script:InstallerDiagnostic.Log
         Test-InstallerDiagnosticsPath $path
         $text = ConvertTo-InstallerDiagnosticText $Message
+        Initialize-InstallerDiagnosticFile $path
         [IO.File]::AppendAllText($path, ($text + "`n"), [Text.UTF8Encoding]::new($false))
     } catch { Write-InstallerDiagnosticsWarning }
 }
@@ -502,6 +555,7 @@ function Initialize-InstallerDiagnostics([string]$Plugin) {
             New-InstallerDiagnosticsDirectory $directory
             $metadata = @{ schema = 'copilot-extensions.installer-diagnostics'; plugin = $Plugin
                 attempt = $attempt; attribution = 'UNATTRIBUTED'; started = [DateTime]::UtcNow.ToString('o') }
+            Initialize-InstallerDiagnosticFile ([IO.Path]::Combine($directory, 'attempt.json'))
             [IO.File]::WriteAllText([IO.Path]::Combine($directory, 'attempt.json'),
                 ($metadata | Microsoft.PowerShell.Utility\ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
         }
@@ -509,6 +563,7 @@ function Initialize-InstallerDiagnostics([string]$Plugin) {
         $script:InstallerDiagnostic = @{ Directory = $directory; Writer = $writer; Owner = $owner
             Log = [IO.Path]::Combine($directory, "$writer.log") }
         $record = @{ writer = $writer; parent = $parentWriter; started = [DateTime]::UtcNow.ToString('o') }
+        Initialize-InstallerDiagnosticFile ([IO.Path]::Combine($directory, "$writer.start.json"))
         [IO.File]::WriteAllText([IO.Path]::Combine($directory, "$writer.start.json"),
             ($record | Microsoft.PowerShell.Utility\ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
         $env:COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT = $attempt
@@ -531,10 +586,12 @@ function Complete-InstallerDiagnostics([int]$ExitCode) {
         $record = @{ exit = $ExitCode; completed = [DateTime]::UtcNow.ToString('o') }
         $path = [IO.Path]::Combine($script:InstallerDiagnostic.Directory, ($script:InstallerDiagnostic.Writer + '.completed.json'))
         Test-InstallerDiagnosticsPath $path
+        Initialize-InstallerDiagnosticFile $path
         [IO.File]::WriteAllText($path, ($record | Microsoft.PowerShell.Utility\ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
         if ($script:InstallerDiagnostic.Owner) {
             $path = [IO.Path]::Combine($script:InstallerDiagnostic.Directory, 'completed.json')
             Test-InstallerDiagnosticsPath $path
+            Initialize-InstallerDiagnosticFile $path
             [IO.File]::WriteAllText($path, ($record | Microsoft.PowerShell.Utility\ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
         }
     } catch { Write-InstallerDiagnosticsWarning }
@@ -546,7 +603,7 @@ function Publish-InstallerDiagnosticHandoff([string]$Identifier) {
     }
     $path = [IO.Path]::Combine([IO.Path]::GetDirectoryName($script:InstallerDiagnostic.Directory), "handoff-$Identifier")
     Test-InstallerDiagnosticsPath $path
-    $stream = [IO.File]::Open($path, 'CreateNew', 'Write', 'None')
+    $stream = New-InstallerDiagnosticFileStream $path -Share ([IO.FileShare]::None)
     try {
         $text = [string]::Join([char]10, @(
             $env:COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT,
@@ -601,9 +658,10 @@ function New-InstallerDiagnosticCapture([switch]$Piped) {
             Stderr = [IO.Path]::Combine($directory, "$id.stderr.raw")
             Log = [IO.Path]::Combine($directory, "$id.log") }
         foreach ($path in @($capture.Stdout, $capture.Stderr)) {
-            $stream = [IO.File]::Open($path, 'CreateNew', 'Write', 'ReadWrite')
+            $stream = New-InstallerDiagnosticFileStream $path -Share ([IO.FileShare]::ReadWrite)
             $stream.Dispose()
         }
+        Initialize-InstallerDiagnosticFile ([IO.Path]::Combine($directory, "$id.pending"))
         [IO.File]::WriteAllText([IO.Path]::Combine($directory, "$id.pending"),
             'Private raw transport; inherited writers may remain.')
         return $capture
@@ -792,6 +850,7 @@ function Save-InstallerDiagnosticCapture($Capture) {
                 $decoder = [IO.StreamReader]::new($memory, $encoding, $true)
                 try { $text = $decoder.ReadToEnd() } finally { $decoder.Dispose() }
                 $text = ConvertTo-InstallerDiagnosticText $text
+                Initialize-InstallerDiagnosticFile $Capture.Log
                 [IO.File]::AppendAllText($Capture.Log, ($text + "`n"), [Text.UTF8Encoding]::new($false))
             } finally { $reader.Dispose() }
         }

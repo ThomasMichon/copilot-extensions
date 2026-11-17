@@ -145,8 +145,12 @@ def test_native_powershell_entry_joins_the_reserved_attempt(host, launch_env, tm
     launch_env["PSModulePath"] = str(Path(shutil.which(host)).parent / "Modules")
     result = run([shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(script)], launch_env)
     assert result.rc == 23 and result.status == "installer exited 23"
-    assert result.diagnostics["status"] == "available", result.diagnostics
     directory = Path(result.diagnostics["directory"])
+    helper = installer_diagnostics._helper()
+    for path in directory.iterdir():
+        fd = helper.files().open_file(path)
+        os.close(fd)
+    assert result.diagnostics["status"] == "available", result.diagnostics
     assert "native entry fixture" in next(directory.glob("*.log")).read_text(encoding="utf-8")
     assert not (directory / "completed.json").exists()
 

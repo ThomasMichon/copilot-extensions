@@ -1445,3 +1445,32 @@ Authored direct per-source Plan, actual global Validation and continuing custody
   The fix changes no production source or test deadline. A new reviewed,
   CI-green exact head and native run remain necessary; the failed run is not
   retried as a substitute for a versioned repair.
+
+### 2026-11-16 - Exact-head qualification and native file ownership
+
+- Focused run `44035046784` checked out
+  `9a5084a1dd81ca526de5f182d9733e13ee8a7747`. Windows passed the Bash
+  group (4 passed, 3 skipped), foundation (42 passed) and guardian
+  (33 passed, 1 skipped), then failed both PowerShell variants of
+  `test_native_powershell_entry_joins_the_reserved_attempt` (23 passed).
+  Later groups and real-UV construction were unexecuted, not passes.
+- The hardened Linux job timed out in `devcontainer up` at its unchanged
+  1,800-second preparation bound, before test collection. The CLI preparation
+  step succeeded. No Docker, image or filesystem root cause is inferred from
+  the timeout; no unchanged rerun or longer deadline is used as qualification.
+- Both Windows failures reproduced in isolation. Checking each native artifact
+  through the canonical Python reader exposed a TokenUser ownership mismatch:
+  private directory inheritance did not ensure the native files had the
+  expected owner. The producer now creates metadata, logs, raw captures and
+  handoffs with explicit TokenUser ownership and private full-control access.
+  Existing files are validated, not re-owned or repaired. The packaged helper
+  is synchronized from the canonical source.
+- The existing correlation regression now verifies every native artifact through
+  that private reader. Both PS5/PS7 cases pass after the repair. The related
+  foundation, presentation and caller-reference suites pass **93 controls**
+  under their original limits, including privacy, redaction, backpressure and
+  native exit preservation. These source results do not replace fresh hosted
+  qualification of the repaired head.
+- Source publication, current-head CI/review and complete native qualification
+  remain outstanding. The draft, larger-consumer limits and rollout holds remain;
+  this does not complete the parent effort.

@@ -4374,6 +4374,9 @@ require current-user ownership and mode 0700; Windows directories require a
 protected TokenUser-only full-control DACL. Files require ordinary, single-link
 identity and user-only access, including read access. Existing public, foreign
 or linked state is refused rather than repaired or treated as available logging.
+Native Windows metadata, logs, raw captures and handoffs also set TokenUser
+ownership explicitly at file creation; private inherited access alone does not
+establish that ownership. Existing files are validated, not re-owned.
 The CLI entry explicitly announces its exact diagnostic directory on stderr.
 Generic in-process writers do not announce by default, preserving their original
 stream bytes. The optional construction progress callback reports fixed labels
