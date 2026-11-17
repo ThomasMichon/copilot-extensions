@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 import zipfile
 from typing import TYPE_CHECKING, Any
 
@@ -391,11 +392,11 @@ def _profile_policy(
     selected: source_inputs.ProjectSource, environment: dict[str, str],
     download_origins: tuple[str, ...],
 ) -> tuple[tuple[str, str | None], dict[str, Any]]:
-    from governed_feed_trust import _opaque_index_identity, _validated_trusted_index_url
+    from governed_feed_trust import _effective_default_index_url, _opaque_index_identity
 
-    trusted = _validated_trusted_index_url(environment)
-    if trusted is None:
-        raise ProfileError("native profile acquisition needs a configured, affirmatively trusted governed feed")
+    trusted = _effective_default_index_url(environment) or ("https://pypi.org/simple", None)
+    if urlsplit(trusted[0]).scheme != "https":
+        raise ProfileError("native profile acquisition needs an HTTPS default feed")
     return trusted, {
         "policyId": "sha256:" + _opaque_index_identity(json.dumps({
             "source": selected.identity.document(), "index": trusted,
@@ -419,6 +420,7 @@ def _profile_feed(
         transaction, projections[1], projections[0], None, policy, uv, deadline,
         wheels=wheels, profile_policy="native-source-profile",
         opaque_identity=_opaque_index_identity, excluded_local_packages=excluded_local_packages,
+        allow_public_indexes=True,
     )
     if (
         {item.index_url for item in feed.feeds} != {trusted[0]}

@@ -5749,6 +5749,16 @@ identity; unbundled libraries still require their associated distributions.
 Existing feed policy, artifact seasoning, source identity and installation
 custody still apply; a local snapshot is not independent authorization.
 
+Source profiles support the standard public PyPI default and explicitly
+configured public or internal HTTPS default indexes. The retained native
+compiler and acquisition owners enforce the same seven-day artifact cutoff,
+TLS and exact-wheel integrity for both, including Microsoft internal feeds.
+Supplemental or changed feed evidence still refuses this single-default
+profile. This source-profile capability does not relax other consumers'
+governed-feed-only admission.
+Acquisition permits the selected public index itself, but still refuses
+substituting another selected feed with a public index, including redirects.
+
 An application may declare a first-party SDK association in its existing
 `pyproject.toml`, separately from its ordinary dependency/extra declaration:
 

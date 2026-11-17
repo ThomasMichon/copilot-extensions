@@ -2291,15 +2291,15 @@ def test_complete_native_profile_inspects_bytes_and_writes_independent_source_sn
 
 
 @pytest.mark.parametrize("trusted,indexes", [
-    (None, ["primary"]), (("primary", None), ["primary", "foreign"]),
-    (("primary", None), ["primary", "primary"]),
+    (None, ["primary"]), (("https://primary.example/simple", None), ["primary", "foreign"]),
+    (("https://primary.example/simple", None), ["primary", "primary"]),
 ])
 def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypatch: pytest.MonkeyPatch, trusted: None | tuple[str | None, ...], indexes: list[str]) -> None:
     native: ModuleType = importlib.import_module("local_install_profile")
     import governed_feed_trust
     import installer_native_feed
 
-    monkeypatch.setattr(governed_feed_trust, "_validated_trusted_index_url", lambda env: trusted)
+    monkeypatch.setattr(governed_feed_trust, "_effective_default_index_url", lambda env: trusted)
     monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", lambda text: "1" * 64)
     monkeypatch.setattr(
         installer_native_feed, "capture_native_feed_inputs",
