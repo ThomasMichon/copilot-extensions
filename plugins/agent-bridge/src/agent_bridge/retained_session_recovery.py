@@ -364,6 +364,13 @@ async def resume(
         session._retained_recovery_owner = owner
         token = _current.set(owner)
         try:
+            if session.event_log is not None:
+                from .retained_recovery_settlement import START_EVENT
+
+                session.event_log.append(START_EVENT, {
+                    "version": 1, "request": request.model_dump(),
+                })
+                manager.db.flush()
             with recovery_admission(manager, session_id, automatic=True):
                 async with retained(manager.db, row, executing_writer=writer):
                     resumed = await manager.resume_session(

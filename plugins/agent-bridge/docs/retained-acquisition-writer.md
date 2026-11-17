@@ -223,7 +223,7 @@ does not silently receive an ordinary unfenced resume.
 
 The same journal retains completed and uncertain operation IDs. A same-ID
 request reads that outcome, never relaunches. Pending/unknown recovery blocks
-other resumes; transport mutation retries are disabled. The read-only
+other resumes; transport mutation retries are disabled. The inspection-only
 `GET /api/v1/sessions/{exact-id}/retained-recovery/{operation-id}` route, or
 `status <exact-id> --recovery-operation <id> --json`, reconciles the original
 operation without a new launch. A lost reply after committed acceptance
@@ -232,8 +232,22 @@ live status by itself cannot invent acceptance of that operation.
 Preparation is retained before native qualification. A refused preparation
 or an automatic admission that never entered native launch records
 `not-started`; a preparing request or uncertain native entry remains unknown.
-Read-only reconciliation can settle that exact no-effect outcome without
-reusing its ID. A non-complete same-ID CLI replay reports
+Inspection can settle that exact no-effect outcome without reusing its ID.
+Recovery now durably tags its startup event span with the original operation
+before entering native preparation. Status reconciliation requires a stopped,
+transport-free original owner, unchanged compatible writer/workspace/head,
+and the retained local Host record with both birth-matched processes
+confirmed exited. It commits `not-started` and removes that operation's
+launch gate atomically; it does not remove the Host record, change the
+request/history, clear a stop token, drain prompts or start native work.
+For older writers without the explicit operation tag, only a complete fresh
+metadata-adoption epoch containing its sole recovery operation and the
+affirmative initialization/child-exit/terminal-resume failure sequence is
+eligible. Missing or ambiguous history, a possible native load, live or
+unknown Host custody, and changed ownership remain held. This is receiver-side
+completion of the existing version-1 inspection contract, not a new caller
+option or permission to replay an unknown operation.
+A non-complete same-ID CLI replay reports
 `verb: recovery-inspected`, not a successful resume.
 The existing native launch gate commits atomically with the operation journal.
 Its native-bound gate form also blocks legacy ordinary ACP resumes and fresh

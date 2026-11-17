@@ -62,10 +62,13 @@ async def resume_session(
 
 
 @router.get("/{session_id}/retained-recovery/{operation_id:path}")
-def inspect_retained_recovery(session_id: str, operation_id: str, request: Request) -> dict[str, Any]:
-    from ..retained_session_recovery import inspect
+async def inspect_retained_recovery(session_id: str, operation_id: str, request: Request) -> dict[str, Any]:
+    from ..retained_recovery_settlement import inspect
 
     try:
-        return inspect(request.app.state.session_manager, session_id, operation_id)
+        return await inspect(
+            request.app.state.session_manager, session_id, operation_id,
+            lambda: bool(getattr(request.app.state, "ready", False)),
+        )
     except (AcquisitionRefused, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
