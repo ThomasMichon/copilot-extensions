@@ -46,8 +46,8 @@ superseding another contributor's unmerged fixture repair.
 | Kind | Completion. |
 | Acceptance | Qualify the launch and attach repairs through real consumer controls, required strict typing, review and CI, then verify the source PR merged. Preserve legacy-session coexistence, unknown-observation refusal, process custody, seed admission and unchanged deadlines. |
 | Finalization criterion | Source merge verified, canonical outcome records published and this source worktree's claims settled through its native owner. Keep broader parent and separately owned installed-acceptance gates open unless completed or explicitly transferred to a tracked owner. |
-| Now | No Bridge owner for #12880 is confirmed. Per the operator's direction, the Mux join-hint regression is independently qualified and its seed-fixture file is unchanged from the comparison base. The full candidate strict ratchet passes; prepare normal source publication without waiting on that PR. |
-| Return | Drive the independently qualified Mux candidate through the normal source review/CI/merge gate. Preserve the contributor's repair and notify/reconcile through its actual owner if identified; do not replay an unknown effect or weaken a production check. |
+| Now | The independently qualified Mux source repair merged in #12981 after current-head approval and green CI. Its outcome is recorded in the journal below; source-worktree settlement follows publication of this record. The contributor-owned #12880 repair was not incorporated or superseded. |
+| Return | Keep LS5579-P1/P2/V1 and all other pre-existing parent validation, release and installed-acceptance gates open under their existing owners. Source merge grants no rollout, retained-session restoration or live diagnostic authority. |
 
 This charter records existing authority only. It grants no deployment, installed
 edits, service restart, deadline widening, retained-session restoration or
@@ -278,6 +278,10 @@ Focused mini-effort: [Picker Launch Handoff](picker-launch-handoff.md).
   terminal attachment, and ownership/reaping semantics; do not replace
   the waiters with a detached unowned process.
 - [x] Land code, lifecycle regression tests, docs, and required changefiles.
+- [x] Qualify the independent Windows PSMux creation/attachment repair through
+  current-head review and CI, then verify #12981 merged. See the
+  [source outcome](journal/2026/11.17-mux-source-outcome.md); this closes no
+  broader shim, diagnostic, release or installed-acceptance item.
 
 Phase 3's source slice landed in #9936. The changed boundary is ordinary
 Windows foreground preparation and terminal-owned attachment; unchanged
@@ -380,6 +384,10 @@ _(Agent-recommended validation detail: zero wait-only Python workers in the
 two measured forwarding roles, with live process-tree evidence.)_
 
 ## Journal
+
+### 2026-11-17 - Mux source repair merged
+
+[Source outcome, validation limits and retained parent gates](journal/2026/11.17-mux-source-outcome.md).
 
 ### 2026-11-15 - Broader shim scope and diagnostic wish retained
 
