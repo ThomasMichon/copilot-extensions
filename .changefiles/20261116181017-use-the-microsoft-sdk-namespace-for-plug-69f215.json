@@ -1,5 +1,5 @@
 {
-  "comment": "Use the Microsoft SDK namespace for plugin extension entrypoints and isolated consumers",
+  "comment": "Prefer Microsoft SDK imports with legacy loader compatibility and retain complete receiving archive dependencies",
   "changes": [
     {
       "plugin": "agent-bridge",

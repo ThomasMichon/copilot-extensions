@@ -17,7 +17,7 @@ import pytest
 
 from agent_procutil import no_window_kwargs
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
-from test_headed_extension import _OfflineCli, _logs, offline_cli as offline_cli
+from test_headed_extension import _OfflineCli, _logs, _native_sdk_import, offline_cli as offline_cli
 
 pytestmark = pytest.mark.portfolio_tier("T3")
 
@@ -36,7 +36,7 @@ def test_native_joined_pending_work_observes_real_tool(
     )
     (extension / "extension.mjs").write_text("""
 import { existsSync, writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 const snapshots = [await session.rpc.tasks.list()];
 let taskId;
@@ -294,7 +294,7 @@ def test_native_joined_client_task_transitions_remain_visible_until_removed(
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 const api = session.rpc.tasks;
 const initial = await api.list();
@@ -374,7 +374,7 @@ def test_native_joined_schedule_list_and_exact_stop_observe_real_command(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 writeFileSync(process.env.DRIVER_OBSERVER_READY, JSON.stringify({
     sessionId: session.sessionId, pid: process.pid,

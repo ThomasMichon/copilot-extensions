@@ -15,7 +15,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil.owned_process import run_caller_owned
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
-from test_headed_extension import _OfflineCli, _logs, offline_cli as offline_cli
+from test_headed_extension import _OfflineCli, _logs, _native_sdk_import, offline_cli as offline_cli
 
 pytestmark = pytest.mark.portfolio_tier("T3")
 
@@ -32,7 +32,7 @@ async def test_native_acp_missing_inventory_is_not_an_empty_snapshot(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 writeFileSync(process.env.DRIVER_EXTENSION_STARTED, "started");
 const session = await joinSession();
 const tasks = await session.rpc.tasks.list();
@@ -403,7 +403,7 @@ def test_native_prompt_mode_loads_the_same_inventory_plugin(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 writeFileSync(process.env.DRIVER_EXTENSION_STARTED, "started");
 const session = await joinSession();
 const tasks = await session.rpc.tasks.list();

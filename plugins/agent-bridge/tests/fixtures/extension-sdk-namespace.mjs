@@ -75,17 +75,19 @@ for (const entry of entries) {
   const end = source.indexOf("\n}", start) + 2;
   assert.ok(end > start);
   const helper = source.slice(start, end);
-  for (const available of ["microsoft", "github", "both", "dependency-failure"]) {
+  for (const available of ["microsoft", "github", "both", "dependency-failure", "initialization-failure"]) {
     const calls = [];
     const dependencyFailure = Object.assign(new Error(
       "Cannot find package 'missing-sdk-dependency' imported from sdk/index.js",
     ), { code: "ERR_MODULE_NOT_FOUND" });
+    const failure = available === "initialization-failure"
+      ? new Error("SDK initialization failed") : dependencyFailure;
     const module = new vm.SourceTextModule(`${helper}\nexport { importExtensionSdk };`, {
       identifier: pathToFileURL(entry).href,
       importModuleDynamically: async (specifier) => {
         calls.push(specifier);
         const modern = specifier.startsWith("@microsoft/");
-        if (modern && available === "dependency-failure") throw dependencyFailure;
+        if (modern && available.endsWith("-failure")) throw failure;
         if ((modern && available === "github") || (!modern && available === "microsoft")) {
           const namespace = modern ? "microsoft" : "github";
           throw Object.assign(new Error(
@@ -104,9 +106,9 @@ for (const entry of entries) {
     await module.evaluate();
     for (const subpath of ["", "/extension"]) {
       calls.length = 0;
-      if (available === "dependency-failure") {
+      if (available.endsWith("-failure")) {
         await assert.rejects(module.namespace.importExtensionSdk(subpath),
-          (error) => error === dependencyFailure);
+          (error) => error === failure);
         assert.deepEqual(calls, [`@microsoft/copilot-sdk${subpath}`]);
       } else {
         const exports = await module.namespace.importExtensionSdk(subpath);

@@ -72,6 +72,18 @@ class _OfflineCli:
     release_response: threading.Event
 
 
+def _native_sdk_import() -> str:
+    """Keep generated native fixtures on the production SDK resolution contract."""
+    entrypoint = (
+        Path(__file__).resolve().parents[2]
+        / "extensions" / "agent-remote-driver" / "extension.mjs"
+    )
+    source = entrypoint.read_text(encoding="utf-8")
+    start = source.index("async function importExtensionSdk(")
+    end = source.index("\n}", start) + 2
+    return source[start:end] + '\nconst { joinSession } = await importExtensionSdk("/extension");\n'
+
+
 @pytest.fixture
 def offline_cli(tmp_path: Path) -> Iterator[_OfflineCli]:
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
@@ -318,7 +330,7 @@ def test_native_launch_scoped_observer_needs_no_privileged_permission(
     )
     (plugin / "extensions" / "driver-fixture" / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     sessionId: session.sessionId,
@@ -368,7 +380,7 @@ def test_native_joined_session_reports_pending_read_support_without_permission_g
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 const observations = {};
 for (const [name, field] of [["tasks", "tasks"], ["schedule", "entries"]]) {
@@ -430,7 +442,7 @@ def test_native_joined_observer_close_returns_no_attributed_outcome(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 const unsubscribe = session.on(() => {});
 const unsubscribeResult = unsubscribe();
