@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from contextlib import suppress
 from datetime import datetime
 import json
 import os
@@ -638,8 +639,9 @@ asyncio.run(main())
         if front is not None:
             await front.close()
         if process.returncode is None:
-            process.stdin.write(b"quit\n")
-            await process.stdin.drain()
+            with suppress(BrokenPipeError, ConnectionResetError):
+                process.stdin.write(b"quit\n")
+                await process.stdin.drain()
             try:
                 await asyncio.wait_for(process.wait(), 5)
             except TimeoutError:

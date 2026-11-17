@@ -1,6 +1,7 @@
 """Database schema bootstrap and migrations."""
 
 from __future__ import annotations
+from .message_contracts import prepare_schema as prepare_message_contracts
 
 import sqlite3
 from typing import TYPE_CHECKING
@@ -152,6 +153,7 @@ class _SchemaMixin:
                 if current < SCHEMA_VERSION:
                     self._migrate(conn, current)
             self._ensure_current_columns(conn)
+            prepare_message_contracts(conn)
             validate_schema(conn)
             validate_inbox_schema(conn)
             validate_consumer_schema(conn)
