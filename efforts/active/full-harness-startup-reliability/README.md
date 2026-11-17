@@ -145,6 +145,16 @@ force replacement, native experiment, hook bypass or resource release.
 Normal review, complete current receiving readback and a separate source
 judgment precede any tracking retirement; no new generic ACK is required.
 
+### Continuing #4307 Linux/WSL diagnostic custody
+
+The finite Linux/WSL lane below preserves the existing Bridge/startup source,
+platform-validation and resource owners. It does not broaden, contact or
+displace #3303's bounded Windows cold-hook claimant, absorb its inherited
+acceptance, or appoint an executor. Existing holds, budgets and operation
+permissions remain unchanged. Normal reviewed delivery and complete current
+receiving readback precede a separate #4307 tracking judgment; planned intake
+is neither a diagnostic run nor permission to execute hooks or native workloads.
+
 ## Context
 
 This effort is seeded directly from a live investigation this session (see
@@ -526,6 +536,44 @@ first unresolved gate and independent full-harness qualification.
 - [ ] **V4547-E:** Keep the three original variants independently attributable;
   source or contained evidence must not be relabeled installed/native proof.
 
+### Direct retained #4307 Linux/WSL diagnostic contract
+
+All rows remain unchecked. This is the original finite platform-flow obligation,
+not another full-roster baseline or a replacement for existing startup phases.
+
+- [ ] **P4307-1:** Identify the Linux/WSL equivalent of the prior Windows-focused
+  startup-hook hang diagnostic flow and its actual hook/reconciliation boundary.
+  Attribute platform, supported caller/version, relevant configuration and
+  blocking stage; do not substitute a different upstream MCP-connect failure,
+  isolated stamp/no-flock component or generic portable source inspection.
+- [ ] **P4307-2:** Revalidate that flow on a Linux/WSL host through the existing
+  authorized validation owner. Record attributable findings, including a
+  genuinely clean result if no blocking reconciliation is discovered, rather
+  than assuming Windows behavior or inferring native success from source tests.
+- [ ] **P4307-3:** Harden every blocking reconciliation path established by
+  that flow using bounded and/or asynchronous behavior, rather than leaving
+  the demonstrated path synchronously blocking. Preserve intended instruction
+  delivery, registration and daemon/reconciliation behavior, existing deadline
+  budgets and truthful failure/recovery outcomes.
+- [ ] **P4307-4:** Record the diagnosis, any resulting finite corrections and
+  their re-verification. Credit #3098's async metadata/readiness, #2241's
+  historical WSL upstream-connect fix and the existing WSL no-flock stamp case
+  only at their actual component scope. This lane neither waits for the entire
+  independent 20/20 programme nor qualifies it by itself.
+- [ ] **V4307-1:** Establish an attributable actual Linux/WSL execution of the
+  equivalent startup-hook diagnostic flow, with its observed blocking or clean
+  outcome and honest unavailable coverage. Portable code, a Windows result or
+  an unrelated WSL component witness is not this result.
+- [ ] **V4307-2:** For each blocker actually found, qualify the bounded/async
+  correction at its real caller and preserve the hook's intended work and
+  failure semantics. Reuse relevant existing regression evidence and record
+  the platform-flow recheck; do not add an arbitrary new run count or all-host
+  matrix.
+- [ ] **V4307-3:** Keep historical component, source/contained and actual
+  platform-flow evidence distinct. Preserve the independent Windows claim,
+  source/resource holds and existing budgets; no native execution, process
+  intervention, installation or deployment follows from this tracking intake.
+
 ## Validation Plan
 
 - [ ] 20/20 clean full-harness starts: all 3 real extensions (and any others
@@ -712,6 +760,15 @@ lane inherits the whole-parent/native gate as a prerequisite to planned intake.
   receiving does not require the independent full-harness20/20 programme,
   every-adopter/native rollout or historical-slot remediation to finish first;
   it does not weaken those incumbent gates or authorize their execution.
+
+### Global validation for #4307
+
+- [ ] **G4307:** Resolve every P4307-1 through 4 and V4307-1 through 3 at the
+  original finite Linux/WSL diagnostic-and-established-blocker tier. Preserve
+  the existing full-roster 20/20 gate and other independently owned lanes,
+  without making their completion a prerequisite for this finite slice.
+  Reviewed planned receiving is not technical completion, native evidence,
+  source/claim reassignment or resource release.
 
 ## Proposal
 
@@ -1220,3 +1277,14 @@ publication credit, the original hypothesis distinction and every incumbent
 phase, check state and claimant. This entry records authored planned intake,
 not review, merge, whole-family acceptance, source retirement or operational
 repair. Complete current receiving readback and separate source judgment remain.
+
+### 2026-11-16 - Proposed finite Linux/WSL diagnostic receiving
+
+Added direct P4307/V4307 and actual global G4307 acceptance for the complete
+Linux/WSL startup-hook revalidation and hardening of blockers established by
+that flow. The equivalent-flow/platform boundary remains explicit; portable
+async code, upstream MCP connection and no-flock stamp cases retain their
+bounded historical credit. All eight new technical rows remain unchecked,
+and every incumbent row, phase, budget and custodian is preserved. Normal
+review and complete current receiving readback precede a separate tracking
+judgment; no hook, diagnostic, native workload or operational remedy ran here.

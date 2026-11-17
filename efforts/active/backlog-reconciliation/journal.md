@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-16 - Finite Linux/WSL startup receiving and canonical boundaries](journal/2026/11.16-linux-startup-and-canonical-boundaries.md)
+
 - [2026-11-16 - Recovery boundaries and owned inflow](journal/2026/11.16-recovery-boundaries-and-owned-inflow.md)
 
 - [2026-11-16 - Complete self-update convergence and receipt receiving](journal/2026/11.16-complete-self-update-receiving.md)
