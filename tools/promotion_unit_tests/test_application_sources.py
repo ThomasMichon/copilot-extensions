@@ -20,6 +20,21 @@ from installer_wheel_inputs import _check_deadline
 from runtime_profile import ProfileError, _requirement
 
 
+@pytest.mark.parametrize(("selected", "present", "retained"), [
+    (("worktree-manager",), True, ("apps/worktree-manager", "worktree-manager")),
+    (("worktree-manager",), False, ("worktree-manager",)),
+    (("plugins/other",), True, ("plugins/other",)),
+], ids=["selected-output", "missing-output", "different-source"])
+def test_local_source_application_exports_follow_the_selected_producer(
+    monkeypatch: pytest.MonkeyPatch, selected: tuple[str, ...], present: bool,
+    retained: tuple[str, ...],
+) -> None:
+    from materialize_source_applications import retain_outputs
+
+    monkeypatch.setattr(Path, "is_dir", lambda _path: present)
+    assert retain_outputs(Path("candidate"), selected) == retained
+
+
 @pytest.fixture(autouse=True)
 def marker_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(

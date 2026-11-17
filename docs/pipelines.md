@@ -636,6 +636,27 @@ ref, artifact or runtime selection. Changefiles are removed only from its
 owned scratch checkout; the input checkout and pending bump intent remain
 unchanged. Main version metadata is read in bounded raw-blob batches, and
 inherited Git repository/index/config selectors do not redirect composition.
+
+Manager's `application-source.json` opts its source project into an additional
+promotion output, `apps/worktree-manager`. After the existing reference and
+packaged-asset expansion, `tools/materialize_source_applications.py` uses the
+canonical standalone build inventory to embed Python packages, runtime assets,
+package data and license notices under the application's own `src/`. Generated
+project metadata removes the embedded first-party dependency group and its
+development source mappings, while retaining external requirements and their
+project-local inputs, including the existing vendor archive. The input project
+and its version declarations are unchanged. No prebuilt Manager wheel is
+committed as a replacement for this source representation.
+
+The local composer retains that generated directory when its corresponding
+Manager source root is selected for export. Main and local composition therefore
+use the same source emitter, not a second local vendoring implementation.
+This output is independently buildable after relocation; it does not yet
+provide the complete slot-local setup/lock/construction consumer or qualify
+cold bootstrap, installed adoption or the full application-footprint reference.
+Those remaining gates stay in the
+[Manager footprint plan](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md).
+
 The version writer admits all manifest, fallback, projection-template and catalog
 destinations before its first write. Linked changefile directories/files are
 rejected before version seeding or consumption, not left for later materialization.
