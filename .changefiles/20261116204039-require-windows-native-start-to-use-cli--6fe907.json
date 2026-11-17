@@ -1,0 +1,9 @@
+{
+  "comment": "Require Windows native start to use CLI readiness for enabled task registrations and settle private discovery pipe fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

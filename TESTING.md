@@ -4061,6 +4061,22 @@ programs, recorded unavailable publisher paths, independently executable cmd
 forms and delegating-peer refusal. Common removal controls include finite nested
 helpers and their own bytecode with unknown siblings retained, CodeSpaces'
 root resolver modules, and explicit pre-mutation consumer/custody admission.
+Vault's optional `tests/test_native_start_readiness.py` extracts its actual
+native start and active-runtime resolver into a private PowerShell fixture.
+PowerShell 5/7 controls cover enabled/running task registrations, the no-task
+path, disabled-task refusal, selected-profile execution, project context,
+installation state/IPC selection and caller-environment restoration with and
+without an installation identity, and unchanged CLI success/failure exits.
+Task APIs are synthetic and the fixture
+CLI starts no service or credential operation. Its discovery packet separately
+proves that a stopped tagged selection with port zero starts through its own
+advertisement rather than accepting an unrelated healthy TCP listener, while
+untagged legacy discovery is unchanged. The start callback is synthetic;
+both listeners and their ping responses are private loopback fixtures.
+The discovery packet also
+settles private named-pipe handlers, transports and the event-loop thread before
+cleanup; neither packet expands required unit-only CI or proves installed
+service-generation readiness.
 The Worktrees custody packet runs actual publisher/remover contention in both
 directions against the existing whole-action command lifecycle, not a second
 root-lock authority.
