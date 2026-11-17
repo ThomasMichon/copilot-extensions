@@ -1260,9 +1260,9 @@ def cmd_cache_populate(args: Any) -> int:
         failure = None
         try:
             with read_lock:
-                resp = send_command(
+                sender = partial(send_command, strict_endpoint=True) if cache._recovery else send_command
+                resp = sender(
                     request, timeout=None if args.prompt else 15.0,
-                    **({"strict_endpoint": True} if cache._recovery else {}),
                 )
                 present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
                 if (
