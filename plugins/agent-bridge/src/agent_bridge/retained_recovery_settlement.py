@@ -98,6 +98,60 @@ def _events(manager: Any, session_id: str) -> list[dict[str, Any]]:
     return events if len(events) == count else []
 
 
+def _historical_predecessor(
+    manager: Any, row: dict[str, Any], session_id: str, other: dict[str, Any],
+    hosts: Any,
+) -> bool:
+    from .retained_metadata_lineage import native_for
+    from zdd.process_exit import observe_original_exit
+
+    try:
+        handoffs = json.loads(row["creation_handoffs_json"] or "{}")
+        cursor, seen = session_id, {session_id}
+        while cursor != other["id"]:
+            previous = [
+                predecessor for predecessor, item in handoffs.items()
+                if item["successor_id"] == cursor and item["stage"] == "completed"
+            ]
+            if len(previous) != 1 or previous[0] in seen:
+                return False
+            cursor = previous[0]
+            seen.add(cursor)
+        target = json.loads(other["target_json"])
+        scope, _writer = _binding(row)
+        if (
+            other["status"] != "stopped" or other["runtime_custody_json"] is not None
+            or other["acp_session_id"] != native_for(row, cursor)
+            or target.get("type") != "local" or target.get("cwd") != scope.worktree_path
+            or target.get("project") != scope.project or target.get("worktree_id") != scope.worktree_id
+            or target.get("venue", {}).get(JOURNAL_KEY) != row["key_digest"]
+        ):
+            return False
+        managed = manager.get_session(cursor)
+        if managed is not None and (
+            managed.session_id != cursor or managed.status != SessionStatus.STOPPED
+            or managed.client is not None or managed._native_turn_transport is not None
+            or managed._handoff_in_progress or managed.acp_session_id != other["acp_session_id"]
+            or json.loads(managed.target.to_json()) != target
+            or managed._prompt_task is not None and not managed._prompt_task.done()
+        ):
+            return False
+        for host in hosts:
+            if host.session_id == cursor and (
+                host.boundary != "local" or any(
+                    not isinstance(host.extra.get(f"{name}_process_start"), str)
+                    or not host.extra[f"{name}_process_start"]
+                    or not observe_original_exit(
+                        getattr(host, f"{name}_pid"), host.extra[f"{name}_process_start"],
+                    ) for name in ("host", "child")
+                )
+            ):
+                return False
+        return True
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return False
+
+
 async def inspect(
     manager: Any, session_id: str, operation_id: str, ready: Callable[[], bool],
 ) -> dict[str, Any]:
@@ -215,12 +269,21 @@ async def inspect(
             gate = conn.execute(
                 "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (scope.worktree_id,),
             ).fetchone()
-            if saved is None or dict(saved) != row or gate is None or dict(gate) != expected_gate or conn.execute(
-                "SELECT 1 FROM sessions WHERE id<>? AND "
-                "(acp_session_id=? OR json_extract(target_json,'$.worktree_id')=?) UNION ALL "
+            collisions = conn.execute(
+                "SELECT * FROM sessions WHERE id<>? AND "
+                "(acp_session_id=? OR json_extract(target_json,'$.worktree_id')=?)",
+                (session_id, request.native_session_id, scope.worktree_id),
+            ).fetchall()
+            if (
+                saved is None or dict(saved) != row or gate is None or dict(gate) != expected_gate
+                or any(not _historical_predecessor(
+                    manager, row, session_id, dict(other), inventory.records,
+                ) for other in collisions)
+                or conn.execute(
                 "SELECT 1 FROM live_sessions WHERE worktree_id=? AND status='live' AND updated_at>=?",
-                (session_id, request.native_session_id, scope.worktree_id, scope.worktree_id, time.time() - 120),
-            ).fetchone():
+                (scope.worktree_id, time.time() - 120),
+                ).fetchone()
+            ):
                 raise recovery._refuse("Original pre-native operation or workspace custody changed")
             operations = recovery._operations(row)
             operations[operation_id] = {**operation, "state": "not-started"}

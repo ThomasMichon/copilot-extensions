@@ -247,6 +247,13 @@ owner's retained streams and socket are closed; no process is signaled and no
 generic client shutdown runs. Startup pruning and ordinary dead-client
 settlement preserve Host evidence while the original recovery is unresolved,
 so inspection also works after frontend restart.
+Completed handoff predecessors are retained history, not competing live
+owners. Reconciliation excludes such a row only after following the completed
+keyed handoff chain and verifying its stopped state, original native/workspace
+binding, absence of an active in-memory transport or turn, and exited
+birth-matched processes for any retained predecessor Host. Uncompleted,
+foreign, live and ambiguous predecessor custody still blocks settlement;
+the historical row itself is never changed.
 For older writers without the explicit operation tag, only a complete fresh
 metadata-adoption epoch containing its sole recovery operation and the
 affirmative initialization/child-exit/terminal-resume failure sequence is

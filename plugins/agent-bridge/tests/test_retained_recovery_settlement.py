@@ -14,9 +14,12 @@ from agent_bridge import acquisition_authority
 from agent_bridge import retained_metadata_recovery as metadata
 from agent_bridge import retained_recovery_settlement as settlement
 from agent_bridge import retained_session_recovery as recovery
+from agent_bridge import worktree_lineage
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.acquisition_executor import executor
 from agent_bridge.acp_client import AcpClient
+from agent_bridge.creation_worktree_writer import JOURNAL_KEY
+from agent_bridge.session_status import SessionStatus
 from agent_bridge.session_host.host_index import HostIndex, HostRecord
 from agent_bridge.session_host_connection import _SessionHostConnectionMixin
 from test_creation_worktree_writer import writer_creation  # noqa: F401
@@ -27,24 +30,7 @@ rig = _rig
 pytestmark = pytest.mark.contract("agent_bridge.retained_native_settlement")
 
 
-async def failed_epoch(
-    fixture: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *,
-    marker: bool = False, fault: str | None = None,
-) -> SimpleNamespace:
-    manager = fixture.rig.manager
-    old, request = await missing_record(fixture, monkeypatch)
-    if fault == "prior-operation":
-        prior = request.model_copy(update={"operation_id": "predecessor-operation"})
-        manager.db.execute_write(
-            "UPDATE workspace_embodiments SET creation_recoveries_json=? WHERE key_digest=?",
-            (json.dumps({prior.operation_id: {"request": prior.model_dump(), "state": "complete"}}),
-             request.journal_key),
-        )
-    session, boundary = await metadata.prepare(
-        manager, old.session_id, request, fixture.requirement, lambda: True,
-    )
-    if fault == "foreign-epoch":
-        request = request.model_copy(update={"operation_id": "different-operation"})
+def record_failure(manager: Any, session: Any, request: Any, *, marker: bool) -> None:
     operations = recovery._operations(dict(manager.db.execute_read(
         "SELECT * FROM workspace_embodiments",
     )[0]))
@@ -71,6 +57,27 @@ async def failed_epoch(
         ("startup_progress", {"phase": "resume", "state": "failed"}),
     ]:
         session.event_log.append(event_type, data)
+
+
+async def failed_epoch(
+    fixture: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *,
+    marker: bool = False, fault: str | None = None,
+) -> SimpleNamespace:
+    manager = fixture.rig.manager
+    old, request = await missing_record(fixture, monkeypatch)
+    if fault == "prior-operation":
+        prior = request.model_copy(update={"operation_id": "predecessor-operation"})
+        manager.db.execute_write(
+            "UPDATE workspace_embodiments SET creation_recoveries_json=? WHERE key_digest=?",
+            (json.dumps({prior.operation_id: {"request": prior.model_dump(), "state": "complete"}}),
+             request.journal_key),
+        )
+    session, boundary = await metadata.prepare(
+        manager, old.session_id, request, fixture.requirement, lambda: True,
+    )
+    if fault == "foreign-epoch":
+        request = request.model_copy(update={"operation_id": "different-operation"})
+    record_failure(manager, session, request, marker=marker)
     index = HostIndex(tmp_path / "hosts" / "index.json")
     host = HostRecord(
         session_id=session.session_id, port=12345, host_pid=90000001, child_pid=90000002,
@@ -328,3 +335,84 @@ async def test_real_connector_failure_settles_before_and_after_startup_pruning(
         sock.close.assert_awaited_once()
     sock.terminate.assert_not_awaited()
     clients[0].load_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "live", "uncompleted", "foreign", "unknown-host"])
+async def test_handoff_successor_settles_without_discarding_stopped_predecessor(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fault: str | None,  # noqa: F811
+) -> None:
+    from test_creation_worktree_writer import recovery_fixture
+
+    fixture, manager = writer_creation, writer_creation.rig.manager
+    predecessor, request, command = await recovery_fixture(fixture, monkeypatch)
+    index = HostIndex(tmp_path / "hosts" / "index.json")
+    with index._locked_reload():
+        pass
+    manager._host_index = index
+    predecessor.status = SessionStatus.IDLE
+    fixture.rig.client.acp_session_id = "native-successor"
+
+    def link(_worktree: Any, _previous: Any, successor: str, **_kwargs: Any) -> None:
+        fixture.rig.head["id"] = successor
+
+    monkeypatch.setattr(worktree_lineage, "link_succession", link)
+    for name in ("note_handoff", "session_role", "history_digest"):
+        monkeypatch.setattr(worktree_lineage, name, lambda *_a, **_kw: None)
+    successor = await manager.handoff_session(
+        predecessor.session_id, reason="fixture", seed=False, seed_text="Retained continuation",
+    )
+    assert predecessor.status == SessionStatus.STOPPED
+    successor.status, successor.client = SessionStatus.STOPPED, None
+    manager.db.update_session_status(successor.session_id, "stopped", 100)
+    request = request.model_copy(update={
+        "operation_id": "successor-recovery", "native_session_id": successor.acp_session_id,
+    })
+    record_failure(manager, successor, request, marker=True)
+    index.register(HostRecord(
+        session_id=successor.session_id, port=12345, host_pid=90000001, child_pid=90000002,
+        extra={"host_process_start": "original-host", "child_process_start": "original-child"},
+    ))
+    manager._host_index = index
+    monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda _pid, _birth: True)
+
+    async def owner(args: Any, project: Any, **kwargs: Any) -> Any:
+        if args[0] == "head-session":
+            return {
+                "tracked": True, "state": "active", "head_session": request.native_session_id,
+                "head_revision": request.head_revision, "pending_handoffs": [],
+            }
+        return await command(args, project, **kwargs)
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", owner)
+    if fault == "live":
+        predecessor.status = SessionStatus.IDLE
+        manager.db.update_session_status(predecessor.session_id, "idle", 101)
+    elif fault == "uncompleted":
+        row = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+        handoffs = json.loads(row["creation_handoffs_json"])
+        handoffs[predecessor.session_id]["stage"] = "linked"
+        manager.db.execute_write(
+            "UPDATE workspace_embodiments SET creation_handoffs_json=? WHERE key_digest=?",
+            (json.dumps(handoffs), request.journal_key),
+        )
+    elif fault == "foreign":
+        manager.db.execute_write(
+            "UPDATE sessions SET target_json=json_set(target_json,?,'foreign') WHERE id=?",
+            (f"$.venue.{JOURNAL_KEY}", predecessor.session_id),
+        )
+    elif fault == "unknown-host":
+        index.register(HostRecord(
+            session_id=predecessor.session_id, port=12346, host_pid=90000003, child_pid=90000004,
+        ))
+    original = dict(manager.db.get_session(predecessor.session_id))
+    if fault is None:
+        result = await settlement.inspect(manager, successor.session_id, request.operation_id, lambda: True)
+        assert result["state"] == "not-started"
+        assert not manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    else:
+        with pytest.raises(AcquisitionRefused):
+            await settlement.inspect(manager, successor.session_id, request.operation_id, lambda: True)
+        assert recovery.inspect(manager, successor.session_id, request.operation_id)["state"] == "unknown"
+        assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert dict(manager.db.get_session(predecessor.session_id)) == original
