@@ -216,3 +216,8 @@ Validate the stable correlated envelope before interpreting payloads.
   private markers. Preserved that execution before integrating a subsequent
   upstream SDK namespace-loader update and its actual VM/doc adjustments.
   Final-source independent replay, exact-source checks and release remain open.
+- Integrated that SDK update through one owned rebase. Canonical metadata
+  reconciliation retained another 220 genuine incoming records; staged-byte
+  verification allowed only the exact SDK spelling updates in owned VM/docs.
+  The six actual SDK-facade/extension controls pass. Final combined-source
+  declarations are prepared; complete current execution/replay remains open.
