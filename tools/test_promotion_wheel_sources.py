@@ -10,7 +10,9 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -18,7 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
 from test_promotion_python_artifacts import (
-    _STATIC_BUILD, _complete_manifest, _publish_fixture, _wheel_bytes, _write_index,
+    _STATIC_BUILD, _complete_manifest, _publish_fixture as _legacy_publish_fixture,
+    _wheel_bytes, _write_index,
+)
+
+_publish_fixture = cast(
+    Callable[[Path, pytest.MonkeyPatch], tuple[Path, dict[str, Any]]], _legacy_publish_fixture,
 )
 
 
@@ -31,7 +38,9 @@ from test_promotion_python_artifacts import (
     "missing-backend", "custom-backend", "backend-path", "setup-py", "setup-cfg",
     "cmdclass", "dynamic-config",
 ])
-def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypatch, case):
+def test_wheel_source_mapping_requires_exact_candidate_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     with zipfile.ZipFile(directory / entry["filename"]) as bundle:
         manifest = json.loads(bundle.read("manifest.json"))
@@ -106,7 +115,114 @@ def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypat
             artifacts.validate_wheel(archive, wheel, source_dir=source)
 
 
-def test_self_consistent_injected_wheel_fails_before_publication(tmp_path, monkeypatch):
+@pytest.mark.parametrize("case", [
+    "match", "changed", "missing", "extra", "python-resource", "wrong-scheme",
+])
+def test_declared_share_data_files_require_exact_installed_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    directory, entry = _publish_fixture(tmp_path, monkeypatch)
+    with zipfile.ZipFile(directory / entry["filename"]) as bundle:
+        wheel = json.loads(bundle.read("manifest.json"))["wheels"][0]
+    source = tmp_path / "plugins" / "demo"
+    resource = source / "config" / ("policy.py" if case == "python-resource" else "policy.json")
+    resource.parent.mkdir()
+    resource.write_bytes(b'{"candidate": true}\n')
+    project = source / "pyproject.toml"
+    project.write_text(
+        project.read_text() + '\n[tool.setuptools.data-files]\n'
+        '"share/example" = [' + json.dumps(resource.relative_to(source).as_posix()) + ']\n'
+    )
+    name = "demo-1.0.data/data/share/example/" + resource.name
+    members = {} if case == "missing" else {
+        name: b"forged bytes" if case == "changed" else resource.read_bytes(),
+    }
+    if case == "extra":
+        extra = "demo-1.0.data/data/share/example/undeclared.json"
+        copied = source / "src" / extra
+        copied.parent.mkdir(parents=True)
+        copied.write_bytes(b"undeclared\n")
+        members[extra] = copied.read_bytes()
+    elif case == "wrong-scheme":
+        members = {"demo-1.0.data/scripts/policy.json": resource.read_bytes()}
+    archive = io.BytesIO(_wheel_bytes("demo", "1.0", members=members))
+    if case in ("match", "python-resource"):
+        artifacts.validate_wheel(archive, wheel, source_dir=source)
+    else:
+        with pytest.raises(artifacts.PromotionArtifactError):
+            artifacts.validate_wheel(archive, wheel, source_dir=source)
+
+
+@pytest.mark.parametrize("case", [
+    "source-escape", "destination-escape", "absolute-destination", "script-destination",
+    "glob", "collision", "case-collision", "symlink", "linked-parent", "pth",
+])
+def test_unsafe_data_file_layouts_refuse_before_toolchain_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    import build_toolchain_lock
+
+    _publish_fixture(tmp_path, monkeypatch)
+    source = tmp_path / "plugins" / "demo"
+    resource = source / "config" / "policy.json"
+    resource.parent.mkdir()
+    resource.write_bytes(b"declared\n")
+    declarations = {"share/example": ["config/policy.json"]}
+    if case == "source-escape":
+        (source.parent / "outside.json").write_bytes(b"outside\n")
+        declarations = {"share/example": ["../outside.json"]}
+    elif case in ("destination-escape", "absolute-destination", "script-destination"):
+        destination = {
+            "destination-escape": "share/../bin",
+            "absolute-destination": "/share/example",
+            "script-destination": "bin",
+        }[case]
+        declarations = {destination: ["config/policy.json"]}
+    elif case == "glob":
+        declarations = {"share/example": ["config/*.json"]}
+    elif case == "collision":
+        other = source / "other" / resource.name
+        other.parent.mkdir()
+        other.write_bytes(b"other\n")
+        declarations["share/example"].append("other/policy.json")
+    elif case == "case-collision":
+        declarations["share/Example"] = ["config/policy.json"]
+    elif case in ("symlink", "linked-parent"):
+        link = source / ("linked.json" if case == "symlink" else "linked")
+        try:
+            link.symlink_to(
+                resource if case == "symlink" else resource.parent,
+                target_is_directory=case == "linked-parent",
+            )
+        except (OSError, NotImplementedError):
+            pytest.skip("native link creation unavailable")
+        declarations = {"share/example": [
+            "linked.json" if case == "symlink" else "linked/policy.json",
+        ]}
+    else:
+        (source / "bootstrap.pth").write_bytes(b"import undeclared_startup\n")
+        declarations = {"share/example": ["bootstrap.pth"]}
+    project = source / "pyproject.toml"
+    project.write_text(project.read_text() + '\n[tool.setuptools.data-files]\n' + "".join(
+        json.dumps(destination) + " = " + json.dumps(files) + "\n"
+        for destination, files in declarations.items()
+    ))
+    calls = []
+    monkeypatch.setattr(
+        build_toolchain_lock, "resolve_toolchain_lock", lambda *args, **kwargs: calls.append(args),
+    )
+    output = tmp_path / "unsigned"
+    output.mkdir()
+    with pytest.raises(artifacts.PromotionArtifactError):
+        artifacts.build_candidate_bundles(
+            tmp_path, output, source_policy="seasoned-public", min_age_days=7,
+        )
+    assert not calls and not list(output.iterdir())
+
+
+def test_self_consistent_injected_wheel_fails_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     original = directory / entry["filename"]
     with zipfile.ZipFile(original) as bundle:
@@ -133,7 +249,9 @@ def test_self_consistent_injected_wheel_fails_before_publication(tmp_path, monke
     assert not calls
 
 
-def test_declared_flat_python_modules_bind_to_root_source(tmp_path, monkeypatch):
+def test_declared_flat_python_modules_bind_to_root_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     with zipfile.ZipFile(directory / entry["filename"]) as bundle:
         manifest = json.loads(bundle.read("manifest.json"))
@@ -153,7 +271,9 @@ def test_declared_flat_python_modules_bind_to_root_source(tmp_path, monkeypatch)
     "setuptools", "setuptools.py", "setuptools.pyc", "sitecustomize.py", "json.py",
     "setuptools" + importlib.machinery.EXTENSION_SUFFIXES[0],
 ])
-def test_unvalidated_build_hooks_fail_before_toolchain_resolution(tmp_path, monkeypatch, hook):
+def test_unvalidated_build_hooks_fail_before_toolchain_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hook: str,
+) -> None:
     import build_toolchain_lock
     _publish_fixture(tmp_path, monkeypatch)
     source = tmp_path / "plugins" / "demo"
@@ -179,7 +299,7 @@ def test_unvalidated_build_hooks_fail_before_toolchain_resolution(tmp_path, monk
     assert not list(directory.iterdir())
 
 
-def test_current_repository_packages_satisfy_static_build_admission():
+def test_current_repository_packages_satisfy_static_build_admission() -> None:
     from plugin_runtime_resources import build_inputs
 
     root = Path(artifacts.__file__).resolve().parent.parent
@@ -194,7 +314,9 @@ def test_current_repository_packages_satisfy_static_build_admission():
     "missing-extra", "duplicate-extra", "python-floor", "missing-python", "duplicate-python",
     "unconditional-extra-dep", "direct-url", "dynamic", "ambiguous-extras",
 ])
-def test_runtime_metadata_cannot_change_candidate_install_behavior(tmp_path, monkeypatch, case):
+def test_runtime_metadata_cannot_change_candidate_install_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     with zipfile.ZipFile(directory / entry["filename"]) as bundle:
         manifest = json.loads(bundle.read("manifest.json"))
@@ -249,19 +371,26 @@ def test_runtime_metadata_cannot_change_candidate_install_behavior(tmp_path, mon
             artifacts.validate_wheel(archive, manifest["wheels"][0], source_dir=source)
 
 
-def test_validator_provisioning_never_exposes_release_authority(monkeypatch, tmp_path):
+def test_validator_provisioning_never_exposes_release_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import yaml
-    from seasoned_uv import prepare_uv_install
+    import seasoned_uv
     import installer_dependency_policy as policy
     from _promotion_workflow_test_support import source_owned
 
+    prepare_uv_install = cast(
+        Callable[..., list[str]], getattr(seasoned_uv, "prepare_uv_install"),
+    )
     root = Path(__file__).resolve().parent.parent
     jobs = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())["jobs"]
-    probes = []
+    probes: list[Sequence[str]] = []
     selected_uv = str(tmp_path / "uv-fixture")
     monkeypatch.setattr(policy, "_select_uv_executable", lambda _: selected_uv)
 
-    def settings_probe(command, **kwargs):
+    def settings_probe(
+        command: Sequence[str], **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
         probes.append(command)
         assert command[:4] == [selected_uv, "pip", "install", "--show-settings"]
         return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
@@ -269,7 +398,7 @@ def test_validator_provisioning_never_exposes_release_authority(monkeypatch, tmp
             exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
         }, }""", "")
 
-    monkeypatch.setattr(policy.subprocess, "run", settings_probe)
+    monkeypatch.setattr(subprocess, "run", settings_probe)
     prefix = (
         "python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv --"
         if source_owned(jobs) else "python tools/seasoned_uv.py --registry-only --uv uv --"
@@ -304,7 +433,7 @@ def test_validator_provisioning_never_exposes_release_authority(monkeypatch, tmp
     assert len(probes) == 4
 
 
-def test_promotion_actions_never_receive_or_persist_the_release_pat():
+def test_promotion_actions_never_receive_or_persist_the_release_pat() -> None:
     import yaml
     from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
     root = Path(__file__).resolve().parent.parent
@@ -370,7 +499,9 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
 
 
 @pytest.mark.parametrize("ambient_helper", (False, True))
-def test_git_helper_uses_each_steps_token_without_storing_it(tmp_path, monkeypatch, ambient_helper):
+def test_git_helper_uses_each_steps_token_without_storing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ambient_helper: bool,
+) -> None:
     if shutil.which("gh") is None:
         pytest.skip("the hosted promotion credential helper requires GitHub CLI")
     if ambient_helper:
@@ -399,7 +530,9 @@ def test_git_helper_uses_each_steps_token_without_storing_it(tmp_path, monkeypat
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
         "GIT_CEILING_DIRECTORIES": str(tmp_path),
     })
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW
     repository = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"], env=environment,
         cwd=home, capture_output=True, text=True, creationflags=flags, timeout=15,
