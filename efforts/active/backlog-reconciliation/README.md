@@ -3433,6 +3433,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   judgments, including current bounded claims, two-set recovery acceptance,
   retained native/prototype gates and actual source exclusions. The complete
   861-issue census remains 132 above fixed 729, with no new closure credit.
+  Reviewed #12966 subsequently delivered this complete intent; full current
+  #5035 receiving readback preceded verified #5215 `NOT_PLANNED` retirement.
+  All sixteen incumbent/new technical rows and existing custody remain open.
+  Five further whole-original judgments and two arrivals leave the complete
+  862-issue census 133 above fixed 729: one campaign departure, not a fix.
   The [finite Linux/WSL startup receiving proposal](journal/2026/11.16-linux-startup-and-canonical-boundaries.md)
   directly preserves #4307's equivalent startup-hook diagnostic flow AND
   bounded/async hardening of blockers actually found in the existing startup
