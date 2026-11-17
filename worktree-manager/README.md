@@ -53,6 +53,68 @@ does not execute its displayed commands, open links or change readiness.
 Redirected/noninteractive bare invocation still prints installation status;
 explicit verbs, project launch and launcher JSON output keep their contracts.
 
+## Prepared application installation
+
+`worktree-manager-install FOOTPRINT` is Manager's finite, noninteractive
+frontdoor for an already prepared application footprint. It is separate from
+the interactive/operational command entry and does not discover, repair, import
+or invoke a Worktrees installer. It neither builds packages nor resolves source,
+release approval or feed policy: the caller supplies the promotion-produced
+input, and each application's setup owns construction, readiness and activation.
+This first consumer does not qualify Manager's own complete new-flow update or
+replace the legacy suite update/bootstrap callers; #12905 retains those gates.
+
+The default is a read-only plan. Add `--apply` to use the existing request-local
+Update Driver, or `--apply --stage` to stop after candidate preparation.
+`--app NAME` includes that app's explicit IPC dependency closure; omitting it
+selects the complete footprint. All selected apps are copied and staged before
+any activates; dependencies activate before consumers. Stage failure prevents
+all activation. Failure after activation starts remains partial, not automatic
+rollback or permission to replay unrelated work. Existing busy/unsettled driver
+outcomes remain explicit.
+Apply performs no-effect source, existing-slot and prerequisite validation
+before request admission and again before execution scope. A rejected footprint
+therefore does not fence a later corrected request; mutation-time rechecks and
+unknown cleanup retain their execution scope.
+Installation executes inside the Driver's registered execution scope. Confirmed
+nonzero setup exits retain their native status after normal cleanup settlement;
+timeouts and unknown cleanup retain the Driver's interruption/recovery boundary.
+
+The default destination is `~/.copilot-extensions/apps/<app>/versions/<version>`;
+`--apps-root ABSOLUTE_PATH` selects an isolated installation root. Legacy roots
+and their command selection are not touched by copying/staging. Full slot setup
+alone owns global command cutover and service readiness. Durable state remains
+outside slots; exclusively version-owned disposable state may use their
+`state/` directories. This consumer does not delete old footprints or slots.
+`--timeout SECONDS` bounds the complete finite request (default 1800, maximum
+7200); cancellation, child cleanup and native startup retain their existing
+Driver/process/application owners.
+
+The prepared folder contains `footprint.json` and `apps/<app>/` directories:
+
+```json
+{
+  "schema": "copilot-extensions.application-footprint",
+  "version": 1,
+  "apps": [
+    {"name": "example", "version": "1.0", "dependencies": []}
+  ]
+}
+```
+
+Each app carries its matching `application.json` construction/version and
+root-environment binding, declared commands, `pyproject.toml`, `uv.lock`, and
+`bin/setup.ps1` / `bin/setup.sh`. No preexisting `.venv` or runtime `state/`
+is copied from the footprint. Every setup receives the explicit roots of the
+complete selected set, so neutral dependency commands cannot follow ambient
+legacy-root overrides. Conflicting root-environment declarations refuse.
+Setup receives
+`--stage` for preparation; it supplies the PATH-uv/declared-Python behavior.
+Missing or cyclic IPC dependencies, duplicate commands, changed declarations
+and invalid layouts refuse before setup rather than falling back to an old
+installer. This manifest's edges order already selected apps, not Python
+packages or a second version-resolution service.
+
 ## Explicit Sync progress
 
 Local paired Sync reads `agent_worktrees/sync-progress-v1.json` beside the exact

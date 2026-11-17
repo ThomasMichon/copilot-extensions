@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.7.120-dev1"
+version = "0.7.121-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -117,6 +117,7 @@ agent-update-driver = { path = "libs/update-driver" }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"
+worktree-manager-install = "worktree_manager.application_footprints:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "setuptools>=83.0.0", "pydantic>=2", "wheel>=0.45", "packaging>=24", "pyyaml>=6.0", "pyte==0.8.2"]
