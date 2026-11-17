@@ -103,8 +103,10 @@ in the existing lease payload. Callers must discover support before opting a
 resource into that contract; legacy receivers refuse opted-in state on rollback.
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
-configured remote and chooses the fetched remote default branch as the start
-point when available. A clean anchor checked out on its default branch is also
+configured remote default branch explicitly, even when the remote's ordinary
+fetch refspec excludes it, without refreshing unrelated branch refs for this
+preparation. It chooses the fetched remote default branch as the start point
+when available. A clean anchor checked out on its default branch is also
 fast-forwarded opportunistically. Dirty, detached, non-default, ahead, and
 diverged anchors are never rewritten; creation still uses the fetched remote
 ref, or a last-known local fallback when the fetch is unavailable.
