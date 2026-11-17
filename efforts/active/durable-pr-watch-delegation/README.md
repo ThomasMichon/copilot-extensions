@@ -67,8 +67,9 @@ because they also require the separate live qualification.
   accepted by their rightful owners through the normal guarded flow.
 - **Now:** The filtered-population source and synthetic qualification are
   complete through #12200, including the bounded Windows registry snapshot
-  prerequisite. Reconcile release evidence and the remaining M1 integration
-  criteria without treating source publication as installed acceptance.
+  prerequisite. Promotion #13048 includes that source; select the remaining
+  M1 installed/running qualification only within its separate operational
+  authority, without treating promotion as installed acceptance.
 - **Return:** Continue installed/running and consumer-owned acceptance under
   this same effort when its separate operational authority is available.
   Existing MCP follow-through, domain custody, operational holds and separate
@@ -379,7 +380,7 @@ its implementation or authorizing production activation.
   service/client slices with their finite source validation plan (#12166,
   #12184, #12200). The [source completion record](journal/2026/11.17%20Filtered%20source%20completion.md)
   distinguishes hosted qualification from final-head compatibility checks;
-  parent service/fleet, release/installed and live-provider acceptance remain open.
+  parent service/fleet, installed and live-provider acceptance remain open.
 
 ### First integrated repository cache and event milestone
 
@@ -1210,8 +1211,9 @@ or silently expanding a bounded source claim.
   hosted run 44001919435 passes both disposable platforms at its recorded source;
   later source-preserving rebase compatibility and final-head review/required CI
   pass before #12200 merges. See the [qualification record](journal/2026/11.17%20Filtered%20source%20completion.md).
-  Synthetic native/foreground/client evidence does not establish release,
-  installed/running, live-provider or review-consumer acceptance.
+  Promotion #13048 separately includes this source; synthetic
+  native/foreground/client evidence does not establish installed/running,
+  live-provider or review-consumer acceptance.
 
 - [ ] Resolve the [reviewer-action feed validation](reviewer-action-feeds.md#validation-plan)
   under #12947, keeping actual cache/client/stream behavior, inert consumer

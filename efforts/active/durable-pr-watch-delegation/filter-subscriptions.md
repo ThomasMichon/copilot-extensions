@@ -180,8 +180,9 @@ synthetic provider data. Driver capabilities remain explicit: the initial native
 ADO driver rejects groups and activity age rather than claiming their support
 from the generic evaluator's tests.
 
-Release promotion has not been credited by this source reconciliation.
-Installed/running qualification, native Windows local ingress, real service
+Promotion #13048 includes this source in `main`; see the dated source journal
+for the distinct promotion evidence. Installed/running qualification, native
+Windows local ingress, real service
 placement, existing production-state migration, provider enrollment, selected
 live-population/event evidence and review/Dispatch automation remain separately
 authorized acceptance in the [canonical parent](README.md#validation-plan).
