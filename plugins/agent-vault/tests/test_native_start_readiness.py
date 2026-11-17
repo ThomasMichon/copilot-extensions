@@ -50,6 +50,7 @@ def test_native_start_preserves_readiness_and_disabled_policy(
         "AGENT_VAULT_LOG": str(root / "logs" / "agent-vault-service.log"),
         "AGENT_VAULT_TASK_NAME": "fixture",
         "AGENT_VAULT_INSTALLATION_ID": installation_id or None,
+        "AGENT_VAULT_PORT": "0" if installation_id else None,
     }
     (package / "__main__.py").write_text(
         "import json, os, pathlib, sys\n"
@@ -102,7 +103,7 @@ $PidFile=Join-Path $RunDir 'agent-vault-service.pid'
 $LogFile=Join-Path $Root 'logs\agent-vault-service.log'
 $environmentNames=@(
     'HOME','RUN_DIR','CORE_RUN_DIR','CACHE_DIR','SOCKET','PIPE',
-    'PID','LOG','TASK_NAME','INSTALLATION_ID'
+    'PID','LOG','TASK_NAME','INSTALLATION_ID','PORT'
 ) | ForEach-Object { "AGENT_VAULT_$_" }
 foreach ($name in $environmentNames) {
     [Environment]::SetEnvironmentVariable($name, "retained-$name", 'Process')

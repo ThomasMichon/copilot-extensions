@@ -170,6 +170,38 @@ def test_ping_transports_each_callers_current_vault_context(
         server.close()
 
 
+@pytest.mark.parametrize("tagged", [True, False])
+def test_native_start_port_policy_with_unrelated_healthy_legacy_tcp(
+    run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,
+    tagged: bool,
+) -> None:
+    unrelated = _EchoServer({"ok": True, "pid": 123, "cli": "locked"})
+    selected = _EchoServer({"ok": True, "pid": 456, "cli": "locked"})
+    launches: list[list[str]] = []
+
+    def launch(arguments: list[str]) -> None:
+        launches.append(arguments)
+        _write_scoped_tcp(run_dir, selected.port, "selected-installation")
+
+    monkeypatch.setattr(cli, "IS_WINDOWS", True)
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setattr(cli, "_runtime_active", lambda: True)
+    monkeypatch.setattr(cli.launch, "spawn_service", launch)
+    monkeypatch.setattr(config, "DEFAULT_TCP_PORT", unrelated.port)
+    if tagged:
+        monkeypatch.setenv("AGENT_VAULT_INSTALLATION_ID", "selected-installation")
+        monkeypatch.setenv("AGENT_VAULT_PORT", "0")
+    try:
+        assert not (run_dir / "endpoint.json").exists()
+        assert cli.cmd_start(None) == 0
+        assert len(launches) == int(tagged)
+        assert (selected.received is not None) is tagged
+        assert (unrelated.received is None) is tagged
+    finally:
+        selected.close()
+        unrelated.close()
+
+
 @pytest.mark.parametrize("transport", ["unix", "pipe"])
 def test_strict_failed_selection_never_contacts_legacy_tcp(
     run_dir: Path, monkeypatch: pytest.MonkeyPatch, empty_registry: ExtensionRegistry,

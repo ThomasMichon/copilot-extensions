@@ -76,6 +76,9 @@ enabled Scheduled Task exists; task activation alone is not success. A disabled
 task still refuses startup, and the CLI's exit code and project context survive.
 The invocation binds the requested installation's state and IPC paths, task
 name and installation identity, then restores the caller's environment.
+It also mirrors the service launcher's port policy: tagged installations use
+port zero rather than accepting a healthy unrelated legacy TCP listener;
+untagged installations retain normal configured-port discovery.
 Common PATH/pruning finalization also runs after retained profile construction.
 Bootstrap currentness binds the marker and full original source receipt to the
 incoming payload's exact generation, including unselected prepared-source base.

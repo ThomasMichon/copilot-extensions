@@ -4069,6 +4069,11 @@ installation state/IPC selection and caller-environment restoration with and
 without an installation identity, and unchanged CLI success/failure exits.
 Task APIs are synthetic and the fixture
 CLI starts no service or credential operation. Its discovery packet separately
+proves that a stopped tagged selection with port zero starts through its own
+advertisement rather than accepting an unrelated healthy TCP listener, while
+untagged legacy discovery is unchanged. The start callback is synthetic;
+both listeners and their ping responses are private loopback fixtures.
+The discovery packet also
 settles private named-pipe handlers, transports and the event-loop thread before
 cleanup; neither packet expands required unit-only CI or proves installed
 service-generation readiness.

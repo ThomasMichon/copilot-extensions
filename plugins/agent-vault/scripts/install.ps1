@@ -1513,6 +1513,7 @@ function Invoke-Start {
         AGENT_VAULT_LOG = $LogFile
         AGENT_VAULT_TASK_NAME = $TaskName
         AGENT_VAULT_INSTALLATION_ID = $(if ($installationId) { $installationId } else { $null })
+        AGENT_VAULT_PORT = $(if ($installationId) { '0' } else { $null })
     }
     $previousEnvironment = @{}
     foreach ($name in $startEnvironment.Keys) {
