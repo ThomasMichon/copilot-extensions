@@ -28,6 +28,9 @@ _PRESERVE = {
     "COPILOT_EXTENSIONS_TEST_SANDBOX",
     "COPILOT_EXTENSIONS_ALLOW_HOST_STATE",
 }
+_PAYLOAD_MAX_BYTES = 256 * 1024 * 1024
+_PAYLOAD_MAX_FILE_BYTES = 8 * 1024 * 1024
+_PAYLOAD_HASH_CHUNK_BYTES = 64 * 1024
 
 
 class RepairAdmissionError(ValueError):
@@ -73,14 +76,20 @@ def payload_identity(root: Path) -> str:
                 pending.append(entry)
                 continue
             ordinary(entry)
-            if len(rows) >= 8192 or info.st_size > 8 * 1024 * 1024:
+            if len(rows) >= 8192 or info.st_size > _PAYLOAD_MAX_FILE_BYTES:
                 raise RepairAdmissionError("repair payload exceeds its file bound")
+            content_hash = hashlib.sha256()
+            size = 0
             with entry.open("rb") as stream:
-                content = stream.read(8 * 1024 * 1024 + 1)
-            total += len(content)
-            if len(content) != info.st_size or total > 64 * 1024 * 1024:
+                while chunk := stream.read(_PAYLOAD_HASH_CHUNK_BYTES):
+                    size += len(chunk)
+                    total += len(chunk)
+                    if size > _PAYLOAD_MAX_FILE_BYTES or total > _PAYLOAD_MAX_BYTES:
+                        raise RepairAdmissionError("repair payload exceeds its content bound or changed")
+                    content_hash.update(chunk)
+            if size != info.st_size:
                 raise RepairAdmissionError("repair payload exceeds its content bound or changed")
-            rows.append((entry.relative_to(root).as_posix(), hashlib.sha256(content).hexdigest()))
+            rows.append((entry.relative_to(root).as_posix(), content_hash.hexdigest()))
     return digest(sorted(rows))
 
 
