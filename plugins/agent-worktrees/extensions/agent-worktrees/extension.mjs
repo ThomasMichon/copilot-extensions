@@ -25,8 +25,8 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { approveAll } from "@microsoft/copilot-sdk";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 import { fileURLToPath } from "node:url";
 import { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } from "./resident-pre-tool.mjs";
 import { createManagedSessionAdmission } from "./managed-session.mjs";

@@ -3870,6 +3870,13 @@ at `extensions/<name>/extension.{mjs,cjs,js}` in the plugin; the CLI scans an
 `plugin`-source extension. The canonical example is **context-handoff**
 (`plugins/context-handoff/extensions/context-handoff/extension.mjs`).
 
+Use `@microsoft/copilot-sdk/extension` for `joinSession` and
+`@microsoft/copilot-sdk` for shared SDK exports such as `approveAll`. Copilot
+CLI 1.0.113 resolves these names to its bundled SDK; the previous
+`@github/copilot-sdk` extension imports are not resolved by that loader.
+Do not install a separate SDK package into extension payloads to mask a
+namespace mismatch.
+
 Such a plugin ships **no `scripts/install.*`**, no deploy manifest, and copies
 nothing to `~/.copilot/extensions/`. `copilot plugin update <name>` (or repo
 `enabledPlugins` auto-install) is the entire deploy. Two conditions gate

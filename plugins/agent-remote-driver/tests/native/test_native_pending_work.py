@@ -31,7 +31,7 @@ def test_native_joined_pending_work_observes_real_tool(tmp_path, offline_cli, ki
     )
     (extension / "extension.mjs").write_text("""
 import { existsSync, writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 const session = await joinSession();
 const snapshots = [await session.rpc.tasks.list()];
 let taskId;
@@ -287,7 +287,7 @@ def test_native_joined_client_task_transitions_remain_visible_until_removed(tmp_
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 const session = await joinSession();
 const api = session.rpc.tasks;
 const initial = await api.list();
@@ -367,7 +367,7 @@ def test_native_joined_schedule_list_and_exact_stop_observe_real_command(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 const session = await joinSession();
 writeFileSync(process.env.DRIVER_OBSERVER_READY, JSON.stringify({
     sessionId: session.sessionId, pid: process.pid,

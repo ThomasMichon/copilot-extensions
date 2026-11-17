@@ -1,5 +1,5 @@
 import { createConnection } from "node:net";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 import { createHeadedAdapter } from "./acp-adapter.mjs";
 
 const binding = JSON.parse(process.env.COPILOT_DRIVER_HEADED_BINDING || "null");

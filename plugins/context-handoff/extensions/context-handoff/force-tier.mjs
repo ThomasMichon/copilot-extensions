@@ -6,7 +6,7 @@
 // the session -- but read-only inspection should still be allowed so the
 // agent (or the operator) can observe what happened. This module holds the
 // pure classification logic in isolation so it is unit-testable without the
-// live @github/copilot-sdk connection extension.mjs needs.
+// live @microsoft/copilot-sdk connection extension.mjs needs.
 //
 // Uses the SDK's own per-request read-only signals (the permission request
 // `kind`, or a request-specific `readOnly` flag) rather than a hand-

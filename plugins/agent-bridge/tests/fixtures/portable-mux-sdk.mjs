@@ -94,8 +94,8 @@ async function load(path, tail = "") {
   const dependencies = {};
   const imports = [...source.matchAll(/^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm)];
   for (const [, , name] of imports) {
-    dependencies[name] = name === "@github/copilot-sdk" ? { approveAll: () => {} }
-      : name === "@github/copilot-sdk/extension" ? { joinSession: async () => session }
+    dependencies[name] = name === "@microsoft/copilot-sdk" ? { approveAll: () => {} }
+      : name === "@microsoft/copilot-sdk/extension" ? { joinSession: async () => session }
         : await import(name.startsWith(".")
           ? pathToFileURL(join(dirname(path), name)).href : name);
   }

@@ -47,8 +47,8 @@
 // gracefully instead of spinning or exhausting resources.
 
 import { mkdirSync, unlinkSync } from "node:fs";
-import { approveAll } from "@github/copilot-sdk";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { approveAll } from "@microsoft/copilot-sdk";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 import { createDriverServer, MAX_SSE_CLIENTS } from "./driver-server.mjs";
 import { createSessionDriver } from "./session-driver.mjs";
 import { discoveryDir, descriptorPath, generateToken, buildDescriptor, writeDescriptorAtomic } from "./discovery.mjs";

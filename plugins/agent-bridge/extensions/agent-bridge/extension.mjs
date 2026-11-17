@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const packaged = new URL("./core/extension.mjs", import.meta.url);
 // Promotion projects the canonical Core assets into this plugin. A source

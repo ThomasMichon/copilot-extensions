@@ -30,8 +30,8 @@ const module = new vm.SourceTextModule(readFileSync(process.argv[1], "utf8"), {
   initializeImportMeta: meta => {meta.url = pathToFileURL(process.argv[1]).href;},
 });
 await module.link(async name => {
-  if (name === "@github/copilot-sdk") return synthetic({approveAll: () => true});
-  if (name === "@github/copilot-sdk/extension") return synthetic({
+  if (name === "@microsoft/copilot-sdk") return synthetic({approveAll: () => true});
+  if (name === "@microsoft/copilot-sdk/extension") return synthetic({
     joinSession: async () => ({sessionId: "fixture-session", on: (key, fn) => handlers.set(key, fn),
       send: async message => {prompts.push(message);}}),
   });

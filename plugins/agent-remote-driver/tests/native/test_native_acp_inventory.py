@@ -29,7 +29,7 @@ async def test_native_acp_missing_inventory_is_not_an_empty_snapshot(tmp_path, o
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 writeFileSync(process.env.DRIVER_EXTENSION_STARTED, "started");
 const session = await joinSession();
 const tasks = await session.rpc.tasks.list();
@@ -392,7 +392,7 @@ def test_native_prompt_mode_loads_the_same_inventory_plugin(tmp_path, offline_cl
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 writeFileSync(process.env.DRIVER_EXTENSION_STARTED, "started");
 const session = await joinSession();
 const tasks = await session.rpc.tasks.list();

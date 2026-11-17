@@ -27,6 +27,21 @@ def _materializer():
         sys.path.remove(str(tools))
 
 
+def test_all_extension_entrypoints_link_with_microsoft_only_sdk_resolution():
+    from agent_procutil.owned_process import run_caller_owned
+
+    node = shutil.which("node")
+    assert node, "the extension SDK namespace control requires Node"
+    root = Path(__file__).resolve().parents[3]
+    fixture = Path(__file__).parent / "fixtures" / "extension-sdk-namespace.mjs"
+    result = run_caller_owned(
+        [node, "--experimental-vm-modules", str(fixture), str(root)],
+        timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Microsoft-only SDK resolution" in result.stdout
+
+
 def test_selected_extensions_and_canonical_pane_shell_survive_materialization(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[3]
     bridge = root / "plugins" / "agent-bridge"
@@ -211,7 +226,7 @@ def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path, layou
     resources.mkdir(parents=True, exist_ok=True)
     for name, contents in sources:
         (resources / name).write_bytes(contents)
-    sdk = selected / "node_modules/@github/copilot-sdk"
+    sdk = selected / "node_modules/@microsoft/copilot-sdk"
     sdk.mkdir(parents=True)
     (sdk / "package.json").write_text(json.dumps({
         "type": "module", "exports": {"./extension": "./extension.mjs"},

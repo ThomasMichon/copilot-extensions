@@ -98,7 +98,7 @@ admission requirements. Current Core omits process diagnostics from new-mode
 requests; optional valid observations from other consumers remain advisory.
 Proxy ingress remains unsupported.
 
-The already-used `@github/copilot-sdk` session must expose `send()`, `getEvents()`
+The already-used `@microsoft/copilot-sdk` session must expose `send()`, `getEvents()`
 and `rpc.metadata.snapshot()`. Its actual `sessionId`, metadata session ID and
 working directory must agree with the registered native context. Metadata alone
 cannot redirect a stale SDK handle's send target. A resume whose SDK handle

@@ -33,8 +33,8 @@ import {
 } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { approveAll } from "@microsoft/copilot-sdk";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 import {
   agentDispatchAvailable,
   agentWorktreesGet,
@@ -104,7 +104,7 @@ import {
 // This extension has been observed, on at least one machine, to reach the
 // harness's "ready" state (successful tool registration over the joinSession
 // IPC channel) and then terminate with exit code 1 and NO captured stderr.
-// See crash-diagnostics.mjs (an isolated, @github/copilot-sdk-free module,
+// See crash-diagnostics.mjs (an isolated, @microsoft/copilot-sdk-free module,
 // so it can be exercised directly by subprocess tests -- see
 // tests/crash-diagnostics.test.mjs) for the full rationale and the
 // uninstall-capable implementation. `uninstall()` itself is never called:

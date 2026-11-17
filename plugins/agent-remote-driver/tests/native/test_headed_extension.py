@@ -318,7 +318,7 @@ def test_native_launch_scoped_observer_needs_no_privileged_permission(
     )
     (plugin / "extensions" / "driver-fixture" / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 const session = await joinSession();
 writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     sessionId: session.sessionId,
@@ -368,7 +368,7 @@ def test_native_joined_session_reports_pending_read_support_without_permission_g
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 const session = await joinSession();
 const observations = {};
 for (const [name, field] of [["tasks", "tasks"], ["schedule", "entries"]]) {
@@ -430,7 +430,7 @@ def test_native_joined_observer_close_returns_no_attributed_outcome(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 const session = await joinSession();
 const unsubscribe = session.on(() => {});
 const unsubscribeResult = unsubscribe();
