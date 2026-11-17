@@ -34,12 +34,12 @@ def _activity(
         return unknown, None
     reviews = []
     for row in facts["reviews"]:
-        if not isinstance(row["user"], str):
-            return unknown, None
-        if row["user"].casefold() != reviewer.casefold():
-            continue
         state = row["state"]
         if state in ("PENDING", "REQUEST_REVIEW"):
+            continue
+        if not isinstance(row["user"], str) or not row["user"].strip():
+            return unknown, None
+        if row["user"].casefold() != reviewer.casefold():
             continue
         evidence = review_evidence(row, observed_at)
         if evidence is None:

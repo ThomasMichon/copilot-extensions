@@ -76,7 +76,9 @@ The existing pure attention owner projects and ages the queue:
 
 Terminal, draft and self-review interests do not become reviewer actions.
 Missing author/candidate identity, incomplete history, invalid reviewer
-timestamps and stale/unavailable evidence remain explicit. A review matching
+timestamps and stale/unavailable evidence remain explicit. Blank submitted-review
+actors make the review evidence unavailable; actorless draft/request records
+remain non-verdicts. A review matching
 the current head alone does not establish its reviewed base: that result is
 `reviewed-base-unknown`, not fabricated handled feedback.
 
