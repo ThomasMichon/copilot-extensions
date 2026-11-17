@@ -68,8 +68,9 @@ direct receiving, current entire ROOT/source/custody readback and separate
 source-specific judgment permit administrative supersession. This Active
 effort still requires its own complete Plan/Validation resolution; neither
 tracker retirement nor planned receiving completes its technical work.
-Normal review, actual complete delivery and full current receiving/source/
-custody readback precede any separate administrative judgment; no script,
+Normal review and actual merge of complete planned receiving, followed by
+full current receiving/source/custody readback, precede separate administrative
+judgment; technical delivery remains the effort's distinct gate. No script,
 engine, provider, lease, task or runtime operation is authorized here.
 
 The whole #4959 receiving amendment below adds the already-incorporated
@@ -632,6 +633,8 @@ Active effort's own completion gate. #4959 remains open pending this
 clarification's review, current complete readback and separate judgment.
 All incumbent checks, actual source/resource owners and completed #8300
 claim remain unchanged; no implementation or operational effect.
+Review also reconciled the adjacent older "actual complete delivery" sentence
+to the same reviewed-plan-merge/readback gate, not technical implementation.
 
 ### 2026-10-30 - Finite inherited-script defining-origin clarification
 
