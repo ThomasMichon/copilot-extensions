@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
+from typing import Any, cast
 
 
-def run_self_install(rest: list[str], render) -> int:
+def run_self_install(rest: list[str], render: Callable[[], int]) -> int:
     """Route Windows apply through the existing installation execution owner."""
     if "--apply" in rest and os.name == "nt":
         from .update_driver_cli import self_install_request
@@ -17,14 +19,16 @@ def run_self_install(rest: list[str], render) -> int:
     return render()
 
 
-def activate_installed_slot(slot: Path) -> dict:
+def activate_installed_slot(slot: Path) -> dict[str, Any]:
     """Activate the exact installed slot without resolving a mutable selection."""
     from .self_install import _runtime_installer
 
-    return _runtime_installer()._activate_after_bootstrap_update(slot.parent.parent, slot)
+    return cast(dict[str, Any], _runtime_installer()._activate_after_bootstrap_update(
+        slot.parent.parent, slot, start_if_missing=True,
+    ))
 
 
-def started_outcome(stdout: str, generation: str) -> dict | None:
+def started_outcome(stdout: str, generation: str) -> dict[str, Any] | None:
     """Accept only the requested incoming generation's acknowledged startup."""
     try:
         outcome = json.loads(stdout)
@@ -49,8 +53,10 @@ def started_outcome(stdout: str, generation: str) -> dict | None:
 
 def main(argv: list[str] | None = None) -> int:
     from . import mux_daemon, mux_daemon_cutover
-    from ._installation_context import paths_equal
+    from . import _installation_context
     from .runtime_identity import running_slot
+
+    paths_equal: Callable[[Path, Path], bool] = vars(_installation_context)["paths_equal"]
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)

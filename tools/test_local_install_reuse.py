@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -10,11 +11,16 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from types import SimpleNamespace
+from collections.abc import Iterator
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
 import local_install_source as local
+
+preparation: ModuleType = vars(local)["preparation"]
+preparation_process: ModuleType = vars(local)["preparation_process"]
 
 
 def test_profile_worker_starts_in_preparer_runtime_not_build_only_environment(
@@ -26,10 +32,10 @@ def test_profile_worker_starts_in_preparer_runtime_not_build_only_environment(
     deadline = time.monotonic() + 30
     output = tmp_path / "prepared"
     expected = {"demo": str(output / "profiles/demo/snapshot")}
-    run = local.preparation_process.run
+    run = preparation_process.run
     calls = []
 
-    def start_worker(argv, **options):
+    def start_worker(argv: list[str], **options: Any) -> Any:
         started = run([*argv[:2], "--help"], **options)
         assert started.returncode == 0, started.stderr
         assert "--application-components" in started.stdout
@@ -37,7 +43,7 @@ def test_profile_worker_starts_in_preparer_runtime_not_build_only_environment(
         return subprocess.CompletedProcess(argv, 0, json.dumps(expected), "")
 
     monkeypatch.setattr(locks, "_query_marker_environment", lambda *a, **k: default_environment())
-    monkeypatch.setattr(local.preparation_process, "run", start_worker)
+    monkeypatch.setattr(preparation_process, "run", start_worker)
     assert local._prepare_profiles(
         tmp_path, {}, output, ("demo",), {},
         SimpleNamespace(venv_python=tmp_path / "build-only-python", record={}),
@@ -47,11 +53,11 @@ def test_profile_worker_starts_in_preparer_runtime_not_build_only_environment(
 
 
 @pytest.fixture
-def application_portfolio(tmp_path, monkeypatch):
+def application_portfolio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     import build_toolchain_lock as locks
 
-    permissions = local.preparation_process.procutil_module("python_cache_permissions")
-    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    permissions = preparation_process.procutil_module("python_cache_permissions")
+    owner = preparation_process.procutil_module("_daemon_instance_owner")
     parent = tmp_path / "portfolios"
     owner.mkdir_private(parent)
     repository = tmp_path / "repository"
@@ -59,11 +65,11 @@ def application_portfolio(tmp_path, monkeypatch):
     state = SimpleNamespace(parent=parent, repository=repository, builds=0, compositions=0)
     toolchain = SimpleNamespace(record={"fixture": True})
 
-    def write(path, content):
+    def write(path: Path, content: str) -> None:
         with os.fdopen(owner.open_private(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY), "w") as stream:
             stream.write(content)
 
-    def compose(repository, commit, main, output, **options):
+    def compose(repository: Path, commit: str, main: str, output: Path, **options: Any) -> Any:
         permissions.check(output.parent, private=True)
         state.compositions += 1
         owner.mkdir_private(output)
@@ -76,12 +82,12 @@ def application_portfolio(tmp_path, monkeypatch):
         return record
 
     @contextmanager
-    def build(output, record, **options):
+    def build(output: Path, record: dict[str, Any], **options: Any) -> Iterator[Any]:
         state.builds += 1
         owner.mkdir_private(output / "build-tools")
         yield record, toolchain
 
-    def profiles(built, record, output, components, extras, toolchain, **options):
+    def profiles(built: Any, record: dict[str, Any], output: Path, components: Any, extras: Any, toolchain: Any, **options: Any) -> Any:
         previous = options.get("reuse_source")
         if previous is not None:
             return json.loads((previous / "applications.json").read_text())["snapshots"]
@@ -92,13 +98,13 @@ def application_portfolio(tmp_path, monkeypatch):
         write(output / "applications.json", "")
         return {"demo": str(snapshot)}
 
-    monkeypatch.setattr(local.preparation, "_admit", lambda *a, **kw: ("d" * 40, "b" * 40))
+    monkeypatch.setattr(preparation, "_admit", lambda *a, **kw: ("d" * 40, "b" * 40))
     monkeypatch.setattr(local, "compose", compose)
     monkeypatch.setattr(local, "_built_projects", build)
     monkeypatch.setattr(local, "_prepare_profiles", profiles)
     monkeypatch.setattr(locks, "resolve_toolchain_lock", lambda *a, **kw: toolchain)
 
-    def prepare(output):
+    def prepare(output: Path) -> Any:
         return local.prepare_applications(
             repository, "a" * 40, "c" * 40, output, components=("demo",),
             branch="dev", uv="unused", deadline=time.monotonic() + 30,
@@ -108,7 +114,7 @@ def application_portfolio(tmp_path, monkeypatch):
     return state
 
 
-def test_fresh_application_root_is_private_and_complete_repeat_reuses(application_portfolio):
+def test_fresh_application_root_is_private_and_complete_repeat_reuses(application_portfolio: SimpleNamespace) -> None:
     state = application_portfolio
     first = state.parent / "first"
     old_umask = os.umask(0o022)
@@ -116,7 +122,7 @@ def test_fresh_application_root_is_private_and_complete_repeat_reuses(applicatio
         prepared = state.prepare(first)
     finally:
         os.umask(old_umask)
-    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    permissions = preparation_process.procutil_module("python_cache_permissions")
     permissions.check_bytecode(first, max_entries=100, seconds=10)
     assert state.prepare(state.parent / "second") == prepared
     assert (first / "applications.json").is_file()
@@ -124,7 +130,7 @@ def test_fresh_application_root_is_private_and_complete_repeat_reuses(applicatio
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX sticky directory semantics")
-def test_fresh_application_accepts_trusted_sticky_parent_without_reusing_siblings(application_portfolio):
+def test_fresh_application_accepts_trusted_sticky_parent_without_reusing_siblings(application_portfolio: SimpleNamespace) -> None:
     state = application_portfolio
     state.parent.chmod(0o1777)
     assert state.prepare(state.parent / "first")
@@ -134,18 +140,18 @@ def test_fresh_application_accepts_trusted_sticky_parent_without_reusing_sibling
 
 @pytest.mark.parametrize("where", ["parent", "ancestor", "foreign-parent"])
 @pytest.mark.skipif(os.name == "nt", reason="POSIX access bits and ownership")
-def test_fresh_application_refuses_replaceable_parent_chain(application_portfolio, monkeypatch, where):
+def test_fresh_application_refuses_replaceable_parent_chain(application_portfolio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
     state = application_portfolio
     target = state.parent.parent if where == "ancestor" else state.parent
     original = target.stat().st_mode
     if where == "foreign-parent":
         lstat = Path.lstat
 
-        def foreign(path, *args, **options):
+        def foreign(path: Path, *args: Any, **options: Any) -> Any:
             info = lstat(path, *args, **options)
             if path == target:
                 values = list(info)
-                values[4] = os.getuid() + 1
+                values[4] = vars(os)["getuid"]() + 1
                 return os.stat_result(values)
             return info
 
@@ -163,7 +169,7 @@ def test_fresh_application_refuses_replaceable_parent_chain(application_portfoli
 
 
 @pytest.mark.parametrize("where", ["leaf", "parent", "ancestor"])
-def test_fresh_application_refuses_linked_output_chain(application_portfolio, where):
+def test_fresh_application_refuses_linked_output_chain(application_portfolio: SimpleNamespace, where: str) -> None:
     state = application_portfolio
     link = state.parent / "linked"
     target = state.parent / "target"
@@ -171,7 +177,7 @@ def test_fresh_application_refuses_linked_output_chain(application_portfolio, wh
     if os.name == "nt":
         subprocess.run(
             [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(target)],
-            check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+            check=True, capture_output=True, creationflags=vars(subprocess)["CREATE_NO_WINDOW"],
         )
     else:
         link.symlink_to(target, target_is_directory=True)
@@ -189,8 +195,8 @@ def test_fresh_application_refuses_linked_output_chain(application_portfolio, wh
 
 @pytest.mark.parametrize("previous", ["ordinary", "shared", "foreign", "partial"])
 def test_fresh_application_never_repairs_or_reenters_existing_root(
-    application_portfolio, monkeypatch, previous,
-):
+    application_portfolio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, previous: str,
+) -> None:
     state = application_portfolio
     output = state.parent / "existing"
     output.mkdir()
@@ -199,10 +205,10 @@ def test_fresh_application_never_repairs_or_reenters_existing_root(
     if previous == "shared" and os.name != "nt":
         output.chmod(0o777)
     if previous == "foreign":
-        permissions = local.preparation_process.procutil_module("python_cache_permissions")
+        permissions = preparation_process.procutil_module("python_cache_permissions")
         check = permissions.check
 
-        def foreign(path, **options):
+        def foreign(path: Path, **options: Any) -> Any:
             if path == output:
                 raise PermissionError("foreign root")
             return check(path, **options)
@@ -217,14 +223,14 @@ def test_fresh_application_never_repairs_or_reenters_existing_root(
     assert output.stat().st_mode == mode and state.compositions == 0
 
 
-def test_fresh_application_claim_is_exclusive_before_composition(application_portfolio, monkeypatch):
+def test_fresh_application_claim_is_exclusive_before_composition(application_portfolio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     state = application_portfolio
     output = state.parent / "racing"
-    owner = local.preparation_process.procutil_module("_daemon_instance_owner")
+    owner = preparation_process.procutil_module("_daemon_instance_owner")
     mkdir = owner.mkdir_private
     claimed = []
 
-    def competitor(path, **options):
+    def competitor(path: Path, **options: Any) -> None:
         mkdir(path)
         (path / "competitor").write_text("retained")
         claimed.append(path)
@@ -237,26 +243,26 @@ def test_fresh_application_claim_is_exclusive_before_composition(application_por
     assert state.compositions == 0
 
 
-def test_concurrent_fresh_preparers_have_one_owner(application_portfolio, monkeypatch):
+def test_concurrent_fresh_preparers_have_one_owner(application_portfolio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier, local as thread_local
 
     state = application_portfolio
     barrier, entered = Barrier(2), thread_local()
 
-    def admit(*args, **options):
+    def admit(*args: Any, **options: Any) -> Any:
         if not getattr(entered, "first", False):
             entered.first = True
             barrier.wait(timeout=5)
         return "d" * 40, "b" * 40
 
-    def prepare():
+    def prepare() -> Any:
         try:
             return state.prepare(state.parent / "concurrent")
         except FileExistsError as error:
             return error
 
-    monkeypatch.setattr(local.preparation, "_admit", admit)
+    monkeypatch.setattr(preparation, "_admit", admit)
     with ThreadPoolExecutor(max_workers=2) as workers:
         futures = [workers.submit(prepare) for _ in range(2)]
         results = [future.result(timeout=10) for future in futures]
@@ -266,19 +272,19 @@ def test_concurrent_fresh_preparers_have_one_owner(application_portfolio, monkey
 
 
 def test_failed_fresh_preparation_retains_private_partial_root_without_reusing_it(
-    application_portfolio, monkeypatch,
-):
+    application_portfolio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     state = application_portfolio
     profiles = local._prepare_profiles
     first = state.parent / "partial"
 
-    def fail(*args, **options):
+    def fail(*args: Any, **options: Any) -> None:
         raise RuntimeError("profile failed")
 
     monkeypatch.setattr(local, "_prepare_profiles", fail)
     with pytest.raises(RuntimeError, match="profile failed"):
         state.prepare(first)
-    permissions = local.preparation_process.procutil_module("python_cache_permissions")
+    permissions = preparation_process.procutil_module("python_cache_permissions")
     permissions.check(first, private=True)
     assert (first / "inputs").is_dir() and not (first / "applications.json").exists()
     with pytest.raises(ValueError, match="must be new"):
@@ -289,7 +295,7 @@ def test_failed_fresh_preparation_retains_private_partial_root_without_reusing_i
 
 
 @pytest.fixture
-def reusable_source(tmp_path, monkeypatch):
+def reusable_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     import build_python_artifacts as builder
     import build_toolchain_lock
     import promotion_python_artifacts as artifacts
@@ -351,7 +357,7 @@ def reusable_source(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("changed", [None, "source", "composition", "wheel", "policy"])
-def test_prepared_wheel_reuse_revalidates_inputs_without_build_fallback(reusable_source, changed):
+def test_prepared_wheel_reuse_revalidates_inputs_without_build_fallback(reusable_source: tuple[Path, Path, dict[str, Any], dict[str, Any]], changed: str | None) -> None:
     previous, output, record, original = reusable_source
     if changed == "source":
         (output / "source/plugins/demo/src/demo/__init__.py").write_text("CHANGED = True\n")
@@ -359,7 +365,7 @@ def test_prepared_wheel_reuse_revalidates_inputs_without_build_fallback(reusable
         record["composition"] = {**record["composition"], "tree": "e" * 40}
     elif changed == "wheel":
         (previous / "wheels/demo/demo-1.0.0-py3-none-any.whl").write_bytes(b"damaged")
-    options = dict(
+    options: dict[str, Any] = dict(
         projects=("demo",), reuse_source=previous,
         source_policy="seasoned-public" if changed == "policy" else "governed",
     )
@@ -381,9 +387,9 @@ def test_prepared_wheel_reuse_revalidates_inputs_without_build_fallback(reusable
     "toolchain", "selected-source", "missing-copy", "damaged-copy",
 ])
 def test_complete_application_reuse_revalidates_real_outputs_without_constructing(
-    reusable_source, tmp_path, monkeypatch, fault,
-):
-    import local_install_profile as native
+    reusable_source: tuple[Path, Path, dict[str, Any], dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
+    native: ModuleType = importlib.import_module("local_install_profile")
     from packaging.markers import default_environment
     from packaging.tags import sys_tags
     from runtime_profile import ProfileUnavailable
@@ -399,10 +405,15 @@ def test_complete_application_reuse_revalidates_real_outputs_without_constructin
     }
     expected = {row["filename"]: row["sha256"] for row in artifact["wheels"]}
     deadline = time.monotonic() + 60
-    target = {"environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
+    target: dict[str, Any] = {"environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
     monkeypatch.setattr(native, "_query_marker_environment", lambda *a, **kw: target["environment"])
-    policy = {"policyId": "fixture-policy"}
-    monkeypatch.setattr(native, "_profile_policy", lambda *args: (("fixture", None), policy))
+    policy: dict[str, Any] = {"policyId": "fixture-policy", "selection": {"downloadOrigins": []}}
+    feed = SimpleNamespace(policy_id="fixture-acquisition")
+    @contextmanager
+    def configuration(*args: Any, **kwargs: Any) -> Iterator[Any]:
+        yield SimpleNamespace(environment={}), ["original", "retained"]
+    monkeypatch.setattr(native, "_reuse_configuration", configuration)
+    monkeypatch.setattr(native, "_profile_feed", lambda *args, **kwargs: (policy, feed))
     with native.retain_wheel_inputs(
         archives, expected, max_wheels=256, max_archive_bytes=128 << 20,
         max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
@@ -428,6 +439,18 @@ def test_complete_application_reuse_revalidates_real_outputs_without_constructin
     snapshot_record["projects"]["demo"]["application"] = "applications/demo"
     (snapshot / local.MANIFEST).write_text(json.dumps(snapshot_record))
     completion = local._application_completion(snapshots, deadline=deadline)
+    (completed / "applications.json").write_text(json.dumps(completion))
+    (output / local.MANIFEST).write_text(json.dumps(record))
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+    toolchain_record = json.loads(json.dumps(artifact["build_toolchain"]))
+    monkeypatch.setattr(native, "prepare_registry_lock", lambda *a, **kw: pytest.fail(
+        "complete reuse must not prepare another native profile",
+    ))
+    options: dict[str, Any] = dict(
+        extras={}, deadline=deadline,
+        source_record_sha256=digest, toolchain_record=toolchain_record,
+    )
+    assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
     if fault == "completion":
         completion["content"]["demo"] = "0" * 64
     elif fault == "wheel":
@@ -441,9 +464,6 @@ def test_complete_application_reuse_revalidates_real_outputs_without_constructin
     if fault in {"wheel", "application", "missing-copy", "damaged-copy"}:
         completion = local._application_completion(snapshots, deadline=deadline)
     (completed / "applications.json").write_text(json.dumps(completion))
-    (output / local.MANIFEST).write_text(json.dumps(record))
-    digest = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
-    toolchain_record = json.loads(json.dumps(artifact["build_toolchain"]))
     if fault == "toolchain":
         toolchain_record["lock_id"] = "sha256:" + "0" * 64
     if fault == "target":
@@ -455,19 +475,14 @@ def test_complete_application_reuse_revalidates_real_outputs_without_constructin
     if fault == "selected-source":
         reuse = local._reuse_projects
 
-        def changed(*args, **kwargs):
+        def changed(*args: Any, **kwargs: Any) -> Any:
             result = reuse(*args, **kwargs)
             (output / "source/plugins/demo/src/demo/__init__.py").write_text("CHANGED = True\n")
             return result
 
         monkeypatch.setattr(local, "_reuse_projects", changed)
-    monkeypatch.setattr(native, "prepare_registry_lock", lambda *a, **kw: pytest.fail(
-        "complete reuse must not prepare another native profile",
-    ))
-    options = dict(
-        extras={"demo": ["bootstrap"]} if fault == "extras" else {}, deadline=deadline,
-        source_record_sha256=digest, toolchain_record=toolchain_record,
-    )
+    if fault == "extras":
+        options["extras"] = {"demo": ["bootstrap"]}
     if fault:
         with pytest.raises(native.ProfileError if fault == "selected-source" else ProfileUnavailable):
             native.reuse_applications(output, completed, ["demo"], **options)

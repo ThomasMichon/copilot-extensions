@@ -28,8 +28,11 @@ import sys
 import time
 import uuid
 from contextlib import ExitStack
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 import worktree_manager
 
@@ -151,7 +154,7 @@ def control_plane_providers_dir() -> Path:
     return home / ".agent-worktrees" / CONTROL_PLANE_PROVIDERS_SUBDIR
 
 
-def _runtime_installer():
+def _runtime_installer() -> Any:
     return _load_runtime_installer(_runtime_scripts())
 
 
@@ -238,7 +241,7 @@ def _expected_control_plane_provider_manifest(
         "session": {"version": 1, "root": str((root or default_root()).resolve())},
     }
     template["provider_root"] = str((root or default_root()).resolve())
-    return template
+    return cast(dict[str, object], template)
 
 
 def _control_plane_provider_manifest_path(
@@ -258,7 +261,7 @@ def _control_plane_provider_manifest_is_stale(
         current = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return True
-    return current != _expected_control_plane_provider_manifest(payload_dir, root=root)
+    return bool(current != _expected_control_plane_provider_manifest(payload_dir, root=root))
 
 
 def _write_control_plane_provider_manifest(
@@ -322,6 +325,16 @@ def binstub_present() -> Path | None:
     return None
 
 
+def _application_launchers(slot: Path) -> ModuleType:
+    script = slot / "runtime_application_binstubs.py"
+    spec = importlib.util.spec_from_file_location("_manager_application_binstubs", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Manager application launchers are unavailable")
+    launchers = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launchers)
+    return launchers
+
+
 def _expected_binstub_contents(*, application_slot: Path | None = None) -> dict[str, str]:
     """The exact binstub file contents this version would (re)deploy.
 
@@ -329,16 +342,25 @@ def _expected_binstub_contents(*, application_slot: Path | None = None) -> dict[
     can compare against the same expectation without writing anything.
     """
     if application_slot is not None:
-        script = application_slot / "runtime_application_binstubs.py"
-        spec = importlib.util.spec_from_file_location("_manager_application_binstubs", script)
-        if spec is None or spec.loader is None:
-            raise RuntimeError("Manager application launchers are unavailable")
-        launchers = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(launchers)
-        return launchers.global_binstubs(
-            "worktree-manager", "WORKTREE_MANAGER_ROOT", ".worktree-manager",
-            root=application_slot.parent.parent,
-        )
+        launchers = _application_launchers(application_slot)
+        declaration = application_slot / "application.json"
+        record = json.loads(declaration.read_text(encoding="utf-8")) if declaration.exists() else {}
+        if not isinstance(record, dict):
+            raise ValueError("Manager application declaration must be an object")
+        commands = record.get("commands", ["worktree-manager"])
+        if (
+            not isinstance(commands, list) or not commands
+            or any(not isinstance(command, str) for command in commands)
+            or "worktree-manager" not in commands or len(set(commands)) != len(commands)
+        ):
+            raise ValueError("Manager application commands must be unique and include Manager")
+        contents: dict[str, str] = {}
+        for command in commands:
+            contents.update(launchers.global_binstubs(
+                command, "WORKTREE_MANAGER_ROOT", ".worktree-manager",
+                root=application_slot.parent.parent,
+            ))
+        return contents
     contents = {"worktree-manager": _sh_binstub()}
     if os.name == "nt":
         contents = {
@@ -347,6 +369,20 @@ def _expected_binstub_contents(*, application_slot: Path | None = None) -> dict[
             "worktree-manager": _sh_binstub(),  # for git-bash on Windows
         }
     return contents
+
+
+def _expected_frontdoor_contents(application_slot: Path | None) -> dict[Path, str]:
+    globals_text = _expected_binstub_contents(application_slot=application_slot)
+    result = {local_bin() / name: body for name, body in globals_text.items()}
+    if application_slot is not None:
+        root = application_slot.parent.parent
+        result.update({root / "bin" / name: body for name, body in globals_text.items()})
+        setup = _application_launchers(application_slot).global_binstubs(
+            "setup", "WORKTREE_MANAGER_ROOT", ".worktree-manager", root=root,
+            slot_directory="bin",
+        )
+        result.update({root / "bin" / name: body for name, body in setup.items()})
+    return result
 
 
 def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
@@ -364,9 +400,12 @@ def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
     handing off to this Manager. Comparing content closes that gap: any
     mismatch (or absence) means the binstub needs (re)deploying.
     """
-    lb = local_bin()
-    for name, expected in _expected_binstub_contents(application_slot=application_slot).items():
-        p = lb / name
+    try:
+        contents = _expected_frontdoor_contents(application_slot)
+    except Exception:
+        # Unreadable selected inputs and older rendering APIs are replacement gaps.
+        return True
+    for p, expected in contents.items():
         try:
             # newline="" preserves exact line endings on read (matches how
             # _deploy_binstubs writes them) -- otherwise universal-newline
@@ -374,7 +413,7 @@ def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
             # to \n on read, making an up-to-date file look "stale".
             with p.open(encoding="utf-8", newline="") as f:
                 actual = f.read()
-        except OSError:
+        except (OSError, UnicodeError):
             return True
         if actual != expected:
             return True
@@ -514,19 +553,20 @@ def _slot_package_version(slot: Path) -> str | None:
     return _runtime_slot_package_version(slot, _runtime_installer, payload_version)
 
 
-def _deploy_binstubs(*, application_slot: Path | None = None, _published=None) -> list[Path]:
+def _deploy_binstubs(
+    *, application_slot: Path | None = None, _published: dict[Path, Any] | None = None,
+) -> list[Path]:
     lb = local_bin()
     lb.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    contents = _expected_binstub_contents(application_slot=application_slot)
+    contents = _expected_frontdoor_contents(application_slot)
     if application_slot is not None:
-        for name in contents:
-            path = lb / name
+        for path in contents:
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise RuntimeError(f"Foreign Manager command preserved: {path}")
     # Explicit installation owns these named outputs, not their historical byte template.
-    for name, body in contents.items():
-        p = lb / name
+    for p, body in contents.items():
+        p.parent.mkdir(parents=True, exist_ok=True)
         if application_slot is None:
             p.write_text(body, encoding="utf-8", newline="")
             if os.name != "nt":
@@ -549,7 +589,8 @@ def _deploy_binstubs(*, application_slot: Path | None = None, _published=None) -
                     raise RuntimeError(f"Manager command changed during publication: {p}")
             finally:
                 temporary.unlink(missing_ok=True)
-        written.append(p)
+        if p.parent == lb:
+            written.append(p)
     return written
 
 
@@ -577,7 +618,7 @@ class _CutoverLockBusy(Exception):
     """A genuinely concurrent cutover holds the mux-daemon lock right now."""
 
 
-def _acquire_install_cutover_lease(root: Path):
+def _acquire_install_cutover_lease(root: Path) -> tuple[Any, ModuleType]:
     """The shared mux-daemon cutover lease, held for the WHOLE slot mutation
     below (reap + :func:`_copy_payload`).
 
@@ -777,8 +818,9 @@ class SelfInstallResult:
 
 
 def _complete_candidate(
-    ready, payload: Path, root: Path, *, previous: str | None,
-    was_current: bool, before_publish=None, after_activate=None,
+    ready: Any, payload: Path, root: Path, *, previous: str | None,
+    was_current: bool, before_publish: Callable[[], None] | None = None,
+    after_activate: Callable[[Path], object] | None = None,
     transactional_activation: bool = False,
 ) -> SelfInstallResult:
     return _complete_slot(
@@ -791,22 +833,24 @@ def _complete_candidate(
 def _complete_slot(
     slot: Path, payload: Path, version: str | None, root: Path, *,
     previous: str | None, was_current: bool, reused: bool,
-    before_publish=None, after_activate=None, transactional_activation: bool = False,
+    before_publish: Callable[[], None] | None = None,
+    after_activate: Callable[[Path], object] | None = None, transactional_activation: bool = False,
 ) -> SelfInstallResult:
     stubs: list[Path] = []
     application_slot = slot if (slot / "application.json").is_file() else None
-    baseline = {}
-    contents = {}
-    published = {}
-    started, leased, interrupted = False, False, None
+    baseline: dict[Path, Any] = {}
+    contents: dict[Path, bytes | None] = {}
+    published: dict[Path, Any] = {}
+    started, leased = False, False
+    interrupted: BaseException | None = None
 
     def publish_frontdoors() -> None:
         nonlocal stubs, started, leased, interrupted
         publication = installer.runtime._runtime_component("versioned_runtime_publication")
-        targets = [*(local_bin() / name for name in (
-            _expected_binstub_contents(application_slot=application_slot)
-            if application_slot is not None else _binstub_files()
-        )),
+        targets = [*(
+            _expected_frontdoor_contents(application_slot)
+            if application_slot is not None else (local_bin() / name for name in _binstub_files())
+        ),
                    _control_plane_provider_manifest_path(payload, root=root)]
         if not leased:
             publication_custody.enter_context(publication.target_leases(root, targets))
@@ -867,15 +911,20 @@ def self_install(
     root: Path | None = None,
     dry_run: bool = True,
     stage_only: bool = False,
-    _after_activate=None, _before_publish=None,
+    _after_activate: Callable[[Path], object] | None = None,
+    _before_publish: Callable[[], None] | None = None,
     _transactional_activation: bool = False, _reconcile_instances: bool = True,
-    _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
+    _wheel_inputs: Any = None, _local_packages: tuple[str, ...] | None = None,
+    _validate_candidate: Callable[..., Any] | None = None,
     _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
-    _application: Path | None = None, _native_wheel_inputs=None,
+    _application: Path | None = None, _native_wheel_inputs: Any = None,
 ) -> SelfInstallResult:
     """Construct and health-gate; stage-only proves readiness without selection."""
     from .runtime_identity import running_application_slot
-    from ._installation_context import path_is_within, paths_equal
+    from . import _installation_context
+
+    path_is_within: Callable[[str | Path, str | Path], bool] = vars(_installation_context)["path_is_within"]
+    paths_equal: Callable[[str | Path, str | Path], bool] = vars(_installation_context)["paths_equal"]
 
     r = (root or default_root()).resolve()
     application_slot = running_application_slot() if payload_dir is None else None
@@ -942,9 +991,9 @@ def self_install(
                 reused = installer.runtime.is_complete(r, slot.name)
                 _, unchanged = custody.enter_context(application._qualified(slot, record))
                 if stage_only:
-                    return installer.stage_application(r, slot, version, unchanged)
+                    return cast(SelfInstallResult, installer.stage_application(r, slot, version, unchanged))
 
-                def before_publish():
+                def before_publish() -> None:
                     unchanged()
                     if _before_publish is not None:
                         _before_publish()

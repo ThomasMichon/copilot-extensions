@@ -322,3 +322,191 @@ eligibility, require default hosts to activate cells or complete every unrelated
 all incumbent acceptance, actual assignments, native/diagnostic/release and
 source/resource custody remain. Planned intake is neither technical completion
 nor permission to resume capability execution.
+
+## Finite generic-review convergence receipt (2026-11-17 UTC)
+
+This records the complete direct domain Plan amendment already reviewed and
+merged in #12667. Current receiving readback confirms that the domain ROOT
+still matches that reviewed amendment. This append-only receipt does not
+repropose the plan, alter earlier entries or resume the parked effort.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Optional action/revision-bound review steering, knowledge/persona references and existing lifecycle composition, including the complete located-finding postback family | Public #2887 and its existing #2899 incorporation; generic requirements only | routed | [review-automation-reliability](../review-automation-reliability/README.md), existing Phase 11 C2887/P2887/P2899/V/G family | Keep #2887 OPEN as the canonical long-term objective; #2899 receiving was already satisfied historically, with no repeated disposition or new closure credit |
+
+Normal review of the direct domain Plan addition is the intake's acceptance
+route, not permission to execute it. All 24 added technical Plan/local
+Validation/global Validation rows remain unchecked. The ROOT remains
+Blocked/parked; execution requires its existing explicit maintainer resumption.
+Incumbent phases, acceptance, assignments and source/resource custody remain.
+
+Preserve optional rather than universal steering, consumer-owned referenced
+content, provenance/access/unavailable outcomes, one existing reviewer
+lifecycle and applicator, valid located findings with classified fallback,
+provider/acting-identity/landing authority, idempotency and separate
+fixture/contract/native evidence tiers. Finite #2899 repair need not await
+independent #2887 capabilities or whole-parent completion. This receipt creates
+no issue, executor, live post, source change or claim transfer.
+
+## Finite both-provider auth-lifetime intake (2026-11-17 UTC)
+
+This appends a proposed route. It becomes effective only through normal
+reviewed delivery of the accompanying complete direct domain Plan amendment.
+Ledger publication alone is not domain acceptance. Prior rows and unresolved
+residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Explicit both-provider unattended-auth modes, independent inference identity, effective lifetime/readiness, provider-policy decision and real disconnected authenticated-work acceptance | Public #3442, complete original and all four eligible refinements | routed (proposed; effective after reviewed direct Plan acceptance) | [venue-parity](../venue-parity/README.md), WS-B P3442-1..8/V3442-1..8/G3442 only | Retain #3442 pending reviewed delivery, complete current ROOT/source readback and separate source-specific judgment; no new issue, executor or credential/resource effect |
+
+The existing domain intake contract remains the deduplication and acceptance
+route, not another primary implementation programme. Launch-time credential
+consumption alone is not the whole auth-lifetime contract. Preserve the
+explicit durable-auth request and provider-policy/vision conflict decision
+without selecting a credential design, bottling borrowed secrets, copying
+host stores, baking credentials into images or broadening grants.
+
+All seventeen technical rows remain unchecked. Both providers retain actual
+long-duration driver-disconnected authenticated work and negative controls;
+source, fixture, relay/controller survival and sleep are not substitutes.
+The existing implementation claimant remains unidentified, not absent or
+released. No generic claimant ACK is added to documentary review.
+Incumbent P0/P2 order, #954's whole-programme/P3 reservation, #3507's actual
+native-OR-complete-accepted-transfer condition, credential/relay and other
+source/resource custody remain. Planned intake is neither implementation
+nor issue disposition.
+
+## Both-provider auth-lifetime reviewed receipt (2026-11-17 UTC)
+
+#13106 merged the preceding complete direct WS-B domain amendment.
+Current receiving readback confirms all P3442-1..8/V3442-1..8/G3442 and
+continuing Coordination in venue-parity, with all seventeen technical rows
+unchecked. The proposed route is now accepted through the existing contract;
+this receipt appends rather than changes its history.
+
+The separate audited tracker judgment retired #3442 `NOT_PLANNED` into that
+planned receiver. #954 remains OPEN; source discussions and the existing
+implementation claim remain intact. No new issue, second primary owner,
+executor, credential operation, native proof or resource transfer is created.
+
+## Complete six-category shared-core intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Prior rows and unresolved residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete shared dispatch, session/process ownership, launch policy, credentials, recovery and parity tests with genuine thin substrate adapters | Public #4227, complete original and all three eligible refinements | routed (proposed; effective after reviewed direct Plan acceptance) | [venue-parity](../venue-parity/README.md), P4227-1..8/V4227-1..3/G4227 through existing WS1/WS-D/WS-B/WS-E | Retain #4227 until reviewed delivery, complete current ROOT/source readback and separate source-specific judgment; no new issue, executor or resource effect |
+
+The existing Bridge-owned programme is the sole canonical domain owner;
+responsibility-owned packages may compose its reusable core. The direct
+Plan/global Validation retain all six categories, actual consumers,
+genuine lifecycle/endpoint/bootstrap/boot differences and restricted denial.
+#5837's now-#2709 pre-creation contract retains BOTH races and no-create/
+rejoin-only OR prior authorization alternatives; its tracker supersession
+does not imply implementation.
+
+Actual affected-P3 reconciliation remains planned work before dependent
+implementation, preserving the existing provider-capability/idle-restart
+reservation. It is not a new native/whole-parent or generic-ACK prerequisite
+to reviewing this complete plan. All incumbent #954 and inherited acceptance,
+P3442, #3507's literal OR condition and source/resource owners remain.
+The twelve new technical rows stay unchecked. Ledger publication alone is
+neither domain acceptance, tracker retirement nor implementation completion.
+
+## Complete shared-core reviewed receipt (2026-11-17 UTC)
+
+#13126 merged the complete direct venue-parity domain amendment after
+current-head approval and required CI. Complete current ROOT and source/
+custody readback confirms all eight Plan, three local Validation and one
+actual global Validation clauses; the proposed route is now accepted
+through the existing contract. This appends its outcome without rewriting
+the proposed-route row or any earlier pass.
+
+The separate audited judgment retired #4227 `NOT_PLANNED` as redundant
+tracking. Its original and three earlier discussions remain unchanged;
+#954 stays OPEN. All twelve technical rows and actual affected-P3
+reconciliation before dependent implementation remain unfinished.
+The original reservation, inherited acceptance and every source/resource
+owner remain; no new issue, executor, implementation or operational effect.
+
+## Complete hosted-session preservation intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Earlier conditional rows and their history remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Standard hosted-session protocol behind the public orchestration layer, preserving lifecycle, credentials, policy and rollback compatibility | Public #4229, complete original and both eligible discussions; current #1266 original and all five discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-bridge-ahp-convergence](../agent-bridge-ahp-convergence/README.md), existing ROOT-R4229-P1..4/V1..4/G4229 and six-component crosswalk | Keep #4229 until reviewed complete receiving, current whole ROOT/source/custody readback and separate source-specific judgment; #1266 remains the same assigned held lane |
+
+The additional assignee-receipt veto was a campaign research recommendation,
+not a literal original requirement or independent #1266 owner condition.
+The domain amendment corrects that provenance prospectively without waiving
+actual custody. This Draft receiver retains all technical checks, inherited
+#989 and distinct #1460/#1138/#1454 ownership. No new issue, implementation
+owner, activation, credential operation, native proof or resource transfer
+is created. Ledger publication is not domain acceptance or tracker retirement.
+
+## Complete hosted-session reviewed receipt (2026-11-17 UTC)
+
+#13133 merged the complete direct AHP domain amendment after current-head
+Copilot approval and required CI. Complete current ROOT/source/custody
+readback confirms all four Plan, four Validation, one global gate and
+six-component crosswalk clauses. The proposed route is now accepted
+through the existing contract; this receipt appends rather than rewriting
+its proposed-route row or any earlier conditional pass.
+
+The separate audited judgment retired #4229 `NOT_PLANNED` as redundant
+tracking. Its original and both earlier discussions remain unchanged;
+#1266 stays OPEN under the same actual assignee. All nine direct technical
+rows remain unchecked, the AHP effort remains Draft, and actual held
+implementation/source/resource responsibilities remain unchanged.
+The campaign-origin extra receipt veto is prospectively corrected, not a
+waiver of actual owner custody. No keeper-body edit, implementation,
+activation, credential operation, native proof or resource transfer follows.
+
+## Complete attention-wait preservation intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Earlier conditional rows and their history remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Original-turn post-reattach settlement, per-wait deadline/result/continuation and represented support OR explicit unsupported-capability | Public #4681, including complete #7977/#9387 refinements and eligible discussion | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-bridge-delegation-convergence](../agent-bridge-delegation-convergence/README.md), direct AW4681-P1..3/LV1..3/global G | Keep #4681 until reviewed complete receiving, current whole ROOT/source/custody readback and separate source-specific judgment; completed Phase 1B and archived Done baseline retain credit |
+
+Terminal production, actual live-registry resolution and compatibility stay
+with their existing owners. No new ACK, implementation claimant, AHP or
+all-parent prerequisite, session operation or live wait is introduced.
+The seven direct technical rows remain unchecked. Ledger publication is
+neither domain acceptance, tracker retirement nor wait-channel completion.
+
+## Complete attention-wait reviewed receipt (2026-11-17 UTC)
+
+#13136 merged the complete direct delegation-domain amendment after
+current-head Copilot approval and required CI. Complete current ROOT and
+source/custody readback confirms all three Plan, three local Validation and
+one actual global Validation clauses. The proposed route is now accepted
+through the existing contract; this receipt appends without rewriting it.
+
+The separate audited judgment retired #4681 `NOT_PLANNED` as redundant
+tracking. Its original and earlier discussion remain unchanged. The seven
+technical rows remain unchecked, and all 92 incumbent checkbox lines,
+completed Phase 1B/archived Done credit and actual terminal/live-registry/
+compatibility/source/resource owners remain. No wait-channel repair,
+session operation, live subscription or service/native/rollout effect.
+
+## Whole fork-consent and recipe-composition preservation intake (2026-11-17 UTC)
+
+These are proposed routes, effective only after normal reviewed direct
+domain Plan acceptance. Earlier whole-OPEN/history rows remain retained.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Whole private durable fork target/account/remote consent and reuse, prior-existence/reauthorization before POST, automatic exact remote repair and persistence failure | Public #4756 original and both complete eligible discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [account-aware-operations](../account-aware-operations/README.md), separate FC4756-P1..3/LV1..3/global G | Keep #4756 until reviewed WHOLE receiving, current entire ROOT/source/custody readback and separate judgment; Draft, temporary token, #5791 separation and #5904/#1043 independence remain |
+| Whole RC1..4/RCV1..3 recursive/direct typed-engine composition, every defining-hop path field and single-producer taxonomy/reference authority | Public #4959 expanded original, inherited #5174/#5732/#4691 and all three eligible discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-dispatch-recipe-composability](../agent-dispatch-recipe-composability/README.md), existing P4959/V4959 plus T4959-P1/P2/local Validation and WHOLE4959-G | Keep #4959 until reviewed complete union, current entire ROOT/source/custody readback and separate judgment; #8300 completed claim and actual registrar/base/provider/resource owners remain |
+
+Neither route appoints an executor or runs credentials, fork/provider/script,
+queue/task/lease/native operations. All twelve new technical rows remain
+unchecked. The old taxonomy scope exclusion is prospectively reconciled to
+the already-incorporated whole source, not a reversal of historical credit.
+Ledger publication alone is neither domain acceptance nor source retirement.

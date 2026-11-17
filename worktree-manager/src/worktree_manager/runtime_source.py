@@ -47,8 +47,8 @@ class ResolvedSource:
     branch_tip: str
     main_head: str | None = None
 
-    def document(self) -> dict:
-        document = {
+    def document(self) -> dict[str, object]:
+        document: dict[str, object] = {
             "selection": self.selection.document(), "checkout": str(self.checkout),
             "commit": self.commit, "tree": self.tree, "branch_tip": self.branch_tip,
             "branch": self.selection.branch,
@@ -105,6 +105,8 @@ def _git(
         raise SourceAcquisitionError(
             f"Runtime source Git operation failed: {result.stderr.strip() or result.returncode}"
         )
+    if not isinstance(result.stdout, str):
+        raise SourceAcquisitionError("Runtime source Git operation returned non-text output")
     return result.stdout.strip()
 
 
@@ -147,6 +149,7 @@ def acquire(
     selection: RuntimeSource, *, root: Path | None = None, deadline: float | None = None,
     environment: dict[str, str] | None = None,
     branch_repository: str | None = None,
+    compact: bool = False,
 ) -> Iterator[ResolvedSource]:
     # The payload owns the lease library; acquisition needs no installer or CLI.
     scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
@@ -162,7 +165,7 @@ def acquire(
     if selection.channel == "marketplace":
         raise SourceAcquisitionError("Marketplace runtime delivery has no independent source checkout")
     installation = (root or default_root()).absolute()
-    source_root = installation / "runtime-sources"
+    source_root = installation / ("s" if compact else "runtime-sources")
     _ordinary(source_root)
     repo = absolute_local_source(selection.repo)
     authority = None
@@ -170,7 +173,9 @@ def acquire(
         RuntimeSource("main", repo=branch_repository)
         authority = absolute_local_source(branch_repository)
     digest = hashlib.sha256((repo + ("\n" + authority if authority else "")).encode("utf-8")).hexdigest()
-    checkout = source_root / digest / "checkout"
+    if compact:
+        digest = digest[:8]
+    checkout = source_root / digest if compact else source_root / digest / "checkout"
     owner = {"schema": "worktree-manager.runtime-source", "repo": repo}
     if authority is not None:
         owner["branch_repository"] = authority
@@ -180,11 +185,13 @@ def acquire(
         _ordinary(checkout)
         if not checkout.exists():
             checkout.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix=".acquire-", dir=checkout.parent) as temporary:
-                staging = Path(temporary) / "checkout"
+            with tempfile.TemporaryDirectory(
+                prefix=".a-" if compact else ".acquire-", dir=checkout.parent,
+            ) as temporary:
+                staging = Path(temporary) if compact else Path(temporary) / "checkout"
                 git_command(
                     Path(temporary), "clone", "--no-hardlinks", "--no-checkout",
-                    "--origin", "origin", "--", repo, "checkout",
+                    "--origin", "origin", "--", repo, "." if compact else "checkout",
                 )
                 _ordinary(staging / ".git")
                 if authority is not None:

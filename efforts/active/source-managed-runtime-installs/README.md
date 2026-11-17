@@ -911,8 +911,17 @@ onto one branch.
 
 ## Journal
 
+- 2026-11-17: [Prepared Manager install/update and recovery](journal/2026/11.17%20manager-footprint-consumer.md#merged-prepared-reference-source-and-next-footprint-slice)
+  merged in #13069 after exact-head approval, required CI and final-runtime
+  installed Windows repair/repeat qualification. Its source worktree is
+  finalized; Main source apps, equivalent local outputs and cold bootstrap
+  remain the next F1-F3 acceptance, not completed by the wheel-carrier witness.
 - 2026-11-17: [Finite Manager-owned application consumer](journal/2026/11.17%20manager-footprint-consumer.md)
   merged in #12930; F1-F3 and the complete Manager reference remain open.
+- 2026-11-17: [Frozen Manager footprint producer](journal/2026/11.17%20manager-footprint-consumer.md#prepared-footprint-producer)
+  merged in #12965 after exact-head approval and required PR-event CI; the source
+  worktree is finalized. Real relocated Windows staging/construction passed;
+  release emission, full Manager install/update and F1-F3 remain open.
 
 ### 2026-11-16 - Manager reference and clean-break state boundaries
 

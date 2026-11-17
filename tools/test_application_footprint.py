@@ -1,14 +1,16 @@
 """Export consumes canonical preparation and preserves the slot setup boundary."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from collections.abc import Callable, Iterator
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -23,6 +25,56 @@ import local_install_profile as profiles
 import install_source as source_inputs
 import installer_engine as engine
 from installer_dependency_config import native_retained_path
+
+
+def _code_snapshot(slot: Path) -> dict[str, tuple[bytes, int]]:
+    return {
+        path.relative_to(slot).as_posix(): (
+            hashlib.sha256(path.read_bytes()).digest(), path.stat().st_mtime_ns,
+        )
+        for path in slot.rglob("*")
+        if path.relative_to(slot).parts[0] != "state" and path.is_file()
+    }
+
+
+def _assert_code_unchanged(slot: Path, expected: dict[str, tuple[bytes, int]]) -> None:
+    observed = _code_snapshot(slot)
+    changed = [
+        name for name in sorted(expected.keys() | observed.keys())
+        if expected.get(name) != observed.get(name)
+    ]
+    assert not changed, changed[:20]
+
+
+@contextmanager
+def _manager_subscriber(endpoint: Any, root: Path) -> Iterator[None]:
+    from work_coalescing_singleton import client
+    from worktree_manager.mux_serving_observation import _existing_token
+
+    token, _identity = _existing_token(root)
+    identity = client.new_client_id()
+    errors: list[Exception] = []
+    stopped = threading.Event()
+
+    def renew() -> None:
+        while not stopped.wait(10):
+            try:
+                client.subscribe(endpoint.client_host, endpoint.port, token, identity)
+            except Exception as error:
+                errors.append(error)
+                return
+
+    client.subscribe(endpoint.client_host, endpoint.port, token, identity)
+    renewal = threading.Thread(target=renew)
+    renewal.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        renewal.join(timeout=5)
+        client.release(endpoint.client_host, endpoint.port, token, identity)
+        assert not renewal.is_alive()
+        assert not errors, errors
 
 
 @pytest.fixture
@@ -136,15 +188,17 @@ def test_invalid_prepared_application_never_publishes_a_footprint(
 
 
 @pytest.mark.parametrize("branch", ["dev", "main"])
+@pytest.mark.parametrize("explicit_source", [False, True])
 def test_cli_delegates_the_exact_source_and_one_budget_to_canonical_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     prepared: tuple[Path, Path, list[str]], capsys: pytest.CaptureFixture[str],
-    branch: str,
+    branch: str, explicit_source: bool,
 ) -> None:
     import local_install_source
 
     snapshot, _application, _events = prepared
     output = tmp_path / "output"
+    descriptor = {"source": "directory", "path": str(tmp_path)}
     seen: list[dict[str, Any]] = []
     def prepare(
         repository: Path, commit: str, main_head: str, destination: Path, **options: Any,
@@ -158,10 +212,12 @@ def test_cli_delegates_the_exact_source_and_one_budget_to_canonical_preparation(
     assert footprint.main([
         "--source-checkout", str(tmp_path), "--source-commit", "a" * 40,
         "--main-head", "b" * 40, "--branch", branch, "--output", str(output), "--timeout", "30",
+        *(["--source-descriptor", json.dumps(descriptor)] if explicit_source else []),
     ]) == 0
     assert seen[0]["components"] == ("worktree-manager",)
     assert seen[0]["branch"] == branch
     assert seen[0]["uv"] == shutil.which("uv")
+    assert seen[0].get("source_descriptor") == (descriptor if explicit_source else None)
     assert 0 < seen[0]["deadline"] - time.monotonic() <= 30
     assert json.loads(capsys.readouterr().out) == {"footprint": str(output / "footprint")}
 
@@ -443,3 +499,273 @@ def test_actual_prepared_manager_stages_without_changing_legacy_selection(
     assert not (application.root / "current-version").exists()
     assert marker.read_bytes() == b"legacy\n"
     assert command.read_bytes() == b"legacy command\n"
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or not os.environ.get("MANAGER_PREPARED_FOOTPRINT")
+    or os.environ.get("MANAGER_NATIVE_LIFETIME") != "1",
+    reason="requires an explicit native Windows Manager footprint/lifetime qualification",
+)
+@pytest.mark.parametrize("mode", ["repeat", "update-reverse", "default-update", "same-source-repair"])
+def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from agent_procutil.owned_process import run_installation_owned
+    from plugin_test_environment import isolated_environment
+
+    update_source = os.environ.get("MANAGER_UPDATE_FOOTPRINT")
+    update_repository = os.environ.get("MANAGER_UPDATE_REPOSITORY")
+    if mode == "update-reverse" and not update_source:
+        pytest.skip("requires a second explicitly prepared Manager footprint")
+    if mode in {"default-update", "same-source-repair"} and not update_repository:
+        pytest.skip("requires an explicitly selected fixture Manager source repository")
+    sys.path.insert(0, str(TOOLS.parent / "worktree-manager" / "src"))
+    from worktree_manager import mux_daemon_cutover
+    from worktree_manager.application_footprints import install, plan
+
+    source = Path(os.environ["MANAGER_PREPARED_FOOTPRINT"])
+    incoming = tmp_path / "incoming"
+    shutil.copytree(source, incoming)
+    environment = isolated_environment(
+        dict(os.environ), tmp_path / "isolated", allow_explicit_tiers=True,
+    )
+    environment["AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"] = str(tmp_path / "providers")
+    environment["AGENT_WORKTREES_STATUS_MONITOR"] = "0"
+    environment["WORKTREE_NO_UPDATE"] = "1"
+    environment["AGENT_WORKTREES_NO_SELFPROVISION"] = "1"
+    monkeypatch.setattr(os, "environ", environment)
+    home = Path(environment["HOME"])
+    legacy = home / ".worktree-manager"
+    legacy.mkdir()
+    marker = legacy / "current-version"
+    marker.write_bytes(b"legacy\n")
+    command = home / ".local" / "bin" / "worktree-manager.ps1"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(b"legacy command\n")
+    environment["WORKTREE_MANAGER_ROOT"] = str(legacy)
+    applications = plan(incoming, home / ".copilot-extensions" / "apps")
+    assert len(applications) == 1
+    application = applications[0]
+    deadline = time.monotonic() + (1500 if mode in {"default-update", "same-source-repair"} else 360)
+    install(applications, stage=True, deadline=deadline)
+    assert marker.read_bytes() == b"legacy\n" and command.read_bytes() == b"legacy command\n"
+    assert not (application.root / "current-version").exists()
+    cleanup: list[Any] = []
+    with daemon_test_lifecycle(
+        owner="prepared-manager-reference", registry_root=tmp_path / "daemon-instances",
+        deadline=deadline, cleanup_results=cleanup,
+    ) as lifecycle, ExitStack() as subscribers:
+        environment.update(lifecycle)
+        # This explicit lane proves survival beyond the setup caller, under the renewable lease.
+        environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
+        try:
+            install(applications, stage=False, deadline=deadline)
+        except subprocess.CalledProcessError as error:
+            raise AssertionError((error.stdout, error.stderr)) from error
+        assert (application.root / "current-version").read_text().strip() == application.version
+        assert marker.read_bytes() == b"legacy\n"
+        assert command.read_bytes() != b"legacy command\n"
+        endpoint = mux_daemon_cutover.routed_endpoint(application.root)
+        assert endpoint is not None and endpoint.version == application.version
+        assert mux_daemon_cutover._health_check(
+            endpoint.client_host, endpoint.port, root=application.root,
+            generation=application.version,
+        )
+        immutable = _code_snapshot(application.slot)
+        state = application.root / "state" / "fixture-user-state.json"
+        state.parent.mkdir(exist_ok=True)
+        state.write_bytes(b'{"preserve":true}\n')
+        incoming.rename(tmp_path / "concealed-incoming")
+        installed_environment = {key: value for key, value in environment.items()
+                                 if key != "WORKTREE_MANAGER_ROOT"}
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        assert powershell is not None
+
+        def invoke(frontdoor: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+            return run_installation_owned(
+                [powershell, "-NoLogo", "-NoProfile", "-File", str(frontdoor), *arguments],
+                cwd=home, env=installed_environment, timeout=max(1, deadline - time.monotonic()),
+                max_stdout_bytes=1 << 20, max_stderr_bytes=1 << 20,
+            )
+
+        for frontdoor, arguments in (
+            (command, ["self-install"]),
+            (command.parent / "worktree-manager-install.ps1", ["--help"]),
+            (application.root / "bin" / "setup.ps1", []),
+        ):
+            result = invoke(frontdoor, arguments)
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            if arguments == ["self-install"]:
+                assert str(application.root) in result.stdout
+                assert "already current" in result.stdout
+        assert state.read_bytes() == b'{"preserve":true}\n'
+        _assert_code_unchanged(application.slot, immutable)
+        repeated_endpoint = mux_daemon_cutover.routed_endpoint(application.root)
+        assert repeated_endpoint is not None and repeated_endpoint.pid == endpoint.pid
+        assert mux_daemon_cutover._health_check(
+            repeated_endpoint.client_host, repeated_endpoint.port, root=application.root,
+            generation=application.version,
+        )
+        if mode in {"default-update", "same-source-repair"}:
+            import update_driver
+            from worktree_manager import source_config
+
+            assert update_repository is not None
+            assert Path(update_repository).is_absolute() and Path(update_repository).is_dir()
+            source_config.set_source(repo=update_repository, ref="dev", root=application.root)
+            installed_environment["WORKTREE_MANAGER_ROOT"] = str(application.root)
+            repair_slot = None
+            repair_code = None
+            repair_base = None
+            if mode == "same-source-repair":
+                established = invoke(command, ["update", "--target", "worktree-manager"])
+                assert established.returncode == 0, (established.stdout, established.stderr)
+                established_endpoint = mux_daemon_cutover.routed_endpoint(application.root)
+                assert established_endpoint is not None and established_endpoint.version is not None
+                repair_base = established_endpoint.version
+                repair_slot = application.root / "versions" / repair_base
+                (repair_slot / "application.json").unlink()
+                repair_code = _code_snapshot(repair_slot)
+                if repair_slot == application.slot:
+                    immutable = repair_code
+            previous_pid = None
+            default_code = None
+            for attempt in range(2):
+                result = invoke(command, ["update", "--target", "worktree-manager"])
+                assert result.returncode == 0, (result.stdout, result.stderr)
+                selected = mux_daemon_cutover.routed_endpoint(application.root)
+                assert selected is not None and selected.version is not None
+                assert selected.version != application.version
+                if mode == "same-source-repair":
+                    assert repair_base is not None
+                    assert selected.version.startswith(repair_base + ".repair.")
+                    assert repair_slot is not None and repair_code is not None
+                    _assert_code_unchanged(repair_slot, repair_code)
+                assert selected.pid is not None
+                slot = application.root / "versions" / selected.version
+                if attempt:
+                    assert selected.pid == previous_pid and default_code is not None
+                    _assert_code_unchanged(slot, default_code)
+                else:
+                    default_code = _code_snapshot(slot)
+                previous_pid = selected.pid
+                assert mux_daemon_cutover._health_check(
+                    selected.client_host, selected.port, root=application.root,
+                    generation=selected.version,
+                )
+                if not attempt:
+                    subscribers.enter_context(_manager_subscriber(selected, application.root))
+                    native: Callable[[Path], str] = native_retained_path
+                    probe = run_installation_owned(
+                        [
+                            native(slot / ".venv" / "Scripts" / "python.exe"),
+                            "-I", "-B", "-c",
+                            "import json,sys;from pathlib import Path;"
+                            "from worktree_manager import mux_daemon_cutover as c;"
+                            "from worktree_manager.mux_serving_observation import _existing_token;"
+                            "root=Path(sys.argv[1]).resolve();route=c.routed_endpoint(root);"
+                            "token,_=_existing_token(root);"
+                            "health=c.ControlClient('http://'+str(route.bind)+':'+str(route.port),"
+                            "root=root,token=token).health();"
+                            "print(json.dumps({'health':health,"
+                            "'same_generation':c._already_at_version(route,route.version,root=root)}))",
+                            str(application.root),
+                        ],
+                        cwd=home, env=installed_environment,
+                        timeout=max(1, deadline - time.monotonic()),
+                        max_stdout_bytes=1 << 20, max_stderr_bytes=1 << 20,
+                    )
+                    assert probe.returncode == 0, (probe.stdout, probe.stderr)
+                    installed_health = json.loads(probe.stdout)
+                    assert installed_health["same_generation"], installed_health
+                    assert installed_health["health"]["runtime_generation"] == selected.version
+                assert state.read_bytes() == b'{"preserve":true}\n'
+                _assert_code_unchanged(application.slot, immutable)
+                assert (slot / "application.json").is_file()
+                assert (application.root / "bin" / "setup.ps1").is_file()
+                assert marker.read_bytes() == b"legacy\n"
+            requests = update_driver.status(root=home / ".copilot-extensions" / "update-driver")
+            assert isinstance(requests, tuple) and requests
+            assert all(request.state == "completed" for request in requests)
+        if mode == "update-reverse":
+            import update_driver
+
+            assert update_source is not None
+            execution_root = home / ".copilot-extensions" / "update-driver"
+            before_requests = update_driver.status(root=execution_root)
+            assert isinstance(before_requests, tuple)
+            initial_self_installs = sum(
+                request.spec.backend == "manager-self-install" for request in before_requests
+            )
+            incoming_update = tmp_path / "incoming-update"
+            shutil.copytree(update_source, incoming_update)
+            updated, = plan(incoming_update, application.root.parent)
+            assert updated.version != application.version
+            secondary = command.parent / "worktree-manager-install.ps1"
+            manifest = incoming_update / "footprint.json"
+            original_manifest = manifest.read_bytes()
+            invalid = json.loads(original_manifest)
+            invalid["apps"][0]["dependencies"] = ["missing-fixture-provider"]
+            manifest.write_text(json.dumps(invalid), encoding="utf-8")
+            arguments = [
+                str(incoming_update), "--apps-root", str(application.root.parent), "--apply",
+                "--timeout", str(max(1, deadline - time.monotonic())),
+            ]
+            rejected = invoke(secondary, arguments)
+            assert rejected.returncode != 0
+            assert not updated.slot.exists()
+            assert (application.root / "current-version").read_text().strip() == application.version
+            manifest.write_bytes(original_manifest)
+            staged = invoke(secondary, [*arguments, "--stage"])
+            assert staged.returncode == 0, (staged.stdout, staged.stderr)
+            assert updated.slot.is_dir()
+            assert (application.root / "current-version").read_text().strip() == application.version
+            assert mux_daemon_cutover._health_check(
+                repeated_endpoint.client_host, repeated_endpoint.port, root=application.root,
+                generation=application.version,
+            )
+            incoming_pid: int | None = None
+            incoming_code: dict[str, tuple[bytes, int]] | None = None
+            for attempt in range(2):
+                advanced = invoke(secondary, arguments)
+                assert advanced.returncode == 0, (advanced.stdout, advanced.stderr)
+                selected = mux_daemon_cutover.routed_endpoint(application.root)
+                assert selected is not None and selected.version == updated.version
+                assert selected.pid is not None
+                if attempt:
+                    assert selected.pid == incoming_pid
+                    assert incoming_code is not None
+                    _assert_code_unchanged(updated.slot, incoming_code)
+                else:
+                    incoming_code = _code_snapshot(updated.slot)
+                incoming_pid = selected.pid
+                assert mux_daemon_cutover._health_check(
+                    selected.client_host, selected.port, root=application.root,
+                    generation=updated.version,
+                )
+                assert (application.root / "current-version").read_text().strip() == updated.version
+                assert state.read_bytes() == b'{"preserve":true}\n'
+            reverse = invoke(secondary, [
+                str(tmp_path / "concealed-incoming"), "--apps-root", str(application.root.parent),
+                "--apply", "--timeout", str(max(1, deadline - time.monotonic())),
+            ])
+            assert reverse.returncode == 0, (reverse.stdout, reverse.stderr)
+            restored = mux_daemon_cutover.routed_endpoint(application.root)
+            assert restored is not None and restored.version == application.version
+            assert mux_daemon_cutover._health_check(
+                restored.client_host, restored.port, root=application.root,
+                generation=application.version,
+            )
+            assert state.read_bytes() == b'{"preserve":true}\n'
+            _assert_code_unchanged(application.slot, immutable)
+            assert incoming_code is not None
+            _assert_code_unchanged(updated.slot, incoming_code)
+            assert marker.read_bytes() == b"legacy\n"
+            after_requests = update_driver.status(root=execution_root)
+            assert isinstance(after_requests, tuple)
+            assert all(request.state == "completed" for request in after_requests)
+            assert sum(
+                request.spec.backend == "manager-self-install" for request in after_requests
+            ) == initial_self_installs
+    assert cleanup and all(result.status == "settled" for result in cleanup), cleanup

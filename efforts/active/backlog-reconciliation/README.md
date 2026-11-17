@@ -3421,6 +3421,64 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+  record reviewed complete #4681 receiving and separate redundant-tracking
+  retirement, reconcile the omitted-five receipt, and propose whole #4756
+  and #4959 domain contracts without technical completion or new custody.
+  The [hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)
+  record reviewed complete #4229 receiving, its separate redundant-tracking
+  retirement, ten retained outcomes and prospective #4477 cause reconciliation.
+  The [complete attention receiving and seven contracts](journal/2026/11.17-attention-receiving-and-seven-contracts.md)
+  directly proposes all three #4681 lanes in the existing delegation domain,
+  retains six whole outcomes and queues the #4756/#4959 domain amendments
+  without accepting them or reopening completed attention credit.
+  The [hosted-session receiving and condition-provenance proposal](journal/2026/11.17-hosted-session-receiving-and-condition-provenance.md)
+  maps every literal #4229 component into the existing Draft AHP receiver
+  without duplicate rows. It corrects the campaign-origin receipt recommendation,
+  not actual assignee custody, and retains review/readback/separate judgment.
+  The [shared-core receipt and retained runtime contracts](journal/2026/11.17-shared-core-receipt-and-runtime-contracts.md)
+  record reviewed complete #4227 receiving, its separate redundant-tracking
+  retirement, nine remaining contracts and the prospective #4195 cause recovery.
+  The [complete shared-core receiving proposal](journal/2026/11.17-complete-shared-core-receiving.md)
+  maps #4227's six responsibilities into the existing venue-parity ROOT,
+  retaining affected-P3 reconciliation, inherited policy alternatives and
+  every incumbent gate before any separate source disposition.
+  The [platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+  retain ten whole outcomes while prospectively correcting the actual
+  #4163 citation-classifier barrier without releasing linked-source custody.
+  The [ten source deltas and gate-provenance checkpoint](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
+  preserves actual source conditions without inventing operator vetoes,
+  distinguishes partial receiving and records independently owned inflow.
+  The [ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
+  distinguish four changed source deltas, unchanged independent obligations
+  and the expanded #3761 contract without claiming whole-ROOT receiving.
+  The [auth-lifetime and twelve-contract checkpoint](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
+  records reviewed complete #3442 receiving through venue-parity and its
+  separate redundant-tracking retirement, not technical completion.
+  Its subsequent #3444/#3556 receiving checks retain the full independent
+  contracts: existing recovery and worker-handoff plans are partial homes,
+  not accepted whole-contract transfers.
+  The [cleanup and unchanged-source discriminator](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
+  credits #3179's finite checkpoint/guard changes while retaining its whole
+  incident and stops #1742/#3115 at unchanged decisive sources.
+  The [generic-review intake receipt](journal/2026/11.17-generic-review-intake-receipt.md)
+  records #2887's already-reviewed Phase 11 route without resuming its parked
+  owner, closing the canonical issue or repeating #2899's historical retirement.
+  The [cadence and idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+  distinguishes #2908's conditional cadence from existing merge guidance and
+  stops #2879 research at unchanged decisive entrypoints without closure credit.
+  The [build-isolation and native-acceptance checkpoint](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+  establishes the retained #1838 case's actual current installer/policy wiring
+  and credits #13074/#13096 source delivery without claiming native acceptance.
+  The [hygiene-engine and Index-custody checkpoint](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+  distinguishes #1544's engine from current privacy adapters and verifies
+  #1843's complete planned receiving without releasing its assigned coordination.
+  The [lifecycle and cache-owner checkpoint](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
+  preserves #78's finite source gap, #84's complete accepted canonical and new
+  #9532/#12900 owner deltas without equating source delivery with adoption.
+  The [SDK, cache and transport delta](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+  credits new source deliveries while retaining actual release, adoption and
+  unclassified transport-observation boundaries.
   The [serving and typing checkpoint](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
   preserves #6389's complete canonical acceptance, credits delivered slices
   and separates #10931's canonical-source and consumer-fixture qualification.
@@ -4580,6 +4638,12 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [whole fork/composition receiving proposal](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+preserves every existing domain/campaign check state, actual original
+consent/publish and RC1..4/RCV1..3 obligation, completed source reservation
+and independent owner. Reviewed delivery, full current ROOT/source/custody
+readback and separate source-specific judgment remain distinct gates.
 
 The [cold-bootstrap completion audit](journal/2026/11.16-cold-bootstrap-source-completion.md#12824---completed-narrow-recovery-bootstrap-correction)
 retains the complete original-to-delivery crosswalk, qualified description

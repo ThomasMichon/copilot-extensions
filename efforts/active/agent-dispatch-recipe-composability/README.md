@@ -22,10 +22,12 @@
   refactor (schedule/webhook/websocket as emitter *triggers* rather than
   separate `kind` values) to
   [`ThomasMichon/copilot-extensions#5732`](https://github.com/ThomasMichon/copilot-extensions/issues/5732)
-  when it archived — a related but distinct registrar-taxonomy refactor,
-  not part of this effort's own scope (this effort generalizes `extends:`
-  *resolution* and override values; #5732 generalizes *producer kind*).
-  Worth checking for sequencing overlap before either lands.
+  when it archived. That was originally a separate registrar-taxonomy
+  refactor. The later complete #4959 RC1..4/RCV1..3 intake incorporated it;
+  the proposed finite taxonomy/reference lane below reconciles this older
+  scope exclusion while keeping producer-kind work distinct from resolution.
+  Preserve actual content/sequence dependencies, not a blocking prerequisite
+  on the archived recipe-library baseline or unrelated optional work.
 
 ## Guiding Intent
 
@@ -65,6 +67,16 @@ and this Active effort remain until their own complete gates resolve.
 Normal review, actual complete delivery and full current receiving/source/
 custody readback precede any separate administrative judgment; no script,
 engine, provider, lease, task or runtime operation is authorized here.
+
+The whole #4959 receiving amendment below adds the already-incorporated
+RC3/RC4 taxonomy/reference workstream, not a new umbrella or execution owner.
+Existing registrar/base-engine/provider/scheduling/lease/source/resource
+custodians retain it. RC1/RC2 continue through P4959/V4959 and the credited
+Phases 1..4; all RC1..4 and RCV1..3 must be received together before a
+separate redundant-tracker judgment. Preserve the completed #8300 claim,
+archived recipe-library/provider receipts, separate #5731 full-suite
+follow-up and optional #2570/catalog/motivating-consumer work. The proposed
+scope correction changes neither those histories nor technical completion.
 
 The direct #2570 lane is a concrete Phase 5 need under this existing
 base-engine/script-hook owner, not a new verifier loop or completion of generic hooks.
@@ -479,7 +491,57 @@ incorporated #5174 rows, while leaving completed reviewer/worker work credited.
   reopening #8300; independent optional hooks/catalog/consumer gates remain
   open but do not delay this finite repair.
 
+### Proposed finite #4959 taxonomy and reference-authority workstream
+
+This prospectively receives the later RC3/RC4 intake that the earlier
+scope exclusion did not. RC1/RC2 and RCV1 remain directly mapped to
+P4959-1..4/V4959-1..3 plus the existing recursive/direct and actual typed
+base-engine script contract. EVERY supported defining-hop path field is
+required, including emitter cwd, reviewer cwd, effective worker identity
+and script forge command/cwd. One illustrative script-origin witness is
+not a substitute for that complete supported-field contract.
+
+- [ ] **T4959-P1:** Retain RC3's nonblocking single-emitter PRODUCER primitive
+  refactor: schedule/interval, webhook and websocket are triggers, not distinct
+  primitives merely because templates need parameters. Preserve bare emitters,
+  parameterized reviewer/repository-issue templates, direct declarations,
+  producer/evaluator routing, subscriber/event notes, companion lifecycle,
+  caller identity and compatibility. Reuse delivered extends/named recipes;
+  do not remove working consumers to reduce kind names or reopen the archived
+  recipe-library and real migrated/provider receipts.
+- [ ] **T4959-P2:** Retain RC4's cross-repository reference authority through
+  outside-root, symlink and traversal handling without discarding valid
+  cross-repository use. Canonical alias/cycle normalization is partial credit,
+  not complete containment/authorization. A ref/template string cannot grant
+  outside-source read/execution, and failed/ambiguous lookup cannot silently
+  select another source or owner. Preserve existing named-source/script
+  admission, nearest-hop overrides and valid direct/absolute/same-root paths.
+- [ ] **T4959-LV1:** At the taxonomy transition's actual supported
+  trigger/template/direct-producer boundaries, prove compatibility for every
+  P1 category with unchanged evaluator/event/companion/caller custody.
+  Preserve actual typed script input/output/error/deadline and base-owned
+  scheduling/lease/dedup/suspend-resume contracts; a kind rename or raw origin
+  field alone cannot pass whole RC1..4/RCV1..3 acceptance.
+- [ ] **T4959-LV2:** Exercise allowed cross-origin references and wrong-source,
+  outside-root, symlink, traversal, missing and ambiguous failures at their
+  actual lookup/admission boundary. Prove no unauthorized read/execution or
+  silent owner substitution. Preserve every inherited #5174 field/form,
+  required unsafe-relative refusal until supported safe execution, original
+  finite evidence tier and separately owned #5731 full-suite follow-up.
+  No new generic handshake, mandatory catalog or private-consumer rollout gate.
+
 ## Validation Plan
+
+- [ ] **WHOLE4959-G:** Complete the entire RC1..4/RCV1..3 source union:
+  P4959/V4959 and actual recursive/direct typed-engine execution, EVERY
+  supported field's defining-hop provenance, T4959-P1/P2 and local Validation
+  for compatible single-producer trigger taxonomy and reference authority.
+  Keep the existing narrower G4959 origin gate independently applicable,
+  #8300/#8363 and archived recipe/provider credit, all current owners and
+  separate #5731/#2570/optional/catalog/consumer scope. Normal reviewed whole
+  receiving plus complete current ROOT/source/custody readback precedes any
+  separate administrative judgment. Plan acceptance is not implementation,
+  safe relative-script delivery, installed adoption or resource release.
 
 - [ ] Complete every directly retained #2570 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -541,6 +603,18 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-11-17 - Whole composition and taxonomy receiving proposed
+
+Reconciled the historical taxonomy exclusion against #4959's later direct
+RC1..4/RCV1..3 intake. Added two unchecked taxonomy/reference Plan, two local
+Validation and one actual whole global gate, reusing rather than duplicating
+P4959/V4959 and completed recursive/direct typed-engine phases. Every supported
+path field remains required; the older one-witness wording does not reduce
+that union. #8300's bounded claim stays complete; #8363, archived recipe/
+provider receipts and independent #5731/#2570/catalog/consumer work keep their
+scope and owners. No engine/script/provider/queue/task/lease/native action,
+implementation appointment, tracker retirement or custody transfer.
 
 ### 2026-10-30 - Finite inherited-script defining-origin clarification
 

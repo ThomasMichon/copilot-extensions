@@ -2123,6 +2123,9 @@ not the behavioral packet's remaining cold-preparation budget. All jobs use the
 same exact-source checkout and tool setup. The
 behavioral jobs also run `tests/test_update_python_path.py` with fake registry
 state to check waited completion, excluded observer modes and publication failures.
+Windows partitions the behavioral selection into complementary native and
+adapter jobs so cold environment preparation and cleanup fit inside each
+existing job ceiling. Their union retains every selected case exactly once.
 They select the source-anchor-loss dispatch controls and standalone prepared-source
 acquisition controls from `test_bootstrap_dispatch.py` and `test_install_source.py`
 without adding those files' unrelated cases to this acceptance packet.
@@ -7139,6 +7142,60 @@ The separate installer-child executable-spelling failure remains tracked in
 [issue #12253](https://github.com/ThomasMichon/copilot-extensions/issues/12253);
 do not report its installation cases as passing preparation evidence.
 
+### Prepared Manager footprint: explicit Windows lifetime
+
+The on-demand `tools/test_application_footprint.py` native case consumes an
+already prepared footprint through `MANAGER_PREPARED_FOOTPRINT`.
+`MANAGER_NATIVE_LIFETIME=1` explicitly selects actual daemon survival beyond
+the setup caller; the ordinary contained-test lane remains unchanged.
+It uses private roots and IPC plus the canonical renewable daemon-test lifecycle,
+and requires exact instance cleanup to settle. It is not a host rollout.
+
+The `repeat` case proves real staging/full setup, app/global command routing,
+neutral setup with the input concealed, durable-state preservation and unchanged
+slot code. Set `MANAGER_UPDATE_FOOTPRINT` to a second canonically prepared frozen
+candidate to select the `update-reverse` case as well. That case requires a
+distinct generated version and exercises rejected input followed by corrected
+installation, incoming staging without selection, actual installed-consumer
+update/repeat, compatible reverse selection and live generation-specific health.
+An omitted second footprint skips that case, not an update pass.
+
+Set `MANAGER_UPDATE_REPOSITORY` to an owned local fixture repository with
+explicit Main and candidate Dev refs to select `default-update`. Its baseline
+must contain the application-root update adapter. This case runs the installed
+`update --target worktree-manager` command twice, including real acquisition,
+packaged promotion/footprint production and incoming setup. It requires live
+incoming routing after caller Jobs close, unchanged old/new code trees and
+preserved durable state. An authenticated subscriber is retained and renewed
+during the unchanged repeat, then released on exit: the same-PID assertion
+requires actual consumer demand, not suppression of Manager's normal idle
+shutdown. The incoming interpreter also probes its own control-health contract.
+The fixture's selected Dev ref is isolated test input,
+not publication or qualification of unmerged source as the real merged branch.
+An omitted repository skips this case, not a default-update pass.
+
+The `same-source-repair` case first establishes the fixture's source/profile
+through its installed producer, removes only that slot's `application.json`,
+then runs the same installed update twice. It requires a distinct `.repair.<id>` slot,
+unchanged damaged-slot bytes/mtimes, preserved state, ready incoming service
+and same-PID reuse under renewed consumer demand. The missing declaration must
+not select the legacy installation path. It uses the same private lifecycle
+and exact cleanup as `default-update`, not a host repair.
+
+Use the existing prepared tooling/test interpreter, with PATH `uv`:
+
+```powershell
+$env:MANAGER_PREPARED_FOOTPRINT = '<baseline-footprint>'
+$env:MANAGER_UPDATE_FOOTPRINT = '<incoming-footprint>'
+$env:MANAGER_UPDATE_REPOSITORY = '<owned-local-fixture-repository>'
+$env:MANAGER_NATIVE_LIFETIME = '1'
+& $testPython -m pytest tools\test_application_footprint.py -k full_setup
+```
+
+These are explicit integration controls, not additions to required unit CI.
+Keep Main/Dev production, release, clean-OS and authorized installed-adoption
+evidence separate.
+
 ## Unit-only promotion packet
 
 The exclusive attachment-export consumer packet executes the real export
@@ -7157,6 +7214,17 @@ unsafe ancestry, a racing second collision, namespace replacement and
 descriptor settlement after failures. These filesystem controls are outside
 the required actor-free unit admission; they do not qualify Windows ACLs,
 privileged execution, an installed Vault owner or real key material.
+
+The actor-free mux-projection packet substitutes native, storage and Git owners
+while executing the monitor's real ordering, completed-inventory handoff,
+read-only segment view, cooperative cadence and scoped progress cleanup.
+It starts no mux, observer or service. Worktrees'
+`tests/test_status_monitor_presentation.py`, `tests/test_observation_progress.py`
+and `tests/test_worktrees_producer.py` compose the actual collector and producer
+seams; continuous installed publication remains a separate native check.
+Portable private-store creation units select the portable snapshot replacement
+path as well as portable creation. Native Windows replacement and ownership
+remain in their separate qualification lanes, not implicit unit effects.
 
 The actor-free health composition packet also admits installed Windows
 enrollment preview/installation binding, native default normalization,

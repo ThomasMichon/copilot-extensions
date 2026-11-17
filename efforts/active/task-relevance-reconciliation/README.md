@@ -253,7 +253,9 @@ merged plan does not establish running adoption.
       resume provider merged in #13007; the typed-union CLI consumer and
       metadata-only target resolution merged in #13043. Dispatch's rollback-safe
       reservation control-adoption provider merged in #13084. Ordinary supervisor
-      caller migration and installed qualification remain open in the
+      initial-admission resume and separately fenced current-control delivery
+      merged in #13090. Failed historical episodes, installed qualification and
+      full lifecycle acceptance remain open in the
       [consumer continuation](retained-metadata-recovery.md#next-consumer-slice-ordinary-supervised-resume).
 
 ## Validation Plan

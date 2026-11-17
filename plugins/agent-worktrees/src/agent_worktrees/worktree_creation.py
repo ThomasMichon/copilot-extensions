@@ -31,6 +31,8 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 from lazy_cli_dispatch import self_override as _self_override
 from agent_procutil.owned_process import OwnedCleanupError
@@ -55,9 +57,14 @@ from .creation_identity import IdentityMode, new_machine_identity, require_same_
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .receiving_allocation import ReceivingAllocation
 from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
+from .creation_contracts import (
+    ConfigPlatform, CreationCleanupContext, CreationIntent, CreationRecordOptions,
+    ReceivingCreationOptions, TrackingCreation,
+)
+from .launch_preflight import LaunchPreflight
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -94,7 +101,7 @@ def _paired_knowledge_allocation_preflight(config: cfg.Config) -> None:
     from . import repos as repos_mod
 
     entry = repos_mod.find_repo(res.repo)
-    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
+    is_worktree_class = entry is not None and repos_mod.normalize_class(entry.repo_class) in (
         "worktree", "knowledge",
     )
     if not is_worktree_class:
@@ -121,7 +128,7 @@ def _carve_paired_knowledge(
     legacy_machine: str | None = None,
     revalidate_creation: Callable[[], None] | None = None,
     retained_pair_path: Path | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
     When the launch repo is a **stateless harness bound to a knowledge repo**
@@ -163,9 +170,10 @@ def _carve_paired_knowledge(
     execution_machine = (
         machine_identity.execution_machine if machine_identity is not None else legacy_machine or config.machine
     )
-    harness_ref = tracking.format_claim_ref(execution_machine, config.repo_name or "?", harness_id)
+    tracking_creation = cast(TrackingCreation, tracking)
+    harness_ref = tracking_creation.format_claim_ref(execution_machine, config.repo_name or "?", harness_id)
     entry = repos_mod.find_repo(knowledge_name)
-    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
+    is_worktree_class = entry is not None and repos_mod.normalize_class(entry.repo_class) in (
         "worktree", "knowledge",
     )
     remote = git_ops.resolve_remote_name(
@@ -183,7 +191,7 @@ def _carve_paired_knowledge(
 
     if not is_worktree_class:
         # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).
-        anchor_ref = tracking.format_claim_ref(
+        anchor_ref = tracking_creation.format_claim_ref(
             execution_machine,
             knowledge_name,
             os.path.basename(knowledge_anchor.rstrip("/\\")) or "anchor",
@@ -207,7 +215,7 @@ def _carve_paired_knowledge(
         config, harness_id, res, retained_pair_path,
     )
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
-    knowledge_ref = tracking.format_claim_ref(execution_machine, knowledge_name, knowledge_id)
+    knowledge_ref = tracking_creation.format_claim_ref(execution_machine, knowledge_name, knowledge_id)
     knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
 
     # pr-attribution-codenames Phase 2 (#2838): assign the paired knowledge worktree's own
@@ -315,7 +323,7 @@ def _carve_paired_knowledge(
             prepared.start_point,
         )
 
-        tracking.create_new_record(
+        tracking_creation.create_new_record(
             worktree_id=knowledge_id,
             branch=knowledge_branch,
             worktree_path=knowledge_wt_path,
@@ -354,8 +362,8 @@ def _stamp_and_compose_paired_knowledge(
     config: cfg.Config,
     record: tracking.WorktreeRecord,
     worktree_path: str,
-    pair_stamp: dict | None,
-) -> dict | None:
+    pair_stamp: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Persist a new pair before composing its launch-time plugin overlay."""
     if not pair_stamp:
         return None
@@ -399,9 +407,12 @@ def _prepare_worktree_source(
         fast_forward_anchor=fast_forward_anchor,
     )
     if prepared.fetch_error:
+        outcome = (
+            f"policy refresh failed for {label}; using refreshed"
+            if prepared.fetched else f"fetch failed for {label}; using last-known"
+        )
         print(
-            f"Note: fetch failed for {label}; using last-known "
-            f"'{prepared.start_point}' ({prepared.fetch_error}).",
+            f"Note: {outcome} '{prepared.start_point}' ({prepared.fetch_error}).",
             file=sys.stderr,
         )
     if prepared.anchor.updated:
@@ -423,7 +434,7 @@ def _prepare_worktree_source(
         )
     if prepared.start_point != f"{remote}/{default_branch}":
         print(
-            f"Note: '{remote}/{default_branch}' not found for {label}; "
+            f"Note: '{remote}/{default_branch}' not available for {label}; "
             f"branching from '{prepared.start_point}' instead.",
             file=sys.stderr,
         )
@@ -472,7 +483,7 @@ def _create_worktree_core(
     caller_worktree: str | None = None,
     owner_ref: str | None = None,
     dispatch_attempt: dict[str, object] | None = None,
-    launch_preflight: object | None = None,
+    launch_preflight: LaunchPreflight | None = None,
     recovery: bool = False,
     bound_agent: str | None = None,
     no_pair: bool = False,
@@ -482,11 +493,11 @@ def _create_worktree_core(
     allocation: tuple[str, str] | None = None,
     admitted_allocation: AdmittedAllocation | None = None,
     creation_key: str | None = None,
-    creation_intent: Callable[[dict], None] | None = None,
+    creation_intent: CreationIntent | None = None,
     identity_mode: IdentityMode = "legacy",
     build_launch_plan: bool = True,
     receiving_allocation: ReceivingAllocation | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
     Performs the side-effects (fetch, git worktree add, tracking YAML,
@@ -545,7 +556,7 @@ def _create_worktree_core(
             from .receiving_creation_recovery import original_no_pair
 
             no_pair = original_no_pair(config, creation_key, no_pair)
-        options = {
+        options: ReceivingCreationOptions = {
             "profile": profile, "profile_is_explicit": profile_is_explicit,
             "no_mux": no_mux, "kind": kind, "owner": owner, "interface": interface,
             "origin": origin, "name": name, "parent_session": parent_session,
@@ -558,9 +569,9 @@ def _create_worktree_core(
             "pending_seed_id": pending_seed_id, "allocation": allocation,
             "identity_mode": identity_mode, "admitted_allocation": admitted_allocation,
             "build_launch_plan": build_launch_plan,
-            **({"receiving_allocation": receiving_allocation}
-               if receiving_allocation is not None else {}),
         }
+        if receiving_allocation is not None:
+            options["receiving_allocation"] = receiving_allocation
         return creation_requests.create(
             config, creation_key, creation_requests.allocation_facts(config, **options),
             lambda reserve: _create_worktree_core(config, **options, creation_intent=reserve),
@@ -602,7 +613,7 @@ def _create_worktree_core(
             "stateless harness bound to it (see its knowledge_repo config) "
             "creates its own worktree; work there instead."
         )
-    plat = cfg.detect_platform()
+    plat = cast(ConfigPlatform, cfg).detect_platform()
 
     if admitted_allocation is not None:
         timestamp, suffix = admitted_allocation.timestamp, admitted_allocation.suffix
@@ -618,11 +629,12 @@ def _create_worktree_core(
         admitted=admitted_allocation,
     )
     if owner_ref and receiving_allocation is None:
-        parsed_owner = tracking.parse_claim_ref(owner_ref)
+        parsed_owner = cast(TrackingCreation, tracking).parse_claim_ref(owner_ref)
         if parsed_owner is None or not parsed_owner.is_qualified:
             raise RuntimeError(
                 f"--owner-ref must be qualified as machine/project/worktree_id (got {owner_ref!r})"
             )
+        assert parsed_owner.machine is not None
         from .execution_spaces import require_owner_identity
         from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
@@ -656,6 +668,7 @@ def _create_worktree_core(
             worktree_path,
             allocation_source=repo.anchor,
         )
+        assert launch_preflight is not None
         if launch_preflight.error:
             raise core.LaunchPreflightError(launch_preflight.error)
 
@@ -680,7 +693,6 @@ def _create_worktree_core(
         with step("Validating paired worktree policy", worktree_id=worktree_id):
             core._paired_knowledge_allocation_preflight(config)
 
-    # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
     with step("Preparing worktree source", worktree_id=worktree_id):
@@ -835,14 +847,17 @@ def _create_worktree_core(
                     prepared.start_point,
                 )
 
-            # Write tracking YAML
-            record = tracking.create_new_record(
+            record_options: CreationRecordOptions = {}
+            if machine_identity is not None:
+                record_options["machine_identity"] = machine_identity
+            if receiving_allocation is not None:
+                record_options["receiving_allocation"] = receiving_allocation
+            record = cast(TrackingCreation, tracking).create_new_record(
                 worktree_id=worktree_id,
                 branch=branch,
                 worktree_path=worktree_path,
                 repo=config.repo_name,
                 machine=machine_identity.machine if machine_identity is not None else config.machine,
-                **({"machine_identity": machine_identity} if machine_identity is not None else {}),
                 platform_name=plat,
                 tracking_path=tracking_path,
                 kind=kind,
@@ -855,7 +870,7 @@ def _create_worktree_core(
                     tracking.DispatchAttempt(
                         task_id=str(dispatch_attempt["task_id"]),
                         reservation_key=str(dispatch_attempt["reservation_key"]),
-                        attempt=int(dispatch_attempt["attempt"]),
+                        attempt=int(cast("str | int", dispatch_attempt["attempt"])),
                         driver=str(dispatch_attempt["driver"]),
                         supervisor=str(dispatch_attempt["supervisor"]),
                         creator_machine=machine_identity.execution_machine if machine_identity is not None else config.machine,
@@ -881,8 +896,7 @@ def _create_worktree_core(
                 bound_agent=bound_agent or None,
                 pending_seed=None,
                 creation_nonce=receiving_nonce,
-                **({"receiving_allocation": receiving_allocation}
-                   if receiving_allocation is not None else {}),
+                **record_options,
             )
         finally:
             if owner_guard is not None:
@@ -968,11 +982,12 @@ def _create_worktree_core(
             result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return result
     except OwnedCleanupError as exc:
-        exc.worktree = {
+        cleanup_context = cast(CreationCleanupContext, exc)
+        cleanup_context.worktree = {
             "id": record.worktree_id, "path": record.worktree_path,
             "branch": record.branch, "repo": record.repo,
         }
-        exc.seed_id = seed_id
+        cleanup_context.seed_id = seed_id
         if add_note := getattr(exc, "add_note", None):
             add_note(f"Worktree {record.worktree_id} was allocated at {record.worktree_path}; "
                      "cleanup remains unconfirmed. Retain cleanup custody; do not retry New.")
