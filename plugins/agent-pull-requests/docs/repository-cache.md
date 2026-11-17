@@ -67,9 +67,17 @@ coverage unknown. Gitea rejects malformed or overlapping pages, but leaves
 review coverage unknown: it filters other users' pending drafts after pagination,
 so even an empty page is not authoritative exhaustion. Its body-only traversal
 does not qualify reviewer-action completeness. Coverage is not atomic PR/review evidence or reviewer policy, and a PR
-mutation timestamp does not identify an author update. The current version-1/2
-repository projection does not retain these extra fields; reviewer-action
-projection/adoption remains a separate source slice.
+mutation timestamp does not identify an author update. The unselected
+version-1/2 repository projection does not retain these extra fields.
+
+With the optional [reviewer-action selection](../../../services/pr/REVIEWER.md),
+the existing continuing envelope adopts `repository_activity_version:1` in
+place. That selected projection retains these fields and stable candidate/
+conflict causes; legacy facts remain unknown. The cache-only service/client
+query uses the existing attention owner, without protected workspace readers.
+Minimal fingerprints distinguish an actually observed pre-candidate review set
+from an unqualified differing head or newly visible record in a non-atomic snapshot.
+Real-provider coverage and streaming remain separate qualification.
 
 ## Storage and backend identity
 
@@ -185,6 +193,9 @@ events; coverage and departure remain separately typed. Submitted-time/cursor
 refreshes alone produce no PR-change event. Event sequence and IDs are durable.
 Current facts, event identities and coverage survive restart. The fixed current
 summary/event capacities apply backpressure rather than erasing unsettled state.
+When activity storage is selected, retained review-submission and PR-mutation
+metadata also participate in its semantic facts; the original pending candidate/
+conflict cause does not reset merely because those fields refresh.
 
 This remains the internal observation/projection seam. Supported local clients
 use the bounded HTTP handler and never read the state file directly. Continuing
