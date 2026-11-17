@@ -651,11 +651,41 @@ committed as a replacement for this source representation.
 The local composer retains that generated directory when its corresponding
 Manager source root is selected for export. Main and local composition therefore
 use the same source emitter, not a second local vendoring implementation.
-This output is independently buildable after relocation; it does not yet
-provide the complete slot-local setup/lock/construction consumer or qualify
-cold bootstrap, installed adoption or the full application-footprint reference.
+After emission, promotion associates the selected Git commit/tree and emitted
+source bytes through the existing `SourceIdentity` and local-runtime-version
+owner. Package versions remain unchanged by local composition. This records
+the pre-construction source inputs; it is not completion evidence for a later
+lock, environment, service or public release.
+An app-local Git attributes file preserves emitted bytes through checkout and
+archive transport instead of inheriting repository text conversion. The
+repository's normal source-file line-ending policy remains unchanged.
+Promotion stages the complete emitted app as one unit, including required
+source shims that match development-only ignore patterns. It does not change
+the repository's ordinary development ignore rules.
+This output is independently buildable after relocation and carries generated
+slot-local setup/command frontdoors. Command paths that collide with project
+inputs or required directories are rejected before creating the output.
+`bin/setup --stage` uses PATH UV with
+managed Python selected from the project's declaration. Initial setup creates
+a missing UV lock, then uses locked, non-editable environment synchronization;
+subsequent setup requires that lock. Ordinary commands do not synchronize or
+acquire an environment: missing staged inputs are refused before UV runs, and
+Python downloads are disabled for ordinary invocation. Staging does not publish current selection, neutral
+commands or a live service. Initial locking still needs the declared package
+metadata and build inputs from the selected feed or cache.
+
+The source-project output does not yet provide the complete retained
+Source/profile construction association for full setup or qualify cold
+bootstrap, installed adoption or the full application-footprint reference.
 Those remaining gates stay in the
 [Manager footprint plan](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md).
+
+For an explicitly prepared source app, the opt-in
+`tools/test_materialize_source_applications.py::test_actual_promoted_manager_source_app_stages_without_activation`
+reads `MANAGER_SOURCE_APPLICATION`, copies the app into an isolated fixture and
+qualifies first/repeated staging with unchanged slot, input, legacy selector
+and global-command bytes. It starts no Manager service and does not qualify
+full setup or an unprovisioned host.
 
 The version writer admits all manifest, fallback, projection-template and catalog
 destinations before its first write. Linked changefile directories/files are

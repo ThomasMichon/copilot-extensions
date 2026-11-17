@@ -35,6 +35,20 @@ def test_local_source_application_exports_follow_the_selected_producer(
     assert retain_outputs(Path("candidate"), selected) == retained
 
 
+def test_legacy_promotion_does_not_query_source_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from materialize_source_applications import bind_promotion_source, promotion_outputs
+
+    monkeypatch.setattr(Path, "is_file", lambda _path: False)
+
+    def forbidden() -> str:
+        raise AssertionError("an unselected source app must not query Git identity")
+
+    assert bind_promotion_source(Path("candidate"), forbidden) == []
+    assert promotion_outputs(Path("candidate")) == ()
+
+
 @pytest.fixture(autouse=True)
 def marker_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
