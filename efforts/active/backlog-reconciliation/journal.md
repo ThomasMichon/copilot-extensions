@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Serving convergence and canonical typing boundaries](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+
 - [2026-11-17 - Bootstrap, reporting and daemon-generation contracts](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
 
 - [2026-11-17 - Finite reviewer comparison and provider-first delivery boundaries](journal/2026/11.17-provider-first-delivery-boundaries.md)

@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [serving and typing checkpoint](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+  preserves #6389's complete canonical acceptance, credits delivered slices
+  and separates #10931's canonical-source and consumer-fixture qualification.
   The [bootstrap, reporting and generation checkpoint](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
   retains three complete canonical contracts without mistaking partial owner
   evidence, eventual transport or consolidated tracking for whole acceptance.
