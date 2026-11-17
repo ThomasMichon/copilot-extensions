@@ -9,6 +9,9 @@ from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, cast
+from unittest.mock import Mock
 
 import pytest
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
@@ -16,18 +19,42 @@ from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 from agent_pull_requests import workspace_client_profile as profiles
 from agent_pull_requests import workspace_observer as observer
 from agent_pull_requests.watch_replay_binding import ReplayBinding
+from agent_pull_requests.native_read import NativeReadHandler
+from agent_pull_requests.workspace_tools import WorkspaceTools
 from test_native_read import native as native
 from test_native_read import update
 from test_review_workspace import evidence as evidence
 
+if TYPE_CHECKING:
+    from fleet_manager.gateway_local_handler import LocalHandlerBinding
+    from fleet_manager.gateway_local_handler import LocalServiceRequest
+    from fleet_manager.gateway_service_caller import ServiceResponse
+
+NativeFixture = tuple[NativeReadHandler, dict[str, Any], Path, dict[str, Any]]
+update_native: Callable[[NativeFixture], None] = update
+
+
+class _FleetRig(Protocol):
+    h: Any
+    origin: str
+    ca: str
+
+    async def start(self, *, local_handlers: tuple[LocalHandlerBinding, ...] = ()) -> None: ...
+
+    async def update(self) -> None: ...
+
+    async def close(self) -> None: ...
+
+    def access(self, subject: str, key: int) -> str: ...
+
 
 @pytest.fixture(autouse=True)
-def application_context(monkeypatch):
+def application_context(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT"):
         monkeypatch.delenv(key, raising=False)
 
 
-def connection(root):
+def connection(root: Path) -> dict[str, Any]:
     return {
         "gateway_origin": "https://gateway.example", "route_prefix": "/api",
         "proof_key_file": str(root / "proof.pem"), "access_token_file": str(root / "access"),
@@ -44,7 +71,9 @@ def connection(root):
     }
 
 
-def write_profiles(root, selected, owner=None):
+def write_profiles(
+    root: Path, selected: dict[str, Any], owner: dict[str, str] | None = None,
+) -> dict[str, Any]:
     root.mkdir(exist_ok=True, parents=True)
     document = {
         "schema": profiles.SCHEMA, "version": 1,
@@ -56,14 +85,21 @@ def write_profiles(root, selected, owner=None):
 
 
 @pytest.mark.parametrize("name", ["../selected", "a/b", "a\\b", "", "a.py", "selected "])
-def test_profile_name_is_not_a_path_and_refuses_before_configuration(name, monkeypatch):
+def test_profile_name_is_not_a_path_and_refuses_before_configuration(
+    name: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(profiles, "configuration_owner", lambda: pytest.fail("configuration accessed"))
     with pytest.raises(ValueError):
         profiles.read_profile(name, lambda: 10)
 
 
-@pytest.mark.parametrize("change", ["foreign", "version", "extra", "duplicate", "missing", "secret", "scope", "relative"])
-def test_invalid_profile_refuses_without_reading_credentials(tmp_path, monkeypatch, change):
+@pytest.mark.parametrize("change", [
+    "foreign", "version", "extra", "duplicate", "missing", "secret", "scope", "relative",
+    "route", "route-query",
+])
+def test_invalid_profile_refuses_without_reading_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("AGENT_PULL_REQUESTS_HOME", str(tmp_path))
@@ -83,6 +119,10 @@ def test_invalid_profile_refuses_without_reading_credentials(tmp_path, monkeypat
         selected["scope"]["account"] = "not-a-scope-field"
     elif change == "relative":
         selected["proof_key_file"] = "relative.pem"
+    elif change == "route":
+        selected["route_prefix"] = "/api/"
+    elif change == "route-query":
+        selected["route_prefix"] = "/api?unexpected=value"
     path = tmp_path / profiles.PROFILE_FILE
     path.write_text(
         '{"version":1,"version":1}' if change == "duplicate" else json.dumps(document),
@@ -94,7 +134,9 @@ def test_invalid_profile_refuses_without_reading_credentials(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("suffix", ["", "/"])
-def test_application_profile_is_read_only_configuration_not_a_credential_loader(tmp_path, monkeypatch, suffix):
+def test_application_profile_is_read_only_configuration_not_a_credential_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("AGENT_PULL_REQUESTS_HOME", str(tmp_path))
@@ -107,7 +149,9 @@ def test_application_profile_is_read_only_configuration_not_a_credential_loader(
     assert not (tmp_path / "proof.pem").exists()
 
 
-def test_missing_profile_stops_before_any_credential_read(tmp_path, monkeypatch):
+def test_missing_profile_stops_before_any_credential_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import fleet_manager.credential_references as credentials
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
@@ -120,7 +164,9 @@ def test_missing_profile_stops_before_any_credential_read(tmp_path, monkeypatch)
     assert list(tmp_path.iterdir()) == []
 
 
-def test_unattributed_default_legacy_uses_existing_entrypoint_selection(tmp_path, monkeypatch):
+def test_unattributed_default_legacy_uses_existing_entrypoint_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import _installation_context as api
     payload = tmp_path / "payload"
     payload.mkdir()
@@ -137,15 +183,17 @@ def test_unattributed_default_legacy_uses_existing_entrypoint_selection(tmp_path
         profiles.read_profile("selected", lambda: 10)
 
 
-def test_cell_profile_uses_canonical_namespace_not_legacy_watch_or_runtime_capture(tmp_path, monkeypatch):
+def test_cell_profile_uses_canonical_namespace_not_legacy_watch_or_runtime_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import _installation_context as api
     from agent_pull_requests import watch_invocation
     from test_watch_installation import _installation, _policy
 
     profile = tmp_path / "profile"
     profile.mkdir()
-    current = api._current_environment
-    def environment(**kwargs):
+    current: Callable[..., Any] = getattr(api, "_current_environment")
+    def environment(**kwargs: Any) -> Any:
         return current(**{**kwargs, "os_profile": profile})
     monkeypatch.setattr(api, "_current_environment", environment)
     installation = _installation(tmp_path)
@@ -184,15 +232,18 @@ def test_cell_profile_uses_canonical_namespace_not_legacy_watch_or_runtime_captu
 
 
 @pytest.mark.parametrize("unsupported", [False, True])
-def test_optional_events_and_writable_server_operations_are_not_fabricated(unsupported):
+def test_optional_events_and_writable_server_operations_are_not_fabricated(
+    unsupported: bool,
+) -> None:
     from fleet_manager.gateway_service_caller import ServiceResponse
     from agent_pull_requests.workspace_client import WorkspaceClient
-    from agent_pull_requests.workspace_operations import CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL
+    from agent_pull_requests.workspace_operations import CHUNK_BYTES, PROTOCOL
+    from agent_pull_requests.review_workspace import MAX_GENERATION_BYTES
     selected = connection(Path.cwd())
     binding = ReplayBinding.from_document(selected["binding"])
-    calls = []
+    calls: list[str] = []
     class Caller:
-        async def request(self, *args, **kwargs):
+        async def request(self, *args: Any, **kwargs: Any) -> ServiceResponse:
             calls.append(args[1])
             return ServiceResponse(200, (("content-type", "application/json"),), json.dumps({
                 "binding": binding.document(), "protocol": PROTOCOL,
@@ -215,7 +266,9 @@ def test_optional_events_and_writable_server_operations_are_not_fabricated(unsup
 
 
 @pytest.mark.parametrize("command", ["submit", "inspect", "source", "source-read"])
-def test_read_only_selection_refuses_before_request_or_profile_io(command, monkeypatch):
+def test_read_only_selection_refuses_before_request_or_profile_io(
+    command: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(observer, "_observe", lambda *a: pytest.fail("profile accessed"))
     code, value = observer._execute({
         "command": command, "profile": "selected", "request": "missing", "owner_conflict": False,
@@ -223,7 +276,9 @@ def test_read_only_selection_refuses_before_request_or_profile_io(command, monke
     assert code == 4 and value["effect_completion"] == "not_inferred"
 
 
-def test_embedding_and_profile_are_ambiguous_without_replacing_owner(monkeypatch):
+def test_embedding_and_profile_are_ambiguous_without_replacing_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(observer, "_observe", lambda *a: pytest.fail("profile accessed"))
     code, value = observer._execute({
         "command": "capabilities", "profile": "selected", "request": None, "owner_conflict": True,
@@ -231,17 +286,22 @@ def test_embedding_and_profile_are_ambiguous_without_replacing_owner(monkeypatch
     assert code == 4 and value["error"] == "workspace_owner_refused"
 
 
-def test_actual_frontdoor_rejects_profile_and_embedding_before_process_or_stdio(monkeypatch, capsys):
+def test_actual_frontdoor_rejects_profile_and_embedding_before_process_or_stdio(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_pull_requests.__main__ import main
     monkeypatch.setattr(observer, "run_caller_owned", lambda *a, **k: pytest.fail("worker launched"))
+    create_tools: Callable[[], WorkspaceTools] = WorkspaceTools
     assert main(
         ["workspace", "--client-profile", "selected", "capabilities"],
-        workspace_host=observer.WorkspaceTools(),
+        workspace_host=create_tools(),
     ) == 4
     assert capsys.readouterr().out == ""
 
 
-def test_unknown_request_fields_refuse_before_profile_or_credentials(tmp_path, monkeypatch):
+def test_unknown_request_fields_refuse_before_profile_or_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = tmp_path / "request.json"
     request.write_text('{"number":42,"account":"override"}', encoding="utf-8")
     monkeypatch.setattr(observer, "_observe", lambda *a: pytest.fail("profile accessed"))
@@ -251,9 +311,12 @@ def test_unknown_request_fields_refuse_before_profile_or_credentials(tmp_path, m
     assert code == 1
 
 
-def test_failed_physical_cleanup_retains_original_owner(monkeypatch, tmp_path):
-    failure = OwnedCleanupError(object(), cleanup_resources=(("original", object()),))
-    async def fail(*args):
+def test_failed_physical_cleanup_retains_original_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    owner = Mock(name="original-process-owner")
+    failure = OwnedCleanupError(owner, cleanup_resources=(("original", owner),))
+    async def fail(*args: Any) -> None:
         raise failure
     monkeypatch.setattr(observer, "_observe", fail)
     with pytest.raises(OwnedCleanupError) as caught:
@@ -263,14 +326,16 @@ def test_failed_physical_cleanup_retains_original_owner(monkeypatch, tmp_path):
     assert caught.value is failure
 
 
-def test_profile_invocation_carries_one_absolute_deadline_and_borrowed_streams(monkeypatch):
-    calls = []
-    def run(argv, **kwargs):
+def test_profile_invocation_carries_one_absolute_deadline_and_borrowed_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=7)
     monkeypatch.setattr(observer, "run_caller_owned", run)
-    monkeypatch.setattr(observer.sys, "stdin", SimpleNamespace(buffer=object()))
-    monkeypatch.setattr(observer.sys, "stdout", SimpleNamespace(buffer=object()))
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=object()))
+    monkeypatch.setattr(sys, "stdout", SimpleNamespace(buffer=object()))
     started = time.monotonic()
     assert observer.run(SimpleNamespace(
         client_profile="selected", workspace_command="sync", request="-",
@@ -278,18 +343,18 @@ def test_profile_invocation_carries_one_absolute_deadline_and_borrowed_streams(m
     argv, options = calls[0]
     assert started < options["budget"].deadline <= time.monotonic() + 60
     assert float(argv[-2]) == options["budget"].execution_deadline
-    assert options["stdin_stream"] is observer.sys.stdin.buffer
-    assert options["stdout_stream"] is observer.sys.stdout.buffer
+    assert options["stdin_stream"] is sys.stdin.buffer
+    assert options["stdout_stream"] is sys.stdout.buffer
     assert options["capture"] is False
 
 
-def _fleet_fixtures():
+def _fleet_fixtures() -> Callable[[Path], _FleetRig]:
     root = Path(__file__).resolve().parents[3]
     path = str(root / "fleet-manager" / "tests")
     if path not in sys.path:
         sys.path.insert(0, path)
     from gateway_service_transport_fixtures import Rig
-    return Rig
+    return cast(Callable[[Path], _FleetRig], Rig)
 
 
 @pytest.mark.parametrize("change", ["unchanged", "dialogue", "target", "head", "partial", "refusals"])
@@ -299,10 +364,12 @@ def _fleet_fixtures():
 @pytest.mark.effect("network")
 @pytest.mark.timeout(90)
 def test_fresh_cli_processes_use_authenticated_native_owner_cache_and_events(
-    native, tmp_path, monkeypatch, change, record_property,
-):
+    native: NativeFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+    record_property: Callable[[str, object], None],
+) -> None:
     from cryptography.hazmat.primitives import serialization
     from fleet_manager.gateway_local_handler import LocalHandlerBinding
+    from fleet_manager.gateway_service_handler import ServiceResponse as HandlerResponse
     from fleet_manager.gateway_manifest import GatewayManifest
     from fleet_manager.planning import canonical
     from agent_pull_requests.generation_cache import GenerationCache
@@ -336,20 +403,22 @@ def test_fresh_cli_processes_use_authenticated_native_owner_cache_and_events(
         ),), workspaces={("caller-a", "project"): workspace},
     )
 
-    async def scenario():
+    async def scenario() -> None:
         tls = tmp_path / "tls"
         tls.mkdir()
         rig = Rig(tls)
-        requests = []
-        samples = []
-        async def handle(local):
+        requests: list[str] = []
+        samples: list[dict[str, str | int]] = []
+        async def handle(local: LocalServiceRequest) -> HandlerResponse:
             local.checkpoint()
             requests.append(local.request.target)
             result = await gateway.handle(local.request)
+            assert type(result) is HandlerResponse
             local.checkpoint()
             return result
         rig.h.document["manifest"]["slots"][0]["routes"][0]["capabilities"] = ["http"]
-        manifest = GatewayManifest.parse(canonical(rig.h.document["manifest"]))
+        encode_manifest: Callable[[dict[str, Any]], bytes] = canonical
+        manifest = GatewayManifest.parse(encode_manifest(rig.h.document["manifest"]))
         try:
             await rig.start(local_handlers=(LocalHandlerBinding(manifest.slots[0], handle),))
             selected = connection(root)
@@ -360,7 +429,9 @@ def test_fresh_cli_processes_use_authenticated_native_owner_cache_and_events(
             ))
             (root / "access").write_text(rig.access("caller-a", 3), encoding="utf-8")
 
-            async def cli(command, request=None):
+            async def cli(
+                command: str, request: dict[str, Any] | None = None,
+            ) -> tuple[int, dict[str, Any]]:
                 rig.h.clock.value = int(time.time())
                 (root / "access").write_text(rig.access("caller-a", 3), encoding="utf-8")
                 args = [sys.executable, "-m", "agent_pull_requests", "workspace",
@@ -380,6 +451,7 @@ def test_fresh_cli_processes_use_authenticated_native_owner_cache_and_events(
                     "workspace_requests": len(requests) - before,
                 })
                 assert result.stderr == ""
+                assert isinstance(result.stdout, str)
                 return result.returncode, json.loads(result.stdout)
 
             if change == "unchanged":
@@ -407,7 +479,7 @@ def test_fresh_cli_processes_use_authenticated_native_owner_cache_and_events(
                 for section in value["sections"].values():
                     section.update(observed_from="2026-10-30T00:00:02Z",
                                    observed_to="2026-10-30T00:00:03Z")
-                update(native)
+                update_native(native)
                 code, synced = await cli("sync", {
                     "number": 42, "expected_current": identity, "previous_id": identity, "budget_seconds": 10,
                 })

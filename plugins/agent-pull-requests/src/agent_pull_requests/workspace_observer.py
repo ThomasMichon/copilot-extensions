@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
 from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import run_caller_owned
@@ -15,15 +17,35 @@ from agent_procutil.owned_process import run_caller_owned
 from .review_workspace import MAX_GENERATION_BYTES
 from .watch_replay_store import json_object
 from .workspace_tools import FIELDS, WorkspaceTools, WorkspaceToolUnavailable
+from .workspace_cli import _ToolView
+
+if TYPE_CHECKING:
+    from .workspace_client import WorkspaceClient
 
 READ_COMMANDS = ("capabilities", "load", "sync", "materialize", "events")
 INVOCATION_SECONDS = 60
 OUTPUT_BYTES = 6 * MAX_GENERATION_BYTES + 4096
 
 
+class _Arguments(Protocol):
+    client_profile: str
+    workspace_command: str
+
+
+class _Selection(TypedDict):
+    profile: str
+    command: str
+    request: str | None
+    owner_conflict: bool
+
+
 class _ObserverTools(WorkspaceTools):
-    async def capabilities(self, *, operation=None):
-        value = await super().capabilities(operation=operation)
+    def __init__(self, client: WorkspaceClient) -> None:
+        initialize: Callable[[WorkspaceClient], None] = super().__init__
+        initialize(client)
+
+    async def capabilities(self, *, operation: Any = None) -> dict[str, Any]:
+        value = await cast(_ToolView, super()).capabilities(operation=operation)
         value["operations"] = [name for name in value["operations"] if name in READ_COMMANDS]
         if value["backend_contract"] is not None:
             backend = value["backend_contract"]
@@ -33,15 +55,17 @@ class _ObserverTools(WorkspaceTools):
             ]
         return value
 
-    async def invoke(self, command, request):
+    async def invoke(self, command: str, request: dict[str, Any]) -> dict[str, Any]:
         if command not in READ_COMMANDS:
             raise PermissionError("read-only workspace client")
-        return await super().invoke(command, request)
+        return await cast(_ToolView, super()).invoke(command, request)
 
 
-async def _observe(profile, command, request, remaining):
+async def _observe(
+    profile: str, command: str, request: dict[str, Any], remaining: Callable[[], float],
+) -> dict[str, Any]:
     from fleet_manager.credential_references import load_service_credentials
-    from fleet_manager.gateway_service_caller import ServiceCaller
+    from fleet_manager.gateway_service_caller import ServiceCaller, ServiceResponse
     from fleet_manager.gateway_service_channel import DEADLINE
     from .workspace_client import WorkspaceClient
     from .workspace_client_profile import read_profile
@@ -54,7 +78,7 @@ async def _observe(profile, command, request, remaining):
     )
 
     class InvocationCaller(ServiceCaller):
-        async def request(self, *args, **kwargs):
+        async def request(self, *args: Any, **kwargs: Any) -> ServiceResponse:
             self._timeout = min(self._timeout, remaining())
             return await super().request(*args, **kwargs)
 
@@ -67,24 +91,29 @@ async def _observe(profile, command, request, remaining):
     client = WorkspaceClient(
         caller, route_prefix=selected["route_prefix"], binding=binding, scope=scope,
     )
-    return await _ObserverTools(client).for_one_shot().invoke(command, request)
+    return await cast(_ToolView, _ObserverTools(client)).for_one_shot().invoke(command, request)
 
 
-def _failure(error):
+def _failure(error: str) -> dict[str, str]:
     return {"error": error, "effect_completion": "not_inferred"}
 
 
-def _execute(selection, remaining):
+def _execute(
+    selection: _Selection, remaining: Callable[[], float],
+) -> tuple[int, dict[str, Any]]:
     try:
         if selection["owner_conflict"] or selection["command"] not in READ_COMMANDS:
             raise PermissionError("read-only workspace client selection refused")
         request = {}
         if selection["command"] != "capabilities":
             remaining()
-            if selection["request"] == "-":
+            request_path = selection["request"]
+            if request_path is None:
+                raise ValueError("workspace request is required")
+            if request_path == "-":
                 raw = sys.stdin.buffer.read(MAX_GENERATION_BYTES + 1)
             else:
-                with Path(selection["request"]).open("rb") as stream:
+                with Path(request_path).open("rb") as stream:
                     raw = stream.read(MAX_GENERATION_BYTES + 1)
             if len(raw) > MAX_GENERATION_BYTES:
                 raise ValueError("workspace request limit")
@@ -110,11 +139,11 @@ def _execute(selection, remaining):
         return 1, _failure("workspace_input_or_result_unavailable")
 
 
-def run(args, *, host=None):
+def run(args: _Arguments, *, host: object | None = None) -> int:
     budget = OwnedExecutionBudget.from_timeout(INVOCATION_SECONDS, cleanup_reserve=5)
     if host is not None:
         return 4
-    selection = {
+    selection: _Selection = {
         "profile": args.client_profile, "command": args.workspace_command,
         "request": getattr(args, "request", None), "owner_conflict": host is not None,
     }
@@ -133,11 +162,11 @@ def run(args, *, host=None):
         return 1
 
 
-def _main():
+def _main() -> int:
     deadline = float(sys.argv[1])
     selection = json.loads(sys.argv[2])
 
-    def remaining():
+    def remaining() -> float:
         seconds = deadline - time.monotonic()
         if seconds <= 0:
             raise TimeoutError("workspace invocation deadline")

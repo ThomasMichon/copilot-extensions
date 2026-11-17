@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable
+from typing import Callable, TypedDict, cast
 
 from agent_procutil import SyncProcessLaunchError
 from agent_procutil.owned_process import (
@@ -27,6 +27,10 @@ from agent_procutil.owned_process import (
     require_contained_worker,
 )
 from agent_procutil._linux_pidfd import open_pidfd
+from agent_procutil._native_types import (
+    DescriptorStream as _DescriptorStream,
+    FcntlAPI, PollAPI, ProcessAPI, SignalAPI,
+)
 from agent_procutil.owned_budget import OwnedExecutionBudget
 
 _MAX_REQUEST = 16 * 1024 * 1024
@@ -38,6 +42,27 @@ _BOOTSTRAP = (
     "import sys;sys.path.insert(0,sys.argv.pop(1));"
     "from agent_procutil._caller_owned import _main;_main()"
 )
+
+
+class _BudgetFields(TypedDict):
+    deadline: float
+    cleanup_reserve: float
+
+
+class _RequiredRequest(TypedDict):
+    argv: list[str]
+    timeout: float
+    input_text: str | None
+    capture: bool
+    limits: list[int]
+
+
+class _Request(_RequiredRequest, total=False):
+    binary: bool
+    budget: _BudgetFields
+    input_bytes: str
+    stdin_fd: int
+    stdout_fd: int
 
 
 def _after_fork_child() -> None:
@@ -84,12 +109,13 @@ def _require_posix_support() -> None:
 
 
 def _pidfd_exited(fd: int) -> bool:
-    observer = select.poll()
-    observer.register(fd, select.POLLIN)
+    poll_api = cast(PollAPI, select)
+    observer = poll_api.poll()
+    observer.register(fd, poll_api.POLLIN)
     events = observer.poll(0)
-    if any(mask & (select.POLLERR | select.POLLNVAL) for _fd, mask in events):
+    if any(mask & (poll_api.POLLERR | poll_api.POLLNVAL) for _fd, mask in events):
         raise RuntimeError("native pidfd exit observation failed")
-    return any(mask & select.POLLIN for _fd, mask in events)
+    return any(mask & poll_api.POLLIN for _fd, mask in events)
 
 
 def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | None = None) -> None:
@@ -127,14 +153,14 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
                     if pid == process.pid:
                         continue
                     try:
-                        if os.getpgid(pid) != process.pid:
+                        if cast(ProcessAPI, os).getpgid(pid) != process.pid:
                             continue
                         fd = open_pidfd(pid)
                         try:
                             # A reaped/reused numeric PID is not proof of this group's exit.
                             if _pidfd_pid(fd) != pid:
                                 active = True
-                            elif os.getpgid(pid) == process.pid:
+                            elif cast(ProcessAPI, os).getpgid(pid) == process.pid:
                                 active |= not _pidfd_exited(fd)
                         finally:
                             os.close(fd)
@@ -150,7 +176,7 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
         raise OwnedCleanupError(process) from error
 
 
-def _validate(request: object) -> dict:
+def _validate(request: object) -> _Request:
     if not isinstance(request, dict) or set(request) - {
         "binary", "budget", "input_bytes", "stdin_fd", "stdout_fd",
     } != {
@@ -200,13 +226,15 @@ def _validate(request: object) -> dict:
         type(limit) is not int or limit <= 0 for limit in limits
     ):
         raise ValueError("native child stream limits must be positive integers")
-    return request
+    return cast(_Request, request)
 
 
-def _decode(reply: object, request: dict, returncode: int) -> subprocess.CompletedProcess:
+def _decode(
+    reply: object, request: _Request, returncode: int,
+) -> subprocess.CompletedProcess[str | bytes | None]:
     if (
         not isinstance(reply, dict) or type(reply.get("version")) is not int
-        or reply["version"] != 1 or returncode != -signal.SIGKILL
+        or reply["version"] != 1 or returncode != -cast(SignalAPI, signal).SIGKILL
     ):
         raise RuntimeError("caller-owned completion is unconfirmed")
     kind = reply.get("kind")
@@ -228,7 +256,10 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
             raise RuntimeError("caller-owned result is invalid")
         if request.get("binary", False) and request["capture"]:
             try:
-                stdout, stderr = (base64.b64decode(stream, validate=True) for stream in (stdout, stderr))
+                stdout, stderr = (
+                    base64.b64decode(cast(str, stream), validate=True)
+                    for stream in (stdout, stderr)
+                )
                 if any(len(stream) > limit for stream, limit in zip((stdout, stderr), request["limits"])):
                     raise ValueError("binary completion exceeds capture limits")
             except ValueError:
@@ -243,12 +274,16 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
             raise RuntimeError("caller-owned stream limit is invalid")
         raise OutputLimitExceeded(stream, limit)
     if kind == "timeout":
-        partial = [None, None]
+        partial: list[bytes | None] = [None, None]
         if "output" in reply:
             try:
-                partial = [base64.b64decode(reply[name], validate=True) for name in ("output", "stderr")]
-                if any(len(value) > limit for value, limit in zip(partial, request["limits"])):
+                decoded_partial = [
+                    base64.b64decode(reply[name], validate=True)
+                    for name in ("output", "stderr")
+                ]
+                if any(len(value) > limit for value, limit in zip(decoded_partial, request["limits"])):
                     raise ValueError("timeout evidence exceeds its byte budget")
+                partial = list(decoded_partial)
             except (TypeError, ValueError):
                 raise RuntimeError("caller-owned timeout evidence is invalid") from None
         raise subprocess.TimeoutExpired(request["argv"], request["timeout"], *partial)
@@ -266,15 +301,16 @@ def run(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
     input_bytes: bytes | None = None,
-    stdin_stream=None, stdout_stream=None,
+    stdin_stream: _DescriptorStream | None = None,
+    stdout_stream: _DescriptorStream | None = None,
     on_settled: Callable[[], None] | None = None,
-    cwd: str | os.PathLike | None = None,
+    cwd: str | os.PathLike[str] | None = None,
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
     borrow_parent_scope: bool = False,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str | bytes | None]:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
     execution_budget = budget
@@ -293,12 +329,13 @@ def run(
             stdin_fd is not None or stdout_fd is not None
         ):
             import fcntl
+            descriptor_api = cast(FcntlAPI, fcntl)
             # The guardian uses 0/1 for its own framing, not the borrowed streams.
             if stdin_fd is not None:
-                stdin_fd = fcntl.fcntl(stdin_fd, fcntl.F_DUPFD_CLOEXEC, 3)
+                stdin_fd = descriptor_api.fcntl(stdin_fd, descriptor_api.F_DUPFD_CLOEXEC, 3)
                 stdio_descriptors.add(stdin_fd)
             if stdout_fd is not None:
-                stdout_fd = fcntl.fcntl(stdout_fd, fcntl.F_DUPFD_CLOEXEC, 3)
+                stdout_fd = descriptor_api.fcntl(stdout_fd, descriptor_api.F_DUPFD_CLOEXEC, 3)
                 stdio_descriptors.add(stdout_fd)
         if input_bytes is not None and 4 * ((len(input_bytes) + 2) // 3) > _MAX_REQUEST:
             raise ValueError("caller-owned request exceeds its frame limit")
@@ -357,11 +394,8 @@ def run(
                 on_settled=on_settled,
                 allow_daemon_breakaway=allow_daemon_breakaway,
                 binary=binary,
-                **({"stdin_stream": stdin_stream} if stdin_stream is not None else {}),
-                **({"stdout_stream": stdout_stream} if stdout_stream is not None else {}),
-                **({"budget": execution_budget} if execution_budget is not None else {}),
-                **({"cwd": cwd} if cwd is not None else {}),
-                **({"env": env} if env is not None else {}),
+                stdin_stream=stdin_stream, stdout_stream=stdout_stream,
+                budget=execution_budget, cwd=cwd, env=env,
             )
         except _PreparationTimeout as error:
             if on_settled is not None:
@@ -373,8 +407,7 @@ def run(
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             inherit_process_group=True, borrow_parent_scope=True, budget=budget,
             binary=binary, cwd=cwd, env=env,
-            **({"stdin_stream": stdin_stream} if stdin_stream is not None else {}),
-            **({"stdout_stream": stdout_stream} if stdout_stream is not None else {}),
+            stdin_stream=stdin_stream, stdout_stream=stdout_stream,
         )
     reader = writer = None
     launch_attempted = False
@@ -401,9 +434,7 @@ def run(
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
                 on_settled=lambda: native_settled.append(True),
-                **({"budget": execution_budget} if execution_budget is not None else {}),
-                **({"cwd": cwd} if cwd is not None else {}),
-                **({"env": env} if env is not None else {}),
+                budget=execution_budget, cwd=cwd, env=env,
             )
         except _PreparationTimeout as error:
             preparation_refused = True
@@ -448,14 +479,14 @@ def run(
         if (native_settled or not launch_attempted or preparation_refused) and on_settled is not None:
             on_settled()
     try:
-        reply = json.loads(result.stdout)
+        reply = json.loads(cast(str | bytes, result.stdout))
     except (ValueError, TypeError) as error:
         raise RuntimeError("caller-owned completion frame is invalid") from error
     return _decode(reply, request, result.returncode)
 
 
 def _retire() -> None:
-    os.killpg(os.getpid(), signal.SIGKILL)
+    cast(ProcessAPI, os).killpg(os.getpid(), cast(SignalAPI, signal).SIGKILL)
 
 
 def _main() -> None:
@@ -471,14 +502,14 @@ def _main() -> None:
     lifetime = int(sys.argv[1])
     if not stat.S_ISFIFO(os.fstat(lifetime).st_mode):
         raise RuntimeError("caller-owned lifetime descriptor is not a pipe")
-    os.set_blocking(lifetime, False)
+    cast(ProcessAPI, os).set_blocking(lifetime, False)
     try:
         initial = os.read(lifetime, 1)
     except BlockingIOError:
         initial = None
     if initial is not None:
         _retire()
-    os.set_blocking(lifetime, True)
+    cast(ProcessAPI, os).set_blocking(lifetime, True)
 
     def watch() -> None:
         try:
@@ -498,7 +529,7 @@ def _main() -> None:
         threading.Thread(
             target=watch_owner, name="native-caller-exit", daemon=True,
         ).start()
-    response: dict = {"version": 1, "kind": "execution"}
+    response: dict[str, object] = {"version": 1, "kind": "execution"}
     try:
         frame = sys.stdin.buffer.readline(_MAX_REQUEST + 1)
         if len(frame) > _MAX_REQUEST or not frame.endswith(b"\n"):
@@ -518,15 +549,15 @@ def _main() -> None:
                 request["argv"], timeout=request["timeout"],
                 input_text=base64.b64decode(request["input_bytes"], validate=True)
                 if "input_bytes" in request else request["input_text"], capture=request["capture"],
-                inherit_process_group=True, capture_limits=tuple(request["limits"]),
+                inherit_process_group=True,
+                capture_limits=(request["limits"][0], request["limits"][1]),
                 binary=request.get("binary", False),
-                **({"stdin_stream": stdin_stream} if stdin_stream is not None else {}),
-                **({"stdout_stream": stdout_stream} if stdout_stream is not None else {}),
-                **({"budget": budget} if budget is not None else {}),
+                stdin_stream=stdin_stream, stdout_stream=stdout_stream, budget=budget,
             )
             if request.get("binary", False) and request["capture"]:
                 result.stdout, result.stderr = (
-                    base64.b64encode(stream).decode("ascii") for stream in (result.stdout, result.stderr)
+                    base64.b64encode(cast(bytes, stream)).decode("ascii")
+                    for stream in (result.stdout, result.stderr)
                 )
             response.update(
                 kind="completed", returncode=result.returncode,

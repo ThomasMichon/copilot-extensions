@@ -7,6 +7,9 @@ from pathlib import Path
 import shutil
 import sys
 import sysconfig
+import subprocess
+from collections.abc import Sequence
+from typing import cast
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -16,7 +19,9 @@ from agent_procutil.owned_process import run_caller_owned
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
 @pytest.mark.timeout(300)
-def test_installed_console_and_service_dependencies_do_not_require_source_or_copilot(tmp_path):
+def test_installed_console_and_service_dependencies_do_not_require_source_or_copilot(
+    tmp_path: Path,
+) -> None:
     repo = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(repo / "tools"))
     from build_python_artifacts import resolve_vendored_libs
@@ -39,13 +44,16 @@ def test_installed_console_and_service_dependencies_do_not_require_source_or_cop
         "UV_PYTHON_DOWNLOADS": "never",
     }
 
-    def run(argv, *, cwd=tmp_path):
+    def run(
+        argv: Sequence[str | Path], *, cwd: Path = tmp_path,
+    ) -> subprocess.CompletedProcess[str]:
         result = run_caller_owned(
             list(map(str, argv)), cwd=cwd, env=environment,
             timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
         )
+        assert isinstance(result.stdout, str) and isinstance(result.stderr, str)
         assert result.returncode == 0, result.stdout + result.stderr
-        return result
+        return cast(subprocess.CompletedProcess[str], result)
 
     for project in sorted(projects):
         target = copied / project.relative_to(repo)
@@ -120,6 +128,7 @@ def test_installed_console_and_service_dependencies_do_not_require_source_or_cop
         cwd=home, env=environment, timeout=60, max_stdout_bytes=8192, max_stderr_bytes=8192,
     )
     assert refused.returncode == 1 and refused.stderr == ""
+    assert isinstance(refused.stdout, str)
     assert json.loads(refused.stdout)["effect_completion"] == "not_inferred"
     checkout = tmp_path / "checkout"
     shadow = checkout / "agent_pull_requests"
@@ -139,6 +148,7 @@ def test_installed_console_and_service_dependencies_do_not_require_source_or_cop
             timeout=60, max_stdout_bytes=8192, max_stderr_bytes=8192,
         )
         assert isolated.returncode == 1 and isolated.stderr == "", source
+        assert isinstance(isolated.stdout, str)
         assert json.loads(isolated.stdout)["effect_completion"] == "not_inferred"
         assert not (shadow / "imported").exists()
     assert not (home / ".copilot").exists()

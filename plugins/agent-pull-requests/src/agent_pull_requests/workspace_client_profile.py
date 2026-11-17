@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+from collections.abc import Callable
+from typing import Any, Protocol, cast
 
 from .watch_replay_binding import ReplayBinding
 from .watch_replay_store import json_object
@@ -15,10 +17,29 @@ PROFILE_BYTES = 32768
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
-def configuration_owner():
-    from . import _installation_context as api
+class _ConfigurationApi(Protocol):
+    def validate_context_receipt(
+        self, receipt_path: str, durable_home: Path, *, expected_plugin_id: str,
+        expected_payload_root: str, expected_cell_root: Path,
+    ) -> dict[str, Any]: ...
+
+    def resolve_installation_mode(
+        self, *, legacy_root: Path, context: str, plugin_id: str, payload_root: str,
+        durable_home: Path, expected_cell_root: Path,
+    ) -> dict[str, Any]: ...
+
+    def probe_legacy_entrypoint(
+        self, *, legacy_root: Path, plugin_id: str, payload_root: str,
+    ) -> dict[str, Any]: ...
+
+    def paths_equal(self, left: str | Path, right: str | Path) -> bool: ...
+
+
+def configuration_owner() -> tuple[Path, dict[str, str]]:
+    from . import _installation_context
     from .watch_storage import state_dir
 
+    api = cast(_ConfigurationApi, _installation_context)
     root = state_dir()
     if not root.is_absolute():
         raise ValueError("absolute application configuration root required")
@@ -75,7 +96,9 @@ def configuration_owner():
     return root, owner
 
 
-def read_profile(name, remaining):
+def read_profile(
+    name: str, remaining: Callable[[], float],
+) -> tuple[dict[str, Any], ReplayBinding, dict[str, Any]]:
     if not isinstance(name, str) or _NAME.fullmatch(name) is None:
         raise ValueError("invalid workspace client profile selector")
     remaining()
@@ -101,14 +124,20 @@ def read_profile(name, remaining):
         "gateway_ca", "binding", "scope",
     }:
         raise ValueError("workspace client profile unavailable")
-    from fleet_manager.gateway_service_channel import origin
+    from fleet_manager.gateway_service_channel import origin, target
     from .review_workspace import _scope
-    from .watch_replay_client import ReplayClient
+    from .watch_replay_client import _identity
 
     origin(profile["gateway_origin"])
     binding = ReplayBinding.from_document(profile["binding"])
-    ReplayClient(None, route_prefix=profile["route_prefix"], target=binding.target,
-                 repo=binding.repo, binding=binding)
+    prefix = profile["route_prefix"]
+    if not isinstance(prefix, str) or prefix.endswith("/"):
+        raise ValueError("invalid replay route prefix")
+    route = prefix + "/v2/watch/" + binding.target
+    canonical, query = target(route)
+    if canonical != route or query:
+        raise ValueError("invalid replay route prefix")
+    _identity(binding.repo)
     if type(profile["scope"]) is not dict:
         raise ValueError("invalid workspace client scope")
     scope = _scope({**profile["scope"], "number": 1})
