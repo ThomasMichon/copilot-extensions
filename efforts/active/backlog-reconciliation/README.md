@@ -3421,6 +3421,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete workflow, delivery and native-consumer contracts](journal/2026/11.17-complete-workflow-delivery-and-native-consumer-contracts.md)
+  record actual #13064 delivery and twenty-three complete-original judgments,
+  retaining disabled native prototypes, keyed-creation replay distinctions,
+  design-only role/observation proposals and the original OPEN delivery claim.
+  The complete census remains 877 whole open, 148 above fixed 729, with no
+  arrivals, departures or new campaign closure credit. All incumbent checkbox
+  states, explicit holds and custody remain unchanged.
   The [complete typing, guidance and observation contracts](journal/2026/11.17-complete-typing-guidance-and-observation-contracts.md)
   record actual #13053 delivery and fourteen complete-original judgments,
   preserving nonexpiring claims, stopped failed-version retries, separately
