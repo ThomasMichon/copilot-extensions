@@ -4,7 +4,8 @@
 
 **Kind:** completion. Prepare a new worktree from its explicitly refreshed
 configured default branch without fetching unrelated branch refs, while
-preserving the existing safe-anchor and honest offline-fallback behavior.
+preserving committed-policy discovery, safe-anchor behavior and honest
+offline fallback.
 
 **Acceptance:** a fresh local-Git consumer proves exact configured-base
 selection even when the ordinary remote refspec excludes that branch,
@@ -17,8 +18,9 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** complete the implementation PR's exact-source unit admission,
-review and required CI after successful hosted Windows qualification.
+**Now:** qualify the initial implementation review's refmap and policy-discovery
+regressions before revising the scoped fetch; complete source-closure admission,
+exact-source qualification, review and required CI afterward.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -105,6 +107,9 @@ custody remain independent.
 - [x] Satisfy whole-file strict changed-code checks without suppressions or
   pending-project admission. Limit necessary typing corrections to unchanged
   behavior; reconcile any material contributor overlap before proceeding.
+- [ ] Resolve the initial review's actual refmap, policy-discovery,
+  fixture-isolation and moved-source-closure findings. Prove the new behavioral
+  negatives before revising the fetch, then repeat impacted validation.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
 - [ ] Record the finite accepted result, settle #13013 and its original claim,
@@ -138,7 +143,43 @@ cross-runtime contract. The architecture-pattern principles of right-sized
 surfaces, cross-platform parity and truthful failure apply; this below-altitude
 correction does not revise a vision or create a new service/lifecycle owner.
 
+### Review refinement - required policy refs are not unrelated refs
+
+The initial implementation review exposed two incomplete assumptions. An
+explicit refspec can still apply matching configured refmaps, and the offline
+committed-config reader starts from the recorded remote-HEAD branch before
+hopping to a declared contribution branch. Narrowing creation to that
+contribution branch alone can leave a later policy declaration unseen.
+
+Suppress configured refmaps for explicit refreshes. Prepare the configured
+creation base and, when distinct and present, the existing reader's recorded
+remote-HEAD policy branch in one explicit-refspec fetch under the same
+authentication and network deadline. The policy bootstrap ref is a related
+input, not permission to refresh all ordinary refspecs. Reuse the existing
+offline branch reader and fetch implementation rather than change policy
+precedence, add network discovery, duplicate authentication or add a public
+API. Preserve warning/last-known fallback when preparation fails.
+
+Focused controls must cover alternate tracking destinations, a mirror mapping
+to an unchecked-out local branch, and a policy declaration changing from
+`dev` to `stable` while `dev` remains unchanged. Keep Git templates fixture-owned
+and assertions locale-independent. This refinement remains subject to the
+implementation PR's genuine review and required CI; the initial plan approval
+does not claim these newly exposed cases already passed.
+
 ## Journal
+
+### 2026-11-17 - Initial review and expanded fail-first controls
+
+- Review5933811209 against the initial implementation head reports five
+  blocking findings. The complete review and all inline comments were read.
+  The moved state module must join the actor-free source closure in addition
+  to updating the changed original source digest; current CI confirms that
+  missing import explicitly. Preserve exact test membership and budgets.
+- Expanded typed local-Git controls are staged against unchanged runtime
+  behavior. Local preparation again failed before collection, so no expanded
+  behavioral result is claimed. Use the supported disposable Windows source
+  transport for these negatives rather than alter host tools or containment.
 
 ### 2026-11-17 - Finite correction validated locally
 
