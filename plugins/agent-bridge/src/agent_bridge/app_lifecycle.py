@@ -57,7 +57,13 @@ async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -
         from .agent_registry import register_credential_sources
         from .http_provider_sources import register_http_credential_sources
 
-        ownership = observe_owner(app) if start_listener else None
+        try:
+            ownership = observe_owner(app) if start_listener else None
+        except RelayOwnershipLost:
+            if not getattr(app.state, "passive", False):
+                raise
+            start_listener = False
+            ownership = None
         builder = RelayBuilder()
         register_sources = register_credential_sources if start_listener else register_http_credential_sources
         await run_in_daemon_thread(register_sources, builder)
@@ -72,7 +78,7 @@ async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -
         with ownership.activation(app) if ownership is not None else nullcontext():
             relay_server = builder.build()
             try:
-                await relay_server.start()
+                await relay_server.start(reclaim=False)
                 from .relay_state import set_live_relay_port
                 set_live_relay_port(relay_server.port)
                 app.state.credential_relay = relay_server

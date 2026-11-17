@@ -944,6 +944,12 @@ Reselection or shutdown discards the prepared activation; failed publication
 closes the newly started listener before releasing the lease. Source discovery
 does not hold the routing lease.
 
+Bridge starts this listener with port reclamation disabled. An occupied fixed
+port remains unavailable; relay startup cannot evict an unconfirmed predecessor
+or its descendants as a side effect of binding. Before promotion, passive
+readiness still registers provider-backed HTTP credential sources and defers
+only the TCP listener, including for embedded callers retaining relay enablement.
+
 Any failure **before** the commit point rolls back: re-publish the old endpoint
 as active, undrain the old daemon, and terminate the freshly spawned passive. If
 the route was already flipped and the old daemon is gone, the orchestrator
