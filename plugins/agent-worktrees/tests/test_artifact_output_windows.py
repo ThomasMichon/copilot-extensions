@@ -2,11 +2,12 @@
 
 import os
 from pathlib import Path
+import sys
 from typing import Any, Callable
 
 import pytest
 
-from agent_worktrees import tracking
+from agent_worktrees import artifact_output, tracking
 from agent_worktrees.artifact_root import admit_root
 from test_artifact_output import Destination, destination as destination, produce
 from test_resource_producer import owner as owner
@@ -65,3 +66,27 @@ def test_native_output_accepts_reads_not_other_principal_writes(
         with pytest.raises(ValueError, match="unsafe access"):
             produce(destination)
         assert tracking.load_record(path).resources == [] and not Path(selection["destination"]).exists()
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Windows creation-time stat attributes")
+@pytest.mark.parametrize("field", ["st_ctime_ns", "st_mtime_ns"])
+def test_native_cross_probe_timestamp_meanings_preserve_real_change_checks(
+    destination: Destination, monkeypatch: pytest.MonkeyPatch, field: str,
+) -> None:
+    path, selection, _ = destination
+    root = Path(selection["root"])
+    original = Path.lstat
+    def observed(selected: Path) -> os.stat_result:
+        info = original(selected)
+        if selected.is_relative_to(root) and selected.name in {artifact_output.MARKER, "report.txt"}:
+            attributes = {name: getattr(info, name) for name in dir(info) if name.startswith("st_")}
+            attributes[field] += 100
+            return os.stat_result(tuple(info), attributes)
+        return info
+    monkeypatch.setattr(Path, "lstat", observed)
+    if field == "st_ctime_ns":
+        assert produce(destination)["phase"] == "delivered"
+    else:
+        with pytest.raises(ValueError, match="changed during verification"):
+            produce(destination)
+        assert tracking.load_record(path).resources[0].is_unsettled

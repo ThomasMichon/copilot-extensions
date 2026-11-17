@@ -10,6 +10,7 @@ from typing import Any, ContextManager
 import pytest
 import yaml
 
+from agent_procutil._daemon_instance_owner import mkdir_private
 from agent_worktrees import artifact_output as output, claim_providers, config as cfg, finalize, tracking, tracking_write
 from agent_worktrees import resource_producer
 from agent_worktrees.artifact_output_policy import resolve_user_output
@@ -106,7 +107,10 @@ def test_reservation_and_binding_precede_writable_return(
 def test_existing_destination_is_never_overwritten_or_adopted(destination: Destination) -> None:
     path, selection, _ = destination
     existing = Path(selection["destination"])
-    existing.mkdir(parents=True)
+    current = Path(selection["root"])
+    for member in selection["members"]:
+        current /= member
+        mkdir_private(current)
     (existing / "keep.txt").write_bytes(b"existing user content")
     with pytest.raises(ValueError, match="already exists"):
         produce(destination)

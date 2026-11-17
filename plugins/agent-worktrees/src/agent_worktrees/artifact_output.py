@@ -264,9 +264,17 @@ def _read_file(directory: AdmittedRoot, name: str) -> Iterator[int]:
             (directory.path / name).lstat() if os.name == "nt"
             else os.stat(name, dir_fd=directory.fd, follow_symlinks=False)
         )
-        def stamp(info: os.stat_result) -> tuple[int, int, int, int, int]:
-            return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
-        if stamp(before) != stamp(after) or stamp(after) != stamp(observed) or scratch._is_link(observed):
+        def stamp(info: os.stat_result, *, across_probes: bool = False) -> tuple[int, int, int, int, int]:
+            changed = info.st_ctime_ns
+            if across_probes and os.name == "nt":
+                # Windows fstat/lstat can give ctime different meanings.
+                changed = int(getattr(info, "st_birthtime_ns", changed))
+            return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, changed
+        if (
+            stamp(before) != stamp(after)
+            or stamp(after, across_probes=True) != stamp(observed, across_probes=True)
+            or scratch._is_link(observed)
+        ):
             raise ValueError("user-output file changed during verification")
         directory.verify()
     finally:
