@@ -12,9 +12,9 @@ repository-policy qualification layer.
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source worktree; sequential plan and implementation PRs
 - **Created:** 2026-11-16
-- **Status:** Active; reviewed plan merged, focused source implementation under validation
-- **Vision:** [Worktree identity and native mapping](../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity);
-  [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+- **Status:** Done for finite source scope; implementation #12974 merged, archive and native worktree/claim settlement retained in #12939
+- **Vision:** [Worktree identity and native mapping](../../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity);
+  [authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #12939
 - **Related owners:** #12427 / #12433 and #10212
 
@@ -95,11 +95,11 @@ installed-code patch or unknown-operation replay follows from this plan.
 - [x] Cache successful resolution; do not retain absence forever. Rediscover only confirmed executable disappearance before launch, not missing CWD, timeout or ambiguous creation.
 - [x] Build fresh per-child daemon environments with intended runtime overrides and existing credential/session scrubbing, without global environment mutation.
 - [x] Keep registration-model correction coordinated with its existing owner; do not extend Git-backed policy reconstruction to solve executable lookup or claim that PATH repair alone implements the native-mapping model.
-- [ ] Land focused implementation through required source checks, changefiles, review and CI; distinguish merge from promotion and installation.
+- [x] Land focused implementation through required source checks, changefiles, review and CI; distinguish merge from promotion and installation.
 
 ### Phase 3 - Source closeout
 
-- [ ] Record source/test results and remaining independently owned mapping/adoption gates, then archive this finite source effort through the normal flow.
+- [x] Record source/test results and remaining independently owned mapping/adoption gates, then archive this finite source effort through the normal flow.
 
 ## Validation Plan
 
@@ -108,8 +108,9 @@ installed-code patch or unknown-operation replay follows from this plan.
 - [x] A real child consumer exercises absolute Git invocation under a stale inherited PATH rather than testing only a resolver return value.
 - [x] An isolated native service fixture proves fresh environment plus preserved selectors and credential/session scrubbing, using its existing lifecycle/lease cleanup owner.
 - [x] Mapping acceptance distinguishes Git/Copilot reconstruction from copied machine/platform policy and preserves journals, claims and unknown operations; coordinate the existing registration tests rather than weakening them silently.
-- [ ] Record focused source gates and required PR CI separately from optional integration/native evidence, with honest platform limitations.
-- [ ] Confirm merged source and final source-worktree/claim settlement; report promotion, installation and live adoption separately.
+- [x] Record focused source gates and required PR CI separately from optional integration/native evidence, with honest platform limitations.
+- [x] Confirm merged source; report promotion, installation and live adoption separately.
+- [x] Deferred to `#12939`: Confirm final source-worktree/claim settlement after this archive change lands through its own review and required CI.
 
 ## Proposal
 
@@ -121,12 +122,54 @@ silently switching to another executable.
 
 Use the existing daemon lifecycle and cutover contracts. This changes neither
 endpoint/protocol semantics nor cancellation/retirement authority. Evaluate
-[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+[authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement)
 by incoming readiness and all current selections, preserving sessions/data
 and treating outgoing retirement independently. A synthetic fixture is not a
 production rollout.
 
 ## Journal
+
+### 2026-11-17 - Source completion and bounded closeout
+
+#12974 merged to `dev` at `2026-11-17T23:04:07Z`, squash
+`6c23b5e9c98a50c23f3c2e03c1c3410afb9b8516`. The accepted source head
+`9e45864446dd60f1c7c9f9ee47dfba8811a6c909` received Copilot approval
+`5948087440`, with no unresolved threads. Required CI `44192746900`
+passed admitted and whole-file strict type contracts, full source guards,
+exact-input unit evidence with positive production call coverage, and the
+required PR gate. Native `44192805343` passed Linux and Windows publication,
+actual-client and generation-handover controls; legacy monitor acceptance
+`44192733625` also passed on that exact head.
+
+The final combined contained Git, daemon and credential-isolation packet
+passed 148 tests with one explicit platform skip. All 31 actor-free
+composition controls remain admitted. The real leased Windows child now
+exercises a portable copy of the real GitHub CLI, production account-token
+acquisition and actual Git credential-helper lookup against a private
+synthetic account, with no server request or real credential access.
+Only the selected executable's anchored directory accompanies fresh OS PATH;
+the existing non-secret profile selectors and token/session exclusions remain.
+The fixture waits for its exact child before parsing its result, closing a
+created-but-unwritten-file race without enlarging its bounds.
+
+Earlier failed native attempts remain diagnostic evidence. The separately
+owned fixture correction landed through #13056; broader #12357 is not a
+remaining dependency. No accepted-flake exception, retrospective pass or
+competing MCP correction is claimed. The earlier local canonical typecheck
+dependency-preparation failure is retained; the final exact-head CI gate
+supplies its required canonical qualification.
+
+Unit and real-consumer tiers passed. The disposable native Linux/Windows
+workflow supplied available external-venue evidence. A fresh OS image and
+native macOS lane were unavailable, so neither is claimed; fresh fixture
+roots do not substitute for first-machine provisioning. This finite change
+does not install a runtime or add a new provisioning path.
+
+Existing mapping/registration work remains with #12433 and #10212. Normal
+promotion remains with #3336; installation and any live adoption require
+their own authorized owners. The current issue #12939 retains only this
+archive's publication and subsequent native worktree/claim settlement.
+Those post-publication effects are not claimed complete in this commit.
 
 ### 2026-11-17 - Composition and consumer follow-through
 
