@@ -43,9 +43,16 @@ def handle_discovery(
         if not confirmed.get("applied"):
             return confirmed
         replacement = {
-            **payload, "attached_clients": confirmed["attached_clients"],
-            "native_session_incarnation": payload["session_incarnation"], "panes": [],
+            field: payload[field] for field in (
+                "project", "worktree_id", "worktree_path", "mux_session",
+                "mux_bin", "session_incarnation",
+            )
         }
+        replacement.update({
+            "attached_clients": confirmed["attached_clients"],
+            "native_session_incarnation": payload["session_incarnation"], "panes": [],
+            "live": True,
+        })
         admitted: dict[str, Any] = registry.register_next(replacement, expected=incumbent)
         if not admitted.get("applied"):
             return admitted

@@ -254,6 +254,8 @@ owner after matching its session name, executable and worktree path and
 reconfirming the connected native target. Tombstones, foreign mappings, unknown
 observations and concurrent registry changes remain refusals. Ordinary discovery
 retains its incumbent guard; reconciliation does not retire any process or pane.
+Only identity fields enter that CAS registration; the registry allocates its
+next revision and fresh render state rather than accepting caller overrides.
 
 Expand the Manager writer before updating Worktrees' monitor. The unchanged
 request contract permits either older peer to remain installed during that

@@ -31,13 +31,22 @@ def test_real_legacy_admission_recovers_and_same_name_replacement_advances(
     ))
     # Ordinary discovery still retains its incumbent guard.
     assert mux_discovery.discover_mapping(registry, payload)["reason"] == "incumbent-mapping"
+    payload.update({
+        "mapping_revision": 9, "live": False,
+        "last_status_rendered_at": "2099-01-01T00:00:00Z",
+        "observed_at": "2099-01-01T00:00:00Z",
+        "panes": [{"pane_id": "%99", "role": "cli", "live": True}],
+    })
     compute = mux_daemon.build_compute(registry)
     admitted = compute(mux_discovery.KIND, payload)
     assert admitted["applied"] and admitted["entry"]["mapping_revision"] == 10
     assert admitted["entry"]["session_incarnation"] == "$7:100"
     current = registry.get("project", "one")
     assert current is not None and current["native_session_incarnation"] == "$7:100"
-    assert current["last_status_rendered_at"] is None
+    assert current["last_status_rendered_at"] is None and current["live"] is True
+    assert current["panes"] == [] and current["observed_at"] != payload["observed_at"]
+    for field in ("mapping_revision", "live", "last_status_rendered_at", "observed_at", "panes"):
+        payload.pop(field)
     payload["session_incarnation"] = "$8:200"
     replacement = compute(mux_discovery.KIND, payload)
     assert replacement["applied"] and replacement["entry"]["mapping_revision"] == 11
