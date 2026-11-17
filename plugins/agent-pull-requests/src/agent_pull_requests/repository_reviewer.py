@@ -110,16 +110,18 @@ def page(
             state="merged" if facts["merged"] else "closed-unmerged" if facts["pr_state"] == "closed" else "open",
             draft=facts["draft"], conflict=facts["mergeable"] is False,
         )
+        author = facts["author"]
+        author_known = isinstance(author, str) and bool(author.strip())
         # A cache refresh can observe a different base, but a review head alone
         # never supplies the reviewed base needed by attention.Handled.
         item = attention.project(
             selected, attention.Interest(
-                "maintainer", bool(facts["author"]) and facts["author"].casefold() != reviewer.casefold(),
+                "maintainer", author_known and author.casefold() != reviewer.casefold(),
                 consumer,
             ),
             now=now, max_age_seconds=max_age_seconds, review_activity=review,
         )
-        if not facts["author"]:
+        if not author_known:
             item = replace(item, status="unavailable", reasons=("author-unavailable",))
         if item.status == "unavailable":
             result["unavailable"].append({"pr": number, "reason": item.reasons[0]})

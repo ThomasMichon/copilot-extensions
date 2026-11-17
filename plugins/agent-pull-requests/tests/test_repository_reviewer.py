@@ -234,6 +234,9 @@ def test_refresh_restart_candidate_and_conflict_keep_their_actual_cause_ages(tmp
     ({"draft": True}, None, None),
     ({"pr_state": "closed", "merged": True}, None, None),
     ({"author": "reviewer"}, None, None),
+    ({"author": ""}, None, "author-unavailable"),
+    ({"author": " \t"}, None, "author-unavailable"),
+    ({"author": " \t", "mergeable": False}, None, "author-unavailable"),
     ({"reviews_complete": False, "mergeable": False}, "rebase", None),
 ])
 def test_only_qualified_review_causes_become_actions(

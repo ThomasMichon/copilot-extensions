@@ -81,6 +81,9 @@ actors make the review evidence unavailable; actorless draft/request records
 remain non-verdicts. A review matching
 the current head alone does not establish its reviewed base: that result is
 `reviewed-base-unknown`, not fabricated handled feedback.
+An absent, empty or whitespace-only author remains `author-unavailable`,
+including for author-owned rebase recommendations; it cannot establish that the
+selected reviewer is a different actor.
 
 The native body-only Gitea reader currently leaves `reviews_complete` unknown
 because hidden pending drafts can create empty intermediate pages.
