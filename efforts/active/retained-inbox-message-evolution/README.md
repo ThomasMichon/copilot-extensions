@@ -17,10 +17,10 @@ focused qualification, required CI/review and ordinary accepted release pass.
 **Finalization criterion:** complete all Plan and Validation Plan items, verify
 released source/artifact identity and settle only this source workspace's claims.
 Installed rollout and production qualification are excluded.
-**Now:** qualifying the review's expired-history fix with the expanded 688-case
-portfolio. Focused API/extension and strict typing pass; complete prior 681-case
-closed-Core capture is retained. Current full capture/replay, review, merge and
-accepted release remain open.
+**Now:** driving the qualified implementation PR through current required CI,
+review and managed merge. All 688 cases passed final capture and independent
+no-write replay; the contract guard and privacy audit pass. Accepted release
+remains open after the PR gate.
 **Return:** finish Phase 2 against the reviewed intent, qualify the actual
 consumer and obtain accepted release. Installed rollout remains excluded.
 
@@ -221,3 +221,11 @@ Validate the stable correlated envelope before interpreting payloads.
   verification allowed only the exact SDK spelling updates in owned VM/docs.
   The six actual SDK-facade/extension controls pass. Final combined-source
   declarations are prepared; complete current execution/replay remains open.
+- Final SDK-compatible source passed every one of the 688 cases in both the
+  complete write capture and a new independent full no-write replay. Both
+  stayed within unchanged finite limits. The contract guard passes two contracts
+  and 1,148 fixtures; all 225 generated outputs passed the privacy audit.
+  Copilot approved the actual source with no open findings; the expiry thread
+  is resolved. Required remote CI must observe the published genuine evidence.
+  Per the current work direction, PR stewardship/merge takes precedence over
+  any new source phase. Installed rollout remains excluded.
