@@ -118,6 +118,7 @@ def update(root: Path, *, repo: str, ref: str, dry_run: bool) -> SelfUpdateResul
                 raise ValueError("Manager footprint differs from its independent source selection")
             application = application_footprints.select_generation(
                 application, previous, qualify=self_install._expected_frontdoor_contents,
+                deadline=deadline,
             )
             version = application.version
             if dry_run:

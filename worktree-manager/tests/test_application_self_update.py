@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+import hashlib
 import json
 import importlib
 import os
@@ -25,6 +26,51 @@ from worktree_manager import runtime_source as acquisition
 from worktree_manager import self_install, source_config
 from worktree_manager.runtime_source import ResolvedSource, SourceAcquisitionError
 from worktree_manager.runtime_source_config import RuntimeSource
+
+
+def _application_declaration(
+    commit: str, tree: str, *, profile: str = "fixture",
+) -> dict[str, Any]:
+    """Synthetic constructor facts, not wheel bytes or admitted profile evidence."""
+    installer = self_install._runtime_installer()
+    sources = installer.runtime_source
+    identity = sources.SourceIdentity(
+        "worktree-manager", "2.0.0", commit, tree, "c" * 64,
+        sources.runtime_version("2.0.0", commit, "c" * 64),
+    )
+    wheel = {
+        "version": "2.0.0", "filename": "fixture_manager-2.0.0-py3-none-any.whl",
+        "sha256": "sha256:" + "d" * 64,
+    }
+    binding = {
+        "component": "worktree-manager", "approval_source": profile,
+        "release": {"identity": "source:" + commit, "sha256": "sha256:" + "c" * 64},
+        "wheels": [{"name": "fixture-manager", **wheel}],
+    }
+    receipt: dict[str, Any] = {
+        "construction": "closed-wheels", "binding": binding,
+        "lock_id": "sha256:" + hashlib.sha256(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")).encode("ascii"),
+        ).hexdigest(),
+        "distributions": {"fixture-manager": wheel},
+    }
+    version = identity.runtime_version + ".profile." + receipt["lock_id"][7:23]
+    wheels = installer.engine.WheelReuseInputs(
+        version, json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+        time.monotonic() + 30,
+    )
+    return {
+        "name": "worktree-manager", "commands": ["worktree-manager"],
+        "module": "worktree_manager", "root_environment": "WORKTREE_MANAGER_ROOT",
+        "default_directory": ".worktree-manager", "setup": [], "start": [],
+        "construction": {
+            "identity": sources.manifest_fields(identity), "runtime_version": version,
+            "source_hash": "e" * 64,
+            "payload_hash": installer.engine._wheel_construction_hash("e" * 64, wheels),
+            "wheel_inputs": receipt, "extras": [], "local_packages": ["fixture-manager"],
+            "excluded_packages": [],
+        },
+    }
 
 
 @pytest.mark.parametrize("phase", [
@@ -126,10 +172,16 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
     (root / "current-version").write_text("1")
     monkeypatch.setattr("worktree_manager.runtime_application_update.shutil.which", lambda _: "git")
     monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        "worktree_manager.runtime_application_inputs.provider_root",
+        lambda: Path(__file__).resolve().parents[2],
+    )
     monkeypatch.setattr(update, "preparer", lambda: tmp_path / "trusted-tool")
     monkeypatch.setattr("worktree_manager.runtime_application_update.tempfile.gettempdir", lambda: str(tmp_path))
     source = RuntimeSource("dev", str(tmp_path / "upstream"), allow_dev=True)
     commit, tree = "a" * 40, "b" * 40
+    declaration = _application_declaration(commit, tree)
+    version = declaration["construction"]["runtime_version"]
     workspace: list[Path] = []
     prepared_inputs: list[Path] = []
 
@@ -144,17 +196,9 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
         (app / "bin").mkdir(parents=True)
         (footprint / "footprint.json").write_text(json.dumps({
             "schema": "copilot-extensions.application-footprint", "version": 1,
-            "apps": [{"name": "worktree-manager", "version": "2", "dependencies": []}],
+            "apps": [{"name": "worktree-manager", "version": version, "dependencies": []}],
         }))
-        (app / "application.json").write_text(json.dumps({
-            "name": "worktree-manager", "commands": ["worktree-manager"],
-            "module": "worktree_manager", "default_directory": ".worktree-manager",
-            "setup": [], "start": [],
-            "root_environment": "WORKTREE_MANAGER_ROOT",
-            "construction": {"runtime_version": "2", "identity": {"runtime_source": {
-                "source_commit": commit, "source_tree": tree,
-            }}},
-        }))
+        (app / "application.json").write_text(json.dumps(declaration))
         for name in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
             (app / name).write_text("# fixture\n")
         shutil.copyfile(
@@ -170,14 +214,14 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
         assert apps[0].root == root
         if fail_setup:
             raise subprocess.CalledProcessError(7, ["fixture-setup"])
-        (root / "current-version").write_text("2")
+        (root / "current-version").write_text(version)
 
     monkeypatch.setattr(update, "acquire", acquire)
     monkeypatch.setattr(update, "prepare_footprint", prepare)
     monkeypatch.setattr(footprints, "install", install)
     result = update.update(root, repo=source.repo, ref="dev", dry_run=False)
     assert result.action == ("error" if fail_setup else "updated")
-    assert (root / "current-version").read_text() == ("1" if fail_setup else "2")
+    assert (root / "current-version").read_text() == ("1" if fail_setup else version)
     assert workspace and not workspace[0].exists()
     assert prepared_inputs and not prepared_inputs[0].exists()
 
@@ -189,26 +233,27 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
     "frontdoors", "conflict", "incoming", "incoming-module", "incoming-helper",
     "incoming-unreadable", "incoming-command-name", "incoming-environment-name",
     "incoming-runtime-version", "incoming-default-directory", "indirect",
+    "construction-field", "source-field", "receipt-field", "package-list", "payload-hash",
+    "incoming-construction-field", "incoming-source-field", "incoming-receipt-field",
+    "incoming-package-list", "incoming-payload-hash", "source-conflict", "profile-conflict",
 ])
 def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
 ) -> None:
+    monkeypatch.setattr(
+        "worktree_manager.runtime_application_inputs.provider_root",
+        lambda: Path(__file__).resolve().parents[2],
+    )
     root = tmp_path / "worktree-manager"
     footprint = tmp_path / "prepared"
     app = footprint / "apps" / "worktree-manager"
     (app / "bin").mkdir(parents=True)
     commit, tree = "a" * 40, "b" * 40
-    declaration = {
-        "name": "worktree-manager", "commands": ["worktree-manager"],
-        "module": "worktree_manager", "root_environment": "WORKTREE_MANAGER_ROOT",
-        "default_directory": ".worktree-manager", "setup": [], "start": [],
-        "construction": {"runtime_version": "2", "identity": {"runtime_source": {
-            "source_commit": commit, "source_tree": tree,
-        }}},
-    }
+    declaration = _application_declaration(commit, tree)
+    version = declaration["construction"]["runtime_version"]
     (footprint / "footprint.json").write_text(json.dumps({
         "schema": "copilot-extensions.application-footprint", "version": 1,
-        "apps": [{"name": "worktree-manager", "version": "2", "dependencies": []}],
+        "apps": [{"name": "worktree-manager", "version": version, "dependencies": []}],
     }), encoding="utf-8")
     (app / "application.json").write_text(json.dumps(declaration), encoding="utf-8")
     for name in ("pyproject.toml", "uv.lock"):
@@ -230,9 +275,9 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         Path(__file__).resolve().parents[2] / "libs" / "installer-engine"
         / "runtime_application_binstubs.py", app / "runtime_application_binstubs.py",
     )
-    old = root / "versions" / "2"
+    old = root / "versions" / version
     shutil.copytree(app, old)
-    (root / "current-version").write_text("2\n", encoding="utf-8")
+    (root / "current-version").write_text(version + "\n", encoding="utf-8")
     (root / "durable-state").write_bytes(b"preserved")
     metadata = old / "application.json"
     if damage == "missing":
@@ -261,6 +306,29 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         metadata.write_bytes(b"x" * 65537)
     elif damage == "conflict":
         metadata.write_text(json.dumps({**declaration, "module": "other_owner"}), encoding="utf-8")
+    elif damage in {"source-conflict", "profile-conflict"}:
+        metadata.write_text(json.dumps(_application_declaration(
+            "f" * 40 if damage == "source-conflict" else commit, tree,
+            profile="other" if damage == "profile-conflict" else "fixture",
+        )), encoding="utf-8")
+    elif damage.removeprefix("incoming-") in {
+        "construction-field", "source-field", "receipt-field", "package-list", "payload-hash",
+    }:
+        record = json.loads(json.dumps(declaration))
+        construction = record["construction"]
+        field = damage.removeprefix("incoming-")
+        if field == "construction-field":
+            del construction["source_hash"]
+        elif field == "source-field":
+            del construction["identity"]["runtime_source"]["assembly_hash"]
+        elif field == "receipt-field":
+            del construction["wheel_inputs"]["distributions"]
+        elif field == "package-list":
+            construction["local_packages"] = [{}]
+        else:
+            construction["payload_hash"] = "0" * 64
+        target = app / "application.json" if damage.startswith("incoming-") else metadata
+        target.write_text(json.dumps(record), encoding="utf-8")
     elif damage == "incoming-module":
         (app / "application.json").write_text(json.dumps({
             **declaration, "module": "not a module",
@@ -320,18 +388,20 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     if damage in {
         "conflict", "incoming", "incoming-module", "incoming-helper", "incoming-unreadable", "indirect",
         "incoming-command-name", "incoming-environment-name", "incoming-runtime-version",
-        "incoming-default-directory",
+        "incoming-default-directory", "incoming-construction-field", "incoming-source-field",
+        "incoming-receipt-field", "incoming-package-list", "incoming-payload-hash",
+        "source-conflict", "profile-conflict",
     }:
         assert result.action == "error"
-        assert (root / "current-version").read_text(encoding="utf-8").strip() == "2"
+        assert (root / "current-version").read_text(encoding="utf-8").strip() == version
         assert list((root / "versions").iterdir()) == [old]
     elif damage == "frontdoors":
         assert result.action == "already-current", result.reason
-        assert result.version == "2"
+        assert result.version == version
         assert {path for path in (root / "versions").iterdir() if not path.name.startswith(".")} == {old}
     else:
         assert result.action == "updated", result.reason
-        assert result.version is not None and result.version.startswith("2.repair.")
+        assert result.version is not None and result.version.startswith(version + ".repair.")
         repaired = root / "versions" / result.version
         assert (repaired / "application.json").read_bytes() == (app / "application.json").read_bytes()
         repeated = self_install.self_update(root=root)
@@ -481,11 +551,21 @@ def test_packaged_footprint_producer_composes_without_checkout_tool_imports(tmp_
         "assert record['composition']['main_seed']==sys.argv[3]; "
         "assert (output/'source/worktree-manager/pyproject.toml').is_file(); "
         "assert 'sample.cli' in (output/'source/plugins/sample/bin/sample').read_text(); "
+        "import runtime_application_install as owner,installer_engine as engine,versioned_runtime as runtime; "
+        "assert Path(owner.__file__).is_relative_to(Path(sys.argv[1]).parent.parent); "
+        "application=json.loads(sys.argv[5]); "
+        "facts=owner._construction_metadata(application,runtime,engine,time.monotonic()+30); "
+        "slot=output/'versions'/facts.inputs['runtime_version']; slot.mkdir(parents=True); "
+        "(slot/'application.json').write_text(json.dumps(application)); "
+        "(slot/'runtime-source.json').write_text(json.dumps(facts.source)); "
+        "assert owner._construction_inputs(slot,application,runtime,engine,"
+        "time.monotonic()+30).receipt==facts.receipt; "
         "print(json.dumps({'composed':True}))"
     )
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", code, str(producer),
-         str(repository), commit, str(tmp_path / "composed")],
+         str(repository), commit, str(tmp_path / "composed"),
+         json.dumps(_application_declaration("a" * 40, "b" * 40))],
         capture_output=True, text=True, timeout=90, cwd=tmp_path,
         **no_window_kwargs(),
     )

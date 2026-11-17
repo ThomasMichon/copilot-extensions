@@ -130,7 +130,11 @@ metadata or an unusable slot-local launcher renderer in a distinct
 repeat reuses the selected repair generation; missing/edited global or neutral
 commands alone do not allocate another generation. Incoming
 declarations remain strict, and a valid but conflicting installed declaration
-is not treated as corruption. Missing metadata alone does not redirect an
+is not treated as corruption. Conflict classification uses the constructor's
+Source/profile metadata checks without reading old construction artifacts or
+requiring the installed source/profile to match the incoming selection.
+Incomplete or inconsistent construction metadata is a repair gap, not a conflict.
+Missing metadata alone does not redirect an
 application installation or its configuration to the legacy installer/root.
 
 ## Explicit Sync progress

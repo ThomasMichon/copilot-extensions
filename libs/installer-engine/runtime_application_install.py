@@ -194,9 +194,10 @@ def _resources(slot: Path) -> tuple[ModuleType, ModuleType]:
     return runtime, engine
 
 
-def _construction_inputs(
-    slot: Path, record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
+def _construction_metadata(
+    record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
 ) -> SimpleNamespace:
+    """Validate claimed Source/profile facts without reading or qualifying a slot."""
     inputs = record["construction"]
     fields = {
         "identity", "runtime_version", "payload_hash", "source_hash", "wheel_inputs",
@@ -204,17 +205,14 @@ def _construction_inputs(
     }
     if not isinstance(inputs, dict) or set(inputs) != fields:
         raise ValueError("regular install requires the actual Source/profile construction inputs")
-    source_bytes = _read(slot / "runtime-source.json")
-    declaration = _read(slot / "application.json", limit=4 << 20)
     if not isinstance(inputs["identity"], dict):
         raise ValueError("application construction identity must be an object")
     source = inputs["identity"].get("runtime_source")
     source_owner = runtime._runtime_component("versioned_runtime_source")
     identity = source_owner.parse_source_identity(source)
+    source = cast(dict[str, Any], source)
     if (
-        source_bytes is None or json.loads(source_bytes) != source
-        or declaration is None or json.loads(declaration) != record
-        or inputs["identity"].get("runtime_version") != source["runtime_version"]
+        inputs["identity"].get("runtime_version") != source["runtime_version"]
         or any(
             not isinstance(inputs[key], str)
             or re.fullmatch(r"[0-9a-f]{64}", inputs[key]) is None
@@ -222,14 +220,19 @@ def _construction_inputs(
         )
         or any(
             not isinstance(inputs[key], list)
+            or any(
+                not isinstance(name, str)
+                or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                for name in inputs[key]
+            )
             or len(set(inputs[key])) != len(inputs[key])
-            or any(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None for name in inputs[key])
             for key in ("extras", "local_packages", "excluded_packages")
         )
     ):
         raise ValueError("application construction inputs differ from their Source identity")
     wheels = engine.WheelReuseInputs(
-        slot.name, json.dumps(inputs["wheel_inputs"], sort_keys=True, separators=(",", ":")),
+        inputs["runtime_version"],
+        json.dumps(inputs["wheel_inputs"], sort_keys=True, separators=(",", ":")),
         deadline,
     )
     wheels.verify()
@@ -237,7 +240,6 @@ def _construction_inputs(
     generation = source["runtime_version"] + ".profile." + receipt["lock_id"][7:23]
     if (
         inputs["runtime_version"] != generation
-        or re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name) is None
         or engine._wheel_construction_hash(inputs["source_hash"], wheels) != inputs["payload_hash"]
         or receipt["binding"].get("release") != {
             "identity": "source:" + source["source_commit"],
@@ -247,7 +249,28 @@ def _construction_inputs(
         or not set(inputs["local_packages"]) <= receipt["distributions"].keys()
         or set(inputs["excluded_packages"]) & receipt["distributions"].keys()
     ):
-        raise ValueError("application source/profile selection differs from its version slot")
+        raise ValueError("application Source/profile construction metadata is inconsistent")
+    return SimpleNamespace(
+        inputs=inputs, identity=identity, source=source, wheels=wheels, receipt=receipt,
+    )
+
+
+def _construction_inputs(
+    slot: Path, record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
+) -> SimpleNamespace:
+    association = _construction_metadata(record, runtime, engine, deadline)
+    inputs, source = association.inputs, association.source
+    wheels, receipt = association.wheels, association.receipt
+    source_bytes = _read(slot / "runtime-source.json")
+    declaration = _read(slot / "application.json", limit=4 << 20)
+    if (
+        source_bytes is None or json.loads(source_bytes) != source
+        or declaration is None or json.loads(declaration) != record
+        or re.fullmatch(
+            re.escape(inputs["runtime_version"]) + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name,
+        ) is None
+    ):
+        raise ValueError("application construction inputs differ from their Source identity")
     origins = {
         name: (slot / "wheels" / filename).as_uri()
         for name, _version, filename, _digest in wheels.distributions
@@ -259,7 +282,7 @@ def _construction_inputs(
         **({"extras": inputs["extras"]} if inputs["extras"] else {}),
     }
     return SimpleNamespace(
-        inputs=inputs, identity=identity, source=source, source_bytes=source_bytes,
+        inputs=inputs, identity=association.identity, source=source, source_bytes=source_bytes,
         declaration=declaration, wheels=wheels, receipt=receipt, origins=origins, proof=proof,
     )
 

@@ -202,13 +202,25 @@ def _verify_tree(path: Path, application: Application) -> None:
 def select_generation(
     application: Application, current: str | None, *,
     qualify: Callable[[Path], object] | None = None,
+    deadline: float | None = None,
 ) -> Application:
     """Reuse a qualified selection or allocate a distinct slot for damaged inputs."""
     from .self_install import _runtime_installer
+    from .runtime_application_inputs import provider_root
 
     _verify_copy(application.source, application)
-    _runtime_installer()
-    validate = importlib.import_module("runtime_application_install")._validate_application
+    installer = _runtime_installer()
+    owner = importlib.import_module("runtime_application_install")._load(
+        provider_root() / "libs" / "installer-engine" / "runtime_application_install.py",
+        "_manager_application_construction",
+    )
+    deadline = time.monotonic() + 180 if deadline is None else deadline
+
+    def validate(record: dict[str, Any]) -> None:
+        owner._validate_application(record)
+        _validate_declaration(record)
+        owner._construction_metadata(record, installer.runtime, installer.engine, deadline)
+
     validate(json.loads(application.declaration, object_pairs_hook=_unique))
     if qualify is not None:
         try:
@@ -238,7 +250,6 @@ def select_generation(
         try:
             record = json.loads(installed, object_pairs_hook=_unique)
             validate(record)
-            _validate_declaration(record)
         except (ValueError, UnicodeError):
             pass
         else:
