@@ -185,3 +185,17 @@ def test_publication_cli_keeps_callback_separator_and_refuses_stage(
         application.main(["--global-bin", str(selected), "--stage"])
     assert error.value.code == 2 and len(calls) == 1
     assert not selected.exists()
+
+
+@pytest.mark.parametrize("generation", ["2.0", "1.0"])
+def test_publication_directory_preserves_current_and_retained_slots(
+    tmp_path: Path, generation: str,
+) -> None:
+    directory = tmp_path / "versions" / generation
+    directory.mkdir(parents=True)
+    launcher = directory / "fixture-app.sh"
+    launcher.write_bytes(b"owned slot-local launcher\n")
+    with pytest.raises(ValueError, match="cannot overlap runtime version slots"):
+        application.publication_directory(directory, root=tmp_path)
+    assert launcher.read_bytes() == b"owned slot-local launcher\n"
+    assert application.publication_directory(tmp_path / "commands", root=tmp_path) == tmp_path / "commands"

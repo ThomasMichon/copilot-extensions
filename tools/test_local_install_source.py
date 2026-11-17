@@ -3370,7 +3370,7 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
     return fixture
 
 
-@pytest.mark.parametrize("receiver", ["current", "old", "malformed", "rolled-back"])
+@pytest.mark.parametrize("receiver", ["current", "old", "malformed", "rolled-back", "slot-directory"])
 def test_application_adapter_selects_actual_helper_before_construction_and_dispatch(
     application_adapter: SimpleNamespace, receiver: str,
 ) -> None:
@@ -3384,7 +3384,7 @@ def test_application_adapter_selects_actual_helper_before_construction_and_dispa
         else "pass\n" if receiver == "old" else capable,
     )
     (fixture.old / "install.py").write_text("pass\n" if receiver == "rolled-back" else capable)
-    selected = fixture.root / "isolated commands"
+    selected = fixture.old if receiver == "slot-directory" else fixture.root / "isolated commands"
     if receiver == "current":
         assert Path(fixture.install(global_bin=selected, arguments=("--fixture",))["slot"]) == fixture.old
         command = fixture.argv[fixture.argv.index(str(fixture.old / "install.py")):]
@@ -3392,7 +3392,11 @@ def test_application_adapter_selects_actual_helper_before_construction_and_dispa
             str(fixture.old / "install.py"), "--global-bin", str(selected), "--", "--fixture",
         ]
     else:
-        with pytest.raises(ValueError, match="selected application helper lacks global-bin/v1"):
+        message = (
+            "cannot overlap runtime version slots" if receiver == "slot-directory"
+            else "selected application helper lacks global-bin/v1"
+        )
+        with pytest.raises(ValueError, match=message):
             fixture.install(global_bin=selected)
         assert fixture.children == []
         assert fixture.versions == ([fixture.old.name] if receiver == "rolled-back" else [])

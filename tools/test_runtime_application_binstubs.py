@@ -286,7 +286,9 @@ def test_install_cli_selects_publication_without_changing_callbacks_or_default_c
     assert (fixture.slot / "install-success.json").is_file()
 
 
-@pytest.mark.parametrize("invalid", ["relative", "control", "file", "stage", "manager"])
+@pytest.mark.parametrize("invalid", [
+    "relative", "control", "file", "stage", "manager", "current-slot", "retained-slot",
+])
 def test_explicit_publication_refuses_before_materialization_or_callbacks(
     install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, invalid: str,
 ) -> None:
@@ -299,6 +301,10 @@ def test_explicit_publication_refuses_before_materialization_or_callbacks(
     elif invalid == "file":
         selected.write_text("not a directory")
         selected /= "commands"
+    elif invalid in {"current-slot", "retained-slot"}:
+        selected = fixture.slot if invalid == "current-slot" else fixture.root / "versions" / "1.0"
+        selected.mkdir(exist_ok=True)
+        (selected / "fixture-app.sh").write_bytes(b"owned slot-local launcher\n")
     if invalid == "manager":
         fixture.record["name"] = "worktree-manager"
         fixture.record["commands"] = ["worktree-manager"]
@@ -317,6 +323,8 @@ def test_explicit_publication_refuses_before_materialization_or_callbacks(
         )
     assert not (fixture.slot / "install-success.json").exists()
     assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    if invalid in {"current-slot", "retained-slot"}:
+        assert (selected / "fixture-app.sh").read_bytes() == b"owned slot-local launcher\n"
 
 
 def test_stage_cli_rejects_publication_selection_before_install(monkeypatch: pytest.MonkeyPatch) -> None:

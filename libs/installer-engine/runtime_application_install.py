@@ -24,7 +24,7 @@ _PUBLICATION_ALLOWANCE = 60
 APPLICATION_INSTALL_CAPABILITIES = ("global-bin/v1",)
 
 
-def publication_directory(directory: Path) -> Path:
+def publication_directory(directory: Path, *, root: Path | None = None) -> Path:
     """Validate an explicit publication selection without creating its ancestry."""
     if (
         not directory.is_absolute() or ".." in directory.parts
@@ -38,6 +38,8 @@ def publication_directory(directory: Path) -> Path:
             continue
         if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("application command directory must have ordinary directory ancestry")
+    if root is not None and directory.resolve().is_relative_to((root / "versions").resolve()):
+        raise ValueError("application command directory cannot overlap runtime version slots")
     return directory
 
 
@@ -619,11 +621,11 @@ def install(
     arguments: tuple[str, ...] = (),
 ) -> dict[str, str]:
     """UV has synchronized the environment before this entry runs."""
-    if global_bin is not None:
-        if stage:
-            raise ValueError("application command directory cannot be selected with --stage")
-        publication_directory(global_bin)
+    if global_bin is not None and stage:
+        raise ValueError("application command directory cannot be selected with --stage")
     slot = slot.resolve()
+    if global_bin is not None:
+        publication_directory(global_bin, root=slot.parent.parent)
     if (
         not (slot / ".venv" / "pyvenv.cfg").is_file()
         or not Path(sys.prefix).samefile(slot / ".venv")

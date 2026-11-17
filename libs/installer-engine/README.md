@@ -108,7 +108,9 @@ privilege, service behavior or a persistent update policy.
 Both entrypoints retain the existing publication/target leases, all declared
 commands, current-publication checks, rollback and unknown-startup custody.
 Explicit selections require ordinary directory ancestry and cannot accompany
-`--stage`. Manager retains its existing owned command directory. Callback
+`--stage` or overlap the addressed runtime's `versions` subtree: those paths
+contain current and retained slot-local launchers, not global command targets.
+Manager retains its existing owned command directory. Callback
 arguments remain after `--` and are not installer options.
 
 The additive `global-bin/v1` capability is a literal

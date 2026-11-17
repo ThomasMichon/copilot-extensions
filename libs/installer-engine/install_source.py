@@ -466,7 +466,7 @@ def install_application(
     )
 
     if global_bin is not None:
-        publication_directory(global_bin)
+        publication_directory(global_bin, root=root)
         require_publication_selection(_member(snapshot, preview.project["application"]) / "install.py")
     _validate_application(declaration)
     install_timeout = application_install_timeout(declaration)

@@ -5308,7 +5308,9 @@
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_selection_reads_actual_helper_without_executing[current]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_selection_reads_actual_helper_without_executing[old]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_selection_reads_actual_helper_without_executing[malformed]",
-        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_cli_keeps_callback_separator_and_refuses_stage"
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_cli_keeps_callback_separator_and_refuses_stage",
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[2.0]",
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[1.0]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -6360,7 +6362,7 @@
         "worktree-manager/src/worktree_manager/bootstrap_activation.py": "6c5e49f8fb6639e0afa3b5bd6d30a4b14c42f606e5121b3b79fe73135755bac5",
         "tools/promotion_unit_tests/test_manager_activation.py": "047b6135b5882a9fb1eec41d78f331b1ed212fa4d87da07fca8902c3c07a81f5",
         "fleet-manager/setup.py": "85af516449571a6e0d3208e35fcca48d527fbfed84da5f29cce8c5c5dae93e0a",
-        "libs/installer-engine/install_source.py": "405c4191f0e39e34bb7c7af0ceffc2af00cbcd8e86baf9fdd2364665349c6abb",
+        "libs/installer-engine/install_source.py": "9885908a32e6ebe7375b1f90769ef4a041a8a7dfa2bb4b56d6e0c383abaee99d",
         "libs/installer-engine/installer_driver.py": "d63882f5024114f5ab6623b95fbdb45b7322dfbffd3546ee24e1de8bd93ca98a",
         "libs/installer-engine/installer_engine_commands.py": "5d8028b9286f61480b0d19d77b82a4a932fa7ea8193635a728170afc4f61d4ed",
         "libs/installer-engine/installer_engine_stop.py": "5a563fe15a205d7168871a8e9470a286c1281bbeead93acb486bda259eaaee16",
@@ -6370,7 +6372,7 @@
         "libs/installer-engine/installer_engine_uninstall_windows.py": "93b5d042662d4bd35130f81adfe178c5f512095604fbc52dc1a1e5c2d091dc24",
         "libs/installer-engine/installer_instance_reconcile.py": "fad8539d4b6d49cd055fb04f65a3dae8001e721ecd73af555586042027b4d9a2",
         "libs/installer-engine/runtime_application_binstubs.py": "93dcc1639d9bed69982591ac6263092155becb96a6acc0e65618ab646413c752",
-        "libs/installer-engine/runtime_application_install.py": "0d83be6f52895fd85ae8465a7cac85ba57726e078ff94b88cdea2e602ba382ac",
+        "libs/installer-engine/runtime_application_install.py": "7b06360278cf93bec001fd10a8238fb7a51632bdb3e0d6d2473a1e39dd6c1d99",
         "libs/installer-engine/runtime_launcher.py": "0cd1ac9fd75cff85f605345ec958fabc70f59796343b798aceec253ecc0b7cde",
         "libs/versioned-runtime/versioned_runtime_readiness.py": "09872cbf02a3f452be9e22384652563a152621ab8d6744b6ae192dce22a9185d",
         "plugins/agent-worktrees/setup.py": "a84c08cc197148887532d1fc1100ae56ff1e1079860139fcd5655e7089f0241f",
@@ -6470,7 +6472,7 @@
         "tools/typecheck-projects.json": "38a05de57b269cd654a304fb3eddfbc6c739725de4566cb5c6a4e11d65b2db63",
         "tools/promotion_unit_tests/test_typecheck_new_code.py": "4615dd0831e531913f97835cf0cab7bcc48435e7804949d62cc8684047b08921",
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
-        "tools/promotion_unit_tests/test_application_callback_deadlines.py": "3be1e6a01fb5269b32f2c8d6e0280fd0a37a1d803dfadb32f407c66b9a31ea4b",
+        "tools/promotion_unit_tests/test_application_callback_deadlines.py": "bb82a11398538564c98a99ffac7c27c8b25ffd0a64ce10f7438ecdf5a6ef676b",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268",
         "plugins/agent-worktrees/src/agent_worktrees/monitor_projection_cache.py": "96a5d521df3272df471512a2d1a432d160d36f701f2fde53e08522fc5bc9760f",
         "plugins/agent-worktrees/src/agent_worktrees/mux_state_projection.py": "e425c8a594009ab0edb1cb1965b5d8a2c769b74cac0c68880657b311249cafab",
