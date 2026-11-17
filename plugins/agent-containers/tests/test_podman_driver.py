@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -17,7 +18,18 @@ IMAGE_ID = "sha256:" + "a" * 64
 MEMBER_ID = "b" * 64
 
 
-def request(**changes):
+class NativeDocument(TypedDict):
+    Id: str
+    Name: str
+    Image: str
+    State: dict[str, str]
+    Config: dict[str, dict[str, str]]
+
+
+EngineCalls = list[tuple[list[str], str | None, float]]
+
+
+def request(**changes: object) -> dict[str, object]:
     return {
         "protocolVersion": 1, "driver": "podman", "fleet": "example",
         "driverOptions": {"image": "configured-alias"},
@@ -25,7 +37,9 @@ def request(**changes):
     }
 
 
-def document(*, fleet="example", driver="podman", member_id=MEMBER_ID):
+def document(
+    *, fleet: str = "example", driver: str = "podman", member_id: str = MEMBER_ID,
+) -> NativeDocument:
     return {
         "Id": member_id, "Name": "example-1", "Image": IMAGE_ID,
         "State": {"Status": "running"},
@@ -36,10 +50,13 @@ def document(*, fleet="example", driver="podman", member_id=MEMBER_ID):
 
 
 @pytest.fixture
-def engine(monkeypatch):
-    calls = []
+def engine(monkeypatch: pytest.MonkeyPatch) -> EngineCalls:
+    calls: EngineCalls = []
 
-    def run(argv, *, timeout, input_text=None, **kwargs):
+    def run(
+        argv: list[str], *, timeout: float, input_text: str | None = None,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
         calls.append((argv, input_text, timeout))
         if "exists" in argv:
             return subprocess.CompletedProcess(argv, 1, "", "")
@@ -53,10 +70,11 @@ def engine(monkeypatch):
 
     monkeypatch.setattr(podman_driver, "run_caller_owned", run)
     monkeypatch.setattr(podman_driver.shutil, "which", lambda name: name)
+    monkeypatch.setattr(podman_driver, "_resolve_executable", lambda name: name)
     return calls
 
 
-def provision(driver):
+def provision(driver: podman_driver.PodmanDriver) -> podman_driver.DriverResponse:
     return driver.handle("provision", {
         "member": {"name": "example-1", "fleet": "example", "instance": "example-1"},
         "workspaceFolder": "/workspaces/example", "execUser": "vscode",
@@ -64,7 +82,7 @@ def provision(driver):
     })
 
 
-def test_configured_image_is_resolved_once_and_run_by_immutable_id(engine):
+def test_configured_image_is_resolved_once_and_run_by_immutable_id(engine: EngineCalls) -> None:
     result = provision(podman_driver.PodmanDriver(request()))
     assert result["member"]["id"] == MEMBER_ID
     pull = next(argv for argv, _, _ in engine if "pull" in argv)
@@ -79,13 +97,21 @@ def test_configured_image_is_resolved_once_and_run_by_immutable_id(engine):
 @pytest.mark.parametrize("code, output", [
     (125, ""), (0, ""), (0, IMAGE_ID + "\n" + IMAGE_ID),
 ])
-def test_pull_failure_never_creates_or_publishes_member(engine, monkeypatch, code, output):
+def test_pull_failure_never_creates_or_publishes_member(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch, code: int, output: str,
+) -> None:
     original = podman_driver.run_caller_owned
 
-    def fail(argv, **kwargs):
+    def fail(
+        argv: list[str], *, timeout: float, max_stdout_bytes: int,
+        max_stderr_bytes: int, input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         if "pull" not in argv:
-            return original(argv, **kwargs)
-        engine.append((argv, None, kwargs["timeout"]))
+            return original(
+                argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes, input_text=input_text,
+            )
+        engine.append((argv, None, timeout))
         return subprocess.CompletedProcess(argv, code, output, "unresolved source/authentication")
 
     monkeypatch.setattr(podman_driver, "run_caller_owned", fail)
@@ -99,13 +125,13 @@ def test_pull_failure_never_creates_or_publishes_member(engine, monkeypatch, cod
     {}, {"image": ""}, {"image": "--bad"}, {"image": "x", "pull_policy": "newer"},
     {"image": "x", "credentials": "not-allowed"}, {"image": "x", "connection": 1},
 ])
-def test_invalid_options_fail_before_engine(options, engine):
+def test_invalid_options_fail_before_engine(options: dict[str, object], engine: EngineCalls) -> None:
     with pytest.raises(podman_driver.PodmanError, match="driverOptions"):
         podman_driver.PodmanDriver(request(driverOptions=options))
     assert engine == []
 
 
-def test_selected_executable_connection_and_incarnation(engine):
+def test_selected_executable_connection_and_incarnation(engine: EngineCalls) -> None:
     driver = podman_driver.PodmanDriver(request(driverOptions={
         "image": "configured-alias", "executable": "/tools/podman",
         "connection": "configured-machine",
@@ -118,11 +144,14 @@ def test_selected_executable_connection_and_incarnation(engine):
 @pytest.mark.parametrize("changed", [
     {"fleet": "foreign"}, {"driver": "other"}, {"member_id": "c" * 64},
 ])
-def test_foreign_or_recreated_member_is_never_mutated(engine, monkeypatch, changed):
-    monkeypatch.setattr(podman_driver, "run_caller_owned", lambda argv, **_: (
+def test_foreign_or_recreated_member_is_never_mutated(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch, changed: dict[str, str],
+) -> None:
+    def inspect(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         engine.append((argv, None, 0))
-        or subprocess.CompletedProcess(argv, 0, json.dumps([document(**changed)]), "")
-    ))
+        return subprocess.CompletedProcess(argv, 0, json.dumps([document(**changed)]), "")
+
+    monkeypatch.setattr(podman_driver, "run_caller_owned", inspect)
     driver = podman_driver.PodmanDriver(request())
     with pytest.raises(podman_driver.PodmanError):
         driver.handle("stop", {"name": "example-1", "id": MEMBER_ID})
@@ -132,16 +161,24 @@ def test_foreign_or_recreated_member_is_never_mutated(engine, monkeypatch, chang
 @pytest.mark.parametrize("state, command", [
     ("paused", "unpause"), ("exited", "start"), ("created", "start"),
 ])
-def test_start_uses_state_specific_command_on_pinned_member(engine, monkeypatch, state, command):
+def test_start_uses_state_specific_command_on_pinned_member(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch, state: str, command: str,
+) -> None:
     original = podman_driver.run_caller_owned
 
-    def inspect_state(argv, **kwargs):
+    def inspect_state(
+        argv: list[str], *, timeout: float, max_stdout_bytes: int,
+        max_stderr_bytes: int, input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         if "inspect" in argv:
             row = document()
             row["State"]["Status"] = state
-            engine.append((argv, None, kwargs["timeout"]))
+            engine.append((argv, None, timeout))
             return subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
-        return original(argv, **kwargs)
+        return original(
+            argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes, input_text=input_text,
+        )
 
     monkeypatch.setattr(podman_driver, "run_caller_owned", inspect_state)
     podman_driver.PodmanDriver(request()).handle("start", {
@@ -152,9 +189,13 @@ def test_start_uses_state_specific_command_on_pinned_member(engine, monkeypatch,
     ]
 
 
-def test_failed_unpause_is_not_replayed_as_start(engine, monkeypatch):
-    def fail(argv, **kwargs):
-        engine.append((argv, None, kwargs["timeout"]))
+def test_failed_unpause_is_not_replayed_as_start(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(
+        argv: list[str], *, timeout: float, **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        engine.append((argv, None, timeout))
         if "inspect" in argv:
             row = document()
             row["State"]["Status"] = "paused"
@@ -171,14 +212,22 @@ def test_failed_unpause_is_not_replayed_as_start(engine, monkeypatch):
     ]
 
 
-def test_creation_failure_is_not_replayed_or_removed(engine, monkeypatch):
+def test_creation_failure_is_not_replayed_or_removed(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = podman_driver.run_caller_owned
 
-    def fail_creation(argv, **kwargs):
+    def fail_creation(
+        argv: list[str], *, timeout: float, max_stdout_bytes: int,
+        max_stderr_bytes: int, input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         if "run" in argv:
-            engine.append((argv, None, kwargs["timeout"]))
-            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
-        return original(argv, **kwargs)
+            engine.append((argv, None, timeout))
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return original(
+            argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes, input_text=input_text,
+        )
 
     monkeypatch.setattr(podman_driver, "run_caller_owned", fail_creation)
     with pytest.raises(podman_driver.PodmanError, match="retained state"):
@@ -187,17 +236,23 @@ def test_creation_failure_is_not_replayed_or_removed(engine, monkeypatch):
     assert not any("rm" in argv for argv, _, _ in engine)
 
 
-def test_existing_name_blocks_pull_and_creation(engine, monkeypatch):
-    monkeypatch.setattr(podman_driver, "run_caller_owned", lambda argv, **_: (
-        engine.append((argv, None, 0)) or subprocess.CompletedProcess(argv, 0, "", "")
-    ))
+def test_existing_name_blocks_pull_and_creation(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def inspect(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        engine.append((argv, None, 0))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(podman_driver, "run_caller_owned", inspect)
     with pytest.raises(podman_driver.PodmanError, match="replacement is forbidden"):
         provision(podman_driver.PodmanDriver(request()))
     assert len(engine) == 1
 
 
-def test_inventory_rejects_missing_or_foreign_rows(engine, monkeypatch):
-    def missing(argv, **_):
+def test_inventory_rejects_missing_or_foreign_rows(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             argv, 0, MEMBER_ID if "ps" in argv else "[]", "",
         )
@@ -207,7 +262,7 @@ def test_inventory_rejects_missing_or_foreign_rows(engine, monkeypatch):
         podman_driver.PodmanDriver(request()).handle("list", {})
 
 
-def test_exec_preserves_literal_argv_and_stdin_and_targets_id(engine):
+def test_exec_preserves_literal_argv_and_stdin_and_targets_id(engine: EngineCalls) -> None:
     result = podman_driver.PodmanDriver(request()).handle("exec", {
         "name": "example-1", "id": MEMBER_ID,
         "argv": ["/bin/echo", "literal; $value", "", "--argument"],
@@ -224,7 +279,7 @@ def test_exec_preserves_literal_argv_and_stdin_and_targets_id(engine):
 
 
 @pytest.mark.parametrize("timeout", [0, -1, True, float("inf"), float("nan")])
-def test_exec_refuses_invalid_deadlines(engine, timeout):
+def test_exec_refuses_invalid_deadlines(engine: EngineCalls, timeout: float) -> None:
     with pytest.raises(podman_driver.PodmanError, match="timeoutSeconds"):
         podman_driver.PodmanDriver(request()).handle("exec", {
             "name": "example-1", "argv": ["true"], "timeoutSeconds": timeout,
@@ -233,12 +288,14 @@ def test_exec_refuses_invalid_deadlines(engine, timeout):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX exec replacement boundary")
-def test_stream_keeps_inherited_values_out_of_argv(engine, monkeypatch):
-    captured = []
+def test_stream_keeps_inherited_values_out_of_argv(
+    engine: EngineCalls, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[list[str]] = []
     class Replaced(Exception):
         pass
 
-    def replace(exe, argv):
+    def replace(exe: str, argv: list[str]) -> None:
         captured.append(argv)
         raise Replaced()
 
@@ -255,20 +312,22 @@ def test_stream_keeps_inherited_values_out_of_argv(engine, monkeypatch):
     assert "synthetic-only" not in repr(captured)
 
 
-def test_invalid_protocol_real_cli_refuses_before_native_lookup():
+def test_invalid_protocol_real_cli_refuses_before_native_lookup() -> None:
     selected = FleetConfig(driver="podman", driver_options={"image": "example"})
     # This crosses the actual CLI/parser boundary without needing a native engine.
     driver = ExternalDriver(DriverSpec(
         "podman", (sys.executable, "-m", "agent_containers.podman_driver"), "bundled",
     ), "example", selected)
     original = driver._request
-    driver._request = lambda payload: {**original(payload), "protocolVersion": 2}
+    setattr(driver, "_request", lambda payload: {**original(payload), "protocolVersion": 2})
     with pytest.raises(DriverError) as raised:
         driver.call("capabilities")
     assert raised.value.code == "unsupported_protocol"
 
 
-def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
+def test_real_provider_and_driver_process_roundtrip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Cross provider -> bundled CLI -> fake native executable, without a real engine."""
     root = tmp_path / "engine"
     root.mkdir()
@@ -296,7 +355,10 @@ def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
         RuntimeError("Docker is not part of this fixture"),
     ))
     selected = FleetConfig(
-        driver="podman", driver_options={"image": "configured-alias", "executable": sys.executable},
+        # The fake native engine is stdlib-only, not another plugin consumer.
+        driver="podman", driver_options={
+            "image": "configured-alias", "executable": getattr(sys, "_base_executable"),
+        },
         size=1, workspace_folder="/workspaces/example", exec_user="vscode",
     )
     config = ContainersConfig(fleets={"example": selected})

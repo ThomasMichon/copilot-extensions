@@ -37,6 +37,7 @@ on:
           - bridge-http52-capture
           - bridge-binding
           - vault-activation
+          - vault-cache-diagnostic
           - dispatch-binding
           - dispatch-publication
           - dispatch-maintenance
@@ -383,6 +384,19 @@ jobs:
           version: "0.12.6"
       - name: Record exact source
         run: python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Qualify ordinary configuration source readers
+        run: >-
+          python tools/run-plugin-tests.py configuration-layers --allow-explicit-tiers
+          --test-file tests/test_configuration_layers.py
+          --plugin-timeout 120 --timeout 90 --test-timeout 30
+          --junit-dir vault-configuration-critical-junit
+      - name: Qualify native bytecode ownership without relaxing metadata custody
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_python_cache_owner.py
+          --plugin-timeout 120 --timeout 90 --test-timeout 30
+          --junit-dir vault-configuration-critical-junit
       - name: Qualify Vault launcher and cold peer capture
         timeout-minutes: 5
         run: >-
@@ -423,16 +437,141 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-vault --max-files-per-sub-suite 2
           --test-file tests/test_configuration_layers.py
+          --test-file tests/test_default_owner.py
+          --test-file tests/test_default_warm.py
+          --test-file tests/test_cache_warm.py
           --test-file tests/test_installer_readiness.py
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --test-file tests/test_runtime_activation.py
           --test-file tests/test_install_snapshot_ps1.py
           --test-file tests/test_service_launch.py
+          --test-file tests/test_native_default_uninstall.py
+          --junit-dir vault-configuration-consumers-junit
+      - name: Retain Vault configuration consumer results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-configuration-consumers-${{ runner.os }}-${{ github.sha }}
+          path: vault-configuration-consumers-junit
+          if-no-files-found: warn
       - name: Qualify accepted activation context under a different queue worker
         run: >-
           python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use.py -k activation_selectors
+          --test-file tests/test_first_use.py
+          --test-file tests/test_vault_selection_context.py
+          -k "activation_selectors or first_use_root_survives"
+      - name: Diagnose native cache policy on failure
+        if: failure() && runner.os == 'Windows'
+        shell: python
+        run: &vault-cache-diagnostic-program |
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          import venv
+
+          sys.stdout.reconfigure(encoding="utf-8")
+          sys.stderr.reconfigure(encoding="utf-8")
+          source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert source == os.environ["GITHUB_SHA"]
+          requested = os.environ.get("REQUESTED_SOURCE_SHA")
+          if requested:
+              assert source == requested
+          print(f"diagnostic-only=true; source={source}; native-platform={sys.platform}", flush=True)
+          sys.path.insert(0, str(Path.cwd() / "libs/agent-procutil/src"))
+          from agent_procutil import python_cache_permissions
+          import agent_procutil
+
+          temporary = Path(os.environ["TEMP"])
+          for path in (temporary, *temporary.parents):
+              try:
+                  python_cache_permissions.check(path, ancestor=True)
+              except (OSError, ValueError) as error:
+                  print(f"cache-ancestor={path}; refusal={type(error).__name__}: {error}")
+              else:
+                  print(f"cache-ancestor={path}; protection=accepted")
+          with tempfile.TemporaryDirectory(prefix="vault-cache-diagnostic-") as directory:
+              root = Path(directory).resolve() / "vault home-\u03bb"
+              slot = root / "versions" / "1.0.0"
+              venv.EnvBuilder(with_pip=False).create(slot)
+              site = slot / "Lib" / "site-packages"
+              shutil.copytree(Path(agent_procutil.__file__).parent, site / "agent_procutil")
+              (site / "diagnostic_cache_import.py").write_text("VALUE = 42\n", encoding="utf-8")
+              (slot / ".install-complete.json").write_text(
+                  '{"version":"1.0.0","completed_at":"fixture","pid":0,"payload_hash":"'
+                  + "a" * 64 + '"}', encoding="utf-8",
+              )
+              record = site / "fixture.dist-info" / "RECORD"
+              record.parent.mkdir()
+              record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
+              probe = (
+                  "import json,sys,traceback\nfrom pathlib import Path\n"
+                  "from agent_procutil import python_cache as cache\n"
+                  "root=Path(sys.argv[1]);slot=root/'versions'/'1.0.0'\n"
+                  "identity=cache._installed_identity(slot)\n"
+                  "print(json.dumps({'executable':sys.executable,'prefix':sys.prefix,"
+                  "'root':str(root),'identity':identity,"
+                  "'policy':cache.policy_arguments(root,runtime=sys.executable)}),flush=True)\n"
+                  "try:\n"
+                  " print(cache._store().prepare(root,slot,identity,read_record=cache._read_regular))\n"
+                  "except Exception:\n"
+                  " traceback.print_exc()\n"
+              )
+              result = subprocess.run(
+                  [str(slot / "Scripts" / "python.exe"), "-I", "-B", "-c", probe, str(root)],
+                  env={
+                      **os.environ, "LOCALAPPDATA": str(root.parent / "user-cache"),
+                      "PYTHONIOENCODING": "utf-8",
+                  },
+                  capture_output=True, text=True, encoding="utf-8",
+                  check=False, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+              )
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", file=sys.stderr, flush=True)
+              result.check_returncode()
+              policy = json.loads(result.stdout.splitlines()[0])["policy"]
+              for phase, arguments in (
+                  ("cached-import", [
+                      str(slot / "Scripts" / "python.exe"), "-I", *policy, "-c",
+                      "import json,sys,diagnostic_cache_import as module; "
+                      "print(json.dumps({'cached':module.__cached__,"
+                      "'prefix':sys.pycache_prefix,'readonly':sys.dont_write_bytecode}))",
+                  ]),
+                  ("reuse-after-import", [
+                      str(slot / "Scripts" / "python.exe"), "-I", "-B", "-c", probe, str(root),
+                  ]),
+              ):
+                  print("diagnostic-phase=" + phase, flush=True)
+                  repeated = subprocess.run(
+                      arguments, env={
+                          **os.environ, "LOCALAPPDATA": str(root.parent / "user-cache"),
+                          "PYTHONIOENCODING": "utf-8",
+                      },
+                      capture_output=True, text=True, encoding="utf-8", check=False,
+                      timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+                  )
+                  print(repeated.stdout, end="", flush=True)
+                  print(repeated.stderr, end="", file=sys.stderr, flush=True)
+                  repeated.check_returncode()
+                  if phase == "cached-import":
+                      observed = json.loads(repeated.stdout)
+                      ownership = python_cache_permissions._owner()
+                      print(json.dumps({
+                          "diagnostic-token-sids": ownership._current_sids(os.getpid()),
+                      }), flush=True)
+                      cached = Path(observed["cached"]).resolve()
+                      prefix = Path(observed["prefix"]).resolve()
+                      for member in (cached, *cached.parents):
+                          if not member.is_relative_to(prefix):
+                              break
+                          print(json.dumps({
+                              "diagnostic-cache-entry": str(member),
+                              "owner-sid": ownership._path_owner_sid(member),
+                          }), flush=True)
 
   vault-activation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
@@ -440,6 +579,24 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps: *vault-activation-steps
+  vault-cache-diagnostic-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-cache-diagnostic'
+    name: Vault cache diagnostic only (not native acceptance)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Diagnose sealed-cache policy without the activation portfolio
+        shell: python
+        run: *vault-cache-diagnostic-program
   related-knowledge-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'related-knowledge'
     name: Bound knowledge related readers (Linux)
@@ -1280,7 +1437,7 @@ jobs:
           version: "0.12.6"
       - name: Prepare pinned native lifecycle prerequisites
         shell: pwsh
-        run: |
+        run: &manager-native-prerequisites |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP "manager-lifecycle-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $null = New-Item -ItemType Directory -Path $root
@@ -1292,8 +1449,8 @@ jobs:
             },
             @{
               Name = 'psmux'; Variable = 'PSMUX_TEST_BIN'
-              Url = 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip'
-              Hash = '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe'
+              Url = 'https://github.com/psmux/psmux/releases/download/v3.4.0/psmux-v3.4.0-windows-x64.zip'
+              Hash = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
             }
           )
           foreach ($pin in $pins) {
@@ -1522,19 +1679,20 @@ jobs:
 
   manager-suite-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
-    name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
+    name: Manager whole-suite acceptance (Windows, ${{ matrix.mode }})
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        mode: [normal, repair]
+        mode: [normal, repair, fresh]
     env:
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -1542,6 +1700,26 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Prepare pinned full-suite lifecycle prerequisites
+        if: matrix.mode == 'fresh'
+        shell: pwsh
+        run: *manager-native-prerequisites
+      - name: Prepare pinned Vault backend for fresh suite readiness
+        if: matrix.mode == 'fresh'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "manager-vault-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'keepassxc.zip'
+          & ".\tools\download_pinned_native.ps1" -Uri 'https://github.com/keepassxreboot/keepassxc/releases/download/2.7.11/KeePassXC-2.7.11-Win64.zip' -OutFile $archive -TimeoutSeconds 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '63ec66632bf5b1448c873f8d959a8a5885bbccdd7dcf1af0231667ce4d7121f0') {
+            throw 'Pinned KeePassXC prerequisite archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root 'payload')
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter keepassxc-cli.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned KeePassXC CLI' }
+          $binaries[0].DirectoryName >> $env:GITHUB_PATH
       - name: Record exact native source
         shell: pwsh
         env:
@@ -1551,12 +1729,12 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE) {
             throw 'Suite replacement source does not match the dispatch SHA'
           }
-      - name: Qualify installed V1 to V2 through the real Manager
+      - name: Qualify the selected installed suite through the real Manager
         shell: pwsh
         run: >-
           python tools\run-manager-suite-acceptance.py
           --root .v --mode ${{ matrix.mode }}
-      - name: Retain synthetic qualification diagnostics
+      - name: Retain installed suite qualification diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -1565,6 +1743,8 @@ jobs:
             .v/*-runner.json
             .v/*-process-trace.json
             .v/*/result.json
+            .v/*/setup.json
+            .v/*/diagnostics/*
             .v/*/preparation-error.json
             .v/*/settlement.json
             .v/*/commands.jsonl
@@ -2101,7 +2281,7 @@ jobs:
 
   generic-mux-windows:
     if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'generic-mux' || inputs.portfolio == 'resume-pane' || inputs.portfolio == 'mux-continuity')
-    name: PSMux ${{ inputs.portfolio == 'mux-continuity' && '3.4.0' || '3.3.8' }} consumer qualification (isolated sessions)
+    name: PSMux 3.4.0 consumer qualification (isolated sessions)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -2123,12 +2303,8 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP 'generic-mux-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          $version = '3.3.8'
-          $digest = '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe'
-          if ($env:PORTFOLIO -eq 'mux-continuity') {
-            $version = '3.4.0'
-            $digest = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
-          }
+          $version = '3.4.0'
+          $digest = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
           try {
             Invoke-WebRequest -Uri "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" -OutFile $archive -TimeoutSec 60
           } catch {

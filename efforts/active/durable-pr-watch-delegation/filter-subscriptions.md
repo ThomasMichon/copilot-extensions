@@ -134,7 +134,7 @@ refuse before effect and never fall back to a broader sweep or process waiter.
 
 - [x] Land this contract/vision amendment through normal independent review and
   required CI before runtime implementation.
-- [ ] Add the bounded expression parser, canonical immutable definition
+- [x] Add the bounded expression parser, canonical immutable definition
   resolution, capability validation and three-valued driver evaluation.
 - [ ] Extend the existing native provider seam with bounded selected-population
   acquisition and initial ADO semantics; preserve read credential ownership and
@@ -180,6 +180,119 @@ separately authorized acceptance; no synthetic fixture passes those gates.
 The canonical parent remains Active until its own full Plan/Validation resolves.
 
 ## Journal
+
+### 2026-11-15 - Preserve Windows qualification fixture custody
+
+The final reviewed-source run passed the entire Linux service portfolio.
+Windows passed all test assertions but failed subsequent cleanup for two
+finished records whose PIDs had been reused; that is not clean acceptance.
+The runner now selects its existing bounded native handle pins for ordinary
+contained Windows tests too, without relaxing unknown/reused identity holds.
+Already-pinned records do not require repeated full decoding.
+
+A local full portfolio then exposed one short-lived refusal fixture that
+polling alone could miss, plus a terminal-workspace 503. The command fixture
+now uses the existing direct-interpreter owner, retains the actual created
+process handle, and settles only its same-run birth-matched receipt with
+termination disabled before closing that handle. The affected terminal case
+passes with clean teardown; 20 focused runner/real-handle controls and the
+33-file Linux/Windows strict ratchet pass. The retained failed fixture is not
+reaped or reinterpreted. Fresh hosted qualification remains pending under
+#12717, with no automatic reuse of the consumed two-run approval.
+The next review's sequential-budget counterexample fails against the published
+baseline. Exited pins whose receipts are settled now release their budget;
+unsettled receipts and unconfirmed process exits remain pinned. Dedicated
+controls cover both refusal branches and sequential progress without raising
+the process or inventory limits.
+
+### 2026-11-15 - Preserve deferred departures across backpressure and outage
+
+A review counterexample reproduced stale membership when a complete scan
+pruned shared facts while a registration could not fit its departure events.
+Three controls failed for restart/ACK followed by partial or unavailable
+discovery, including a newer positive observation for one retained member.
+The registration generation now retains bounded pending-removal evidence
+through projection rollback; positive facts supersede absence, while
+cancellation or generation replacement clears that evidence. The affected
+storage/native/observer/Gateway consumer packet passes 140 tests. Strict
+whole-file checks pass for all 31 changed Python files on Linux and Windows.
+Independent review and final-source platform qualification remain open.
+
+### 2026-11-13 - Review corrections and bounded native validation
+
+The original five service findings are corrected: per-registration projection,
+inactive membership release, aggregate native admission, ADO repository names
+and surviving captured demand. A second review identified withdrawal-closed
+admission, initial fan-out progress and revision-consistent query pages; these
+now have focused controls, including 21 overlapping 200-PR populations.
+
+The operator approved one synthetic `pr_service=true` run at
+`1cdc09036e98b44e8dffd310931da5969bfcb20e`, two disposable jobs with existing
+10-minute caps and all other selectors off. No deployment, live-provider,
+credential or shared-service effects were authorized. Run 43520097792 used
+that exact source and selection. Windows exposed a transport test that did not
+reconcile the existing pre-transaction busy response; Linux's full standalone
+suite exhausted its 180-second runner limit. Neither job is claimed passing.
+The busy contract is now handled with bounded original-ID retry only for its
+explicit pre-entry response. A separate opt-in filtered Linux workflow selects
+the changed foreground consumers without dropping or relaxing the full lane.
+Any further workflow invocation needs its own authority; the original single
+run approval is consumed.
+
+The separately approved `pr_filtered=true` attempt at
+`4a2f6aa21bfb46698efe040ce5f98310a0842e2c` was rejected before a run was
+created: the shared dispatch workflow already has GitHub's maximum 25 inputs.
+The focused lane therefore lives in `pr-filtered-acceptance.yml`, with one
+Linux job and no inputs; existing shared-workflow selectors remain unchanged.
+Workflow contract controls check the input limit and focused job scope.
+
+That temporary separate-workflow plan is superseded: GitHub does not register
+the new workflow from the unmerged branch, so it cannot close pre-merge
+qualification. The existing registered `pr_service` lane now runs the focused
+filtered standalone selection first, then its complete complementary portfolio
+in the same two 10-minute jobs. The remaining-suite runner limit is 420 seconds
+instead of the observed insufficient 180; the overall job cap is unchanged.
+No tests or assertions are removed, and any new invocation still requires its
+own applicable approval. The unused separate workflow is removed.
+
+The next review's byte-accounting, disproved-cache, query-fairness and
+sponsor-conflict findings are addressed in the same service slice. Shared-cache
+bytes are included before each bounded registration projection; complete scans
+remove disproved seed facts. The native descriptor expands with bounded
+`query_rotation: offset/v1`, preserving default native callers while the new
+service selects support before passing offsets. Sponsor renewal conflicts are
+reported without stopping already admitted dynamic demand.
+
+### 2026-11-11 - Native population merged; service qualification in progress
+
+#12184 merged the native ADO population driver after clean current-head review
+and successful required CI. Groups and activity age remain explicitly
+unsupported by that driver. The service slice composes generation-three
+ReplayStore demand, independent membership/delivery, startup sponsorship and
+the explicit local `population-*` client. It is not yet a merged service or
+an installed/live acceptance claim.
+
+The Windows standalone service suite passed in a combined compatibility run;
+one retained-review control then exposed a wrapped-lock compatibility issue.
+After preserving context-manager acquisition, all 52 retained-review controls
+and the exact installed workspace regression pass. Transaction-custody waits
+are bounded by current request authority and never replay a provider read or
+an entered operation. Strict service typechecks pass on Linux and Windows.
+Actual Linux foreground qualification, source-composed native verification and
+the service PR's independent review/required CI remain open.
+
+### 2026-11-11 - Shared expression foundation merged
+
+#12166 merged after current-head independent review, resolved findings and
+refreshed successful required CI. The managed merge used the existing Maintainer
+review-rule exception, not a CI bypass. The canonical contained library runner
+passes 33 tests; strict Python 3.10 Linux/Windows typechecks pass. Three focused
+materialized-snapshot and cell dependency controls pass; native child installs
+are intercepted, so real first-provision/install acceptance remains unclaimed.
+The fixes include strict UTF-8 bytes, read-only mappings, cell dependency closure
+and numeric overflow containment. The native population slice now proceeds
+through its own normal publication gates; filtered storage, observer, sponsorship
+and supported host/CLI qualification remain open here.
 
 ### 2026-11-11 - Contract accepted; shared semantics first
 

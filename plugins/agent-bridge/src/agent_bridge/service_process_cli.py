@@ -11,15 +11,19 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from subprocess import Popen
+
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
     from zdd.conditional import ConditionalCutover
 
 from ._kill_pid_identity import _kill_pid  # noqa: F401 -- re-exported for __main__/callers
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -281,7 +285,9 @@ def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
         return False
 
 
-def _reap_abandoned_passive(config_dir_path, record: dict | None) -> dict:
+def _reap_abandoned_passive(
+    config_dir_path: str | os.PathLike[str], record: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Retire a passive daemon stranded by an abandoned cutover."""
     core = _core()
     try:
@@ -406,15 +412,16 @@ def _daemon_root_env() -> dict[str, str]:
     }
 
 
-def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resort: bool):
+def _launch_bridge_daemon(
+    argv: list[str], *, display: str, contained_last_resort: bool,
+) -> Popen[bytes] | WindowsDaemonProcess:
     """Start a bridge daemon through ``spawn_daemon``; return its process handle.
 
     The daemon breaks away from the caller's Job and runs from the install root
     with ``agent-bridge.log`` and a separate ``agent-bridge-err.log``. Canonical
-    native admission verifies escape from tracked caller cleanup
-    Jobs. A caller may explicitly accept its shorter Job lifetime with
-    ``contained_last_resort`` after a settled refusal; direct starts and
-    passive generations do not accept that fallback.
+    native admission verifies escape from tracked caller cleanup Jobs. Persistent
+    Bridge callers disable ``contained_last_resort``: a settled refusal must not
+    become a caller-owned daemon that dies when the launcher exits.
     """
     core = _core()
     root = os.path.abspath(core._INSTALL_DIR)
@@ -436,14 +443,14 @@ def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resor
         "env_overrides": environment,
         "console_children": True,
     }
-    return core.spawn_daemon(
+    return cast("Popen[bytes] | WindowsDaemonProcess", core.spawn_daemon(
         argv, display=display, contained_fallback=contained_last_resort,
         instance=DaemonInstanceSpec("agent-bridge", Path(root), Path(__file__).resolve()),
         **launch,
-    )
+    ))
 
 
-def _spawn_detached_argv(argv: list[str]):
+def _spawn_detached_argv(argv: list[str]) -> Popen[bytes] | WindowsDaemonProcess:
     """Spawn ``argv`` as a detached, job-surviving bridge process; return its handle.
 
     Never the caller's ambient cwd: this is a long-lived supervised daemon that
@@ -451,11 +458,11 @@ def _spawn_detached_argv(argv: list[str]):
     durable install dir where its logs also live.
     """
     return _launch_bridge_daemon(
-        argv, display="agent-bridge service", contained_last_resort=True
+        argv, display="agent-bridge service", contained_last_resort=False
     )
 
 
-def _spawn_detached_daemon():
+def _spawn_detached_daemon() -> Popen[bytes] | WindowsDaemonProcess:
     """Spawn ``agent-bridge start`` through the job-surviving launch path."""
     return _spawn_detached_argv(_daemon_launch_argv())
 
@@ -556,18 +563,18 @@ def _wait_for_ensure_owner() -> bool:
         if core._service_is_running():
             return True
         if core._service_process_is_live():
-            return core._wait_for_service_start()
+            return cast(bool, core._wait_for_service_start())
         if not os.path.exists(core._ENSURE_LOCK):
-            return core._wait_for_service_start()
+            return cast(bool, core._wait_for_service_start())
         time.sleep(1)
-    return core._service_is_running()
+    return cast(bool, core._service_is_running())
 
 
 #: Waits (seconds) before re-probing a forwarded bridge that did not answer.
 _FORWARD_RETRY_DELAYS_S = (1.0, 2.0, 4.0)
 
 
-def _await_forwarded_bridge(core) -> bool:
+def _await_forwarded_bridge(core: ModuleType) -> bool:
     """Re-probe a forwarded bridge with backoff; never start a daemon over it."""
     import time
 
@@ -590,7 +597,7 @@ def _ensure_daemon() -> bool:
 
     core = _core()
     if os.environ.get("AGENT_BRIDGE_NO_ENSURE") == "1":
-        return core._service_is_running()
+        return cast(bool, core._service_is_running())
     if core._service_is_running():
         return True
     if core._active_endpoint_is_forward():
@@ -607,14 +614,14 @@ def _ensure_daemon() -> bool:
         last_attempt = 0.0
     if now - last_attempt < core._ENSURE_BACKOFF_S:
         if core._service_process_is_live():
-            return core._wait_for_service_start()
+            return cast(bool, core._wait_for_service_start())
         if os.path.exists(core._ENSURE_LOCK):
-            return core._wait_for_ensure_owner()
-        return core._service_is_running()
+            return cast(bool, core._wait_for_ensure_owner())
+        return cast(bool, core._service_is_running())
 
     fd = core._acquire_ensure_lock()
     if fd is None:
-        return core._wait_for_ensure_owner()
+        return cast(bool, core._wait_for_ensure_owner())
     lock_held = True
     try:
         if core._service_is_running():
@@ -626,7 +633,7 @@ def _ensure_daemon() -> bool:
         if core._service_process_is_live():
             core._release_ensure_lock(fd)
             lock_held = False
-            return core._wait_for_service_start()
+            return cast(bool, core._wait_for_service_start())
         try:
             with open(core._ENSURE_MARKER, "w") as fh:
                 fh.write(str(now))
@@ -647,7 +654,7 @@ def _ensure_daemon() -> bool:
             core._release_ensure_lock(fd)
 
 
-def _record_started_pid(handle) -> None:
+def _record_started_pid(handle: Popen[bytes] | WindowsDaemonProcess | None) -> None:
     """Record the actual daemon's pid for direct and brokered starts alike."""
     if handle is None:
         return
@@ -842,7 +849,9 @@ def _cmd_service(
         sys.exit(1)
 
 
-def register_service_control_commands(sub: argparse._SubParsersAction) -> None:
+def register_service_control_commands(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
     service_p = sub.add_parser(
         "service",
         help="Control the agent-bridge daemon (start/stop/restart/status)",

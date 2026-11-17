@@ -3,6 +3,54 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Build-isolation wiring and retained native acceptance](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+
+- [2026-11-17 - Hygiene engine and Index custody](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+
+- [2026-11-17 - Lifecycle and cache-owner acceptance](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
+
+- [2026-11-17 - SDK release, cache adoption and transport observation](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+
+- [2026-11-17 - Serving convergence and canonical typing boundaries](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+
+- [2026-11-17 - Bootstrap, reporting and daemon-generation contracts](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
+
+- [2026-11-17 - Finite reviewer comparison and provider-first delivery boundaries](journal/2026/11.17-provider-first-delivery-boundaries.md)
+
+- [2026-11-17 - Copy-source delivery, Vault follow-ups and retained custody](journal/2026/11.17-vault-followups-and-custody-gap.md)
+
+- [2026-11-17 - Ordinary Windows test custody and retained compatibility work](journal/2026/11.17-ordinary-windows-test-custody.md)
+
+- [2026-11-17 - Delivery, presentation and native-failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
+
+- [2026-11-17 - Filtered-population source completion](journal/2026/11.17-filtered-population-source-completion.md)
+
+- [2026-11-16 - Resident readiness receiving and current-owner boundaries](journal/2026/11.16-resident-readiness-receiving.md)
+
+- [2026-11-16 - Complete claims-ownership receiving and three tracking retirements](journal/2026/11.16-complete-claims-ownership-receiving.md)
+
+- [2026-11-16 - Finite Linux/WSL startup receiving and canonical boundaries](journal/2026/11.16-linux-startup-and-canonical-boundaries.md)
+
+- [2026-11-16 - Recovery boundaries and owned inflow](journal/2026/11.16-recovery-boundaries-and-owned-inflow.md)
+
+- [2026-11-16 - Complete self-update convergence and receipt receiving](journal/2026/11.16-complete-self-update-receiving.md)
+
+- [2026-11-16 - Complete machine-state receiving reconciliation](journal/2026/11.16-complete-machine-state-receiving.md)
+
+- [2026-11-16 - Complete supported-UV receiving proposal](journal/2026/11.16-complete-supported-uv-receiving.md)
+
+- [2026-11-16 - Complete standalone-consumer receiving and canonical boundaries](journal/2026/11.16-standalone-consumer-and-canonical-boundaries.md)
+
+- [2026-11-16 - Complete hygiene receiving reconciliation](journal/2026/11.16-complete-hygiene-receiving.md)
+
+- [2026-11-16 - Complete first-adoption receiving and retained inflow](journal/2026/11.16-first-adoption-receiving-and-inflow.md)
+
+- [2026-11-16 - Complete status, catalog and roster receiving proposal](journal/2026/11.16-status-catalog-roster-receiving.md)
+
+- [2026-11-16 - Accepted ZDD tracking and current unfinished contracts](journal/2026/11.16-current-contracts-and-zdd-acceptance.md)
+
+- [2026-11-16 - Runtime source completion and finite authoring-contract intake](journal/2026/11.16-runtime-source-and-authoring-contract.md)
+
 - [2026-11-16 - Changed owner evidence and keeper boundaries](journal/2026/11.16-changed-owner-evidence-and-keeper-boundaries.md)
 
 - [2026-11-16 - Complete WSL provisioning receiving](journal/2026/11.16-wsl-provisioning-receiving.md)

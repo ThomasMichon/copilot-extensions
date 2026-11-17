@@ -17,11 +17,16 @@ if TYPE_CHECKING:
 BINDING = "compatible-inbox-v1"
 
 
+def receiver_identity(document: dict[str, Any]) -> dict[str, Any]:
+    """Keep advisory process diagnostics separate from native receiver identity."""
+    return {key: value for key, value in document.items() if key not in ("pid", "process_started_at")}
+
+
 def require_live(
     conn: sqlite3.Connection, session_id: str, now: float, *, native_only: bool = False,
 ) -> None:
     row = conn.execute(
-        "SELECT status,updated_at,venue FROM live_sessions WHERE session_id=?", (session_id,),
+        "SELECT * FROM live_sessions WHERE session_id=?", (session_id,),
     ).fetchone()
     if (
         row is None or row["status"] != "live"
@@ -33,6 +38,17 @@ def require_live(
         raise RuntimeCustodyError("Inbox target is not registered live; explicitly resume it first")
     if native_only and row["venue"] is not None:
         raise RuntimeCustodyError("Automatic SDK compatibility requires a registered native target")
+    if row["worktree_id"]:
+        owner = conn.execute(
+            "SELECT session_id FROM live_sessions WHERE worktree_id=? AND status='live' "
+            "AND updated_at>=? AND (? IS NULL OR ? IS NULL OR "
+            "(machine=? COLLATE NOCASE AND repo=? COLLATE NOCASE)) "
+            "ORDER BY registered_at DESC,updated_at DESC LIMIT 1",
+            (row["worktree_id"], now - LIVE_SESSION_STALE_SECONDS,
+             row["machine"], row["repo"], row["machine"], row["repo"]),
+        ).fetchone()
+        if owner is None or owner["session_id"] != session_id:
+            raise RuntimeCustodyError("Inbox target is not the current worktree session")
 
 
 def negotiate(
@@ -55,12 +71,6 @@ def enroll(
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
         require_live(conn, consumer.session_id, now, native_only=native_only)
-        if conn.execute(
-            "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
-            "AND kind != 'control:plugin-readiness' AND delivered_at IS NULL LIMIT 1",
-            (consumer.session_id,),
-        ).fetchone() is not None:
-            raise RuntimeCustodyError("Pending legacy controls prevent retained inbox enrollment")
         document = encode(consumer.document())
         original = conn.execute(
             "SELECT * FROM bridge_inbox_consumers WHERE incarnation=?", (consumer.incarnation,),
@@ -70,6 +80,7 @@ def enroll(
                 original["session_id"] != consumer.session_id
                 or original["installation"] != BINDING or original["current"] != 1
                 or original["predecessor"] != expected_incarnation
+                or receiver_identity(json.loads(original["consumer_json"])) != receiver_identity(consumer.document())
             ):
                 raise RuntimeCustodyError("Inbox receiver identifier is retired or reused")
             return
@@ -93,11 +104,11 @@ def enroll(
 
 def require_current(conn: sqlite3.Connection, consumer: InboxConsumer) -> None:
     row = conn.execute(
-        "SELECT 1 FROM bridge_inbox_consumers "
+        "SELECT consumer_json FROM bridge_inbox_consumers "
         "WHERE session_id=? AND incarnation=? AND installation=? AND current=1",
         (consumer.session_id, consumer.incarnation, BINDING),
     ).fetchone()
-    if row is None:
+    if row is None or receiver_identity(json.loads(row["consumer_json"])) != receiver_identity(consumer.document()):
         raise RuntimeCustodyError("Inbox receiver is not currently enrolled")
 
 
@@ -145,25 +156,49 @@ def poll(
     with db._runtime_transaction(write=True) as conn:
         require_live(conn, consumer.session_id, now, native_only=native_only)
         require_current(conn, consumer)
+        from .message_contracts import envelope, pending_controls
+
+        controls = pending_controls(conn, consumer, limit or 100, now=now)
         rows = conn.execute(
             "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
             "AND kind NOT LIKE 'control:%' AND delivered_at IS NULL "
             "AND handoff_started_at IS NULL AND outcome IS NOT 'unknown' "
+            "AND disposition_json IS NULL "
             "AND (claimed_at IS NULL OR handoff_json IS NOT NULL) "
             "ORDER BY id LIMIT ?", (consumer.session_id, limit or 100),
         ).fetchall()
         result = []
         for row in rows:
-            require_supported(conn, row, now)
+            if consumer.message_base is None:
+                from .message_contracts import dispose, require_supported as require_contract
+
+                try:
+                    require_contract(envelope(conn, row, consumer), row["kind"])
+                except RuntimeCustodyError:
+                    dispose(
+                        conn, consumer, row["id"], "rejected", "unsupported_reader",
+                        "This reader cannot enforce the stored message contract.", now=now,
+                    )
+                    continue
+                require_supported(conn, row, now)
             if row["handoff_json"] is None:
                 retain_message(conn, row["id"])
                 row = conn.execute("SELECT * FROM live_messages WHERE id=?", (row["id"],)).fetchone()
             retained = original_handoff(row)
+            if consumer.message_base is None and receiver_identity(retained["consumer"]) != receiver_identity(consumer.document()):
+                from .message_contracts import dispose
+
+                dispose(
+                    conn, consumer, row["id"], "rejected", "unsupported_reader",
+                    "This reader cannot adopt an unstarted offer from an earlier receiver.", now=now,
+                )
+                continue
             result.append({
                 **dict(row), "handoff": retained, "consumer": retained["consumer"],
                 "handoff_stage": handoff_stage(row),
+                **({"message_contract": envelope(conn, row, consumer)} if consumer.message_base == 1 else {}),
             })
-        return result
+        return sorted([*controls, *result], key=lambda row: row["id"])[:limit or 100]
 
 
 def begin(
@@ -173,12 +208,25 @@ def begin(
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
         require_live(conn, consumer.session_id, now, native_only=native_only)
+        require_current(conn, consumer)
+        original = conn.execute(
+            "SELECT * FROM live_messages WHERE id=? AND session_id=?",
+            (message_id, consumer.session_id),
+        ).fetchone()
+        if original is None:
+            raise RuntimeCustodyError("Original inbox handoff is absent")
+        original_consumer = InboxConsumer(**original_handoff(original)["consumer"])
         row = db._original_handoff(
-            conn, message_id, consumer, handoff_id, compatible_consumer=True,
+            conn, message_id, original_consumer, handoff_id, compatible_consumer=True,
         )
         if row["session_id"] != consumer.session_id:
             raise RuntimeCustodyError("Inbox handoff target is unsupported")
         require_supported(conn, row, now)
+        from .message_contracts import envelope, require_supported as require_contract
+
+        require_contract(envelope(conn, row, consumer), row["kind"])
+        if row["disposition_json"] is not None:
+            raise RuntimeCustodyError("Original message already has a disposition")
         if handoff_stage(row) != "offered":
             return False
         conn.execute("UPDATE live_messages SET handoff_started_at=? WHERE id=?", (now, message_id))

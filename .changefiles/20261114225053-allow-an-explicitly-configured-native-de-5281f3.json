@@ -1,0 +1,9 @@
+{
+  "comment": "Allow an explicitly configured native default configuration owner for neutral-directory and minimal-PATH callers while preserving scoped repository selection.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

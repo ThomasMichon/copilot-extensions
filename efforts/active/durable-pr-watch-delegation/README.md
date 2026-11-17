@@ -27,12 +27,51 @@ and production writer/merge cutover; it does not replace the broader Guiding
 Intent or any original, refined or inherited Plan/Validation outcome.
 This effort remains Active under its existing integration and domain owners.
 
+The requested read-only extension is a reviewer-perspective status/current-PR/
+priority-next-action feed backed by PR activity, subscribable through SSE or
+WebSockets. The [reviewer-action feed contract](reviewer-action-feeds.md),
+coordinated by #12947, preserves existing observation/attention owners and
+defines inert round-robin/Dispatch consumers plus observational comparison.
+It adds no consumer activation or production-write authority, and does not
+replace M1 or the full retained parent acceptance.
+
 The [M1 source evidence map](repository-cache-events-m1.md#source-evidence-map)
 separates the standalone synthetic vertical from still-open release,
 installed/running and authorized real-target qualification. Completing that
 source slice does not complete M1 or this effort. The reviewed source stages
 1–4 have landed; the combined Plan and Validation items below remain open
 because they also require the separate live qualification.
+
+### Delegation driver's completion charter
+
+- **Kind:** completion; a finite implementation and qualification assignment,
+  not an indefinitely running review service.
+- **Root goal (agent-stated, public-safe):** Deliver the durable, independently
+  operable PR service in Guiding Intent, with reliable selected-provider
+  observation and owned subscriptions. Its ADO consumer prerequisite includes
+  reliable MCP initialization and diff/source acquisition, demonstrated by
+  real posted reviews from the separately authorized review owner. The M1
+  milestone above remains the current integration exit, not a replacement for
+  the broader goal or inherited outcomes.
+- **Original direction:** The accepted filter model is recorded in
+  [driver-aware filters](filter-subscriptions.md). The implementation go-ahead
+  was, verbatim, "Great, that sounds good. Build it" (2026-11-12).
+- **Acceptance:** Resolve the existing Plan and Validation Plan, including
+  source review/CI, final-source lifecycle and clean teardown, M1 release and
+  installed/running qualification, and separately authorized real-consumer
+  evidence. Source publication, cache reads and a passing child PR alone do
+  not meet these criteria.
+- **Finalization criterion:** The canonical effort is explicitly Done, every
+  Plan/Validation item is resolved or transferred to a named tracked objective,
+  owned PRs are terminal, and resource obligations have been settled or
+  accepted by their rightful owners through the normal guarded flow.
+- **Now:** Finish the owned filtered-population source and qualification
+  gates. The Windows registry snapshot correction is a bounded lifecycle
+  prerequisite, not a new root objective.
+- **Return:** After that slice, resume the remaining M1 integration,
+  installed/running and consumer-owned acceptance under this same effort.
+  Existing MCP follow-through, domain custody, operational holds and separate
+  spending, deployment, credential and retained-resource authority remain.
 
 ## Guiding Intent
 
@@ -63,6 +102,23 @@ native/fleet switch alone does not deliver this service intake model.
 | M1 plan steward | Bounded repository-cache/event contract, independent review and source reconciliation only | Source creaky-lever; planning claim #11779 |
 
 ## Coordination
+
+### MCP startup prerequisite follow-through
+
+The existing integration driver retains concurrent MCP bridge startup diagnosis
+and source-fix ownership under #11786, alongside the filtered-population work,
+not as a pause or replacement for it. Earlier root fix #11795 is merged;
+reconcile its current source/selection and fresh owner-reported failures before
+duplicating a fix or replaying a historical failed request. Source fixes retain
+focused tests, normal independent review, required CI and role-scoped merge.
+Deployment, installed-plugin changes, rollout, shared-service restart,
+credentials, spending and retained-resource custody need their existing
+separate authority. The affected consumer owner receives the qualified fix
+availability before removing a workaround.
+
+Remaining work may be taken over only after the prior owner's change is merged
+and its worktree is actually finalized. Otherwise coordinate with or reawaken
+that existing owner rather than waiting indefinitely or replacing it silently.
 
 The [M1 cache/event contract](repository-cache-events-m1.md) under #11779
 sequences the first integrated milestone within #6007, not a second campaign.
@@ -301,6 +357,13 @@ discovery pollers. The selection grammar and admission mechanics are design
 details, not additional operator quotations or live deployment authority.
 
 ## Plan
+
+### Reviewer-perspective status and action feeds
+
+- [ ] Review and deliver the [activity-backed action-feed extension](reviewer-action-feeds.md)
+  under #12947, beginning with the actual cache-backed reviewer read, then
+  streaming transport, inert consumer contract and independent comparison.
+  Preserve every original M1/Author/Reviewer/provider and operational gate.
 
 ### Driver-aware filter definitions and owned population demand
 
@@ -1140,6 +1203,10 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Resolve the [reviewer-action feed validation](reviewer-action-feeds.md#validation-plan)
+  under #12947, keeping actual cache/client/stream behavior, inert consumer
+  controls and separately authorized provider/operational proof distinct.
+
 - [x] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
   after reviewed contract #11754. All five finite source-control rows pass
   (229 coupled Worktrees and 123 frontend cases, five existing platform skips);
@@ -1518,6 +1585,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-16 - Reviewer-action feed contract reviewed](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md)
 - [2026-11-09 - First integrated cache/event milestone selected](journal/2026/11.09%20Repository%20cache%20events%20milestone.md)
 - [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
 - [2026-11-09 - Selected native reopening source implementation](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)

@@ -5,11 +5,15 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
+from typing import Any
 
+import agent_bridge_contract_git as git_evidence
+import agent_bridge_contract_registry as registry_codec
+from agent_bridge_contract_paths import safe
 import bridge_http47_evidence as evidence
 
 
-def validate_closure(root: Path, packet: dict, registry: dict) -> None:
+def validate_closure(root: Path, packet: dict[str, Any], registry: dict[str, Any]) -> None:
     if packet.get("runtime_binding_policy") != "every-owned-interpreter-source-and-entrypoint-v1":
         raise ValueError("HTTP-47 interpreter binding policy is missing")
     proof = packet.get("execution_closure")
@@ -17,7 +21,7 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
         "execution_closure_sha256"
     ) != evidence.digest(evidence.encode(proof)):
         raise ValueError("HTTP-47 execution closure manifest/digest missing or invalid")
-    evidence.git_evidence.prefetch_objects(
+    git_evidence.prefetch_objects(
         identity["blob"] for identity in proof.values()
         if isinstance(identity, dict) and isinstance(identity.get("blob"), str)
         and re.fullmatch(r"[0-9a-f]{40}", identity["blob"])
@@ -28,15 +32,16 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
         contract["declared_range"]["current"] for contract in registry["contracts"]
         if contract["id"] == "agent-bridge.http-wire"
     )
-    tree_result = evidence.git_evidence.git("ls-tree", "-r", commit)
+    tree_result = git_evidence.git("ls-tree", "-r", commit)
     if tree_result.returncode == 0:
         tree = {}
         for line in tree_result.stdout.splitlines():
-            metadata, path = line.split("\t", 1)
-            mode, kind, blob = metadata.split()
+            tree_metadata, path = line.split("\t", 1)
+            mode, kind, blob = tree_metadata.split()
             tree[path] = (mode, kind, blob)
-        metadata = evidence.registry_codec.load(
+        metadata = registry_codec.load(
             root, read=lambda path: evidence.git(root, "show", commit + ":" + path),
+            read_many=lambda paths: git_evidence.read_files(root, commit, paths),
         )
         original = metadata.materialized
         # Compute completeness against the captured tree, not a digest supplied
@@ -62,7 +67,7 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
         # Captured chunks must remain an immutable prefix of each published
         # history; newly published chunks are not execution inputs retroactively.
         tree = None
-        metadata = evidence.registry_codec.load(root)
+        metadata = registry_codec.load(root)
         metadata_paths = set(proof) & (set(metadata.inputs) - {evidence.REGISTRY})
         for contract in metadata.index["contracts"]:
             after_capture = False
@@ -85,7 +90,7 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
         if (current == 47 and set(proof) != required) or not required <= set(proof):
             raise ValueError("HTTP-47 execution closure inventory is unprovable")
     for path, identity in proof.items():
-        evidence.safe(root, path)
+        safe(root, path)
         if (
             not isinstance(identity, dict) or set(identity) != {"blob", "sha256"}
             or not re.fullmatch(r"[0-9a-f]{40}", identity.get("blob", ""))
@@ -102,9 +107,9 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
             ("100644", "blob", blob), ("100755", "blob", blob)
         }:
             raise ValueError(f"HTTP-47 execution closure source/blob mismatch: {path}")
-        actual = evidence.git_evidence.blob_sha256(blob)
+        actual = git_evidence.blob_sha256(blob)
         if actual is None:
-            data = evidence.safe(root, path).read_bytes()
+            data = safe(root, path).read_bytes()
             canonical = data.decode().replace("\r\n", "\n").replace("\r", "\n").encode()
             if blob not in {
                 hashlib.sha1(
@@ -148,7 +153,10 @@ def closure_python(path: str) -> bool:
     )
 
 
-def validate_http47(root: Path, registry: dict, loaded: dict, errors: list[str]) -> None:
+def validate_http47(
+    root: Path, registry: dict[str, Any],
+    loaded: dict[str, tuple[str, dict[str, Any]]], errors: list[str],
+) -> None:
     primary = loaded.get(evidence.PRIMARY)
     if primary is None:
         errors.append("HTTP-47 execution closure primary evidence is missing")

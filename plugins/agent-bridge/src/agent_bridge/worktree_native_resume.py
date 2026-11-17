@@ -14,12 +14,14 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_gates import AcquisitionGateHeld
 from .acquisition_executor import executor
 from .acquisition_store import AcquisitionStore
-from .models import SessionInfo, SessionStatus
+from .models import SessionInfo
+from .session_status import SessionStatus
 from .session_manager import DaemonDrainingError, ProviderTargetRefreshError
 from .singleton_anchor import repo_name_from_anchor_key
 from .worktree_charter import _apply_bound_charter
@@ -39,10 +41,26 @@ def _refuse(reason: str, detail: str, *, status: int = 409) -> HTTPException:
     return HTTPException(status, detail={"reason": reason, "detail": detail})
 
 
+@router.get("/api/v1/targets")
+async def list_targets(request: Request, refresh: bool = False) -> dict[str, Any]:
+    """Project registrations and every discovered workspace without hydration."""
+    from .target_inventory import inventory
+
+    return await inventory(request, refresh=refresh)
+
+
+@router.post("/api/v1/worktrees/{worktree_id}/metadata", response_model=SessionInfo)
+async def hydrate_worktree(worktree_id: str, request: Request) -> JSONResponse:
+    """Resolve and hydrate the authoritative head without resuming it."""
+    from .worktree_metadata import hydrate
+
+    return await hydrate(worktree_id, request)
+
+
 @router.post("/api/v1/worktrees/{worktree_id}/resume/{mode}", response_model=SessionInfo)
 async def resume_native_worktree(
     worktree_id: str, request: Request, mode: Mode, reclaim: bool = False, strict: bool = False,
-) -> SessionInfo:
+) -> SessionInfo | JSONResponse:
     from .routes import worktrees as wt
 
     singleton = repo_name_from_anchor_key(worktree_id) if isinstance(worktree_id, str) else None
@@ -59,16 +77,22 @@ async def resume_native_worktree(
         raise _refuse("draining", "Bridge is draining", status=503)
     async with wt._fresh_start_locks.setdefault(worktree_id, asyncio.Lock()):
         try:
-            with executor(db, worktree_id):
-                manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
-                try:
+            manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
+            try:
+                if not singleton:
+                    from .retained_worktree_resume import resume
+
+                    recovered = await resume(request, worktree_id, mode)
+                    if recovered is not None:
+                        return recovered
+                with executor(db, worktree_id):
                     if singleton:
                         from .singleton_resume import resume_singleton_anchor
 
                         return await resume_singleton_anchor(worktree_id, request, mode, strict=strict)
                     return await _resume(worktree_id, request, mode, manager, db, resolver)
-                finally:
-                    manager._active_acquisitions -= 1
+            finally:
+                manager._active_acquisitions -= 1
         except AcquisitionRefused as exc:
             raise _refuse(exc.code, str(exc)) from exc
         except AcquisitionGateHeld as exc:
@@ -94,7 +118,7 @@ async def _resume(
     from .routes import worktrees as wt
     from .routes.sessions import _session_info
 
-    owner, entry = await wt._find_cached_worktree_entry(
+    owner, entry = await getattr(wt, "_find_cached_worktree_entry")(
         worktree_id, resolver, cache=wt.cache_for_app(request.app),
     )
     if owner is None or entry is None or not entry.path:
@@ -166,9 +190,13 @@ async def _resume(
         session for session in manager.list_sessions()
         if session.target.worktree_id == worktree_id
     ]
+    from .retained_session_recovery import require_resume
+
     for session in owned:
+        if session.acp_session_id == native:
+            require_resume(manager, session)
         if session.status not in {SessionStatus.STOPPED, SessionStatus.ENDED, SessionStatus.FAILED}:
-            already_live = await wt._resolve_already_live(manager, worktree_id, session)
+            already_live = await getattr(wt, "_resolve_already_live")(manager, worktree_id, session)
             if (
                 mode == "acp" and session.acp_session_id == native
                 and session.target.cwd == entry.path and session.target.project == config.project
@@ -241,6 +269,15 @@ async def _resume(
 
     await require_owner_hosting(owner, resolver, entry.path, operation="native resume")
     session = None
+    if db.execute_read(
+        "SELECT 1 FROM workspace_embodiments WHERE creation_writer_json IS NOT NULL "
+        "AND (native_session_id=? OR json_extract(worktree_json,'$.id')=?) LIMIT 1",
+        (native, worktree_id),
+    ) and not any(session.acp_session_id == native for session in owned):
+        raise _refuse(
+            "retained_metadata_held",
+            "The original keyed conversation requires retained metadata recovery, not generic native import",
+        )
     if mode == "acp":
         target = replace(
             resolver.resolve(owner), cwd=entry.path, worktree_id=worktree_id,

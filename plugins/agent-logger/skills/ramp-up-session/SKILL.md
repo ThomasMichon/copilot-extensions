@@ -30,10 +30,12 @@ Every Copilot session records its raw event stream at
 `~/.copilot/session-state/<id>/events.jsonl`; this skill turns that stream into
 a compact takeover brief and hands your current session the torch.
 
-It reuses the segmenter engine wholesale — `ramp-up-session` is a thin front
-end over the same `collate-session` machinery, adding only worktree-scoped
-session discovery. The collated digest is written **ephemerally** (to
-`$TEMP/session-digest/<id>/`), never to the persistent digest store.
+It reuses the segmenter engine wholesale — `ramp-up-session` and
+`collate-session` share one events → Markdown digest engine
+(`agent_logger.segmenter.digest`); ramp-up adds only worktree-scoped session
+discovery and its takeover-brief charter. The collated digest is written
+**ephemerally** (to `$TEMP/session-digest/<id>/`), never to the persistent
+digest store.
 
 ## When to use
 

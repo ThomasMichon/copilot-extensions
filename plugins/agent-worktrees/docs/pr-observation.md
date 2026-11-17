@@ -54,6 +54,37 @@ correct admitted scope rather than substitute `base_ref`. Existing watch
 cursors, transition criteria and merge policy are unchanged; exporting this
 field does not silently add a target-movement transition.
 
+The optional `reviews_complete` reports review-page coverage. Gitea captures
+`X-Total-Count` through the existing curl response owner, within the unchanged
+capture budget. That count includes raw rows before other users' pending drafts
+are filtered. Empty intermediate pages and server-clamped short pages therefore
+do not establish exhaustion.
+
+When the first count is available and remains unchanged, traversal completes
+after acquiring that many distinct rows or reaching the count's conservative
+last-page bound: a positive raw page size cannot put a row after page N for
+N raw rows. Filtered empty pages are traversed within the existing request
+budget and a 64-page ceiling; reaching a bound fails rather than certifying
+partial history. A changed/lost count, contradictory rows, malformed,
+oversized or overlapping pages also fail. Normal fully visible histories can
+finish without an extra empty-page request.
+
+Missing metadata on the first response leaves coverage unknown (`null`),
+including prior executable/transport forms; an empty body never upgrades it.
+Valid team-only review requests retain their request state without inventing an
+individual reviewer. This is not atomic multi-page evidence, a submitted verdict,
+reviewer-specific completeness or permission to act. The additive `updated_at`
+retains the PR mutation timestamp from the same PR object; it does not identify
+the actor or kind of mutation. Count capture adds no separate provider request,
+and older version-1 consumers may ignore the additive fields.
+
+The provider semantics follow Gitea's
+[raw review count](https://github.com/go-gitea/gitea/blob/894a971fab2c93f7018d0bc8139b1e25ec59be96/routers/api/v1/repo/pull_review.go),
+[post-pagination draft filtering](https://github.com/go-gitea/gitea/blob/894a971fab2c93f7018d0bc8139b1e25ec59be96/services/convert/pull_review.go)
+and [page normalization](https://github.com/go-gitea/gitea/blob/894a971fab2c93f7018d0bc8139b1e25ec59be96/routers/api/v1/utils/page.go).
+These describe the API contract, not qualification of an arbitrary server or
+curl binary. An older curl that supplies no usable count leaves it unknown.
+
 On-demand `threads` reads return discussion bodies, stable comment identities and
 comparison-round context; persisted watch snapshots contain metadata only.
 Each readable thread also reports a reply fingerprint or an explicit
@@ -208,6 +239,23 @@ requirement into a passed gate. Set requirements deliberately and retain native
 policy evidence. Native required policies are never disabled by this block.
 
 ### Renewable observation credentials
+
+An explicitly selected `snapshot <repo> <number> --config <file>
+--credential-command <JSON-argv>` resolves its target through the same bounded
+selected-file binding owner as repository inventory. No local anchor, project,
+registry or layered configuration is needed for this form. The file must contain
+one matching `repos.<name>.pr` provider/repository binding; relative paths retain
+their caller-directory meaning. Unavailable paths return a sanitized selection
+error, not a traceback. Gitea and Azure DevOps
+also require their explicit endpoint. GitHub retains its supported public
+default when the endpoint is omitted. Invalid or ambiguous selection refuses
+before credential acquisition. Ordinary reads without this explicit typed-source
+form retain their existing layered configuration behavior.
+
+The existing inventory contract declares this additive support as
+`snapshot_explicit_binding` version 1 (`scope: selected-file`,
+`local_checkout: not-required`). Older readers lacking that declaration must
+not be assumed checkout-free; no CLI option is added or retired.
 
 The native Python observation boundary (`pr_watch.build_fetch` and
 `pr_observation.configured_snapshot`) accepts an optional `credential_source`.

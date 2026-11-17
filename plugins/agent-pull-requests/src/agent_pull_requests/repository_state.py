@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from .repository_contract import (
     MAX_CACHE_BYTES, MAX_EVENTS, MAX_PULLS, MAX_REGISTRATIONS, MAX_TARGETS,
@@ -11,23 +12,31 @@ from .repository_contract import (
 
 METADATA_RESERVE_BYTES = 1_048_576
 
-def empty() -> dict:
+def empty() -> dict[str, Any]:
     return {"repositories": [], "registrations": [], "events": [], "next_sequence": 1}
 
 
-def _fields(value, names):
+def _fields(value: object, names: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != set(names.split()):
         raise ValueError("invalid repository cache storage fields")
+    return value
 
 
-def _integer(value, minimum=0):
+def _integer(value: object, minimum: int = 0) -> None:
     if type(value) is not int or value < minimum:
         raise ValueError("invalid repository cache integer")
 
 
-def facts(value):
-    _fields(value, "provider pr_state merged head_sha base_ref base_sha mergeable checks_state "
-            "checks_complete title draft author reviews check_failures fingerprints")
+def facts(value: object, *, activity: bool = False) -> None:
+    value = _fields(value, "provider pr_state merged head_sha base_ref base_sha mergeable checks_state "
+            "checks_complete title draft author reviews check_failures fingerprints" + (
+                " reviews_complete updated_at" if activity else ""
+            ))
+    if activity and (
+        value["reviews_complete"] is not None and type(value["reviews_complete"]) is not bool
+        or value["updated_at"] is not None and not isinstance(value["updated_at"], str)
+    ):
+        raise ValueError("invalid normalized review coverage")
     if value["provider"] not in ("github", "gitea") or value["pr_state"] not in ("open", "closed"):
         raise ValueError("invalid normalized provider or lifecycle")
     if any(type(value[name]) is not bool for name in ("merged", "draft")) or any(
@@ -44,7 +53,9 @@ def facts(value):
     if not isinstance(value["reviews"], list) or len(value["reviews"]) > 1000:
         raise ValueError("invalid normalized reviews")
     for review in value["reviews"]:
-        _fields(review, "id state user commit_id dismissed")
+        _fields(review, "id state user commit_id dismissed" + (" submitted_at" if activity else ""))
+        if activity and review["submitted_at"] is not None and not isinstance(review["submitted_at"], str):
+            raise ValueError("invalid normalized review time")
         if review["id"] is not None:
             _integer(review["id"])
         if any(review[name] is not None and not isinstance(review[name], str)
@@ -67,15 +78,15 @@ def facts(value):
         raise ValueError("normalized facts exceed byte bound")
 
 
-def validate(value: object, namespace: str, *, version: int = 1) -> None:
+def validate(value: object, namespace: str, *, version: int = 1, activity: bool = False) -> None:
     """Refuse foreign/newer state rather than silently rebuilding a projection."""
-    _fields(value, "repositories registrations events next_sequence")
+    value = _fields(value, "repositories registrations events next_sequence")
     _integer(value["next_sequence"], 1)
     limits = {"repositories": MAX_TARGETS, "registrations": MAX_REGISTRATIONS, "events": MAX_EVENTS}
     for name, limit in limits.items():
         if not isinstance(value[name], list) or len(value[name]) > limit:
             raise ValueError("repository cache capacity exceeded")
-    targets = set()
+    targets: set[str] = set()
     for row in value["repositories"]:
         _fields(row, "identity inventory pulls")
         identity = RepositoryIdentity.parse(row["identity"])
@@ -94,9 +105,9 @@ def validate(value: object, namespace: str, *, version: int = 1) -> None:
             raise ValueError("invalid inventory error")
         if not isinstance(row["pulls"], list) or len(row["pulls"]) > MAX_PULLS * 2:
             raise ValueError("repository current-state bound exceeded")
-        numbers = set()
+        numbers: set[int] = set()
         for pull in row["pulls"]:
-            _fields(pull, "number member departed_at observed_at error facts")
+            _fields(pull, "number member departed_at observed_at error facts" + (" activity" if activity else ""))
             _integer(pull["number"], 1)
             if pull["number"] in numbers or type(pull["member"]) is not bool:
                 raise ValueError("invalid current-state membership")
@@ -107,8 +118,11 @@ def validate(value: object, namespace: str, *, version: int = 1) -> None:
             if not isinstance(pull["error"], str) or len(pull["error"]) > 128:
                 raise ValueError("invalid current-state error")
             if pull["facts"] is not None:
-                facts(pull["facts"])
-    registrations = set()
+                facts(pull["facts"], activity=activity)
+            if activity:
+                from .repository_activity import validate as validate_activity
+                validate_activity(pull["activity"], pull["observed_at"])
+    registrations: set[str] = set()
     for row in value["registrations"]:
         _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled" + (
             " request delivered acknowledged_event" if version == 2 else ""
@@ -161,22 +175,22 @@ def validate(value: object, namespace: str, *, version: int = 1) -> None:
                 ):
                     raise ValueError("invalid inventory status event")
             else:
-                facts(row["facts"])
+                facts(row["facts"], activity=activity)
     if not fits(value, version=version):
         raise RepositoryBackpressure("repository cache byte capacity exceeded")
 
 
-def encoded_sizes(value):
+def encoded_sizes(value: dict[str, Any]) -> tuple[int, int]:
     total = len(json.dumps(value, allow_nan=False).encode())
     payload = len(json.dumps({**value, "registrations": []}, allow_nan=False).encode())
     return total, payload
 
 
-def sizes_fit(total, payload, *, version=1):
+def sizes_fit(total: int, payload: int, *, version: int = 1) -> bool:
     return total <= MAX_CACHE_BYTES and payload <= MAX_CACHE_BYTES - (
         METADATA_RESERVE_BYTES if version == 2 else 0
     )
 
 
-def fits(value, *, version=1):
+def fits(value: dict[str, Any], *, version: int = 1) -> bool:
     return sizes_fit(*encoded_sizes(value), version=version)

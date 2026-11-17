@@ -5,6 +5,21 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = @($args)
+$readinessProbe = $false
+$skipLogLevel = $false
+$logLevelOptions = @('--l', '--lo', '--log', '--log-', '--log-l', '--log-le', '--log-lev', '--log-leve', '--log-level')
+foreach ($argument in $forwardArgs) {
+    if ($skipLogLevel) { $skipLogLevel = $false; continue }
+    $optionName = ([string]$argument -split '=', 2)[0]
+    if ($argument -cin $logLevelOptions) {
+        $skipLogLevel = $true
+    } elseif ($optionName -cin $logLevelOptions) {
+        continue
+    } elseif ($argument -cin @('installer-readiness', 'invocation-contract')) {
+        $readinessProbe = $true
+        break
+    } else { break }
+}
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_MCP_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-mcp] owning payload root is unavailable.')
@@ -187,8 +202,17 @@ function Invoke-Runtime {
     # a terminating exception here (copilot-extensions#5494).
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $pythonOptions = @()
+    if ($readinessProbe) {
+        $pythonOptions = @('-I', '-B', '-X', 'utf8')
+    }
     try {
-        & $Python -m agent_mcp @forwardArgs
+        if ($pythonOptions.Count) {
+            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
+            & $Python @pythonOptions $probeEntry --plugin agent-mcp --module agent_mcp -- @forwardArgs
+        } else {
+            & $Python -m agent_mcp @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }

@@ -52,9 +52,19 @@ import sys
 from pathlib import Path
 
 source, fresh = map(Path, sys.argv[1:])
+sys.path.insert(0, str(source / "tools"))
+from launch_wrapper_assets_ref import load_manifest_groups
+
 ignore = shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist")
-shutil.copytree(source / "plugins/budget-guidance", fresh / "plugins/budget-guidance", ignore=ignore)
+plugin = source / "plugins/budget-guidance"
+candidate = fresh / "plugins/budget-guidance"
+shutil.copytree(plugin, candidate, ignore=ignore)
 shutil.copytree(source / "libs/agent-procutil", fresh / "libs/agent-procutil", ignore=ignore)
+for assets in load_manifest_groups(plugin, manifest_name="packaged-assets.json"):
+    destination = assets.payload_dir(plugin_dir=candidate)
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in assets.files:
+        shutil.copyfile(assets.canonical_dir(repo_root=source) / name, destination / name)
 PY
 then
     jam "path-binstub" "candidate copy failed" "inspect copy-candidate.log"

@@ -194,6 +194,45 @@ authorized escalation. Name a missing adapter owner/operation and remaining
 proof. Do not ship service repair, queue surgery, new messaging/state services
 or a parallel scheduler as an adaptation.
 
+## Diagnose the failed boundary, not the whole role
+
+Separate source merge, package installation, runtime activation and current
+consumer-qualified health. A coordinator heartbeat does not prove that the
+selected discovery or publisher is running; a stale queue does not prove an
+empty forge population. A prior successful manual review proves historical
+capability, not current liveness. An absent process alone is not an
+authentication outage. Record which operation, actor/scope and observation
+actually support the diagnosis; unknown health stays unknown.
+
+Classify each attempted operation before deciding whether to retry:
+
+- **Local request assembly failed before provider invocation:** correct the
+  caller input within existing authority and make one bounded corrected
+  attempt. This does not require a new permission ceremony or service repair.
+  If invocation may have occurred, preserve the unknown effect and reconcile
+  it first rather than assuming this is a pre-invocation failure.
+- **Provider authentication, configuration, access or transport failure:**
+  stop the affected operation and retain its exact failed boundary and evidence,
+  including provider errors embedded in an exit-zero response. Do not retry
+  unchanged on a timer or blanket-block unrelated working operation families.
+  A later attempt needs genuinely changed evidence or corrected caller input,
+  a stated bound and the selected owner's safeguards. Preserve the original
+  failure, clocks, attempt budget and unknown effects; no credential bypass or
+  implied repair authority.
+- **Healthy empty success:** claim an empty population only after a successful,
+  complete scoped enumeration with no provider error. Empty/unknown capture,
+  partial pages or a success footer alone never establish an empty source.
+
+When activation or repair is separately held, preserve that hold and route one
+concrete blocker through the existing escalation owner: condition, evidence,
+impact, next owner, resumption condition and default path. An unanswered approval
+form is not approval; a revisit or default cannot clear the hold. Repeated
+unchanged healthy-coordinator/zero-lane observations are not progress or service
+coverage. If authorized and supported, manual review can continue for unattempted
+eligible retained candidates without the absent loop or optional API. Preserve
+their eligibility, source validity, deduplication and original failure budgets;
+manual operation is not a workaround for the failed boundary or held effect.
+
 ## Merge policy mapping
 
 | Repository flow | Required handling |

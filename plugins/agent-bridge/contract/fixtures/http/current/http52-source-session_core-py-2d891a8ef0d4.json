@@ -2,15 +2,15 @@
   "evidence_family": "http52-shared-asgi-v1",
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "0c1b60e159c41929ca7e3b0fa5ad67631b9fa8674600ef0cc5f0c88c97a9c2ae"
+    "sha256": "2cb12ac51a6b83d240e79522a80084cae76e1918443fe3ca3cd8ff29be42528c"
   },
   "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "ea027c101ae0786d05bb1fe7742647c5b6cbaf5d",
+    "commit": "7d270b9fb82007057307b63b49d9cf37f75f5593",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-    "source_git_blob": "df838d7819c662fe6b3fa72f14a010692f00dd7d",
-    "source_sha256": "6c166c3df13af4c982710851f43abeb0fd12ab4d3b7022aee21fdda85a523bdb"
+    "source_git_blob": "17b9c30083858a6beeb6c399186400f9e7569738",
+    "source_sha256": "99697101d753cf500a2fc8c1632da8da34acef2ebae7e6408650647e1a05644c"
   }
 }

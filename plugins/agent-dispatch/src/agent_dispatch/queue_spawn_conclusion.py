@@ -24,8 +24,13 @@ and ``self._now()`` from that class and is not usable standalone.
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
+from collections.abc import Callable
+from typing import Any
 
+from .retained_conversation_cleanup import pending_conversation, require_conversation_released
+from .queue_common import Task
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_reservations import _newer_worktree_reservation, _validate_conclusion_claim
 
@@ -48,7 +53,7 @@ CLAIM_BLOCKED_REASON = "outstanding-obligations"
 CLAIM_HELD_REARM_CAPABILITY = "claim_held_cleanup_rearm"
 
 
-def claim_blocked_rearm_payload(payload: dict) -> dict | None:
+def claim_blocked_rearm_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Return a pending retry payload when only a live claim preserved cleanup."""
     component = payload.get("worktree_cleanup")
     if isinstance(component, dict):
@@ -83,11 +88,16 @@ def claim_blocked_rearm_payload(payload: dict) -> dict | None:
 class SpawnConclusionMixin:
     """``TaskQueue`` mixin: spawn-reservation conclusion-claim lifecycle."""
 
-    def recover_held_cleanup(self, key: str, **kwargs) -> dict:
+    _connect: Callable[[], sqlite3.Connection]
+    _fetch: Callable[[sqlite3.Connection, str], Task | None]
+    _now: Callable[[float | None], float]
+    _audit: Callable[..., None]
+
+    def recover_held_cleanup(self, key: str, **kwargs: Any) -> dict[str, Any]:
         from .cleanup_recovery import recover
         return recover(self, key, **kwargs)
 
-    def cleanup_recovery_history(self, key: str) -> list[dict]:
+    def cleanup_recovery_history(self, key: str) -> list[dict[str, Any]]:
         from .cleanup_recovery import history
         return history(self, key)
 
@@ -118,6 +128,7 @@ class SpawnConclusionMixin:
             if row["state"] not in mutable_states:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} is {row['state']!r}, not mutable")
+            require_conversation_released(conn, row)
             _validate_conclusion_claim(
                 row["cleanup_claim_token"],
                 row["cleanup_claim_expires_at"],
@@ -267,6 +278,9 @@ class SpawnConclusionMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} has no retired pending cleanup")
+            if pending_conversation(conn, row):
+                conn.execute("COMMIT")
+                return SpawnReservation._from_row(row), False, None
             from .cleanup_recovery import validate_recovery
             validate_recovery(self, conn, row, check_allocation=False, claimant_machine=claimant_machine)
             try:
@@ -344,6 +358,7 @@ class SpawnConclusionMixin:
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
+            require_conversation_released(conn, row)
             _validate_conclusion_claim(
                 row["cleanup_claim_token"],
                 row["cleanup_claim_expires_at"],

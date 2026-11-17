@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol, cast
 
 import yaml
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
-from configuration_layers import ConfigurationError, compose, read_source
+from configuration_layers import Composition, ConfigurationError, Document, Layer, LayerOwner, compose, read_source
 
-from . import _peer_launch
+from . import _peer_launch as _peer_launch
+from .config_routing import _deep_merge
 from .home import default_home_dir
 
 if TYPE_CHECKING:
@@ -19,6 +21,14 @@ if TYPE_CHECKING:
 
 FIELDS = {"timeout", "retries", "idle_timeout"}
 RELPATH = Path(".copilot-extensions") / "agent-mcp" / "bridges"
+
+class MCPComposition(Composition, total=False):
+    native_selectors: dict[str, str]
+
+
+class ConfigurationMetadata(Protocol):
+    configuration_provenance: dict[str, LayerOwner]
+    configuration_selectors: dict[str, str]
 
 
 def load_readiness_config(name_or_path: str) -> BridgeConfig:
@@ -28,7 +38,7 @@ def load_readiness_config(name_or_path: str) -> BridgeConfig:
     path = native.resolve_config_path(name_or_path)
     data = native._read_file(path)
     machine = native._machine_overlay(data, path)
-    return native.parse_config(native._deep_merge(data, machine), name=path.stem, source_path=path)
+    return native.parse_config(_deep_merge(data, machine), name=path.stem, source_path=path)
 
 
 def load_native_config(
@@ -41,17 +51,18 @@ def load_native_config(
     data = native._read_file(path)
     machine = native._machine_overlay(data, path)
     ordinary = compose_preferences(data, path, machine, repository_root=repository_root)
-    data = native._deep_merge(data, machine)
+    data = _deep_merge(data, machine)
     if ordinary is not None:
         data.update(ordinary["values"])
     config = native.parse_config(data, name=path.stem, source_path=path)
     if ordinary is not None:
-        config.configuration_provenance = ordinary["provenance"]
-        config.configuration_selectors = ordinary.get("native_selectors", {})
+        metadata = cast(ConfigurationMetadata, config)
+        metadata.configuration_provenance = ordinary["provenance"]
+        metadata.configuration_selectors = ordinary.get("native_selectors", {})
     return config
 
 
-def _legacy_report(root: Path) -> dict | None:
+def _legacy_report(root: Path) -> dict[str, object] | None:
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or default_home_dir())
     legacy = Path.home() / ".agent-mcp"
     peer = Path.home() / ".agent-worktrees"
@@ -74,6 +85,9 @@ def _legacy_report(root: Path) -> dict | None:
             path = retained
     if not path.is_file():
         return None
+    from configuration_context.readiness import qualify_resolver
+
+    qualify_resolver(path, "agent-mcp", "agent_mcp")
     resolver = _peer_launch._load_primitive(path, "_mcp_configuration_runtime")
     prefix = ready_owner_prefix(peer, "agent_worktrees", resolver=resolver.resolve_python)
     if not prefix:
@@ -81,12 +95,14 @@ def _legacy_report(root: Path) -> dict | None:
     environment = _peer_launch.legacy_peer_environment(dict(os.environ))
     environment.pop("AGENT_CONFIGURATION_CONTEXT", None)
     return read_owner_context(
-        [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
+        prefix, root,
         environment=environment,
     )
 
 
-def _checked_report(report, own):
+def _checked_report(
+    report: dict[str, object] | None, own: Mapping[str, str] | None,
+) -> dict[str, object] | None:
     if report is not None and own is not None and (
         context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
     ):
@@ -94,7 +110,7 @@ def _checked_report(report, own):
     return report
 
 
-def owner_report(root: Path) -> dict | None:
+def owner_report(root: Path) -> dict[str, object] | None:
     own_root = Path(os.environ.get("AGENT_RT_ROOT") or default_home_dir())
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
     if not raw and (
@@ -132,12 +148,13 @@ def owner_report(root: Path) -> dict | None:
     ), own)
 
 
-def _ordinary(raw: dict) -> dict:
-    values = {}
+def _ordinary(raw: Mapping[str, object]) -> dict[str, int | float]:
+    values: dict[str, int | float] = {}
     for key, raw_value in raw.items():
         if key not in FIELDS:
             continue
-        value = int(raw_value) if key == "retries" else float(raw_value)
+        numeric = cast("str | int | float", raw_value)
+        value = int(numeric) if key == "retries" else float(numeric)
         if key == "retries" and value < 0:
             raise ValueError("MCP ordinary retries must be a nonnegative integer")
         if key == "timeout" and value <= 0:
@@ -146,7 +163,7 @@ def _ordinary(raw: dict) -> dict:
     return values
 
 
-def _source(root: str, relative: Path) -> dict | None:
+def _source(root: str, relative: Path) -> Document | None:
     if not Path(root).exists():
         return None
     for extension in (".yaml", ".yml", ".json"):
@@ -159,9 +176,9 @@ def _source(root: str, relative: Path) -> dict | None:
 
 
 def compose_preferences(
-    data: dict, selected_path: Path, machine_values: dict, *,
+    data: dict[str, object], selected_path: Path, machine_values: dict[str, object], *,
     repository_root: Path | None = None,
-) -> dict | None:
+) -> MCPComposition | None:
     from .config import _overlay_id
 
     report = owner_report(repository_root if repository_root is not None else Path.cwd())
@@ -171,7 +188,7 @@ def compose_preferences(
     bridge_id = _overlay_id(data, selected_path)
     # ID is a native selector, never a path fragment supplied unchecked.
     relative = RELPATH / bridge_id
-    layers = [{
+    layers: list[Layer] = [{
         "id": "mcp-defaults", "tier": "defaults", "origin": "defaults",
         "values": {"timeout": 30.0, "retries": 1, "idle_timeout": 300.0},
     }, {
@@ -181,13 +198,14 @@ def compose_preferences(
     sources = [(context["base_root"], "repository", "base")]
     if context["binding"] == "bound":
         sources.append((context["knowledge_root"], "repository", "knowledge"))
-    if report.get("repository_machine_root"):
-        sources.append((report["repository_machine_root"], "repository_machine", "repository_machine"))
+    machine_root = report.get("repository_machine_root")
+    if isinstance(machine_root, str) and machine_root:
+        sources.append((machine_root, "repository_machine", "repository_machine"))
     for root, tier, origin in sources:
         document = _source(root, relative)
         if document is None:
             continue
-        layer = {
+        layer: Layer = {
             "id": f"mcp-{origin}", "tier": tier, "origin": origin,
             "repository_id": context["repository_id"],
             "values": _ordinary(document["values"]), "source": document["source"],
@@ -201,7 +219,7 @@ def compose_preferences(
         "execution_machine": context["execution_machine"],
         "installation_cell": context["installation_cell"], "values": _ordinary(machine_values),
     })
-    result = compose(context, layers)
+    result = cast(MCPComposition, compose(context, layers))
     # Invocation environment remains outside the portable tiers.
     if "idle_timeout" not in data and not any(
         "idle_timeout" in layer["values"] for layer in layers[2:]

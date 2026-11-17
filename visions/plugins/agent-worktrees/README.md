@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-16
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -53,6 +53,18 @@ not prevent entering that checkout or settling its original local ownership.
 Host renames preserve worktree IDs, sessions, relationships and claim references;
 they do not require identity migration to make existing work usable. Explicit
 remote selection and new allocation retain their own execution-target checks.
+
+Git is the canonical holder of local checkout/worktree membership. Copilot
+session-state and its workspace CWD records are the canonical holder of
+session/workspace membership. The service proactively maintains their joined
+mapping in an operational store so ordinary concurrent operations do not need
+to reconstruct it on demand, while converging to the mapping reconstructable
+from those native sources. The selected user directory, project registry,
+checkouts and Copilot roots already scope local execution; copied
+machine/environment/platform fields are not a second qualification of a local
+worktree or session mapping. This derived mapping does not replace durable
+agency state: serialized writes, in-flight journals, idempotency, claims and
+unknown outcomes remain preserved across reconciliation and reconstruction.
 
 The resident agent-worktrees service maintains a flattened, attributable map of
 registered repository information, including each repository's resolved local
@@ -243,6 +255,22 @@ machine's state authority. The origin coordinates the request and its obligation
 the receiving owner creates and tracks its own workspace. Selecting another
 destination repository or execution environment never silently changes the
 creator or makes the receiver authoritative over the origin's ledger.
+
+### Artifact disposition
+
+Agent-created artifacts remain accountable to their producing worktree until
+their class-appropriate disposition is established. Disposable scratch,
+execution history, durable knowledge, user deliverables and reusable caches
+have distinct lifetimes. A retained allocation need not be deleted to complete
+the producing work.
+
+Verified user delivery closes the producing obligation and leaves bounded
+historical evidence, not a permanent inventory of destination files.
+Failed or unknown delivery preserves responsibility. Explicit destinations
+and owner-resolved portable/machine preferences govern placement; changing a
+default neither moves old content nor grants permission to do so.
+The user may reorganize completed deliverables without reopening custody or
+requiring the producing agent to monitor or repair those moves.
 
 ### Write guards are hygiene nudges, named for their plain, mundane reason
 

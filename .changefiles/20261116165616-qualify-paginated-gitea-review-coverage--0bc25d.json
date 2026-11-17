@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify paginated Gitea review coverage and preserve optional native activity metadata",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

@@ -7,6 +7,23 @@ visions:
 
 ## Goal
 
+**Bridge target-discovery amendment:**
+
+> One thing we still clearly need to fix: agent-bridge's available bridge set needs to be a *union* of all active, registered bridge sessions from session-host or agent-bridge extension registrations, and also of all listed worktrees. Any worktree listed by agent-worktrees, should be a valid target in agent-bridge. If there isn't a DB row for a bridge, it should just be created by reading the worktree's head session to hydrate a bridge row.
+
+Include this in the [ordinary resume consumer](retained-metadata-recovery.md#next-consumer-slice-ordinary-supervised-resume).
+Target discovery does not itself authorize native execution, a prompt or task
+acceptance; preserve authoritative head, keyed lineage and history boundaries.
+
+**Retained-writer compatibility amendment:**
+
+> "exact-build" pins should only be used for kicking a contract-compatible *daemon*. If for some reason we need to pin a contract to a specific build, then that data either needs to be ephemeral, or we always need a "contract adapter" for support for newer versions to claim it. We should avoid exact-build pins whenever possible.
+
+Apply this to the [retained-writer compatibility repair](retained-writer-compatibility.md):
+preserve original ownership and history while admitting a compatible newer
+executor through a versioned contract and an adapter for existing build-bound
+records. The implementation sequence below is a proposal, not rollout authority.
+
 Reconcile source-backed tasks that are no longer relevant. Retire a
 never-claimed, resource-free task atomically; otherwise request closeout from
 its existing agent through durable steering and wake delivery. Allow both
@@ -123,6 +140,16 @@ merged plan does not establish running adoption.
       separates passive receipt observation from owner-proved, durably fenced
       non-admission; #12789 accepted the plan, while implementation
       qualification remains open.
+- [x] Review and implement the
+      [retained-writer compatibility repair](retained-writer-compatibility.md)
+      before qualifying newer-code original-conversation continuation.
+      Keep birth provenance separate from the executing serializer; adapt
+      existing build-bound records without replaying unknown operations.
+      Source accepted in #12892; the distinct runtime, concurrent-adoption
+      and rollback qualifications below remain open.
+      Already-missing managed metadata additionally follows the reviewed
+      [retained metadata recovery slice](retained-metadata-recovery.md);
+      preserving source cleanup is not recovery of deleted history.
 
 ### Phase 3 - Source and periodic evaluation integration
 
@@ -222,8 +249,23 @@ merged plan does not establish running adoption.
       running acceptance, and no production activation is implied.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
+      The target-inventory, metadata-hydration and ordinary retained-worktree
+      resume provider merged in #13007; the typed-union CLI consumer and
+      metadata-only target resolution merged in #13043. Dispatch's rollback-safe
+      reservation control-adoption provider merged in #13084. Ordinary supervisor
+      initial-admission resume and separately fenced current-control delivery
+      merged in #13090. Failed historical episodes, installed qualification and
+      full lifecycle acceptance remain open in the
+      [consumer continuation](retained-metadata-recovery.md#next-consumer-slice-ordinary-supervised-resume).
 
 ## Validation Plan
+
+- [ ] Qualify the retained-writer contract adapter through actual Bridge-to-
+      Worktrees serialization: compatible newer execution of original records,
+      preserved identity/history, unsupported-contract refusal, concurrent
+      adoption and supported rollback. The
+      [bounded controls](retained-writer-compatibility.md#validation-plan)
+      remain implementation obligations, not claimed passes.
 
 - [x] Source closure before claim abandons without launching an agent.
       Isolated receipt-caller/current-HTTP controls exercise explicit source
@@ -285,6 +327,12 @@ authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
 
+- [Retained conversation versus failed-attempt cleanup](journal/2026/11.16-retained-conversation-cleanup.md)
+  records the queue-owned preservation correction and bounded controls;
+  missing-metadata recovery and native acceptance remain open.
+- [Retained-writer contract adaptation](journal/2026/11.16-retained-writer-contract.md)
+  records the reviewed compatibility plan and bounded source controls;
+  native/runtime adoption remains open.
 - [Managed command-emitter grant carrier](journal/2026/11.14-managed-command-emitter.md)
   - credential-free discovery and existing managed-create integration; running adoption remains open.
 - [Original body closeout before affirmative start](journal/2026/11.14-before-start-owner.md)

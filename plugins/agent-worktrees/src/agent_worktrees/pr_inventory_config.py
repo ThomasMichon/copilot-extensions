@@ -1,18 +1,24 @@
 """Passive selected-file inventory binding, without layered project/registry intake."""
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from .pr_related_binding import parse_repository
+
+if TYPE_CHECKING:
+    from .config import PRConfig
 
 
 class _UniqueLoader(yaml.SafeLoader):
     pass
 
 
-def _mapping(loader, node):
-    result = {}
+def _mapping(loader: Any, node: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in node.value:
         name = loader.construct_object(key)
         if not isinstance(name, str) or name in result:
@@ -24,7 +30,10 @@ def _mapping(loader, node):
 _UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
 
 
-def load_binding(path: Path, repository: str, *, providers=("github", "gitea")):
+def load_binding(
+    path: Path, repository: str, *, providers: tuple[str, ...] = ("github", "gitea"),
+    allow_default_github_endpoint: bool = False,
+) -> PRConfig:
     """Only explicit repos.<name>.pr fields select inventory provider policy."""
     from .config import _parse_pr
     if not path.is_absolute():
@@ -48,9 +57,10 @@ def load_binding(path: Path, repository: str, *, providers=("github", "gitea")):
             raise ValueError("invalid explicit repository binding")
         selected = binding.get("pr")
         if isinstance(selected, dict) and parse_repository(selected.get("repository", "")) == repository:
-            if selected.get("provider") not in providers or not isinstance(
-                selected.get("api_base"), str,
-            ) or not selected["api_base"]:
+            endpoint = selected.get("api_base", "")
+            if selected.get("provider") not in providers or not isinstance(endpoint, str) or (
+                not endpoint and not (allow_default_github_endpoint and selected.get("provider") == "github")
+            ):
                 raise ValueError("inventory requires an explicit provider and endpoint")
             matches.append(_parse_pr(selected))
     if len(matches) != 1:

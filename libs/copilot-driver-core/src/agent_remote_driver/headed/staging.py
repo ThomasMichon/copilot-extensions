@@ -21,6 +21,9 @@ def stage_extension(attempt_directory: Path) -> Path:
             "extensions/copilot-driver-headed/" + name: source.joinpath(name).read_bytes()
             for name in ("extension.mjs", "acp-adapter.mjs", "host-client.mjs")
         },
+        "extensions/copilot-driver-headed/sdk-compat.mjs": files(
+            "agent_remote_driver.bridge_extension"
+        ).joinpath("sdk-compat.mjs").read_bytes(),
     }
     digest = hashlib.sha256()
     for name, content in sorted(assets.items()):

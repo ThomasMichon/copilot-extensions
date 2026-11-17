@@ -1970,6 +1970,12 @@ settlement and never licenses a retry. Default installer, activation-preserving
 install and POSIX observation are unchanged. Write activity does not establish
 payload validity, successful publication or runtime health.
 
+After native confirmation that the strict Job is empty, output cleanup drains
+available pipe bytes and settles its readers and relays without requiring EOF
+from an unrelated retained write handle. This does not substitute pipe idleness
+for process-tree confirmation or relax cleanup failures, output delivery,
+payload validation or retry rules.
+
 The engine collects the logical target selection before acquisition, refreshes
 its own payload once, and attempts required registered payloads before inactive
 inventory. A required failure stops remaining payload attempts immediately;

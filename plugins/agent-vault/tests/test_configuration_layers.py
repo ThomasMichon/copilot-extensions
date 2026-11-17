@@ -1,12 +1,29 @@
+from __future__ import annotations
+
 import json
+import os
+import subprocess
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import NoReturn, TypedDict, cast
 
 import pytest
-from configuration_layers import ConfigurationError
+from configuration_layers import ConfigurationError, LayerOwner
 
-from agent_vault import config, configuration
+from agent_vault import config, configuration, _peer_launch
 
 
-def setup(tmp_path, monkeypatch, binding="bound"):
+class OwnerReport(TypedDict):
+    schema: str
+    version: int
+    context: dict[str, str]
+    repository_machine_root: str
+
+
+def setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binding: str = "bound",
+) -> tuple[Path, Path, Path, Path, OwnerReport]:
     base, knowledge, local = (tmp_path / part for part in ("base", "knowledge", "local"))
     for root in (base, knowledge, local):
         root.mkdir()
@@ -27,7 +44,7 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     }
     if binding == "bound":
         context["knowledge_root"] = str(knowledge)
-    report = {
+    report: OwnerReport = {
         "schema": "agent-worktrees.configuration", "version": 1, "context": context,
         "repository_machine_root": str(local),
     }
@@ -35,16 +52,16 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     return base, knowledge, local, global_path, report
 
 
-def write(root, values):
+def write(root: Path, values: dict[str, object]) -> None:
     (root / ".agent-vault.json").write_text(json.dumps(values), encoding="utf-8")
 
 
-def test_cli_missing_repository_is_actionable_without_traceback(monkeypatch, capsys):
+def test_cli_missing_repository_is_actionable_without_traceback(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from configuration_context import RepositoryContextRequired
 
     from agent_vault import cli
 
-    def missing():
+    def missing() -> NoReturn:
         raise RepositoryContextRequired()
 
     monkeypatch.setattr(cli, "ensure_service", missing)
@@ -55,9 +72,7 @@ def test_cli_missing_repository_is_actionable_without_traceback(monkeypatch, cap
     assert "Traceback" not in error
 
 
-def test_payload_reader_reports_missing_repository_without_private_error_text(
-    tmp_path, monkeypatch, capsys,
-):
+def test_payload_reader_reports_missing_repository_without_private_error_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import importlib.util
     import sys
     from pathlib import Path
@@ -66,12 +81,13 @@ def test_payload_reader_reports_missing_repository_without_private_error_text(
 
     script = Path(__file__).parents[1] / "scripts" / "runtime-activation.py"
     spec = importlib.util.spec_from_file_location("vault_activation_context_test", script)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(sys, "argv", [str(script), "--cwd", str(tmp_path)])
 
-    def missing(cwd):
+    def missing(cwd: str) -> NoReturn:
         raise RepositoryContextRequired()
 
     monkeypatch.setattr(configuration, "runtime_enabled", missing)
@@ -83,7 +99,7 @@ def test_payload_reader_reports_missing_repository_without_private_error_text(
     assert "Traceback" not in result["detail"]
 
 
-def test_runtime_activation_uses_existing_qualified_layers(tmp_path, monkeypatch):
+def test_runtime_activation_uses_existing_qualified_layers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     assert configuration.runtime_enabled(str(base)) is False
     write(knowledge, {"enabled": True})
@@ -99,17 +115,15 @@ def test_runtime_activation_uses_existing_qualified_layers(tmp_path, monkeypatch
         configuration.runtime_enabled(str(base))
 
 
-def test_batch_reports_invalid_configuration_without_touching_cache(
-    tmp_path, monkeypatch, capsys,
-):
+def test_batch_reports_invalid_configuration_without_touching_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import io
     from types import SimpleNamespace
 
-    from agent_vault import cache, cli
+    from agent_vault import cache, cli, credential_reads
 
     setup(tmp_path, monkeypatch, binding="unresolved")
     monkeypatch.setattr(cache, "get_cache", lambda: pytest.fail("invalid context reached cache"))
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
         '[{"entry":"Example/one"},{"entry":"Example/two"}]',
     ))
 
@@ -122,18 +136,20 @@ def test_batch_reports_invalid_configuration_without_touching_cache(
     assert all(row["error"].startswith("context_invalid;") for row in results)
     assert captured.err == ""
     with pytest.raises(ConfigurationError):
-        cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
+        cast(Callable[[SimpleNamespace], int], credential_reads.cmd_get)(
+            SimpleNamespace(entry="Example/one", field="password"),
+        )
 
 
 @pytest.mark.parametrize("value", [None, "true", 1, {}, []])
-def test_runtime_activation_rejects_nonboolean_opt_in(tmp_path, monkeypatch, value):
+def test_runtime_activation_rejects_nonboolean_opt_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: object) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     write(knowledge, {"enabled": value})
     with pytest.raises(RuntimeError, match="enabled must be a boolean"):
         configuration.runtime_enabled(str(base))
 
 
-def test_standalone_activation_needs_no_worktrees_or_backend(tmp_path, monkeypatch):
+def test_standalone_activation_needs_no_worktrees_or_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(configuration, "owner_report", lambda root: None)
     monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent-global.json"))
     assert configuration.runtime_enabled(str(tmp_path)) is False
@@ -143,7 +159,7 @@ def test_standalone_activation_needs_no_worktrees_or_backend(tmp_path, monkeypat
     assert configuration.runtime_enabled(str(tmp_path)) is False
 
 
-def test_native_vault_selector_all_tiers_without_opening_database(tmp_path, monkeypatch):
+def test_native_vault_selector_all_tiers_without_opening_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     write(base, {"vault": "base", "group": "base-group"})
     write(knowledge, {"vault": "knowledge", "group": "knowledge-group"})
@@ -159,17 +175,19 @@ def test_native_vault_selector_all_tiers_without_opening_database(tmp_path, monk
     assert result.group == "local-group"
     assert result.kpdb == str(tmp_path / "local.kdbx")
     assert not (tmp_path / "local.kdbx").exists()
-    assert result.configuration_provenance["/vault"]["source"]["root"] == str(local)
+    provenance = cast(dict[str, LayerOwner], getattr(result, "configuration_provenance"))
+    assert provenance["/vault"]["source"]["root"] == str(local)
     monkeypatch.setenv("AGENT_VAULT", "explicit")
     monkeypatch.setenv("VAULT_GROUP", "explicit-group")
     result = config.resolve_context(str(base), strict=True)
     assert result.vault_name == "explicit"
     assert result.group == "explicit-group"
-    assert "/vault" not in result.configuration_provenance
-    assert "/group" not in result.configuration_provenance
+    provenance = cast(dict[str, LayerOwner], getattr(result, "configuration_provenance"))
+    assert "/vault" not in provenance
+    assert "/group" not in provenance
 
 
-def test_native_unbound_and_unresolved_are_distinct(tmp_path, monkeypatch):
+def test_native_unbound_and_unresolved_are_distinct(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch, "unbound")
     write(base, {"vault": "base"})
     write(knowledge, {"vault": "knowledge"})
@@ -180,14 +198,14 @@ def test_native_unbound_and_unresolved_are_distinct(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("protected", ["kpdb", "port", "vaults", "socket_path", "cache", "kek"])
-def test_portable_vault_selection_refuses_protected_state(tmp_path, monkeypatch, protected):
+def test_portable_vault_selection_refuses_protected_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, protected: str) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     write(knowledge, {protected: {}})
     with pytest.raises(ValueError, match="custody"):
         config.resolve_context(str(base), strict=True)
 
 
-def test_native_repository_database_path_retains_declaring_owner(tmp_path, monkeypatch):
+def test_native_repository_database_path_retains_declaring_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     write(base, {"vault": "base", "kpdb": "native.kdbx"})
     write(knowledge, {"group": "portable-group"})
@@ -196,7 +214,48 @@ def test_native_repository_database_path_retains_declaring_owner(tmp_path, monke
     assert result.sources["kpdb"] == "repo"
 
 
-def test_native_project_scope_preserves_database_expansion(tmp_path, monkeypatch):
+def test_cache_policy_uses_ordinary_precedence_and_each_declaring_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import cache_targets, extensions
+
+    base, knowledge, local, global_path, _report = setup(tmp_path, monkeypatch)
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    write(base, {
+        "cache_entries": ["base"], "cache_manifests": ["base.conf"],
+        "cache_maintenance": "selected-service",
+    })
+    write(knowledge, {
+        "cache_entries": ["knowledge"], "cache_manifests": ["knowledge.conf"],
+        "cache_maintenance": "local",
+    })
+    policy = cache_targets.configured(str(base))
+    assert policy == {
+        "cache_entries": ["knowledge"], "cache_manifests": [str(knowledge / "knowledge.conf")],
+        "cache_maintenance": "local",
+    }
+    data = json.loads(global_path.read_text())
+    data.update(
+        cache_entries=["machine"], cache_manifests=["machine.conf"],
+        cache_maintenance="selected-service",
+    )
+    global_path.write_text(json.dumps(data))
+    assert cache_targets.configured(str(base)) == {
+        "cache_entries": ["machine"], "cache_manifests": [str(global_path.parent / "machine.conf")],
+        "cache_maintenance": "selected-service",
+    }
+    write(local, {
+        "cache_entries": [], "cache_manifests": ["local.conf"], "cache_maintenance": "local",
+    })
+    assert cache_targets.configured(str(base)) == {
+        "cache_entries": [], "cache_manifests": [str(local / "local.conf")],
+        "cache_maintenance": "local",
+    }
+
+
+def test_native_project_scope_preserves_database_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_vault.invocation import use_configuration_root
 
     base, _knowledge, _local, _global_path, _report = setup(tmp_path, monkeypatch)
@@ -211,9 +270,7 @@ def test_native_project_scope_preserves_database_expansion(tmp_path, monkeypatch
     assert result.sources["kpdb"] == "env"
 
 
-def test_native_project_scope_selects_repo_without_changing_cwd_or_native_paths(
-    tmp_path, monkeypatch, capsys,
-):
+def test_native_project_scope_selects_repo_without_changing_cwd_or_native_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_vault import cli
 
     home, project = tmp_path / "home", tmp_path / "project"
@@ -233,8 +290,8 @@ def test_native_project_scope_selects_repo_without_changing_cwd_or_native_paths(
     selected = json.loads(capsys.readouterr().out)
     assert selected["group"] == "selected"
     assert selected["kpdb"] == str(home / "machine.kdbx")
-    assert config.os.getcwd() == str(home)
-    assert config.os.environ["AGENT_VAULT_CONFIG"] == "native.json"
+    assert os.getcwd() == str(home)
+    assert os.environ["AGENT_VAULT_CONFIG"] == "native.json"
     assert cli.main(["which", "--json"]) == 0
     previous = json.loads(capsys.readouterr().out)
     assert previous["group"] == "caller"
@@ -242,9 +299,7 @@ def test_native_project_scope_selects_repo_without_changing_cwd_or_native_paths(
 
 
 @pytest.mark.parametrize("already_unlocked", [False, True])
-def test_native_project_unlock_tags_real_requests_with_selected_database(
-    tmp_path, monkeypatch, capsys, already_unlocked,
-):
+def test_native_project_unlock_tags_real_requests_with_selected_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], already_unlocked: bool) -> None:
     from agent_vault import cli, extensions
 
     home, project = tmp_path / "home", tmp_path / "project"
@@ -265,10 +320,10 @@ def test_native_project_unlock_tags_real_requests_with_selected_database(
         cli, "gui_prompt_password", lambda *args: pytest.fail("unexpected password prompt"),
     )
     expected = str(project / "selected.kdbx")
-    requests = []
+    requests: list[dict[str, object]] = []
     unlocked = already_unlocked
 
-    def transport(request, *args, **kwargs):
+    def transport(request: dict[str, object], *args: object, **kwargs: object) -> dict[str, object]:
         nonlocal unlocked
         requests.append(dict(request))
         if request["action"] == "unlock":
@@ -284,7 +339,7 @@ def test_native_project_unlock_tags_real_requests_with_selected_database(
     assert "Vault available" in capsys.readouterr().out
     assert all(request["kpdb"] == expected for request in requests)
     assert any(request["action"] == "unlock" for request in requests) is not already_unlocked
-    assert config.os.getcwd() == str(home)
+    assert os.getcwd() == str(home)
 
 
 @pytest.mark.parametrize("arguments", [
@@ -292,9 +347,7 @@ def test_native_project_unlock_tags_real_requests_with_selected_database(
     ["--configuration-root", "relative", "unlock"],
     ["--configuration-root", "one", "--configuration-root", "two", "unlock"],
 ])
-def test_native_project_scope_rejects_invalid_requests_before_dispatch(
-    monkeypatch, arguments,
-):
+def test_native_project_scope_rejects_invalid_requests_before_dispatch(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
     from agent_vault import cli
 
     monkeypatch.setattr(cli, "_main", lambda argv: pytest.fail("invalid scope reached dispatch"))
@@ -303,24 +356,30 @@ def test_native_project_scope_rejects_invalid_requests_before_dispatch(
     assert error.value.code == 2
 
 
-def test_native_invocation_contract_is_read_only(monkeypatch, capsys):
+def test_native_invocation_contract_is_read_only(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_vault import cli
 
     monkeypatch.setattr(cli, "_main", lambda argv: pytest.fail("metadata reached dispatch"))
     assert cli.main(["invocation-contract", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {
+    contract = json.loads(capsys.readouterr().out)
+    assert contract["capabilities"].pop() == "native-default-owner-v1"
+    assert contract == {
         "schema": "agent-vault.invocation", "version": 1,
         "capabilities": [
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
+            "credential-read-require-running-v1",
+            "windows-machine-cache-v1",
+            "repository-cache-targets-v1",
+            *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            *(["key-attachment-exclusive-export-v1"] if os.name == "posix" else []),
+            "service-cache-maintenance-v1",
         ],
     }
 
 
 @pytest.mark.parametrize("router_owned", [False, True])
-def test_native_project_scope_consumes_only_router_owned_provisioning_guard(
-    tmp_path, monkeypatch, capsys, router_owned,
-):
+def test_native_project_scope_consumes_only_router_owned_provisioning_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], router_owned: bool) -> None:
     from agent_vault import cli
 
     monkeypatch.setenv("AGENT_VAULT_NO_SELFPROVISION", "1")
@@ -331,11 +390,11 @@ def test_native_project_scope_consumes_only_router_owned_provisioning_guard(
         ["--configuration-root", str(tmp_path), "invocation-contract", "--json"],
     ) == 0
     capsys.readouterr()
-    assert ("AGENT_VAULT_NO_SELFPROVISION" in config.os.environ) is not router_owned
-    assert "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD" not in config.os.environ
+    assert ("AGENT_VAULT_NO_SELFPROVISION" in os.environ) is not router_owned
+    assert "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD" not in os.environ
 
 
-def test_native_project_scope_preserves_literal_argument_after_separator(tmp_path):
+def test_native_project_scope_preserves_literal_argument_after_separator(tmp_path: Path) -> None:
     from agent_vault.invocation import parse_invocation
 
     root, remaining = parse_invocation(
@@ -345,7 +404,7 @@ def test_native_project_scope_preserves_literal_argument_after_separator(tmp_pat
     assert remaining == ["search", "--", "--configuration-root"]
 
 
-def test_native_project_scope_composes_with_resident_source(tmp_path, monkeypatch):
+def test_native_project_scope_composes_with_resident_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_vault import configuration_scope
     from agent_vault.invocation import use_configuration_root
 
@@ -364,9 +423,7 @@ def test_native_project_scope_composes_with_resident_source(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("resident", [False, True])
-def test_native_project_scope_preserves_extension_default_and_resident_selection(
-    tmp_path, monkeypatch, resident,
-):
+def test_native_project_scope_preserves_extension_default_and_resident_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resident: bool) -> None:
     from pathlib import Path
 
     from agent_vault import configuration_scope, extensions
@@ -386,9 +443,9 @@ def test_native_project_scope_preserves_extension_default_and_resident_selection
         selected.mkdir()
         config.bind_service_configuration(str(selected))
         expected_hint = str(selected)
-    seen = []
+    seen: list[str | None] = []
 
-    def contribute(cwd):
+    def contribute(cwd: str | None) -> dict[str, str]:
         seen.append(cwd)
         name = Path(cwd).name if cwd is not None else "default"
         return {"kpdb": str(tmp_path / f"{name}.kdbx"), "group": name}
@@ -408,9 +465,7 @@ def test_native_project_scope_preserves_extension_default_and_resident_selection
     assert seen == [expected_hint, str(project), expected_hint]
 
 
-def test_actual_absent_owner_keeps_unbound_vault_defaults_without_open_or_bootstrap(tmp_path, monkeypatch):
-    import configuration_context
-
+def test_actual_absent_owner_keeps_unbound_vault_defaults_without_open_or_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT",
                  "AGENT_VAULT", "KPDB", "VAULT_GROUP", "AGENT_VAULT_PORT",
                  "AGENT_VAULT_PINNED_CONTEXT"):
@@ -418,10 +473,10 @@ def test_actual_absent_owner_keeps_unbound_vault_defaults_without_open_or_bootst
     monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent-global.json"))
     monkeypatch.setattr(config, "_ext_config", lambda cwd: {})
 
-    def no_process(*args, **kwargs):
+    def no_process(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("vault selection must not install an owner or open a vault")
 
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
     result = config.resolve_context(str(tmp_path), strict=True)
     assert result.vault_name is None
     assert result.kpdb is None
@@ -429,10 +484,9 @@ def test_actual_absent_owner_keeps_unbound_vault_defaults_without_open_or_bootst
     assert list(tmp_path.iterdir()) == []
 
 
-def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypatch):
+def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import shutil
     from pathlib import Path
-    import configuration_context
 
     home = tmp_path / "home"
     scripts = home / ".agent-vault" / "scripts"
@@ -452,10 +506,10 @@ def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypa
     monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent-global.json"))
     monkeypatch.setattr(config, "_ext_config", lambda cwd: {})
 
-    def no_process(*args, **kwargs):
+    def no_process(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("an unready optional owner must not bootstrap or open a vault")
 
-    monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
     assert config.resolve_context(str(tmp_path), strict=True).kpdb is None
     assert (scripts / "versioned_runtime.py").is_file()
     assert configuration._legacy_report(tmp_path) is None
@@ -466,8 +520,9 @@ def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypa
 ])
 @pytest.mark.parametrize("layout", ["versioned", "application", "adjacent"])
 def test_installed_reader_uses_retained_sdk_for_qualified_activation(
-    tmp_path, monkeypatch, capsys, enabled, owner_code, layout,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    enabled: bool | str | None, owner_code: int, layout: str,
+) -> None:
     import shutil
     import subprocess
     import sys
@@ -492,7 +547,7 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
     bootstrap.mkdir(parents=True)
     for source in sdk_source.glob("versioned_runtime*.py"):
         shutil.copy2(source, bootstrap / source.name)
-    sdk = configuration._peer_launch._load_primitive(
+    sdk = _peer_launch._load_primitive(
         bootstrap / "versioned_runtime.py", "_vault_installed_fixture_runtime",
     )
     sdk.mark_complete(peer, "1.0.0")
@@ -510,15 +565,17 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
     for name in ("AGENT_RT_ROOT", "AGENT_VAULT_HOME", "COPILOT_EXTENSIONS_CONTEXT",
                  "AGENT_CONFIGURATION_CONTEXT"):
         monkeypatch.delenv(name, raising=False)
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         assert argv == [
-            str(python), "-I", "-B", "-X", "utf8", "-B", "-m", "agent_worktrees",
+            str(python), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
             "state-root", "--configuration", "--json",
         ]
         assert kwargs["cwd"] == base
-        assert "AGENT_CONFIGURATION_CONTEXT" not in kwargs["env"]
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        assert "AGENT_CONFIGURATION_CONTEXT" not in environment
         calls.append(argv)
         return subprocess.CompletedProcess(argv, owner_code, json.dumps(report).encode(), b"")
 
@@ -533,9 +590,9 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
         assert configuration.runtime_enabled(str(base)) is (enabled is True)
         from agent_vault import cli
 
-        probes = []
+        probes: list[dict[str, object]] = []
 
-        def ping(request, **kwargs):
+        def ping(request: dict[str, object], **kwargs: object) -> dict[str, object]:
             assert request == {"action": "ping"}
             assert kwargs == {"strict_endpoint": True}
             probes.append(request)
@@ -543,7 +600,7 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
 
         monkeypatch.setattr(cli, "send_command", ping)
         monkeypatch.chdir(base)
-        assert cli.cmd_installer_readiness(None) == 0
+        assert cast(Callable[[None], int], cli.cmd_installer_readiness)(None) == 0
         readiness = json.loads(capsys.readouterr().out)
         assert readiness["state"] == ("ready" if enabled is True else "configuration-empty")
         assert len(probes) == int(enabled is True)
@@ -555,7 +612,7 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
 
 @pytest.mark.parametrize("implicit", [False, True])
 @pytest.mark.parametrize("matching_cell", [False, True])
-def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, implicit: bool, matching_cell: bool) -> None:
     real_report = configuration.owner_report
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(configuration, "owner_report", real_report)
@@ -565,15 +622,15 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
     own_root = cell / "plugins" / "agent-vault"
     own_root.mkdir(parents=True)
     report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
-    calls = []
+    calls: list[tuple[str, Path, str]] = []
 
-    def validate(owner, root, raw):
+    def validate(owner: str, root: Path, raw: str) -> dict[str, str]:
         calls.append((owner, root, raw))
         assert root == own_root
         assert raw == str(own_root / "install.json")
         return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
 
-    monkeypatch.setattr(configuration._peer_launch, "validate_owner", validate)
+    monkeypatch.setattr(_peer_launch, "validate_owner", validate)
     monkeypatch.setenv("AGENT_RT_ROOT", str(own_root))
     if implicit:
         monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -589,7 +646,7 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
 
 
 @pytest.mark.parametrize("shape", ["flat", "nested", "foreign", "deep"])
-def test_qualified_deployed_owner_layout_and_refusal(tmp_path, shape):
+def test_qualified_deployed_owner_layout_and_refusal(tmp_path: Path, shape: str) -> None:
     import os
     import shutil
     import subprocess
@@ -611,7 +668,7 @@ def test_qualified_deployed_owner_layout_and_refusal(tmp_path, shape):
     python.parent.mkdir(parents=True)
     python.write_bytes(b"fixture interpreter; never executed")
 
-    def resolve():
+    def resolve() -> Path | None:
         return deployed_runtime_python(
             root, resolver=resolver, environment={"SystemRoot": str(tmp_path)},
             runner=lambda argv, **kwargs: subprocess.CompletedProcess(
@@ -627,7 +684,7 @@ def test_qualified_deployed_owner_layout_and_refusal(tmp_path, shape):
 
 
 @pytest.mark.parametrize("tier", ["knowledge", "repository_machine"])
-def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp_path, monkeypatch, tier):
+def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str) -> None:
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     write(base, {"vault": "base", "group": "base-group"})
     if tier == "knowledge":
@@ -650,8 +707,9 @@ def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp
     assert (result.vault_name, result.group) == (expected_vault, expected_group)
     assert result.sources["vault"] == vault_source
     assert result.sources["group"] == group_source
-    assert "/vault" not in result.configuration_provenance
-    assert "/group" not in result.configuration_provenance
+    provenance = cast(dict[str, LayerOwner], getattr(result, "configuration_provenance"))
+    assert "/vault" not in provenance
+    assert "/group" not in provenance
     assert not (tmp_path / f"{expected_vault}.kdbx").exists()
 
 
@@ -661,7 +719,7 @@ def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp
     (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
     (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
 ])
-def test_optional_older_peer_preserves_native_vault_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+def test_optional_older_peer_preserves_native_vault_or_fails_real_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, diagnostic: str) -> None:
     import subprocess
     real_report = configuration.owner_report
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
@@ -673,12 +731,12 @@ def test_optional_older_peer_preserves_native_vault_or_fails_real_refusal(tmp_pa
     monkeypatch.setenv("AGENT_RT_ROOT", str(own))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own / "install.json"))
     monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
-    monkeypatch.setattr(configuration._peer_launch, "validate_owner", lambda *args:
+    monkeypatch.setattr(_peer_launch, "validate_owner", lambda *args:
                         {"cellRoot": str(cell), "pluginRoot": str(own)})
-    monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
-    calls = []
+    monkeypatch.setattr(_peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
         calls.append(argv)
         return subprocess.CompletedProcess(argv, code, b"{bad-json", diagnostic.encode())
@@ -692,7 +750,7 @@ def test_optional_older_peer_preserves_native_vault_or_fails_real_refusal(tmp_pa
     assert len(calls) == 1
 
 
-def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     real_report = configuration.owner_report
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(configuration, "owner_report", real_report)

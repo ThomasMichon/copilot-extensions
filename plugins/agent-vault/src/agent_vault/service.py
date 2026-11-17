@@ -13,6 +13,7 @@ import signal
 import sys
 import threading
 import time
+from uuid import uuid4
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
@@ -57,7 +58,7 @@ from .rendezvous import write_endpoint as write_endpoint
 from .service_endpoints import advertised_endpoint as advertised_endpoint
 from .service_connections import Closable as PipeServer, VaultConnections, settle_owned
 from .service_runtime import serve as _serve
-from . import service_cache
+from . import cache_maintenance, service_cache, service_copy
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration as ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
@@ -83,7 +84,7 @@ PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
-    "move", "mv", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
+    "move", "mv", "copy", "cp", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
 })
 _DISPATCH_WITHOUT_CREDENTIAL_LOCK = frozenset({
     "ping", "stop", "handoff-export", "git-credential", "seal", "unseal", "kek-list",
@@ -109,6 +110,7 @@ class VaultService:
         self._password_handoff_deadlines: dict[str, float] = {}
         self._shutdown = False
         self._runtime_can_work = True
+        self._attachment_import_owner = uuid4().hex
         self._default_kpdb: str | None = None
         self.ttl_override: int | None = None  # 0 = persistent (never expire)
         self._unlock_lock = threading.Lock()  # prevents concurrent GUI prompts
@@ -573,6 +575,14 @@ class VaultService:
             "runtime_generation": PROCESS_GENERATION,
             "generation_protocol": PROTOCOL,
             "accepting_work": self._runtime_can_work,
+            "key_attachment_import_versions": (
+                [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []
+            ),
+            "key_attachment_import_owner": self._attachment_import_owner,
+            "key_attachment_export_versions": (
+                [1] if callable(getattr(self.cli, "export_attachment_bounded", None)) else []
+            ),
+            "key_attachment_export_owner": self._attachment_import_owner,
             "auth_handoff_versions": supported_versions(),
             "auth_handoff_receiver": (
                 self._generation.handoff_advertisement()
@@ -601,9 +611,7 @@ class VaultService:
                     return self._dispatch_request(request, peer, transport)
                 with self._credential_lock, contextlib.ExitStack() as custody:
                     self._check_password_ttl()
-                    if request.get("action") in {"add", "set-username", "remove", "rm", "move", "mv"}:
-                        kpdb = request.get("kpdb") or resolve_kpdb(required=False)
-                        custody.enter_context(service_cache.backend_custody(get_cache(), kpdb))
+                    custody.enter_context(service_cache.custody(request, resolve_kpdb, get_cache))
                     return self._dispatch_request(request, peer, transport)
             except service_cache.ServiceCacheUnavailable:
                 return {"ok": False, "error": service_cache.UNAVAILABLE}
@@ -612,8 +620,38 @@ class VaultService:
                           transport: str) -> dict[str, Any]:
         self.keepalive()
         action: Any = request.get("action")
+        if action == "cache-maintenance" and (invalid := cache_maintenance.validate_selector(request)) is not None:
+            return invalid
         if action == "ping" and request.get("health_only") is True:
             return self._generation_health()
+        if action == "export-key-nonactivating":
+            from .attachment_export import handle_request as export_request
+
+            if request.get("expected_export_owner") != self._attachment_import_owner:
+                export_result: dict[str, Any] = {
+                    "ok": False, "code": "export_owner_changed", "error": "export_owner_changed",
+                }
+            else:
+                self._check_password_ttl()
+                export_result = export_request(
+                    self.cli, request.get("kpdb") or resolve_kpdb(required=False),
+                    request.get("group"), request,
+                )
+            return {**export_result, "key_attachment_export_owner": self._attachment_import_owner}
+        if action == "import-key-create-only":
+            from .attachment_import import handle_request
+
+            if request.get("expected_import_owner") != self._attachment_import_owner:
+                import_result: dict[str, Any] = {
+                    "ok": False, "code": "import_owner_changed", "error": "import_owner_changed",
+                }
+            else:
+                self._check_password_ttl()
+                import_result = handle_request(
+                    self.cli, request.get("kpdb") or resolve_kpdb(required=False),
+                    request.get("group"), request,
+                )
+            return {**import_result, "key_attachment_import_owner": self._attachment_import_owner}
         self._check_password_ttl()
         client = request.get("_client", "")
         kpdb: Any = request.get("kpdb")
@@ -657,6 +695,7 @@ class VaultService:
                 "daemon_persistent": self.ttl_override == 0,
                 "password_lifetime": describe_password_lifetime(self, kpdb),
                 "cache_warm": self._cache_warm.status(kpdb, group),
+                "cache_maintenance": cache_maintenance.describe(),
                 "federated_relay": (
                     relay.status() if relay else {"state": "disabled", "channel_attached": False}
                 ),
@@ -689,6 +728,9 @@ class VaultService:
             from .ssh_key import handle_prepare_request
 
             return handle_prepare_request(self, kpdb, group, request)
+
+        if action == "cache-maintenance":
+            return cache_maintenance.handle(self, get_cache(), kpdb, group, request)
 
         if action == "get":
             entry = request.get("entry", "")
@@ -960,6 +1002,8 @@ class VaultService:
                 log.info("Moved entry %s -> %s", entry, dest_group)
             return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
 
+        if action in ("copy", "cp"):
+            return service_copy.handle(self, kpdb, group, vault_name, reason, request, get_cache)
         if action == "stop":
             self._shutdown = True
             return {"ok": True}

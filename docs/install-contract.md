@@ -23,6 +23,64 @@ requirements remain binding.
 
 ## Authoritative replacement and completion
 
+The [Manager-owned application-footprint vision](../visions/installer/application-footprints/README.md)
+adds the forward packaging and setup boundary: promotion produces whole-copy
+app directories, local Dev/WIP preparation assigns local output versions, and
+Manager orchestrates dependency staging and app setup rather than depending on
+Worktrees installation code. Slot-local `setup --stage` selects nothing; full
+setup establishes actual readiness, selection and neutral app/global commands.
+Shared IPC components are separate installations, not consumer imports.
+The [receiving plan and verbatim snapshot](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+retain pending conversion/qualification. Current native installers, generated
+`install` entries and import-based shared implementations below are legacy
+adoption for this boundary; this documentation does not change their code or
+weaken their independent safety and durable-state contracts.
+
+Manager's separate `worktree-manager-install` frontdoor consumes an already
+prepared explicit application set, copies whole version slots, stages the
+complete selected dependency closure and then invokes full setup in dependency
+order. It uses the canonical finite Update Driver and source-snapshot/process
+owners, not a Worktrees installation. Its
+[command and footprint contract](../worktree-manager/README.md#prepared-application-installation)
+records the read-only default, new app-root selection and failure boundaries.
+This initial consumer is not complete promotion/Manager-reference adoption;
+the receiving effort retains those pending gates.
+
+**Preparing the Manager footprint.**
+
+The repository tooling entry `tools/application_footprint.py` prepares the
+Manager reference through the existing promotion/composition, wheel and
+application-profile owners, then exports the complete locked project into
+`<output>/footprint/apps/worktree-manager`. Its `footprint.json` is directly
+consumable by `worktree-manager-install`. The output contains relative wheel
+inputs, declared Python and generated `bin/setup.{ps1,cmd,sh}` forwards to the
+canonical slot-local install entries; it contains no copied environment or state.
+The exported footprint can move independently of the preparation tree.
+Manager's setup/runtime resources, lifecycle archive and launcher generator
+come from its verified first-party wheel, not mutable tooling-checkout helpers
+or helper bytes in a reused profile. Output paths are normalized before
+preparation/export receipts are returned.
+
+Run the entry with the repository's prepared tooling Python and PATH `uv`,
+supplying `--source-checkout`, `--source-commit`, `--main-head`, `--branch`,
+and a new `--output` outside the selected checkout. `--branch main` or `dev`
+retains the existing preparer's clean standalone-checkout and fetched-branch
+admission. `--branch wip --dev-head <full-commit>` explicitly selects a frozen
+commit descended from that fetched Dev seed. It supports a managed worktree as
+an object source, but never includes its uncommitted or untracked bytes.
+Commit intended WIP inputs first; neither the selected commit nor the Main/Dev
+seeds can be abbreviated or implicit. The canonical local composition/version
+owner assigns output versions without changing tracked source declarations.
+
+`--timeout` supplies one finite preparation/export deadline, defaulting to 600
+seconds and capped at 7200. Existing package/feed, interpreter and process
+policies remain in force. Output JSON names the exported `footprint`; preparation
+diagnostics go to stderr. Preparation performs no installation, active selection,
+registration, global-command change or service startup. Failed attempts retain
+their owned output rather than replacing a previous result. This repository-tool
+adapter does not yet make release promotion publish `apps/` automatically or
+convert bootstrap/default update callers; #12905 retains those boundaries.
+
 The canonical intent is
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
 This section is its normative installer contract, not a declaration that all
@@ -3606,6 +3664,14 @@ The existing format fixes *what the binstub is*. Each Windows entry point in
   bare `CreateProcess`/`PATHEXT` spawn, `cmd /c` Windows Terminal profiles, ssh
   launchers) that cannot resolve a `.ps1`. Forwards with `%*`.
 
+Standalone application front doors render ordinary Windows file-root aliases
+consistently: extended drive and `UNC` spellings become their ordinary drive
+and UNC forms before quoting only when their components retain ordinary Win32
+semantics. Trailing-dot/space names, reserved devices, traversal and alternate
+streams retain their extended spelling; other device namespaces stay unchanged.
+This is launcher presentation, not a relaxation of physical-root or ownership
+checks; explicit environment root overrides retain their existing precedence.
+
 ### Why `.ps1` is primary, not `.cmd`
 
 A `.cmd` forwarding `%*` **re-tokenizes** the command line through cmd.exe's
@@ -3812,6 +3878,16 @@ at `extensions/<name>/extension.{mjs,cjs,js}` in the plugin; the CLI scans an
 `plugin`-source extension. The canonical example is **context-handoff**
 (`plugins/context-handoff/extensions/context-handoff/extension.mjs`).
 
+Prefer `@microsoft/copilot-sdk/extension` for `joinSession` and
+`@microsoft/copilot-sdk` for shared SDK exports such as `approveAll`. Copilot
+CLI 1.0.113 resolves these names to its bundled SDK; older CLI loaders resolve
+only `@github/copilot-sdk`. Keep extension entrypoints self-contained and use
+dynamic imports with a legacy fallback only when the Microsoft SDK package
+itself is missing (`ERR_MODULE_NOT_FOUND`). Missing dependencies inside a
+resolved SDK, missing exports and other initialization failures must propagate,
+not select a different SDK. Do not install a separate SDK package into extension
+payloads to mask a namespace mismatch.
+
 Such a plugin ships **no `scripts/install.*`**, no deploy manifest, and copies
 nothing to `~/.copilot/extensions/`. `copilot plugin update <name>` (or repo
 `enabledPlugins` auto-install) is the entire deploy. Two conditions gate
@@ -3875,6 +3951,29 @@ replace the ambient-Python prerequisite with per-project `uv` management.
 The [implementation and qualification plan](../efforts/active/source-managed-runtime-installs/managed-python.md)
 retains the existing setup, engine, bootstrap and application owners.
 
+The [finite-controller target](../visions/installer/README.md#finite-installation-controller)
+separates three stages. The native shell seed establishes tooling and stages
+sources; the prepared managed interpreter runs finite installation management;
+installed applications then use their own runtime/service owners. On Windows,
+PowerShell reaches the existing uv prerequisite owner (a supported package
+manager or Astral's official standalone installer), performs core Git
+checkout/copies and invokes the real per-app setup entrypoints.
+Do not require a Python-backed SDK to acquire that first Python, or require
+an installed/running Manager/application daemon to run the controller.
+The normal Manager entry establishes Manager first and then composes the
+selected repository's declared apps/plugins. Independent per-app setup remains
+available. A separately packaged helper is optional and reuses the same engine,
+not another installation algorithm or mandatory service.
+
+This staging preserves native foreground-command ownership, failure,
+cancellation/deadline and cleanup obligations. The seed is not a substitute
+implementation of later Python/helper pipe, process/Job or installation
+protocols; after the execution base exists, their existing owners retain them.
+Source/feed/seasoning, repository hosting policy-before-acquisition and OS
+execution policy remain in force. Application service activation is a separate
+accepted handoff, not an installation-controller startup prerequisite.
+This is the required layering, not a qualification of current cold-entry paths.
+
 - An installable Python project declares compatibility in `pyproject.toml`
   (`requires-python`). Its release/setup inputs select a compatible version;
   locks and native wheel targets must agree with the selected interpreter.
@@ -3936,13 +4035,39 @@ accept it. Self-install uses the same finite interpreter scope.
 The standalone Windows install-only participant also establishes its own finite
 base-interpreter scope. Its queue and the bootstrap-update queue clear the
 worker's hint without requiring newer private APIs from a prepared Manager.
+Manager's in-process `setup`/`register` CLI also qualifies its own prepared base
+interpreter against the Python 3.11 helper floor rather than scanning PATH for
+another Python. Its core install child receives that executable through
+Windows `-BootstrapPython` and the finite bootstrap environment. The POSIX
+Worktrees receiver consumes the explicit environment input at initial
+admission and subsequent bootstrap-helper selection; an invalid, unsupported or
+excluded selection never falls back to a current runtime or PATH interpreter.
+POSIX qualification checks the resolved executable and interpreter prefixes,
+including an executable directly at the excluded root, within the existing
+version probe rather than relying only on the candidate's parent directory.
+Legacy POSIX callers without an explicit input retain their existing discovery.
+Windows also honors the explicit evaluator in versioned helpers and deployment,
+before discovery of a signed base. Its qualification preserves target/runtime
+exclusions and fails without another discovery attempt. Signed-base discovery
+for legacy construction remains separate.
+This evaluator handoff does not waive application/project, lock or ABI
+compatibility admission, bypass source/feed policy or require a
+Manager/application daemon.
+The finite core child explicitly forwards the caller's stdout/stderr alongside
+Windows no-window flags; it does not depend on implicit console handles for
+installer progress or failure diagnostics.
 These helpers are stdlib-only. Using the base interpreter keeps an inherited
 helper hint independent of a retired Manager package environment; managed-base
 retention remains with the toolchain owner.
 Manager cold/passive resident launches remove the finite hint through their
 existing environment scrubber instead of retaining the updater's selection.
-The installation-context caller-owned adapter and the evaluator selector
-below consume it without rediscovering PATH Python. Their optional `-Python`
+The installation-context caller-owned adapter, PowerShell daemon-instance
+transport and the evaluator selector below consume it without rediscovering
+PATH Python. The process transport applies the hint only at its existing lazy
+helper startup: a live helper retains its original interpreter and custody,
+and a conflicting nonempty hint refuses before another request without
+breaking that owner.
+The installation-context and evaluator adapters' optional `-Python`
 argument overrides the inherited value. Invalid paths and interpreter execution
 failures are terminal, not permission to fall back. The original process,
 private-pipe, Job/group, startup/deadline and cleanup protocols are unchanged.
@@ -4450,6 +4575,24 @@ version, SHA-256 remains mandatory, known auxiliary hashes must be well formed,
 and package markers must apply to the selected environment. The unique
 best-ranked compatible file is retained; ties refuse. This is not a second
 resolver or permission to acquire from any recorded URL.
+
+`retain_source_wheel_lock` may instead receive an explicit positive
+`max_diagnostic_bytes`. This opt-in captures `pylock.toml` and verbose selection
+diagnostics from the same held native compile, with caller-supplied finite
+stream limits and the shared deadline. Each final exact package/version must
+name one compatible selected wheel whose SHA-256 appears exactly once in its
+pylock package; missing, ambiguous or unsupported output refuses rather than
+ranking alternatives or running another resolver. Retained first-party
+metadata must be static. The existing single-file and target-tag paths retain
+their defaults.
+
+The fixed stdlib capture worker keeps UV in the existing installer's
+Job/process group and settles all descendants before retained input cleanup,
+including on stream overflow or timeout. Private control files live only in
+the invocation-owned retained root. Normalized source records exclude raw
+diagnostics and URLs, and downstream source-profile assembly enforces exact
+file records when present. None of these facts authenticates a source, admits
+a file or enables a production caller.
 
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
@@ -5477,8 +5620,9 @@ snapshot/wheel/profile portfolio. Otherwise it builds the explicitly selected
 first-party projects once and calls the existing complete-profile owner for
 each component. One selected UV executable and monotonic deadline cover the
 portfolio. Component extras are explicit inputs to that same profile owner.
-The complete-profile worker borrows the same locked build-toolchain interpreter
-while its workspace remains held, including the compact Windows workspace.
+The complete-profile worker uses the invoking provider's interpreter through the
+caller-owned process adapter and shared monotonic deadline. The build-toolchain
+context remains held, including the compact Windows workspace.
 The cold parent needs no ambient Packaging installation. The worker checks its
 actual native marker environment against the selected parent interpreter and
 binds its source-record inspection to the parent's exact record. Existing
@@ -5903,13 +6047,15 @@ effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
 ### Python-owned construction foundation
 
-For the earlier, Python-free Windows admission boundary, the canonical
+For the earlier pre-runtime Windows admission boundary, the canonical
 `agent-procutil` package also carries native daemon/owned-child helpers, and
 `single-instance-lease` carries the native counterpart of `OperationLock`.
 They reuse WMI outside-Job admission and the exact existing kernel lock
 protocol; owned writers enter their strict Job atomically at creation.
 Their API and qualification boundary are in the
-[procutil bootstrap reference](../libs/agent-procutil/README.md#python-free-windows-bootstrap-admission).
+[procutil bootstrap reference](../libs/agent-procutil/README.md#windows-bootstrap-and-shell-admission).
+Those helpers still require setup-provided Python; they do not supply the
+Python-free first-toolchain stage required by the managed-Python target.
 They do not themselves construct a driver foundation or migrate any first-use
 publisher. Bootstrap source admission, durable interruption fencing and
 immutable publication remain consumer obligations.

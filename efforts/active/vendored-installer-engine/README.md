@@ -140,12 +140,39 @@ judgment; no implementation, next adopter or rollout starts here.
 
 ### Continuing #2729 custody
 
-Keep #2729 as the complete hygiene canonical, current package/installer/interpreter and
-source/resource/activation custodians and original #2726 inheritance. Engine owner
-coordinates only its actual shared-mechanics/adopter boundary;
-Procutil/Manager/Worktrees are not silently lost to the service-engine rollout subset.
-Reviewed mapping is not accepted transfer, source appointment, owner expiry, environment
-scan or remediation permission.
+Retain #2729's complete hygiene contract, including its original #2726 inheritance,
+through R2729-P1-P5, local V1-V3 and actual global G1 below. Current package,
+installer, interpreter and source/resource/activation custodians remain responsible;
+the engine owner coordinates only its actual shared-mechanics/adopter boundary.
+Procutil, Manager and Worktrees are not lost to the service-engine rollout subset,
+and Worktrees' permanent engine exception does not exclude its hygiene obligations.
+
+Until this receiving reconciliation clears normal review, actually merges and receives
+complete current Plan/local/global Validation, Coordination and Journal readback,
+#2729 remains the canonical open tracking token. After those conditions, a separate
+fresh source judgment may retire redundant issue tracking while this Active effort's
+complete hygiene work remains planned and unchecked. Preserve any intervening source
+change or actual claimant condition; a reference, authored proposal or merge alone is
+insufficient. Administrative consolidation is not technical completion, implementer
+appointment, owner expiry, environment scanning, cleanup or resource transfer.
+
+### Continuing #3946 supported-UV custody
+
+Retain #3946's complete real-alias/headless-Windows outcome AND its directly inherited
+#7313 child-handoff contract through U3946-P1-P3, local V1-V3 and actual global G1
+below. Worktrees keeps its permanent service-engine exception and its own prerequisite
+installer; the shared engine, each actual adopter, native/SSH qualification and
+updater/source custodians retain their existing responsibilities and resources.
+This effort coordinates the shared-mechanics/adopter boundary, not a transfer of those
+lanes or a requirement to migrate Worktrees to the engine.
+
+The source issue remains open until normal review, actual receiving merge and complete
+current direct Plan/local/global Validation, Coordination and Journal readback permit
+a separate fresh source judgment. That judgment must preserve any intervening source
+change or actual claimant condition. Redundant tracking may then retire while this
+Active effort's complete technical work remains unchecked; documentary receiving is
+not exact-alias execution, child-process qualification, implementation or rollout.
+No new generic owner ACK or unrelated every-machine/full-parent gate is introduced.
 
 ## Context
 
@@ -641,10 +668,15 @@ seven-row ledger.
 
 <!-- backlog-reconciliation:7556:qualified-fifteen:2729:Plan -->
 
-### Direct proposed acceptance from #2729
+### Complete planned hygiene acceptance from #2729
 
 _Agent-recommended additive tracking proposal; the entire original/refined/directly
 inherited acceptance and its finite evidence tiers remain binding._
+
+Credit #2728's distribution-generic report-first/manual-fix baseline without treating
+it as cross-package adoption, intended-global-interpreter inspection, prevention or
+installer integration. The scope remains all five named distributions below, not only
+the current shared-engine adopter set.
 
 Preserve the incumbent Request, status, Participants, Coordination, every old
 Plan/global Validation row and check state, first unresolved gates and full Journal.
@@ -677,8 +709,11 @@ universal ACK, every-host or whole-parent completion gate is introduced.
 - [ ] **R2729-P4:** Carry applicable named Windows/POSIX owner-installer best-effort
   NONFATAL detection/warnings, with at least ONE actual automatic post-update
   integration and proved nonfatal failure. Keep result/health/lifecycle and manual
-  remediation; no automatic --fix/global uninstall. Consider existing fleet
-  coordination/shared-library reuse without mandating another watcher/framework.
+  remediation; no automatic --fix/global uninstall. Consider extracting the shared
+  detector at the second adoption, following existing vendoring and byte-sync guards,
+  rather than drifting independent copies. Evaluate the existing fleet/requirement-
+  package owner for periodic cross-plugin coordination without mandating another
+  watcher/framework.
 
 - [ ] **R2729-P5:** Preserve package/interpreter/artifact ownership, explicit
   remediation consent, foreign/active metadata and .worktrees-not-ownership truth. Any
@@ -702,6 +737,69 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   and truthful leftover failures as their own boundary. Keep native
   Windows/POSIX/real-global evidence at its original appropriate separately authorized
   tier; source/mock/merge/installed evidence and unknowns remain distinct.
+
+### Complete planned supported-UV acceptance from #3946
+
+_Agent-recommended additive tracking proposal; the entire original, both discussions
+and directly inherited #7313 acceptance remain binding._
+
+Credit the recorded #1909/#3287 resolver/health/fallback work and #7410 scalar
+production correction without calling them the exact remaining native/child witness.
+Historical #6487 review and #7302 update-blocker observations remain historical, not
+claims about their current state or new installer authority. Preserve every incumbent
+Plan/Validation check state, phase owner, exception, pause and Journal entry.
+
+#### Plan
+
+- [ ] **U3946-P1:** Resolve a functional, trusted supported UV executable on the
+  original noninteractive Windows/SSH path: real WinGet App Execution Alias
+  skipping/resolution, unique ordinary package executable selection, actual
+  `--version` health and direct executable OR installation-owned canonical fallback.
+  Preserve missing/ambiguous/refused results, no-acquisition mode, supported
+  architecture and existing dependency/source/integrity policy, including pinned
+  official acquisition and post-download execution checks where applicable. A path,
+  placeholder bytes or mocked reparse metadata alone is not executable health or
+  exact real-alias execution across the required actual owners.
+
+- [ ] **U3946-P2:** Preserve #7410's credited scalar `Get-ApplicationPath` correction
+  at BOTH lookups, before AND after preparation, and carry the selected single
+  supported executable into the real runtime-install child as ONE `--uv` value when
+  two Application candidates are discoverable. Keep missing-UV/bootstrap behavior,
+  trusted/native executable checks, construction deadlines, first-touch completion
+  and containment. Do not weaken argparse, remove the runtime test or substitute an
+  unrelated RedirectionGuard/path-normalization repair.
+
+- [ ] **U3946-P3:** Keep Worktrees' permanent service-engine exception, its bespoke
+  prerequisite owner and shared-engine/adopter/source/native/updater stewardship.
+  One common helper is not proof of each actual consumer. No global user/system
+  PATH or App Execution Alias setting change, desktop requirement, alternative
+  executor or installed-payload workaround. Preserve authoritative incoming
+  readiness/current selection, user state/session keepers and independent outgoing
+  retirement; this finite UV case does not create an old-recovery/custody veto.
+
+#### Local Validation
+
+- [ ] **U3946-V1:** Qualify the exact real WinGet-alias/noninteractive-SSH case through
+  the required actual installer owners, with supported direct executable OR owned
+  fallback, actual executable health, missing/ambiguous/refused and no-acquisition
+  controls. Keep source/contained selection proof, practical native witness and
+  separately authorized installed rollout distinct. A generic native pilot or
+  another application's alias repair is not that causal witness.
+
+- [ ] **U3946-V2:** A PowerShell consumer regression exposes TWO real discoverable
+  applications and proves an actual runtime-install OR equivalent real child
+  receives ONE scalar `--uv` value. The existing actual-discovery/extracted-
+  constructor test with replaced `Invoke-Hidden` and ArgList checking remains useful
+  vector evidence, not that literal child witness. Retain fresh/reused,
+  success/nonzero and contextual controls; accept genuinely equivalent existing
+  process-boundary proof if established.
+
+- [ ] **U3946-V3:** Qualify unchanged bootstrap, trust/source/integrity, timeout,
+  first-touch, failure and containment semantics at the original finite tier and
+  through the original owners. Preserve both Worktrees and shared-engine/adopter
+  boundaries, independent replacement/retirement and all existing pauses. No
+  every-host/full-update programme, actual SSH/installer/acquisition operation,
+  source reassignment or resource release is authorized by this planned intake.
 
 ### Proposed qualification-only completed-slot/liveness case from #5356
 
@@ -860,6 +958,14 @@ state, pause, participant, exception and Journal entry remains binding._
   Mechanical adoption alone is insufficient; completing all serving/native
   adopter work is not required merely to adjudicate this decision.
 
+- [ ] **U3946-G1:** Resolve EVERY U3946-P/local-V/continuing-Coordination clause,
+  including the original real alias/headless Windows case AND inherited #7313
+  two-applications/one-real-child-value regression. Credit resolver, health/fallback
+  and scalar production delivery separately from remaining exact native/consumer
+  qualification. Preserve supported alternatives, finite controls, actual owners,
+  Worktrees' permanent exception, pauses and independently authorized rollout;
+  administrative tracking retirement is not a technical pass or parent completion.
+
 ## Proposal
 
 **Phase 0 audit findings (2026-09-22):**
@@ -903,6 +1009,40 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-11-16 - Complete supported-UV receiving proposed
+
+Reconciled the complete #3946 original and both discussions, including its directly
+preserved #7313 original and six UV/UVV rows, against this existing shared-mechanics
+and adopter effort. Added three direct Plan rows, three local Validation rows, an
+actual global Validation row and continuing Coordination. They retain the real
+WinGet-alias/headless-SSH causal witness separately from exact two-candidate scalar
+handoff into an actual child, while crediting earlier resolver/health/fallback and
+scalar production work.
+
+The existing Worktrees prerequisite, shared engine, adopter, native/SSH and updater/
+source owners retain their lanes. Worktrees does not become an engine adopter.
+Source tracking stays open pending normal reviewed actual receiving delivery,
+complete current readback and separate source judgment; every technical row remains
+unchecked. No implementation study, product test, native/SSH probe, acquisition,
+settings change or rollout occurred.
+
+### 2026-11-16 - Complete hygiene receiving reconciliation
+
+Reconciled the complete #2729 original and both discussions against this entire
+current ROOT, including all direct #2726 inherited requirements. The existing five
+Plan, three local Validation and actual global Validation rows retain all five
+distributions, literal alternatives, finite negative cases and unchanged custodians.
+Made the detector/extraction and existing fleet-home considerations explicit, and
+credited #2728 without claiming the broader outcome.
+
+The former keep-canonical wording now states its prospective receiving gate:
+normal review, actual merge, complete current direct contract readback and a separate
+fresh source judgment. Until then the issue remains open; afterward redundant tracking
+may retire without resolving any technical checkbox, resuming paused adopters or
+transferring interpreter/resource authority. Every incumbent check state, pause,
+exception, participant and prior Journal entry remains unchanged. No implementation,
+test, environment operation or installed/native result occurred.
 
 ### 2026-11-13 - Separate #5956 architecture receiving proposed
 

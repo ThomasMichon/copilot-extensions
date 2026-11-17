@@ -983,6 +983,14 @@ Direct writes are machine-local; repository, knowledge, plugin, and preset
 sources are read-only. The sequencing and validation below are
 _(agent-recommended)_ realizations of that operator-approved boundary.
 
+- [ ] Receive the complete finite
+      [#356 first-repository adoption contract](phase-5-configuration-workbench.md#complete-finite-first-repository-adoption-from-356):
+      guided local OR remote-URL/chosen-root OR skip, discovery/consent-driven
+      registration and actual knowledge linking. Retain FA356-P1 through P7,
+      local V1 through V5, this ROOT's FA356-G and continuing Coordination.
+      The bounded #8545 shared setup seam and all other owners stay separate;
+      reviewed receiving is not implementation or a source disposition.
+
 - [ ] Optional bootstrap repository caller (#8545): establish core readiness,
       then compose attended acquisition and explicitly trusted repository setup.
       The [proposed concrete caller contract](optional-repository-bootstrap.md)
@@ -2704,6 +2712,16 @@ version-consistency guard; do not build competing mechanisms.
 
 ## Validation Plan
 
+- [ ] **FA356-G:** Resolve every
+  [FA356 Plan/local Validation clause](phase-5-configuration-workbench.md#complete-first-repository-adoption-validation-from-356)
+  at the finite first-repository/discovery/knowledge-linking tier. Preserve
+  literal local OR remote-with-chosen-root OR skip and the two discovery
+  cases without mandatory simultaneous inputs. Exercise actual owner paths,
+  consent/decline and usable readiness; retain source immutability and the
+  bounded #8545 shared setup seam. The applicable fresh-install/UI/native
+  matrix and all other phase owners remain. Planned intake is neither
+  technical completion nor permission for source/provider/runtime effects.
+
 - [ ] **M13-G4204-4182:** Resolve P3/V2/C2 as the #4182 consumer-display
   slice only. Preserve its separate source claim, unresolved semantic
   decision and #3791's conditional demand/materialization/readback duties.
@@ -2957,6 +2975,18 @@ tiers without imposing every-host or native-on-every-leaf requirements.
 
 ## Coordination
 
+**FA356:** Keep the existing Manager/domain claim process, #542 assignment,
+bounded #8545 shared setup transfer and #11989/#11976 dependency/acquisition
+owners. The [complete Phase 5 intake](phase-5-configuration-workbench.md#complete-finite-first-repository-adoption-from-356)
+prospectively reconciles only #356's separate-OPEN tracking reference after
+actual reviewed delivery and FA356-V5's ENTIRE CURRENT ROOT/Phase 5/source
+readback. All other execution tokens, Participants, check states, historical
+credit, claims and source/native/resource gates remain. No implementation
+claim, resource transfer, expiry or generic owner-ACK requirement is created.
+Retain #356 if any complete scope, literal alternative or actual restriction
+cannot survive; a separate supported administrative judgment is
+`NOT_PLANNED`, never technical `COMPLETED`. Keep this parent Active.
+
 The finite #4118 intake below receives the Manager Picker consumer only.
 Worktrees creation/producer stamps and Bridge launch/session/API stay with
 their existing owners. Preserve all incumbent claims, source/resource
@@ -3148,6 +3178,19 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-16 - Complete finite first-repository adoption proposal
+
+The complete #356 contract is now proposed directly in Phase 5 as FA356-P1
+through P7, local V1 through V5, the actual global FA356-G row and continuing
+Coordination. The bounded setup seam's actual transfer to #8545 is retained,
+with discovery/UI/local-remote-skip still outside that transfer. Historical
+read-model and narrower registration/binding delivery are partial credit,
+not the complete fresh-install outcome. Only #356's historical separate-OPEN
+tracking reference is prospectively reconciled after normal reviewed actual
+delivery and ENTIRE CURRENT ROOT, complete Phase 5 and source readback.
+No receiving receipt, issue closure, implementation, native execution,
+rollout or change to incumbent check states or custody is claimed.
 
 ### 2026-11-14 - Finite terminal-theme receiving proposal
 

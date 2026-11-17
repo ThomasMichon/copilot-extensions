@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import os
 import signal
-import sys
 from pathlib import Path
-from typing import Any
+import sys
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -22,6 +23,12 @@ from agent_worktrees.sessions import LiveVerdict
 from agent_worktrees.tracking_lifecycle import create_new_record
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native POSIX fork/exec contract")
+
+
+def _peek(record: Path) -> seeds.LaunchSeed:
+    seed = seeds.peek(record)
+    assert seed is not None
+    return seed
 
 
 @pytest.mark.parametrize("fault", ["truncated", "invalid-presence"])
@@ -203,10 +210,13 @@ elif r["fault"] == "restore-interrupt":
     signal.signal = interrupt_restore
 if r["admission_only"]:
     from agent_worktrees import launch_admission, launch_seed_state
+    from agent_worktrees import launch_seed_exec
+    from agent_worktrees.sessions import LiveVerdict
+    launch_seed_exec.sessions.verify_worktree_active = lambda *_: LiveVerdict()
     if r["retained"]:
-        from agent_worktrees import launch_seed_exec, resource_relationship, session_liveness, tracking
+        from agent_worktrees import resource_relationship, session_liveness, tracking
         session_liveness.session_liveness = lambda *_: "dead"
-        launch_seed_exec.sessions.has_mux_session = lambda *_: False
+        launch_seed_exec.sessions.has_mux_session = lambda *_, **__: False
         resource_relationship.writer_identity = lambda: r["retained"]["writer"]["identity"]
         if r["fault"] == "new-head":
             current = tracking.load_record(Path(r["record"]))
@@ -299,7 +309,7 @@ def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
         },
         "head": {"session_id": "native-original", "revision": current.head_revision},
     }
-    monkeypatch.setattr(sessions, "has_mux_session", lambda *_: False)
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *_, **__: False)
     monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
     monkeypatch.setattr(resource_relationship, "writer_identity", lambda: intent["writer"]["identity"])
     monkeypatch.setenv(ENVIRONMENT_KEY, json.dumps(intent))
@@ -337,9 +347,7 @@ def test_no_seed_exec_keeps_creation_fence_until_kernel_exec_and_refuses_new_int
     assert (assets / ".native-seed-exec.complete").read_text() == ("3\n" if changed else "0\n")
     if changed:
         assert not (assets / "backend.json").exists()
-        observed_seed = seeds.peek(record)
-        assert observed_seed is not None
-        assert observed_seed.handoff_id is None
+        assert _peek(record).handoff_id is None
     else:
         backend = json.loads((assets / "backend.json").read_text())
         before = json.loads((assets / "before.json").read_text())

@@ -254,7 +254,13 @@ export function read_source(baseRoot, relativePath, {parser, optional = true} = 
   try {
     const target = contained(baseRoot, relativePath);
     let bytes;
-    try { bytes = fs.readFileSync(target); }
+    try {
+      const descriptor = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0));
+      try {
+        if (!fs.fstatSync(descriptor).isFile()) fail('selected source must be an ordinary file');
+        bytes = fs.readFileSync(descriptor);
+      } finally { fs.closeSync(descriptor); }
+    }
     catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
     const text = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes);
     const values = (parser ?? strictJson)(text);

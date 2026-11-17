@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 import time
+import subprocess
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 from .base import ProviderError
-from .observation_credentials import ObservationCredentialError
+from .gitea_pagination import COUNT_WRITE_OUT, counted_response, review_page
+from .observation_credentials import ObservationCredentialError, ObservationCredentials
 
 
-def read(method, url, credentials, *, invoke, payload=None, deadline=None):
+def read(
+    method: str, url: str, credentials: ObservationCredentials, *,
+    invoke: Callable[..., subprocess.CompletedProcess[str]],
+    payload: dict[str, Any] | None = None, deadline: float | None = None,
+) -> tuple[int, str]:
     if method != "GET" or payload is not None:
         raise ProviderError("observation credentials permit only native reads")
+    counted = review_page(method, url)
     if getattr(credentials, "http_profile", "legacy") == "direct-v1":
         from .observation_http import read_get
-        return read_get(url, credentials.authorization(), invoke=invoke, deadline=deadline)
+        return read_get(
+            url, credentials.authorization(), invoke=invoke, deadline=deadline,
+            capture_count=counted,
+        )
     address = urlsplit(url)
     if (
         address.scheme != "https" or not address.hostname
@@ -29,7 +41,7 @@ def read(method, url, credentials, *, invoke, payload=None, deadline=None):
         raise ObservationCredentialError("observation inventory deadline exhausted")
     result = invoke(
         ["curl", "-sS", "-X", "GET", url, "-H", "@-", "-H", "Accept: application/json",
-         "-w", "\n%{http_code}"],
+         "-w", COUNT_WRITE_OUT if counted else "\n%{http_code}"],
         input_text="Authorization: " + authorization + "\n",
         timeout=max(1, int(remaining)), max_stdout_bytes=1_048_584, max_stderr_bytes=8192,
     )
@@ -42,4 +54,4 @@ def read(method, url, credentials, *, invoke, payload=None, deadline=None):
         status = 0
     if status in (401, 403):
         raise ObservationCredentialError("Gitea observation authorization lost", transient=True)
-    return status, body
+    return counted_response(status, body) if counted else (status, body)

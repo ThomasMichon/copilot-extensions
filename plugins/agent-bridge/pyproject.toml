@@ -128,6 +128,9 @@ agent-bridge = "agent_bridge.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_bridge" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 # The /ui control surface's page, scripts, and stylesheet (routes/ui.py).
 agent_bridge = [

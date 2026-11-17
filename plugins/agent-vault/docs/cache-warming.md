@@ -1,20 +1,29 @@
 # Unlock-triggered cache warming
 
-An opted-in protected cache and registered `cache_source` extensions allow the
+An opted-in protected cache and declared targets or `cache_source` extensions allow the
 selected service to warm configured credentials after a successful unlock.
 Provider-based, explicit-password and attended unlocks use the same path.
 Nothing enables the cache, unlocks a database or registers targets implicitly.
 
-The existing extension registry owns the target allowlist. Sources receive the
+The [configuration owner](configuration.md#declared-cache-targets) supplies the
+declared allowlist, followed by the existing extension registry. Sources receive the
 ordinary optional machine hint as `None`; each source remains responsible for
 returning the targets appropriate to that service. Warming never lists or scans
 the database, starts a session ceremony, or adds a timer. Manual population
 retains its existing uncapped collection behavior through the same collector.
+Enqueue captures only the discovery root and unlock identity. Coalescing precedes
+policy discovery; the existing worker resolves fresh policy and default groups
+outside credential-lock custody, then snapshots the sources for that work.
+Invalid declarations or manifests fail queued work before credential reads rather
+than falling through to extensions. Non-comment rows need a nonempty entry.
+Declared entries, every raw manifest row (including comments and blanks), and
+extension items share the unchanged raw-work budget. Scanning checks the deadline
+and cancellation between rows. Manual collection remains uncapped.
 
 ## Work and lifetime
 
 Verified unlocks enqueue a database/group context without waiting for backend
-reads. Repeated already-unlocked requests coalesce with that unlock's work,
+reads or configuration-owner discovery. Repeated already-unlocked requests coalesce with that unlock's work,
 including completed or partial work; they do not retry failed targets or renew
 the master password. A genuinely new verified unlock gets a new identity even
 when the wall-clock timestamp is unchanged.
@@ -24,6 +33,8 @@ It admits at most 32 pending/retained contexts, 256 configured targets, 1024 raw
 source items and 32 sources per context. The 60-second work deadline starts at
 enqueue, including queue wait. Reaching a bound is a truthful partial outcome,
 not evidence that unexamined targets were cached.
+Default-group scope remains unresolved until the worker binds it; status never
+guesses that an explicitly requested foreign group is the native default.
 
 Source callbacks and their iterators run off the event loop and must return
 cooperatively. The deadline prevents further admission; it does not forcibly
@@ -69,6 +80,8 @@ actual work settlement before executor and service cleanup.
 The existing full `ping` response adds `cache_warm` using contract
 `agent-vault.cache-warm`, version `1`. It reports only state, a fixed reason,
 `selected`, `cached`, `failed`, `remaining`, `failed_sources` and `truncated`.
+The additive `target_policy: "repository-cache-targets-v1"` identifies support
+in the running generation, separately from an installed CLI's capability.
 Counts and status are scoped to the selected database/group; no entry names,
 database paths, credential values or callback exception messages are included.
 Full ping never reloads configuration to select warming status. An omitted group

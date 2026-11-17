@@ -1,13 +1,20 @@
 """Gitea snapshot acquisition under the provider's existing native read owner."""
 
+from __future__ import annotations
+
 import json
+from typing import Any
 
 from ..pr_contract import PRSnapshot
 from .base import ProviderError
+from .gitea_reviews import ReviewCollection
 from .observation_credentials import MAX_SNAPSHOT_REQUESTS, ObservationCredentials
 
 
-def snapshot(owner, repo, number, *, api_base="", token=None, credential_source=None):
+def snapshot(
+    owner: Any, repo: str, number: int, *, api_base: str = "",
+    token: Any = None, credential_source: Any = None,
+) -> PRSnapshot:
     if credential_source is not None:
         if token is not None:
             raise ProviderError("explicit observation credentials cannot select a legacy token")
@@ -40,12 +47,14 @@ def snapshot(owner, repo, number, *, api_base="", token=None, credential_source=
         if isinstance(label, dict) and label.get("name")
     )
     mergeable = pr.get("mergeable")
+    reviews = owner._all_review_objs(repo, number, api_base, token)
     return PRSnapshot(
         pr_state=str(pr.get("state", "")) or "open", endpoint=owner.authority_endpoint(api_base),
         merged=bool(pr.get("merged", False)), head_sha=str(head.get("sha", "")),
         base_ref=str(base.get("ref", "")), base_sha=str(base.get("sha") or ""),
         updated_at=str(pr.get("updated_at", "") or ""),
-        reviews=owner._all_review_objs(repo, number, api_base, token),
+        reviews=tuple(reviews),
+        reviews_complete=reviews.complete if isinstance(reviews, ReviewCollection) else None,
         author=str((pr.get("user") or {}).get("login", "")),
         mergeable=mergeable if isinstance(mergeable, bool) else None,
         checks_state=owner._combined_status_state(repo, str(head.get("sha", "")), api_base, token),

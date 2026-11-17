@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -16,6 +17,8 @@ from agent_vault import cache, cli, config, credential_reads, extensions, servic
 from agent_vault.cache_dpapi import CacheDecryptionUnavailable, CacheProtectionError
 from agent_vault.extensions import ExtensionRegistry
 from agent_vault.service_cache_store import COLLECTION, ServiceCacheStore
+
+Cached = tuple[service.VaultService, cache.PersistentCache, str, list[float]]
 
 
 @pytest.fixture
@@ -31,7 +34,7 @@ def cached_service(
     registry._loaded = True
     monkeypatch.setattr(extensions, "_REGISTRY", registry)
     clock = [1000.0]
-    monkeypatch.setattr(service.time, "time", lambda: clock[0])
+    monkeypatch.setattr("agent_vault.service.time.time", lambda: clock[0])
     monkeypatch.setattr(service, "PASSWORD_TTL", 10)
     kpdb = str(tmp_path / "fixture.kdbx")
     Path(kpdb).touch()
@@ -48,7 +51,7 @@ def cached_service(
             return data[len(b"fixture-ciphertext:"):]
 
     persistent = cache.PersistentCache()
-    persistent._fernet = FixtureCipher()
+    monkeypatch.setattr(persistent, "_fernet", FixtureCipher())
     (persistent._base_dir).mkdir()
     persistent._key_file.write_bytes(b"fixture-key")
     monkeypatch.setattr(
@@ -67,10 +70,15 @@ def cached_service(
     return vault, persistent, kpdb, clock
 
 
-def _get(vault: service.VaultService, **overrides: object) -> dict:
+def _get(vault: service.VaultService, **overrides: object) -> dict[str, Any]:
     return vault.handle_request({
         "action": "get", "entry": "entry", "group": "Allowed", **overrides,
     })
+
+
+def _known(record: dict[str, Any] | None) -> dict[str, Any]:
+    assert record is not None
+    return record
 
 
 def _store(
@@ -80,12 +88,12 @@ def _store(
 
 
 def test_service_cache_retains_attributed_hit_and_generation_after_password_expiry(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     first = _get(vault)
     assert first["ok"] and first["value"] == "fixture-value"
-    assert _store(persistent, kpdb).record("entry")["binding"] == service_cache.binding_for(
+    assert _known(_store(persistent, kpdb).record("entry"))["binding"] == service_cache.binding_for(
         kpdb, "Allowed", "Allowed/entry", "password",
     )
     clock[0] += 10
@@ -99,7 +107,7 @@ def test_service_cache_retains_attributed_hit_and_generation_after_password_expi
 
 
 def test_replacement_service_reuses_protected_record_without_master_or_memory_cache(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, _persistent, kpdb, _clock = cached_service
     expected = _get(vault)
@@ -114,7 +122,7 @@ def test_replacement_service_reuses_protected_record_without_master_or_memory_ca
 
 @pytest.mark.parametrize("mismatch", ["database", "group", "field", "installation", "unattributed"])
 def test_cache_binding_mismatch_is_not_relabelled_or_served(
-    cached_service, monkeypatch: pytest.MonkeyPatch, mismatch: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, mismatch: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault)["ok"]
@@ -141,12 +149,12 @@ def test_cache_binding_mismatch_is_not_relabelled_or_served(
 
 
 def test_dpapi_unavailable_client_uses_actual_locked_service_without_cache_writeback(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, _persistent, kpdb, clock = cached_service
     first = _get(vault)
     clock[0] += 10
-    requests = []
+    requests: list[dict[str, Any]] = []
 
     class UnreadableClientCache:
         enabled = True
@@ -160,14 +168,14 @@ def test_dpapi_unavailable_client_uses_actual_locked_service_without_cache_write
     monkeypatch.setattr(cache, "get_cache", UnreadableClientCache)
     monkeypatch.setattr(cli, "ensure_service", lambda: True)
 
-    def selected(request: dict, timeout: object = None) -> dict:
+    def selected(request: dict[str, Any], timeout: object = None) -> dict[str, Any]:
         requests.append(request)
         return vault.handle_request({**request, "group": "Allowed"})
 
     monkeypatch.setattr(cli, "send_command", selected)
     result = credential_reads.read_credential(SimpleNamespace(entry="entry", field="password"))
     assert result.code == 0 and result.value == first["value"]
-    assert result.warning.startswith("cache_decryption_unavailable;")
+    assert (result.warning or "").startswith("cache_decryption_unavailable;")
     assert len(requests) == 1 and not vault.cli.has_password(kpdb)
     requests.clear()
     refused = credential_reads.read_credential(
@@ -177,7 +185,7 @@ def test_dpapi_unavailable_client_uses_actual_locked_service_without_cache_write
 
 
 def test_authoritative_refresh_never_serves_cached_value_or_destroys_current_record(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault)["ok"]
@@ -190,7 +198,7 @@ def test_authoritative_refresh_never_serves_cached_value_or_destroys_current_rec
 
 
 def test_freshness_clear_and_pending_rotation_cannot_return_stale_service_memory(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     first = _get(vault)
@@ -205,7 +213,7 @@ def test_freshness_clear_and_pending_rotation_cannot_return_stale_service_memory
 
 
 def test_explicit_lock_revokes_cache_but_retains_unrelated_database_records(
-    cached_service,
+    cached_service: Cached,
 ) -> None:
     vault, persistent, kpdb, _clock = cached_service
     assert _get(vault)["ok"]
@@ -214,11 +222,11 @@ def test_explicit_lock_revokes_cache_but_retains_unrelated_database_records(
     assert vault.handle_request({"action": "lock", "kpdb": kpdb})["ok"]
     assert not vault.cli.has_password(kpdb)
     assert _store(persistent, kpdb).record("entry") is None
-    assert _store(persistent, other).record("other")["value"] == "other-value"
+    assert _known(_store(persistent, other).record("other"))["value"] == "other-value"
 
 
 def test_revocation_failure_still_locks_master_and_refuses_retained_cache(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, kpdb, _clock = cached_service
     assert _get(vault)["ok"]
@@ -230,7 +238,7 @@ def test_revocation_failure_still_locks_master_and_refuses_retained_cache(
 
 
 def test_protection_failure_has_fixed_credential_free_response(
-    cached_service, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
     vault, persistent, _kpdb, _clock = cached_service
 
@@ -242,17 +250,20 @@ def test_protection_failure_has_fixed_credential_free_response(
     assert "private credential-bearing diagnostic" not in caplog.text
 
 
-def test_protected_snapshot_value_and_generation_are_returned_together(cached_service) -> None:
+def test_protected_snapshot_value_and_generation_are_returned_together(cached_service: Cached) -> None:
     _vault, persistent, kpdb, _clock = cached_service
     scoped = _store(persistent, kpdb)
     assert scoped.put("entry", "password", "old", 5)
     record = scoped.record("entry")
     assert scoped.put("entry", "password", "new", 6)
+    assert record is not None
     assert (record["value"], record["generation"]) == ("old", 5)
-    assert scoped.record("entry")["generation"] == 6
+    assert _known(scoped.record("entry"))["generation"] == 6
 
 
-def test_service_cache_write_failure_is_not_reported_as_cached(cached_service, monkeypatch) -> None:
+def test_service_cache_write_failure_is_not_reported_as_cached(
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     vault, persistent, _kpdb, _clock = cached_service
     monkeypatch.setattr(ServiceCacheStore, "put", lambda *_a, **_kw: False)
     response = _get(vault)
@@ -261,7 +272,7 @@ def test_service_cache_write_failure_is_not_reported_as_cached(cached_service, m
 
 @pytest.mark.parametrize("operation", ["put", "replace", "complete", "reconcile"])
 def test_client_writeback_retains_exact_service_attribution_and_original_age(
-    cached_service, operation: str,
+    cached_service: Cached, operation: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     response = _get(vault)
@@ -272,7 +283,7 @@ def test_client_writeback_retains_exact_service_attribution_and_original_age(
     if operation == "complete":
         assert persistent.complete_replace(*args, 1, generation)
     else:
-        method = {
+        method: Any = {
             "put": persistent.put,
             "replace": persistent.replace,
             "reconcile": persistent.reconcile_authoritative,
@@ -283,12 +294,12 @@ def test_client_writeback_retains_exact_service_attribution_and_original_age(
 
 @pytest.mark.parametrize("action", ["set-username", "remove", "move"])
 def test_backend_mutation_invalidates_service_cache_before_an_uncertain_result(
-    cached_service, monkeypatch: pytest.MonkeyPatch, action: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, action: str,
 ) -> None:
     vault, persistent, kpdb, _clock = cached_service
     assert _get(vault)["ok"]
 
-    def uncertain(*_args: object) -> tuple[bool, str]:
+    def uncertain(*_args: object, **_kwargs: object) -> tuple[bool, str]:
         assert _store(persistent, kpdb).record("entry") is None
         return False, "backend outcome unavailable"
 
@@ -303,7 +314,7 @@ def test_backend_mutation_invalidates_service_cache_before_an_uncertain_result(
 
 
 def test_password_rotation_remains_available_from_service_cache_after_expiry(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault)["ok"]
@@ -315,12 +326,12 @@ def test_password_rotation_remains_available_from_service_cache_after_expiry(
     assert changed["ok"]
     clock[0] += 10
     assert _get(vault)["value"] == "fixture-updated"
-    assert _store(persistent, kpdb).record("entry")["generation"] == changed["generation"]
+    assert _known(_store(persistent, kpdb).record("entry"))["generation"] == changed["generation"]
 
 
 @pytest.mark.parametrize("operation", ["refresh", "mutation", "lock"])
 def test_unknown_password_replacement_remains_journalled_and_cannot_restore_revoked_binding(
-    cached_service, monkeypatch: pytest.MonkeyPatch, operation: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
     vault, persistent, kpdb, _clock = cached_service
     first = _get(vault)
@@ -336,13 +347,13 @@ def test_unknown_password_replacement_remains_journalled_and_cannot_restore_revo
         })["ok"] is False
     else:
         assert vault.handle_request({"action": "lock", "kpdb": kpdb})["ok"]
-    assert persistent.pending_replace("Allowed/entry", "password")["operation"] == pending
+    assert _known(persistent.pending_replace("Allowed/entry", "password"))["operation"] == pending
     assert persistent.rollback_replace("Allowed/entry", "password", pending)
     assert _store(persistent, kpdb).record("entry") is None
 
 
 def test_service_database_reads_do_not_poison_a_legacy_direct_readers_entry(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, first_db, clock = cached_service
     second_db = str(Path(first_db).with_name("second.kdbx"))
@@ -368,7 +379,7 @@ def test_service_database_reads_do_not_poison_a_legacy_direct_readers_entry(
 
 @pytest.mark.parametrize("subject", ["entry", "field"])
 def test_migration_or_record_rekeying_cannot_change_a_service_records_subject(
-    cached_service, monkeypatch: pytest.MonkeyPatch, subject: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, subject: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault, entry="token", group="")["ok"]
@@ -385,7 +396,7 @@ def test_migration_or_record_rekeying_cannot_change_a_service_records_subject(
 
 
 def test_standard_field_aliases_share_password_rotation_and_pending_journal(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault, field="Password")["ok"]
@@ -406,7 +417,7 @@ def test_standard_field_aliases_share_password_rotation_and_pending_journal(
 
 @pytest.mark.parametrize("locked", [False, True])
 def test_actual_service_recovery_read_preserves_the_callers_existing_record(
-    cached_service, monkeypatch: pytest.MonkeyPatch, locked: bool,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, locked: bool,
 ) -> None:
     from agent_vault import cache_recovery
 
@@ -430,7 +441,7 @@ def test_actual_service_recovery_read_preserves_the_callers_existing_record(
 
 @pytest.mark.parametrize("action", ["lock", "set-username", "remove", "move", "set-password"])
 def test_unavailable_protection_never_reports_revocation_or_mutation_success(
-    cached_service, monkeypatch: pytest.MonkeyPatch, action: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, action: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault)["ok"]
@@ -452,7 +463,7 @@ def test_unavailable_protection_never_reports_revocation_or_mutation_success(
 
 
 def test_custom_field_case_remains_distinct_while_standard_aliases_are_canonical(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, _persistent, _kpdb, clock = cached_service
     monkeypatch.setattr(vault.cli, "get_entry", lambda _db, _entry, field: "value-" + field)
@@ -470,7 +481,7 @@ def test_custom_field_case_remains_distinct_while_standard_aliases_are_canonical
 ])
 @pytest.mark.parametrize("entry", ["entry", "uncached"])
 def test_malformed_revocation_metadata_is_not_replaced_or_treated_as_permission(
-    cached_service, monkeypatch: pytest.MonkeyPatch, invalid: bytes, entry: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, invalid: bytes, entry: str,
 ) -> None:
     from agent_vault.service_cache_epochs import FILENAME
 
@@ -486,7 +497,7 @@ def test_malformed_revocation_metadata_is_not_replaced_or_treated_as_permission(
 
 
 def test_alias_population_cache_only_and_verification_use_the_same_field(
-    cached_service, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     vault, persistent, _kpdb, _clock = cached_service
     monkeypatch.setattr(cache, "get_cache", lambda: persistent)
@@ -510,7 +521,7 @@ def test_alias_population_cache_only_and_verification_use_the_same_field(
 
 
 def test_legacy_alias_remains_readable_without_migration_but_cannot_bypass_a_pending_canonical_field(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
     assert persistent.put("Allowed/entry", "Password", "legacy-alias-value", 1)
@@ -525,7 +536,7 @@ def test_legacy_alias_remains_readable_without_migration_but_cannot_bypass_a_pen
 
 
 def test_revocation_compaction_and_explicit_clear_retain_fences_without_exhausting_capacity(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_vault import service_cache_epochs
 
@@ -541,16 +552,16 @@ def test_revocation_compaction_and_explicit_clear_retain_fences_without_exhausti
     assert persistent.clear()
     assert set(service_cache_epochs.read(persistent._base_dir)) == {"all"}
     assert _store(persistent, kpdb).put("entry", "password", "fresh-value", 50)
-    assert _store(persistent, kpdb).record("entry")["value"] == "fresh-value"
+    assert _known(_store(persistent, kpdb).record("entry"))["value"] == "fresh-value"
 
 
 @pytest.mark.parametrize("legacy_entry", ["Allowed/entry", "/Allowed/entry"])
 @pytest.mark.parametrize("legacy_field", ["password", "Password"])
 def test_refresh_and_password_commit_generations_advance_beyond_persisted_values_after_clock_rollback(
-    cached_service, monkeypatch: pytest.MonkeyPatch, legacy_entry: str, legacy_field: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, legacy_entry: str, legacy_field: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
-    monkeypatch.setattr(service.time, "time_ns", lambda: 500)
+    monkeypatch.setattr("agent_vault.service.time.time_ns", lambda: 500)
     first = _get(vault)
     assert persistent.put(legacy_entry, legacy_field, "old-client-value", 2000)
     clock[0] = 900
@@ -583,7 +594,7 @@ def test_refresh_and_password_commit_generations_advance_beyond_persisted_values
 
 @pytest.mark.parametrize("action", ["set-password", "remove"])
 def test_backend_equivalent_leading_slash_records_are_revoked_together(
-    cached_service, monkeypatch: pytest.MonkeyPatch, action: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, action: str,
 ) -> None:
     vault, persistent, kpdb, clock = cached_service
     assert _get(vault, entry="/Allowed/entry")["ok"]
@@ -610,7 +621,7 @@ def test_backend_equivalent_leading_slash_records_are_revoked_together(
 
 
 def test_absolute_bare_entry_is_not_reprefixed_by_service_cache_layers(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, _persistent, _kpdb, clock = cached_service
     monkeypatch.setattr(vault.cli, "get_entry", lambda _db, entry, _field: "value-" + entry)
@@ -624,7 +635,7 @@ def test_absolute_bare_entry_is_not_reprefixed_by_service_cache_layers(
 @pytest.mark.parametrize("compartments", [False, True])
 @pytest.mark.parametrize("action", ["set-password", "remove"])
 def test_shared_database_revocation_crosses_installation_bindings_and_selected_compartments(
-    cached_service, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, compartments: bool, action: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, compartments: bool, action: str,
 ) -> None:
     first, first_cache, kpdb, clock = cached_service
     second_cache = first_cache
@@ -667,7 +678,7 @@ def test_shared_database_revocation_crosses_installation_bindings_and_selected_c
 
 @pytest.mark.parametrize("action", ["get", "lock", "add", "set-username", "remove", "move", "set-password"])
 def test_cache_construction_failure_has_an_authoritative_service_response(
-    cached_service, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, action: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, action: str,
 ) -> None:
     vault, _persistent, kpdb, _clock = cached_service
     assert _get(vault)["ok"]
@@ -692,7 +703,7 @@ def test_cache_construction_failure_has_an_authoritative_service_response(
 
 
 def test_shared_backend_custody_orders_a_refresh_after_another_service_mutation(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first, _persistent, kpdb, clock = cached_service
     second = service.VaultService()
@@ -727,16 +738,56 @@ def test_shared_backend_custody_orders_a_refresh_after_another_service_mutation(
         assert refreshing.result(timeout=4)["value"] == "changed-value"
 
 
+def test_shared_backend_custody_orders_a_refresh_after_another_service_copy(
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first, _persistent, kpdb, clock = cached_service
+    second = service.VaultService()
+    second.cli.set_password(kpdb, "fixture-master")
+    second._password_set_at[kpdb] = clock[0]
+    value = ["old-value"]
+    entered, release, read = threading.Event(), threading.Event(), threading.Event()
+
+    def copy(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+        entered.set()
+        assert release.wait(4)
+        value[0] = "copied-value"
+        return True, "copied"
+
+    def refresh(*_args: object) -> str:
+        read.set()
+        return value[0]
+
+    paths = {"Allowed/Old/entry"}
+    monkeypatch.setattr(first.cli, "has_entry", lambda _db, path: path in paths)
+    monkeypatch.setattr(first.cli, "group_exists", lambda _db, _path: False)
+    monkeypatch.setattr(first.cli, "copy_entry", copy)
+    monkeypatch.setattr(second.cli, "get_entry", refresh)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        mutation = workers.submit(first.handle_request, {
+            "action": "copy", "entry": "Allowed/Old/entry", "group": "Allowed",
+            "dest": "Allowed/entry",
+        })
+        try:
+            assert entered.wait(2)
+            refreshing = workers.submit(_get, second, refresh=True)
+            assert not read.wait(0.1)
+        finally:
+            release.set()
+        assert mutation.result(timeout=4)["ok"]
+        assert refreshing.result(timeout=4)["value"] == "copied-value"
+
+
 def test_mutation_deadline_still_prevents_backend_work_after_cache_journalling(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, _kpdb, _clock = cached_service
     monotonic = [0.0]
     original = vault._prepare_password_cache
-    monkeypatch.setattr(service.time, "monotonic", lambda: monotonic[0])
+    monkeypatch.setattr("agent_vault.service.time.monotonic", lambda: monotonic[0])
 
-    def prepare(*args: object) -> tuple:
-        result = original(*args)
+    def prepare(*args: object) -> Any:
+        result = original(*args)  # type: ignore[arg-type]
         monotonic[0] = 31.0
         return result
 
@@ -750,7 +801,7 @@ def test_mutation_deadline_still_prevents_backend_work_after_cache_journalling(
 
 
 def test_alternate_spelling_pending_journal_is_preserved_instead_of_starting_another_mutation(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, persistent, _kpdb, _clock = cached_service
     assert persistent.begin_replace("/Allowed/entry", "password", "unknown-candidate", 5)
@@ -759,11 +810,11 @@ def test_alternate_spelling_pending_journal_is_preserved_instead_of_starting_ano
         "action": "set-password", "entry": "Allowed/entry", "group": "Allowed", "password": "other",
     })
     assert response == {"ok": False, "error": service_cache.UNAVAILABLE}
-    assert persistent.pending_replace("/Allowed/entry", "password")["operation"] == 5
+    assert _known(persistent.pending_replace("/Allowed/entry", "password"))["operation"] == 5
 
 
 def test_add_at_an_existing_path_cannot_leave_the_prior_service_value_cached(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, _persistent, _kpdb, _clock = cached_service
     value = ["prior-value"]
@@ -782,7 +833,7 @@ def test_add_at_an_existing_path_cannot_leave_the_prior_service_value_cached(
 @pytest.mark.parametrize("refresh", [False, True])
 @pytest.mark.parametrize("blocked", ["unlock", "entry-read"])
 def test_inflight_backend_read_cannot_repopulate_the_service_cache_after_clear(
-    cached_service, monkeypatch: pytest.MonkeyPatch, refresh: bool, blocked: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, refresh: bool, blocked: str,
 ) -> None:
     vault, persistent, kpdb, _clock = cached_service
     if refresh:
@@ -813,7 +864,7 @@ def test_inflight_backend_read_cannot_repopulate_the_service_cache_after_clear(
 
 @pytest.mark.parametrize("journal_entry", ["Allowed/entry", "/Allowed/entry", "entry"])
 def test_alias_pending_journal_blocks_an_existing_canonical_value_or_legacy_fallback(
-    cached_service, monkeypatch: pytest.MonkeyPatch, journal_entry: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, journal_entry: str,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
     canonical_entry = "entry" if journal_entry == "entry" else "Allowed/entry"
@@ -827,11 +878,11 @@ def test_alias_pending_journal_blocks_an_existing_canonical_value_or_legacy_fall
             SimpleNamespace(entry="entry", field=field, cache_only=True),
         )
         assert response.code == 1 and response.value is None
-    assert persistent.pending_replace(journal_entry, "Password")["operation"] == 2
+    assert _known(persistent.pending_replace(journal_entry, "Password"))["operation"] == 2
 
 
 def test_absolute_move_destination_invalidates_memory_when_persistent_caching_is_disabled(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vault, _persistent, kpdb, _clock = cached_service
     monkeypatch.delenv(cache.CACHE_ENABLE_ENV, raising=False)
@@ -850,7 +901,7 @@ def test_absolute_move_destination_invalidates_memory_when_persistent_caching_is
 
 @pytest.mark.parametrize("invalid_field", ["password", "Password"])
 def test_alias_journal_guard_preserves_strict_corruption_failure(
-    cached_service, invalid_field: str,
+    cached_service: Cached, invalid_field: str,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
     assert persistent.put("Allowed/entry", "password", "old-canonical", 1)
@@ -871,7 +922,7 @@ def test_alias_journal_guard_preserves_strict_corruption_failure(
 @pytest.mark.parametrize("invalid_field", ["password", "Password"])
 @pytest.mark.parametrize("operation", ["record", "put"])
 def test_service_store_rejects_malformed_journals_without_revoking_or_writing(
-    cached_service, invalid_field: str, operation: str,
+    cached_service: Cached, invalid_field: str, operation: str,
 ) -> None:
     _vault, persistent, kpdb, _clock = cached_service
     selected = _store(persistent, kpdb)
@@ -895,7 +946,7 @@ def test_service_store_rejects_malformed_journals_without_revoking_or_writing(
 
 
 def test_direct_client_cannot_reuse_a_root_credential_for_a_group_relative_lookup(
-    cached_service, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     vault, persistent, _kpdb, _clock = cached_service
     monkeypatch.setattr(cache, "get_cache", lambda: persistent)
@@ -930,7 +981,7 @@ def test_direct_client_cannot_reuse_a_root_credential_for_a_group_relative_looku
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("operation", ["failed-rotation", "population"])
 def test_grouped_write_paths_preserve_root_values_and_journals(
-    cached_service, monkeypatch: pytest.MonkeyPatch, pending: bool, operation: str,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, pending: bool, operation: str,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
     assert persistent.put("token", "password", "root-value", 1)
@@ -942,7 +993,7 @@ def test_grouped_write_paths_preserve_root_values_and_journals(
     monkeypatch.setattr(cli, "ensure_service", lambda: True)
     monkeypatch.setattr(persistent, "prepare", lambda: {"state": "ready"})
 
-    def selected(request: dict, **_kwargs: object) -> dict:
+    def selected(request: dict[str, Any], **_kwargs: object) -> dict[str, Any]:
         if operation == "failed-rotation":
             assert request["action"] == "set-password"
             return {"ok": False, "error": "rejected"}
@@ -965,7 +1016,7 @@ def test_grouped_write_paths_preserve_root_values_and_journals(
 @pytest.mark.parametrize("journal_entry", ["Allowed/entry", "/Allowed/entry"])
 @pytest.mark.parametrize("operation", ["refresh", "population"])
 def test_confirmed_authority_reconciles_equivalent_alias_journals_atomically(
-    cached_service, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     journal_entry: str, operation: str,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
@@ -995,7 +1046,7 @@ def test_confirmed_authority_reconciles_equivalent_alias_journals_atomically(
 
 
 def test_missing_only_recovery_does_not_clear_an_alias_owned_journal(
-    cached_service, monkeypatch: pytest.MonkeyPatch,
+    cached_service: Cached, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
     assert persistent.begin_replace("Allowed/entry", "Password", "candidate", 2)
@@ -1006,7 +1057,7 @@ def test_missing_only_recovery_does_not_clear_an_alias_owned_journal(
 
 
 def test_older_authority_cannot_claim_to_reconcile_a_newer_value_with_an_alias_journal(
-    cached_service,
+    cached_service: Cached,
 ) -> None:
     _vault, persistent, _kpdb, _clock = cached_service
     assert persistent.put("Allowed/entry", "password", "newer", 50)

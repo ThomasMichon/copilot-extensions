@@ -24,8 +24,9 @@ _BOOTSTRAP = (
 @pytest.mark.parametrize("language,host_name", [
     ("ps1", "pwsh"), ("ps1", "powershell.exe"), ("sh", "bash"),
 ])
+@pytest.mark.parametrize("layout", ("flat", "nested"))
 def test_native_post_repair_bootstrap_readiness(
-    tmp_path: Path, mode: str, condition: str, language: str, host_name: str,
+    tmp_path: Path, mode: str, condition: str, language: str, host_name: str, layout: str,
 ) -> None:
     if language == "sh" and (os.name == "nt" or not shutil.which("bash")):
         pytest.skip("Native POSIX shell required")
@@ -59,8 +60,13 @@ def test_native_post_repair_bootstrap_readiness(
         fields["runtime_source"] = {**fields["runtime_source"], "source_tree": "c" * 40}
     shared["_manifest"](install, **fields)
     slot = shared["_slot"](install, selected, complete=condition != "incomplete")
-    (slot / "Scripts").mkdir()
-    (slot / "Scripts/python.exe").write_bytes(b"fixture interpreter; must not execute")
+    environment = slot
+    if layout == "nested":
+        environment = slot / ".venv"
+        environment.mkdir()
+        shutil.move(slot / "bin", environment / "bin")
+    (environment / "Scripts").mkdir()
+    (environment / "Scripts/python.exe").write_bytes(b"fixture interpreter; must not execute")
     actual = selected
     if condition == "wrong-generation":
         actual = selected[:-32] + "e" * 32
@@ -74,6 +80,7 @@ def test_native_post_repair_bootstrap_readiness(
         assert bool(shared["_children"](home)) is (condition != "healthy")
         assert not (install / "logs").exists()
         return
+    assert host is not None
     hook = str(scripts / "bootstrap-check.ps1").replace("'", "''")
     command = f". '{hook}'"
     env = shared["_environment"](home)
@@ -82,7 +89,7 @@ def test_native_post_repair_bootstrap_readiness(
     result = subprocess.run(
         [host, "-NoProfile", "-Command", command], cwd=home, env=env,
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
     assert (home / "children").exists() is (condition != "healthy"), result.stderr

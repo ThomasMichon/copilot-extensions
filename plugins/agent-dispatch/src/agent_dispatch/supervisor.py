@@ -31,7 +31,7 @@ re-spawn) and surfaced for a human, which is the safe default.
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import daemon_entrypoint
+from agent_procutil.daemon_instances import admit_daemon_instance
 
 import hashlib
 import json
@@ -44,10 +44,11 @@ from typing import Any
 import httpx
 
 from .bridge_events import BridgeSubscription, SupervisorEventWake
-from .client import DispatchClient, DispatchError
+from .client import DispatchClient
+from .client_errors import DispatchError
 from .client_cleanup_recovery import HostBoundConclusionClient
 from .loop_governance import LoopGovernance
-from .queue import SpawnState, Status
+from .queue_records import SpawnState, Status
 from .spawn_factories import (  # noqa: F401 -- re-exported for existing call sites/tests
     _FLEET_BODY_PREFIX,
     _LOCAL_BODY_PREFIX,
@@ -67,7 +68,6 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     LocalResumeFn,
     NudgeFn,
     RedriveFn,
-    ScriptBodyVerdictFn,
     SpawnFn,
     SpawnPreparationRetained,
     VerdictFn,
@@ -88,25 +88,28 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     _default_local_resume,
     _default_nudge,
     _default_redrive,
-    _default_script_body_verdict,
     _default_verdict,
     _default_worktree_directory_present,
-    _cleanup_script_task_file,
     _machine_from_owner,
     _parse_fleet_body_handle,
     _parse_local_body_handle,
-    _parse_script_body_handle,
     _reservation_made_progress,
     _target_directory_missing,
-    _tracking,
     _worktree_from_owner,
     _worktree_from_reservation,
     make_embody_spawn,
     make_headless_spawn,
     make_label_routed_spawn,
-    make_script_spawn,
     make_redrive_sender,
     request_failed_created_spawn_release,
+)
+from .spawn_script_body import (  # noqa: F401 -- compatibility re-exports
+    ScriptBodyVerdictFn,
+    _cleanup_script_task_file,
+    _default_script_body_verdict,
+    _parse_script_body_handle,
+    _tracking,
+    make_script_spawn,
 )
 from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing call sites/tests
     _CONCLUSION_COMPLETE,
@@ -154,7 +157,7 @@ _COLD_RESUME_RETRY_SECONDS = 300
 _MIN_RESERVING_TIMEOUT_SECONDS = 600
 
 
-def _bridge_creation_nonce(reservation: dict) -> str | None:
+def _bridge_creation_nonce(reservation: dict[str, Any]) -> str | None:
     """Bridge's retained creation nonce for an ordinary Bridge-created worker."""
     if reservation.get("driver") != "ordinary-bridge":
         return None
@@ -228,7 +231,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         machine: str | None = None,
         pool_instance: tuple[str, str, str] | None = None,
         pool_allocation_enabled: bool = False,
-        capacity_gate: Callable[[dict], bool] | None = None,
+        capacity_gate: Callable[[dict[str, Any]], bool] | None = None,
         worktree_directory_present_fn: WorktreeDirectoryPresentFn | None = None,
         evaluator: Any | None = None,
         evaluator_ref: str | None = None,
@@ -436,7 +439,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
     # -- helpers -------------------------------------------------------------
 
-    def _eligible(self, now: float) -> list[dict]:
+    def _eligible(self, now: float) -> list[dict[str, Any]]:
         """Queued, due finite tasks in the lane matching the label opt-in (oldest first).
 
         Server-side per-label and finite-kind filtering applies before the
@@ -445,7 +448,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         explicit attachment admission may select. Deduplicate locally.
         """
         if self.labels:
-            seen: dict[str, dict] = {}
+            seen: dict[str, dict[str, Any]] = {}
             for label in sorted(self.labels):
                 for t in self.client.list(
                     repo=self.repo, status=Status.QUEUED, label=label, kind="finite", limit=200
@@ -456,7 +459,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             # No label restriction (a catch-all pool) -- nothing to scope the
             # server-side query to; same broad page as before.
             tasks = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=200)
-        out: list[dict] = []
+        out: list[dict[str, Any]] = []
         for t in tasks:
             if t.get("kind", "finite") != "finite":
                 continue  # standing charters are never finite executable work
@@ -472,7 +475,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         out.sort(key=lambda t: t.get("created_at") or 0)
         return out
 
-    def _matches_pool(self, task: dict) -> bool:
+    def _matches_pool(self, task: dict[str, Any]) -> bool:
         if (self.repo is not None and task.get("repo") != self.repo) or (task.get("source") == "ci-repair" and task.get("origin_ref") != self.supervisor_id):
             return False
         if self.labels is not None and not (self.labels & set(task.get("labels") or [])):
@@ -482,7 +485,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             return matches_task(self, task)
         return True
 
-    def _active_reservations(self) -> list[dict]:
+    def _active_reservations(self) -> list[dict[str, Any]]:
         try:
             reservations = self._pool_reservations(
                 state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING},{SpawnState.COLD}"),
@@ -512,7 +515,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 exc,
             )
             return [{}] * self.max_concurrent
-        active: list[dict] = []
+        active: list[dict[str, Any]] = []
         for reservation in reservations:
             try:
                 task = self.client.get(reservation["task_id"])
@@ -527,7 +530,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 active.append(reservation)
         return active
 
-    def _list_reservations_safe(self, *, strict: bool = False, **kwargs: Any) -> list[dict]:
+    def _list_reservations_safe(self, *, strict: bool = False, **kwargs: Any) -> list[dict[str, Any]]:
         """List reservations, treating a transport failure as "none found".
 
         Every caller of this is one sub-check inside a larger per-cycle
@@ -557,7 +560,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         pool_accountable: bool = False,
         resume_requested: bool | None = None,
         strict: bool = False,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """List reservations filtered server-side to this pool before limit."""
         if not self.labels:
             return self._list_reservations_safe(
@@ -570,7 +573,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 resume_requested=resume_requested,
                 limit=10000,
             )
-        by_key: dict[str, dict] = {}
+        by_key: dict[str, dict[str, Any]] = {}
         for label in self.labels:
             for reservation in self._list_reservations_safe(
                 strict=strict,
@@ -588,7 +591,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     by_key[key] = reservation
         return list(by_key.values())
 
-    def _spawn_requires_reusable_worktree(self, task: dict) -> bool:
+    def _spawn_requires_reusable_worktree(self, task: dict[str, Any]) -> bool:
         selector = getattr(
             self.spawn_fn,
             "requires_reusable_worktree_for",
@@ -598,13 +601,13 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             return bool(selector(task))
         return bool(getattr(self.spawn_fn, "requires_reusable_worktree", False))
 
-    def _spawn_no_pair(self, task: dict) -> bool:
+    def _spawn_no_pair(self, task: dict[str, Any]) -> bool:
         selector = getattr(self.spawn_fn, "allocation_no_pair_for", None)
         if callable(selector):
             return bool(selector(task))
         return bool(getattr(self.spawn_fn, "allocation_no_pair", False))
 
-    def _spawn_attribute(self, task: dict, name: str, default: str) -> str:
+    def _spawn_attribute(self, task: dict[str, Any], name: str, default: str) -> str:
         selector = getattr(self.spawn_fn, f"{name}_for", None)
         if callable(selector):
             value = selector(task)
@@ -612,7 +615,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             value = getattr(self.spawn_fn, name, default)
         return value if isinstance(value, str) and value else default
 
-    def _prepare_spawn_task(self, task: dict, reservation: dict) -> dict:
+    def _prepare_spawn_task(self, task: dict[str, Any], reservation: dict[str, Any]) -> dict[str, Any]:
         """Prepare the selected backend's reservation-bound startup facts."""
         ordinary = getattr(self.spawn_fn, "ordinary_bridge_for", None)
         restricted = getattr(self.spawn_fn, "restricted_bridge_for", None)
@@ -634,7 +637,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         from .workspace_binding import prepare_workspace
         return prepare_workspace(self, task, reservation)
 
-    def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
+    def _reservation_has_live_process(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
         if reservation.get("state") in SpawnState.ACTIVE and (
             reservation.get("startup_complete") is not True
             and reservation.get("startup_fenced") is not True
@@ -932,7 +935,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         return _r(self, now=now)
 
     def _reserving_worktree_confirmed_absent(
-        self, res: dict, task: dict, worktree: str
+        self, res: dict[str, Any], task: dict[str, Any], worktree: str
     ) -> bool:
         """Whether ``worktree`` can be **positively** confirmed absent from
         the local ``agent-worktrees`` registry, as a safe escalation path for
@@ -980,7 +983,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         return present is False
 
     def _fail_unresolved_reserving(
-        self, res: dict, reason: str, *, worktree: str | None = None
+        self, res: dict[str, Any], reason: str, *, worktree: str | None = None
     ) -> bool:
         """Release a ``reserving`` reservation whose worktree is positively
         confirmed absent (see :meth:`_reserving_worktree_confirmed_absent`)
@@ -1260,7 +1263,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 self.client.record_spawn(
                     res["key"],
                     session_handle=session_id,
-                    worktree=session.get("worktree_id") or worktree,
+                    worktree=(session or {}).get("worktree_id") or worktree,
                 )
                 reconciled += 1
             except DispatchError:
@@ -1302,7 +1305,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         """
         from . import spawn_reservation_machine as srm
 
-        active = self._pool_reservations(state=SpawnState.ACTIVE)
+        active = self._pool_reservations(state=",".join(sorted(SpawnState.ACTIVE)))
         records = tuple(
             srm.ReservationRecord(
                 key=str(res.get("key") or ""),
@@ -1360,10 +1363,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
     def _conclude_released_attempt(
         self,
-        reservation: dict,
+        reservation: dict[str, Any],
         *,
         session_id: str | None,
-    ) -> tuple[str, dict]:
+    ) -> tuple[str, dict[str, Any]]:
         """Conclude only an allocation proven created by this reservation."""
         worktree = reservation.get("worktree")
         if not isinstance(worktree, str) or not worktree:
@@ -1424,11 +1427,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
     def _retire_release_for_cleanup(
         self,
-        reservation: dict,
+        reservation: dict[str, Any],
         *,
         conclusion_state: str,
-        cleanup_payload: dict,
-    ) -> dict:
+        cleanup_payload: dict[str, Any],
+    ) -> dict[str, Any]:
         encoded = json.dumps(
             cleanup_payload,
             sort_keys=True,
@@ -1454,7 +1457,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     _retired_cleanup_plan = staticmethod(_retired_cleanup_plan)
 
     @staticmethod
-    def _validated_cleanup_claim(claim: dict) -> tuple[str, dict]:
+    def _validated_cleanup_claim(claim: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         token, reservation = claim.get("claim_token"), claim.get("reservation")
         if not isinstance(token, str) or not token.strip():
             log.warning("cleanup claim protocol error: missing or malformed token")
@@ -1588,7 +1591,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     except DispatchError:
                         pass
                     continue
-            if session_due:
+            if session_due and isinstance(session_end, dict):
                 cleanup_sid = str(session_end.get("session_id") or local_sid or "")
                 try:
                     session_ended = bool(cleanup_sid and self.local_end_fn(cleanup_sid))
@@ -1715,29 +1718,28 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         released += 1
                         continue
                     else:
-                        if conclusion_session:
-                            checkpoint = {
-                                **retry_payload,
-                                "action": "pending",
-                                "reason": "ending-released-body",
-                                "acp_session_id": conclusion_session,
-                            }
-                            try:
-                                self._conclusion_client.record_spawn_conclusion(
-                                    res["key"],
-                                    conclusion_state=(
-                                        res.get("conclusion_state") or _CONCLUSION_PENDING
-                                    ),
-                                    conclusion_detail=json.dumps(
-                                        checkpoint, sort_keys=True, separators=(",", ":"),
-                                    ),
-                                )
-                            except DispatchError:
-                                log.exception(
-                                    "failed to checkpoint ACP identity before ending local body %s",
-                                    local_sid,
-                                )
-                                continue
+                        checkpoint = {
+                            **retry_payload,
+                            "action": "pending",
+                            "reason": "ending-released-body",
+                            **({"acp_session_id": conclusion_session} if conclusion_session else {}),
+                        }
+                        try:
+                            self._conclusion_client.record_spawn_conclusion(
+                                res["key"],
+                                conclusion_state=(
+                                    res.get("conclusion_state") or _CONCLUSION_PENDING
+                                ),
+                                conclusion_detail=json.dumps(
+                                    checkpoint, sort_keys=True, separators=(",", ":"),
+                                ),
+                            )
+                        except DispatchError:
+                            log.exception(
+                                "failed to checkpoint conversation before ending local body %s",
+                                local_sid,
+                            )
+                            continue
                         try:
                             can_release = self.local_end_fn(local_sid)
                         except Exception:
@@ -1900,6 +1902,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 if not settle_completed_relationship(self, res, task):
                     continue
                 if body_already_released:
+                    if claim_token is None:
+                        continue
                     try:
                         self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
@@ -1995,7 +1999,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
     # -- phases --------------------------------------------------------------
 
-    def _completion_detail(self, task: dict) -> str:
+    def _completion_detail(self, task: dict[str, Any]) -> str:
         """Settle-detail for a terminal task, with completion-claim verification.
 
         Implements *verify-the-completion-claim*: a **goal-bearing** task that
@@ -2031,11 +2035,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
     def _conclude_terminal_worker(
         self,
-        reservation: dict,
-        task: dict,
+        reservation: dict[str, Any],
+        task: dict[str, Any],
         *,
         session_override: str | None = None,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Run the opt-in exact-identity terminal conclusion policy."""
         if not self.disposable_cli_labels.intersection(task.get("labels") or []):
             return None
@@ -2085,7 +2089,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 failure["acp_session_id"] = session
             return failure
 
-    def _nudge_terminal_conclusion(self, reservation: dict, task: dict) -> bool:
+    def _nudge_terminal_conclusion(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
         """Reawaken the exact local body once to finish its worktree lifecycle."""
         session_id = _parse_local_body_handle(reservation.get("session_handle"))
         worktree = reservation.get("worktree")
@@ -2109,7 +2113,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             )
             return False
 
-    def _refresh_terminal_session(self, reservation: dict, task: dict) -> dict:
+    def _refresh_terminal_session(self, reservation: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
         """Capture an exact live session id before releasing the reservation."""
         if reservation.get("startup_complete") is not True:
             return reservation
@@ -2178,11 +2182,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
     def _exclusive_terminal_release_ready(
         self,
-        reservation: dict,
-        task: dict,
+        reservation: dict[str, Any],
+        task: dict[str, Any],
         *,
         policy_applies: bool,
-    ) -> tuple[bool, dict | None]:
+    ) -> tuple[bool, dict[str, Any] | None]:
         """Require body conclusion before releasing an exclusive reservation."""
         local_sid = _parse_local_body_handle(reservation.get("session_handle"))
         if not reservation.get("exclusive_key") and not (policy_applies and local_sid is not None):
@@ -2820,7 +2824,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     continue
                 final_detail = self._append_conclusion_detail(detail, outcome)
                 conclusion_state = self._conclusion_state(outcome)
-                conclusion_payload: dict = dict(outcome)
+                conclusion_payload = dict(outcome)
                 if conclusion_state == _CONCLUSION_PENDING:
                     attempts = prior_attempts + 1
                     conclusion_payload["attempts"] = attempts
@@ -2882,7 +2886,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         worker's own activity still extends its lease). Returns the count held.
         """
         tracking = _tracking()
-        local_by_id: dict[str, dict] | None = None
+        local_by_id: dict[str, dict[str, Any]] | None = None
         held = 0
         from .activity_snapshots import capture
         snapshots = capture(self.client, self._pool_reservations(state=SpawnState.SPAWNED))
@@ -3354,7 +3358,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             key = res.get("key")
             if not key or key in self._redriven_spawn_keys:
                 continue
-            candidate: dict | None = None
+            candidate: dict[str, Any] | None = None
             if res.get("driver") in {"cli", "ordinary-bridge"}:
                 try:
                     candidate = self.client.get(res["task_id"])
@@ -3555,7 +3559,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             )
         self.event_wake.update(subscriptions)
 
-    def _effective_max_attempts(self, task: dict) -> int:
+    def _effective_max_attempts(self, task: dict[str, Any]) -> int:
         """The dead-letter bound for ``task``: the most-permissive per-label
         override across its labels, else the global ``max_attempts`` (0 = no
         bound)."""
@@ -3655,7 +3659,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         # without limit -- keep the most recent terminal ids (dedup_key still
         # guards anything evicted).
         if len(self._evaluated) > 4 * self.evaluate_limit:
-            keep = {t.get("id") for t in terminal if t.get("id")}
+            keep = {str(t["id"]) for t in terminal if t.get("id")}
             self._evaluated = keep
         return emitted
 
@@ -3677,7 +3681,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             counts[res["task_id"]] = counts.get(res["task_id"], 0) + 1
         return counts
 
-    def _is_dead_lettered(self, task: dict, failed_counts: dict[str, int]) -> bool:
+    def _is_dead_lettered(self, task: dict[str, Any], failed_counts: dict[str, int]) -> bool:
         """Whether ``task`` has exhausted its (possibly per-label) spawn-attempt
         bound and should no longer be auto-retried.
 
@@ -3690,7 +3694,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             return False
         return failed_counts.get(task["id"], 0) >= cap
 
-    def _log_dead_lettered(self, tasks: Sequence[dict], failed_counts: dict[str, int]) -> set[str]:
+    def _log_dead_lettered(self, tasks: Sequence[dict[str, Any]], failed_counts: dict[str, int]) -> set[str]:
         blocked = [
             (
                 task["id"],
@@ -3729,7 +3733,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
         return poll_once(self, now=now)
 
-    @daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
     def serve(
         self,
         *,
@@ -3742,45 +3745,48 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         Push delivery changes latency only; the timeout always preserves ordinary
         fixed-interval reconciliation as the correctness floor.
         """
-        event_wake = self.event_wake
         from .diagnostic_logs import maintain_file_logging
 
-        try:
-            while True:
-                maintain_file_logging()
-                boundary = self._recheck_governance("iteration-boundary")
-                if boundary is not None and boundary.get("status") != "ready":
-                    log.warning(
-                        "supervisor backing off at %s: %s (%s)",
-                        boundary.get("checkpoint"),
-                        boundary.get("reason"),
-                        boundary.get("status"),
-                    )
+        with admit_daemon_instance(
+            "agent-dispatch-lane", source=__file__, purpose="production",
+        ):
+            event_wake = self.event_wake
+            try:
+                while True:
+                    maintain_file_logging()
+                    boundary = self._recheck_governance("iteration-boundary")
+                    if boundary is not None and boundary.get("status") != "ready":
+                        log.warning(
+                            "supervisor backing off at %s: %s (%s)",
+                            boundary.get("checkpoint"),
+                            boundary.get("reason"),
+                            boundary.get("status"),
+                        )
+                        try:
+                            self.wait_for_turn_end(_GOVERNANCE_BACKOFF_SECONDS)
+                        except KeyboardInterrupt:
+                            return
+                        continue
                     try:
-                        self.wait_for_turn_end(_GOVERNANCE_BACKOFF_SECONDS)
+                        if on_cycle_start is not None:
+                            on_cycle_start()
+                        spawned = self.poll_once()
+                        if on_cycle is not None:
+                            from .spawn_diagnostics import SpawnDiagnostics
+
+                            with SpawnDiagnostics(supervisor_id=self.supervisor_id).stage("on_cycle"):
+                                on_cycle(spawned)
                     except KeyboardInterrupt:
                         return
-                    continue
-                try:
-                    if on_cycle_start is not None:
-                        on_cycle_start()
-                    spawned = self.poll_once()
-                    if on_cycle is not None:
-                        from .spawn_diagnostics import SpawnDiagnostics
-
-                        with SpawnDiagnostics(supervisor_id=self.supervisor_id).stage("on_cycle"):
-                            on_cycle(spawned)
-                except KeyboardInterrupt:
-                    return
-                except Exception as exc:
-                    # The causal stage already recorded the filtered error. Rendering
-                    # its traceback here would reintroduce credentials and prompts.
-                    log.error("supervision cycle failed (%s); inspect spawn stage records",
-                              type(exc).__name__)
-                try:
-                    self.wait_for_turn_end(interval)
-                except KeyboardInterrupt:
-                    return
-        finally:
-            if event_wake is not None:
-                event_wake.close_and_wait()
+                    except Exception as exc:
+                        # The causal stage already recorded the filtered error. Rendering
+                        # its traceback here would reintroduce credentials and prompts.
+                        log.error("supervision cycle failed (%s); inspect spawn stage records",
+                                  type(exc).__name__)
+                    try:
+                        self.wait_for_turn_end(interval)
+                    except KeyboardInterrupt:
+                        return
+            finally:
+                if event_wake is not None:
+                    event_wake.close_and_wait()

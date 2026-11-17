@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from types import ModuleType
+from typing import Any, cast
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _resolve_read_target(client, target: str) -> tuple[str | None, str | None]:
+def _resolve_read_target(client: Any, target: str) -> tuple[str | None, str | None]:
     from .client import BridgeClientError
 
     get_session = getattr(client, "get_session", None)
@@ -32,19 +34,25 @@ def _resolve_read_target(client, target: str) -> tuple[str | None, str | None]:
     return target, None
 
 
-def _session_status_name(session: dict) -> str:
+def _session_status_name(session: dict[str, Any]) -> str:
     status = session.get("status")
     if hasattr(status, "value"):
-        status = status.value
+        status = getattr(status, "value")
     return str(status or "").lower()
 
 
 def _resolve_read_worktree_session(
-    client,
+    client: Any,
     worktree_id: str,
     *,
     exclude_session_id: str | None = None,
 ) -> str | None:
+    from .target_resolution_cli import resolve_workspace
+
+    hydrated = resolve_workspace(client, worktree_id, exclude_session_id=exclude_session_id)
+    if hydrated is not None:
+        session_id = hydrated["session_id"]
+        return session_id if session_id != exclude_session_id else None
     list_sessions = getattr(client, "list_sessions", None)
     if list_sessions is None:
         return None
@@ -68,7 +76,7 @@ def _resolve_read_worktree_session(
 
 
 def _wait_for_worktree_read_target(
-    client,
+    client: Any,
     target: str,
     *,
     prior_session_id: str | None = None,
@@ -104,7 +112,7 @@ def _report_unavailable_read_target(target: str) -> None:
     )
 
 
-def _reuse_existing(client, session: dict, agent_name: str) -> str:
+def _reuse_existing(client: Any, session: dict[str, Any], agent_name: str) -> str:
     core = _core()
     sid = session.get("session_id", "")
     name = session.get("name", "")
@@ -117,10 +125,10 @@ def _reuse_existing(client, session: dict, agent_name: str) -> str:
         except Exception:
             pass
     print(f"[>] Reusing session {sid} ({name}) for '{agent_name}' ({turns} prior turn(s))")
-    return sid
+    return cast(str, sid)
 
 
-def _await_coming_up_settled(client, session: dict) -> dict:
+def _await_coming_up_settled(client: Any, session: dict[str, Any]) -> dict[str, Any]:
     import time as _time
 
     core = _core()
@@ -144,7 +152,7 @@ def _await_coming_up_settled(client, session: dict) -> dict:
         _time.sleep(core._COMING_UP_POLL_INTERVAL)
 
 
-def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict | None:
+def _find_caller_session(client: Any, agent_name: str, caller_id: str | None) -> dict[str, Any] | None:
     core = _core()
     try:
         sessions = client.list_sessions()
@@ -158,18 +166,18 @@ def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict
             and (s.get("status", "") != "stopped" or bool(s.get("acp_session_id")))
             and not s.get("read_only", False)
         ):
-            return s
+            return cast(dict[str, Any], s)
     return None
 
 
 def _sender_repo_for_target(
-    agent_name: str, *, agent_inventory: list[dict] | None = None,
+    agent_name: str, *, agent_inventory: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Derive a preference only for targets whose resolver consumes it."""
     from .remote_acp_config import is_remote_address
 
     if is_remote_address(agent_name):
-        return _core()._sender_repo()
+        return cast(str | None, _core()._sender_repo())
     repo, separator, venue = agent_name.partition("@")
     if separator and repo.strip() and venue.strip():
         return None
@@ -192,22 +200,22 @@ def _sender_repo_for_target(
             ):
                 return None
             if entry.get("derived") and entry.get("host"):
-                return _core()._sender_repo()
+                return cast(str | None, _core()._sender_repo())
     if ":" in agent_name:
         # A namespaced provider owns its target; an unlisted namespace remains
         # directly resolvable even when provider enumeration is incomplete.
         return None
-    return _core()._sender_repo()
+    return cast(str | None, _core()._sender_repo())
 
 
-def _read_agent_inventory(client) -> list[dict]:
+def _read_agent_inventory(client: Any) -> list[dict[str, Any]]:
     from .client import BridgeClientError
 
     list_agents = getattr(client, "list_agents", None)
     if list_agents is None:
         return []
     try:
-        return list_agents()
+        return cast(list[dict[str, Any]], list_agents())
     except BridgeClientError as exc:
         print(
             f"[WARN] Agent roster unavailable (HTTP {exc.status}); "
@@ -224,7 +232,7 @@ class _SenderPreference:
 
 
 def _prepare_sender_preference(
-    client, agent_name: str, *, agent_inventory: list[dict] | None = None,
+    client: Any, agent_name: str, *, agent_inventory: list[dict[str, Any]] | None = None,
 ) -> _SenderPreference:
     from .remote_acp_config import is_remote_address
 
@@ -249,7 +257,7 @@ class _CallerContext:
     owner_ref: str | None
 
 
-def _prepare_caller_context(client, agent_name: str, caller_id: str | None) -> _CallerContext:
+def _prepare_caller_context(client: Any, agent_name: str, caller_id: str | None) -> _CallerContext:
     from .client import BridgeClientError
     from .protocol import REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
     from .remote_acp_config import is_remote_address
@@ -274,7 +282,7 @@ def _prepare_caller_context(client, agent_name: str, caller_id: str | None) -> _
 
 
 def _start_agent_session(
-    client,
+    client: Any,
     agent_name: str,
     *,
     force_new: bool = False,
@@ -285,7 +293,7 @@ def _start_agent_session(
     charter: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
-    agent_inventory: list[dict] | None = None,
+    agent_inventory: list[dict[str, Any]] | None = None,
     sender_preference: _SenderPreference | None = None,
     caller_id: str | None = None,
     caller_context: _CallerContext | None = None,
@@ -425,10 +433,10 @@ def _start_agent_session(
     timeouts = core._phased_timeouts()
     start_timeout = timeouts.codespace_boot if agent_name.startswith("codespace:") else timeouts.session_start
     core._wait_for_idle(client, sid, timeout=start_timeout)
-    return sid
+    return cast(str, sid)
 
 
-def _render_head_guard_refusal(exc) -> bool:
+def _render_head_guard_refusal(exc: Any) -> bool:
     if getattr(exc, "status", None) != 409:
         return False
     detail = getattr(exc, "detail", None)
@@ -444,7 +452,7 @@ def _render_head_guard_refusal(exc) -> bool:
     return True
 
 
-def _conflict_session_id(exc) -> str | None:
+def _conflict_session_id(exc: Any) -> str | None:
     if getattr(exc, "status", None) != 409:
         return None
     detail = getattr(exc, "detail", None)
@@ -453,7 +461,7 @@ def _conflict_session_id(exc) -> str | None:
     return None
 
 
-def _wait_for_idle(client, session_id: str, timeout: float = 30.0) -> None:
+def _wait_for_idle(client: Any, session_id: str, timeout: float = 30.0) -> None:
     import time
 
     deadline = time.monotonic() + timeout
@@ -472,7 +480,7 @@ def _wait_for_idle(client, session_id: str, timeout: float = 30.0) -> None:
     sys.exit(1)
 
 
-def _session_failure_detail(client, session_id: str) -> str | None:
+def _session_failure_detail(client: Any, session_id: str) -> str | None:
     try:
         events = client.read_range(session_id)
     except Exception:

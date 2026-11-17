@@ -79,12 +79,21 @@ duplicate per-write forge audit.
   and scope: `<existing owner results, not candidate-supplied authority>`.
 - Missing, ambiguous or conflicting inputs and affected-action blockers:
   `<responsible owner and next action>`.
+- Current discovery/publication health and failed-boundary classification:
+  `<actual operation evidence, separate from coordinator/package status;
+  held activation/repair owner, one escalation and resumption/default path>`.
 - Reviewable charter home: `<target repository's existing planning convention>`.
 - Mutable coordination home: `<owner-selected durable private location outside
   candidate/source content, unless repository already owns the contract>`.
 - Optional session SQL index plus durable JSON ledger: `<chosen or not used>`.
 - Original full receipts, prior rounds, opaque IDs/nulls and unknown effects:
   `<existing retention/version/transfer contract>`.
+- Returned-result acceptance and pending-marker reconciliation:
+  `<canonical accepted revision, coverage/uncertainty and duplicate handling>`.
+- Turnaround observations: `<original clocks; measured acquisition/judgment/
+  effect/readback/parent acceptance and explicitly uninstrumented intervals>`.
+- Stop/sunset disposition: `<owned watches/schedules; unsettled effects,
+  resources and WIP; tracked receiving objective or accepted custodian>`.
 - Per-repository merge profile, required reviews/checks/threads, conflict/draft/
   holds and actual consent requirements: `<current policy and evidence>`.
 - Same-PR original reviewer, unrelated-PR fresh context and delta/full gate:
@@ -94,6 +103,8 @@ duplicate per-write forge audit.
 ## Acceptance and refusal walkthrough
 
 Record actual adapter results and unknowns, not hypothetical success.
+Use the [offline failure scenarios](scenarios.json) as synthetic walkthrough
+inputs, not evidence that the actual adapters or model passed.
 
 - [ ] Complete paginated initial/final census; partial results remain unknown.
 - [ ] Positive concurrency target, prompt refill/authorized expansion, genuine
@@ -120,6 +131,12 @@ Record actual adapter results and unknowns, not hypothetical success.
 - [ ] Explicit hand-backs, hold revisit/default actions and live-state re-check
   before each consent request.
 - [ ] Predecessor told and released after accepted transfer; one reviewer per scope.
+- [ ] Absent discovery, local assembly error, embedded provider error and healthy
+  empty enumeration remain distinct; held repair gets one actionable escalation.
+- [ ] Partial/delta/own-thread work is not a new full review; duplicate result
+  delivery and interrupted pending-marker writes reconcile one accepted revision.
+- [ ] Sunset stops only owned flows and explicitly transfers unresolved work
+  without abandoning PRs or claiming unknown resources settled.
 
 Static documentation tests do not qualify runtime, clean-room or live-provider
 effects. Missing adapter proof remains a named blocker or repository-permitted

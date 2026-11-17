@@ -65,6 +65,14 @@ class ContextRefused(RuntimeError):
     """An explicit installation boundary was rejected; never an optional miss."""
 
 
+def _probe_failure(error: Exception) -> ModuleType | None:
+    support = sys.modules.get("configuration_context.readiness")
+    contract_error = getattr(support, "ProbeContractError", None)
+    if isinstance(contract_error, type) and isinstance(error, contract_error):
+        return support
+    return None
+
+
 def launch_prefix(owner: str, own_root: Path, raw_context: str, peer: str) -> list[str]:
     """Build a native prefix that revalidates receipts at execution time."""
     bootstrap = Path(sys.executable)
@@ -135,6 +143,8 @@ def _load_primitive(path: Path, name: str) -> ModuleType:
     try:
         exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
     except Exception as error:
+        if _probe_failure(error) is not None:
+            raise
         raise ValueError(f"Installation-context primitive initialization failed: {path}") from error
     return module
 
@@ -149,6 +159,15 @@ def _packaged_primitive() -> ModuleType:
             module = _load_primitive(key, "_owner_installation_context")
             _packaged_primitives[key] = module
         return module
+
+
+def _readiness_support(own: dict[str, Any]) -> ModuleType:
+    with _primitive_lock:
+        support = sys.modules.get("configuration_context.readiness")
+        if support is None:
+            path = Path(own["payloadRoot"]) / "scripts" / "versioned_runtime_probe.py"
+            support = _load_primitive(path, "configuration_context.readiness")
+        return support
 
 
 def _active_context(
@@ -353,6 +372,8 @@ def _peer_python_inprocess(context: dict[str, Any]) -> Path | None:
             try:
                 exec(compile(key.read_bytes(), str(key), "exec"), module.__dict__)
             except Exception as error:
+                if _probe_failure(error) is not None:
+                    raise
                 raise ValueError("Peer runtime resolver load failed; restart the observing caller") from error
             _peer_runtimes[key] = (signature, module)
         else:
@@ -368,6 +389,8 @@ def _peer_python_inprocess(context: dict[str, Any]) -> Path | None:
     try:
         python = resolve(Path(context["pluginRoot"]))
     except Exception as error:
+        if _probe_failure(error) is not None:
+            raise
         raise ValueError("Peer runtime resolver selection failed") from error
     if python is None:
         raise ValueError(f"{context['pluginId']}: no completed runtime resolved")
@@ -483,6 +506,13 @@ def _resolve_peer(
     peer_receipt = Path(own["cellRoot"]) / "plugins" / plugin / "install.json"
     peer = _active_context(primitive, peer_receipt, durable, plugin, cell, {})
     environment = peer_environment(peer, dict(os.environ))
+    support: ModuleType | None = None
+    if "COPILOT_EXTENSIONS_READONLY_PROBE" in environment:
+        support = _readiness_support(own)
+        if support.required(environment):
+            payload = support.payload_contract(Path(peer["payloadRoot"]), plugin)
+            if payload.module != PEERS[plugin]:
+                raise support.ProbeContractError("Peer probe module differs from its payload contract.")
     peer_primitive = _load_primitive(
         Path(peer["payloadRoot"]) / "scripts" / "installation-context"
         / "installation_context.py", "_peer_installation_context",
@@ -497,6 +527,10 @@ def _resolve_peer(
     python = _checked_python(peer, pinned_python) if pinned_python is not None else (
         _peer_python(peer, environment) if allow_native else _peer_python_inprocess(peer)
     )
+    if support is not None:
+        if python is None:
+            raise support.ProbeContractError("Peer probe requires a qualified installed interpreter.")
+        support.runtime_contract(python, PEERS[plugin], plugin=plugin)
     if (
         validate_owner(owner, own_root, raw_context) != own
         or _active_context(peer_primitive, peer_receipt, durable, plugin,
@@ -562,7 +596,12 @@ def main() -> int:
             arguments[0], Path(arguments[1]), arguments[2], arguments[3], arguments[4:],
             pinned_python=pinned_python, runtime_identity=runtime_identity,
         )
-    except (OSError, ValueError, ImportError, subprocess.SubprocessError) as error:
+    except Exception as error:
+        support = _probe_failure(error)
+        if support is not None:
+            return cast(int, support.refuse(error))
+        if not isinstance(error, (OSError, ValueError, ImportError, subprocess.SubprocessError)):
+            raise
         print(f"peer launch refused: {error}", file=sys.stderr)
         return 126
 

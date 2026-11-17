@@ -63,3 +63,38 @@ authorize cleanup. Allocation custody and retained disposition use the
 [resource-producer contract](resource-producer.md#retained-artifact-disposition).
 The explicitly selected [runner pilot](artifact-scratch.md) adds private root
 admission and native allocation without changing ordinary runner defaults.
+
+## User-output policy
+
+The same selected documents accept an optional `user_output` object. Portable
+fields are `target` (`auto`, `onedrive` or `downloads`) and `templates`, keyed by
+`onedrive` and/or `downloads`. Templates use relative `/`-separated portable
+components and only `{date}` and `{topic}` substitutions, without formatting,
+attribute access, traversal, absolute paths or device names. For example:
+
+```json
+{"version":1,"portable":{"user_output":{"target":"onedrive","templates":{"onedrive":"Deliverables/{date}/{topic}"}}}}
+```
+
+Only exact machine-scoped values may add `user_output.roots`, a mapping of target
+to absolute native directory. The roots come from the existing machine/storage
+owner, not from account discovery or environment inference:
+
+```json
+{"version":1,"values":{"user_output":{"roots":{"downloads":"/home/example/Downloads"}}}}
+```
+
+Use native Windows paths in a Windows machine entry. Other machine entries stay
+inert, with the same foreign-platform structural validation as scratch roots.
+An explicit operation destination wins without rewriting its basename or
+appending organization directories. Otherwise the exact composed machine root
+wins over a storage-provider root for the selected target. A portable preference
+chooses the target and layout; absent preference defaults to an available
+owner-resolved OneDrive, then owner-resolved Downloads.
+An explicit or configured required target must resolve or fail visibly.
+
+Default layouts are `Apps/Copilot/Artifacts/{date} {topic}` for OneDrive and
+`Copilot/Artifacts/{date} {topic}` for Downloads. Changing policy does not move
+old allocations. `resolve_user_output` performs no filesystem access or writes.
+Native admission, exclusive allocation and verified handover belong to the
+[user-output producer](artifact-output.md), not configuration composition.

@@ -34,11 +34,16 @@ class RepositoryConfig:
     bindings: tuple[WatchScopeBinding, ...]
     peers: tuple[tuple[int, str], ...]
     socket_path: Path
+    definitions: Any = None
+    sponsors: tuple[dict[str, Any], ...] = ()
 
     @classmethod
-    def parse(cls, value: object, namespace: str, root: Path) -> RepositoryConfig:
-        selected = _fields(value, {"protocol", "socket", "peers", "repositories", "bindings"})
-        if selected["protocol"] != "agent-pull-requests.repository-cache/v1":
+    def parse(cls, value: object, namespace: str, root: Path, *, filtered: bool = False) -> RepositoryConfig:
+        selected = _fields(value, {"protocol", "socket", "peers", "repositories", "bindings"} | (
+            {"definitions", "sponsors"} if filtered else set()
+        ))
+        expected = "agent-pull-requests.filtered-population/v1" if filtered else "agent-pull-requests.repository-cache/v1"
+        if selected["protocol"] != expected:
             raise ValueError("unsupported repository cache protocol")
         if sys.platform != "linux":
             raise ValueError("local repository ingress requires Linux SO_PEERCRED")
@@ -65,6 +70,8 @@ class RepositoryConfig:
             entry = _fields(raw, {"target", "identity", "prefix", "credential_command", "source_config"})
             target = identifier(entry["target"])
             identity = RepositoryIdentity.parse(entry["identity"])
+            if not filtered and identity.provider not in ("github", "gitea"):
+                raise ValueError("unselected population driver unsupported")
             if identity.namespace != namespace:
                 raise ValueError("repository selection namespace differs from host")
             prefix, credential = _argv(entry["prefix"]), _argv(entry["credential_command"])
@@ -92,4 +99,25 @@ class RepositoryConfig:
             ))
         if len({(b.principal, b.target) for b in bindings}) != len(bindings):
             raise ValueError("ambiguous local consumer binding")
-        return cls(tuple(identities), tuple(observations), tuple(bindings), tuple(peers), socket_path)
+        definitions, sponsors = None, []
+        if filtered:
+            from pr_filters import Definitions
+            from agent_pull_requests.filtered_state import text
+            definitions = Definitions.parse(selected["definitions"])
+            if not isinstance(selected["sponsors"], list) or len(selected["sponsors"]) > 128:
+                raise ValueError("invalid bounded startup sponsors")
+            requests = set()
+            admitted = {(b.principal, b.target): b.scope.consumer for b in bindings}
+            for raw in selected["sponsors"]:
+                sponsor = _fields(raw, {"principal", "target", "request_id", "definition", "ttl"})
+                key = sponsor["principal"], sponsor["target"]
+                if key not in admitted or type(sponsor["ttl"]) is not int or not 1 <= sponsor["ttl"] <= 86400:
+                    raise ValueError("startup sponsor requires admitted consumer and finite lifetime")
+                request = admitted[key], text(sponsor["request_id"])
+                if request in requests:
+                    raise ValueError("ambiguous startup sponsorship")
+                requests.add(request)
+                definitions.resolve(text(sponsor["definition"]))
+                sponsors.append(dict(sponsor))
+        return cls(tuple(identities), tuple(observations), tuple(bindings), tuple(peers), socket_path,
+                   definitions, tuple(sponsors))

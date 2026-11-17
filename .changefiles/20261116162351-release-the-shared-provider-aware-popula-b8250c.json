@@ -1,0 +1,17 @@
+{
+  "comment": "Release the shared provider-aware population acquisition planner used by the filtered service and native driver.",
+  "changes": [
+    {
+      "plugin": "libs/pr-filters",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in channel-derived caller context and bounded service handlers",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -3,22 +3,39 @@
 from __future__ import annotations
 
 import contextlib
+from functools import partial
 import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
-from .cache_manifests import read_cache_manifest as _read_cache_manifest
-from .cache_recovery import status_command as cmd_cache_status
+from .cache_manifests import read_cache_manifest
+from .cache_machine_cli import cmd_cache_verify as cmd_cache_verify, register_prepare
+from .cache_targets import command_entries as command_entries, command_plan, status_command as cmd_cache_status
+from .cli_status import (
+    _TRANSPORT_LABELS as _TRANSPORT_LABELS,
+    _vault_status_label as _vault_status_label,
+)
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
-from .credential_reads import cmd_get, legacy_cache_entry
+from .credential_reads import cmd_get as cmd_get, legacy_cache_entry
 from .prompt import prompt_password as gui_prompt_password
+from .terminal_input import (
+    _has_controlling_tty as _has_controlling_tty,
+    _read_password_from_tty as _read_password_from_tty,
+)
+from .transport_binding import MutationBinding
 from .winpipe import pipe_send
+
+if TYPE_CHECKING:
+    from .command_transport import CommandRoute
+
+_read_cache_manifest = read_cache_manifest
 
 
 def _detect_wsl() -> bool:
@@ -58,9 +75,11 @@ PROVIDER_UNLOCK_TIMEOUT = 10.0
 
 
 def _send_socket(
-    request: dict, timeout: float | None = 5.0, path: str = SOCKET_PATH
-) -> dict | None:
+    request: dict[str, Any], timeout: float | None = 5.0, path: str = SOCKET_PATH
+) -> dict[str, Any] | None:
     """Try sending a command via Unix socket (``path`` defaults to ``SOCKET_PATH``)."""
+    if sys.platform == "win32":
+        return None
     import socket as _sock
 
     connect_timeout = 5.0
@@ -77,12 +96,13 @@ def _send_socket(
                 break
             buf += chunk
         s.close()
-        return json.loads(buf.decode().strip())
+        response = json.loads(buf.decode().strip())
+        return response if isinstance(response, dict) else None
     except Exception:
         return None
 
 
-def _send_tcp(request: dict, host: str, port: int, timeout: float | None) -> dict | None:
+def _send_tcp(request: dict[str, Any], host: str, port: int, timeout: float | None) -> dict[str, Any] | None:
     """Try sending a command via TCP to a specific host:port."""
     import socket
 
@@ -100,7 +120,8 @@ def _send_tcp(request: dict, host: str, port: int, timeout: float | None) -> dic
                 break
             buf += chunk
         s.close()
-        return json.loads(buf.decode().strip())
+        response = json.loads(buf.decode().strip())
+        return response if isinstance(response, dict) else None
     except Exception:
         return None
 
@@ -144,8 +165,8 @@ def _read_windows_endpoint(
     """Read the Windows-side rendezvous file from WSL; ``None`` if none found.
 
     The recorded ``pid`` is a *Windows* pid, meaningless to a Linux
-    ``pid_alive`` check, so staleness here is left to the actual send (which
-    fails fast and falls through to the legacy dial). The endpoint is re-tagged
+    ``pid_alive`` check, so staleness here is left to the actual send. Only
+    non-strict callers retain legacy-dial fallback. The endpoint is re-tagged
     ``source="windows"`` so the caller keeps the resolved cross-boundary host.
     """
     from dataclasses import replace
@@ -177,6 +198,7 @@ def _discover_endpoint(
     if override == "" and config.PINNED_CONTEXT_ENV in os.environ:
         override = None
     expected_installation = config.installation_id()
+    endpoint: rendezvous.Endpoint | None
     if strict:
         if override is not None:
             endpoint = rendezvous.Endpoint.parse(override, source="env")
@@ -188,8 +210,10 @@ def _discover_endpoint(
             and expected_installation
             and endpoint.installation_id not in (None, expected_installation)
         ):
-            endpoint = None
-        if endpoint is not None and not rendezvous.is_stale(endpoint, probe=rendezvous.connect_probe):
+            raise rendezvous.EndpointUnavailable("Selected vault endpoint has another installation")
+        if endpoint is not None:
+            if rendezvous.is_stale(endpoint, probe=rendezvous.connect_probe):
+                raise rendezvous.EndpointUnavailable("Selected vault endpoint is unavailable")
             return endpoint
     else:
         try:
@@ -213,115 +237,45 @@ def _discover_endpoint(
             and expected_installation
             and endpoint.installation_id not in (None, expected_installation)
         ):
+            if strict:
+                raise rendezvous.EndpointUnavailable("Selected vault endpoint has another installation")
             return None
         return endpoint
     return None
 
 
 def send_command(
-    request: dict,
+    request: dict[str, Any],
     timeout: float | None = 5.0,
     *,
     strict_endpoint: bool = False,
-) -> dict | None:
+    require_endpoint: bool = False,
+    binding: MutationBinding | None = None,
+    _context: ResolvedVault | None = None,
+    _route: CommandRoute | None = None,
+) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
-    context = config.resolve_context()
-    request = dict(request)
-
-    def _tag(result: dict | None, transport: str) -> dict | None:
-        if result is not None:
-            result["_transport"] = transport
-        return result
-
+    from .command_transport import TransportBoundary, send_command as send
     from .extensions import TransportContext, get_registry
 
-    host = os.environ.get("AGENT_VAULT_HOST", "127.0.0.1")
-    port = context.port
-
-    # Discovery-first (backwards-compatible): resolve the daemon's *actual*
-    # endpoint from the rendezvous file, falling back to today's fixed
-    # socket/port when nothing is advertised. A discovered TCP port also feeds
-    # the extension transports (e.g. the WSL->Windows interop relay), so a
-    # dynamic/discovered port is honored end to end.
-    discovered = _discover_endpoint(context, strict=strict_endpoint)
-    discovered_unix: str | None = None
-    discovered_pipe: str | None = None
-    if discovered is not None:
-        # On WSL the daemon's native primary -- a Windows named pipe, or a Unix
-        # socket that isn't this guest's -- can't be dialed. Fall to a TCP
-        # alternate the daemon also advertises so the interop relay gets a real
-        # port instead of the legacy default (#3426). ``usable`` returns the
-        # primary when it's already dialable here, else the first matching alt.
-        if IS_WSL:
-            usable = discovered.usable(lambda t: t == "tcp")
-            if usable is not None:
-                discovered = usable
-        if discovered.transport == "unix":
-            discovered_unix = discovered.address
-        elif discovered.transport == "pipe":
-            discovered_pipe = discovered.address
-        elif discovered.transport == "tcp":
-            try:
-                d_host, d_port = discovered.tcp_host_port
-                port = d_port
-                # A locally-advertised file carries the real host; the WSL
-                # Windows-side file advertises 127.0.0.1, so keep the resolved
-                # host to cross the boundary.
-                if discovered.source != "windows":
-                    host = d_host
-            except ValueError:
-                if strict_endpoint:
-                    raise
-                discovered = None
-
-    # Inject the caller's vault selection for a LOCAL daemon only. A cross-
-    # boundary daemon reached over the WSL->Windows interop (endpoint source
-    # "windows") owns its OWN kpdb/group/vault; forwarding the guest's paths --
-    # which don't exist on the host -- would make the host daemon try to open a
-    # nonexistent database ("KeePass database not found"). Let the host daemon use
-    # its own configuration. See #3426.
-    if not (discovered is not None and discovered.source == "windows"):
-        request.setdefault("kpdb", context.kpdb)
-        request.setdefault("group", context.group)
-        request.setdefault("vault", context.vault_name)
-
-    ext_ctx = TransportContext(
-        kpdb=context.kpdb,
-        group=context.group,
-        vault_name=context.vault_name,
-        port=port,
+    boundary = TransportBoundary(
+        resolve_context=config.resolve_context,
+        discover=_discover_endpoint,
+        socket_send=_send_socket,
+        tcp_send=_send_tcp,
+        pipe_send=pipe_send,
+        registry=get_registry,
+        transport_context=TransportContext,
+        is_windows=IS_WINDOWS,
+        is_wsl=IS_WSL,
+        host=os.environ.get("AGENT_VAULT_HOST", "127.0.0.1"),
+        unavailable=rendezvous.EndpointUnavailable,
+        invalid=rendezvous.EndpointStateError,
     )
-
-    # Extension transports registered before_builtin take precedence over the
-    # local daemon (e.g. an SSH-tunnel that should reach the caller's own vault).
-    result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
-    if result is not None:
-        return result
-
-    # Strict selection never falls back to another daemon after a failed dial.
-    if discovered_pipe is not None and IS_WINDOWS:
-        result = pipe_send(discovered_pipe, request, timeout)
-        if result is not None or strict_endpoint:
-            return _tag(result, "discovered-pipe")
-
-    # A discovered Unix socket (native, possibly non-default path) is dialed
-    # ahead of the legacy fixed socket.
-    if discovered_unix is not None and not IS_WINDOWS:
-        result = _send_socket(request, timeout, path=discovered_unix)
-        if result is not None or strict_endpoint:
-            return _tag(result, "discovered-unix")
-
-    if discovered_unix is None and not IS_WINDOWS and context.sources.get("port") == "default":
-        result = _send_socket(request, timeout)
-        if result is not None:
-            return _tag(result, "unix-socket")
-
-    result = _send_tcp(request, host, port, timeout)
-    if result is not None or strict_endpoint and discovered is not None:
-        is_disc_tcp = discovered is not None and discovered.transport == "tcp"
-        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
-
-    return get_registry().try_transports(request, timeout, ext_ctx)
+    return send(
+        boundary, request, timeout, strict_endpoint=strict_endpoint,
+        require_endpoint=require_endpoint, binding=binding, _context=_context, _route=_route,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +307,7 @@ def _start_service_systemd() -> bool:
         return False
 
 
-def _ready_for_work(response: dict | None) -> bool:
+def _ready_for_work(response: dict[str, Any] | None) -> bool:
     return bool(
         response and response.get("ok") and response.get("accepting_work", True) is True
     )
@@ -437,61 +391,6 @@ def prompt_password() -> str | None:
         )
         return None
     return None
-
-
-def _read_password_from_tty(prompt: str) -> str | None:
-    """Read a password from the controlling terminal with echo disabled."""
-    if os.name == "nt":
-        import getpass
-
-        try:
-            return getpass.getpass(prompt)
-        except (EOFError, KeyboardInterrupt):
-            return None
-
-    try:
-        import termios
-
-        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-    except OSError:
-        return None
-
-    try:
-        old = termios.tcgetattr(fd)
-        new = list(old)
-        new[3] &= ~termios.ECHO
-        try:
-            termios.tcsetattr(fd, termios.TCSADRAIN, new)
-            os.write(fd, prompt.encode("utf-8", "replace"))
-            data = os.read(fd, 4096)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-            os.write(fd, b"\n")
-        return data.decode("utf-8", "replace").rstrip("\r\n")
-    except (OSError, termios.error):
-        return None
-    finally:
-        os.close(fd)
-
-
-def _has_controlling_tty() -> bool:
-    """Whether an interactive controlling terminal is available for a prompt.
-
-    On POSIX this checks that ``/dev/tty`` can be opened -- it works even when
-    stdin is piped, as long as the process has a controlling terminal (e.g. an
-    interactive SSH session). On Windows it falls back to ``sys.stdin.isatty()``.
-    Used to decide whether the inline-terminal unlock fallback can reach the
-    operator, so a headless/agent caller fails fast instead of printing a
-    "no terminal" error.
-    """
-    if os.name == "nt":
-        return sys.stdin.isatty()
-    try:
-        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-    except OSError:
-        return False
-    os.close(fd)
-    return True
 
 
 def _server_prompted_unlock() -> bool:
@@ -648,7 +547,7 @@ Write-Output $box1.Text
             capture_output=True, text=True, timeout=120,
             **no_window_kwargs(),
         )
-        pw = r.stdout.strip().replace("\r", "")
+        pw: str = r.stdout.strip().replace("\r", "")
         if pw == "CANCELLED" or not pw:
             return None
         if pw == "MISMATCH":
@@ -677,7 +576,7 @@ Write-Output $box1.Text
 # ---------------------------------------------------------------------------
 
 
-def cmd_has(args):
+def cmd_has(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -695,7 +594,7 @@ def cmd_has(args):
     return 1
 
 
-def cmd_search(args):
+def cmd_search(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -711,23 +610,7 @@ def cmd_search(args):
     return 1
 
 
-def _vault_status_label(cli_state: str) -> str:
-    """Translate internal cli state to user-facing status."""
-    if cli_state == "unlocked":
-        return "available"
-    return "locked"
-
-
-_TRANSPORT_LABELS = {
-    "unix-socket": "unix socket",
-    "tcp": "local TCP",
-    "discovered-pipe": "named pipe (discovered)",
-    "discovered-unix": "unix socket (discovered)",
-    "discovered-tcp": "local TCP (discovered)",
-}
-
-
-def cmd_ping(args):
+def cmd_ping(args: Any) -> int:
     from .service_status import format_service_status
 
     resp = send_command({"action": "ping"})
@@ -742,7 +625,7 @@ def cmd_ping(args):
     return 1
 
 
-def cmd_installer_readiness(args):
+def cmd_installer_readiness(args: Any) -> int:
     """Report config and service readiness without starting or unlocking."""
     from .installer_readiness import emit, evaluate
     from .configuration import runtime_enabled
@@ -765,11 +648,12 @@ def cmd_installer_readiness(args):
     return emit(evaluate(context, service))
 
 
-def cmd_start(args):
+def cmd_start(args: Any) -> int:
     if not _runtime_active():
         return 2
     resp = send_command({"action": "ping"})
     if _ready_for_work(resp):
+        assert resp is not None
         status = _vault_status_label(resp["cli"])
         print(f"Already running - PID {resp['pid']}, status={status}")
         return 0
@@ -777,6 +661,7 @@ def cmd_start(args):
     if ensure_service():
         resp = send_command({"action": "ping"})
         if _ready_for_work(resp):
+            assert resp is not None
             status = _vault_status_label(resp["cli"])
             print(f"Vault service started - PID {resp['pid']}, status={status}")
             return 0
@@ -784,13 +669,13 @@ def cmd_start(args):
     return 1
 
 
-def cmd_source_start(args):
+def cmd_source_start(args: Any) -> int:
     from .source_start import command
 
     return command(args)
 
 
-def cmd_stop(args):
+def cmd_stop(args: Any) -> int:
     resp = send_command({"action": "stop"})
     if resp and resp.get("ok"):
         print("Vault service stopped")
@@ -799,7 +684,7 @@ def cmd_stop(args):
     return 1
 
 
-def cmd_lock(args):
+def cmd_lock(args: Any) -> int:
     resp = send_command({"action": "lock"})
     if resp and resp.get("ok"):
         if resp.get("was_unlocked"):
@@ -811,7 +696,7 @@ def cmd_lock(args):
     return 1
 
 
-def _current_vault_unlocked(resp: dict, context: ResolvedVault | None = None) -> bool:
+def _current_vault_unlocked(resp: dict[str, Any] | None, context: ResolvedVault | None = None) -> bool:
     """Return whether the service has the current vault unlocked."""
     if not resp or not resp.get("ok"):
         return False
@@ -821,7 +706,7 @@ def _current_vault_unlocked(resp: dict, context: ResolvedVault | None = None) ->
     return resp.get("cli") == "unlocked"
 
 
-def cmd_unlock(args):
+def cmd_unlock(args: Any) -> int:
     if getattr(args, "terminal", False) or os.environ.get("VAULT_UNLOCK_TERMINAL"):
         if _terminal_unlock_local():
             print("Vault unlocked (local service, via terminal)")
@@ -857,7 +742,7 @@ def _ensure_unlocked_service() -> bool:
     return False
 
 
-def cmd_add(args):
+def cmd_add(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -889,7 +774,7 @@ def cmd_add(args):
     return 1
 
 
-def cmd_set_password(args):
+def cmd_set_password(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1024,7 +909,7 @@ def cmd_set_password(args):
         return 1
 
 
-def cmd_set_username(args):
+def cmd_set_username(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1041,7 +926,7 @@ def cmd_set_username(args):
     return 1
 
 
-def cmd_list(args):
+def cmd_list(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1061,7 +946,7 @@ def cmd_list(args):
     return 1
 
 
-def cmd_show(args):
+def cmd_show(args: Any) -> int:
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1078,7 +963,7 @@ def cmd_show(args):
     return 1
 
 
-def cmd_remove(args):
+def cmd_remove(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1094,7 +979,7 @@ def cmd_remove(args):
     return 1
 
 
-def cmd_move(args):
+def cmd_move(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
 
@@ -1110,7 +995,7 @@ def cmd_move(args):
     return 1
 
 
-def cmd_git_credential(args):
+def cmd_git_credential(args: Any) -> int:
     """git credential helper: delegate an allowlisted host's credential to GCM.
 
     Reads the git-credential protocol (key=value lines, blank-line terminated)
@@ -1155,7 +1040,15 @@ def cmd_git_credential(args):
     return 0
 
 
-def cmd_import_key(args):
+def cmd_import_key(args: Any) -> int:
+    if getattr(args, "create_only", False):
+        from .attachment_import_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
+        return 1
+
     import base64
 
     key_file = Path(args.key_file)
@@ -1191,7 +1084,15 @@ def cmd_import_key(args):
     return 1
 
 
-def cmd_export_key(args):
+def cmd_export_key(args: Any) -> int:
+    if getattr(args, "exclusive", False):
+        from .attachment_export_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --exclusive for export-key", file=sys.stderr)
+        return 1
+
     import base64
 
     dest_dir = Path(args.dest_dir)
@@ -1226,7 +1127,7 @@ def cmd_export_key(args):
     return 0
 
 
-def _read_seal_input(args) -> bytes | None:
+def _read_seal_input(args: Any) -> bytes | None:
     """Read the plaintext/ciphertext payload from --in FILE or stdin."""
     src = getattr(args, "in_path", None)
     try:
@@ -1238,7 +1139,7 @@ def _read_seal_input(args) -> bytes | None:
         return None
 
 
-def cmd_seal(args):
+def cmd_seal(args: Any) -> int:
     import base64
 
     if not ensure_service():
@@ -1262,7 +1163,7 @@ def cmd_seal(args):
     return 1
 
 
-def cmd_unseal(args):
+def cmd_unseal(args: Any) -> int:
     import base64
     import binascii
 
@@ -1294,7 +1195,7 @@ def cmd_unseal(args):
     return 1
 
 
-def cmd_kek_list(args):
+def cmd_kek_list(args: Any) -> int:
     if not ensure_service():
         print("Error: service unreachable", file=sys.stderr)
         return 1
@@ -1312,45 +1213,26 @@ def cmd_kek_list(args):
     return 0
 
 
-def cmd_cache_populate(args):
+def cmd_cache_populate(args: Any) -> int:
     """Pre-warm the vault cache for a set of entries.
 
     Entries come from (deduped, in order): explicit ``--entry`` values, a
-    ``--manifest`` file, and every registered cache-source extension. Each entry
-    is fetched so the daemon caches it (and missing entries surface early).
+    ``--manifest`` file, declared targets, and registered cache-source extensions.
+    Each entry is fetched so the daemon caches it (and missing entries surface early).
     """
-    from .extensions import get_registry
-    from .credential_fields import canonical_field
-
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(entry: str, field: str) -> None:
-        pair = (entry, canonical_field(field or "password"))
-        if pair[0] and pair not in seen:
-            seen.add(pair)
-            pairs.append(pair)
-
-    for entry in (args.entry or []):
-        e, sep, f = entry.partition(":")
-        _add(e.strip(), (f.strip() if sep else "password"))
-
-    if args.manifest:
-        manifest = Path(args.manifest)
-        if not manifest.exists():
-            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
-            return 1
-        for e, f in _read_cache_manifest(manifest):
-            _add(e, f)
-
-    for e, f in get_registry().collect_cache_entries(args.machine):
-        _add(e, f)
-
+    plan = command_plan(args)
+    if plan is None:
+        return 1
+    pairs = plan.entries
     if not pairs:
-        print("No entries to cache (no --entry, --manifest, or cache-source extension).",
+        print("No entries to cache (no declared targets, --entry, --manifest, or extension).",
               file=sys.stderr)
         return 1
 
+    if plan.service_owned:
+        from .cache_maintenance_client import command
+
+        return command(args, pairs, "populate")
     if not ensure_service():
         print("Error: could not start vault service", file=sys.stderr)
         return 1
@@ -1374,7 +1256,7 @@ def cmd_cache_populate(args):
     failures: list[str] = []
     for entry, field in pairs:
         action = "has" if args.verify else "get"
-        request = {"action": action, "entry": entry, "field": field}
+        request: dict[str, Any] = {"action": action, "entry": entry, "field": field}
         if not args.verify:
             request["refresh"] = True
         if args.prompt and not args.verify:
@@ -1387,13 +1269,14 @@ def cmd_cache_populate(args):
         failure = None
         try:
             with read_lock:
-                resp = send_command(
+                sender = partial(send_command, strict_endpoint=True) if cache._recovery else send_command
+                resp = sender(
                     request, timeout=None if args.prompt else 15.0,
-                    **({"strict_endpoint": True} if cache._recovery else {}),
                 )
                 present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
                 if (
                     present
+                    and resp is not None
                     and not args.verify
                     and cache.enabled
                     and resp.get("value") is not None
@@ -1435,7 +1318,7 @@ def cmd_cache_populate(args):
     return 1 if fail > 0 else 0
 
 
-def cmd_cache_clear(args):
+def cmd_cache_clear(args: Any) -> int:
     """Wipe the persistent on-disk credential cache."""
     from .cache import get_cache
 
@@ -1447,71 +1330,7 @@ def cmd_cache_clear(args):
     return 1
 
 
-def cmd_cache_verify(args):
-    """Check the persistent cache holds a set of entries without unlocking.
-
-    Entries come from ``--entry`` / ``--manifest`` / cache-source extensions,
-    exactly like ``cache-populate``. Exits non-zero (2) if any are missing, so a
-    launch-time gate can confirm an unattended box is primed while still locked.
-    """
-    from .cache import get_cache
-    from .credential_fields import attribute_name, canonical_field
-
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(entry: str, field: str) -> None:
-        pair = (entry, canonical_field(field or "password"))
-        if pair[0] and pair not in seen:
-            seen.add(pair)
-            pairs.append(pair)
-
-    for entry in (getattr(args, "entry", None) or []):
-        e, sep, f = entry.partition(":")
-        _add(e.strip(), (f.strip() if sep else "password"))
-    if getattr(args, "manifest", None):
-        manifest = Path(args.manifest)
-        if not manifest.exists():
-            print(f"Error: manifest not found: {manifest}", file=sys.stderr)
-            return 1
-        for e, f in _read_cache_manifest(manifest):
-            _add(e, f)
-    from .extensions import get_registry
-
-    for e, f in get_registry().collect_cache_entries(getattr(args, "machine", None)):
-        _add(e, f)
-
-    if not pairs:
-        print("No entries to verify (no --entry, --manifest, or cache-source extension).",
-              file=sys.stderr)
-        return 1
-
-    cache = get_cache()
-    present = 0
-    missing: list[str] = []
-    for entry, field in pairs:
-        cache_entry = config.normalize_entry(entry, config.resolve_context().group)
-        if cache.get(
-            cache_entry, field, readonly=True, legacy_field=attribute_name(field),
-            legacy_entry=legacy_cache_entry(entry, cache_entry),
-        ) is not None:
-            present += 1
-        else:
-            missing.append(f"{entry} [{field}]")
-
-    if getattr(args, "json", False):
-        print(json.dumps(
-            {"present": present, "total": len(pairs), "missing": missing},
-            indent=2,
-        ))
-    else:
-        print(f"Cached: {present}/{len(pairs)}")
-        for m in missing:
-            print(f"  missing: {m}", file=sys.stderr)
-    return 2 if missing else 0
-
-
-def cmd_which(args):
+def cmd_which(args: Any) -> int:
     context = config.resolve_context()
     payload = {
         "vault_name": context.vault_name,
@@ -1531,7 +1350,7 @@ def cmd_which(args):
     return 0
 
 
-def cmd_vault_list(args):
+def cmd_vault_list(args: Any) -> int:
     data = config.load_global_config()
     vaults = config.list_vaults()
     active = config.resolve_context().vault_name
@@ -1559,7 +1378,7 @@ def cmd_vault_list(args):
     return 0
 
 
-def cmd_vault_add(args):
+def cmd_vault_add(args: Any) -> int:
     # A relative database path names the caller's directory, but the global
     # settings resolve relative paths against their own directory: anchor it.
     kpdb = args.kpdb
@@ -1570,7 +1389,7 @@ def cmd_vault_add(args):
     return 0
 
 
-def cmd_vault_set_default(args):
+def cmd_vault_set_default(args: Any) -> int:
     try:
         config.set_default_vault(args.name)
     except KeyError as exc:
@@ -1580,7 +1399,7 @@ def cmd_vault_set_default(args):
     return 0
 
 
-def cmd_vault_remove(args):
+def cmd_vault_remove(args: Any) -> int:
     try:
         config.remove_vault(args.name)
     except KeyError as exc:
@@ -1590,12 +1409,12 @@ def cmd_vault_remove(args):
     return 0
 
 
-def main(argv: list[str] | None = None):
+def main(argv: list[str] | None = None) -> int | None:
     from .invocation import invoke_cli
     return invoke_cli(_main, sys.argv[1:] if argv is None else argv)
 
 
-def _main(argv: list[str] | None = None):
+def _main(argv: list[str] | None = None) -> int | None:
     import argparse
 
     class _LazyVersionAction(argparse.Action):
@@ -1605,14 +1424,14 @@ def _main(argv: list[str] | None = None):
         front, forcing the ``importlib.metadata`` lookup on every invocation
         regardless of subcommand)."""
 
-        def __init__(self, option_strings, dest=argparse.SUPPRESS,
-                     default=argparse.SUPPRESS, help=None):
+        def __init__(self, option_strings: list[str], dest: str=argparse.SUPPRESS,
+                     default: Any=argparse.SUPPRESS, help: str | None=None) -> None:
             super().__init__(
                 option_strings=option_strings, dest=dest, default=default,
                 nargs=0, help=help,
             )
 
-        def __call__(self, parser, namespace, values, option_string=None):
+        def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values: Any, option_string: str | None=None) -> None:
             import sys as _sys
 
             from . import __version__
@@ -1761,6 +1580,10 @@ def _main(argv: list[str] | None = None):
                    help="Allow moving an entry outside the vault group")
     p.set_defaults(func=cmd_move)
 
+    from .copy_command import add_copy_parser
+
+    add_copy_parser(sub)
+
     p = sub.add_parser("git-credential",
                        help="git credential helper (delegates allowlisted hosts to GCM)")
     p.add_argument("op", choices=["get", "store", "erase"], help="git credential operation")
@@ -1769,12 +1592,20 @@ def _main(argv: list[str] | None = None):
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("key_file", help="Path to private key file (.pub must exist alongside)")
+    p.add_argument("--create-only", action="store_true",
+                   help="Refuse an existing entry and retain partial/unknown creation without retry")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --create-only, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_import_key)
 
     p = sub.add_parser("export-key", help="Export key pair from entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("dest_dir", help="Destination directory")
     p.add_argument("key_name", help="Key filename (e.g. id_ed25519)")
+    p.add_argument("--exclusive", action="store_true",
+                   help="Create both files exclusively in an absolute same-owner private directory")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --exclusive, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_export_key)
 
     p = sub.add_parser("seal",
@@ -1817,6 +1648,7 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true", help="Print JSON")
     p.set_defaults(func=cmd_cache_status)
 
+    register_prepare(sub)
     p = sub.add_parser("cache-verify",
                        help="Check the persistent cache holds a set of entries "
                             "(no unlock); exit 2 if any missing")
@@ -1825,6 +1657,8 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--manifest", help="File of 'entry | field' lines to check")
     p.add_argument("--machine", help="Machine hint passed to cache-source extensions")
     p.add_argument("--json", action="store_true", help="Print JSON")
+    p.add_argument("--machine-fallback", action="store_true",
+                   help="Verify through the redundant machine copy, without user decryption")
     p.set_defaults(func=cmd_cache_verify)
 
     p = sub.add_parser("vault", help="Manage named vaults")
@@ -1863,7 +1697,7 @@ def _main(argv: list[str] | None = None):
     from configuration_context import RepositoryContextRequired
 
     try:
-        return args.func(args)
+        return cast("int | None", args.func(args))
     except RepositoryContextRequired:
         print(
             "Error: Agent Vault repository context is missing. Run from an adopted "

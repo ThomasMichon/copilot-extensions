@@ -87,9 +87,13 @@ Legacy `on_output` callbacks share captured storage and run only through
 `deliver()` after `finish()` and producer settlement; they are no longer live
 stdio adapters. This helper does not create keepalive output
 or change the existing generic owned-process timeout policy.
-After retiring its writers, a POSIX caller may use `finish(stop_at_idle=True)`
+After retiring its writers, a caller may use `finish(stop_at_idle=True)`
 to drain available bytes without waiting for EOF from an escaped daemon that
-retained an otherwise idle pipe. This never authorizes killing that daemon.
+retained an otherwise idle pipe. Windows readers use native pipe availability
+before bounded reads, so idle retirement joins the reader without changing
+descriptor flags or waiting for unrelated write handles to close. An idle pipe
+is never process-tree settlement evidence; the Windows installer first confirms
+its strict Job empty. This never authorizes killing an unrelated process.
 
 Importing the synchronous package and portable daemon registry does not load
 `ctypes` or a native library. Platform operations load their native bindings
@@ -213,6 +217,10 @@ access can reach independently granted children below a private directory,
 the provider additionally checks existing bytecode descendants' ownership and
 DACLs. This metadata-only admission stops at 256 entries or 50 ms between
 filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Cache roots and metadata retain exact user ownership. Interpreter-created
+bytecode descendants may also use the current process's TokenOwner when that
+SID is already a trusted privileged writer; this handles elevated Windows
+launchers without admitting a foreign owner or relaxing any DACL check.
 Large Windows caches therefore currently lose reuse rather than bypass
 protection. POSIX private traversal needs no descendant walk.
 macOS additionally reads extended
@@ -506,9 +514,16 @@ whole-desktop SDK self-profile, literal cases and verifier remain separate.
 compiled `native_daemon.ps1` launcher below remains a separate migration
 boundary. `native_owned.ps1` delegates finite process execution to the same
 original-shell-owned Python transport.
-Python is an existing harness prerequisite owned by machine provisioning;
+Setup may supply its existing absolute
+`COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON` handoff when the helper starts. The
+adapter uses only that executable, with terminal validation/startup failures
+and no PATH fallback. The selected interpreter and original helper remain
+bound for that helper's lifetime; a different nonempty hint refuses before
+sending another request and does not replace or break live custody.
+Acquisition stays with setup, not this transport.
+Without that handoff, Python remains a legacy harness prerequisite:
 a cold plugin runtime does not authorize another Python download or a
-helper-owned interpreter installation. The PowerShell adapter checks PATH's
+helper-owned interpreter installation. The compatibility adapter checks PATH's
 `python` applications headlessly and selects the first compatible Python 3.10+.
 An unsupported earlier interpreter or WindowsApps alias does not hide a later
 compatible interpreter. A confirmed version refusal exits before receiving any
@@ -1448,9 +1463,17 @@ access; it does not depend on a launcher's token default owner. Native Python
 and a Bash child can therefore share the same user-owned inventory even when
 their default owners differ. Existing entries are not reowned or migrated,
 current-token ownership admission is unchanged, and borrowed runtime anchors
-remain read-only metadata. File access/share/disposition, binary record bytes
+remain read-only metadata. Private creation, lock sharing, binary record bytes
 and noninheritance retain their existing behavior. Portable registry imports
 still load no native bindings; Windows descriptor types are initialized lazily.
+
+Read-only record and reconcile-cursor snapshots share read, write and delete
+access on Windows, without acquiring write or delete rights. Publication uses
+`FileRenameInfoEx` with replace-existing and POSIX semantics: an open snapshot
+keeps its old bytes while subsequent opens see the complete replacement.
+Unsupported atomic rename or denied delete sharing fails without unlink-first
+or in-place-write fallback. Ownership, no-indirection, file-identity and byte
+bounds remain enforced; lock entries keep their existing sharing policy.
 
 `reconcile_instances(registry_root=None, limit=128, max_seconds=5,
 terminate=False, runtime_root=None)` is an explicit backstop for **expired
@@ -1581,7 +1604,8 @@ It composes the helpers above, so its flags never drift from them:
   venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
 - **Escapes caller cleanup.** On Windows, a resident durable daemon
   (`breakaway=True`, the default, outside contained test mode) starts through
-  the WMI durable launch: `Win32_Process.Create` runs a hidden no-Job bootstrap
+  the WMI durable launch: `Win32_Process.Create` runs a hidden bootstrap outside
+  the caller's Jobs
   with the explicit environment block, cwd and log destinations (WMI inherits
   nothing), which creates the daemon suspended, pins PID and creation time,
   hands a process handle back and resumes it. The daemon is in none of the
@@ -1598,6 +1622,7 @@ It composes the helpers above, so its flags never drift from them:
   raises `DaemonSpawnError` naming that cause. See
   `docs/patterns/windows-background-process-launch.md`.
   Finite workers keep native breakaway and start the Windows child suspended.
+  Both paths use the canonical cleanup-scope checks before admission.
   Canonical Job producers
   assign fresh `Local\ce-owned-job-<uuid>` names and propagate the complete
   semicolon-separated chain in `COPILOT_EXTENSIONS_OWNED_JOB_SCOPES`, including

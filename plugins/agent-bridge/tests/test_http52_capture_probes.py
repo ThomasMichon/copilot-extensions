@@ -1,5 +1,42 @@
 """Extend the unchanged current portfolio with original SDK wire controls."""
 
+from test_live_inbox_runtime import (
+    test_versioned_enrollment_migrates_24_legacy_replays_without_effects
+    as test_versioned_enrollment_migrates_24_legacy_replays_without_effects,
+    test_versioned_rejection_is_terminal_and_sender_correlated
+    as test_versioned_rejection_is_terminal_and_sender_correlated,
+    test_versioned_control_start_is_one_shot_and_unknown_cannot_be_rejected
+    as test_versioned_control_start_is_one_shot_and_unknown_cannot_be_rejected,
+    test_versioned_old_database_first_touch_and_original_key_survive_rejection
+    as test_versioned_old_database_first_touch_and_original_key_survive_rejection,
+    test_versioned_control_begin_race_and_authentication_preserve_one_effect_grant
+    as test_versioned_control_begin_race_and_authentication_preserve_one_effect_grant,
+)
+from test_versioned_inbox_consumers import (
+    test_history_replay_api_acknowledges_acceptance_not_event_count
+    as test_history_replay_api_acknowledges_acceptance_not_event_count,
+    test_history_replay_empty_batch_has_only_one_atomic_acceptance
+    as test_history_replay_empty_batch_has_only_one_atomic_acceptance,
+    test_additive_schema_first_touch_serializes_concurrent_openers
+    as test_additive_schema_first_touch_serializes_concurrent_openers,
+    test_required_message_semantics_refuse_an_older_provider_before_post
+    as test_required_message_semantics_refuse_an_older_provider_before_post,
+    test_receiver_rejection_never_projects_requested_urgency_as_delivery
+    as test_receiver_rejection_never_projects_requested_urgency_as_delivery,
+    test_prior_receiver_cannot_silently_ignore_new_required_message_semantics
+    as test_prior_receiver_cannot_silently_ignore_new_required_message_semantics,
+    test_real_node_consumer_settles_original_versioned_rows_through_asgi
+    as test_real_node_consumer_settles_original_versioned_rows_through_asgi,
+    test_native_receiver_must_still_own_the_registered_worktree
+    as test_native_receiver_must_still_own_the_registered_worktree,
+    test_versioned_sender_observes_original_receiver_rejection_without_resending
+    as test_versioned_sender_observes_original_receiver_rejection_without_resending,
+    test_required_message_semantics_cannot_fall_through_to_legacy_delivery
+    as test_required_message_semantics_cannot_fall_through_to_legacy_delivery,
+    test_terminal_control_audit_keeps_original_context_and_legacy_retention
+    as test_terminal_control_audit_keeps_original_context_and_legacy_retention,
+)
+
 from test_http51_capture_probes import *  # noqa: F403 - Preserve the existing source-bound portfolio.
 from test_native_send_settlement_frontend import (
     keyed as keyed,
@@ -43,4 +80,18 @@ from test_session_inspection import (
     as test_inspect_json_names_older_daemon_inspection_gap_without_retry,
     test_semantic_projection_is_bounded_content_free_and_not_ping_progress
     as test_semantic_projection_is_bounded_content_free_and_not_ping_progress,
+)
+from test_retained_metadata_recovery import (
+    test_missing_metadata_adopts_distinct_control_epoch_once
+    as test_missing_metadata_adopts_distinct_control_epoch_once,
+    test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed
+    as test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed,
+    test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover
+    as test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover,
+    test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery
+    as test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery,
+    test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh
+    as test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh,
+    test_completed_metadata_recovery_admits_its_journaled_handoff_successor
+    as test_completed_metadata_recovery_admits_its_journaled_handoff_successor,
 )

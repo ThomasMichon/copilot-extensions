@@ -8,11 +8,15 @@ executable beneath the test's temporary directory.
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
+from typing import Any
 
 import pytest
 
-from worktree_manager.catalog import Prereq
+from worktree_manager.catalog import Catalog, Prereq
 from worktree_manager.core_install import (
+    CoreInstallResult,
     core_status,
     install_command,
     install_core,
@@ -24,14 +28,17 @@ from worktree_manager.prereqs import (
     detect_prereq,
     missing,
 )
-from worktree_manager.provision import apply, plan, recipe_for, restart_needed
+from worktree_manager.provision import (
+    ProvisionAction, ProvisionResult, apply, plan, recipe_for, restart_needed,
+)
 from worktree_manager.__main__ import main
 from worktree_manager import agent_plugin_runtime
+from worktree_manager import repository_bootstrap
 from _installation_context_fixtures import patch_profile
 
 
 @pytest.fixture(autouse=True)
-def isolated_core_context(monkeypatch, tmp_path):
+def isolated_core_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     patch_profile(monkeypatch, agent_plugin_runtime, tmp_path)
@@ -39,14 +46,14 @@ def isolated_core_context(monkeypatch, tmp_path):
 
 # ── detection ───────────────────────────────────────────────────────────────
 
-def test_version_compare():
+def test_version_compare() -> None:
     assert _ge("2.43.0", "2.15")
     assert _ge("3.10.4", "3.10")
     assert not _ge("3.9.1", "3.10")
     assert _ge("anything", "")  # unparseable minimum never blocks
 
 
-def test_detect_prereq_present_tool():
+def test_detect_prereq_present_tool() -> None:
     # git is present in CI and locally; detection should find it with a version.
     st = detect_prereq(Prereq(name="git", min="2.15"))
     if st.present:
@@ -54,7 +61,7 @@ def test_detect_prereq_present_tool():
         assert st.satisfied
 
 
-def test_detect_prereq_absent_tool():
+def test_detect_prereq_absent_tool() -> None:
     st = detect_prereq(Prereq(name="definitely-not-a-real-tool-xyz"))
     assert st.present is False
     assert st.satisfied is False
@@ -66,8 +73,8 @@ def test_detect_prereq_absent_tool():
      (0, "Python 3.9.5", False), (0, "Python 3.11.9", True)],
 )
 def test_python_prerequisite_requires_a_successful_supported_version(
-    monkeypatch, returncode, output, satisfied,
-):
+    monkeypatch: pytest.MonkeyPatch, returncode: int, output: str, satisfied: bool,
+) -> None:
     import subprocess
 
     from worktree_manager import prereqs
@@ -75,7 +82,7 @@ def test_python_prerequisite_requires_a_successful_supported_version(
     monkeypatch.setattr(prereqs, "_which", lambda name: ("python3", "selected-python"))
     monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", ())
     monkeypatch.setattr(
-        prereqs.subprocess, "run",
+        subprocess, "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args, returncode, output, ""),
     )
     status = detect_prereq(Prereq("python3", min="3.10"))
@@ -88,8 +95,8 @@ def test_python_prerequisite_requires_a_successful_supported_version(
 @pytest.mark.parametrize("first_version", ["3.9.5", None])
 @pytest.mark.parametrize("same_alias", [False, True])
 def test_python_prerequisite_continues_to_supported_path_candidate(
-    monkeypatch, tmp_path, first_version, same_alias,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, first_version: str | None, same_alias: bool,
+) -> None:
     import os
 
     from worktree_manager import prereqs
@@ -103,12 +110,12 @@ def test_python_prerequisite_continues_to_supported_path_candidate(
         ("python3" if same_alias else "python", directories[1]): supported,
     }
     monkeypatch.setattr(
-        prereqs.shutil, "which",
+        shutil, "which",
         lambda name, path=None: mapping.get((Path(name).stem.lower(), path)),
     )
     probes = []
 
-    def probe(path):
+    def probe(path: str) -> str | None:
         probes.append(path)
         return {first: first_version, supported: "3.11.9"}[path]
 
@@ -120,22 +127,22 @@ def test_python_prerequisite_continues_to_supported_path_candidate(
     assert os.environ["PATH"] == os.pathsep.join(directories)
 
 
-def test_python_prerequisite_stops_at_supported_first_candidate(monkeypatch):
+def test_python_prerequisite_stops_at_supported_first_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager import prereqs
 
-    def which(name, path=None):
+    def which(name: str, path: str | None=None) -> str:
         assert path is None
         return "selected-python"
 
-    monkeypatch.setattr(prereqs.shutil, "which", which)
+    monkeypatch.setattr(shutil, "which", which)
     monkeypatch.setattr(prereqs, "_probe_version", lambda path: "3.11.9")
     assert detect_prereq(Prereq("python3", min="3.10")).path == "selected-python"
 
 
-def test_python_prerequisite_without_candidates_is_missing(monkeypatch):
+def test_python_prerequisite_without_candidates_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager import prereqs
 
-    monkeypatch.setattr(prereqs.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(shutil, "which", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         prereqs, "_probe_version", lambda path: pytest.fail("no executable to probe"),
     )
@@ -148,8 +155,8 @@ def test_python_prerequisite_without_candidates_is_missing(monkeypatch):
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("filesystem")
 def test_python_prerequisite_empty_path_entry_searches_current_directory(
-    monkeypatch, tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     import os
 
     from worktree_manager import prereqs
@@ -173,14 +180,15 @@ def test_python_prerequisite_empty_path_entry_searches_current_directory(
     )
     status = detect_prereq(Prereq("python3", min="3.10"))
     assert status.satisfied
+    assert status.path is not None
     assert Path(status.path).samefile(current / filename)
 
 
 @pytest.mark.parametrize("supported_available", [False, True])
 @pytest.mark.parametrize("platform", ["windows", "linux"])
 def test_python_prerequisite_windowsapps_alias_is_windows_only(
-    monkeypatch, tmp_path, supported_available, platform,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, supported_available: bool, platform: str,
+) -> None:
     import os
 
     from worktree_manager import prereqs
@@ -197,12 +205,12 @@ def test_python_prerequisite_windowsapps_alias_is_windows_only(
         ("python", supported_dir): supported if supported_available else None,
     }
     monkeypatch.setattr(
-        prereqs.shutil, "which",
+        shutil, "which",
         lambda name, path=None: mapping.get((Path(name).stem.lower(), path)),
     )
     probes = []
 
-    def probe(path):
+    def probe(path: str) -> str | None:
         if platform == "windows":
             assert path != alias
         probes.append(path)
@@ -225,8 +233,8 @@ def test_python_prerequisite_windowsapps_alias_is_windows_only(
     "supported_suffix,older_location", [(".exe", "current"), (".cmd", "current"), (".cmd", "path")],
 )
 def test_python_prerequisite_windows_candidates_cannot_hide_supported_path_python(
-    monkeypatch, tmp_path, supported_suffix, older_location,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, supported_suffix: str, older_location: str,
+) -> None:
     import os
 
     from worktree_manager import prereqs
@@ -251,6 +259,7 @@ def test_python_prerequisite_windows_candidates_cannot_hide_supported_path_pytho
     )
     status = detect_prereq(Prereq("python3", min="3.10"))
     assert status.satisfied
+    assert status.path is not None
     assert Path(status.path).samefile(supported / ("python" + supported_suffix))
 
 
@@ -260,15 +269,15 @@ def test_python_prerequisite_windows_candidates_cannot_hide_supported_path_pytho
      (0, "PowerShell 6.2.7", False), (0, "PowerShell 7.4.0", True)],
 )
 def test_pwsh_prerequisite_requires_a_successful_supported_version(
-    monkeypatch, returncode, output, satisfied,
-):
+    monkeypatch: pytest.MonkeyPatch, returncode: int, output: str, satisfied: bool,
+) -> None:
     import subprocess
 
     from worktree_manager import prereqs
 
     monkeypatch.setattr(prereqs, "_which", lambda name: ("pwsh", "selected-pwsh"))
     monkeypatch.setattr(
-        prereqs.subprocess, "run",
+        subprocess, "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args, returncode, output, ""),
     )
     assert detect_prereq(Prereq("pwsh", min="7.0")).satisfied is satisfied
@@ -276,7 +285,7 @@ def test_pwsh_prerequisite_requires_a_successful_supported_version(
 
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
-def test_python_prerequisite_probes_the_exact_discovered_executable(monkeypatch):
+def test_python_prerequisite_probes_the_exact_discovered_executable(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
     from worktree_manager import prereqs
@@ -296,8 +305,8 @@ def test_python_prerequisite_probes_the_exact_discovered_executable(monkeypatch)
 @pytest.mark.effect("process")
 @pytest.mark.parametrize("selection", ["unusable", "supported", "supported-later"])
 def test_setup_qualifies_actual_python_before_core_and_repository(
-    monkeypatch, tmp_path, capsys, selection,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], selection: str,
+) -> None:
     import os
     import sys
 
@@ -311,7 +320,7 @@ def test_setup_qualifies_actual_python_before_core_and_repository(
         python = tmp_path / ("unusable-python.exe" if os.name == "nt" else "unusable-python")
         python.write_bytes(b"not an executable\n")
         python.chmod(0o700)
-    candidates = (str(python),)
+    candidates: tuple[str, ...] = (str(python),)
     if selection == "supported-later":
         candidates += (sys.executable,)
     monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", candidates)
@@ -321,7 +330,7 @@ def test_setup_qualifies_actual_python_before_core_and_repository(
     )
     provisioned = []
 
-    def provision(actions, **kwargs):
+    def provision(actions: list[ProvisionAction], **kwargs: Any) -> list[ProvisionResult]:
         provisioned.extend(actions)
         return [
             ProvisionResult(action, False, skipped_reason="fixture does not install")
@@ -336,16 +345,16 @@ def test_setup_qualifies_actual_python_before_core_and_repository(
     monkeypatch.setattr(cli, "install_command", lambda: None)
     calls = []
 
-    def install(**kwargs):
+    def install(**kwargs: Any) -> CoreInstallResult:
         calls.append("core")
         return CoreInstallResult(None, False, reason="already-installed")
 
-    def repository(args):
+    def repository(args: Any) -> int:
         calls.append("repository")
         return 0
 
     monkeypatch.setattr(cli, "install_core", install)
-    monkeypatch.setattr(cli.repository_bootstrap, "run", repository)
+    monkeypatch.setattr(repository_bootstrap, "run", repository)
     assert main(["setup", "--apply", "--repository", "https://example.invalid/repo"]) == (
         0 if usable else 1
     )
@@ -357,22 +366,43 @@ def test_setup_qualifies_actual_python_before_core_and_repository(
         assert "core installation was not attempted" in output
 
 
-def test_optional_absent_is_satisfied():
+def test_optional_absent_is_satisfied() -> None:
     st = PrereqStatus(name="psmux", present=False, optional=True)
     assert st.satisfied is True
 
 
-def test_detect_baseline_covers_catalog():
+def test_detect_baseline_covers_catalog() -> None:
     statuses = detect_baseline()
     names = {s.name for s in statuses}
     assert {"git", "python3", "uv"} <= names
 
 
+@pytest.mark.parametrize("version", ["3.9.5", "3.11.9", None])
+def test_baseline_qualifies_prepared_python_without_ambient_fallback(monkeypatch: pytest.MonkeyPatch, version: str | None) -> None:
+    import sys
+    from worktree_manager import prereqs
+
+    monkeypatch.setattr(
+        prereqs, "_which", lambda name: pytest.fail("must not rediscover PATH Python"),
+    )
+    probes = []
+
+    def probe(path: str) -> str | None:
+        probes.append(path)
+        return version
+
+    monkeypatch.setattr(prereqs, "_probe_version", probe)
+    status, = detect_baseline(Catalog(1, (Prereq("python3", min="3.11"),), ()))
+    assert status.path == getattr(sys, "_base_executable", sys.executable)
+    assert status.satisfied is (version == "3.11.9")
+    assert probes == [getattr(sys, "_base_executable", sys.executable)]
+
+
 @pytest.mark.parametrize("os_", ["windows", "macos", "linux"])
 @pytest.mark.parametrize("pwsh_present", [False, True])
 def test_setup_requires_pwsh_only_for_the_windows_core(
-    monkeypatch, capsys, os_, pwsh_present,
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], os_: str, pwsh_present: bool,
+) -> None:
     from worktree_manager import prereqs, provision, setup_cli as cli
     from worktree_manager.core_install import CoreInstallResult, CoreStatus
 
@@ -384,7 +414,7 @@ def test_setup_requires_pwsh_only_for_the_windows_core(
     )
     monkeypatch.setattr(prereqs, "_probe_version", lambda path: "99.0")
     monkeypatch.setattr(
-        provision.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: pytest.fail("system-package guidance must not execute an installer"),
     )
     monkeypatch.setattr(
@@ -394,16 +424,16 @@ def test_setup_requires_pwsh_only_for_the_windows_core(
     monkeypatch.setattr(cli, "install_command", lambda: ["fixture-native-installer"])
     calls = []
 
-    def install(**kwargs):
+    def install(**kwargs: Any) -> CoreInstallResult:
         calls.append("core")
         return CoreInstallResult(None, False, reason="already-installed")
 
-    def repository(args):
+    def repository(args: Any) -> int:
         calls.append("repository")
         return 0
 
     monkeypatch.setattr(cli, "install_core", install)
-    monkeypatch.setattr(cli.repository_bootstrap, "run", repository)
+    monkeypatch.setattr(repository_bootstrap, "run", repository)
     blocked = os_ == "windows" and not pwsh_present
     assert main(["setup", "--apply", "--repository", "https://example.invalid/repo"]) == (
         1 if blocked else 0
@@ -420,7 +450,7 @@ def test_setup_requires_pwsh_only_for_the_windows_core(
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
-def test_native_setup_missing_pwsh_stops_before_installers_and_repository(tmp_path):
+def test_native_setup_missing_pwsh_stops_before_installers_and_repository(tmp_path: Path) -> None:
     import os
     import subprocess
     import sys
@@ -462,7 +492,7 @@ raise SystemExit(cli.cmd_setup(['--apply', '--repository', 'https://example.inva
     assert not entered.exists()
 
 
-def test_missing_filters_unsatisfied():
+def test_missing_filters_unsatisfied() -> None:
     statuses = [
         PrereqStatus(name="git", present=True, version="2.55", min_required="2.15"),
         PrereqStatus(name="uv", present=False),
@@ -474,7 +504,7 @@ def test_missing_filters_unsatisfied():
 
 # ── provisioning plan ───────────────────────────────────────────────────────
 
-def test_recipe_shapes():
+def test_recipe_shapes() -> None:
     uv = recipe_for("uv", "linux")
     assert uv is not None and uv.auto and uv.changes_path
     git = recipe_for("git", "windows")
@@ -483,7 +513,7 @@ def test_recipe_shapes():
     assert py is not None and py.requires == "uv"
 
 
-def test_plan_orders_dependencies_first():
+def test_plan_orders_dependencies_first() -> None:
     gaps = [
         PrereqStatus(name="python3", present=False, min_required="3.10"),
         PrereqStatus(name="uv", present=False),
@@ -493,7 +523,7 @@ def test_plan_orders_dependencies_first():
     assert names.index("uv") < names.index("python3")
 
 
-def test_apply_dry_run_runs_nothing():
+def test_apply_dry_run_runs_nothing() -> None:
     gaps = [PrereqStatus(name="uv", present=False)]
     actions = plan(gaps, os_="linux")
     results = apply(actions, dry_run=True)
@@ -502,7 +532,7 @@ def test_apply_dry_run_runs_nothing():
     assert restart_needed(results) is False  # nothing actually ran
 
 
-def test_manual_action_never_runs_even_when_applied():
+def test_manual_action_never_runs_even_when_applied() -> None:
     gaps = [PrereqStatus(name="git", present=False)]
     actions = plan(gaps, os_="linux")
     # dry_run=False, but a manual recipe must still not execute.
@@ -513,20 +543,20 @@ def test_manual_action_never_runs_even_when_applied():
 
 # ── core install driver ─────────────────────────────────────────────────────
 
-def test_core_status_absent(tmp_path: Path):
+def test_core_status_absent(tmp_path: Path) -> None:
     st = core_status(home=tmp_path)
     assert st.state == "absent"
     assert not st.installed
 
 
-def test_core_status_partial(tmp_path: Path):
+def test_core_status_partial(tmp_path: Path) -> None:
     (tmp_path / ".agent-worktrees" / ".venv").mkdir(parents=True)
     st = core_status(home=tmp_path)
     assert st.state == "partial"  # runtime+venv but no binstub
 
 
 @pytest.mark.parametrize("layout", [".venv", "versions"])
-def test_core_status_rejects_empty_runtime_artifacts(tmp_path: Path, layout):
+def test_core_status_rejects_empty_runtime_artifacts(tmp_path: Path, layout: str) -> None:
     (tmp_path / ".agent-worktrees" / layout).mkdir(parents=True)
     localbin = tmp_path / ".local" / "bin"
     localbin.mkdir(parents=True)
@@ -536,7 +566,7 @@ def test_core_status_rejects_empty_runtime_artifacts(tmp_path: Path, layout):
     assert not st.installed
 
 
-def _selected_core(home):
+def _selected_core(home: Path) -> tuple[Path, Path]:
     import json
     import os
 
@@ -553,7 +583,7 @@ def _selected_core(home):
     return root, python
 
 
-def test_core_status_uses_selected_runtime_without_requiring_global_stub(tmp_path: Path):
+def test_core_status_uses_selected_runtime_without_requiring_global_stub(tmp_path: Path) -> None:
     root, _ = _selected_core(tmp_path)
     st = core_status(home=tmp_path)
     assert st.installed
@@ -563,14 +593,14 @@ def test_core_status_uses_selected_runtime_without_requiring_global_stub(tmp_pat
 
 @pytest.mark.parametrize("marker", ["current-version", "last-known-good"])
 @pytest.mark.parametrize("content", [b"\xff", b"1.2.3\x00"])
-def test_core_status_malformed_markers_keep_native_fallback(tmp_path, marker, content):
+def test_core_status_malformed_markers_keep_native_fallback(tmp_path: Path, marker: str, content: bytes) -> None:
     root, _ = _selected_core(tmp_path)
     (root / marker).write_bytes(content)
     assert core_status(home=tmp_path).installed
 
 
 @pytest.mark.parametrize("refusal", ["context", "policy"])
-def test_core_status_does_not_override_native_selection_refusal(monkeypatch, tmp_path, refusal):
+def test_core_status_does_not_override_native_selection_refusal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, refusal: str) -> None:
     _selected_core(tmp_path)
     localbin = tmp_path / ".local" / "bin"
     localbin.mkdir(parents=True)
@@ -584,7 +614,7 @@ def test_core_status_does_not_override_native_selection_refusal(monkeypatch, tmp
     assert not core_status(home=tmp_path).installed
 
 
-def test_core_status_refuses_damaged_selected_runtime(tmp_path: Path):
+def test_core_status_refuses_damaged_selected_runtime(tmp_path: Path) -> None:
     _, python = _selected_core(tmp_path)
     python.unlink()
     (tmp_path / ".agent-worktrees" / ".venv").mkdir(parents=True)
@@ -596,7 +626,7 @@ def test_core_status_refuses_damaged_selected_runtime(tmp_path: Path):
     assert not st.installed
 
 
-def test_core_status_uses_canonical_context_selection(monkeypatch, tmp_path):
+def test_core_status_uses_canonical_context_selection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from worktree_manager import agent_plugin_runtime, core_install
 
     selected = tmp_path / "selected-cell" / "agent-worktrees"
@@ -604,7 +634,7 @@ def test_core_status_uses_canonical_context_selection(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "ordinary-state"))
     calls = []
 
-    def resolve(plugin, **kwargs):
+    def resolve(plugin: str, **kwargs: Any) -> Path:
         calls.append((plugin, kwargs))
         return selected / "versions" / "1.2.3"
 
@@ -615,7 +645,7 @@ def test_core_status_uses_canonical_context_selection(monkeypatch, tmp_path):
     assert calls == [("agent-worktrees", {})]
 
 
-def test_install_command_from_checkout():
+def test_install_command_from_checkout() -> None:
     cmd = install_command()
     # Inside a checkout the real installer resolves; otherwise None (no checkout).
     if cmd is not None:
@@ -623,14 +653,14 @@ def test_install_command_from_checkout():
         assert any("install.ps1" in c or "install.sh" in c for c in cmd)
 
 
-def test_install_core_is_noop_when_installed(tmp_path: Path):
+def test_install_core_is_noop_when_installed(tmp_path: Path) -> None:
     _selected_core(tmp_path)
     res = install_core(dry_run=True, home=tmp_path)
     assert res.ran is False
     assert res.reason == "already-installed"
 
 
-def test_install_core_dry_run_plans_but_does_not_run(tmp_path: Path):
+def test_install_core_dry_run_plans_but_does_not_run(tmp_path: Path) -> None:
     res = install_core(dry_run=True, home=tmp_path)
     assert res.ran is False
     # Either a planned command (checkout present) or a clear no-installer reason.
@@ -640,7 +670,7 @@ def test_install_core_dry_run_plans_but_does_not_run(tmp_path: Path):
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
-def test_native_setup_never_admits_repository_after_artifact_only_core_install(tmp_path):
+def test_native_setup_never_admits_repository_after_artifact_only_core_install(tmp_path: Path) -> None:
     import os
     import subprocess
     import sys
@@ -686,12 +716,12 @@ with pytest.MonkeyPatch.context() as patch:
 
 # ── command surface ─────────────────────────────────────────────────────────
 
-def test_doctor_command_runs(capsys, monkeypatch, tmp_path):
-    from worktree_manager import daemon_health
+def test_doctor_command_runs(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from worktree_manager import mux_daemon_cutover
 
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     monkeypatch.setattr(
-        daemon_health.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: set(),
+        mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: set(),
     )
     rc = main(["doctor"])
     out = capsys.readouterr().out
@@ -700,7 +730,7 @@ def test_doctor_command_runs(capsys, monkeypatch, tmp_path):
     assert rc in (0, 1)
 
 
-def test_setup_command_dry_run_changes_nothing(capsys):
+def test_setup_command_dry_run_changes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     rc = main(["setup"])
     out = capsys.readouterr().out
     assert "plan" in out.lower()
@@ -708,7 +738,7 @@ def test_setup_command_dry_run_changes_nothing(capsys):
     assert rc in (0, 1)
 
 
-def _setup_providers(monkeypatch, *, before, after, results, core_result=None):
+def _setup_providers(monkeypatch: pytest.MonkeyPatch, *, before: list[PrereqStatus], after: list[PrereqStatus], results: list[ProvisionResult], core_result: CoreInstallResult | None=None) -> list[dict[str, Any]]:
     from worktree_manager import setup_cli as cli
     from worktree_manager.core_install import CoreInstallResult, CoreStatus
 
@@ -720,7 +750,7 @@ def _setup_providers(monkeypatch, *, before, after, results, core_result=None):
     monkeypatch.setattr(cli, "install_command", lambda: ["owned-installer"])
     calls = []
 
-    def install(**kwargs):
+    def install(**kwargs: Any) -> CoreInstallResult:
         calls.append(kwargs)
         return core_result or CoreInstallResult(None, False, reason="already-installed")
 
@@ -728,7 +758,7 @@ def _setup_providers(monkeypatch, *, before, after, results, core_result=None):
     return calls
 
 
-def test_setup_apply_uses_post_provision_readiness(monkeypatch, capsys):
+def test_setup_apply_uses_post_provision_readiness(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from worktree_manager.provision import ProvisionResult
 
     gap = PrereqStatus("uv", False)
@@ -743,7 +773,7 @@ def test_setup_apply_uses_post_provision_readiness(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("returncode", [1, 3010, None])
-def test_setup_failed_prerequisite_never_runs_core(monkeypatch, capsys, returncode):
+def test_setup_failed_prerequisite_never_runs_core(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], returncode: int | None) -> None:
     from worktree_manager.provision import ProvisionResult
 
     gap = PrereqStatus("uv", False)
@@ -756,7 +786,7 @@ def test_setup_failed_prerequisite_never_runs_core(monkeypatch, capsys, returnco
     assert "prerequisite uv failed" in capsys.readouterr().out
 
 
-def test_setup_unstarted_prerequisite_reports_reason(monkeypatch, capsys):
+def test_setup_unstarted_prerequisite_reports_reason(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from worktree_manager.provision import ProvisionResult
 
     gap = PrereqStatus("uv", False)
@@ -770,7 +800,7 @@ def test_setup_unstarted_prerequisite_reports_reason(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("name", ["uv", "git"])
-def test_setup_unresolved_prerequisite_blocks_core(monkeypatch, capsys, name):
+def test_setup_unresolved_prerequisite_blocks_core(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], name: str) -> None:
     from worktree_manager.provision import ProvisionResult
 
     gap = PrereqStatus(name, False)
@@ -794,8 +824,8 @@ def test_setup_unresolved_prerequisite_blocks_core(monkeypatch, capsys, name):
     [(True, 7, None), (False, None, "no-installer"), (False, None, None)],
 )
 def test_setup_core_failure_is_not_hidden_by_installed_state(
-    monkeypatch, capsys, ran, returncode, reason,
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], ran: bool, returncode: int | None, reason: str | None,
+) -> None:
     from worktree_manager.core_install import CoreInstallResult
 
     calls = _setup_providers(
@@ -808,7 +838,7 @@ def test_setup_core_failure_is_not_hidden_by_installed_state(
 
 
 @pytest.mark.parametrize("installed", [True, False])
-def test_setup_first_core_install_checks_postcondition(monkeypatch, installed):
+def test_setup_first_core_install_checks_postcondition(monkeypatch: pytest.MonkeyPatch, installed: bool) -> None:
     from worktree_manager import setup_cli as cli
     from worktree_manager.core_install import CoreInstallResult, CoreStatus
 
@@ -828,8 +858,8 @@ def test_setup_first_core_install_checks_postcondition(monkeypatch, installed):
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
 def test_setup_refreshes_actual_tool_after_synthetic_installer(
-    monkeypatch, tmp_path, capsys,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     import os
     import shlex
     import subprocess

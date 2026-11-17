@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Sweep every project through temporary strict opt-in, catalog all failures, fix low-risk typing deltas in waves, and resweep before finishing projects in descending measured completion order. Persistent strict-new-code selection, arbitrary emitted coverage and exact-candidate parity remain open; they no longer serialize independent diagnostic and annotation preparation. The bounded physical-file/known-composition ratchet merged in #12679; a changed-file check is not persistent admission or complete repository-wide new-code coverage. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
+- **Current slice:** Review the manifest-backed persistent strict-file proposal in Phase 1a. The independent diagnostic/annotation roster remains open: sweep every project through temporary strict opt-in, catalog all failures, fix low-risk typing deltas in waves, and resweep before finishing projects in descending measured completion order. Persistent strict-new-code selection, arbitrary emitted coverage and exact-candidate parity remain open; they no longer serialize independent diagnostic and annotation preparation. The bounded physical-file/known-composition ratchet merged in #12679; a changed-file check is not persistent admission or complete repository-wide new-code coverage. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
 - **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 delivers emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. Preserve full-composed-consumer qualification under #10362 independently while progressing the other assigned slices.
 - **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
 - **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
@@ -19,11 +19,13 @@
 
 ## Goal
 
-Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
+**Kind:** completion.
+
+**Root goal:** Operator outcome direction, **2026-11-14 00:27 UTC**, verbatim:
 
 > All Python code in copilot-extensions passing string type-checking, with strict type-checkng enforced first for all new code, and then all existing code.
 
-Acceptance evidence must prove both stages, not merely a completed activity:
+**Acceptance:** Evidence must prove both stages, not merely a completed activity:
 
 - Required source CI rejects new first-party Python that lacks strict coverage,
   including additions inside pending owners, with real negative controls and
@@ -52,6 +54,19 @@ The repository-wide strict-new-code gate remains required. The sweep and
 low-risk annotation waves proceed without waiting for that separate gate;
 diagnostic passes do not constitute persistent admission or waive any
 project's existing acceptance criteria.
+
+**Now:** Review the [manifest-backed persistent strict-file proposal](persistent-strict-files.md)
+for Phase 1a before implementation. The diagnostic and annotation roster
+remains open and independent: reconcile changed inputs and existing ownership,
+prepare bounded low-risk cohorts and resweep affected inputs. Phase 1a remains
+required before further persistent legacy admission; this proposal itself
+adds no coverage or qualification authority.
+
+**Return:** After a prerequisite, publication or guidance refresh, return to
+the next unmet Plan or Validation Plan criterion. Reuse preserved exact-input
+evidence and recheck current ownership and holds; rerun only changed or
+unresolved checks. No slice, transfer or refresh completes the parent or
+renews a spent qualification clock.
 
 ## Guiding Intent
 
@@ -87,9 +102,10 @@ definition of success.
 - **Transfer checkpoint:** #12679 is merged and its PR claim is released;
   no owned open PR, review thread, test process or scheduled run remains.
   The latest merged inventory is 43/74 strict projects and 481/9,392 strict
-  physical files; 31 pending projects own 8,911 files. The new sweep has not
-  run. Next, inspect the successor's actual prepared checker environments,
-  run the complete diagnostic matrix and retain every failure before edits.
+  physical files; 31 pending projects own 8,911 files. At that transfer the
+  sweep had not run. The subsequent initial diagnostic catalog is recorded
+  under Strict diagnostic and annotation waves below; its blocked cells and
+  changed-input reconciliation remain open before selecting typing edits.
   Prior one-shot qualification budgets remain spent, retained allocations
   stay protected, and all native/minimum-runtime, original-corpus,
   emitted/copy/candidate, provider, publication and deployment holds remain.
@@ -165,6 +181,11 @@ Confirmed operator responses:
   file-weighted accounting remain part of the original all-Python objective.
 - The operator explicitly confirmed tracking both merged strict-project
   coverage and physical Python-file coverage.
+- Persistent-coverage design selection, verbatim:
+  `Use strict_files in the existing project manifest (recommended)`.
+  This selects the next normal-reviewed Phase 1a proposal, not implementation,
+  unmodeled-program qualification, a renewed test budget, SDK work or
+  Main-controller changes.
 - Bounded diagnostics may proceed without another approval prompt, preserving
   existing resource, privacy, custody and cleanup limits. This does not
   authorize rollout, protected shared IPC, production mutation, deadline
@@ -295,6 +316,20 @@ Confirmed operator responses:
   is insufficient. Directly dependent canonical generated copies retain their
   normal ownership and release checks; their consumers are not thereby admitted.
 
+- `license_metadata_packet=true`: finish only the retained Manager and Dispatch
+  license-metadata compatibility fixes in a separate managed worktree, preserving
+  all original library work and evidence. One fresh source-bound 600-second
+  packet (510 work, 90 cleanup) may exercise the declared setuptools 68 backend
+  with the existing Python 3.12 installation. Keep used storage plus the
+  512 MiB reserve below 6 GiB, with 128-process, 4,096 MiB memory and 512 MiB
+  temporary-storage limits. Use only the currently configured approved package
+  feed and stop if none is configured; credentials stay with the normal
+  dependency owner, with no global settings change or implicit public fallback.
+  Scope is the two license-field fixes, required changefiles, focused artifact
+  checks and normal reviewed publication. No held SDK reuse/rebuild, automatic
+  packet retry, broader library-copy/Linux-shell qualification, retained-evidence
+  cleanup or rollout is authorized. The original library holds otherwise remain.
+
 ## Plan
 
 The decomposition and proposed mechanics below are **agent-recommended**
@@ -322,6 +357,11 @@ rewrite.
 
 ### Phase 1a - Strict new-code gate
 
+The [persistent strict-file proposal](persistent-strict-files.md) specifies the
+selected manifest approach and its validation obligations. It is not yet
+implemented and does not resolve the complete emitted/new-code acceptance
+items below.
+
 - [x] Land the bounded physical-file ratchet and existing composed-input
   selectors, without treating that prerequisite as complete emitted/candidate
   coverage or pending-project admission (#12679).
@@ -340,6 +380,16 @@ rewrite.
 
 Agent-recommended realization of the subsequent operator direction:
 
+The initial catalog at source `06ac2991` covers all 152 declared cells:
+88 completed without diagnostics, 42 completed with strict diagnostics and
+22 blocked. Blockers comprise fourteen fatal module/analysis cells, two
+checker assertions, two source-view refusals, two unprepared-environment
+cells and two absent scopes. Complete matrices exist for 63 projects;
+incomplete matrices have no clean-file fraction. Full raw output and
+per-cell source, lock and input identities are retained outside Git.
+This is diagnostic evidence, not admission, and must be reconciled against
+subsequent source and manifest changes before selecting the next wave.
+
 - [ ] Run every declared project's complete interpreter/platform matrix with
   temporary strict opt-in. Catalog full diagnostics, setup/module/composition
   blockers, absent scopes and exact source inputs without changing admission.
@@ -347,8 +397,10 @@ Agent-recommended realization of the subsequent operator direction:
   waves; preserve behavior, assertions, source ownership and typed boundaries.
 - [ ] Resweep after each wave and rerank pending projects by measured clean-file
   fraction, distinguishing complete analyses from blocked or unexecuted scope.
-- [ ] Finish the nearest-complete projects first through their existing
-  acceptance, review and CI gates; record only merged persistent strict coverage.
+- [ ] After Phase 1a's strict-new-code gate is established, finish the
+  nearest-complete projects first through their existing acceptance, review
+  and CI gates; record only merged persistent strict coverage. Diagnostics
+  and annotation preparation do not depend on that admission gate.
 
 ### Phase 2 - Source and platform qualification
 
@@ -617,13 +669,40 @@ composition prerequisites, and review/validation rules.
 
 ## Journal
 
+### 2026-11-17 - Session Host helper and caller annotation wave
+
+- #13014 merged after exact-head approval and required CI. Four complete
+  touched files pass both strict analysis targets, and the exposed process
+  return types match the provider's existing native and Windows forms.
+- The complete 45-file project remains pending with 152 Linux and 148 win32
+  diagnostics in seventeen files. Preserved setup failures, helper-revision
+  controls and final caller smoke evidence do not imply native, SDK, copied
+  consumer or persistent project admission.
+- The next selected slice is review of manifest-backed persistent strict
+  files; implementation and any new qualification packet remain gated.
+
+### 2026-11-17 - First Driver Core annotation wave
+
+- #12989 merged the three-file receipt, original-owner callback and mux
+  collection annotation cohort after exact-head approval and required CI.
+  Both whole-file strict targets, eight existing pure controls and the
+  filesystem consumer smoke pass with executable syntax unchanged.
+- The complete 44-file project remains pending: the subsequent declared
+  Linux and win32 analyses report 156 and 152 errors respectively, each in
+  twenty files. This is diagnostic progress, not persistent admission;
+  Phase 1a and all existing native, SDK and consumer gates remain open.
+
+- [2026-11-16 - Chat preparation merged and native qualification](journal/2026/11.16%20Chat%20preparation%20and%20qualification.md)
+
 ### 2026-11-15 - Strict sweep direction and execution transfer
 
 - Captured the operator's complete temporary-opt-in, failure-catalog,
   low-risk-wave and nearest-completion ordering direction above. The
   persistent new-code, emitted-program and exact-candidate gaps remain open.
 - Prepared a clean documentation-only continuation checkpoint after #12679;
-  no new sweep, typing fix, qualification run or admission is claimed.
+  no new sweep, typing fix, qualification run or admission was claimed at
+  that transfer. The subsequent initial diagnostic catalog appears in the
+  Strict diagnostic and annotation waves section above.
   Documentation validation checks the exact request capture and Git whitespace.
 - The successor must resume the pushed branch, accept the same active effort,
   preserve the original scope approvals and individual holds, and start with
@@ -3397,3 +3476,25 @@ composition prerequisites, and review/validation rules.
   unavailable inbound coordination evidence is not treated as an empty
   roster. No source/caller ownership transfer, installed rollout, cleanup
   waiver or whole-effort completion is inferred.
+
+### 2026-11-16 - License-metadata packet stopped on audit normalization
+
+- The configured dependency owner reports an explicit feed in the environment
+  and retained UV configuration. No implicit public-index fallback is selected.
+  The two retained standalone license-field fixes and their release intent are
+  isolated from the original library work.
+- The single approved 600-second packet stops after 123.843 seconds. Its fresh
+  Python 3.12 environment installs seasoned setuptools 68.0.0, wheel 0.45.1
+  and packaging 25.0 through the configured feed. The original Manager license
+  string is rejected; the corrected real project generates metadata and a
+  license artifact.
+- The audit then incorrectly compares version strings literally:
+  `0.1.0-dev97` is normalized by the backend to `0.1.0.dev97`. This is an
+  audit failure, not a demonstrated packaging defect. Dispatch checks and the
+  install-contract gate are not reached; this is not a passing packet.
+- Source hashes remain unchanged, the fresh environment is removed with
+  confirmed process settlement, and cleanup finishes within the original
+  deadline. The observed joint allocation peaks at 727,099,114 bytes, below
+  the 6 GiB ceiling with its 512 MiB reserve. Evidence is retained.
+  The one-shot grant is spent. No automatic retry, original-library gate
+  completion, strict admission or installed rollout is inferred.

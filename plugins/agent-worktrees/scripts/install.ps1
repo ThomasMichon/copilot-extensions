@@ -1833,7 +1833,8 @@ function Resolve-CopilotCommand {
 
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
+       An explicit prepared interpreter excludes discovery fallbacks.
+       Otherwise prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none.
@@ -1856,6 +1857,39 @@ function Get-BootstrapPython {
        either fallback could still resolve straight back into $VenvDir and
        defeat the whole exclusion. #>
     param([switch]$ExcludeVenvDir, [switch]$ExcludeRuntimeRoot)
+    $prepared = Get-Variable -Name BootstrapPython -ValueOnly -ErrorAction SilentlyContinue
+    if ($prepared) {
+        if (-not [IO.Path]::IsPathRooted($prepared) -or
+            [IO.Path]::GetPathRoot($prepared) -match '^(?:[/\\]|[A-Za-z]:)$' -or
+            -not [IO.File]::Exists($prepared)) {
+            throw 'The prepared bootstrap Python must be an existing absolute executable.'
+        }
+        $excludedRoot = if ($ExcludeRuntimeRoot) { $InstallDir } elseif ($ExcludeVenvDir) { $VenvDir } else { '' }
+        $probe = @'
+import json,sys
+from pathlib import Path
+assert sys.version_info >= (3, 11), 'Prepared bootstrap Python requires 3.11+'
+if sys.argv[2]:
+    boundary = Path(sys.argv[2]).resolve()
+    for value in (sys.argv[1], sys.executable, sys.prefix, sys.base_prefix,
+                  getattr(sys, '_base_executable', sys.executable)):
+        assert not Path(value).resolve().is_relative_to(boundary), 'Prepared bootstrap Python is inside the excluded runtime'
+print(json.dumps(str(Path(sys.executable).resolve())))
+'@
+        $probeError = ''
+        $selected = Invoke-Hidden -FilePath $prepared -ArgList @(
+            '-I', '-S', '-B', '-X', 'utf8', '-c', $probe, $prepared, [string]$excludedRoot
+        ) -ErrorOutput ([ref]$probeError)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Prepared bootstrap Python failed qualification (exit ${LASTEXITCODE}): $selected$probeError"
+        }
+        $resolved = $selected | ConvertFrom-Json -ErrorAction Stop
+        if ($resolved -isnot [string] -or -not [IO.Path]::IsPathRooted($resolved) -or
+            -not [IO.File]::Exists($resolved)) {
+            throw 'Prepared bootstrap Python returned an invalid executable.'
+        }
+        return $resolved
+    }
     $dirs = if ($ExcludeRuntimeRoot) { @() } elseif ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
     foreach ($d in $dirs) {
         if (-not $d) { continue }
@@ -3126,7 +3160,9 @@ function Deploy-VenvAndPackage {
 }
 
 function Deploy-PythonRuntime {
-    $base = if ($WheelProfile) { $WheelPython } else { Get-SignedBasePython }
+    $base = if ($WheelProfile) { $WheelPython } elseif ($BootstrapPython) {
+        Get-BootstrapPython -ExcludeVenvDir
+    } else { Get-SignedBasePython }
     if (-not $base) { $base = Get-BootstrapPython -ExcludeVenvDir }
     if (-not $base) {
         throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'
@@ -3629,16 +3665,33 @@ function Resolve-AwPsmuxBin {
 }
 
 function Ensure-Psmux {
-    <# Ensure a compatible psmux version. Versions 3.3.5 and 3.3.7+ are
-       accepted; 3.3.6 is blocked. Missing or incompatible versions are
+    <# Ensure psmux 3.4.0 or newer for new launches. Legacy providers remain
+       observable while their sessions are live. Missing or incompatible versions are
        installed/upgraded to the preferred version. The
        installer deliberately does not own the machine's winget pin -- an
        adopting machine-state package may pin an exact validated version.
        Replacement happens only when no live sessions exist, because refreshing
        the portable package
        tears down the running psmux server and every attached session. #>
-    $installVersion = '3.3.8'
+    $installVersion = '3.4.0'
+    $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
+    if (-not (Test-Path -LiteralPath $helper)) {
+        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is missing -- not replacing it"
+        return
+    }
+    . $helper
+    if (-not (Get-Command Get-AwPsmuxBinaryVersion -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Get-AwPsmuxSessionState -ErrorAction SilentlyContinue)) {
+        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is unavailable -- not replacing it"
+        return
+    }
     if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+        $sessionState = Get-AwPsmuxSessionState -Path 'psmux.exe'
+        if (-not $sessionState.Known -or $sessionState.Sessions.Count -gt 0) {
+            Write-ServiceWarn "psmux is unavailable on PATH, but provider activity is present or unknown -- not installing or repairing paths"
+            return
+        }
         Write-Host "  Installing psmux $installVersion (terminal multiplexer)..."
         & winget install --id marlocarlo.psmux --version $installVersion --exact `
             --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
@@ -3651,17 +3704,6 @@ function Ensure-Psmux {
         return
     }
     $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
-    $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
-    if (-not (Test-Path -LiteralPath $helper)) {
-        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is missing -- not replacing it"
-        return
-    }
-    . $helper
-    if (-not (Get-Command Get-AwPsmuxBinaryVersion -ErrorAction SilentlyContinue) -or
-        -not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue)) {
-        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is unavailable -- not replacing it"
-        return
-    }
     $psmuxVer = Get-AwPsmuxBinaryVersion -Path $muxBin
     $psmuxDisplay = if ($psmuxVer) { $psmuxVer } else { '<unknown>' }
     $compatible = Test-AwPsmuxVersionCompatible -Version $psmuxVer
@@ -3669,8 +3711,10 @@ function Ensure-Psmux {
         $sessionState = Get-AwPsmuxSessionState -Path $muxBin
         if (-not $sessionState.Known) {
             Write-ServiceWarn "psmux $psmuxDisplay is incompatible, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
+            return
         } elseif ($sessionState.Sessions.Count -gt 0) {
             Write-ServiceWarn "psmux $psmuxDisplay is incompatible. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to upgrade."
+            return
         } else {
             Write-ServiceChanged "psmux $psmuxDisplay is incompatible -- refreshing the portable package"
             & winget install --id marlocarlo.psmux --version $installVersion --exact `
@@ -4559,7 +4603,7 @@ switch ($Action) {
         }
 
         # Optional: psmux terminal multiplexer for session persistence. New
-        # installs use 3.3.8; existing compatible versions remain supported.
+        # installs use 3.4.0; live legacy providers are never replaced here.
         # See Ensure-Psmux (shared with 'update' so existing boxes self-heal).
         if (-not $ContextualInstall) {
             Ensure-Psmux

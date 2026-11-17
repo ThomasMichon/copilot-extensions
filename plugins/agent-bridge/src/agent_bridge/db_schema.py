@@ -1,6 +1,7 @@
 """Database schema bootstrap and migrations."""
 
 from __future__ import annotations
+from .message_contracts import prepare_schema as prepare_message_contracts
 
 import sqlite3
 from typing import TYPE_CHECKING
@@ -102,7 +103,10 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 39:
                     validate_exact_live_schema(conn)
                 if recorded is not None and recorded["version"] >= 41:
-                    validate_creation_writer_schema(conn, require_recovery=recorded["version"] >= 45)
+                    validate_creation_writer_schema(
+                        conn, require_recovery=recorded["version"] >= 45,
+                        require_metadata=recorded["version"] >= 49,
+                    )
                 if recorded is not None and recorded["version"] >= 43:
                     validate_mux_question_schema(conn)
                 if recorded is not None and recorded["version"] >= 44:
@@ -149,6 +153,7 @@ class _SchemaMixin:
                 if current < SCHEMA_VERSION:
                     self._migrate(conn, current)
             self._ensure_current_columns(conn)
+            prepare_message_contracts(conn)
             validate_schema(conn)
             validate_inbox_schema(conn)
             validate_consumer_schema(conn)
@@ -986,3 +991,9 @@ class _SchemaMixin:
                 validate_send_settlement(conn)
                 conn.execute("UPDATE schema_version SET version=?", (48,))
             log.info("Schema migrated to version 48: original native-send exclusion")
+
+        if from_version < 49:
+            from .creation_writer_schema import migrate_metadata
+
+            migrate_metadata(conn)
+            log.info("Schema migrated to version 49: retained metadata adoption and namespace exclusion")

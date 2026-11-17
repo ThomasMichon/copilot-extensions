@@ -342,6 +342,112 @@ can authorize recurring stage writes without a new human preview every hour,
 but is revalidated at each mutation; it cannot authorize service changes or
 carrier writes. On-demand staging preserves the normal preview/confirm owner.
 
+### Installed Linux job enrollment
+
+**Agent-recommended amendment: review before implementation.** This closes the
+remaining Linux lifecycle part of the existing platform acceptance; it does
+not enroll a Linux host or release any current receiving/carrier hold.
+`health_jobs.prepare` already renders inert systemd-user definitions, but those
+definitions still name replaceable payload paths. `health_enrollment.select`,
+the native backend, desired-state validation and `HealthJobResourceHandler`
+currently admit Windows only. Inert preparation is not Linux installed support.
+
+Extend the existing enrollment owner with a Linux native adapter. Reuse its
+preview/confirmation, serialized desired/confirmed/pending transaction,
+policy qualification and `versioned_runtime` reference custody. Keep Windows
+definitions, state and behavior compatible; do not make a Windows record valid
+on Linux by ignoring its SID or interpreting task XML as a unit. Introduce an
+explicit platform discriminator/version where the persisted contract needs
+different account or native-definition fields. Unknown state versions and
+cross-platform records refuse before native effects; any schema evolution
+retains deliberate disable/remove recovery through the owning version.
+
+#### Installed execution and local consent
+
+- Resolve one immutable installed Agent Machines slot and its complete retained
+  execution closure through the installation owner. Qualify collection support
+  from that exact interpreter's platform-correct package location; the current
+  Windows `Lib/site-packages` assumption is not portable. The finite action
+  invokes the retained runtime, not a checkout, mutable payload launcher, PATH
+  lookup, first-use installer or update command.
+- Reuse the native retained launch and bounded process owners without GUI
+  requirements on Linux. Preserve the existing parent collection budget and
+  cleanup reserve. The oneshot remains in its systemd invocation cgroup;
+  daemon escape/breakaway is inappropriate for this finite job. Missing runtime
+  support or an unavailable user manager refuses without provisioning,
+  enabling lingering, starting a user manager, prompting or using `sudo`.
+- Desired state continues to name only the explicit local store, exact policy
+  approval and enabled intent. Derive and verify the executing user through
+  native ownership; no remote account, arbitrary UID, executable, unit content,
+  credentials or synchronized enrollment policy is accepted. A requirement
+  package can converge an already adopted job, not create local consent.
+- Normal installer/runtime replacement and resource convergence retain the
+  existing opt-in and reference lifecycle. Missing desired state is inert.
+  Windows consent does not enroll Linux, and source qualification does not
+  authorize live registration on any other host.
+
+#### Native pair, settlement and rollback
+
+Use an installation-owned, collision-resistant service/timer pair within the
+current user's native configuration scope. Bind both exact names, file
+identities/content and manager readback to that installation. Refuse foreign
+definitions, links, drop-ins or override state that would alter the admitted
+execution; never overwrite another unit or merely trust its description.
+Distinguish absent, unavailable, conflicting and partially applied native state.
+
+Publish the service with its timer disabled, reload through the user manager
+and verify the loaded pair before enabling the adopted timer. Use an hourly UTC
+calendar with the existing post-boundary delay, persistent late-start coalescing,
+no restart policy and no per-missed-hour replay. Preserve the same on-time
+current-health/preceding-hour-service semantics as the manual operation.
+Systemd's oneshot/no-overlap behavior supplements, not replaces, the existing
+collection admission lock. A matching pair is unchanged: do not restart an
+active action or reset cadence just to converge.
+
+Treat publication of two files plus manager state as a journaled operation,
+not an atomic multi-file claim. Record pending intent and retain incumbent and
+candidate dependencies before effects. Re-read native state after an interrupted
+write, reload, enable, stop or remove; unknown outcomes do not justify another
+pair, duplicate invocation, releasing runtime references or a success report.
+Disable the timer before settling only its owned action/cgroup. Verify native
+exit and the complete pair's disabled/removed state before releasing references;
+leave health history, policy and unrelated units untouched.
+
+Replacement first validates candidate readiness and preserves before-state.
+If candidate registration fails, restore and read back a compatible known-good
+pair and report rollback separately from candidate readiness. An unavailable
+manager or unconfirmed process settlement remains an explicit owned recovery
+condition, not permission to kill a PID by name or declare removal. Preserve
+the installer contract: old-job reference retention protects its dependencies
+but does not veto an otherwise ready incoming installation.
+
+Expose configured, enabled, active invocation, absolute last execution/result
+and next scheduled execution separately. Missing native timestamps/results
+remain unknown; a successful manager command, enabled timer or report parser
+is not proof a real hourly action completed. Keep enrollment status independent
+from carrier receipt, receiving-mode readiness and peer observations.
+
+#### Dependency-ordered qualification
+
+1. Review and merge this Linux amendment before enabling any new implementation.
+2. Extend portable enrollment contracts with pure adapter controls: platform and
+   account isolation, exact support, foreign/overridden unit refusal, matching
+   no-op, changed preview, partial publication, unknown effects and compatible
+   rollback. Run the existing Windows controls to preserve that lane.
+3. Prove the normal installed CLI in an isolated Linux environment: fresh
+   enrollment and repeat convergence, retained launch after removing the
+   fixture checkout/payload, replacement/rollback, two accelerated calendar
+   cycles, late start, overlap, deadline/storage failures and exact cleanup.
+   The test owner supplies bounded leases and isolated units; it never
+   borrows a production unit, installs a system manager or changes lingering.
+   Without a real user manager, report that native lane unavailable rather
+   than substituting mocked commands for native qualification.
+4. Only after required source review/CI, promotion and separate target authority
+   may the selected Linux host adopt the job. Capture usable before-state,
+   rollback and post-change health; then prove an actual hourly execution and
+   persisted current/prior-hour coverage. Other-host rollout, real carrier
+   publication and peer receipt retain their existing independent gates.
+
 ## First complete flow and promotion gates
 
 Review and merge this amendment before runtime realization. Then deliver one

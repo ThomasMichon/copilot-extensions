@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+from collections.abc import Callable
+
 import importlib.util
 import hashlib
 import json
 import sys
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -17,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "promotion_retained_writer"
 
 
-def test_creation_cli_forwards_validated_writer_without_changing_creation(boundary):
+def test_creation_cli_forwards_validated_writer_without_changing_creation(boundary: Any) -> None:
     import argparse
     import io
 
@@ -30,9 +33,9 @@ def test_creation_cli_forwards_validated_writer_without_changing_creation(bounda
     requirement = b.request.worktree_writer.model_dump()
     b.monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(requirement)))
     validated = cli.validate_arguments(args)
-    output = []
+    output: list[dict[str, Any]] = []
 
-    def module(name, **attributes):
+    def module(name: Any, **attributes: Any) -> Any:
         value = ModuleType(name)
         value.__dict__.update(attributes)
         b.monkeypatch.setitem(sys.modules, f"{PACKAGE}.{name}", value)
@@ -56,7 +59,7 @@ def test_creation_cli_forwards_validated_writer_without_changing_creation(bounda
     )
     calls = []
 
-    def start(**kwargs):
+    def start(**kwargs: Any) -> Any:
         calls.append(kwargs)
         return {
             "session_id": "original-session",
@@ -84,7 +87,7 @@ def test_creation_cli_forwards_validated_writer_without_changing_creation(bounda
     ({"prompt": "-"}, "{}"), ({}, "not json"),
     ({"target": "remote-acp:fixture"}, "{}"), ({"target": "https://example.com/acp"}, "{}"),
 ])
-def test_creation_cli_refuses_invalid_writer_before_client(boundary, changes, text):
+def test_creation_cli_refuses_invalid_writer_before_client(boundary: Any, changes: Any, text: Any) -> None:
     import io
 
     cli = importlib.import_module(f"{PACKAGE}.workspace_creation_cli")
@@ -98,7 +101,7 @@ def test_creation_cli_refuses_invalid_writer_before_client(boundary, changes, te
     assert failure.value.code == 2
 
 
-def finish(coroutine):
+def finish(coroutine: Any) -> Any:
     try:
         coroutine.send(None)
     except StopIteration as result:
@@ -107,7 +110,7 @@ def finish(coroutine):
 
 
 class Refused(RuntimeError):
-    def __init__(self, code, message, *, effect=None):
+    def __init__(self, code: Any, message: Any, *, effect: Any=None) -> None:
         super().__init__(message)
         self.code = code
         self.effect = effect
@@ -128,8 +131,9 @@ class Request:
 
 
 @pytest.fixture
-def boundary(monkeypatch):
-    def module(name, **attributes):
+def boundary(monkeypatch: pytest.MonkeyPatch) -> Any:
+    requirement: SimpleNamespace
+    def module(name: Any, **attributes: Any) -> Any:
         value = ModuleType(name)
         value.__dict__.update(attributes)
         monkeypatch.setitem(sys.modules, name, value)
@@ -140,6 +144,9 @@ def boundary(monkeypatch):
     module(
         f"{PACKAGE}.acquisition_contract", AcquisitionRefused=Refused, AcquisitionRequest=Request,
         WorktreeWriterRequirement=SimpleNamespace(model_validate=lambda value: requirement),
+        InstalledWorktreeWriter=SimpleNamespace(model_validate=lambda value: SimpleNamespace(
+            installation_root=value["installation_root"], model_dump=lambda: value.copy(),
+        )),
     )
     module(f"{PACKAGE}.acquisition_journal", _digest=lambda request: request.delivery_id)
     module(
@@ -147,7 +154,7 @@ def boundary(monkeypatch):
         is_remote_address=lambda name: name.startswith("remote-acp:") or "://" in name,
     )
     module(f"{PACKAGE}._peer_launch", ContextRefused=Refused)
-    calls = []
+    calls: list[tuple[Any, ...]] = []
     prefix = ("/example/pinned-python", "/example/pinned-worktrees")
     identity = {
         "installation_root": str(Path("/example/installation")),
@@ -161,6 +168,15 @@ def boundary(monkeypatch):
         creation_nonce="original-nonce",
         model_dump=lambda: {"version": 1, "identity": identity.copy(), "creation_nonce": "original-nonce"},
     )
+    def copy_requirement(*, update: dict[str, Any]) -> SimpleNamespace:
+        selected = SimpleNamespace(**{**vars(requirement), **update})
+        selected.model_dump = lambda: {
+            "version": 1, "identity": selected.identity.model_dump(),
+            "creation_nonce": selected.creation_nonce,
+        }
+        return selected
+
+    requirement.model_copy = copy_requirement
     support = {
         "schema": "copilot-extensions.resource-relationship", "version": 1,
         "expected_creation_nonce": True, "expected_writer_identity": True,
@@ -172,11 +188,11 @@ def boundary(monkeypatch):
         },
     }
 
-    def select():
+    def select() -> Any:
         calls.append(("select", prefix))
         return prefix, Path(identity["installation_root"]), prefix[0]
 
-    async def command(args, project, *, owner_prefix):
+    async def command(args: Any, project: Any, *, owner_prefix: Any) -> Any:
         calls.append(("qualify", tuple(owner_prefix), tuple(args), project))
         return support
 
@@ -194,8 +210,8 @@ def boundary(monkeypatch):
     creation = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, name, creation)
     spec.loader.exec_module(creation)
-    rows = []
-    creation_rows = []
+    rows: list[dict[str, Any]] = []
+    creation_rows: list[dict[str, Any]] = []
     db = SimpleNamespace(execute_read=lambda sql, args: (
         creation_rows if "workspace_embodiments" in sql else rows
     ))
@@ -206,10 +222,10 @@ def boundary(monkeypatch):
     )
 
 
-def test_fresh_selection_and_recovery_reuse_original_prefix(boundary):
+def test_fresh_selection_and_recovery_reuse_original_prefix(boundary: Any) -> None:
     b = boundary
 
-    async def acquire():
+    async def acquire() -> Any:
         async with b.writer.acquisition_writer(b.db, b.request):
             assert b.writer.current().prefix == b.prefix
             document = b.writer.retained_document(b.request)
@@ -226,20 +242,25 @@ def test_fresh_selection_and_recovery_reuse_original_prefix(boundary):
         "data_json": json.dumps({"_worktree_writer": document}),
     })
     assert finish(acquire()) == document
-    assert [call[0] for call in b.calls] == ["select", "qualify", "qualify"]
+    assert [call[0] for call in b.calls] == ["select", "qualify", "select", "qualify"]
     assert all(call[1] == b.prefix for call in b.calls)
     assert b.request.worktree_writer.creation_nonce == "original-nonce"
+    original = b.request.worktree_writer.model_dump()
+    b.support["writer_identity"]["runtime_generation"] = "b" * 32
+    assert finish(acquire()) == document
+    assert b.request.worktree_writer.model_dump() == original
+    assert [call[0] for call in b.calls][-2:] == ["select", "qualify"]
 
 
 @pytest.mark.parametrize("field", [
     "writer_identity", "writer_scope", "expected_creation_nonce",
     "expected_writer_identity", "writer_contract", "retained_session_writes",
 ])
-def test_changed_or_missing_writer_refuses_before_context_admission(boundary, field):
+def test_changed_or_missing_writer_refuses_before_context_admission(boundary: Any, field: Any) -> None:
     b = boundary
     b.support[field] = None
 
-    async def acquire():
+    async def acquire() -> None:
         async with b.writer.acquisition_writer(b.db, b.request):
             raise AssertionError("incompatible writer admitted")
 
@@ -249,11 +270,11 @@ def test_changed_or_missing_writer_refuses_before_context_admission(boundary, fi
     assert b.writer.current() is None
 
 
-def test_recovery_missing_binding_never_recaptures_selection(boundary):
+def test_recovery_missing_binding_never_recaptures_selection(boundary: Any) -> None:
     b = boundary
     b.rows.append({"request_digest": b.request.delivery_id, "data_json": "{}"})
 
-    async def acquire():
+    async def acquire() -> None:
         async with b.writer.acquisition_writer(b.db, b.request):
             raise AssertionError("missing original binding admitted")
 
@@ -263,12 +284,12 @@ def test_recovery_missing_binding_never_recaptures_selection(boundary):
     assert b.calls == []
 
 
-def test_required_session_commands_carry_original_executing_scope(boundary):
+def test_required_session_commands_carry_original_executing_scope(boundary: Any) -> None:
     b = boundary
     legacy = ["register-session", "--session-id", "native-one"]
     assert b.writer.session_write_args(legacy) is legacy
 
-    async def acquire():
+    async def acquire() -> None:
         async with b.writer.acquisition_writer(b.db, b.request):
             for command in ("register-session", "bind-session", "link-succession"):
                 arguments = [command, "--worktree-id", b.request.worktree_id]
@@ -291,7 +312,7 @@ def test_required_session_commands_carry_original_executing_scope(boundary):
     "creation", "singleton", "caller", "legacy-acquisition",
     "explicit-missing", "attempt-incomplete", "attempt-malformed",
 ])
-def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch, operation, owner):
+def test_continuation_requires_an_actual_acquisition_owner(boundary: Any, monkeypatch: pytest.MonkeyPatch, operation: Any, owner: Any) -> None:
     b = boundary
     monkeypatch.setattr(
         b.writer, "AcquisitionRequest",
@@ -313,7 +334,7 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch
     session = SimpleNamespace(target=target, caller_id="acquisition:" + delivery)
     queries, effects = [], []
 
-    def read(sql, arguments):
+    def read(sql: Any, arguments: Any) -> Any:
         queries.append((sql, arguments))
         return b.creation_rows if "workspace_embodiments" in sql else b.rows
 
@@ -323,7 +344,7 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch
         _db=b.db,
     )
 
-    async def continuation(manager_arg, session_id, *, allow_recreate):
+    async def continuation(manager_arg: Any, session_id: Any, *, allow_recreate: Any) -> Any:
         effects.append((manager_arg, session_id, allow_recreate))
         return session
 
@@ -338,7 +359,9 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch
         assert finish(pending) is session
         assert effects == [(manager, "original-session", False)]
     assert len(queries) == 2
-    assert "workspace_embodiments" in queries[0][0] and queries[0][1] == ("original-session",)
+    assert "workspace_embodiments" in queries[0][0]
+    assert "json_extract(creation_adoption_json,'$.session_id')" in queries[0][0]
+    assert queries[0][1] == ("original-session", "original-session")
     assert "LEFT JOIN acquisition_effects" in queries[1][0] and queries[1][1] == (delivery,)
     assert not b.calls
     assert b.writer.current() is None
@@ -347,11 +370,11 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch
 @pytest.mark.parametrize("changed", [
     None, "nonce", "journal", "instance", "missing-launcher", "unreadable-record",
 ])
-def test_original_writer_inspection_rechecks_owner_without_selection(boundary, monkeypatch, changed):
+def test_original_writer_inspection_rechecks_owner_without_selection(boundary: Any, monkeypatch: pytest.MonkeyPatch, changed: Any) -> None:
     b = boundary
     contract = sys.modules[f"{PACKAGE}.acquisition_contract"]
     monkeypatch.setattr(contract, "AcquisitionRequest", SimpleNamespace(model_validate=lambda data: b.request))
-    slot = {"role": "active", "pid": 17, "active": {"pid": 17, "generation": 1}}
+    slot: dict[str, Any] = {"role": "active", "pid": 17, "active": {"pid": 17, "generation": 1}}
     for name, attributes in (
         ("config", {"config_dir": lambda: Path("/example/bridge")}),
         ("self_retire", {"slot_descriptor": lambda root: slot}),
@@ -370,11 +393,11 @@ def test_original_writer_inspection_rechecks_owner_without_selection(boundary, m
     b.rows.append(original.copy())
     authority = sys.modules[f"{PACKAGE}.acquisition_authority"]
     if changed == "missing-launcher":
-        async def missing(*args, **kwargs):
+        async def missing(*args: Any, **kwargs: Any) -> None:
             raise FileNotFoundError("original launcher unavailable")
         monkeypatch.setattr(authority, "worktree_command", missing)
 
-    async def record(worktree_id, project, *, command):
+    async def record(worktree_id: Any, project: Any, *, command: Any) -> Any:
         assert worktree_id == b.request.worktree_id and project == b.request.project
         assert command.keywords == {"owner_prefix": b.prefix}
         if changed == "journal":
@@ -407,11 +430,13 @@ def test_original_writer_inspection_rechecks_owner_without_selection(boundary, m
         assert observed["bridge_instance"]["generation"] == 1
         assert observed["reservation_key"] == b.request.reservation_key
         assert b.rows == [original]
-    assert [call[0] for call in b.calls] == ([] if changed == "missing-launcher" else ["qualify"])
+    assert [call[0] for call in b.calls] == (
+        ["select"] if changed == "missing-launcher" else ["select", "qualify"]
+    )
     assert b.writer.current() is None
 
 
-def test_receiving_scope_checks_locked_incarnation_and_resets_after_failure(monkeypatch):
+def test_receiving_scope_checks_locked_incarnation_and_resets_after_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     package = "promotion_receiving_writer"
     root = ROOT / "plugins/agent-worktrees/src/agent_worktrees"
     identity = {"installation_root": "/example/owner", "runtime_generation": "a" * 32}
@@ -445,8 +470,10 @@ def test_receiving_scope_checks_locked_incarnation_and_resets_after_failure(monk
         retained_record_writer=json.dumps(scope), worktree_id="original", session_id="native-one",
     )
 
-    @receiver.command
-    def command(_args):
+    decorate: Callable[[Callable[..., Any]], Callable[..., Any]] = receiver.command
+
+    @decorate
+    def command(_args: Any) -> Any:
         assert receiver.active()
         receiver.require_record(record)
         return "written"
@@ -458,10 +485,10 @@ def test_receiving_scope_checks_locked_incarnation_and_resets_after_failure(monk
     assert not receiver.active()
 
 
-def test_required_scope_refuses_another_workspace_and_propagates_lineage_error(boundary):
+def test_required_scope_refuses_another_workspace_and_propagates_lineage_error(boundary: Any) -> None:
     b = boundary
 
-    async def acquire():
+    async def acquire() -> None:
         async with b.writer.acquisition_writer(b.db, b.request):
             target = SimpleNamespace(
                 type="local", worktree_id=b.request.worktree_id,
@@ -486,10 +513,10 @@ def test_required_scope_refuses_another_workspace_and_propagates_lineage_error(b
         raise ValueError("legacy best effort remains unchanged")
 
 
-def test_required_cli_refuses_without_writer_or_native_effect(boundary):
+def test_required_cli_refuses_without_writer_or_native_effect(boundary: Any) -> None:
     b = boundary
 
-    async def acquire():
+    async def acquire() -> None:
         async with b.writer.acquisition_writer(b.db, replace(b.request, mode="cli")):
             raise AssertionError("unsupported CLI writer admitted")
 
@@ -500,7 +527,7 @@ def test_required_cli_refuses_without_writer_or_native_effect(boundary):
     assert b.calls == []
 
 
-def test_handoff_journal_keeps_original_successor_and_native_binding(boundary):
+def test_handoff_journal_keeps_original_successor_and_native_binding(boundary: Any) -> None:
     b = boundary
     stored = {
         "request_digest": b.request.delivery_id,
@@ -508,19 +535,19 @@ def test_handoff_journal_keeps_original_successor_and_native_binding(boundary):
     }
     writes = []
 
-    def execute(sql, params):
+    def execute(sql: Any, params: Any) -> Any:
         if sql.startswith("UPDATE"):
             stored["data_json"] = params[0]
             writes.append(params)
         return SimpleNamespace(fetchone=lambda: stored)
 
-    def transaction(*, write, full_sync):
+    def transaction(*, write: Any, full_sync: Any) -> Any:
         assert full_sync is True
         return nullcontext(SimpleNamespace(execute=execute))
 
     b.db._runtime_transaction = transaction
 
-    async def acquire():
+    async def acquire() -> None:
         async with b.writer.acquisition_writer(b.db, b.request):
             created = b.writer.handoff_state(b.db, "predecessor", create={
                 "successor_id": "original-successor", "seed_prompt": "original seed",
@@ -546,7 +573,7 @@ def test_handoff_journal_keeps_original_successor_and_native_binding(boundary):
 
 
 @pytest.fixture
-def creation_owner(boundary):
+def creation_owner(boundary: Any) -> Any:
     b = boundary
     requirement = b.request.worktree_writer
     facts = {
@@ -572,13 +599,13 @@ def creation_owner(boundary):
     b.creation_rows.append(row)
     workspace = ModuleType(f"{PACKAGE}.workspace_creation")
 
-    async def verify(project, worktree_id, *, expected):
+    async def verify(project: Any, worktree_id: Any, *, expected: Any) -> Any:
         assert b.writer.current().prefix == b.prefix
         assert (project, worktree_id, expected) == (saved["repo"], saved["id"], saved)
         b.calls.append(("record", b.prefix))
         return saved, {}
 
-    workspace._workspace = verify
+    setattr(workspace, "_workspace", verify)
     b.monkeypatch.setitem(sys.modules, workspace.__name__, workspace)
     target = SimpleNamespace(
         type="local", worktree_id=saved["id"], project=saved["repo"], cwd=saved["path"],
@@ -594,7 +621,7 @@ def creation_owner(boundary):
 
 
 @pytest.mark.parametrize("changed", [None, "pointer", "native", "journal"])
-def test_creation_continuation_retains_original_writer_and_never_recreates(creation_owner, changed):
+def test_creation_continuation_retains_original_writer_and_never_recreates(creation_owner: Any, changed: Any) -> None:
     b = creation_owner
     if changed == "pointer":
         b.session.target.venue.clear()
@@ -604,7 +631,7 @@ def test_creation_continuation_retains_original_writer_and_never_recreates(creat
         b.creation_rows.clear()
     effects = []
 
-    async def resume_session(manager, session_id, *, allow_recreate):
+    async def resume_session(manager: Any, session_id: Any, *, allow_recreate: Any) -> Any:
         effects.append((session_id, allow_recreate, b.writer.current().prefix))
         return b.session
 
@@ -619,13 +646,13 @@ def test_creation_continuation_retains_original_writer_and_never_recreates(creat
     else:
         assert finish(pending) == (True, b.session)
         assert effects == [("original-session", False, b.prefix)]
-        assert [call[0] for call in b.calls] == ["qualify", "record"]
+        assert [call[0] for call in b.calls] == ["select", "qualify", "record"]
     assert b.writer.current() is None
-    assert not any(call[0] == "select" for call in b.calls)
+    assert sum(call[0] == "select" for call in b.calls) == (0 if changed else 1)
 
 
 @pytest.mark.parametrize("changed", ["facts", "workspace", "runtime-owner", "binding"])
-def test_creation_binding_refuses_changed_original_custody(creation_owner, changed):
+def test_creation_binding_refuses_changed_original_custody(creation_owner: Any, changed: Any) -> None:
     b = creation_owner
     if changed == "facts":
         b.row["facts_digest"] = "c" * 64
@@ -642,11 +669,11 @@ def test_creation_binding_refuses_changed_original_custody(creation_owner, chang
     assert b.calls == []
 
 
-def test_creation_handoff_keeps_original_successor_and_unconfirmed_seed(creation_owner):
+def test_creation_handoff_keeps_original_successor_and_unconfirmed_seed(creation_owner: Any) -> None:
     b = creation_owner
     writes = []
 
-    def execute(sql, params):
+    def execute(sql: Any, params: Any) -> Any:
         if sql.startswith("UPDATE"):
             b.row["creation_handoffs_json"] = params[0]
             writes.append(params)
@@ -654,7 +681,7 @@ def test_creation_handoff_keeps_original_successor_and_unconfirmed_seed(creation
 
     b.db._runtime_transaction = lambda **kwargs: nullcontext(SimpleNamespace(execute=execute))
 
-    async def handoff():
+    async def handoff() -> None:
         async with b.creation.retained(b.db, b.row) as scope:
             b.writer.handoff_state(b.db, "original-session", create={
                 "successor_id": "original-successor", "seed_prompt": "original seed",
@@ -679,20 +706,20 @@ def test_creation_handoff_keeps_original_successor_and_unconfirmed_seed(creation
 @pytest.mark.parametrize("changed", [
     None, "native", "transport", "nonce", "journal", "instance", "readiness", "missing-launcher",
 ])
-def test_creation_inspection_requalifies_original_owner_without_effects(creation_owner, changed):
+def test_creation_inspection_requalifies_original_owner_without_effects(creation_owner: Any, changed: Any) -> None:
     b = creation_owner
     b.db.get_session = lambda ref: {"cold_recovery_stop_token": None}
     generation = [1]
     ready = [True]
     instance = ModuleType(f"{PACKAGE}.acquisition_writer_inspection")
-    instance._instance = lambda: {"generation": generation[0], "role": "active"}
+    setattr(instance, "_instance", lambda: {"generation": generation[0], "role": "active"})
     b.monkeypatch.setitem(sys.modules, instance.__name__, instance)
     if changed == "native":
         b.session.acp_session_id = "replacement"
     elif changed == "transport":
         b.session.target.remote_acp = {"host": "example"}
 
-    async def record(worktree_id, project, *, command):
+    async def record(worktree_id: Any, project: Any, *, command: Any) -> Any:
         assert command.keywords == {"owner_prefix": b.prefix}
         assert (worktree_id, project) == (b.saved["id"], b.saved["repo"])
         if changed == "journal":
@@ -709,7 +736,7 @@ def test_creation_inspection_requalifies_original_owner_without_effects(creation
     authority = sys.modules[f"{PACKAGE}.acquisition_authority"]
     b.monkeypatch.setattr(authority, "read_worktree_record", record, raising=False)
     if changed == "missing-launcher":
-        async def missing(*args, **kwargs):
+        async def missing(*args: Any, **kwargs: Any) -> None:
             raise FileNotFoundError("original launcher unavailable")
         b.monkeypatch.setattr(authority, "worktree_command", missing)
     name = f"{PACKAGE}.creation_writer_inspection"
@@ -733,5 +760,7 @@ def test_creation_inspection_requalifies_original_owner_without_effects(creation
         assert observed["key_digest"] == b.row["key_digest"]
         assert observed["native_session_id"] == b.row["native_session_id"]
         assert observed["worktree_writer"] == b.request.worktree_writer.model_dump()
-    assert not any(call[0] == "select" for call in b.calls)
+    assert sum(call[0] == "select" for call in b.calls) == (
+        0 if changed in {"native", "transport"} else 1
+    )
     assert b.writer.current() is None

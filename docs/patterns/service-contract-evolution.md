@@ -88,6 +88,32 @@ mechanism itself provider-first, rather than assuming old peers understand a new
 
 ## Roll out in phases: expand, migrate, contract
 
+### Durable state must not require its original executable
+
+Apply the same separation of build identity from contract support to retained
+conversations, requests and writer bindings. Preserve original build provenance
+as history, not as a requirement to execute that build forever. Prefer a
+versioned compatibility contract that newer code can satisfy while preserving
+the original resource identity, ownership, incarnation and operation semantics.
+
+Use an exact-build pin only to start a selected, contract-compatible daemon;
+it identifies that invocation, not the lifetime compatibility of its data.
+If a contract unavoidably contains build-specific data, make that data ephemeral
+or supply a contract adapter through which newer code can adopt it. Expiration
+must not discard unresolved effects, durable ownership or recovery history.
+An adapter interprets a documented legacy contract; it must not relabel old
+provenance as current, infer missing guarantees, or weaken unknown-outcome fences.
+
+Select a compatible executing owner through its existing installation and
+runtime-selection boundary. Keep historical writer facts distinct from the
+current executor and recheck required semantics at mutation. An unsupported or
+ambiguous record refuses the affected operation before effects, with a specific
+contract gap; that is not a permanent old-build requirement or an installer
+replacement veto. Qualify supported old records, current/prior peers and
+rollback through the real serialization boundary before enabling adoption.
+
+### Provider and consumer sequence
+
 1. **Expand providers first.** Receivers accept the new form while retaining the
    old form and its meaning. Publish the new support declaration through a seam
    existing consumers can safely ignore. A new command/argument remains unused

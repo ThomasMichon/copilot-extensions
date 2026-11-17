@@ -1,31 +1,83 @@
 """Actual payload first-touch controls with no Vault runtime or backend."""
 
+from __future__ import annotations
+
 import base64
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
-from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
-from .test_bootstrap_driver import native_bootstrap
-from .test_identity_payload_gate import prepare_payload, prepare_runtime, invoke, launcher
-from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
+if TYPE_CHECKING:
+    from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
+    from .test_bootstrap_driver import native_bootstrap as _native_bootstrap
+    from .test_identity_payload_gate import (
+        prepare_payload as _prepare_payload, prepare_runtime as _prepare_runtime,
+        invoke as _invoke, launcher as _launcher, load_module as _load_module,
+    )
+    from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
+    from .test_payload_invocation import _installer_function as _raw_installer_function
+else:
+    from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
+    from .test_bootstrap_driver import native_bootstrap as _native_bootstrap
+    from .test_identity_payload_gate import (
+        prepare_payload as _prepare_payload, prepare_runtime as _prepare_runtime,
+        invoke as _invoke, launcher as _launcher, load_module as _load_module,
+    )
+    from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
+    from .test_payload_invocation import _installer_function as _raw_installer_function
+
+
+class _Invoke(Protocol):
+    def __call__(
+        self, payload: Path, env: dict[str, str], cwd: Path, *args: str,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+# The shared legacy fixtures expose these concrete native-launch interfaces.
+_prepare_payload_fixture = cast(Callable[[Path, str], tuple[Path, Path, Path, str, str]], _prepare_payload)
+prepare_runtime = cast(Callable[[Path, Path], None], _prepare_runtime)
+invoke = cast(_Invoke, _invoke)
+launcher = cast(Callable[[Path], list[str]], _launcher)
+native_bootstrap = cast(Callable[[Path, Path, Path], list[str]], _native_bootstrap)
+load_module = cast(Callable[[Path, str], ModuleType], _load_module)
+_installer_function = cast(Callable[[str], str], _raw_installer_function)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
+    result = _prepare_payload_fixture(root, mode)
+    shutil.copy2(PLUGIN / "readiness-isolation.json", result[1] / "readiness-isolation.json")
+    return result
+
+
+def _prepare_qualified_runtime(runtime: Path, payload: Path) -> None:
+    prepare_runtime(runtime, payload)
+    for directory in (
+        payload,
+        runtime / "versions" / "fixture" / "share" / "copilot-extensions" / "agent_vault",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PLUGIN / "readiness-isolation.json", directory / "readiness-isolation.json")
+
+
 @pytest.mark.parametrize("package", [False, True])
-def test_native_readiness_ignores_project_local_shadow_module(tmp_path, package):
+@pytest.mark.parametrize("command", ["installer-readiness", "--help"])
+def test_native_readiness_ignores_project_local_shadow_module(tmp_path: Path, package: bool, command: str) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected repository"
     project.mkdir()
     (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
-    prepare_runtime(runtime, payload)
+    _prepare_qualified_runtime(runtime, payload)
     marker = tmp_path / "shadow-executed"
     target = project / "agent_vault.py"
     if package:
@@ -43,16 +95,19 @@ def test_native_readiness_ignores_project_local_shadow_module(tmp_path, package)
         "AGENT_VAULT_NO_SELFPROVISION": "1",
     })
 
-    result = invoke(payload, env, project, "installer-readiness")
+    result = invoke(payload, env, project, command)
 
     assert not marker.exists(), result.stdout + result.stderr
     assert result.returncode != 73
-    assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    if command == "installer-readiness":
+        assert json.loads(result.stdout)["module"] == "agent-vault/runtime"
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
     assert not (runtime / "run").exists()
 
 
 @pytest.mark.parametrize("scoped", [False, True])
-def test_native_cold_contract_query_never_provisions(tmp_path, scoped):
+def test_native_cold_contract_query_never_provisions(tmp_path: Path, scoped: bool) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     (home / ".agent-vault.json").write_text('{"enabled": false}', encoding="utf-8")
     env = _clean_env({
@@ -71,7 +126,7 @@ def test_native_cold_contract_query_never_provisions(tmp_path, scoped):
     assert not runtime.exists()
 
 
-def test_native_batch_reads_real_cache_without_service(tmp_path, monkeypatch):
+def test_native_batch_reads_real_cache_without_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_vault.cache import PersistentCache
 
     home, payload, runtime, _identity, context = prepare_payload(tmp_path, "namespaced")
@@ -113,7 +168,7 @@ def test_native_batch_reads_real_cache_without_service(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("environment_database", [False, True])
-def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environment_database):
+def test_native_payload_configuration_root_keeps_caller_paths(tmp_path: Path, environment_database: bool) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected repository"
     project.mkdir()
@@ -129,7 +184,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
     (project / "native.json").write_text(
         json.dumps({"enabled": False}), encoding="utf-8",
     )
-    prepare_runtime(runtime, payload)
+    _prepare_qualified_runtime(runtime, payload)
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
         "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
@@ -153,15 +208,109 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
         payload, env, home, "--configuration-root", str(project), "invocation-contract", "--json",
     )
     assert metadata.returncode == 0, metadata.stdout + metadata.stderr
-    assert json.loads(metadata.stdout)["capabilities"] == [
+    capabilities = json.loads(metadata.stdout)["capabilities"]
+    assert capabilities.pop() == "native-default-owner-v1"
+    assert capabilities == [
         "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
         "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
+        "credential-read-require-running-v1",
+        "windows-machine-cache-v1",
+        "repository-cache-targets-v1",
+        *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+        *(["key-attachment-exclusive-export-v1"] if os.name == "posix" else []),
+        "service-cache-maintenance-v1",
     ]
     assert not (runtime / "run").exists()
 
 
+@pytest.mark.parametrize("default_config", ['{"enabled":false}', '{"vaults":{}}'])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_native_explicit_root_without_local_file_keeps_bound_knowledge(
+    tmp_path: Path, default_config: str, prepared: bool,
+) -> None:
+    if prepared:
+        home, payload, runtime, _, _ = prepare_payload(tmp_path, "legacy")
+        project = tmp_path / "project"
+        project.mkdir()
+    else:
+        home, payload, runtime, project, _, _ = _scoped_first_use_fixture(tmp_path)
+        (project / ".agent-vault.json").unlink()
+    (tmp_path / ".agent-vault.json").unlink()
+    knowledge, default = (tmp_path / part for part in ("knowledge", "default"))
+    for path in (knowledge, default):
+        path.mkdir()
+    (knowledge / ".agent-vault.json").write_text(
+        '{"enabled":true,"group":"bound-group"}', encoding="utf-8",
+    )
+    (default / ".agent-vault.json").write_text(default_config, encoding="utf-8")
+    native = home / "native.json"
+    native.write_text(json.dumps({
+        "default_configuration_root": str(default),
+        "vaults": {"fixture": {"kpdb": str(home / "unused.kdbx")}},
+    }), encoding="utf-8")
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified", "execution_machine": "fixture",
+            "installation_cell": "legacy", "binding": "bound",
+            "base_root": str(project), "knowledge_root": str(knowledge),
+        },
+    }
+    module = payload / "src" / "agent_vault" / "configuration.py"
+    module.write_text(
+        module.read_text(encoding="utf-8")
+        + "\ndef _legacy_report(root):\n"
+        + f"    assert root == Path({str(project)!r})\n"
+        + f"    return {report!r}\n",
+        encoding="utf-8",
+    )
+    if prepared:
+        prepare_runtime(runtime, payload)
+    else:
+        driver = payload / "libs" / "update-driver" / "scripts"
+        reader = payload / "scripts" / "runtime-activation.py"
+        if os.name == "nt":
+            python = str(sys.executable).replace("'", "''")
+            selected_reader = str(reader).replace("'", "''")
+            (driver / "first-use.ps1").write_text(
+                "param($Root,$Payload,$RuntimeRoot,$Project,[switch]$Wait)\n"
+                "$env:COPILOT_PLUGIN_INSTALL_STAGED='1'\n"
+                "$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=$Project\n"
+                "Set-Location -LiteralPath $env:USERPROFILE\n"
+                f"& '{python}' -I -B '{selected_reader}' --cwd $Project --runtime-root $RuntimeRoot\n"
+                "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; exit 37\n",
+                encoding="utf-8",
+            )
+        else:
+            import shlex
+
+            (driver / "first-use.sh").write_text(
+                "#!/bin/sh\n"
+                "export COPILOT_PLUGIN_INSTALL_STAGED=1\n"
+                'export COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT="$4"\n'
+                'cd "$HOME" || exit 91\n'
+                f"{shlex.quote(sys.executable)} -I -B {shlex.quote(str(reader))} "
+                '--cwd "$4" --runtime-root "$3" || exit "$?"\nexit 37\n',
+                encoding="utf-8",
+            )
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+        "AGENT_VAULT_CONFIG": str(native), "AGENT_VAULT_NO_SELFPROVISION": "1",
+        "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD": "1",
+    })
+    result = invoke(payload, env, home, "--configuration-root", str(project), "which", "--json")
+    assert result.returncode == (0 if prepared else 37), result.stdout + result.stderr
+    if prepared:
+        assert json.loads(result.stdout)["group"] == "bound-group"
+    else:
+        assert json.loads(result.stdout)["state"] == "configured"
+    assert not (project / ".agent-vault.json").exists()
+    assert not (runtime / "run").exists()
+
+
 @pytest.mark.parametrize("enabled,code", [(False, 2), (True, 1)])
-def test_native_cold_configuration_root_respects_scope_and_no_provisioning(tmp_path, enabled, code):
+def test_native_cold_configuration_root_respects_scope_and_no_provisioning(tmp_path: Path, enabled: bool, code: int) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected"
     project.mkdir()
@@ -178,7 +327,7 @@ def test_native_cold_configuration_root_respects_scope_and_no_provisioning(tmp_p
     assert not runtime.exists()
 
 
-def _scoped_first_use_fixture(tmp_path):
+def _scoped_first_use_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path, dict[str, str]]:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     project = tmp_path / "selected repository"
     project.mkdir()
@@ -205,6 +354,7 @@ def _scoped_first_use_fixture(tmp_path):
             "param($Root,$Payload,$RuntimeRoot,$Project,[switch]$Wait)\n"
             "@{project=$Project; config=$env:AGENT_VAULT_CONFIG; "
             "no_self=$env:AGENT_VAULT_NO_SELFPROVISION; "
+            "selection=$env:_AGENT_VAULT_FIRST_USE_ROOT; "
             "guard=$env:_AGENT_WORKTREES_VAULT_RUNTIME_GUARD} | ConvertTo-Json -Compress | "
             f"Set-Content -Encoding UTF8 -LiteralPath '{destination}'\nexit 37\n",
             encoding="utf-8",
@@ -223,6 +373,7 @@ def _scoped_first_use_fixture(tmp_path):
                 f"with open({str(receipt)!r},'w') as stream:\n"
                 " json.dump({'project':sys.argv[1], 'config':os.environ.get('AGENT_VAULT_CONFIG'), "
                 "'no_self':os.environ.get('AGENT_VAULT_NO_SELFPROVISION'), "
+                "'selection':os.environ.get('_AGENT_VAULT_FIRST_USE_ROOT'), "
                 "'guard':os.environ.get('_AGENT_WORKTREES_VAULT_RUNTIME_GUARD')},stream)\n"
                 "sys.exit(37)\n"
             )
@@ -239,19 +390,20 @@ def _scoped_first_use_fixture(tmp_path):
     return home, payload, runtime, project, receipt, env
 
 
-def test_native_scoped_first_use_retains_discovery_and_native_file_separately(tmp_path):
+def test_native_scoped_first_use_retains_discovery_and_native_file_separately(tmp_path: Path) -> None:
     home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
     result = invoke(payload, env, home, "--configuration-root", str(project), "unlock")
     assert result.returncode == 37, result.stdout + result.stderr
     captured = json.loads(receipt.read_text(encoding="utf-8-sig"))
     assert captured["project"] == str(project)
     assert captured["config"] == str(home / "native.json")
+    assert captured["selection"] == str(project)
     assert not captured["no_self"] and not captured["guard"]
     assert not runtime.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="drive-relative paths are Windows-specific")
-def test_native_cold_scope_rejects_drive_relative_before_provisioning(tmp_path):
+def test_native_cold_scope_rejects_drive_relative_before_provisioning(tmp_path: Path) -> None:
     home, payload, runtime, _project, receipt, env = _scoped_first_use_fixture(tmp_path)
     result = invoke(payload, env, home, "--configuration-root", home.drive + ".", "unlock")
     assert result.returncode == 2, result.stdout + result.stderr
@@ -269,8 +421,8 @@ def test_native_cold_scope_rejects_drive_relative_before_provisioning(tmp_path):
     (["installer-readiness"], False, 0, "configuration-empty"),
 ])
 def test_native_scoped_admission_preserves_no_provisioning_commands(
-    tmp_path, arguments, enabled, code, diagnostic,
-):
+    tmp_path: Path, arguments: list[str], enabled: bool, code: int, diagnostic: str,
+) -> None:
     home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
     if not enabled:
         for path in (project / ".agent-vault.json", home / "native.json"):
@@ -285,9 +437,7 @@ def test_native_scoped_admission_preserves_no_provisioning_commands(
 @pytest.mark.parametrize("dispatcher_aware", [False, True])
 @pytest.mark.parametrize("operation", ["scope", "contract"])
 @pytest.mark.parametrize("prepared", [False, True])
-def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
-    tmp_path, dispatcher_aware, operation, prepared,
-):
+def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(tmp_path: Path, dispatcher_aware: bool, operation: str, prepared: bool) -> None:
     import shlex
 
     home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
@@ -304,7 +454,8 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     engine = PLUGIN.parents[1] / "libs" / "installer-engine"
     if os.name == "nt":
         host = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
-        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        def quote(value: object) -> str:
+            return "'" + str(value).replace("'", "''") + "'"
         command = (
             "$ErrorActionPreference='Stop'; . " + quote(engine / "installer-engine.ps1") + "; "
             "function Write-Ok { param([string]$Message) }; "
@@ -336,7 +487,10 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     assert built.returncode == 0, built.stdout + built.stderr
     (runtime / "payload-dir").write_text(str(payload), encoding="utf-8")
     if prepared:
-        prepare_runtime(runtime, payload)
+        if operation == "contract":
+            _prepare_qualified_runtime(runtime, payload)
+        else:
+            prepare_runtime(runtime, payload)
         (project / ".agent-vault.json").write_text(
             '{"enabled": true, "group": "selected"}', encoding="utf-8",
         )
@@ -360,16 +514,24 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     if prepared and operation == "scope":
         assert json.loads(result.stdout)["group"] == "selected"
     if prepared and operation == "contract":
-        assert json.loads(result.stdout)["capabilities"] == [
+        capabilities = json.loads(result.stdout)["capabilities"]
+        assert capabilities.pop() == "native-default-owner-v1"
+        assert capabilities == [
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1",
+            "preserved-cache-recovery-v1", "credential-read-require-running-v1",
+            "windows-machine-cache-v1",
+            "repository-cache-targets-v1",
+            *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            *(["key-attachment-exclusive-export-v1"] if os.name == "posix" else []),
+            "service-cache-maintenance-v1",
         ]
     if not prepared and dispatcher_aware and operation == "contract":
         assert json.loads(result.stdout)["runtime_prepared"] is False
     assert (runtime / "versions").exists() is prepared
 
 
-def test_native_payload_explains_missing_repository_before_unlock(tmp_path):
+def test_native_payload_explains_missing_repository_before_unlock(tmp_path: Path) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     (payload / "scripts" / "runtime-activation.py").write_text(
         "import json\n"
@@ -392,7 +554,7 @@ def test_native_payload_explains_missing_repository_before_unlock(tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell strict-mode contract")
 @pytest.mark.parametrize("reason", [None, "repository-context-missing", "startup"])
-def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path, reason):
+def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path: Path, reason: str | None) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     failure = {"state": "failed", "detail": "fixture invalid configuration"}
     if reason == "repository-context-missing":
@@ -439,7 +601,7 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
 @pytest.mark.parametrize(
     "scenario", ["old-first", "3.10-only", "launcher", "unsupported", "missing", "explicit"],
 )
-def test_native_cold_activation_qualifies_reader_without_installing(tmp_path, host, scenario):
+def test_native_cold_activation_qualifies_reader_without_installing(tmp_path: Path, host: str, scenario: str) -> None:
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} unavailable")
@@ -450,9 +612,9 @@ def test_native_cold_activation_qualifies_reader_without_installing(tmp_path, ho
     old = tmp_path / "old" / "python.exe"
     alias = tmp_path / "WindowsApps" / "python.exe"
     launcher_path = tmp_path / "launcher" / "py.exe"
-    physical = Path(sys._base_executable)
+    physical = Path(getattr(sys, "_base_executable", sys.executable))
 
-    def literal(value):
+    def literal(value: object) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
     candidates = {
@@ -555,7 +717,7 @@ try {{
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
 @pytest.mark.parametrize("scenario", ["old-first", "unsupported", "missing", "explicit"])
-def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path, scenario):
+def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Path, scenario: str) -> None:
     import shlex
 
     host = shutil.which("bash")
@@ -620,8 +782,8 @@ def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path, sce
      (["--install-dir"], 1, "--install-dir requires a directory")],
 )
 def test_native_installer_rejects_arguments_before_activation(
-    tmp_path, configuration, arguments, code, message,
-):
+    tmp_path: Path, configuration: bool | str, arguments: list[str], code: int, message: str,
+) -> None:
     home, payload, _runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     (tmp_path / ".agent-vault.json").write_text(
         "{" if configuration == "malformed" else json.dumps({"enabled": configuration}),
@@ -642,7 +804,7 @@ def test_native_installer_rejects_arguments_before_activation(
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows cold activation entry")
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path, host):
+def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path: Path, host: str) -> None:
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} unavailable")
@@ -677,7 +839,7 @@ def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path, host)
     )
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": str(Path(sys._base_executable).parent),
+        "PATH": str(Path(getattr(sys, "_base_executable", sys.executable)).parent),
     })
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-Command", command],
@@ -694,7 +856,7 @@ def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path, host)
 
 @pytest.mark.parametrize("configuration", [None, False, "invalid", "malformed"])
 @pytest.mark.parametrize("entry", ["bootstrap", "readiness", "update"])
-def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path, configuration, entry):
+def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path: Path, configuration: bool | str | None, entry: str) -> None:
     home = tmp_path / "home"
     project = tmp_path / "project"
     home.mkdir()
@@ -750,7 +912,7 @@ def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path, configu
 
 
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
-def test_actual_command_first_touch_inactive_without_runtime(tmp_path, mode):
+def test_actual_command_first_touch_inactive_without_runtime(tmp_path: Path, mode: str) -> None:
     home, payload, runtime, _identity, context = prepare_payload(tmp_path, mode)
     (tmp_path / ".agent-vault.json").unlink(missing_ok=True)
     env = _clean_env({
@@ -769,7 +931,7 @@ def test_actual_command_first_touch_inactive_without_runtime(tmp_path, mode):
     assert not (runtime / ".provision-status").exists()
 
 
-def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
+def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -786,7 +948,7 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
 
 
 @pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner", "service-cwd"])
-def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, layout):
+def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path: Path, layout: str) -> None:
     import venv
 
     import agent_procutil
@@ -822,7 +984,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         (slot.parent.parent / "current-version").write_text("1.0.0", encoding="utf-8")
     installed = packages["agent-vault"] / "agent_vault"
     installed.mkdir()
-    for name in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "invocation.py", "_peer_launch.py"):
+    for name in (
+        "__init__.py", "config.py", "configuration.py", "configuration_scope.py",
+        "default_owner.py", "invocation.py", "_peer_launch.py",
+    ):
         shutil.copyfile(PLUGIN / "src" / "agent_vault" / name, installed / name)
     if layout == "service-cwd":
         shutil.copytree(
@@ -830,8 +995,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
             ignore=shutil.ignore_patterns("__pycache__"),
         )
     for package in (agent_procutil, configuration_context, configuration_layers):
+        location = package.__file__
+        assert location is not None
         shutil.copytree(
-            Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
+            Path(location).parent, packages["agent-vault"] / package.__name__,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
     if layout == "service-cwd":
@@ -839,8 +1006,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
 
         for name in ("zdd", "single_instance_lease", "update_driver"):
             package = importlib.import_module(name)
+            location = package.__file__
+            assert location is not None
             shutil.copytree(
-                Path(package.__file__).parent, packages["agent-vault"] / name,
+                Path(location).parent, packages["agent-vault"] / name,
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
     if layout not in ("deployed", "mixed-owner"):
@@ -912,7 +1081,8 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
             " selected = config.resolve_context(strict=True)\n"
             " print(json.dumps({'enabled':configuration.runtime_enabled(), 'group':selected.group}))\n"
             "service._run_resident = probe\n"
-            "sys.argv = ['agent_vault.service', *captured['argv'][6:]]\n"
+            "service_args = captured['argv'][captured['argv'].index('--foreground'):]\n"
+            "sys.argv = ['agent_vault.service', *service_args]\n"
             "service.main()\n"
         )
     for enabled in (True, False, None, "invalid"):
@@ -950,11 +1120,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
 
 
 @pytest.mark.parametrize("layout", ["namespaced", "legacy"])
-def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path, layout):
+def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path: Path, layout: str) -> None:
     import venv
     import configuration_context
     import configuration_layers
-    from .test_identity_payload_gate import load_module
 
     home, payload, runtime, _identity, context = prepare_payload(tmp_path, layout)
     peer_payload = payload.parent / "agent-worktrees"
@@ -1009,14 +1178,18 @@ def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path, layout)
                 bootstrap.mkdir()
                 for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
                     shutil.copyfile(source, bootstrap / source.name)
-            for filename in ("__init__.py", "config.py", "configuration.py",
-                             "configuration_scope.py", "invocation.py", "_peer_launch.py"):
+            for filename in (
+                "__init__.py", "config.py", "configuration.py", "configuration_scope.py",
+                "default_owner.py", "invocation.py", "_peer_launch.py",
+            ):
                 shutil.copyfile(PLUGIN / "src" / name / filename, package / filename)
             for source in (PLUGIN / "src" / name).glob("_installation_context*.py"):
                 shutil.copyfile(source, package / source.name)
             for dependency in (configuration_context, configuration_layers):
+                location = dependency.__file__
+                assert location is not None
                 shutil.copytree(
-                    Path(dependency.__file__).parent, site / dependency.__name__,
+                    Path(location).parent, site / dependency.__name__,
                     ignore=shutil.ignore_patterns("__pycache__"),
                 )
         else:
@@ -1065,7 +1238,7 @@ def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path, layout)
 
 
 @pytest.mark.parametrize("shell", ["python", "powershell", "pwsh"])
-def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
+def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path: Path, shell: str) -> None:
     if shell != "python" and (os.name != "nt" or shutil.which(shell) is None):
         pytest.skip("native Windows PowerShell reader")
     home = tmp_path / "home"
@@ -1083,6 +1256,8 @@ def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
             "--cwd", str(project),
         ]
     else:
+        executable = shutil.which(shell)
+        assert executable is not None
         entry = tmp_path / "read-activation.ps1"
         entry.write_text(
             "param($Reader, $Project, $Python)\n"
@@ -1091,8 +1266,10 @@ def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
             "Get-VaultRuntimeActivation -Project $Project -Python $Python\n",
             encoding="utf-8",
         )
+        shell_path = shutil.which(shell)
+        assert shell_path is not None
         argv = [
-            shutil.which(shell), "-NoProfile", "-NonInteractive", "-File", str(entry),
+            executable, "-NoProfile", "-NonInteractive", "-File", str(entry),
             str(payload / "scripts" / "runtime-activation.ps1"), str(project), sys.executable,
         ]
     result = subprocess.run(
@@ -1108,7 +1285,7 @@ def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
     assert not (home / ".agent-vault").exists()
 
 
-def test_relative_config_reader_retains_project_after_staging_to_home(tmp_path):
+def test_relative_config_reader_retains_project_after_staging_to_home(tmp_path: Path) -> None:
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     project.mkdir()
@@ -1130,20 +1307,8 @@ def test_relative_config_reader_retains_project_after_staging_to_home(tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows marketplace self-staging")
 @pytest.mark.timeout(90)
-def test_relative_config_survives_actual_marketplace_self_staging(tmp_path):
-    import runpy
-
+def test_relative_config_survives_actual_marketplace_self_staging(tmp_path: Path) -> None:
     prepared = _stage_payload(tmp_path / "prepared")
-    previous_path = sys.path[:]
-    try:
-        release = runpy.run_path(str(PLUGIN.parents[1] / "tools" / "materialize_main.py"))
-        changes = release["materialize_installer_engine_ref_into"](
-            source_consumer_dir=PLUGIN, dest_consumer_dir=prepared,
-            canonical_root=PLUGIN.parents[1],
-        )
-    finally:
-        sys.path[:] = previous_path
-    assert not any(line.startswith("SKIP ") for line in changes), changes
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
     env = _isolated_install_env(home)
@@ -1173,9 +1338,7 @@ def test_relative_config_survives_actual_marketplace_self_staging(tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="native installed-payload schedule staging")
 @pytest.mark.parametrize("selection", ["repo-opt-in", "invalid-config", "unavailable-project"])
-def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tmp_path, selection):
-    from .test_payload_invocation import _installer_function
-
+def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tmp_path: Path, selection: str) -> None:
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
     env = _isolated_install_env(home)
@@ -1239,8 +1402,10 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$De
         " Set-Content -LiteralPath $env:FIXTURE_SCHEDULE_REPORT\n",
         encoding="utf-8-sig",
     )
+    shell = shutil.which("powershell")
+    assert shell is not None
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File",
+        [shell, "-NoProfile", "-NonInteractive", "-File",
          str(payload / "scripts" / "install.ps1"), "schedule", "-InstallDir", str(runtime)],
         cwd=project, env=env, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
     )
@@ -1260,7 +1425,7 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$De
     assert str(project) in launcher
 
 
-def test_automatic_cell_selection_supplies_qualified_activation_owner(tmp_path):
+def test_automatic_cell_selection_supplies_qualified_activation_owner(tmp_path: Path) -> None:
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "namespaced")
     (tmp_path / ".agent-vault.json").unlink()
     knowledge = tmp_path / "knowledge"

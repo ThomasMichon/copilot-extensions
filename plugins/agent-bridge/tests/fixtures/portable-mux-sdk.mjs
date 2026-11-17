@@ -89,29 +89,18 @@ const session = {
   },
   abort: async () => assert.fail("unexpected native abort"),
 };
+const sdkModule = await import("data:text/javascript," + encodeURIComponent(`
+  let session;
+  export function bindSession(value) { session = value; }
+  export async function loadExtensionSdk() {
+    return { joinSession: async () => session, approveAll: () => {} };
+  }
+`));
+sdkModule.bindSession(session);
 async function load(path, tail = "") {
   const source = readFileSync(path, "utf8");
-  const dependencies = {};
-  const imports = [...source.matchAll(/^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm)];
-  for (const [, , name] of imports) {
-    dependencies[name] = name === "@github/copilot-sdk" ? { approveAll: () => {} }
-      : name === "@github/copilot-sdk/extension" ? { joinSession: async () => session }
-        : await import(name.startsWith(".")
-          ? pathToFileURL(join(dirname(path), name)).href : name);
-  }
-  const linked = source.replace("export async function activateBridgeExtension", "async function activateBridgeExtension").replace(
-    /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm,
-    (_statement, names, name) => {
-      for (const binding of names.split(",").map((part) => part.trim()).filter(Boolean)) {
-        assert.match(binding, /^[A-Za-z_$][\w$]*$/);
-        assert.ok(Object.hasOwn(dependencies[name], binding));
-      }
-      return `const {${names}} = __dependencies[${JSON.stringify(name)}];`;
-    },
-  );
-  assert.doesNotMatch(linked, /^import\s/m);
   const context = vm.createContext({
-    __dependencies: dependencies, __session: session, __bridgeRoot: bridgeRoot,
+    __session: session, __bridgeRoot: bridgeRoot,
     process, Buffer, URL, AbortController,
     fetch: carrier, setTimeout, clearTimeout, clearInterval,
     setInterval: (fn, ms) => {
@@ -120,8 +109,23 @@ async function load(path, tail = "") {
       return timer;
     },
   });
-  return new vm.Script(`(async () => {\n${linked}\n${tail}\n})()`, { filename: path })
-    .runInContext(context);
+  const module = new vm.SourceTextModule(`${source}\n${tail}\n`, {
+    context, identifier: pathToFileURL(path).href,
+    initializeImportMeta: (meta) => { meta.url = pathToFileURL(path).href; },
+    importModuleDynamically: async (specifier) => {
+      assert.match(specifier, /\/sdk-compat\.mjs$/);
+      return sdkModule;
+    },
+  });
+  await module.link(async (name) => {
+    const values = await import(name.startsWith(".")
+      ? pathToFileURL(join(dirname(path), name)).href : name);
+    return new vm.SyntheticModule(Object.keys(values), function () {
+      for (const [key, value] of Object.entries(values)) this.setExport(key, value);
+    }, { context });
+  });
+  await module.evaluate();
+  return module.namespace.fixtureResult;
 }
 const headed = JSON.parse(process.env.COPILOT_DRIVER_HEADED_CLIENT);
 assert.equal(headed.sessionId, sid);
@@ -130,7 +134,7 @@ await load(join(dirname(headed.client), "extension.mjs"));
 emit({ stage: "loading driver extension" });
 driver = await load(
   join(driverRoot, "extensions", "agent-remote-driver", "extension.mjs"),
-  "return { driverServer, cleanupDescriptor };",
+  "export const fixtureResult = { driverServer, cleanupDescriptor };",
 );
 emit({ stage: "loading bridge extension" });
 await load(

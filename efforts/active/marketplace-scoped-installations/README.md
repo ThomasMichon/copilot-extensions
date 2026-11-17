@@ -79,6 +79,13 @@ remain outside this namespacing model.
 The continuing responsibilities below are retained while this effort is parked;
 they do not authorize execution or transfer an incumbent owner's scope.
 
+The finite #1176 runtime-agent authoring contract is retained through existing
+Phase 2/8 and migration-intake coordination, not a second implementation owner.
+Its [complete receiving Plan](../backlog-reconciliation/runtime-authoring-contract-receiving.md)
+preserves delivered definition/structural credit, independent finite acceptance,
+all incumbent owners and the execution park. General authoring requirements do
+not extend suite-private cell eligibility or require default hosts to use cells.
+
 The complete #3943 simultaneous-registration/metadata/lookup consumer lane continues
 through Phase 2/8 and assigned OPEN #1096 under the SAME
 source/registration/activation/installation/native custodians. Ordinary supported
@@ -470,6 +477,21 @@ direction reconciliation; coordinated under #1096 and #1103._
   blocked-governance, and Windows/POSIX parity coverage. Reconcile the
   original Validation Plan item by item before enabling blocking guards.
 
+### Finite runtime-agent authoring contract retained from #1176
+
+- [ ] Resolve the complete
+  [FC1176-P1-P8 Plan and V1-V4 validation](../backlog-reconciliation/runtime-authoring-contract-receiving.md#direct-receiving-plan-fc1176):
+  canonical complete shape; required/optional ownership/discovery/versioning;
+  minimal reference and before-release command OR equivalent CI rejecting
+  incomplete OR ambiguous plugins; attributable invocation; installed-payload
+  shim/catalog/capability agreement; installation-owned state and identities;
+  idempotent install/update/rollback/repair/adoption/uninstall with unavailable
+  optional services; and fixture/platform checks for Windows, Linux and WSL.
+  Credit delivered definition/structural guards without treating them as whole
+  behavior or imposing every unrelated #1096 item as this finite task's gate.
+  Existing Phase 8 blocking-enforcement, default-legacy/optional-coexistence,
+  suite-private cell scope, native waivers, custody and execution park remain.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (VEI + direct review)._
@@ -620,6 +642,14 @@ receipts; no actual registration, settings, namespace or native operation is aut
 
 ## Validation Plan
 
+- [ ] Complete every direct FC1176-P1-P8 and V1-V4 authoring-contract clause at
+  its original evidence tier, including installed-payload agreement, the
+  before-release command-OR-CI alternative, all six lifecycle operations,
+  unavailable optional services and Windows/Linux/WSL fixtures. Assess this
+  finite contract independently while preserving Phase 8's separate blocking
+  enforcement gate, all incumbent acceptance/owners and the execution park.
+  Reviewed planning is not implementation or installed/native qualification.
+
 - [ ] Resolve every direct #3943 simultaneous-registration/metadata/lookup/consumer
   clause at its original scope and evidence tier, preserving supported ordinary non-cell
   registration, optional coexistence, all incumbent
@@ -674,6 +704,19 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-11-16 - Finite runtime-agent authoring contract retained
+
+- Added the complete #1176 planned family through the existing Phase 2/8
+  migration-intake route, with direct Plan, global Validation and continuing
+  Coordination. The full receiving contract preserves every original clause
+  and literal alternative, delivered definition credit and actual owners.
+  Normal review, actual merge, direct #1096 body delivery and full readback
+  precede a separate source judgment; no disposition is claimed by this plan.
+- Status remains Blocked/parked. Every incumbent checkbox, #2701/#3943 and
+  inherited issue acceptance, native/diagnostic/release/source custody, default
+  legacy, optional coexistence, cell eligibility and activation restriction
+  remains unchanged. No capability execution or qualification is resumed.
 
 ### 2026-11-02 - Parked with delivered source and full acceptance retained
 

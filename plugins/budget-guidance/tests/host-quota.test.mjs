@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, cp, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -87,10 +87,20 @@ test("actual extension entry joins once with no startup read or extra authority"
     t.after(() => rm(root, { recursive: true }));
     await cp(fileURLToPath(new URL("../extensions/budget-guidance/", import.meta.url)),
         join(root, "extensions"), { recursive: true });
+    const helper = join(root, "extensions", "sdk-compat.mjs");
+    try {
+        await access(helper);
+    } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        await copyFile(fileURLToPath(new URL(
+            "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs",
+            import.meta.url,
+        )), helper);
+    }
     const sdkRoot = join(root, "node_modules", "@github", "copilot-sdk");
     await mkdir(sdkRoot, { recursive: true });
     await writeFile(join(sdkRoot, "package.json"), JSON.stringify({
-        type: "module", exports: { "./extension": "./extension.mjs" },
+        type: "module", exports: { ".": "./extension.mjs", "./extension": "./extension.mjs" },
     }));
     await copyFile(fileURLToPath(new URL("./fixtures/host-sdk.mjs", import.meta.url)),
         join(sdkRoot, "extension.mjs"));

@@ -14,6 +14,7 @@ ASSET_NAMES = (
     "questions.mjs",
     "remote-driver.mjs",
     "retained-delivery.mjs",
+    "sdk-compat.mjs",
 )
 
 

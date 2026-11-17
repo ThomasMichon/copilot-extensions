@@ -209,7 +209,7 @@ It never dispatches candidate CI.
 `native-resume-windows` is a separate, mandatory fifteen-minute Windows job for
 every composed promotion candidate, not an impact-selected PR test or part of
 unit coverage. It imports the same frozen candidate and uses the existing
-hash-pinned PSMux 3.3.8 dependency. The contained native packet starts four
+hash-pinned PSMux 3.4.0 dependency. The contained native packet starts four
 concurrent admitted cold Resume plans with PSMux prewarming enabled and disabled. It
 requires the production launcher, copied pane/startup readers, exact child
 arguments, acknowledged consumption, terminal attachment, detach without
@@ -598,9 +598,16 @@ permissions, and no persisted checkout credentials. Every Python plugin
 shares one toolchain venv; every bundle contains only its
 own wheel, required first-party library wheels and schema-3 manifest.
 The trusted validator requires the complete installed payload set to equal
-the candidate's Python sources plus its explicit package-data declarations,
-with matching bytes. Undeclared data, `.pth` files and script payloads fail
-closed; unsupported data-files or exclusion layouts do not receive signatures.
+the candidate's Python sources, explicit package-data declarations and supported
+static `data-files`, with matching bytes. Static data files may target only
+canonical relative `share/` destinations. Each installed `.data/data/share/`
+member binds to its explicitly listed regular, unlinked project source file;
+missing, altered or additional members fail closed. Build admission rejects
+absolute/parent paths, globbed source selectors, linked sources, source-hash
+exclusions (including build/cache paths and bytecode), trailing dots/spaces,
+ambiguous flattened file/directory destinations, Python startup hooks and non-share install layouts
+before toolchain resolution. Undeclared data, `.pth` files, script schemes and
+unsupported exclusion layouts still do not receive signatures.
 Both preparation and release-authorized promotion compose candidate data
 using tools and the projection manager from the pinned workflow-source
 checkout, never Python tooling imported from the candidate scratch tree.

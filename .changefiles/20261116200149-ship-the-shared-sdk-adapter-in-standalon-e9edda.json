@@ -1,0 +1,9 @@
+{
+  "comment": "Ship the shared SDK adapter in standalone and headed extension closures",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

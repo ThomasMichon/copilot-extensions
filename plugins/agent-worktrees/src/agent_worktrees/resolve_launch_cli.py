@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import dataclasses
 import os
 import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import ModuleType
+from typing import TYPE_CHECKING, ParamSpec, TypeVar, cast
 
 from . import activity, codename_tracking, git_ops, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write
 from . import config as cfg
+from .launch_preflight import LaunchPreflight
 from .resume_seed import (
     RETAINED_HANDOFF_WARNING, cold_start_error, plain_live_open,
     preserve_unconfirmed_seed, seed_for_attempt,
@@ -22,7 +25,14 @@ from .worktree_creation import LaunchSeedStagingFailure
 from .worktree_naming import prospective_session_worktree_id
 
 if TYPE_CHECKING:
-    from .__main__ import LaunchPreflight
+    from .claims_cli import CoordinationReadinessFailure
+    from .creation_allocation import AdmittedAllocation
+    from .creation_identity import IdentityMode
+    from .receiving_allocation import ReceivingAllocation
+    from .state_root import CoordinationReadiness
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 def emit_launch_preflight_error(
@@ -51,10 +61,10 @@ def preflight_launch(
         # until the allocated checkout can be checked at the receiving boundary.
         agent_policy.require(allocation_source if allocation_source is not None else work_dir)
     except AgentHostingError as exc:
-        return _core().LaunchPreflight(policy_error=str(exc))
+        return LaunchPreflight(policy_error=str(exc))
 
     recovery = getattr(args, "recovery", False)
-    preflight = _core().LaunchPreflight()
+    preflight = LaunchPreflight()
     if allocation_source is not None and not recovery:
         from .launch_preflight import new_authoring_preflight
 
@@ -72,77 +82,147 @@ def preflight_launch(
     return dataclasses.replace(preflight, config_root=config_root)
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[P, R]) -> Callable[P, R]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[P, R], candidate)
     return local
 
 
-def _build_env(*args, **kwargs):
-    return _core()._build_env(*args, **kwargs)
+def _build_env(
+    profile: cfg.CopilotProfile | None, session_env: dict[str, str] | None = None,
+    work_dir: str | None = None, *, config: cfg.Config | None = None,
+) -> dict[str, str]:
+    return _core_helper("_build_env", _build_env)(
+        profile, session_env, work_dir, config=config,
+    )
 
 
-def _build_launch_cmd(*args, **kwargs):
-    return _core()._build_launch_cmd(*args, **kwargs)
+def _build_launch_cmd(
+    config: cfg.Config, args: argparse.Namespace, work_dir: str,
+    profile: cfg.CopilotProfile | None = None, *, preflight: LaunchPreflight | None = None,
+    fallback_copilot_path: str | None = None,
+) -> list[str]:
+    return _core_helper("_build_launch_cmd", _build_launch_cmd)(
+        config, args, work_dir, profile, preflight=preflight,
+        fallback_copilot_path=fallback_copilot_path,
+    )
 
 
-def _coordination_failure_type():
-    return getattr(_core(), "CoordinationReadinessFailure")
+def _coordination_failure_type() -> type[CoordinationReadinessFailure]:
+    return cast(type["CoordinationReadinessFailure"], getattr(_core(), "CoordinationReadinessFailure"))
 
 
-def _create_worktree_core(*args, **kwargs):
-    return _core()._create_worktree_core(*args, **kwargs)
+def _create_worktree_core(
+    config: cfg.Config, *, profile: cfg.CopilotProfile | None = None,
+    profile_is_explicit: bool = True, no_mux: bool = False,
+    kind: tracking.WorktreeKind = "session", owner: str | None = None,
+    interface: tracking.WorktreeInterface | None = None,
+    origin: tracking.WorktreeOrigin | None = None, name: str | None = None,
+    parent_session: str | None = None, inherit_parent_session: bool = True,
+    caller_worktree: str | None = None, owner_ref: str | None = None,
+    dispatch_attempt: dict[str, object] | None = None,
+    launch_preflight: LaunchPreflight | None = None, recovery: bool = False,
+    bound_agent: str | None = None, no_pair: bool = False,
+    defer_projections: bool = False, pending_seed: str | None = None,
+    pending_seed_id: str | None = None, allocation: tuple[str, str] | None = None,
+    admitted_allocation: AdmittedAllocation | None = None, creation_key: str | None = None,
+    creation_intent: Callable[[dict[str, object]], None] | None = None,
+    identity_mode: IdentityMode = "legacy", build_launch_plan: bool = True,
+    receiving_allocation: ReceivingAllocation | None = None,
+) -> dict[str, object]:
+    return _core_helper("_create_worktree_core", _create_worktree_core)(
+        config, profile=profile, profile_is_explicit=profile_is_explicit, no_mux=no_mux,
+        kind=kind, owner=owner, interface=interface, origin=origin, name=name,
+        parent_session=parent_session, inherit_parent_session=inherit_parent_session,
+        caller_worktree=caller_worktree, owner_ref=owner_ref, dispatch_attempt=dispatch_attempt,
+        launch_preflight=launch_preflight, recovery=recovery, bound_agent=bound_agent,
+        no_pair=no_pair, defer_projections=defer_projections, pending_seed=pending_seed,
+        pending_seed_id=pending_seed_id, allocation=allocation,
+        admitted_allocation=admitted_allocation, creation_key=creation_key,
+        creation_intent=creation_intent, identity_mode=identity_mode,
+        build_launch_plan=build_launch_plan, receiving_allocation=receiving_allocation,
+    )
 
 
-def _emit_coordination_rejection(*args, **kwargs):
-    return _core()._emit_coordination_rejection(*args, **kwargs)
+def _emit_coordination_rejection(readiness: CoordinationReadiness, *, json_out: bool) -> int:
+    return _core_helper("_emit_coordination_rejection", _emit_coordination_rejection)(
+        readiness, json_out=json_out,
+    )
 
 
-def _emit_parent_context_hint(*args, **kwargs):
-    return _core()._emit_parent_context_hint(*args, **kwargs)
+def _emit_parent_context_hint(
+    record: tracking.WorktreeRecord, *, to_stderr: bool = False,
+) -> None:
+    _core_helper("_emit_parent_context_hint", _emit_parent_context_hint)(
+        record, to_stderr=to_stderr,
+    )
 
 
-def _emit_plan(*args, **kwargs):
-    return _core()._emit_plan(*args, **kwargs)
+def _emit_plan(plan: dict[str, object]) -> None:
+    _core_helper("_emit_plan", _emit_plan)(plan)
 
 
-def _launch_preflight_error(*args, **kwargs):
-    return _core()._launch_preflight_error(*args, **kwargs)
+def _launch_preflight_error(preflight: LaunchPreflight, *, json_output: bool = False) -> int:
+    return _core_helper("_launch_preflight_error", _launch_preflight_error)(
+        preflight, json_output=json_output,
+    )
 
 
-def _perform_remux(*args, **kwargs):
-    return _core()._perform_remux(*args, **kwargs)
+def _perform_remux(
+    *, worktree_id: str | None, session_id: str | None, worktree_path: str | None,
+    force_sudo: bool | None, apply_windows: bool, session_ids: list[str] | None = None,
+) -> dict[str, object]:
+    return _core_helper("_perform_remux", _perform_remux)(
+        worktree_id=worktree_id, session_id=session_id, worktree_path=worktree_path,
+        force_sudo=force_sudo, apply_windows=apply_windows, session_ids=session_ids,
+    )
 
 
-def _preflight_launch(*args, **kwargs):
-    return _core()._preflight_launch(*args, **kwargs)
+def _preflight_launch(
+    config: cfg.Config, args: argparse.Namespace, work_dir: str, *,
+    allocation_source: str | None = None,
+) -> LaunchPreflight:
+    return _core_helper("_preflight_launch", _preflight_launch)(
+        config, args, work_dir, allocation_source=allocation_source,
+    )
 
 
-def _repo_session_env(*args, **kwargs):
-    return _core()._repo_session_env(*args, **kwargs)
+def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
+    return _core_helper("_repo_session_env", _repo_session_env)(config, work_dir)
 
 
-def _worktree_to_dict(*args, **kwargs):
-    return _core()._worktree_to_dict(*args, **kwargs)
+def _worktree_to_dict(
+    rec: tracking.WorktreeRecord, *, state_info: git_ops.WorktreeStateInfo | None = None,
+    mux_info: sessions.MuxInfo | None = None, session_ctx: sessions.SessionContext | None = None,
+    bare_orphan_wts: set[str] | None = None, bridge_live_wts: set[str] | None = None,
+    include_profile_assignment_history: bool = False, current_only: bool = False,
+    claim_records: dict[tuple[str, str, str], tracking.WorktreeRecord] | None = None,
+) -> dict[str, object]:
+    return _core_helper("_worktree_to_dict", _worktree_to_dict)(
+        rec, state_info=state_info, mux_info=mux_info, session_ctx=session_ctx,
+        bare_orphan_wts=bare_orphan_wts, bridge_live_wts=bridge_live_wts,
+        include_profile_assignment_history=include_profile_assignment_history,
+        current_only=current_only, claim_records=claim_records,
+    )
 
 
 def _session_bind_project_key() -> str:
-    return getattr(_core(), "_SESSION_BIND_PROJECT")
+    return cast(str, getattr(_core(), "_SESSION_BIND_PROJECT"))
 
 
 def _session_bind_session_key() -> str:
-    return getattr(_core(), "_SESSION_BIND_SESSION")
+    return cast(str, getattr(_core(), "_SESSION_BIND_SESSION"))
 
 
 def _session_bind_worktree_key() -> str:
-    return getattr(_core(), "_SESSION_BIND_WORKTREE")
+    return cast(str, getattr(_core(), "_SESSION_BIND_WORKTREE"))
 
 
 @dataclasses.dataclass(slots=True)
@@ -154,7 +234,7 @@ class ResolveLaunchContext:
     profile: cfg.CopilotProfile | None = None
     profile_is_explicit: bool = True
     record: tracking.WorktreeRecord | None = None
-    launch_preflight: object | None = None
+    launch_preflight: LaunchPreflight | None = None
 
 
 def _resolve_profile(
@@ -301,8 +381,18 @@ def _dispatch_validate_profile_assignment_config(config: cfg.Config) -> None:
     )(config)
 
 
-def _dispatch_launch_profile_selection(*args, **kwargs):
-    return _core_helper("_launch_profile_selection", _launch_profile_selection)(*args, **kwargs)
+def _dispatch_launch_profile_selection(
+    config: cfg.Config, args: argparse.Namespace, record: tracking.WorktreeRecord | None,
+    *, lane: str, generation_key: str, ordinary_profile: cfg.CopilotProfile | None = None,
+    explicit_profile: cfg.CopilotProfile | None = None, resume_session: str | None = None,
+    predecessor_session: str | None = None, allocate_new: bool = True,
+) -> profile_assignment.LaunchProfileSelection:
+    return _core_helper("_launch_profile_selection", _launch_profile_selection)(
+        config, args, record, lane=lane, generation_key=generation_key,
+        ordinary_profile=ordinary_profile, explicit_profile=explicit_profile,
+        resume_session=resume_session, predecessor_session=predecessor_session,
+        allocate_new=allocate_new,
+    )
 
 
 def _dispatch_reflect_assignment(
@@ -402,7 +492,7 @@ def _resolve_resume(
     args: argparse.Namespace,
     profile: cfg.CopilotProfile | None = None,
     profile_is_explicit: bool = True,
-    launch_preflight=None,
+    launch_preflight: LaunchPreflight | None = None,
 ) -> int:
     """Resolve launch plan for resuming an existing worktree."""
     return _resolve_resume_context(
@@ -642,6 +732,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
             return 3
     if seed_pending:
+        assert staged_seed is not None
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id, prepare_native=not args.dry_run,
             environment=merged_env,
@@ -678,10 +769,11 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         "pane_shell_version": 1,
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
+        "mux_join_existing": bool(verdict and verdict.mux_probe_ok and verdict.mux_live),
         "seed_claimed": False,
         "seed_pending": seed_pending,
-        "seed_id": staged_seed.seed_id if seed_pending else None,
-        "seed_kind": staged_seed.kind if seed_pending else None,
+        "seed_id": staged_seed.seed_id if seed_pending and staged_seed is not None else None,
+        "seed_kind": staged_seed.kind if seed_pending and staged_seed is not None else None,
         "project": config.repo_name,
     }
     if selection.assignment is not None:
@@ -816,7 +908,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
     _emit_plan(
         {
             "action": "exec",
-            **result["launch"],
+            **cast(dict[str, object], result["launch"]),
         }
     )
     return 0

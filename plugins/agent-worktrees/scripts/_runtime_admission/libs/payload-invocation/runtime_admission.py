@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 from pathlib import Path
 import stat
@@ -21,11 +22,26 @@ _IGNORED = {"tests", "__pycache__", ".venv", ".test-runs", "build", "dist"}
 _RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz"}
 _RESOURCES = (
     "libs/payload-invocation/generate.py",
+    "libs/payload-invocation/bootstrap_python.py",
     "libs/payload-invocation/runtime_admission.py",
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",
 )
+
+
+def bootstrap_files(manifest: Path, data: dict[str, object]) -> dict[Path, str]:
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec = spec_from_file_location("_bootstrap_python", Path(__file__).with_name("bootstrap_python.py"))
+        assert spec and spec.loader
+        bootstrap = module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        outputs: dict[Path, str] = bootstrap.expected_files(manifest, data)
+        return outputs
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
 
 
 def _ordinary(path: Path, root: Path) -> None:

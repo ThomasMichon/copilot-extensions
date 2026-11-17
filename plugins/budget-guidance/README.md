@@ -64,6 +64,10 @@ readers or refreshes a provider, and uses a reviewed pointer plus a separate
 static advisory boundary. It requires an available Python 3.10+ interpreter
 without provisioning one. The payload retains its command catalog emitter,
 but does not register a competing startup context producer.
+The standalone cue disables bytecode before importing its payload source, so
+cold and resumed reads preserve every installed payload entry. Imported callers,
+posture decisions, provider-refresh restrictions and the existing deadlines
+remain unchanged.
 Direct plugin-owned startup guidance remains a future seam after native host
 composition is proven at the supported Copilot CLI version floor.
 

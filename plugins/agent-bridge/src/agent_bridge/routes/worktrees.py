@@ -12,11 +12,13 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from ..agent_registry import AgentConfig, AgentResolver
 from ..loop_governance import LoopGovernance
@@ -210,7 +212,7 @@ class WorktreeDiscoveryCache:
             task = asyncio.create_task(_probe_archived_owner(worktree_id, resolver))
             self._archive_probe_inflight[worktree_id] = task
 
-            def _evict(t: asyncio.Task, wid: str = worktree_id) -> None:
+            def _evict(t: asyncio.Task[tuple[str, AgentConfig] | None], wid: str = worktree_id) -> None:
                 if self._archive_probe_inflight.get(wid) is t:
                     del self._archive_probe_inflight[wid]
 
@@ -235,7 +237,7 @@ class WorktreeDiscoveryCache:
             task = asyncio.create_task(_probe_live_worktree(worktree_id, resolver))
             self._live_probe_inflight[worktree_id] = task
 
-            def _evict(t: asyncio.Task, wid: str = worktree_id) -> None:
+            def _evict(t: asyncio.Task[tuple[str, _WorktreeEntry] | None], wid: str = worktree_id) -> None:
                 if self._live_probe_inflight.get(wid) is t:
                     del self._live_probe_inflight[wid]
 
@@ -300,11 +302,11 @@ class WorktreeDiscoveryCache:
               for name, cfg in eligible),
             return_exceptions=True,
         )
-        result = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
-        if result is not None and result.get("status") != "ready":
+        governance = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
+        if governance is not None and governance.get("status") != "ready":
             raise RuntimeError(
                 "worktree discovery governance changed before cache update: "
-                f"{result.get('reason')}"
+                f"{governance.get('reason')}"
             )
 
         self._sync_sources(self._resolver if self._resolver is not None else resolver)
@@ -371,7 +373,7 @@ class WorktreeDiscoveryCache:
                 host = target.host or config.host
                 user = target.user or config.ssh_user
 
-        async def _run(args: list[str], *, timeout: float | None = None):
+        async def _run(args: list[str], *, timeout: float | None = None) -> tuple[str | None, str]:
             if is_local:
                 return await _run_local_ex(project, args, timeout=timeout)
             return await _run_ssh_ex(
@@ -599,7 +601,7 @@ def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
     if proc is None or proc.returncode is not None:
         return
     pid = proc.pid
-    if hasattr(os, "killpg") and hasattr(os, "getpgid"):
+    if sys.platform != "win32" and hasattr(os, "killpg") and hasattr(os, "getpgid"):
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return
@@ -705,9 +707,9 @@ async def list_worktrees(
     that have been deleted from disk are not returned (the binstub only
     reports what physically exists).
 
-    Each worktree is decorated with linkage to its most recent bridge
-    session (if any) so consumers can load history, resume, or detect a
-    session that is still live:
+    Each worktree prefers a live qualified bridge record over an inactive
+    predecessor, retaining recency within each class, so consumers can load
+    history, resume, or detect a session that is still live:
 
     - ``session_id``: latest bridge session for this worktree, or None
     - ``acp_session_id``: that session's ACP-sourced id (durable identity),
@@ -746,20 +748,40 @@ async def list_worktrees(
     metadata = cache.render_snapshot() if render and not refresh else cache._refresh.metadata()
     groups = cache.get_all()
 
-    # Build worktree_id -> latest bridge session map for linkage. A worktree
-    # may have had several sessions over its life; list_sessions() is
-    # already sorted newest-first, so the first match per worktree wins.
-    latest_by_wt: dict[str, Any] = {}
+    sessions_by_wt: dict[str, list[Any]] = {}
     mgr = getattr(request.app.state, "session_manager", None)
+    resolver = getattr(request.app.state, "resolver", None)
     if mgr is not None:
         for session in mgr.list_sessions():
             wt_id = getattr(session.target, "worktree_id", None)
-            if wt_id and wt_id not in latest_by_wt:
-                latest_by_wt[wt_id] = session
+            if wt_id:
+                sessions_by_wt.setdefault(wt_id, []).append(session)
 
-    def _decorate(wt: _WorktreeEntry) -> dict[str, Any]:
+    from ..workspace_transport_identity import identity as transport_identity
+
+    owner_targets: dict[str, tuple[str, str | None] | None] = {}
+
+    def _decorate(owner: str, wt: _WorktreeEntry) -> dict[str, Any]:
         entry = wt.to_dict()
-        session = latest_by_wt.get(wt.id)
+        config = getattr(resolver, "agents", {}).get(owner)
+        candidates = [
+            candidate for candidate in sessions_by_wt.get(wt.id, [])
+            if config is not None and isinstance(config.project, str)
+            and candidate.agent_name == owner
+            and candidate.target.project == config.project and candidate.target.cwd == wt.path
+        ]
+        candidates.sort(
+            key=lambda candidate: candidate.status.value in {"created", "starting", "running", "idle"},
+            reverse=True,
+        )
+        if resolver is not None and candidates and owner not in owner_targets:
+            owner_targets[owner] = transport_identity(resolver, owner)
+        expected = owner_targets.get(owner)
+        session = next((
+            candidate for candidate in candidates
+            if expected is not None
+            and (candidate.target.type, candidate.target.host) == expected
+        ), None)
         if session is not None:
             public_status, at_rest, _liveness = session.public_state()
             status = public_status.value
@@ -782,7 +804,7 @@ async def list_worktrees(
 
     return {
         "groups": {
-            name: [_decorate(wt) for wt in worktrees]
+            name: [_decorate(name, wt) for wt in worktrees]
             for name, worktrees in groups.items()
         },
         "discovery": metadata,
@@ -802,7 +824,7 @@ def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
 async def resume_worktree(
     worktree_id: str, request: Request, reclaim: bool = False, strict: bool = False
-) -> SessionInfo:
+) -> SessionInfo | JSONResponse:
     """Keep the original HTTP shape while always preserving the native head."""
     from ..worktree_native_resume import resume_native_worktree
 
@@ -828,7 +850,7 @@ async def handoff_worktree(
 
     mgr = getattr(request.app.state, "session_manager", None)
     session = _latest_session_for_worktree(mgr, worktree_id)
-    if session is None:
+    if mgr is None or session is None:
         raise HTTPException(
             status_code=404,
             detail=f"No session found for worktree {worktree_id}",
@@ -881,7 +903,7 @@ async def handoff_worktree_request(
 
     mgr = getattr(request.app.state, "session_manager", None)
     session = _latest_session_for_worktree(mgr, worktree_id)
-    if session is None:
+    if mgr is None or session is None:
         raise HTTPException(
             status_code=404,
             detail=f"No session found for worktree {worktree_id}",
@@ -950,12 +972,16 @@ async def _run_for_agent(
     if _is_local_target(target.host, resolver, target.execution_space_key):
         return await _run_local(config.project, args)
 
+    if target.ssh_shell in {"pwsh", "powershell", "cmd"}:
+        return await _run_ssh(
+            host=target.host or config.host, user=target.user or config.ssh_user,
+            project=config.project, args=args, ssh_shell=target.ssh_shell,
+        )
     return await _run_ssh(
         host=target.host or config.host,
         user=target.user or config.ssh_user,
         project=config.project,
         args=args,
-        **({"ssh_shell": target.ssh_shell} if target.ssh_shell in {"pwsh", "powershell", "cmd"} else {}),
     )
 
 

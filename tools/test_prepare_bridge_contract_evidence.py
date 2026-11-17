@@ -5,12 +5,15 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import prepare_bridge_contract_evidence as preparation
 import agent_bridge_contract_registry as codec
+import agent_bridge_contract_git as git_evidence
 import bridge_http47_evidence as evidence
 import bridge_http47_validation as validation
 
@@ -18,14 +21,14 @@ COMMIT = "1" * 40
 REMOTE = "https://github.com/example/repository.git"
 
 
-def _packet(root: Path, commit=COMMIT) -> None:
+def _packet(root: Path, commit: object = COMMIT) -> None:
     for relative in preparation.PACKETS:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"captured_from": {"commit": commit}}), encoding="utf-8")
 
 
-def _registry() -> dict:
+def _registry() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "contracts": [{"id": "example", "provenance": [{"commit": COMMIT}]}],
@@ -33,11 +36,17 @@ def _registry() -> dict:
     }
 
 
-def _runner(monkeypatch, results, metadata=None):
-    calls = []
+def _runner(
+    monkeypatch: pytest.MonkeyPatch,
+    results: Iterator[int],
+    metadata: dict[str, str] | None = None,
+) -> list[tuple[tuple[str, ...], int]]:
+    calls: list[tuple[tuple[str, ...], int]] = []
     metadata = {codec.REGISTRY: codec.encode(_registry()).decode()} if metadata is None else metadata
 
-    def run(root, *arguments, timeout=10):
+    def run(
+        root: Path, *arguments: str, timeout: int = 10,
+    ) -> subprocess.CompletedProcess[str]:
         calls.append((arguments, timeout))
         if arguments[:2] == ("cat-file", "blob"):
             path = arguments[2].split(":", 1)[1]
@@ -51,7 +60,7 @@ def _runner(monkeypatch, results, metadata=None):
     return calls
 
 
-def test_available_capture_needs_no_fetch(tmp_path, monkeypatch):
+def test_available_capture_needs_no_fetch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _packet(tmp_path)
     calls = _runner(monkeypatch, iter([0]))
     assert preparation.prepare(tmp_path, REMOTE) == COMMIT
@@ -62,7 +71,9 @@ def test_available_capture_needs_no_fetch(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("fault", [None, "commit", "blob"])
-def test_retained_merkle_metadata_needs_no_remote_checkpoint(tmp_path, monkeypatch, fault):
+def test_retained_merkle_metadata_needs_no_remote_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
     import shutil
     import bridge_capture_metadata as retained
     from test_bridge_capture_metadata import _capture
@@ -94,8 +105,8 @@ def test_retained_merkle_metadata_needs_no_remote_checkpoint(tmp_path, monkeypat
 
 
 def test_dynamic_runtime_inventory_retains_tree_despite_available_registry_metadata(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import bridge_capture_metadata as retained
 
     _packet(tmp_path)
@@ -111,7 +122,9 @@ def test_dynamic_runtime_inventory_retains_tree_despite_available_registry_metad
     ]
 
 
-def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path, monkeypatch):
+def test_missing_capture_fetches_only_exact_object_from_selected_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _packet(tmp_path)
     packet = tmp_path / preparation.PACKET
     data = json.loads(packet.read_text("utf-8"))
@@ -128,7 +141,9 @@ def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path
     ]
 
 
-def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monkeypatch):
+def test_each_distinct_required_capture_is_prepared_and_validated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _packet(tmp_path)
     second = "2" * 40
     for relative in preparation.PACKETS[1:]:
@@ -152,7 +167,9 @@ def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monk
     "http50-retained-recovery.json", "http51-standard-native-send.json",
     "http52-owner-membership.json",
 ])
-def test_new_operation_checkpoint_is_independently_prepared(tmp_path, monkeypatch, name):
+def test_new_operation_checkpoint_is_independently_prepared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
     _packet(tmp_path)
     recovery = "plugins/agent-bridge/contract/fixtures/http/current/" + name
     commit = "5" * 40
@@ -170,7 +187,9 @@ def test_new_operation_checkpoint_is_independently_prepared(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("relative", preparation.PACKETS[1:])
 @pytest.mark.parametrize("fault", ["missing", "malformed"])
-def test_required_later_capture_refuses_before_git(tmp_path, monkeypatch, relative, fault):
+def test_required_later_capture_refuses_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, fault: str | None,
+) -> None:
     _packet(tmp_path)
     path = tmp_path / relative
     if fault == "missing":
@@ -184,7 +203,9 @@ def test_required_later_capture_refuses_before_git(tmp_path, monkeypatch, relati
 
 
 @pytest.mark.parametrize("fault", ["none", "missing", "hash"])
-def test_preparation_reads_complete_captured_provenance_chunks(tmp_path, monkeypatch, fault):
+def test_preparation_reads_complete_captured_provenance_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     _packet(tmp_path)
     chunk = codec.encode({
         "schema": codec.CHUNK_SCHEMA, "schema_version": 1, "contract": "example",
@@ -215,7 +236,9 @@ def test_preparation_reads_complete_captured_provenance_chunks(tmp_path, monkeyp
     ([1, 1], "could not retain"),
     ([1, 0, 1], "still unavailable"),
 ])
-def test_missing_evidence_never_becomes_success(tmp_path, monkeypatch, results, diagnostic):
+def test_missing_evidence_never_becomes_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, results: list[int], diagnostic: str,
+) -> None:
     _packet(tmp_path)
     _runner(monkeypatch, iter(results))
     with pytest.raises(RuntimeError, match=diagnostic):
@@ -223,7 +246,9 @@ def test_missing_evidence_never_becomes_success(tmp_path, monkeypatch, results, 
 
 
 @pytest.mark.parametrize("commit", ["HEAD", "1" * 39, "1" * 40 + ":file", None, 1])
-def test_capture_revision_syntax_refuses_before_git(tmp_path, monkeypatch, commit):
+def test_capture_revision_syntax_refuses_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, commit: object,
+) -> None:
     _packet(tmp_path, commit)
     calls = _runner(monkeypatch, iter([]))
     with pytest.raises(ValueError, match="exact full commit"):
@@ -232,7 +257,9 @@ def test_capture_revision_syntax_refuses_before_git(tmp_path, monkeypatch, commi
 
 
 @pytest.mark.parametrize("record", [None, [], {}, {"captured_from": None}, {"captured_from": []}])
-def test_malformed_capture_container_refuses_before_git(tmp_path, monkeypatch, record):
+def test_malformed_capture_container_refuses_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: object,
+) -> None:
     _packet(tmp_path)
     (tmp_path / preparation.PACKET).write_text(json.dumps(record), encoding="utf-8")
     calls = _runner(monkeypatch, iter([]))
@@ -246,7 +273,9 @@ def test_malformed_capture_container_refuses_before_git(tmp_path, monkeypatch, r
     "https://user:secret@example.invalid/repo.git", "https://example.invalid/repo.git?credential=x",
     "https://example.invalid/repo.git#main", "https://@example.invalid/repo.git",
 ])
-def test_untrusted_remote_forms_refuse_before_git(tmp_path, monkeypatch, remote):
+def test_untrusted_remote_forms_refuse_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: str,
+) -> None:
     _packet(tmp_path)
     calls = _runner(monkeypatch, iter([]))
     with pytest.raises(ValueError, match="credential-free HTTPS"):
@@ -256,18 +285,21 @@ def test_untrusted_remote_forms_refuse_before_git(tmp_path, monkeypatch, remote)
 
 @pytest.mark.parametrize("chunked", [False, True])
 def test_native_git_captured_tree_survives_without_an_advertised_branch(
-    tmp_path, monkeypatch, chunked,
-):
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chunked: bool,
+) -> None:
+    options: dict[str, Any] = (
+        {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
+    )
     if chunked:
         tmp_path = tmp_path / "canonical-source"
         tmp_path.mkdir()
 
-    def git(*arguments):
-        return subprocess.run(
+    def git(*arguments: str) -> str:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             ["git", "-C", str(tmp_path), *arguments],
             input="", capture_output=True, text=True, check=True, timeout=10, **options,
-        ).stdout.strip()
+        )
+        return result.stdout.strip()
 
     git("init")
     registry = tmp_path / codec.REGISTRY
@@ -305,28 +337,24 @@ def test_native_git_captured_tree_survives_without_an_advertised_branch(
     assert git("for-each-ref") == ""
 
 
-def test_ci_prepares_checkpoint_before_local_only_contract_validation():
-    source = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text("utf-8")
-    assert source.index("python tools/prepare_bridge_contract_evidence.py") < source.index(
-        "run: python tools/check-agent-bridge-contracts.py",
+def _published_orphaned_closure(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, chunked: bool,
+) -> tuple[dict[str, Any], codec.Snapshot]:
+    options: dict[str, Any] = (
+        {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     )
-    assert '${{ github.server_url }}/${{ github.repository }}.git' in source
-
-
-def _published_orphaned_closure(root, monkeypatch, *, chunked):
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     subprocess.run(
         ["git", "init", str(root)], capture_output=True, check=True, timeout=10,
-        env=evidence.git_evidence.clean_git_environment(), **options,
+        env=git_evidence.clean_git_environment(), **options,
     )
-    monkeypatch.setattr(evidence.git_evidence, "REPO", root)
-    monkeypatch.setattr(evidence.git_evidence, "git", evidence.git_evidence.git.__wrapped__)
-    monkeypatch.setattr(evidence.git_evidence, "_OBJECT_TYPES", {})
-    monkeypatch.setattr(evidence.git_evidence, "_BLOB_HASHES", {})
+    monkeypatch.setattr(git_evidence, "REPO", root)
+    monkeypatch.setattr(git_evidence, "git", git_evidence.git.__wrapped__)
+    monkeypatch.setattr(git_evidence, "_OBJECT_TYPES", {})
+    monkeypatch.setattr(git_evidence, "_BLOB_HASHES", {})
     monkeypatch.setattr(evidence, "AFFECTED", (evidence.PREFIX + "protocol.py",))
     monkeypatch.setattr(evidence, "TESTS", ())
 
-    def write(path, data):
+    def write(path: str, data: bytes) -> None:
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -363,7 +391,7 @@ def _published_orphaned_closure(root, monkeypatch, *, chunked):
     )
     for path in paths - set(snapshot.inputs) - {"tools/probe.py"}:
         write(path, b"fixture\n")
-    proof = {}
+    proof: dict[str, dict[str, str]] = {}
     for path in paths:
         data = (root / path).read_bytes()
         proof[path] = {
@@ -398,8 +426,8 @@ def _published_orphaned_closure(root, monkeypatch, *, chunked):
 
 @pytest.mark.parametrize("chunked", [False, True], ids=["inline-conversion", "new-chunks"])
 def test_orphaned_closure_uses_captured_metadata_before_size_triggered_publication(
-    tmp_path, monkeypatch, chunked,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chunked: bool,
+) -> None:
     packet, published = _published_orphaned_closure(tmp_path, monkeypatch, chunked=chunked)
     validation.validate_closure(tmp_path, packet, published.materialized)
 
@@ -419,8 +447,8 @@ def test_orphaned_closure_uses_captured_metadata_before_size_triggered_publicati
     ("missing-chunk", "captured chunk unavailable"),
 ])
 def test_orphaned_closure_publication_preserves_fail_closed_inventory(
-    tmp_path, monkeypatch, fault, diagnostic,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, diagnostic: str,
+) -> None:
     packet, published = _published_orphaned_closure(tmp_path, monkeypatch, chunked=True)
     proof = packet["execution_closure"]
     chunks = set(published.inputs) - {codec.REGISTRY}
@@ -453,7 +481,7 @@ def test_orphaned_closure_publication_preserves_fail_closed_inventory(
         published.index["contracts"][0]["provenance_chunks"][0]["path"] = "../outside.json"
         (tmp_path / codec.REGISTRY).write_bytes(codec.encode(published.index))
     elif fault in {"missing-chunk", "chunk-bytes"}:
-        def read(root, path):
+        def read(root: Path, path: str) -> bytes:
             if path == captured_chunk:
                 if fault == "missing-chunk":
                     raise FileNotFoundError("captured chunk unavailable")

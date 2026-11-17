@@ -3,10 +3,14 @@
 ## Required-application New admission
 
 An opted-in repository's `require_application_readiness` extends the existing
-native New preflight after knowledge coordination readiness, before allocation
+native New preflight after configured-knowledge validation, before allocation
 and initial structured-request admission. Creation-time rechecking precedes the
 started marker, preserving retained request/allocation identity through refusal.
 Source-only allocation, existing-session and recovery paths remain unchanged.
+An absent knowledge binding permits local New without a pair; an unresolved
+explicit binding still refuses. Personal storage and claim-producing coordination
+retain their independent gates, as described in the
+[worktree lifecycle](worktree-lifecycle.md#creation-starts-from-freshly-resolved-repository-state).
 
 For repositories with a native tool profile, admission uses the profile owner's
 same prospective settings projection read-only. The anchor must already expose

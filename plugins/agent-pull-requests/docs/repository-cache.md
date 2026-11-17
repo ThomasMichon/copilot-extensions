@@ -61,6 +61,26 @@ provider/endpoint/repository/observe binding before every request. It cannot
 use that credential object for a forge mutation. Credential loss is not
 retried as an unrelated transient provider failure.
 
+The native snapshot may also carry `reviews_complete` and `updated_at`.
+The snapshot decoder preserves these additive fields, leaving absent review
+coverage unknown. The native Gitea owner rejects malformed or overlapping pages
+and can qualify exhaustion with consistent raw-count metadata while traversing
+filtered empty pages. Body-only/prior native readers leave coverage unknown;
+an empty response alone is never completeness. See the
+[native coverage contract](../../agent-worktrees/docs/pr-observation.md).
+Coverage is not atomic PR/review evidence or reviewer policy, and a PR
+mutation timestamp does not identify an author update. The unselected
+version-1/2 repository projection does not retain these extra fields.
+
+With the optional [reviewer-action selection](../../../services/pr/REVIEWER.md),
+the existing continuing envelope adopts `repository_activity_version:1` in
+place. That selected projection retains these fields and stable candidate/
+conflict causes; legacy facts remain unknown. The cache-only service/client
+query uses the existing attention owner, without protected workspace readers.
+Minimal fingerprints distinguish an actually observed pre-candidate review set
+from an unqualified differing head or newly visible record in a non-atomic snapshot.
+Real-provider coverage and streaming remain separate qualification.
+
 ## Storage and backend identity
 
 `RepositoryIdentity` binds namespace, provider, canonical HTTPS endpoint,
@@ -175,6 +195,9 @@ events; coverage and departure remain separately typed. Submitted-time/cursor
 refreshes alone produce no PR-change event. Event sequence and IDs are durable.
 Current facts, event identities and coverage survive restart. The fixed current
 summary/event capacities apply backpressure rather than erasing unsettled state.
+When activity storage is selected, retained review-submission and PR-mutation
+metadata also participate in its semantic facts; the original pending candidate/
+conflict cause does not reset merely because those fields refresh.
 
 This remains the internal observation/projection seam. Supported local clients
 use the bounded HTTP handler and never read the state file directly. Continuing

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import Any
 
 from .bridge import BridgeCarriedSessionBusy
 from .ordinary_agent_facts import owner_record
@@ -15,7 +16,9 @@ from .procutil import (
 from .queue_records import TaskError
 
 
-def read_owner(reservation: dict, task_id: str, *, timeout: float) -> dict:
+def read_owner(
+    reservation: dict[str, Any], task_id: str, *, timeout: float, allow_native: str | None = None,
+) -> dict[str, Any]:
     prefix = agent_worktrees_launch_prefix()
     if not prefix:
         raise BridgeCarriedSessionBusy("exact ground owner capability is unavailable")
@@ -39,14 +42,14 @@ def read_owner(reservation: dict, task_id: str, *, timeout: float) -> dict:
             or not isinstance(result_data.get("worktree"), dict)
         ):
             raise TaskError("ground owner must return successful exact-record JSON version 1")
-        return owner_record(result_data["worktree"], reservation, task_id)
+        return owner_record(result_data["worktree"], reservation, task_id, allow_native=allow_native)
     except (ValueError, TaskError, OSError, subprocess.TimeoutExpired) as exc:
         raise BridgeCarriedSessionBusy(f"exact ground owner record is unproven: {exc}") from exc
 
 
-def current_task(client, task: dict) -> dict:
+def current_task(client: Any, task: dict[str, Any]) -> dict[str, Any]:
     """Read admission without rewriting a held, claimed, or changed task."""
-    from .client import DispatchError
+    from .client_errors import DispatchError
 
     if not callable(getattr(client, "get", None)):
         raise BridgeCarriedSessionBusy("coordinator cannot read current assignment facts")

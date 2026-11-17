@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-09
+- **Last revised:** 2026-11-16
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -100,16 +100,26 @@ has a copyable immutable installation representation and an associated complete
 first-party wheel closure; a top-level wheel alone is not the application closure.
 Optional capability profiles and native compatibility remain separately declared.
 
+Main carries wholly-copyable application directories. Promotion materializes
+embedded first-party library code into each consumer's source tree; Manager
+does not resolve those development indirections during installation. Shared
+runtime providers remain separate installable components, not implementation
+packages imported by their consumers.
+
 The development source release owns these assets through the existing release
 identity, integrity and approval contract, not a new per-installer fingerprint
 scheme or an unknowable future Main merge identifier. Publication completion
 includes readback of the complete source/installation/artifact set. Wheel binaries
 are distribution artifacts rather than source-control inputs.
 
-Controlled local promotion can produce the same complete installation inputs
-for source-change/install/reinstall validation without first creating a public
-PR, tag or release. That result is explicit local evidence, never a claim of
-public release availability or production admission.
+Pinned Dev commits and explicit frozen WIP-on-Dev snapshots run this same
+promotion flow locally to produce the installation footprint before
+orchestration. Local preparation performs all vendoring and assigns local
+versions through the existing composition owner without mutating tracked source
+or public release versions. Different immutable inputs remain distinguishable.
+It can support source-change/install/reinstall validation without first
+creating a public PR, tag or release. That result is explicit local evidence,
+never a claim of public release availability or production admission.
 
 ### complete-before-promotion-pr
 
@@ -298,6 +308,15 @@ Integration assurance remains available through periodic containerized
 validation with explicit failure ownership. Stable delivery comes first;
 subsequent portfolio improvement replaces lesser-value tests with more valuable
 eligible units within the same or smaller budget, instead of accumulating them.
+
+### assurance-without-repeat-execution
+
+One complete, trustworthy execution should satisfy every compatible obligation
+it proves. Gathering evidence or crossing an orchestration boundary should not
+repeat the same tests solely to produce another status or artifact. Distinct
+platform, generated-consumer, installation and integrity guarantees remain
+explicit, while bounded preflight catches composition mistakes before an
+expensive release cycle.
 
 ## Non-Goals / Boundaries
 

@@ -4,7 +4,7 @@ set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python="$(command -v python3 || command -v python || true)"
 if [[ -f "$root/scripts/snapshot_runtime.py" && -n "$python" ]]; then
-  command=("$python" -I -X utf8 "$root/scripts/snapshot_runtime.py" snapshot)
+  command=("$python" -I -X utf8 -B "$root/scripts/snapshot_runtime.py" snapshot)
 else
   command=("$root/bin/agent-ssh" session-snapshot --guidance)
 fi

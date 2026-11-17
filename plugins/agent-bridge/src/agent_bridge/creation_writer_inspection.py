@@ -4,19 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
-import json
 from typing import Any
 
 from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from .acquisition_writer_inspection import _instance
 from .creation_worktree_writer import JOURNAL_KEY, _binding, _read, _refuse
-from .acquisition_worktree_writer import _qualify
+from .acquisition_worktree_writer import select_writer
 
 CAPABILITY = "retained_workspace_creation_writer_inspection"
 SCHEMA = "copilot-extensions.creation-worktree-writer"
 
 
-async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) -> dict:
+async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) -> dict[str, Any]:
     from .acquisition_authority import read_worktree_record, worktree_command
 
     before = _instance()
@@ -35,23 +34,13 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
         or original["state"] not in {"allocated", "preparing", "launching", "delivering", "complete", "terminal"}
     ):
         raise _refuse("exact session changed its original keyed workspace")
-    if session.session_id == original["session_id"]:
-        expected_native = original["native_session_id"]
-    else:
-        try:
-            handoffs = json.loads(original["creation_handoffs_json"] or "{}")
-            if not isinstance(handoffs, dict):
-                raise ValueError("invalid handoffs")
-            matches = [item for item in handoffs.values() if item["successor_id"] == session.session_id]
-        except (ValueError, TypeError, KeyError) as exc:
-            raise _refuse("exact session lost its original keyed lineage") from exc
-        if len(matches) != 1:
-            raise _refuse("exact session lost its original keyed lineage")
-        expected_native = matches[0].get("native_session_id")
+    from .retained_metadata_lineage import native_for
+
+    expected_native = native_for(original, session.session_id)
     if not expected_native or expected_native != native:
         raise _refuse("exact native identity is not retained by its keyed creation")
     try:
-        support = await _qualify(writer)
+        writer, support = await select_writer(writer)
         record = await read_worktree_record(
             scope.worktree_id, scope.project, command=partial(worktree_command, owner_prefix=writer.prefix),
         )
@@ -71,6 +60,7 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
         "key_digest": digest, "session_id": session.session_id, "native_session_id": native,
         "project": scope.project, "worktree_id": scope.worktree_id, "worktree_path": scope.worktree_path,
         "worktree_writer": scope.worktree_writer.model_dump(),
+        "executing_writer_identity": support["writer_identity"],
         "writer_scope": support["writer_scope"], "writer_contract": support["writer_contract"],
         "retained_session_writes": support["retained_session_writes"],
         "retained_native_resume": support.get("retained_native_resume"),
@@ -81,7 +71,7 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
 
 
 async def session_info(
-    session_id: str, request: Any, render: Callable, *, worktree_writer: bool = False,
+    session_id: str, request: Any, render: Callable[..., Any], *, worktree_writer: bool = False,
 ) -> Any:
     from fastapi import HTTPException
     from fastapi.responses import JSONResponse
@@ -110,7 +100,7 @@ async def session_info(
     raise HTTPException(404, detail=f"Session {session_id} not found")
 
 
-def get_session(client: Any, session_id: str) -> dict:
+def get_session(client: Any, session_id: str) -> dict[str, Any]:
     """Negotiate optional evidence and reject an older reader's ignored query."""
     from .client import BridgeClientError
     from .client_protocol_floor import protocol_floored_request

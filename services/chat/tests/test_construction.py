@@ -1,7 +1,10 @@
 from contextlib import contextmanager
 import hashlib
+import os
+from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Any, Iterator, NoReturn, TypedDict
 
 import pytest
 
@@ -9,10 +12,18 @@ from agent_chat_service import construction
 from agent_chat_service.client import ClientError
 
 
-def test_construction_floor_refuses_before_resource_loading(monkeypatch):
+class CandidateArguments(TypedDict):
+    project: Path
+    uv: Path
+    python: Path
+    wait_timeout: float
+    child_timeout: float
+
+
+def test_construction_floor_refuses_before_resource_loading(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(construction.sys, "version_info", (3, 10))
 
-    def refuse():
+    def refuse() -> NoReturn:
         pytest.fail("unsupported bootstrap must not load or inspect construction resources")
 
     monkeypatch.setattr(construction, "installed_catalog", refuse)
@@ -26,7 +37,7 @@ def test_construction_floor_refuses_before_resource_loading(monkeypatch):
     "installer_engine_process", "installer_dependency_policy",
     "installer_wheel_inputs", "installer_wheel_snapshot",
 ])
-def test_occupied_import_scope_is_not_replaced(monkeypatch, name):
+def test_occupied_import_scope_is_not_replaced(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setattr(construction.sys, "version_info", (3, 11))
     monkeypatch.setattr(construction, "installed_catalog", lambda: {})
     monkeypatch.setattr(construction, "_ENGINE", None)
@@ -39,12 +50,14 @@ def test_occupied_import_scope_is_not_replaced(monkeypatch, name):
     assert dict(sys.modules) == before
 
 
-def test_client_policy_delegates_one_canonical_candidate(tmp_path, monkeypatch):
-    calls = []
+def test_client_policy_delegates_one_canonical_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
     candidate = object()
 
     @contextmanager
-    def numbered_candidate(*args, **kwargs):
+    def numbered_candidate(*args: object, **kwargs: object) -> Iterator[object]:
         calls.append((args, kwargs))
         yield candidate
         calls.append("settled")
@@ -52,7 +65,7 @@ def test_client_policy_delegates_one_canonical_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(
         construction, "_engine", lambda: SimpleNamespace(numbered_candidate=numbered_candidate),
     )
-    arguments = {
+    arguments: CandidateArguments = {
         "project": tmp_path / "project", "uv": tmp_path / "uv", "python": tmp_path / "python",
         "wait_timeout": 12, "child_timeout": 34,
     }
@@ -78,7 +91,7 @@ def test_client_policy_delegates_one_canonical_candidate(tmp_path, monkeypatch):
         assert calls[-1] == "settled" and not root.exists()
 
 
-def installed_slot(tmp_path, monkeypatch):
+def installed_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, bytes]:
     slot = tmp_path / "versions" / "1.2.3"
     package = slot / "site" / "agent_chat_service"
     package.mkdir(parents=True)
@@ -94,28 +107,43 @@ def installed_slot(tmp_path, monkeypatch):
     return slot, value
 
 
-def test_completed_slot_cannot_prepare_bootstrap(tmp_path, monkeypatch):
+def test_completed_slot_cannot_prepare_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     slot, _ = installed_slot(tmp_path, monkeypatch)
     marker = slot / "completion"
     marker.touch()
-    runtime = ModuleType("agent_chat_service._versioned_runtime")
+    claimed_slot = slot / ".." / slot.name
+    if os.name == "nt":
+        native_slot = Path("\\\\?\\" + str(slot))
+        monkeypatch.setattr(construction.sys, "prefix", str(native_slot))
+        claimed_slot = slot
+    runtime: Any = ModuleType("agent_chat_service._versioned_runtime")
     runtime.marker_path = lambda root, version: marker
     monkeypatch.setitem(sys.modules, runtime.__name__, runtime)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    for rejected_slot in (str(foreign), "relative", None):
+        with pytest.raises(ClientError) as caught:
+            construction._prepare_client({"slot": rejected_slot, "frozen_plugin": "absent"})
+        assert caught.value.code == "construction_slot_invalid"
     with pytest.raises(ClientError) as caught:
-        construction._prepare_client({"slot": str(slot), "frozen_plugin": "absent"})
+        construction._prepare_client({"slot": str(claimed_slot), "frozen_plugin": "absent"})
     assert caught.value.code == "construction_slot_complete"
     assert not (slot / ".runtime-bootstrap").exists()
 
 
 @pytest.mark.parametrize("damage", ["missing", "changed", "unexpected"])
-def test_installed_health_refuses_bootstrap_drift(tmp_path, monkeypatch, damage):
+def test_installed_health_refuses_bootstrap_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     slot, value = installed_slot(tmp_path, monkeypatch)
+    if os.name == "nt":
+        monkeypatch.setattr(construction.sys, "prefix", "\\\\?\\" + str(slot))
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir()
     for name in construction._BOOTSTRAP.values():
         (bootstrap / name).write_bytes(value)
 
-    def refuse_effect(*args, **kwargs):
+    def refuse_effect(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("installed service validation must not enter hosting")
 
     modules = {}

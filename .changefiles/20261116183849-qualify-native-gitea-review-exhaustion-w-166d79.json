@@ -1,0 +1,17 @@
+{
+  "comment": "Qualify native Gitea review exhaustion with bounded raw-count metadata while preserving unknown older transports",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

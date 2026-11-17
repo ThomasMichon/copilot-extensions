@@ -251,6 +251,18 @@ agent-machines installation-repair --project-root <project>
 agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module>
 ```
 
+Readiness actions run from the selected project root, even when the caller
+starts elsewhere, so repository-aware owners inspect that project's
+configuration rather than their installed payload directory. The admitted plan
+binds this root, and each probe refuses a missing or indirect project path.
+Manifest action targets remain payload-qualified absolute paths. Installer
+actions retain their payload working directory and existing apply authority.
+Read-only children retain only absolute PATH directories and disable implicit
+Windows current-directory command lookup. An all-relative PATH fails closed;
+it never becomes an empty, current-directory-searching PATH. They also remove
+`BASH_ENV`, so Bash cannot source a project-relative startup file before the
+admitted readiness script. Installer environments remain unchanged.
+
 For an explicit complete required-module selection, use `--required` instead of
 `--module`. It selects every discovered required module and its transitive
 prerequisites, including optional prerequisites, but not unrelated optional
@@ -919,6 +931,14 @@ The machine directory is an implicit scope; an explicit package `gate` is still
 honored. Partial overrides of a shared package remain in that package's existing
 `per-machine` block rather than being a cross-file merge.
 Multi-machine packages belong in `all/` with an explicit `gate`.
+
+Machine topology is read from registered repository anchors, including when
+running inside a linked worktree or selecting that worktree with `--repo`.
+Branch-local topology edits do not override or conflict with the anchor's
+machine identity. Unregistered standalone repositories retain their local
+topology fallback; genuine conflicts between different anchors still fail.
+This rule applies to the main CLI and `fleet-update` without changing which
+checkout supplies repository-scoped requirement packages.
 
 `<machine>` is the canonical topology key when an adopted repository provides a
 matching `machines.yaml` entry. The raw `platform.node()` host name (Windows
