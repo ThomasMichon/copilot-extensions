@@ -434,7 +434,7 @@ def _prepare_worktree_source(
         )
     if prepared.start_point != f"{remote}/{default_branch}":
         print(
-            f"Note: '{remote}/{default_branch}' not found for {label}; "
+            f"Note: '{remote}/{default_branch}' not available for {label}; "
             f"branching from '{prepared.start_point}' instead.",
             file=sys.stderr,
         )
