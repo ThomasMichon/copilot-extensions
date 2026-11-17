@@ -272,6 +272,14 @@ ordinary policy read. An optional non-symbolic HEAD cannot block base refresh.
   surviving refs. The reader remains unchanged and offline. Whole-file strict
   checking passes all four changed Python files on Linux and Windows/Python3.10.
   Positive consumer qualification and exact-source review/CI remain required.
+- Disposable Windows
+  [run 44051416434](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44051416434)
+  then qualified exact source `177e4b72a27511a156577d7d3805991b1b44b09a`:
+  **101 passed, zero failed or skipped**, including all11 preparation cases
+  and the binary/text, committed-reader and safe-anchor preservation packet.
+  Source/selection, canonical tests and runtime verification all passed.
+  This journal update changes no qualified runtime/test inputs. Final-head
+  required review/CI and actual merge remain mandatory.
 
 ### 2026-11-17 - Finite correction validated locally
 
