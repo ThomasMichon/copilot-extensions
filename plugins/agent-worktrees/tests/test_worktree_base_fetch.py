@@ -651,6 +651,8 @@ def test_preparation_matches_native_remote_short_source_resolution(
         "config", "--replace-all", "remote.origin.fetch",
         f"+{source_ref}:refs/remotes/origin/stable", cwd=anchor,
     )
+    if source_ref == "HEAD":
+        _git("config", "--add", "remote.origin.fetch", "^refs/heads/trunk", cwd=anchor)
     _git(
         "fetch", "origin", "--refmap=",
         f"+{source_ref}:refs/remotes/origin/stable", cwd=anchor,
@@ -815,3 +817,100 @@ def test_preparation_credential_config_keeps_native_environment_key_case(
     assert result.stdout.strip() == (
         "X-Fixture-Auth: native-case" if environment_os == "nt" else ""
     )
+
+
+@pytest.mark.parametrize(
+    ("head_branch", "local_default"),
+    [("trunk", True), ("trunk", False), ("side", True)],
+)
+def test_preparation_resolves_explicit_head_before_base_conflict(
+    local_repositories: tuple[Path, Path], head_branch: str, local_default: bool,
+) -> None:
+    seed, anchor = local_repositories
+    old_anchor = _git("rev-parse", "HEAD", cwd=anchor)
+    if head_branch == "side":
+        _git("checkout", "side", cwd=seed)
+        _commit(seed, ".agent-worktrees/config.yaml", "default_branch: trunk\nmarker: policy\n")
+        _git("push", "origin", "side", cwd=seed)
+    origin = Path(_git("remote", "get-url", "origin", cwd=anchor))
+    _git("symbolic-ref", "HEAD", f"refs/heads/{head_branch}", cwd=origin)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        "+HEAD:refs/remotes/origin/trunk", cwd=anchor,
+    )
+    _git("fetch", "origin", "--refmap=", "+HEAD:refs/remotes/origin/trunk", cwd=anchor)
+    old_policy = _git("rev-parse", "origin/trunk", cwd=anchor)
+    _git("checkout", "trunk", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    if not local_default:
+        _git("checkout", "-b", "feature", cwd=anchor)
+        _git("branch", "-D", "trunk", cwd=anchor)
+
+    prepared = git_ops.prepare_worktree_base(anchor, remote="origin", default_branch="trunk")
+
+    if head_branch == "side":
+        assert prepared.fetched is False
+        assert prepared.fetch_error is not None
+        assert _git("rev-parse", "origin/trunk", cwd=anchor) == old_policy
+        assert _git("rev-parse", prepared.start_point, cwd=anchor) == old_anchor
+        assert _git("rev-parse", "HEAD", cwd=anchor) == old_anchor
+    else:
+        assert prepared.fetched is True
+        assert prepared.fetch_error is None
+        assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+        assert _git("rev-parse", "origin/trunk", cwd=anchor) == new_base
+        assert _git("rev-parse", "HEAD", cwd=anchor) == (
+            new_base if local_default else old_anchor
+        )
+
+
+def test_preparation_redacts_authenticated_source_probe_timeout(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seed, anchor = local_repositories
+    _git("checkout", "-b", "production", cwd=seed)
+    _commit(seed, ".agent-worktrees/config.yaml", "default_branch: trunk\n")
+    _git("push", "origin", "production", cwd=seed)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        "+production:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git(
+        "fetch", "origin", "--refmap=",
+        "+refs/heads/production:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stable", cwd=anchor)
+    _git("checkout", "trunk", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    opaque = "encoded-fixture-value-not-for-diagnostics"
+
+    def fixture_auth(remote: str, *, cwd: str | Path) -> list[str]:
+        return ["-c", "http.extraheader=X-Fixture-Auth: " + opaque]
+
+    original_run = subprocess.run
+    observed: list[bool] = []
+
+    def timed_run(*args: Any, **kwargs: Any) -> Any:
+        command = args[0]
+        if isinstance(command, list) and "ls-remote" in command:
+            observed.append(any(opaque in argument for argument in command))
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "_auth_config_args", fixture_auth)
+    monkeypatch.setattr(subprocess, "run", timed_run)
+    prepared = worktree_creation._prepare_worktree_source(
+        anchor, remote="origin", default_branch="trunk",
+        fast_forward_anchor=False, label="fixture",
+    )
+
+    assert observed and all(observed)
+    assert prepared.fetched is True
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert prepared.fetch_error is not None
+    assert "timed out" in prepared.fetch_error
+    assert opaque not in prepared.fetch_error
+    assert opaque not in capsys.readouterr().err

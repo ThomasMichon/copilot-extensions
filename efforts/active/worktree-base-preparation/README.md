@@ -18,10 +18,11 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** publish the consumer-qualified correction and obtain final-head review
-and CI. The causal negative packet executes eight meaningful failures; exact
-source `5b346b759f` qualifies all 189 controls, including operation-local failure
-caching. Source acceptance remains open until actual merge and finite closeout.
+**Now:** reproduce the authenticated-probe timeout diagnostic and configured-HEAD
+identity findings before correcting their owning paths. Published `0b7ce1b150`
+contains the 189-case qualified correction; its genuine review accepts the four
+preceding findings but reports these two blockers. A separate native-environment
+case refinement is also under qualification. Source acceptance remains open.
 No production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
@@ -121,6 +122,8 @@ custody remain independent.
   refspecs and cached-bootstrap findings while preserving existing fetch callers.
 - [x] Resolve unusable-ref fallback, overlapping remote namespaces,
   command-scoped credentials and native short-source resolution.
+- [ ] Resolve authenticated-probe timeout redaction and configured-HEAD identity
+  while retaining native exclusion matching and OS environment semantics.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
 - [ ] Record the finite accepted result, settle #13013 and its original claim,
@@ -161,6 +164,10 @@ custody remain independent.
   overlapping namespaces cannot overwrite either source; authorized scoped
   credentials survive without repository selectors; HEAD/tag short sources
   retain Git's actual resolution.
+- [ ] **Probe diagnostics and HEAD identity:** a synthetic authenticated timeout
+  never exposes its injected value; an explicitly configured matching HEAD
+  refreshes even without a local default, while a different HEAD remains a
+  pre-write conflict.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
 - [x] **Evidence tiers:** document why the local-Git consumer is the relevant
