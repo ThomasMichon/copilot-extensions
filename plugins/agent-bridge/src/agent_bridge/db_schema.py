@@ -102,7 +102,10 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 39:
                     validate_exact_live_schema(conn)
                 if recorded is not None and recorded["version"] >= 41:
-                    validate_creation_writer_schema(conn, require_recovery=recorded["version"] >= 45)
+                    validate_creation_writer_schema(
+                        conn, require_recovery=recorded["version"] >= 45,
+                        require_metadata=recorded["version"] >= 49,
+                    )
                 if recorded is not None and recorded["version"] >= 43:
                     validate_mux_question_schema(conn)
                 if recorded is not None and recorded["version"] >= 44:
@@ -986,3 +989,9 @@ class _SchemaMixin:
                 validate_send_settlement(conn)
                 conn.execute("UPDATE schema_version SET version=?", (48,))
             log.info("Schema migrated to version 48: original native-send exclusion")
+
+        if from_version < 49:
+            from .creation_writer_schema import migrate_metadata
+
+            migrate_metadata(conn)
+            log.info("Schema migrated to version 49: retained metadata adoption and namespace exclusion")

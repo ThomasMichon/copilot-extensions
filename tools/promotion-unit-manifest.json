@@ -5062,7 +5062,20 @@
         "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_invalid_manifest_aborts_collection_without_substitute_targets",
         "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_raw_lines_share_the_warming_budget",
         "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_scanning_observes_deadline_and_cancellation[deadline]",
-        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_scanning_observes_deadline_and_cancellation[cancelled]"
+        "tools/promotion_unit_tests/test_vault_cache_targets.py::test_vault_manifest_scanning_observes_deadline_and_cancellation[cancelled]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_adopted_epoch_excludes_old_control_without_rewriting_native_history",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_old_receipt_cannot_be_reinterpreted_as_adopted_execution",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[version]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[same-epoch]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[predecessor]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[history]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[receipts]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[key]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_corrupt_adoption_cannot_fall_back_to_birth_or_handoff[native]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_unadopted_birth_and_unique_handoff_keep_existing_lineage",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_atomic_import_keeps_qualified_owner_inputs[target]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_atomic_import_keeps_qualified_owner_inputs[native]",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_atomic_import_keeps_qualified_owner_inputs[agent]"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/cli.py",
@@ -5389,7 +5402,9 @@
         "plugins/agent-vault/src/agent_vault/cache_manifests.py",
         "plugins/agent-vault/src/agent_vault/credential_fields.py",
         "plugins/agent-vault/src/agent_vault/cache_limits.py",
-        "plugins/agent-vault/src/agent_vault/invocation.py"
+        "plugins/agent-vault/src/agent_vault/invocation.py",
+        "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py",
+        "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py"
     ],
     "sources": {
         "plugins/agent-vault/src/agent_vault/cli.py": "a7547c6174c7e94fafb16a49ff78022ab4057b281977e08386fe50b2cd6ecbe7",
@@ -5693,10 +5708,10 @@
         "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "fbd359cd4b5fe8e37867404564271626f5aef7fb3661eea5b0c0fa426e102104",
         "plugins/agent-bridge/src/agent_bridge/retained_writer_transport.py": "9f9650498eb7e1c8a76b05fa0ada7fecdb0aaccb9a8e783606b2223fa2583208",
         "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "d66ea76d0fee8984060abf78f57ca2e88974d4eaed28c303dc45cea58257ea8e",
-        "plugins/agent-bridge/src/agent_bridge/creation_worktree_writer.py": "a64930bcb8d1de682168bfca50fe01a1b12c1a2ccc9f6bc9d883fd2ff8ef0f68",
-        "plugins/agent-bridge/src/agent_bridge/creation_writer_inspection.py": "38ace541b8c045a145c4aababf9cd6bedaa83f6ad814ad1ccfb21e7cf587aa12",
+        "plugins/agent-bridge/src/agent_bridge/creation_worktree_writer.py": "d93f11053603ad66f77204d705dff03f5d7e73d284d2e80e5e43254e7a2b7d46",
+        "plugins/agent-bridge/src/agent_bridge/creation_writer_inspection.py": "03ea01f80b57036a62cd9286089638a595447ca0ca5018aec9a7ce7921293e31",
         "plugins/agent-worktrees/src/agent_worktrees/retained_record_writer.py": "2ab03a9acd1ac75761c5922057c6b140aced9383dea1dc5892d0da7aeb856ede",
-        "tools/promotion_unit_tests/test_retained_acquisition_writer.py": "f5d84dfa94aea042022ed1ec5168438f2e0e2ae9e7e88916cbdc2d4fcff9faba",
+        "tools/promotion_unit_tests/test_retained_acquisition_writer.py": "1227cf6e9a8c465da6090c102d12764ed8b4e53ae437a155ada46d61b2c5ee6c",
         "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py": "5d50c765fa431f296846c405e0f620c29f3c25845ca88df5b187601c4773cd96",
         "plugins/agent-bridge/src/agent_bridge/session_status.py": "96e8aec0a62cc68c7db7215d6a575c4ad772ce4a96c5def00b18cc1103f3b335",
         "plugins/agent-bridge/src/agent_bridge/singleton_anchor.py": "15b2ce0dc947dbc9e47c3f0de23d43ec91974b2a5898d034cd5bcbce305c12f8",
@@ -6186,6 +6201,9 @@
         "plugins/agent-vault/src/agent_vault/credential_fields.py": "ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
         "tools/promotion_unit_tests/test_vault_cache_targets.py": "ee47a1d49c3544f6e4adf54c56382efa41d54c7ab246bc51d184cb5470bae0ec",
         "plugins/agent-vault/src/agent_vault/cache_limits.py": "6212c5d44d0c9505987bb6dd7c9d46de248011debd2e46b1ea051979315c0264",
-        "plugins/agent-vault/src/agent_vault/invocation.py": "0881b9e3cc4281889a2ee4a9009791f065d5689e0f21f2d1a1532195e2a1f581"
+        "plugins/agent-vault/src/agent_vault/invocation.py": "0881b9e3cc4281889a2ee4a9009791f065d5689e0f21f2d1a1532195e2a1f581",
+        "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py": "379307061aa7e38ad9f249dd88b49df587055afcee38dc0f9393185d5d9e41b0",
+        "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
+        "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970"
     }
 }

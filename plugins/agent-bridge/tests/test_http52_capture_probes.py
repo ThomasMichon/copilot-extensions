@@ -44,3 +44,17 @@ from test_session_inspection import (
     test_semantic_projection_is_bounded_content_free_and_not_ping_progress
     as test_semantic_projection_is_bounded_content_free_and_not_ping_progress,
 )
+from test_retained_metadata_recovery import (
+    test_missing_metadata_adopts_distinct_control_epoch_once
+    as test_missing_metadata_adopts_distinct_control_epoch_once,
+    test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed
+    as test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed,
+    test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover
+    as test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover,
+    test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery
+    as test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery,
+    test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh
+    as test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh,
+    test_completed_metadata_recovery_admits_its_journaled_handoff_successor
+    as test_completed_metadata_recovery_admits_its_journaled_handoff_successor,
+)

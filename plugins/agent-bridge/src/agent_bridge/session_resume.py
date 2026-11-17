@@ -8,13 +8,14 @@ import json
 import time
 import uuid
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from repository_policy import AgentHostingError
 
-from .session_preferences import client_preferences
+from agent_remote_driver.session_preferences import client_preferences
+from .retained_metadata_import import MetadataImport
 from .cold_outages import admitted_recovery, guarded_resume, recovery_admission
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .acquisition_worktree_writer import session_writer
 from .owned_workspace import (
     can_resume_allocation, prepare_session as prepare_owned_workspace, retains_allocation,
@@ -31,12 +32,18 @@ from .session_manager import (
 )
 
 if TYPE_CHECKING:
+    from .session_manager import SessionManager
     from .acp_client import AcpClient
     from .acquisition_launch_owner import AcquisitionLaunchOwner
     from .hosting_policy import SessionHostingFence
     from .retained_session_recovery import RetainedRecovery
 
 _NATIVE_OWNER_CALLER_PREFIX = "native-owner-resume:"
+
+
+class _ResumeHostOptions(TypedDict, total=False):
+    acquisition_launch: AcquisitionLaunchOwner
+    recovery_operation: RetainedRecovery
 
 
 def _core() -> Any:
@@ -60,9 +67,11 @@ class _SessionResumeMixin:
     """Session resume and resync helpers."""
 
     def import_native_session(
-        self, target: SpawnTarget, native_session_id: str, *, agent_name: str,
+        self, target: SpawnTarget, native_session_id: str, *, agent_name: str | None,
+        _metadata: MetadataImport | None = None,
     ) -> Session:
         """Persist a dormant owner-verified conversation without creating one."""
+        self = cast("SessionManager", self)
         if self.is_draining:
             from .session_manager import DaemonDrainingError
 
@@ -78,24 +87,44 @@ class _SessionResumeMixin:
             if session.acp_session_id == native_session_id
             and session.target.worktree_id == target.worktree_id
         ]
+        if _metadata is None:
+            retained = self._db.execute_read(
+                "SELECT 1 FROM workspace_embodiments WHERE creation_writer_json IS NOT NULL "
+                "AND (native_session_id=? OR json_extract(worktree_json,'$.id')=?) LIMIT 1",
+                (native_session_id, worktree_id),
+            )
+            if retained and not matches:
+                from .acquisition_contract import AcquisitionRefused
+
+                raise AcquisitionRefused(
+                    "retained_metadata_held",
+                    "Native import requires the original retained metadata recovery owner",
+                )
         if len(matches) > 1:
             raise ValueError("multiple bridge records claim the native worktree head")
         if matches:
+            if _metadata is not None:
+                raise ValueError("Retained metadata cannot replace another native control record")
             session = matches[0]
             if session.target.cwd != target.cwd or session.status != SessionStatus.STOPPED:
                 raise ValueError("native conversation already has a different or live owner")
             return session
         from .events import EventLog
 
-        session_id = str(uuid.uuid4())[:12]
+        if _metadata is not None:
+            _metadata.require(target.to_json(), native_session_id, agent_name)
+        session_id = _metadata.session_id if _metadata is not None else str(uuid.uuid4())[:12]
+        config = _metadata.config if _metadata is not None else {"mcp_servers": target.mcp_servers}
         session = Session(
             session_id, f"resumed-{native_session_id[:8]}", target, agent_name,
-            caller_id=_NATIVE_OWNER_CALLER_PREFIX + worktree_id,
+            caller_id=_metadata.caller_id if _metadata is not None else _NATIVE_OWNER_CALLER_PREFIX + worktree_id,
         )
         session.acp_session_id = native_session_id
         session.status = SessionStatus.STOPPED
         session.background_recovery_enabled = False
-        session.mcp_servers = [dict(server) for server in target.mcp_servers]
+        session.mcp_servers = [dict(server) for server in config["mcp_servers"]]
+        session.model_override = config.get("model_override")
+        session.effort_override = config.get("effort_override")
         self._db.create_session(
             session_id=session_id,
             name=session.name,
@@ -106,9 +135,10 @@ class _SessionResumeMixin:
             status=SessionStatus.STOPPED.value,
             now=time.time(),
             target_json=target.to_json(),
-            config_json=json.dumps({"mcp_servers": session.mcp_servers}),
+            config_json=json.dumps(config),
             acp_session_id=native_session_id,
             background_recovery_enabled=False,
+            _on_create=_metadata.commit if _metadata is not None else None,
         )
         session.event_log = EventLog(
             db=self._db, session_id=session_id, worktree_id=target.worktree_id,
@@ -156,6 +186,7 @@ class _SessionResumeMixin:
         affinity across frontend restarts and cannot opt into recreation.
         Other provider/singleton sessions keep their existing transport.
         """
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -174,12 +205,12 @@ class _SessionResumeMixin:
 
         with recovery_admission(self, session_id):
             hosting_fence = await require_session_hosting(self, session, operation="resume", activate=True)
-            return await self._resume_session_admitted(
+            return cast(Session, await self._resume_session_admitted(
                 session_id, permission_callback, drain=drain, allow_recreate=allow_recreate,
                 owner_native_resume=owner_native_resume, hosting_fence=hosting_fence,
                 acquisition_launch=acquisition_launch,
                 recovery_operation=recovery_operation,
-            )
+            ))
 
     @admitted_recovery
     @guarded_resume
@@ -197,6 +228,7 @@ class _SessionResumeMixin:
         recovery_operation: RetainedRecovery | None = None,
     ) -> Session:
         """Observe admitted recovery; retain fresh checks at later effect boundaries."""
+        self = cast("SessionManager", self)
         from .hosting_policy import require_session_hosting, require_target_hosting
 
         session_id = self._resolve_ref(session_id) or session_id
@@ -204,6 +236,8 @@ class _SessionResumeMixin:
         if not session:
             raise KeyError(f"Session {session_id} not found")
         if session.target.type == "remote-acp":
+            if session.agent_name is None:
+                raise ValueError("Remote ACP resume requires its retained agent")
             from .remote_acp_sessions import connect_remote_session
             from .remote_relationships import owned
             if owned(session):
@@ -298,6 +332,8 @@ class _SessionResumeMixin:
                 if current() is None:
                     return
                 try:
+                    if session.target.worktree_id is None or session.acp_session_id is None:
+                        raise ValueError("Retained registration requires its workspace and native identity")
                     worktree_lineage.register_session(
                         session.target.worktree_id, session.acp_session_id,
                         pid=session.pid, worktree_dir=session.target.cwd,
@@ -331,7 +367,8 @@ class _SessionResumeMixin:
                 reattached = (
                     acquisition_launch is None
                     and recovery_operation is None
-                    and (not cold_pending or cold_outage["recovery_phase"] == "registered")
+                    and (not cold_pending or cold_outage is not None
+                         and cold_outage["recovery_phase"] == "registered")
                 ) and await self._try_reattach_live_host(session)
             if reattached:
                 await register_retained_native()
@@ -343,6 +380,7 @@ class _SessionResumeMixin:
                 if cold_pending:
                     from .cold_outages import reconnect
 
+                    assert cold_outage is not None
                     await reconnect(self, session, cold_outage)
                 return session
 
@@ -400,6 +438,11 @@ class _SessionResumeMixin:
                         ):
                             from .connect import ConnectTracker
 
+                            host_options: _ResumeHostOptions = {}
+                            if acquisition_launch is not None:
+                                host_options["acquisition_launch"] = acquisition_launch
+                            if recovery_operation is not None:
+                                host_options["recovery_operation"] = recovery_operation
                             host_result = await self._connect_via_session_host(
                                 session.target, tracker=ConnectTracker(),
                                 session_id=session.session_id, on_acp_event=on_acp_event,
@@ -407,8 +450,7 @@ class _SessionResumeMixin:
                                 mcp_servers=session.mcp_servers,
                                 load_session_id=session.acp_session_id,
                                 model=session.model_override, effort=session.effort_override,
-                                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
-                                **({"recovery_operation": recovery_operation} if recovery_operation is not None else {}),
+                                **host_options,
                             )
                         else:
                             host_result = await self._resume_via_new_remote_host(
@@ -785,22 +827,28 @@ class _SessionResumeMixin:
         exactly what needs healing, so it is allowed through; only a genuinely
         live turn is refused (issue #22 / #2385).
         """
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .retained_metadata_lineage import EPOCH_KEY
+
+        if (session.target.venue or {}).get(EPOCH_KEY) == session.session_id:
+            raise ValueError("Adopted metadata cannot reconstruct its missing predecessor event stream")
         from .acquisition_launch_owner import require_unassociated_session
         from .hosting_policy import require_session_hosting
 
         require_unassociated_session(self, session, operation="resync")
         hosting_fence = await require_session_hosting(self, session, operation="resync")
-        return await self._resync_session_admitted(session_id, hosting_fence=hosting_fence)
+        return cast(int, await self._resync_session_admitted(session_id, hosting_fence=hosting_fence))
 
     @admitted_recovery
     async def _resync_session_admitted(
         self, session_id: str, *, hosting_fence: SessionHostingFence,
     ) -> int:
         """Retain recovery admission only after repository hosting is allowed."""
+        self = cast("SessionManager", self)
         session = self._sessions[session_id]
         from .acquisition_launch_owner import require_unassociated_session
         from .cold_outages import latest
