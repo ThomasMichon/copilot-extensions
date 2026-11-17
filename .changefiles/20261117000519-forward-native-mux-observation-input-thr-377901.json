@@ -1,0 +1,9 @@
+{
+  "comment": "Forward native mux observation input through the Windows Resume test fixture so release qualification exercises the production observation guard.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
