@@ -12,16 +12,16 @@ responsibility with a bounded historical receipt.
 **Finalization criterion:** source delivery is merged, all scoped validation is
 resolved and the source workspace's obligations are settled. This does not
 require deleting user output or retained history.
-**Now:** deliver the qualified source through review and required CI.
-**Return:** finish source checks and PR delivery; preserve the broader lifecycle,
-installed and operational owners.
+**Now:** the bounded source flow is reviewed, qualified and merged.
+**Return:** complete archive publication and native workspace settlement;
+preserve the broader lifecycle, release, installed and operational owners.
 
 - **Slug:** `verified-user-output-delivery`
 - **Repo:** copilot-extensions
-- **Branch(es):** one managed source worktree; sequential plan and implementation PRs
+- **Branch(es):** one managed source worktree; sequential intent, implementation and completion PRs
 - **Created:** 2026-11-17
-- **Status:** Active
-- **Vision:** extends [artifact disposition](../../../visions/plugins/agent-worktrees/README.md#artifact-disposition)
+- **Status:** Done
+- **Vision:** extends [artifact disposition](../../../../visions/plugins/agent-worktrees/README.md#artifact-disposition)
 - **Umbrella issue:** #13040; part of #10968
 
 ## Guiding Intent
@@ -53,18 +53,18 @@ verification keeps the original responsibility visible.
 
 ## Context
 
-The [artifact lifecycle guide](../../../plugins/agent-conduct-guidance/docs/artifact-lifecycle.md)
+The [artifact lifecycle guide](../../../../plugins/agent-conduct-guidance/docs/artifact-lifecycle.md)
 already defines segmented user output, explicit destination precedence, verified
 handover and historical receipts without a destination ledger.
-[Artifact storage](../../../plugins/agent-worktrees/docs/artifact-storage.md)
+[Artifact storage](../../../../plugins/agent-worktrees/docs/artifact-storage.md)
 currently composes scratch policy, not user-output preferences.
-The [producer contract](../../../plugins/agent-worktrees/docs/resource-producer.md)
+The [producer contract](../../../../plugins/agent-worktrees/docs/resource-producer.md)
 already supplies reserve/begin/bind fencing and exact registered-provider
 verification. Its retained lifetime describes disposable scratch, not completed
 user handover; that meaning must not be silently broadened.
 
 This slice reuses those owners. It does not reopen the history collection work
-or claim the broader [worktree-data program](../mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
+or claim the broader [worktree-data program](../../../active/mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
 complete.
 
 ## Request
@@ -110,9 +110,9 @@ eviction and other owners' resources.
 
 ### U3 - Deliver and close the bounded source work
 
-- [ ] Update authoritative usage/configuration documentation and the artifact
+- [x] Update authoritative usage/configuration documentation and the artifact
   skill; pass focused tests, source checks, review and required CI.
-- [ ] Merge the source, record its actual release state, resolve this source
+- [x] Merge the source, record its actual release state, resolve this source
   issue and archive the completed effort. Keep #10968 and unrelated owners open.
 
 ## Validation Plan
@@ -199,6 +199,10 @@ Source tests use newly created private fixture roots only; installed and actual
 user-storage adoption remain outside this finite effort.
 
 ## Journal
+
+- [2026-11-17 - Source delivery and bounded completion](journal/2026/11.17%20Source%20delivery.md):
+  #13071 merged after current-head approval and required CI. Final native
+  evidence, review corrections and the pending Main release are recorded there.
 
 ### 2026-11-17 - Windows and Linux source qualification
 
