@@ -18,11 +18,12 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** publish the qualified correction to the same implementation PR, resolve
-its four remaining review threads with the causal proof, and obtain genuine
-final-head review plus required CI before actual merge. Negative and positive
-consumer qualification are complete; source acceptance remains open. No
-production authority or another contributor's seed-delivery files are changed.
+**Now:** republish the qualified rebased correction to the same implementation
+PR through its recorded exact-head lease, then obtain genuine final-head review
+plus required CI before actual merge. All four corrected threads have causal
+proof and confirmed resolution. Negative and positive consumer qualification
+are complete; source acceptance remains open. No production authority or
+another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -428,6 +429,32 @@ typing exemption or pending-project admission.
   existing managed PR, preserve source attribution and verify tested blobs
   through reconciliation. Fresh final-head review, required CI, actual merge
   and finite claim/issue acceptance remain open.
+
+### 2026-11-17 - Rebased integration qualifies
+
+- The qualified correction was published at `fabc9a855a`; all four corrected
+  threads received specific causal-proof replies and confirmed resolution.
+  Complete head/body/source/label/closing-reference readback passed. Own inline
+  reply reviews are not a genuine Copilot verdict.
+- The provider then reported a conflict with current `dev`. Managed sync
+  auto-aborted safely. With the original tip retained, the owned private PR
+  history was reduced to one commit and rebased onto pinned
+  `b97e7f8318988b90830b8fcecb6cbf2cb1c2de61`. The only conflict was an effort-index
+  adjacency: preserve the other effort's current status and reconcile this
+  effort's row. No runtime/test conflict or other-owner source was changed.
+- All 13 qualified code/test/doc/reader/config blobs remain identical. The
+  automatically merged manifest verifies 832 bindings, retaining the pinned
+  upstream exact nodes, coverage and budgets. All ten whole Python files pass
+  strict checking on both Python 3.10 targets against that pinned base.
+- Because upstream also changed shared process code, repeat the actual
+  integrated packet rather than treating unchanged authored blobs as proof.
+  [Run 44086365363](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44086365363)
+  qualifies exact `dae69ef649b72a109501afd241802e14d8173a93`:
+  **163 passed, zero failed/skipped**, all three phases passed, including all
+  20 preparation cases.
+- This entry changes only the result journal. Republish through the normal
+  managed `--rewrite-pr` exact-head lease, not a raw force-push or break-glass.
+  Refresh the live description and exact-head review/CI before merge.
 
 ### 2026-11-17 - Finite correction validated locally
 
