@@ -169,3 +169,12 @@ The expanded bounded cache packet passed 303 tests, including 14 focused
 regressions for these cases. The owned PR's mechanical rebase also preserved
 the concurrent attachment-import capability and its admitted source inventory;
 77 affected actor-free units and 259 population/recovery/service cases passed.
+
+### 2026-11-16 - Bound ordinary opted-in reads
+
+Independent re-review confirmed the previous three corrections and identified
+unbounded primary/key reads before the redundant reader's size check. Opted-in
+stores now use the same bounded input reader before decryption and during key
+migration; default-off input handling is unchanged. The bounded packet passed
+308 tests, with one inapplicable wrapped-key case skipped for the native format.
+Whole-file strict typing passed both platform contracts and focused lint passed.

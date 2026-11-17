@@ -163,6 +163,11 @@ class PersistentCache:
             self._available = False
         return self._available
 
+    def _read_input(self, path: Path) -> bytes:
+        from .cache_machine import _read, enabled
+
+        return _read(path) if enabled(self) else path.read_bytes()
+
     def _get_fernet(self, *, readonly: bool = False) -> DpapiCacheCipher | Fernet | None:
         if self._fernet is not None and not readonly:
             return self._fernet
@@ -194,7 +199,7 @@ class PersistentCache:
         if not readonly:
             self._base_dir.mkdir(parents=True, exist_ok=True)
         if _path_exists(self._key_file):
-            blob = self._key_file.read_bytes()
+            blob = self._read_input(self._key_file)
             if kek.is_wrapped(blob):
                 if readonly and not IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
                     raise CacheProtectionError("cache key requires an unavailable Windows wrapping backend")
@@ -277,7 +282,7 @@ class PersistentCache:
         if f is None or not _path_exists(self._cache_file):
             return {"v": 1, "entries": {}}
         try:
-            plaintext = f.decrypt(self._cache_file.read_bytes())
+            plaintext = f.decrypt(self._read_input(self._cache_file))
             data = json.loads(plaintext)
             if (
                 not isinstance(data, dict) or data.get("v") != 1
@@ -391,7 +396,7 @@ class PersistentCache:
             from .cache_dpapi import DpapiCacheCipher
 
             if not isinstance(f, DpapiCacheCipher) and _path_exists(self._key_file):
-                blob = self._key_file.read_bytes()
+                blob = self._read_input(self._key_file)
                 if not kek.is_wrapped(blob):
                     with contextlib.suppress(OSError, RuntimeError, ValueError):
                         self._write_key(blob.strip())
@@ -558,16 +563,16 @@ class PersistentCache:
         if not readonly and _path_exists(self._key_file):
             from . import kek
 
-            if not kek.is_wrapped(self._key_file.read_bytes()):
+            if not kek.is_wrapped(self._read_input(self._key_file)):
                 # Only a successfully decoded, still-locked store may migrate its key.
                 with contextlib.suppress(OSError):
                     with self._store_lock():
                         current_store = self._read_store(readonly=True, strict=True)
-                        blob = self._key_file.read_bytes()
+                        blob = self._read_input(self._key_file)
                         if not kek.is_wrapped(blob):
                             with contextlib.suppress(OSError, RuntimeError, ValueError):
                                 self._write_key(blob.strip())
-                                write_copy(self, current_store, self._cache_file.read_bytes())
+                                write_copy(self, current_store, self._read_input(self._cache_file))
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
             if self._pending_alias(store, legacy_entry, field, strict=readonly):

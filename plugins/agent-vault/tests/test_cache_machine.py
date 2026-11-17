@@ -117,6 +117,37 @@ def test_additive_preparation_and_primary_first_reads(protected: SimpleNamespace
     assert protected.open().get("Allowed/token", readonly=True) == "fixture-value"
 
 
+@pytest.mark.parametrize("target", ["primary", "wrapped-key"])
+def test_ordinary_reads_bound_opted_in_inputs_before_decryption(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
+    path = protected.primary if target == "primary" else protected.root / "credential-cache.key"
+    if not path.exists():
+        pytest.skip("native primary does not use a wrapped key")
+    prepare(protected)
+    limit = 1024
+    with path.open("ab") as stream:
+        stream.write(b"x" * (limit + 1 - path.stat().st_size))
+    monkeypatch.setattr(cache_machine, "MAX_BYTES", limit)
+    read_bytes = Path.read_bytes
+
+    def bounded_only(candidate: Path) -> bytes:
+        assert candidate != path, "opted-in input used an unbounded read"
+        return read_bytes(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", bounded_only)
+    with pytest.raises(CacheProtectionError, match="size limit"):
+        protected.open().get("Allowed/token")
+    assert path.stat().st_size == limit + 1
+
+
+def test_default_off_preserves_existing_input_size_policy(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cache_machine, "MAX_BYTES", 1)
+    assert protected.open().get("Allowed/token", readonly=True) == "fixture-value"
+
+
 @pytest.mark.parametrize("readonly", [False, True])
 def test_fallback_is_read_only_even_for_ordinary_callers(
     protected: SimpleNamespace, readonly: bool,
