@@ -257,8 +257,10 @@ these fields alone are not a credential, load receipt or authority grant.
 Worktrees cannot infer ACP semantics from a process. It corroborates physical
 epoch, live process births and parentage twice inside the canonical record
 lock, after checking the qualified executing writer and original workspace
-incarnation. The same active native head/revision must remain current, without
-a pending handoff or pruned, saturated or ambiguous activation history.
+incarnation. The replayed transition ledger, never its repairable revision
+cache, must retain the same active native head/revision, without a pending
+handoff or saturated or ambiguous activation history. Fresh sources refuse
+pruned history.
 An exited/zombie process cannot supply a new source.
 
 The hosted source identity binds the physical activation, native UUID and
@@ -266,7 +268,9 @@ workspace incarnation, not an arbitrary operation ID. A new accepted source
 appends an identified `retained-hosted-acp` interval after the original ended
 interval. Repeating that same open source is byte-idempotent; a closed source
 cannot be reopened by changing only the operation ID. Another open source
-refuses. This explicit route does not run hook/profile-assignment side effects,
+refuses. A strictly verified same-open-source retry remains valid if the first
+save pruned older intervals; it cannot reopen a pruned source or append a new
+one through that fence. This explicit route does not run hook/profile-assignment side effects,
 start infrastructure, accept handoff/hook inputs or create a CLI hold file.
 Omitting it retains the existing CLI-native hold and ordinary registration
 semantics. Old receivers must not receive the new flag; a caller must negotiate

@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -26,6 +26,46 @@ SID = "00000000-0000-4000-8000-000000000001"
 EPOCH = {"platform": "linux", "environment_id": "e" * 32, "boot_id": SID}
 REAL_EPOCH = context.epoch
 REAL_PROCESS = context.process
+
+
+@pytest.mark.parametrize("retired", [False, True])
+def test_extracted_handoff_reporting_keeps_stage_and_callback_contract(
+    monkeypatch: pytest.MonkeyPatch, retired: bool,
+) -> None:
+    from agent_worktrees import activity, handoff_diagnostics
+
+    events: list[str] = []
+    stamps: list[tuple[Any, dict[str, Any]]] = []
+    callbacks: list[tuple[Any, dict[str, Any]]] = []
+    monkeypatch.setattr(activity, "log_event", lambda name, **_: events.append(name))
+    monkeypatch.setattr(
+        activity, "read_events",
+        lambda **_: [{"handoff_token": "handoff-token", "outcome": "gone"}] if retired else [],
+    )
+    monkeypatch.setattr(
+        handoff_diagnostics, "stamp_session_state_handoff",
+        lambda *args, **kwargs: stamps.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        session_binding_cli, "_maybe_emit_stage_13",
+        lambda *args, **kwargs: callbacks.append((args, kwargs)),
+    )
+    handoff = cast(tracking.SessionHandoff, SimpleNamespace(
+        token="handoff-token", predecessor="previous-native",
+    ))
+    session_binding_cli._emit_handoff_claim_stages(
+        "workspace", "current-native", handoff, launch_id="original-launch",
+    )
+    assert events == ["handoff_successor_claimed"] + (
+        [] if retired else ["handoff_pickup_confirmed_predecessor_closing"]
+    )
+    assert stamps == [(("previous-native",), {
+        "handoff_token": "handoff-token", "successor_session_id": "current-native",
+    })]
+    assert callbacks == [(("workspace", "handoff-token"), {"launch_id": "original-launch"})]
+    events.clear()
+    session_binding_cli._emit_handoff_claim_stages("workspace", "current-native", None)
+    assert events == [] and len(stamps) == len(callbacks) == 1
 
 
 @pytest.mark.parametrize("state", ["Z", "X", "x"])
@@ -135,6 +175,20 @@ def test_missing_hosted_record_is_not_successful_registration(hosted: SimpleName
     hosted.path.unlink()
     assert hosted.invoke() != 0
     assert not hosted.path.exists()
+
+
+def test_same_open_hosted_source_retries_after_save_prunes_older_history(
+    hosted: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
+    assert hosted.invoke() == 0
+    record = tracking.load_record(hosted.path)
+    entry = record.session_entry(SID)
+    assert entry is not None and len(entry.activations) == 1
+    assert entry.pruned_sources == ["native:previous"]
+    before = hosted.path.read_bytes()
+    assert hosted.invoke() == 0
+    assert hosted.path.read_bytes() == before
 
 
 @pytest.mark.parametrize("change", [

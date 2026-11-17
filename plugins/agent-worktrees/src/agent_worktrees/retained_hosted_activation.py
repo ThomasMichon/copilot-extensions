@@ -62,13 +62,15 @@ def source_identity(
     value = parse(json.dumps(value))
     entry = record.session_entry(session_id)
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None) if entry else None
+    transition = record.replayed_head_transition
     if (
         not retained_record_writer.active() or value["session_id"] != session_id
         or type(pid) is not int or pid != value["child"]["pid"]
         or record.status in {"complete", "completed", "finalized", "finalizing"}
-        or record.resolved_head_session != session_id or record.head_revision != value["head_revision"]
+        or record.resolved_head_session != session_id
+        or transition is None or transition.revision != value["head_revision"]
         or record.pending_handoffs or entry is None or entry.state != "active"
-        or entry.pruned_sources or entry.source_history_saturated
+        or entry.source_history_saturated
         or latest is None or latest.source_identity is None or latest.source_ambiguous
     ):
         raise ValueError("Hosted activation requires its unchanged retained native head and history")
@@ -98,8 +100,10 @@ def source_identity(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8"),
     ).hexdigest()
     if latest.ended_at is None:
-        if latest.source_identity != token:
+        if latest.source_identity != token or token in entry.pruned_sources:
             raise ValueError("Hosted activation cannot replace an open source")
     elif any(item.source_identity == token for item in entry.activations):
         raise ValueError("Hosted activation source is already closed")
+    elif entry.pruned_sources:
+        raise ValueError("A fresh hosted source cannot replace pruned history")
     return token

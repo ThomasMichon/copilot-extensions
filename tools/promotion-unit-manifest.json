@@ -5370,7 +5370,10 @@
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[session]",
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[budget]",
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rechecks_processes_and_epoch[process]",
-        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rechecks_processes_and_epoch[epoch]"
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rechecks_processes_and_epoch[epoch]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[stale]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[current]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[missing]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -6592,7 +6595,7 @@
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba",
         "tools/promotion_unit_tests/test_vault_client_install.py": "566d53f41e7510169bccb286d0830ef24b2d7b208c8253433df1fbc38d77c7e0",
         "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970",
-        "tools/promotion_unit_tests/test_hosted_activation.py": "ac9956c31797f1c4480119838ccc2704a23ca2de1ffbab347ced1cf4cca17e7b",
-        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "354a75a419546af193ee59253914539edd7ae72b5a1283f3261458ad04e85c17"
+        "tools/promotion_unit_tests/test_hosted_activation.py": "3a8e42ed94ecd88170841adf3b8467fa8e7c6502262dc2ed3f92cd617b7d8da6",
+        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "304d1351b8113b059c0eb2790b770d094f897b8decbf3ea6a74dfcf75c5c3bc0"
     }
 }

@@ -52,6 +52,7 @@ def hosted_source(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     record = SimpleNamespace(
         session_entry=lambda sid: entry if sid == SID else None,
         status="active", resolved_head_session=SID, head_revision=7,
+        replayed_head_transition=SimpleNamespace(session_id=SID, revision=7),
         pending_handoffs=[], creation_nonce="original-incarnation",
     )
     value = {
@@ -72,6 +73,7 @@ def test_hosted_source_is_bound_to_physical_activation_not_operation_id(hosted_s
     assert b.owner.source_identity(b.record, SID, 102, b.value) == token
     b.interval.source_identity = token
     b.interval.ended_at = None
+    b.entry.pruned_sources = ["native:previous"]
     assert b.owner.source_identity(b.record, SID, 102, b.value) == token
     b.interval.ended_at = "ended"
     with pytest.raises(ValueError, match="already closed"):
@@ -82,7 +84,7 @@ def test_hosted_source_is_bound_to_physical_activation_not_operation_id(hosted_s
 def test_hosted_source_fences_record_and_physical_boundaries(hosted_source: Any, change: str) -> None:
     b = hosted_source
     if change == "head":
-        b.record.head_revision += 1
+        b.record.replayed_head_transition.revision += 1
     elif change == "nonce-source":
         token = b.owner.source_identity(b.record, SID, 102, b.value)
         b.record.creation_nonce = "new-incarnation"
@@ -100,6 +102,23 @@ def test_hosted_source_fences_record_and_physical_boundaries(hosted_source: Any,
         b.interval.ended_at = None
     with pytest.raises(ValueError):
         b.owner.source_identity(b.record, SID, 102, b.value)
+
+
+@pytest.mark.parametrize("case", ["stale", "current", "missing"])
+def test_hosted_source_uses_replayed_head_not_repairable_cache(
+    hosted_source: Any, case: str,
+) -> None:
+    b = hosted_source
+    b.record.head_revision = 7
+    b.record.replayed_head_transition.revision = 8
+    if case == "current":
+        b.value["head_revision"] = 8
+        assert b.owner.source_identity(b.record, SID, 102, b.value)
+    else:
+        if case == "missing":
+            b.record.replayed_head_transition = None
+        with pytest.raises(ValueError, match="unchanged retained native head"):
+            b.owner.source_identity(b.record, SID, 102, b.value)
 
 
 @pytest.mark.parametrize("change", ["version", "pid", "head", "unknown", "session", "budget"])
