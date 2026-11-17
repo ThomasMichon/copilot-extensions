@@ -68,12 +68,14 @@ production, execution custody and all operational holds.
 
 The receiving contract is reviewed; the isolated Manager module/API and its
 explicit association operations are implemented. The native Windows packet
-passes 21 controls, including actual cold-module inspect/propose/apply/replace/
+passes 23 controls, including actual cold-module inspect/propose/apply/replace/
 clear, expected-root revalidation under the shared lock, failed publication,
 input bounds and unrelated-policy retention. The two changed Python files pass
 whole-file strict analysis for Linux and Windows Python 3.10 targets. The
 Manager checker uses a scoped hash-locked TOML backport environment; this does
 not change the whole project's pending admission.
+Both mutation operations also reject abbreviated apply flags before any
+configuration effect; the parent parser's strictness is set on each subparser.
 
 Schema-2 recovery remains preview-only. No ordinary caller consumes this
 association yet, and no operator installation was configured by the source

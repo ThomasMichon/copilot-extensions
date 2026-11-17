@@ -352,6 +352,8 @@ to associate or clear when that configuration effect is authorized. Replacing
 an existing different association adds `--expect-current-root <previous-root>`.
 Clear uses `clear --expect-current-root <previous-root>` and is also read-only
 without `--apply`. An already-matching desired state changes nothing.
+Every parser requires the declared option spelling. Abbreviations such as
+`--app` are rejected before association or clear can change configuration.
 
 An old runtime ignoring the extra TOML table does not implement the adapter.
 Missing module or unsupported schema is an explicit unsupported result, never

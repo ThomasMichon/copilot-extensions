@@ -185,6 +185,27 @@ def test_native_equivalent_root_does_not_retarget(tmp_path: Path) -> None:
     assert not suite.associate(root, Path(str(repository).swapcase()), apply=True).applied
 
 
+@pytest.mark.parametrize("operation", ["associate", "clear"])
+def test_abbreviated_apply_refuses_without_configuration_effects(
+    tmp_path: Path, operation: str,
+) -> None:
+    root = tmp_path / "manager"
+    repository = directory(tmp_path / "adopter")
+    if operation == "clear":
+        suite.associate(root, repository, apply=True)
+    before = {path.name: path.read_bytes() for path in root.iterdir()} if root.exists() else None
+    arguments = ["--root", str(root), operation]
+    arguments += (
+        ["--repository-root", str(repository)] if operation == "associate"
+        else ["--expect-current-root", str(repository)]
+    )
+    with pytest.raises(SystemExit) as failure:
+        suite.main([*arguments, "--app"])
+    assert failure.value.code == 2
+    after = {path.name: path.read_bytes() for path in root.iterdir()} if root.exists() else None
+    assert after == before
+
+
 def test_real_cold_module_is_explicit_and_read_only_until_apply(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
