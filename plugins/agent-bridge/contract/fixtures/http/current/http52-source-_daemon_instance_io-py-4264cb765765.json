@@ -1,0 +1,16 @@
+{
+  "evidence_family": "http52-shared-asgi-v1",
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
+    "sha256": "de40549952122dfa51964975ef54979c4e72ef2449060c5f33cdaa87ee04a7ac"
+  },
+  "scope": "shared named ASGI portfolio, not an independent capture",
+  "captured_from": {
+    "commit": "85444ab27763e387b7d18ec4bfcc63dab0a9a1d8",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 52,
+    "source_path": "libs/agent-procutil/src/agent_procutil/_daemon_instance_io.py",
+    "source_git_blob": "a3db49da336fcecc9d6d36ef27abc207ae766d7a",
+    "source_sha256": "ac96e3da00b9d5283ba18713c6ebc961058776ab585a3ddc928778d61a6f5717"
+  }
+}

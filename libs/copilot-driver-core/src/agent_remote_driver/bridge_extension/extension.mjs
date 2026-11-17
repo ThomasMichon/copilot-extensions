@@ -429,7 +429,14 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       await fh.close();
     }
     const events = transcriptTail(text, REPRESENT_TYPES);
-    const ok = await bridgeFetch("POST", `/api/v1/live-sessions/${encodeURIComponent(sid)}/events?replay=true`, { events });
+    const route = `/api/v1/live-sessions/${encodeURIComponent(sid)}/events?replay=true`;
+    let ok;
+    if (RETAINED_INBOX) {
+      const result = await retainedBridgeRequest("POST", route, { events });
+      ok = result?.session_id === sid && result?.replay_accepted === true;
+    } else {
+      ok = await bridgeFetch("POST", route, { events });
+    }
     extLog(`replayed ${events.length} transcript events of ${sid} to the bridge (${ok ? "ok" : "failed"})`);
     return ok;
   }
@@ -479,6 +486,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     retainedInbox = createRetainedInbox({
       session, request: retainedBridgeRequest,
       receivingApi: "native-sdk-v1",
+      replayHistory,
       cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
       canSend: () => state.deliveryEnabled && state.registered, log: extLog,
       onPending: (sid, messages) => state.pendingInput.offered(sid, messages),

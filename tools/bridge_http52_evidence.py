@@ -98,6 +98,8 @@ _RETAINED_AFFECTED = (
         "worktree_native_resume.py", "singleton_resume.py", "agent_registry_resolver.py", "routes/dispatch_tasks.py",
         "routes/worktrees.py", "routes/worktree_reporting.py",
         "compatible_inbox.py", "runtime_custody.py", "inbox_consumer_schema.py",
+        "message_contracts.py", "db_operations.py",
+        "live_backfill.py",
         "loop_governance.py", "session_inspection.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
@@ -123,6 +125,7 @@ AFFECTED = tuple(_current_source(path) for path in _RETAINED_AFFECTED) + (
     "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/bridge-endpoint.mjs",
     "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/plugin-readiness.mjs",
     "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py",
+    "libs/agent-procutil/src/agent_procutil/_daemon_instance_io.py",
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
@@ -188,6 +191,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/tests/fixtures/worktree_list_source.py",
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
+    "plugins/agent-bridge/tests/test_versioned_inbox_consumers.py",
     "plugins/agent-bridge/tests/test_unconfigured_sdk_receiving.py",
     "plugins/agent-bridge/tests/test_inbox_custody.py",
     "plugins/agent-bridge/tests/test_retained_sdk_recovery.py",
@@ -211,6 +215,22 @@ EXTRA_PATHS = (
 EXTRA_PATHS = tuple(_current_source(path) for path in EXTRA_PATHS)
 PROBES = {
     **retained.PROBES,
+    "test_versioned_enrollment_migrates_24_legacy_replays_without_effects": 4,
+    "test_versioned_rejection_is_terminal_and_sender_correlated": 12,
+    "test_versioned_control_start_is_one_shot_and_unknown_cannot_be_rejected": 4,
+    "test_versioned_old_database_first_touch_and_original_key_survive_rejection": 2,
+    "test_versioned_control_begin_race_and_authentication_preserve_one_effect_grant": 2,
+    "test_additive_schema_first_touch_serializes_concurrent_openers": 1,
+    "test_required_message_semantics_refuse_an_older_provider_before_post": 1,
+    "test_receiver_rejection_never_projects_requested_urgency_as_delivery": 1,
+    "test_prior_receiver_cannot_silently_ignore_new_required_message_semantics": 4,
+    "test_real_node_consumer_settles_original_versioned_rows_through_asgi": 4,
+    "test_native_receiver_must_still_own_the_registered_worktree": 2,
+    "test_versioned_sender_observes_original_receiver_rejection_without_resending": 2,
+    "test_required_message_semantics_cannot_fall_through_to_legacy_delivery": 2,
+    "test_terminal_control_audit_keeps_original_context_and_legacy_retention": 2,
+    "test_history_replay_api_acknowledges_acceptance_not_event_count": 6,
+    "test_history_replay_empty_batch_has_only_one_atomic_acceptance": 1,
     "test_http_and_both_cli_aliases_use_copied_core_without_cursor_or_input_effects": 1,
     "test_inspect_json_names_older_daemon_inspection_gap_without_retry": 1,
     "test_semantic_projection_is_bounded_content_free_and_not_ping_progress": 1,
@@ -455,6 +475,7 @@ CAPABILITY_VERSIONS = {
     "live_delivery_observation": 1,
     "mux_question_answers": 1,
     "compatible_native_inbox": 1,
+    "versioned_messages": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

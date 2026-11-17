@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import json
 import time
+from typing import Any, Protocol, cast
 
 from fastapi import HTTPException
 
-from ..live_controls import SetModeResult
-from ..plugin_readiness import PluginReadinessError, PluginReadinessRequest, startup_input_digest
+from ..db import Database
+from ..live_controls import SetModeRequest, SetModeResult
+from ..live_message_models import SendMessageRequest
+from ..plugin_readiness import PluginReadinessError, PluginReadinessRequest, PluginReadinessResult, startup_input_digest
 from ..plugin_readiness import READINESS_CONTROL
 
 
-def startup_readiness(db, session_id: str, kind: str) -> dict | None:
+class ReadinessWaiter(Protocol):
+    async def __call__(
+        self, db: Database, session_id: str, expectation: PluginReadinessRequest, *,
+        operation_key: str | None = None, operation_digest: str | None = None,
+    ) -> PluginReadinessResult: ...
+
+
+def startup_readiness(db: Database, session_id: str, kind: str) -> dict[str, Any] | None:
     """Return only the original startup control's selected observation inputs."""
     if not kind.startswith("startup:prompt:"):
         return None
@@ -27,23 +38,27 @@ def startup_readiness(db, session_id: str, kind: str) -> dict | None:
     return None
 
 
-def existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> str | None:
+def existing_startup_kind(db: Database, key: str, expectation: PluginReadinessRequest) -> str | None:
     rows = db.execute_read("SELECT kind FROM live_messages WHERE idempotency_key=?", (key,))
     if not rows:
         return None
-    kind = rows[0]["kind"]
+    kind = cast(str, rows[0]["kind"])
     if not kind.startswith("startup:prompt:"):
         raise HTTPException(409, detail="operation was already used without startup readiness")
     try:
+        if expectation.expected_session_id is None:
+            raise ValueError("startup native session missing")
         control = db.live_control_state(
             expectation.expected_session_id, int(kind.rsplit(":", 1)[1]), include_body=True,
         )
+        if control is None:
+            raise ValueError("startup receipt missing")
         original = json.loads(control["body"])
         original.pop("selection_digest", None)
         previous = PluginReadinessRequest.model_validate(original)
     except (ValueError, TypeError, KeyError):
         raise HTTPException(409, detail="operation readiness receipt is unavailable") from None
-    def selection(value):
+    def selection(value: PluginReadinessRequest) -> dict[str, Any]:
         data = value.model_dump(exclude={"timeout_seconds", "expected_session_id"})
         data["plugins"] = sorted(data["plugins"], key=lambda item: item["projected_source"])
         return data
@@ -52,12 +67,17 @@ def existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> 
     return kind
 
 
-async def startup_message(db, body, target, session_id, *, existing_kind, wait_readiness):
+async def startup_message(
+    db: Database, body: SendMessageRequest, target: dict[str, Any] | None, session_id: str, *,
+    existing_kind: Callable[[Database, str, PluginReadinessRequest], str | None],
+    wait_readiness: ReadinessWaiter,
+) -> tuple[str, str]:
     if body.kind != "prompt" or body.delivery != "queue" or not body.idempotency_key:
         raise HTTPException(400, detail="owned startup requires a queued prompt and operation key")
     if target is None:
         raise HTTPException(404, detail="live session not found")
-    target_session_id = target["session_id"]
+    target_session_id = cast(str, target["session_id"])
+    assert body.plugin_readiness is not None
     expectation = body.plugin_readiness.model_copy(update={"expected_session_id": target_session_id})
     if body.plugin_readiness.expected_session_id not in (None, target_session_id):
         raise HTTPException(409, detail="startup native session changed")
@@ -81,11 +101,12 @@ async def startup_message(db, body, target, session_id, *, existing_kind, wait_r
 
 
 async def set_live_mode(
-    db, session_id, body, *, wait_readiness, poll_seconds, claimed_grace_seconds,
-    mode_control, ready_mode_control,
+    db: Database, session_id: str, body: SetModeRequest, *, wait_readiness: ReadinessWaiter,
+    poll_seconds: float, claimed_grace_seconds: float, mode_control: str, ready_mode_control: str,
 ) -> SetModeResult:
     expected_mode_session = body.expected_session_id
-    control_kind, control_body = mode_control, body.mode
+    control_kind = mode_control
+    control_body: str = body.mode
     if body.plugin_readiness is not None:
         try:
             observed = await wait_readiness(db, session_id, body.plugin_readiness)

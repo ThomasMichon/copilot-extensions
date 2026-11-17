@@ -23,6 +23,16 @@ historical binary rollback or native SDK evidence.
 
 ## Current HTTP-52 owner-membership evidence
 
+The optional `versioned_messages: 1` expansion separates retained message
+base/type revisions and explicit required semantics from authenticated receiver
+enrollment. The current collector adds focused migration, correlated rejection,
+legacy-reader fencing, schema/CAS race, original sender observation and real
+Node/ASGI controls. The actual extension separately reconstructs represented
+history without invoking prompts or tools. Existing historical captures remain
+unchanged; current source declarations and genuine execution evidence are
+refreshed through the existing capture owner. These controls do not establish
+installed adoption or native Copilot delivery.
+
 The optional `compatible_native_inbox: 1` expansion selects
 `receiving_api: "native-sdk-v1"` on the existing retained endpoints.
 Source cases cover absent installation/process custody, actual Node/API receipt

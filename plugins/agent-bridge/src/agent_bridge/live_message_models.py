@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
 from .plugin_readiness import PluginReadinessRequest
 
 LiveMessageDelivery = Literal["queue", "steer", "interrupt"]
@@ -13,7 +13,7 @@ DEFAULT_LIVE_REPLY_TIMEOUT = 120.0
 MAX_LIVE_REPLY_TIMEOUT = 600.0
 
 
-def validate_live_reply_timeout(timeout: float | None) -> float:
+def validate_live_reply_timeout(timeout: float | str | None) -> float:
     """Validate a reply wait before it can become a transport timeout."""
     error = f"must be a finite number of seconds between 0 and {MAX_LIVE_REPLY_TIMEOUT:g}"
     try:
@@ -43,14 +43,22 @@ class SendMessageRequest(BaseModel):
     #: Stable producer key: an identical retry returns the original message ID.
     idempotency_key: str | None = None
     plugin_readiness: PluginReadinessRequest | None = None
+    message_version: int | None = Field(default=None, ge=0, strict=True)
+    message_requires: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
+        default_factory=list, max_length=32,
+    )
 
     @model_serializer(mode="wrap")
-    def serialize_request(self, handler):
-        result = handler(self)
+    def serialize_request(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
         if self.plugin_readiness is None:
             result.pop("plugin_readiness", None)
         if not self.exact_session:
             result.pop("exact_session", None)
+        if self.message_version is None:
+            result.pop("message_version", None)
+        if not self.message_requires:
+            result.pop("message_requires", None)
         return result
 
 
@@ -59,10 +67,18 @@ class LiveMessageReceipt(BaseModel):
 
     session_id: str
     message_id: int
-    stage: Literal["admitted", "sdk_accepted", "consumed"]
+    stage: Literal["admitted", "sdk_accepted", "consumed", "rejected", "control_started", "control_completed", "unknown"]
     admitted_at: float
     sdk_accepted_at: float | None = None
     consumed_at: float | None = None
+    disposition: dict[str, object] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_receipt(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        if self.disposition is None:
+            result.pop("disposition", None)
+        return result
 
 
 class SendMessageResult(BaseModel):
@@ -95,13 +111,13 @@ class LiveMessage(BaseModel):
     kind: str = "prompt"
     delivery: LiveMessageDelivery = "steer"
     created_at: float
-    plugin_readiness: dict | None = None
+    plugin_readiness: dict[str, Any] | None = None
     exact_session: bool = False
     original_session_id: str | None = None
 
     @model_serializer(mode="wrap")
-    def serialize_message(self, handler):
-        result = handler(self)
+    def serialize_message(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
         if self.plugin_readiness is None:
             result.pop("plugin_readiness", None)
         if not self.exact_session:
