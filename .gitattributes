@@ -1,6 +1,12 @@
 * text=auto
 *.sh text eol=lf
 *.ps1 text eol=crlf
+# Promotion inputs must retain their literal Git bytes in every checkout.
+libs/agent-procutil/src/agent_procutil/daemon_instances.ps1 text eol=lf
+libs/agent-procutil/src/agent_procutil/native_daemon.ps1 text eol=lf
+libs/agent-procutil/src/agent_procutil/native_owned.ps1 text eol=lf
+libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1 text eol=lf
+libs/versioned-runtime/versioned_runtime_native.ps1 text eol=lf
 *.cmd text eol=crlf
 *.py text eol=lf
 *.md text eol=lf

@@ -41,32 +41,6 @@ BASH = STEPS["Select the supported native installation-management Bash"]
 EXECUTION = STEPS["Qualify isolated native development lifecycle"]
 
 
-def test_pr_ratchet_uses_the_feature_head_and_merge_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.syspath_prepend(str(ROOT))
-    from tools import typecheck
-
-    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))
-    step = next(item for item in ci["jobs"]["checks"]["steps"]
-                if item.get("name") == "Whole-file strict new-code ratchet")
-    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || github.event.before }}"
-    assert step["env"]["HEAD"] == "${{ github.event.pull_request.head.sha || github.sha }}"
-    assert 'BASE="$(git merge-base "$BASE" "$HEAD")"' in step["run"]
-    feature, common = "a" * 40, "b" * 40
-    comparisons: list[list[str]] = []
-
-    def run(argv: list[str], cwd: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        assert cwd == tmp_path
-        if argv[1] == "rev-parse":
-            value = common if argv[-1] == common + "^{commit}" else feature
-            return subprocess.CompletedProcess(argv, 0, value + "\n", "")
-        comparisons.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "pr-owned.py\0", "")
-
-    monkeypatch.setattr(typecheck, "_run", run)
-    assert typecheck.changed_paths(tmp_path, common, feature) == ("pr-owned.py",)
-    assert comparisons[0][-3:] == [common, feature, "--"]
-
-
 def _python_body(step: dict[str, Any]) -> CodeType:
     prefix, suffix = "python - <<'PY'\n", "\nPY\n"
     command = step["run"]
@@ -177,7 +151,7 @@ def test_manual_selection_preserves_every_existing_route_and_default() -> None:
     }
     assert set(defaults) == set(routes) and not any(defaults.values())
 
-    def selected(values: dict[str, object]) -> set[str]:
+    def selected(values: Mapping[str, object]) -> set[str]:
         return {
             name for name, job in WORKFLOW["jobs"].items()
             if _enabled(job["if"], values)

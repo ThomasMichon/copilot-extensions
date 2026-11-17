@@ -5469,7 +5469,8 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_independent_setup_view_refuses_changed_bound_program[source]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_independent_setup_view_refuses_changed_bound_program[output]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[installation_context.py]",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[_installation_context.py]"
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[_installation_context.py]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_pr_ratchet_uses_the_feature_head_and_merge_base"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -6646,7 +6647,7 @@
         "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
         "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0",
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py": "da9d49e6586e4d9e021f24967269e49a05fa25db8046015dc979e86ef03ab151",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py": "b8312581ebf0414b692a293e22b3f7ba768914698500da1a544b2afc36354d9b",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "7b56c5bf4fcd0e1ebde93376396e29bd53cfc2ad2cd2a58f52d9a1baf442effb",
         "plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py": "7ef0c4cbaaa1954a6ce64332b4ab6da4c148013c41a4404e0025442f87ff5268",
         "plugins/agent-worktrees/src/agent_worktrees/monitor_projection_cache.py": "96a5d521df3272df471512a2d1a432d160d36f701f2fde53e08522fc5bc9760f",
