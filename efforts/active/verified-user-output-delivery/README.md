@@ -1,0 +1,209 @@
+# Verified User-Output Delivery
+
+## Goal
+
+Give a producing worktree a complete, explicitly selected user-output flow:
+resolve a segmented destination, register responsibility before returning a
+writable allocation, verify the finished deliverable and close that
+responsibility with a bounded historical receipt.
+
+**Kind:** completion; a finite source-only slice of #10968.
+**Acceptance:** U0-U3 and UV1-UV5 below, normal source review and required CI.
+**Finalization criterion:** source delivery is merged, all scoped validation is
+resolved and the source workspace's obligations are settled. This does not
+require deleting user output or retained history.
+**Now:** review this source intent before behavioral implementation.
+**Return:** implement the first complete source consumer after this plan clears
+review; preserve the broader lifecycle, installed and operational owners.
+
+- **Slug:** `verified-user-output-delivery`
+- **Repo:** copilot-extensions
+- **Branch(es):** one managed source worktree; sequential plan and implementation PRs
+- **Created:** 2026-11-17
+- **Status:** Draft
+- **Vision:** extends [artifact disposition](../../../visions/plugins/agent-worktrees/README.md#artifact-disposition)
+- **Umbrella issue:** #13040; part of #10968
+
+## Guiding Intent
+
+User output is not disposable scratch, a reusable cache or a live history store.
+The user may organize or move a completed deliverable. The producing worktree
+must not keep responsibility open forever or maintain a second inventory of
+delivered files.
+
+An allocation or copy attempt is not successful delivery. Failed or unknown
+verification keeps the original responsibility visible.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Source driver | Plan, implementation, synthetic qualification and PR stewardship | This effort and #13040 |
+
+## Coordination
+
+- **Topology:** sequential source PRs, with one writer in one managed worktree.
+- **Host (owns PRs):** Source driver.
+- **Delegates:** none.
+- **Handoff:** continue from this Goal, the current unchecked item and its evidence.
+- **Existing owners:** configuration-context/layers select configuration;
+  Worktrees owns the resource ledger, exact owner and finalization; the selected
+  storage provider owns actual account/root discovery. Logger remains an
+  optional history archivist, not a delivery or destination-registry owner.
+
+## Context
+
+The [artifact lifecycle guide](../../../plugins/agent-conduct-guidance/docs/artifact-lifecycle.md)
+already defines segmented user output, explicit destination precedence, verified
+handover and historical receipts without a destination ledger.
+[Artifact storage](../../../plugins/agent-worktrees/docs/artifact-storage.md)
+currently composes scratch policy, not user-output preferences.
+The [producer contract](../../../plugins/agent-worktrees/docs/resource-producer.md)
+already supplies reserve/begin/bind fencing and exact registered-provider
+verification. Its retained lifetime describes disposable scratch, not completed
+user handover; that meaning must not be silently broadened.
+
+This slice reuses those owners. It does not reopen the history collection work
+or claim the broader [worktree-data program](../mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
+complete.
+
+## Request
+
+Public-safe source-admission answer, verbatim:
+
+> Approve source-only user-output slice
+
+The admitted outcome is destination resolution, verified delivery and bounded
+history receipts, with source review, implementation, synthetic Windows/Linux
+validation and normal PR delivery. This is a source contract, not authority to
+operate on real user directories or activate an installed runtime.
+
+## Scope Approvals
+
+The source driver may implement and correct this source flow, run private
+synthetic fixtures and steward its PRs under normal review and CI.
+Excluded effects remain real user-file writes/moves, account/path configuration,
+installed updates, activation, collection, migration, historical deletion, cache
+eviction and other owners' resources.
+
+## Plan
+
+### U0 - Review the intent
+
+- [ ] Reconcile the new disposition intent and this plan through source review.
+
+### U1 - Resolve and produce the complete flow
+
+- [ ] Extend the existing storage owner with portable user-output preferences
+  and exact machine-root overrides. Keep resolution inert.
+- [ ] Add an explicitly negotiated Worktrees user-output allocator and delivery
+  operation over the existing producer ledger. Register before returning a
+  writable destination and complete one real producer flow.
+- [ ] Keep failed, interrupted and unknown handover under the same obligation.
+  Successful exact retries return the stored historical result without
+  rescanning or repairing files the user may have moved later.
+
+### U2 - Qualify the source consumers
+
+- [ ] Prove the controls in UV1-UV5 using private synthetic Windows/Linux roots
+  and the normal contained test owners. Record actual platform coverage.
+
+### U3 - Deliver and close the bounded source work
+
+- [ ] Update authoritative usage/configuration documentation and the artifact
+  skill; pass focused tests, source checks, review and required CI.
+- [ ] Merge the source, record its actual release state, resolve this source
+  issue and archive the completed effort. Keep #10968 and unrelated owners open.
+
+## Validation Plan
+
+- [ ] UV1. Prove precedence, portable organization templates, exact machine
+  roots and explicit destination behavior. Missing or invalid required
+  OneDrive selection never silently becomes Downloads, scratch or source.
+- [ ] UV2. Prove exclusive folder creation, portable topic/member names,
+  collision handling, no link/reparse traversal, protected-home refusal and
+  reserve-before-writable ordering through the real allocator.
+- [ ] UV3. Prove success and actual finalization with a retained deliverable;
+  also prove incomplete, changed, unreadable and over-budget content cannot
+  close the producing obligation.
+- [ ] UV4. Fault the allocation, provider verification and ledger-publication
+  boundaries. Preserve the same identity and responsibility across unknown
+  replies; exact completed retries must not require a destination to remain
+  present or recreate a user-moved folder.
+- [ ] UV5. Prove old/new capability refusal and unchanged disposable/retained
+  scratch semantics. Use focused unit controls and opt-in real-process/native
+  qualification rather than enlarging required CI into an exhaustive matrix.
+
+## Proposal
+
+### Configuration and destination ownership
+
+Use the existing artifact-storage source selection and layers. Portable fields
+describe target choice and relative organization templates; physical roots
+remain exact machine-scoped values or explicit inputs from the selected storage
+owner. Do not infer the intended OneDrive account from an environment variable
+or import a destination-specific sibling runtime.
+
+Precedence is explicit destination, exact machine override, portable preference,
+then capability default. Default organization remains
+`Apps/Copilot/Artifacts/<YYYY-MM-DD> <Topic>` under an owner-resolved OneDrive,
+or `Copilot/Artifacts/<YYYY-MM-DD> <Topic>` under owner-resolved Downloads.
+Templates may express a different portable organization, not arbitrary path
+execution or traversal. An explicit destination is not silently rewritten.
+
+An unspecified target may use an available owner-resolved default. An explicit
+or configured required target must resolve or fail visibly. Resolution neither
+creates folders nor selects/configures an account.
+
+### One producing obligation, then a historical receipt
+
+Add a separately advertised user-deliverable lifetime/disposition to the
+existing producer owner. Do not repurpose scratch retention, generic claim
+release or absence as proof of delivery. Default producer requests and callback
+envelopes keep their current shape. Older providers are unsupported for this
+feature, without bootstrap or fallback.
+
+The first complete producer writes into its newly allocated final compartment.
+This avoids an unnecessary second staging copy or an arbitrary copy/move API.
+Register its exact creator/incarnation and fenced allocation before returning
+the writable path. Bind the real filesystem identity, use exclusive creation,
+and retain unresolved responsibility across partial creation or unknown replies.
+Do not overwrite or adopt a pre-existing user folder.
+
+The integrated producer ends its own writes before requesting delivery.
+The native provider verifies the exact allocation and bounded declared output
+through real filesystem reads, not a caller-supplied success boolean.
+The serialized ledger transition rechecks the same subject and persists the
+verified result before responsibility becomes terminal.
+
+A receipt identifies the actual selected destination, delivery time, content
+summary/integrity and result within explicit count/byte limits. Successful
+delivery is omitted from current resource-ownership inventory, while its bounded
+receipt remains in the producing worktree's retained history. No destination
+registry, periodic scan, recipient handshake or later-user-move repair is added.
+Local verified handover to a sync folder is not remote cloud acknowledgment.
+
+### Boundaries and compatibility
+
+Use the current OS identity/access boundary and pinned filesystem identities
+to prevent wrong-target traversal and replacement. Do not weaken existing root,
+record, handoff, finalization or permission checks. Do not repair user-directory
+permissions, follow links, scan arbitrary roots or delete user deliverables.
+Unsupported cross-owner handoff remains an explicit refusal until its receiving
+contract is separately implemented.
+
+The behavior adds no daemon, scheduler, service, network call or installed
+default activation. Cost is explicit-operation work bounded by the selected
+allocation and manifest limits, not a repeated history or destination scan.
+Source tests use newly created private fixture roots only; installed and actual
+user-storage adoption remain outside this finite effort.
+
+## Journal
+
+### 2026-11-17 - Source intent
+
+Claimed #13040 after searching current public issues and open PRs. Reconciled
+storage policy, producer custody and artifact guidance. The proposed first
+consumer produces directly into an exclusively allocated destination and keeps
+completed receipts only in the existing worktree history. No behavioral
+implementation or real user-directory operation has occurred.
