@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from ..pr_snapshot import Review
 from ..pr_review_policy import KNOWN_REVIEW_STATES, normalize_review_state
 from .base import ProviderError
+from .gitea_pagination import CountedResponse
+from .observation_credentials import MAX_SNAPSHOT_REQUESTS, ObservationCredentials
 
 if TYPE_CHECKING:
     from .gitea import GiteaProvider
+
+
+class ReviewCollection(tuple[Review, ...]):
+    """Preserve review tuple consumers while carrying separately qualified coverage."""
+
+    complete: bool | None
+
+    def __new__(
+        cls, reviews: Iterable[Review], *, complete: bool | None,
+    ) -> ReviewCollection:
+        selected = super().__new__(cls, reviews)
+        selected.complete = complete
+        return selected
 
 
 def _review(value: object) -> Review:
@@ -46,24 +62,32 @@ def _review(value: object) -> Review:
 
 
 def all_reviews(
-    owner: GiteaProvider, repo: str, number: int, api_base: str, token: str,
-) -> tuple[Review, ...]:
-    """Traverse visible pages; body-only exhaustion is not a completeness proof."""
+    owner: GiteaProvider, repo: str, number: int, api_base: str,
+    token: str | ObservationCredentials,
+) -> ReviewCollection:
+    """Traverse raw-page count bounds even when pending-draft filtering empties a page."""
     reviews: list[Review] = []
     seen: set[int] = set()
     page, page_size = 1, 50
-    while True:
-        status, body = owner._curl_with_retry(
+    total: int | None = None
+    while page <= MAX_SNAPSHOT_REQUESTS:
+        response = owner._curl_with_retry(
             "GET",
             owner._api(api_base, f"/repos/{repo}/pulls/{number}/reviews?limit={page_size}&page={page}"),
             token,
         )
+        status, body = response
         if status != 200:
             from .gitea import _is_transient
             raise ProviderError(
                 f"Gitea reviews lookup failed (HTTP {status}) on page {page} for {repo}#{number}",
                 transient=_is_transient(status),
             )
+        count = response.total_count if isinstance(response, CountedResponse) else None
+        if page == 1:
+            total = count
+        elif total is not None and count != total:
+            raise ProviderError("Gitea review count changed or became unavailable", transient=True)
         try:
             batch = json.loads(body)
             if not isinstance(batch, list) or len(batch) > page_size:
@@ -76,6 +100,14 @@ def all_reviews(
                 reviews.append(review)
         except (ValueError, TypeError):
             raise ProviderError(f"Gitea returned malformed reviews on page {page}") from None
-        if not batch:
-            return tuple(reviews)
+        if total is not None:
+            if len(seen) > total:
+                raise ProviderError("Gitea review count contradicts acquired rows", transient=True)
+            # Every raw page has a positive page size. Count is therefore a
+            # conservative last-page bound even when the server clamps limit.
+            if len(seen) == total or page >= total:
+                return ReviewCollection(reviews, complete=True)
+        elif not batch:
+            return ReviewCollection(reviews, complete=None)
         page += 1
+    raise ProviderError("Gitea review traversal reached its page bound", transient=True)

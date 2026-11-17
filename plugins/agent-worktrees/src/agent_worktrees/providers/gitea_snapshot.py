@@ -7,6 +7,7 @@ from typing import Any
 
 from ..pr_contract import PRSnapshot
 from .base import ProviderError
+from .gitea_reviews import ReviewCollection
 from .observation_credentials import MAX_SNAPSHOT_REQUESTS, ObservationCredentials
 
 
@@ -46,15 +47,14 @@ def snapshot(
         if isinstance(label, dict) and label.get("name")
     )
     mergeable = pr.get("mergeable")
+    reviews = owner._all_review_objs(repo, number, api_base, token)
     return PRSnapshot(
         pr_state=str(pr.get("state", "")) or "open", endpoint=owner.authority_endpoint(api_base),
         merged=bool(pr.get("merged", False)), head_sha=str(head.get("sha", "")),
         base_ref=str(base.get("ref", "")), base_sha=str(base.get("sha") or ""),
         updated_at=str(pr.get("updated_at", "") or ""),
-        reviews=owner._all_review_objs(repo, number, api_base, token),
-        # Gitea filters other users' drafts after pagination; an empty body
-        # may be an intermediate page, not authoritative exhaustion.
-        reviews_complete=None,
+        reviews=tuple(reviews),
+        reviews_complete=reviews.complete if isinstance(reviews, ReviewCollection) else None,
         author=str((pr.get("user") or {}).get("login", "")),
         mergeable=mergeable if isinstance(mergeable, bool) else None,
         checks_state=owner._combined_status_state(repo, str(head.get("sha", "")), api_base, token),

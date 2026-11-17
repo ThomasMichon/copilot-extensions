@@ -63,10 +63,12 @@ retried as an unrelated transient provider failure.
 
 The native snapshot may also carry `reviews_complete` and `updated_at`.
 The snapshot decoder preserves these additive fields, leaving absent review
-coverage unknown. Gitea rejects malformed or overlapping pages, but leaves
-review coverage unknown: it filters other users' pending drafts after pagination,
-so even an empty page is not authoritative exhaustion. Its body-only traversal
-does not qualify reviewer-action completeness. Coverage is not atomic PR/review evidence or reviewer policy, and a PR
+coverage unknown. The native Gitea owner rejects malformed or overlapping pages
+and can qualify exhaustion with consistent raw-count metadata while traversing
+filtered empty pages. Body-only/prior native readers leave coverage unknown;
+an empty response alone is never completeness. See the
+[native coverage contract](../../agent-worktrees/docs/pr-observation.md).
+Coverage is not atomic PR/review evidence or reviewer policy, and a PR
 mutation timestamp does not identify an author update. The unselected
 version-1/2 repository projection does not retain these extra fields.
 
