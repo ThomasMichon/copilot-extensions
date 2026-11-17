@@ -116,7 +116,8 @@ The owned branch is reconciled onto exact Dev `59077d83c9`. The source repair
 batches local-only committed metadata reads and indexes historical candidate
 packets without dropping comparisons or increasing any limit. All 56
 contract-checker controls pass. The newly touched legacy tool bodies are
-included in whole-file strict migration. The optional publication-proof lane
+included in whole-file strict migration: all 173 selected physical files in
+25 owners pass every declared target. The optional publication-proof lane
 is Ubuntu; local Windows diagnostics retain their original-limit failures
 and supply no native or installed acceptance.
 

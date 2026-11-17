@@ -3741,3 +3741,19 @@ The original capture inventory, 240-second aggregate, runner limits and
 qualification profiles are unchanged. Documentation impact is confined to
 the existing testing reference and this effort's current evidence; no public
 command, installed-runtime contract, rollout or release policy changes.
+
+Final whole-file strict validation passes all 173 physical files in 25 owners
+and every declared target, including both independent Worktrees programs.
+The committed 120-file size scope, Ruff and 13-plugin installation contract
+pass. The actor-free manifest retains all 5,174 nodes, 337 coverage targets
+and 814 source inputs from both pinned Dev and the prior published head,
+with matching hashes and the original 300-second budget; no unit packet is
+replayed. Canonical declaration preparation at `a784522b66` produces an
+identical registry, not new execution evidence.
+
+The 56-test packet supplies unit and lightweight real-Git consumer coverage,
+including fresh temporary repositories. A whole-host clean-room installation
+is not exercised for this source-evidence-only tooling change; no installer
+behavior changes. Live Ubuntu proof must still run against the newly published
+source through the existing owner. The Windows cleanup and all broader
+qualification, review, release and custody gates remain unresolved.
