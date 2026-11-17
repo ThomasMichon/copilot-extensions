@@ -9,7 +9,7 @@ from agent_worktrees import __main__ as core
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, push_timeout, status_bar_cli, status_monitor_discovery
 from agent_worktrees import status_monitor_runtime, status_updater_cli, tracking
-from agent_worktrees.status_monitor_content import refresh_registered_content
+from agent_worktrees.status_monitor_content import refresh_monitor_content
 from agent_worktrees.status_monitor_presentation import run_monitor_sweep
 
 
@@ -87,7 +87,9 @@ def test_cold_standalone_updater_handoff_gets_scheduled_content_without_tracking
         if index == 0:
             previous = cfg.active_project()
             owner.phase = "producer"
-            refresh_registered_content(paths, owner, governance_deferred=RuntimeError)
+            refresh_monitor_content(
+                paths, owner, recheck=lambda *a: None, governance_deferred=RuntimeError,
+            )
             assert cfg.active_project() == previous
             owner.phase = "projection"
     segments = [value for option, value in writes if option == "@aw_seg"]

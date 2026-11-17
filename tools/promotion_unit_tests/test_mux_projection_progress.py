@@ -244,13 +244,15 @@ def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleN
     )
     assert attempted == ["cleanup", "pending", "ready"]
     assert retained == [("project", "cleanup", error)]
-    api.content.refresh_registered_content(
-        {"untracked": None}, owner, governance_deferred=governance, admitted=lambda: False,
+    api.content.refresh_monitor_content(
+        {"untracked": None}, owner, lifecycle_priority=SimpleNamespace(is_set=lambda: True),
+        recheck=lambda *a: None, governance_deferred=governance,
     )
     assert attempted == ["cleanup", "pending", "ready"]
     with pytest.raises(governance):
-        api.content.refresh_registered_content(
-            {"governance": None, "later": None}, owner, governance_deferred=governance,
+        api.content.refresh_monitor_content(
+            {"governance": None, "later": None}, owner,
+            recheck=lambda *a: None, governance_deferred=governance,
         )
     assert attempted == ["cleanup", "pending", "ready", "governance"]
     assert api.package.config.active_project() == "project"
