@@ -296,40 +296,61 @@ async def test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recov
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [False, True])
 async def test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh(
-    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, provider: bool,  # noqa: F811
 ) -> None:
     from agent_bridge import retained_session_recovery as recovery
+    from agent_bridge import workspace_creation
     from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
 
     fixture, manager = writer_creation, writer_creation.rig.manager
+    if provider:
+        fixture.rig.target = replace(
+            fixture.rig.target, venue={"provider": "original"},
+            env={"REQUEST_SETTING": "original-request"}, copilot_args=["--original-default"],
+        )
+        start = workspace_creation.start
+
+        async def configured(*args: Any, **kwargs: Any) -> Any:
+            return await start(
+                *args, **kwargs, agent_name="fixture", copilot_args=["--request-argument"],
+                env_overrides={"REQUEST_SETTING": "original-request"},
+            )
+
+        monkeypatch.setattr(workspace_creation, "start", configured)
     connect = manager._connect_via_session_host
     old, request = await missing_record(fixture, monkeypatch)
     adopted, _boundary = await metadata.prepare(
         manager, old.session_id, request, fixture.requirement, lambda: True,
     )
     monkeypatch.setattr(manager, "_connect_via_session_host", connect)
+    if provider:
+        assert adopted.target.venue[REQUEST_OVERRIDES_KEY] == old.target.venue[REQUEST_OVERRIDES_KEY]
     await recovery.resume(manager, adopted.session_id, request, fixture.requirement, lambda: True)
     await manager.stop_session(adopted.session_id, force=True)
     adopted.agent_name = "fixture"
-    resolve = AsyncMock(side_effect=AssertionError("internal epoch was classified as a provider"))
+    resolve = AsyncMock(
+        return_value=replace(
+            adopted.target, venue={"provider": "refreshed"}, env={"PROVIDER_DEFAULT": "new-default"},
+            copilot_args=["--new-default"],
+        ),
+        side_effect=None if provider else AssertionError("internal epoch was classified as a provider"),
+    )
     manager._resolver = SimpleNamespace(resolve_async=resolve)
     resumed = await manager.resume_session(adopted.session_id, drain=False)
     assert resumed is adopted
-    resolve.assert_not_awaited()
-    await manager.stop_session(adopted.session_id, force=True)
-    adopted.target = replace(adopted.target, venue={
-        **adopted.target.venue, "provider": "fixture",
-        REQUEST_OVERRIDES_KEY: {"env": {}, "copilot_args": []},
-    })
-    manager.db.update_session_target(adopted.session_id, adopted.target.to_json())
-    resolve.side_effect = None
-    resolve.return_value = replace(adopted.target, venue={"provider": "refreshed"})
-    assert await manager.resume_session(adopted.session_id, drain=False) is adopted
-    resolve.assert_awaited_once_with("fixture")
+    if provider:
+        resolve.assert_awaited_once_with("fixture")
+        assert adopted.target.venue["provider"] == "refreshed"
+        assert adopted.target.copilot_args == ["--new-default", "--request-argument"]
+        assert adopted.target.env == {
+            "PROVIDER_DEFAULT": "new-default", "REQUEST_SETTING": "original-request",
+        }
+    else:
+        resolve.assert_not_awaited()
     assert adopted.target.venue[metadata.EPOCH_KEY] == adopted.session_id
     assert adopted.target.venue[creation.JOURNAL_KEY] == request.journal_key
-    assert adopted.target.venue["provider"] == "refreshed"
     assert json.loads(manager.db.get_session(adopted.session_id)["target_json"])["venue"] == adopted.target.venue
 
 

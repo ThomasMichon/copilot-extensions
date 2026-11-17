@@ -57,6 +57,44 @@ def _inputs(row: dict[str, Any]) -> tuple[SpawnTarget, str | None, dict[str, Any
             caller_owner_ref=target.caller_owner_ref or options.get("caller_owner_ref"),
             venue={**(target.venue or {}), JOURNAL_KEY: scope.key_digest},
         )
+        from .session_core import _SessionCoreMixin
+        from .spawn_target import REQUEST_OVERRIDES_KEY
+        from .privileged_plugins import relay_agent
+
+        previous = (target.venue or {}).get(REQUEST_OVERRIDES_KEY)
+        previous = dict(previous) if isinstance(previous, dict) else {}
+        controller_origin = previous.get(
+            "controller_worktree_origin", "explicit" if target.caller_worktree is not None else "affinity",
+        )
+        privileged = relay_agent(target) is not None
+        if _SessionCoreMixin._provider_backed_target(target) or privileged:
+            request_args = previous.get("copilot_args") if options.get("copilot_args") is None else args
+            request_env = previous.get("env") if options.get("env_overrides") is None else env
+            request_args = [] if request_args is None else request_args
+            request_env = {} if request_env is None else request_env
+            if (
+                not isinstance(request_args, list) or any(not isinstance(arg, str) for arg in request_args)
+                or not isinstance(request_env, dict)
+                or any(not isinstance(key, str) or not isinstance(value, str) or target.env.get(key) != value
+                       for key, value in request_env.items())
+            ):
+                raise ValueError("incomplete provider override provenance")
+            previous.update(
+                env=dict(request_env), copilot_args=list(request_args),
+                **({"mcp_servers": options.get("mcp_servers")} if privileged else {}),
+            )
+        target = replace(
+            target, caller_worktree=(
+                f"acquisition:creation:{scope.key_digest}"
+                if target.caller_worktree is None and controller_origin != "explicit"
+                else target.caller_worktree
+            ),
+            venue={
+                **(target.venue or {}), REQUEST_OVERRIDES_KEY: {
+                    **previous, "controller_worktree_origin": controller_origin,
+                },
+            },
+        )
         servers = options.get("mcp_servers")
         servers = target.mcp_servers if servers is None else servers
         if not isinstance(servers, list) or any(not isinstance(server, dict) for server in servers):

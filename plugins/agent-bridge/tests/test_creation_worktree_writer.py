@@ -46,6 +46,7 @@ def test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuse
     with sqlite3.connect(path) as conn:
         for name in creation_writer_schema.TRIGGERS:
             conn.execute(f"DROP TRIGGER {name}")
+        conn.execute(f"DROP INDEX {creation_writer_schema.ADOPTION_INDEX}")
         for name in creation_writer_schema.COLUMNS:
             conn.execute(f"ALTER TABLE workspace_embodiments DROP COLUMN {name}")
         conn.execute("UPDATE schema_version SET version=40")

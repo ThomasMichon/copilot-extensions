@@ -10,6 +10,11 @@ COLUMNS = (
     "creation_writer_json", "creation_handoffs_json", "creation_recoveries_json",
     "creation_adoption_json",
 )
+ADOPTION_INDEX = "idx_workspace_creation_adoption_session"
+_ADOPTION_INDEX_SQL = (
+    f"CREATE UNIQUE INDEX IF NOT EXISTS {ADOPTION_INDEX} ON workspace_embodiments"
+    "(json_extract(creation_adoption_json,'$.session_id'))"
+)
 ORIGINAL_RECOVERY_HELD = """
 EXISTS (
     SELECT 1 FROM workspace_embodiments AS embodiment
@@ -85,11 +90,12 @@ EXISTS (
         )
 )
 """ % _valid_recovery_request()
+# Remove the column's TEXT affinity so SQLite can use the JSON expression index.
 METADATA_RECOVERY_HELD = f"""
 EXISTS (
     SELECT 1 FROM workspace_embodiments AS embodiment
     WHERE embodiment.creation_adoption_json IS NOT NULL AND embodiment.state!='terminal'
-    AND json_extract(embodiment.creation_adoption_json,'$.session_id')=sessions.id
+    AND json_extract(embodiment.creation_adoption_json,'$.session_id')=+sessions.id
     AND NOT ({_METADATA_RECOVERY_COMPLETE})
 )
 """
@@ -186,6 +192,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     for column in COLUMNS:
         if column not in columns:
             conn.execute(f"ALTER TABLE workspace_embodiments ADD COLUMN {column} TEXT")
+    conn.execute(_ADOPTION_INDEX_SQL)
     for statement in statements().values():
         conn.execute(statement)
 
@@ -199,14 +206,25 @@ def migrate_metadata(conn: sqlite3.Connection) -> None:
 
 
 def validate_schema(
-    conn: sqlite3.Connection, *, require_recovery: bool = True, require_metadata: bool = True,
+    conn: sqlite3.Connection, *, require_recovery: bool = True, require_metadata: bool | None = None,
 ) -> None:
+    require_metadata = require_recovery if require_metadata is None else require_metadata
     columns = {row[1]: row for row in conn.execute("PRAGMA table_info(workspace_embodiments)")}
     required = COLUMNS if require_metadata else COLUMNS[:3] if require_recovery else COLUMNS[:2]
     for column in required:
         row = columns.get(column)
         if row is None or row[2].upper() != "TEXT" or row[3] != 0 or row[5] != 0:
             raise RuntimeCustodyError(f"Creation writer requires writable preparation: {column}")
+    if require_metadata:
+        index = conn.execute(
+            "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (ADOPTION_INDEX,),
+        ).fetchone()
+        if (
+            index is None or index[0] != "index" or index[1] != "workspace_embodiments"
+            or type(index[2]) is not str
+            or _normalized_schema(index[2]) != _normalized_schema(_ADOPTION_INDEX_SQL)
+        ):
+            raise RuntimeCustodyError(f"Creation writer requires writable preparation: {ADOPTION_INDEX}")
     for name, statement in statements().items():
         if not require_metadata and name.startswith("metadata_"):
             continue

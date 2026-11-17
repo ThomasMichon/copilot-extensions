@@ -335,6 +335,10 @@ and task origin come from immutable creation facts; unsupported or incomplete
 configuration refuses. The native owner is observed before and after its
 dormant-conversation admission preview. Preparation starts no native process,
 sends no prompt, drains no queue and attaches no task.
+Provider-backed targets reconstruct request-owned environment, argument and
+controller-origin provenance with the original start-time merge rules. A later
+provider refresh can change provider defaults without losing those original
+request overrides.
 
 When prior managed history is missing, the existing native-import transaction
 commits one **new managed control ID** and its immutable adoption in the original
@@ -368,7 +372,9 @@ This preparation does not prove a new turn, native acceptance, original-task
 attachment or installed-provider qualification.
 
 Writable migration adds nullable `creation_adoption_json` and the exclusion,
-identity, pointer and configuration-retention guards at schema 49. Passive
+identity, pointer and configuration-retention guards plus an indexed adopted-ID
+lookup at schema 49. Retention uses that index rather than scanning every creation
+journal for each session. Passive
 cutover validates the current schema before writes; a prior schema-48 receiver
 refuses it. Supported rollback must retain these semantics or remain unable to
 open this store: do not downgrade its schema stamp, erase adoption or restore
