@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
 import subprocess
@@ -377,6 +376,8 @@ class KeePassXCBackend:
         kpdb: str,
         entry_path: str,
         attachment_name: str,
+        *,
+        max_bytes: int | None = None,
     ) -> tuple[bytes | None, str]:
         """Export an attachment from an entry. Returns (data, message)."""
         import tempfile
@@ -405,15 +406,30 @@ class KeePassXCBackend:
             )
             if r.returncode == 0:
                 with open(tmp_path, "rb") as f:
-                    data = f.read()
+                    data = f.read() if max_bytes is None else f.read(max_bytes + 1)
+                if max_bytes is not None and not 1 <= len(data) <= max_bytes:
+                    return None, "Attachment size is outside the supported bound"
                 return data, f"Exported {attachment_name}"
             return None, r.stderr.strip() or "attachment-export failed"
         except Exception as e:
             return None, str(e)
         finally:
             if tmp_path:
-                with contextlib.suppress(OSError):
+                try:
                     os.unlink(tmp_path)
+                except OSError:
+                    if max_bytes is not None:
+                        raise
+
+    def export_attachment_bounded(
+        self, kpdb: str, entry_path: str, attachment_name: str,
+    ) -> tuple[bytes | None, str]:
+        """Read a small attachment; temporary-file cleanup is part of success."""
+        from .attachment_import import MAX_ATTACHMENT_BYTES
+
+        return self.export_attachment(
+            kpdb, entry_path, attachment_name, max_bytes=MAX_ATTACHMENT_BYTES,
+        )
 
     # -- listing & lifecycle -------------------------------------------------
 

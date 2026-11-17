@@ -579,6 +579,10 @@ class VaultService:
                 [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []
             ),
             "key_attachment_import_owner": self._attachment_import_owner,
+            "key_attachment_export_versions": (
+                [1] if callable(getattr(self.cli, "export_attachment_bounded", None)) else []
+            ),
+            "key_attachment_export_owner": self._attachment_import_owner,
             "auth_handoff_versions": supported_versions(),
             "auth_handoff_receiver": (
                 self._generation.handoff_advertisement()
@@ -622,6 +626,20 @@ class VaultService:
             return invalid
         if action == "ping" and request.get("health_only") is True:
             return self._generation_health()
+        if action == "export-key-nonactivating":
+            from .attachment_export import handle_request as export_request
+
+            if request.get("expected_export_owner") != self._attachment_import_owner:
+                export_result: dict[str, Any] = {
+                    "ok": False, "code": "export_owner_changed", "error": "export_owner_changed",
+                }
+            else:
+                self._check_password_ttl()
+                export_result = export_request(
+                    self.cli, request.get("kpdb") or resolve_kpdb(required=False),
+                    request.get("group"), request,
+                )
+            return {**export_result, "key_attachment_export_owner": self._attachment_import_owner}
         if action == "import-key-create-only":
             from .attachment_import import handle_request
 
