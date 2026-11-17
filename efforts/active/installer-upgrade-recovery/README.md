@@ -193,11 +193,17 @@ authorize production updates, recovery mutations or new access.
   Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
   ambiguity/collision/read-failure refusal and no mutations through the native
   CLI boundary. Source release is not caller adoption or installed recovery.
-- [ ] Qualify the incoming inspection bootstrap under #11083/U18. Run the
+- [x] Qualify the incoming inspection bootstrap under #11083/U18. Run the
   existing reader from canonically constructed incoming code without consulting
   or changing the selected runtime, registrations, selectors or service state.
   Keep preparation/read failures distinct from absence, installation and caller
-  adoption; U17's delivered source/release remains complete.
+  adoption; U17's delivered source/release remains complete. Source #11136,
+  native run `42297364665` and containing release #11182 fulfill this bounded
+  source request; #11083 is closed as completed.
+- [ ] Qualify the optional complete prepared-Source/application input through
+  the incoming inspection entry. The existing composition control is not real
+  prepared-application consumer evidence. Preserve cold/historical-seed
+  performance, caller adoption and installed recovery as separate outcomes.
 
 ### Whole installer and resident-companion lifecycle - #5820
 
@@ -432,6 +438,25 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### 2026-11-17 - Incoming inspection source disposition reconciled
+
+The bounded #11083 source request is closed as completed in
+[its disposition](https://github.com/ThomasMichon/copilot-extensions/issues/11083#issuecomment-6851278348).
+The implementation was already merged in #11136 and its containing release was
+verified in #11182. The previously recorded exact-source native run
+`42297364665` covers all 53 controls per platform, including repeated
+broken-predecessor, fresh, alias/exposure, refusal and no-mutation scenarios.
+This reconciles the stale source checkbox; it is not a new native execution,
+whole-tree correspondence claim or installed-host result.
+
+The separate optional complete prepared-Source/application consumer remains an
+explicit open Plan item. Its focused composition/custody control does not
+qualify real application preparation and invocation. Cold construction and
+historical-seed performance, caller adoption, installed recovery and the
+broader parent retain their original acceptance and effect boundaries. The
+effort remains Active; no issue closure, custody transfer or deployment is
+performed by this reconciliation.
 
 ### Proposed finite #7117 interrupted-installer receiving
 
