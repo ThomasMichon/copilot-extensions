@@ -5247,12 +5247,7 @@
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_explicit_root_group_uses_selected_context_without_daemon_defaults",
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_actual_export_parser_dispatches_exclusive_and_rejects_unknown_arguments",
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_require_running_without_exclusive_refuses_before_ordinary_activation",
-        "tools/promotion_unit_tests/test_vault_export_consumer.py::test_ordinary_export_keeps_existing_activation_write_and_mode_behavior",
-        "tools/promotion_unit_tests/test_resume_fixture_contract.py::test_native_owner_forwards_selected_observation_stdin_and_exit[agent_remote_driver.mux_creation---describe-contract-True]",
-        "tools/promotion_unit_tests/test_resume_fixture_contract.py::test_native_owner_forwards_selected_observation_stdin_and_exit[agent_remote_driver.mux_observation---describe-contract-True]",
-        "tools/promotion_unit_tests/test_resume_fixture_contract.py::test_native_owner_forwards_selected_observation_stdin_and_exit[agent_remote_driver.mux_observation---observe-True]",
-        "tools/promotion_unit_tests/test_resume_fixture_contract.py::test_native_owner_forwards_selected_observation_stdin_and_exit[agent_remote_driver.mux_creation---observe-False]",
-        "tools/promotion_unit_tests/test_resume_fixture_contract.py::test_native_owner_forwards_selected_observation_stdin_and_exit[unselected.module---observe-False]"
+        "tools/promotion_unit_tests/test_vault_export_consumer.py::test_ordinary_export_keeps_existing_activation_write_and_mode_behavior"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/config.py",
@@ -6384,7 +6379,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
-        "tools/typecheck-projects.json": "de5e28db0ed1a6e5fe7db16bc80ec799aebc46f87231a1308d59111294e3c3a3",
+        "tools/typecheck-projects.json": "986b85873a9776799b92a16febe0af936a509b250cc3efa754f149ce35713727",
         "tools/promotion_unit_tests/test_typecheck_new_code.py": "2b086d280ff2d6de186672ce6d49eff16a413239a4deefe9fedc55c86c5ec7a2",
         "tools/typecheck_new_code.py": "228bca779b906e0b37666f7985ad69a9132e8e473f76d2c2e8d532d2842e6016",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "680a3389cd1226effb5e29658ba61671db64d72a3cda41145e0769fa34c14eaa",
@@ -6412,8 +6407,6 @@
         "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
         "plugins/agent-vault/src/agent_vault/attachment_export_cli.py": "99af98466902e71c1afaca751d4bd8a87be14e0c201dae199e28f7b7104bf6bc",
         "tools/promotion_unit_tests/test_vault_export_consumer.py": "434f4b5e553b03a1723db32256a5021b3d25e42f4f5525872a696d5df476bcce",
-        "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2",
-        "tools/promotion_unit_tests/test_resume_fixture_contract.py": "51c79a06dd7b972f8e7d7dee86cb0ee9c55afabd9a6a5d2d1375dd53d4b5af77",
-        "worktree-manager/tests/native/test_resume_pane_startup.py": "c89c0474ac203048100fa3d197aaac75dc41d97db1c0fdaf1e94510e75e7dacf"
+        "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2"
     }
 }

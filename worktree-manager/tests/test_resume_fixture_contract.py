@@ -11,10 +11,7 @@ from typing import Any
 
 import pytest
 
-_FIXTURE = (
-    Path(__file__).resolve().parents[2]
-    / "worktree-manager/tests/native/test_resume_pane_startup.py"
-)
+_FIXTURE = Path(__file__).resolve().parent / "native/test_resume_pane_startup.py"
 _NO_WINDOW = 0x08000000
 
 
@@ -39,10 +36,7 @@ def test_native_owner_forwards_selected_observation_stdin_and_exit(
         ast.literal_eval(node.value)
         for node in tree.body
         if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "OWNER"
-            for target in node.targets
-        )
+        and any(isinstance(target, ast.Name) and target.id == "OWNER" for target in node.targets)
     )
     arguments = ["-I", "-X", "utf8", "-m", module, operation]
     payload = b'{"version":1,"session":"wt-fixture"}\n'
@@ -53,9 +47,7 @@ def test_native_owner_forwards_selected_observation_stdin_and_exit(
         return subprocess.CompletedProcess(command, 17)
 
     monkeypatch.setattr(sys, "argv", ["owner.py", *arguments])
-    monkeypatch.setattr(
-        sys, "stdin", io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8")
-    )
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8"))
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", _NO_WINDOW, raising=False)
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(SystemExit) as caught:

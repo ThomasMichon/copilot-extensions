@@ -706,6 +706,11 @@
       "include": [
         "worktree-manager"
       ],
+      "import_roots": [
+        "worktree-manager/tests",
+        "worktree-manager/tests/native",
+        "tools"
+      ],
       "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-toml-requirements.txt"
