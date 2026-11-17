@@ -3640,3 +3640,41 @@ successful old-source capture is retained as historical proof, not relabelled
 as qualification of these new inputs. Current-source controlled capture,
 required CI, native POSIX proof and the existing larger acceptance gates remain
 open before publication can be treated as completion.
+
+### November 17: compact receiving archive after current Dev reconciliation
+
+The managed update publishes `b76950980ff6b7652164fc6321554ac1465ed9a4`
+under the exact recorded old-head lease. One changed-input Ubuntu capture,
+run `44018057397`, executes the complete portfolio but fails: the first two
+probes pass, then the remaining group reports three failures and 633 passes.
+Its retained progress identifies the two portable receiving attempts and the
+copied-core CLI consumer, not an exhausted aggregate. No capture artifact is
+accepted. The source remains frozen until that terminal result is consumed.
+
+The same head's Windows publication job `133820265570` in run `44017940141`
+reports 14 failures, 102 passes and four skips. The isolated Session Host
+archive omits `_daemon_instance_io.py`, newly imported by Dev's daemon store.
+The copied-core Ubuntu failure independently reports that missing module.
+The shared compact-archive member list is corrected for both current and
+legacy exports, preserving their source-addressed filenames and all lifecycle
+and native-admission boundaries. Other lifecycle archive producers already
+enumerate all ordinary Python sources and need no analogous change.
+
+The original four-file Windows publication packet passes after the repair:
+116 tests pass and four platform-specific tests skip. Initial local attempts
+instead fail because the installed PyYAML record names a missing license file;
+ordinary reinstall does not restore that cached file. The canonical runner's
+cache-free dependency-only preparation restores and verifies it before the
+same packet passes with unchanged selection, limits and containment. Its
+per-case results are retained. The actor-free manifest's source hashes remain
+valid and no unit member is removed. This below-altitude repair restores the
+existing receiving closure; it does not change policy, qualify POSIX or waive
+current-source controlled capture, review, CI or the larger acceptance gates.
+
+The archive owner also passes whole-file strict checks on both declared
+platforms. During the portfolio check, the shared `origin/dev` reference
+advances beyond the contribution's actual merge-base and its direct comparison
+selects newer Vault files absent from this branch. That 172-file attempt
+reports 29 errors and remains failed. Preserve the repair, reconcile the new
+Dev changes and validate the resulting exact-base diff; neither drop selected
+files nor treat that failed moving-base invocation as a pass.
