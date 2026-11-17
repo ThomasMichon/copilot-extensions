@@ -17,15 +17,16 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** review this proposal before implementation.
-**Return:** implement only the accepted finite scope, then record its actual
+**Now:** publish the tested finite correction and complete exact-source
+supplementary Windows qualification, review and required CI.
+**Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
 - **Slug:** `worktree-base-preparation`
 - **Repo:** copilot-extensions
 - **Branch(es):** separate managed plan and implementation PRs against `dev`
 - **Created:** 2026-11-17
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** below-altitude correction consistent with
   [repository/worktree identity](../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity)
 - **Umbrella issue:** #13013
@@ -92,16 +93,16 @@ custody remain independent.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Land this finite proposal through the repository's actual review/CI gate.
-- [ ] Reconcile the current default-base helper and independent contributor
+- [x] Land this finite proposal through the repository's actual review/CI gate.
+- [x] Reconcile the current default-base helper and independent contributor
   hunks without reopening their scopes or changing original acceptance.
 
 ### Phase 2 - Source delivery and finite acceptance
 
-- [ ] Add a few fail-first, fully typed controls using disposable local Git.
-- [ ] Pass `branch=default_branch` at the existing preparation fetch call;
+- [x] Add a few fail-first, fully typed controls using disposable local Git.
+- [x] Pass `branch=default_branch` at the existing preparation fetch call;
   preserve all subsequent start-point and safe-anchor decisions.
-- [ ] Satisfy whole-file strict changed-code checks without suppressions or
+- [x] Satisfy whole-file strict changed-code checks without suppressions or
   pending-project admission. Limit necessary typing corrections to unchanged
   behavior; reconcile any material contributor overlap before proceeding.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
@@ -111,16 +112,16 @@ custody remain independent.
 
 ## Validation Plan
 
-- [ ] **Exact base, fail first:** use a nonstandard configured default branch
+- [x] **Exact base, fail first:** use a nonstandard configured default branch
   omitted by the ordinary fetch refspec; advance it remotely and prove the real
   helper refreshes/selects its exact head.
-- [ ] **Ref scope:** advance an unrelated branch too and prove this operation
+- [x] **Ref scope:** advance an unrelated branch too and prove this operation
   does not refresh its remote-tracking ref.
-- [ ] **Preservation:** retain eligible-anchor fast-forward and existing
+- [x] **Preservation:** retain eligible-anchor fast-forward and existing
   dirty/ahead/diverged/detached/non-default/no-remote controls.
-- [ ] **Offline reporting:** the actual preparation caller reports the literal
+- [x] **Offline reporting:** the actual preparation caller reports the literal
   fetch failure and selected last-known base, preserving the existing fallback.
-- [ ] **Fresh consumer:** local bare repositories and isolated Git configuration
+- [x] **Fresh consumer:** local bare repositories and isolated Git configuration
   exercise actual subprocess/ref behavior without network credentials, operator
   state, installed runtimes or product checkouts.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
@@ -138,6 +139,47 @@ surfaces, cross-platform parity and truthful failure apply; this below-altitude
 correction does not revise a vision or create a new service/lifecycle owner.
 
 ## Journal
+
+### 2026-11-17 - Finite correction validated locally
+
+- The new local-Git controls failed first on unchanged production code:
+  the excluded configured base remained stale, and an absent tracking base
+  selected the local fallback. The actual caller's offline-warning control
+  passed. The correction passes `branch=default_branch` to the existing owner.
+- The focused contained packet passed 52 cases, including all three new
+  cases plus selected wrapper, classification and anchor-preservation controls.
+  Whole-file strict checking passed all three changed Python files for both
+  Linux and Windows targets. Lint, install contract and version consistency
+  passed; a patch changefile is present.
+- Required typing exposed the existing wrapper's text/binary union and
+  dynamically assembled options. Precise overloads, typed option dictionaries
+  and equivalent explicit I/O branches retain those behaviors. Unchanged
+  state/result models moved to `git_state_types.py` with explicit `git_ops`
+  re-exports, keeping the original module below its unchanged size ceiling.
+- Fresh disposable bare repositories exercise the actual native Git subprocess
+  and ref contract, providing the focused end-to-end and first-touch evidence.
+  No installer/provisioning behavior changed, so a fresh-OS install scenario is
+  not applicable; no installed runtime or product-venue outcome is claimed.
+- Initial local preparation on Windows ARM64 could not build the optional
+  authentication dependency without a Rust toolchain. The existing x64
+  interpreter completed the contained packet without changing host setup.
+  A supplementary binary-consumer packet then stopped before collection on a
+  cached-build-file access error. Complete that source coverage through the
+  supported disposable hosted Windows lane; do not treat setup failure as a
+  test pass or relax containment.
+- Source publication, hosted qualification, review, required CI, actual merge
+  and finite issue/claim settlement remain open.
+
+### 2026-11-17 - Plan accepted
+
+- #13017 actually merged at04:51:42 UTC as
+  `956c703a73192bbbeb8b38053f240e727f8836e0`, after genuine current-head
+  Copilot approval with no findings and all actual required checks passed.
+- The index-only base conflict preserved both independent effort entries.
+  The plan body and selected implementation files were unchanged through
+  reconciliation. #13013 stays Open for implementation and finite acceptance.
+- The retained source workspace synchronized onto the accepted plan. Begin
+  the real local-Git regression controls; no installed operation is admitted.
 
 ### 2026-11-17 - Proposed finite correction
 
