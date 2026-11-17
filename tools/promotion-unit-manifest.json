@@ -5505,7 +5505,7 @@
         "plugins/agent-vault/src/agent_vault/attachment_import.py": "14f14d987d931b3a7f6d0de71358aeba6c9c292b956d45cb1bde8178ed68d19a",
         "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "f2e49804bf0a75eb5062617edb0f3e69f0bb5e43bcf77b25ae4ac01c0fcba495",
         "plugins/agent-vault/src/agent_vault/keepassxc.py": "8f451b9094447573c2ab5fb58ccff2461ecc109bf29dbd090bcc4e9e57ccc6d2",
-        "plugins/agent-vault/src/agent_vault/service.py": "42852c75b40c4a8101405fb9bbfe5fddc74a66b819e0d109f03eefa1dcb19ab7",
+        "plugins/agent-vault/src/agent_vault/service.py": "dc1f73cca49adacac730cf58a3e047f193ee2edabe0f1f609fd3942886407a98",
         "tools/promotion_unit_tests/test_vault_attachment_import.py": "bb7349ed448a9a5796667c74ecac6bced2b413a993528c62d6c8a030d3351a99",
         "plugins/agent-vault/src/agent_vault/cli.py": "00242f1c605701d0a8ee5186865f00459f9e9843efaf5fb9113b43585f65fa12",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
