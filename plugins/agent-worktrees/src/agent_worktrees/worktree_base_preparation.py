@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from dropin_registry import ScanAuthority
 
 from . import config, config_acquisition, git_ops, inrepo_config_source as source
 from .git_acquisition_budget import acquisition_budget
+
+
+@dataclass(frozen=True)
+class _FetchPreparation:
+    fetched: bool
+    error: str | None = None
+    usable_base: bool = True
 
 
 def _mapped_source(ref: str, pattern: str, replacement: str) -> str | None:
@@ -21,52 +29,83 @@ def _mapped_source(ref: str, pattern: str, replacement: str) -> str | None:
     return replacement.replace("*", ref[len(before):end])
 
 
-def _policy_source(anchor: Path, remote: str, branch: str) -> str:
-    target = f"refs/remotes/origin/{branch}"
+def _source_ref(ref: str) -> str:
+    if not ref:
+        raise ValueError("committed policy fetch mapping has no source")
+    if ref.startswith("refs/"):
+        return ref
+    if ref.startswith(("heads/", "tags/", "remotes/")):
+        return f"refs/{ref}"
+    return f"refs/heads/{ref}"
+
+
+@dataclass(frozen=True)
+class _FetchRules:
+    mappings: tuple[tuple[str, str], ...]
+    exclusions: tuple[str, ...]
+
+    def sources(self, target: str, fallback: str) -> tuple[set[str], set[str]]:
+        candidates = {
+            _source_ref(matched)
+            for left, right in self.mappings
+            if (matched := _mapped_source(target, right, left)) is not None
+        } or {_source_ref(fallback)}
+        eligible = {
+            candidate for candidate in candidates
+            if not any(
+                _mapped_source(candidate, pattern, candidate) is not None
+                for pattern in self.exclusions
+            )
+        }
+        return candidates, eligible
+
+    def source(self, target: str, fallback: str, *, refreshed_source: str | None = None) -> str:
+        candidates, eligible = self.sources(target, fallback)
+        if not eligible and candidates == {refreshed_source}:
+            eligible = candidates
+        if not eligible:
+            raise ValueError("committed policy fetch mapping excludes its source")
+        if len(eligible) != 1:
+            raise ValueError("committed policy fetch mapping is ambiguous")
+        return next(iter(eligible))
+
+
+def _fetch_rules(anchor: Path, remote: str) -> _FetchRules:
     result = git_ops.git(
         "config", "--get-all", f"remote.{remote}.fetch",
         cwd=anchor, check=False, isolated_repository=True,
     )
     if result.returncode not in (0, 1):
         raise ValueError("committed policy fetch mapping is unavailable")
-    sources: set[str] = set()
+    mappings: list[tuple[str, str]] = []
     exclusions: list[str] = []
     for line in result.stdout.splitlines():
         spec = line.removeprefix("+")
         if spec.startswith("^"):
-            exclusions.append(spec[1:])
+            exclusions.append(_source_ref(spec[1:]))
             continue
         left, separator, right = spec.partition(":")
         if not separator or not right:
             continue
         if left.count("*") != right.count("*") or left.count("*") > 1:
             raise ValueError("committed policy fetch mapping is invalid")
-        matched = _mapped_source(target, right, left)
-        if matched is not None:
-            sources.add(matched)
-    if len(sources) > 1:
-        raise ValueError("committed policy fetch mapping is ambiguous")
-    selected = next(iter(sources), f"refs/heads/{branch}")
-    if not selected:
-        raise ValueError("committed policy fetch mapping has no source")
-    if any(
-        _mapped_source(selected, pattern, selected) is not None for pattern in exclusions
-    ):
-        raise ValueError("committed policy fetch mapping excludes its source")
-    return selected
+        mappings.append((left, right))
+    return _FetchRules(tuple(mappings), tuple(exclusions))
 
 
-def _fetch_worktree_base(anchor: Path, remote: str, default_branch: str) -> tuple[bool, str | None]:
+def _fetch_worktree_base(anchor: Path, remote: str, default_branch: str) -> _FetchPreparation:
     deadline = time.monotonic() + git_ops.DEFAULT_FETCH_TIMEOUT
     with acquisition_budget(deadline):
-        if not git_ops.has_remote(remote, cwd=anchor):
-            return False, None
-        return _refresh_sources(anchor, remote, default_branch, deadline)
+        remotes = git_ops.git("remote", cwd=anchor, isolated_repository=True).stdout.splitlines()
+        if remote not in remotes:
+            return _FetchPreparation(False)
+        policy_remote = "origin" if "origin" in remotes else remote
+        return _refresh_sources(anchor, remote, default_branch, deadline, policy_remote)
 
 
 def _refresh_sources(
-    anchor: Path, remote: str, default_branch: str, deadline: float,
-) -> tuple[bool, str | None]:
+    anchor: Path, remote: str, default_branch: str, deadline: float, policy_remote: str,
+) -> _FetchPreparation:
     attempted: dict[tuple[str, str, str], bool] = {}
     errors: list[Exception] = []
     base_source = f"refs/heads/{default_branch}"
@@ -77,48 +116,65 @@ def _refresh_sources(
         if key not in attempted:
             attempted[key] = False
             try:
-                if target == base_target and (fetch_remote != remote or fetch_source != base_source):
-                    raise ValueError("committed policy fetch would replace the configured base")
                 git_ops._fetch_refspecs(
                     fetch_remote, cwd=anchor, refspec=(f"+{fetch_source}:{target}",),
-                    timeout=git_ops.DEFAULT_FETCH_TIMEOUT,
+                    timeout=git_ops.DEFAULT_FETCH_TIMEOUT, ignore_refmaps=True,
                 )
                 attempted[key] = True
             except Exception as exc:
                 errors.append(exc)
         return attempted[key]
 
-    fetched = _refresh(remote, base_source, base_target)
+    fetched = False
     parent_observations = config_acquisition.current_observations()
     try:
         with config_acquisition.capture_config_observations() as observations:
             try:
-                policy_remote = "origin" if git_ops.has_remote("origin", cwd=anchor) else remote
+                rules = _fetch_rules(anchor, policy_remote)
+                if remote == "origin":
+                    candidates, eligible = rules.sources(base_target, base_source)
+                    if (eligible or candidates) != {base_source}:
+                        return _FetchPreparation(
+                            False, "creation base conflicts with its configured policy source", False,
+                        )
+            except Exception as exc:
+                return _FetchPreparation(False, str(exc), False)
+
+            fetched = _refresh(remote, base_source, base_target)
+
+            def _refresh_policy(branch: str) -> None:
+                target = f"refs/remotes/origin/{branch}"
+                matching_base = (
+                    base_source if fetched and policy_remote == remote and target == base_target else None
+                )
+                try:
+                    selected = rules.source(
+                        target, f"refs/heads/{branch}", refreshed_source=matching_base,
+                    )
+                    _refresh(policy_remote, selected, target)
+                except Exception as exc:
+                    errors.append(exc)
+
+            try:
                 policy_branch = source._offline_remote_head_branch(anchor, "origin", deadline)
                 if policy_branch:
-                    def _refresh_policy(branch: str) -> bool:
-                        return _refresh(
-                            policy_remote, _policy_source(anchor, policy_remote, branch),
-                            f"refs/remotes/origin/{branch}",
-                        )
-
-                    if _refresh_policy(policy_branch):
-                        candidates = (
-                            config.inrepo_config_path(Path()),
-                            config.legacy_inrepo_config_path(Path()),
-                            Path(config.INREPO_CONFIG_FILENAME),
-                        )
-                        bootstrap = source._read_committed_batch(
-                            anchor, "origin", policy_branch, candidates, deadline,
-                        )
-                        if bootstrap is not None:
-                            data = next((
-                                source.parse_yaml_text_safe(bootstrap[path])
-                                for path in candidates if path in bootstrap
-                            ), {})
-                            declared = data.get("default_branch")
-                            if isinstance(declared, str) and declared:
-                                _refresh_policy(declared)
+                    _refresh_policy(policy_branch)
+                    candidates_paths = (
+                        config.inrepo_config_path(Path()),
+                        config.legacy_inrepo_config_path(Path()),
+                        Path(config.INREPO_CONFIG_FILENAME),
+                    )
+                    bootstrap = source._read_committed_batch(
+                        anchor, "origin", policy_branch, candidates_paths, deadline,
+                    )
+                    if bootstrap is not None:
+                        data = next((
+                            source.parse_yaml_text_safe(bootstrap[path])
+                            for path in candidates_paths if path in bootstrap
+                        ), {})
+                        declared = data.get("default_branch")
+                        if isinstance(declared, str) and declared:
+                            _refresh_policy(declared)
                 if any(o.authority is ScanAuthority.INDETERMINATE for o in observations):
                     errors.append(ValueError("committed policy refresh could not verify its source"))
             except Exception as exc:
@@ -126,4 +182,4 @@ def _refresh_sources(
     finally:
         if parent_observations is not None:
             parent_observations.extend(observations)
-    return fetched, str(errors[0]) if errors else None
+    return _FetchPreparation(fetched, str(errors[0]) if errors else None)

@@ -18,11 +18,11 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** reproduce the current repository-custody, pre-write collision and
-effective-refspec findings against unchanged production behavior, then correct
-the owning preparation/fetch paths and repeat real consumer qualification.
-Earlier qualified sources and resolved threads remain historical evidence,
-not acceptance of the current open findings. No production authority or
+**Now:** qualify the corrected repository-custody, pre-write mapping and public
+fetch paths against all current controls and the existing preservation packet.
+The unchanged-runtime packet reproduced 12 behavior failures with 22 passing
+controls. Earlier qualified sources and resolved threads remain historical
+evidence, not acceptance of these open findings. No production authority or
 another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.

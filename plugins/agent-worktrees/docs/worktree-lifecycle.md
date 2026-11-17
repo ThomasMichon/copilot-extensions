@@ -109,16 +109,26 @@ policy bootstrap and its declared policy branch are related refresh inputs,
 including when the configured creation remote is not `origin`. Each required
 source/destination ref is attempted once within one shared fetch deadline.
 That deadline includes remote and credential lookup and is checked again
-immediately before each subprocess. Policy tracking aliases retain their
-configured source ref without applying unrelated fetch mappings.
+immediately before each subprocess. The entire preparation operation, including
+base selection and anchor advancement, isolates inherited repository selectors
+to the supplied anchor.
+Policy tracking aliases retain their configured source. Equivalent source names
+are normalized and exclusions applied before ambiguity is assessed; an already
+refreshed matching base can be reused despite its ordinary fetch exclusion.
+Before a potentially shared base/policy destination is written, conflicting
+configured sources are detected. Conflicting or unavailable preflight mappings
+leave refs and the anchor untouched and report a last-known fallback rather than
+overwriting authoritative policy.
 A missing base or policy branch does not prevent refreshing surviving refs;
 failures and unavailable policy reads still report degraded freshness. A
 policy-only failure reports a refreshed base rather than calling it last-known.
-Non-symbolic optional policy HEAD
-does not block the configured base. The policy reader itself remains offline.
-These explicit
-tracking destinations ignore configured refmaps; unrelated tracking refs and
-unchecked-out local branches are not refreshed for this preparation.
+A failed HEAD fetch can still use its available last-known bootstrap to refresh
+the first declared policy hop, retaining the degradation warning. Non-symbolic
+optional policy HEAD does not block the configured base. The policy reader
+itself remains offline.
+Only preparation's explicit tracking destinations ignore configured refmaps;
+unrelated tracking refs and unchecked-out local branches are not refreshed.
+Ordinary explicit-branch fetch callers retain their configured policy mappings.
 It chooses the fetched configured default branch as the start point when
 available. A clean anchor checked out on its default branch is also
 fast-forwarded opportunistically. Dirty, detached, non-default, ahead, and
