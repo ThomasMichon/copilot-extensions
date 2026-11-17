@@ -130,6 +130,9 @@ it is not serving. No other service or process is killed.
 Every command below connects only to the selected Unix HTTP socket. It does not
 start the service, load provider credentials, read the state file or fetch a
 forge. Namespace and target are explicit expected bindings.
+The separately documented [comparison command](EVALUATION.md) uses these same
+reads and a caller-supplied native reference; it does not subscribe or fetch a
+provider.
 
 ```text
 agent-pull-requests-service list --socket /data/pr-cache/local.sock --namespace installation-a

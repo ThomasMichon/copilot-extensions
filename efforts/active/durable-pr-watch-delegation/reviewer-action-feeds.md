@@ -121,9 +121,12 @@ erase existing CI/follow-up/merge distinctions.
   reads, distinguishing disagreement from stale/unavailable evidence. Runtime
   source, release, installation, running proof and real-provider agreement
   remain separate exits.
-  The [finite comparison reference](../../../services/pr/EVALUATION.md) keeps
+  The [finite local comparison CLI and pure reference](../../../services/pr/EVALUATION.md) keep
   current-fact differences, stale/unavailable evidence and unproven causal
-  ordering distinct; it performs no independent acquisition itself.
+  ordering distinct. The local client reads one PR and first action page under
+  one finite deadline, using an independently supplied native envelope; it
+  performs no provider acquisition, subscription, ACK or automatic retry.
+  Actual admitted reference acquisition and provider agreement remain open.
 
 ## Streaming and consumer boundaries
 
