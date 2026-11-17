@@ -7158,6 +7158,17 @@ descriptor settlement after failures. These filesystem controls are outside
 the required actor-free unit admission; they do not qualify Windows ACLs,
 privileged execution, an installed Vault owner or real key material.
 
+The actor-free mux-projection packet substitutes native, storage and Git owners
+while executing the monitor's real ordering, completed-inventory handoff,
+read-only segment view, cooperative cadence and scoped progress cleanup.
+It starts no mux, observer or service. Worktrees'
+`tests/test_status_monitor_presentation.py`, `tests/test_observation_progress.py`
+and `tests/test_worktrees_producer.py` compose the actual collector and producer
+seams; continuous installed publication remains a separate native check.
+Portable private-store creation units select the portable snapshot replacement
+path as well as portable creation. Native Windows replacement and ownership
+remain in their separate qualification lanes, not implicit unit effects.
+
 The actor-free health composition packet also admits installed Windows
 enrollment preview/installation binding, native default normalization,
 GUI-environment binding, collection support loss, finite-root result/timeout/

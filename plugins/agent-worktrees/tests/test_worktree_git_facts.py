@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import types
+from pathlib import Path
+from typing import Any, NoReturn
 
 import pytest
 
@@ -23,12 +25,19 @@ from agent_worktrees import (
     worktree_status_daemon,
 )
 from agent_worktrees.worktree_status_cache import WorktreeStatusCache
+from agent_worktrees.closure_descriptor import assemble_closure_descriptor
 
 pytestmark = pytest.mark.contract("agent_worktrees.shared_git_facts")
 
+GitFactsContext = tuple[str, tracking.WorktreeRecord, config.RepoConfig, Path]
+
+
+class UnloadedRecord(tracking.WorktreeRecord):
+    _loaded_record_subject: tuple[object, ...] | None = None
+
 
 @pytest.fixture
-def git_facts_context(monkeypatch, tmp_path):
+def git_facts_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> GitFactsContext:
     project = "isolated"
     project_dir = tmp_path / project
     tracking_dir = project_dir / "worktrees"
@@ -36,7 +45,7 @@ def git_facts_context(monkeypatch, tmp_path):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     (checkout / ".git").mkdir()
-    record = tracking.WorktreeRecord(
+    record = UnloadedRecord(
         worktree_id="wt1",
         branch="worktree/wt1",
         worktree_path=str(checkout),
@@ -71,12 +80,12 @@ def git_facts_context(monkeypatch, tmp_path):
 
 
 def test_both_public_entry_points_delegate_to_shared_wrapper_over_real_transports(
-    monkeypatch, tmp_path, git_facts_context
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, git_facts_context: GitFactsContext,
+) -> None:
     project, record, _repo, _record_path = git_facts_context
-    calls = []
+    calls: list[tuple[str, dict[str, Any]]] = []
 
-    def shared_compute(rec, **kwargs):
+    def shared_compute(rec: tracking.WorktreeRecord, **kwargs: Any) -> git_ops.WorktreeStateInfo:
         calls.append((rec.worktree_id, kwargs))
         return git_ops.WorktreeStateInfo(
             state=git_ops.WorktreeState.WIP,
@@ -87,7 +96,7 @@ def test_both_public_entry_points_delegate_to_shared_wrapper_over_real_transport
 
     monkeypatch.setattr(worktree_git_facts, "compute", shared_compute)
 
-    def no_caller_compute(*args, **kwargs):
+    def no_caller_compute(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("live daemon request fell through to caller-side computation")
 
     monkeypatch.setattr(cli, "_classify_records_lease_guarded", no_caller_compute)
@@ -99,7 +108,7 @@ def test_both_public_entry_points_delegate_to_shared_wrapper_over_real_transport
     )
     lock_path = tmp_path / "monitor.lock"
     monkeypatch.setattr(cli, "_monitor_lock_path", lambda: lock_path)
-    outputs = []
+    outputs: list[dict[str, Any]] = []
     monkeypatch.setattr(output, "_json_output", outputs.append)
     try:
         batch.start()
@@ -145,8 +154,9 @@ def test_both_public_entry_points_delegate_to_shared_wrapper_over_real_transport
     ],
 )
 def test_shared_refinements_preserve_disposition_and_freshness_fields(
-    monkeypatch, git_facts_context, status, state, dirty, expected
-):
+    monkeypatch: pytest.MonkeyPatch, git_facts_context: GitFactsContext,
+    status: tracking.WorktreeStatus, state: str, dirty: int, expected: str,
+) -> None:
     _project, record, repo, _path = git_facts_context
     record.status = status
     raw = git_ops.WorktreeStateInfo(
@@ -167,12 +177,15 @@ def test_shared_refinements_preserve_disposition_and_freshness_fields(
 
 
 @pytest.mark.parametrize("status,expected", [("finalized", "completed"), ("active", "gone")])
-def test_missing_checkout_never_fetches(monkeypatch, git_facts_context, status, expected):
+def test_missing_checkout_never_fetches(
+    monkeypatch: pytest.MonkeyPatch, git_facts_context: GitFactsContext,
+    status: tracking.WorktreeStatus, expected: str,
+) -> None:
     _project, record, repo, _path = git_facts_context
     record.worktree_path += "-missing"
     record.status = status
 
-    def no_git(*args, **kwargs):
+    def no_git(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("missing checkout must not invoke git")
 
     monkeypatch.setattr(git_ops, "classify_worktree", no_git)
@@ -181,15 +194,17 @@ def test_missing_checkout_never_fetches(monkeypatch, git_facts_context, status, 
 
 
 def test_finalized_attached_shell_cannot_hide_dirty_checkout(
-    monkeypatch, git_facts_context,
-):
+    monkeypatch: pytest.MonkeyPatch, git_facts_context: GitFactsContext,
+) -> None:
     from agent_worktrees import prune
 
     _project, record, repo, _path = git_facts_context
     record.status = "finalized"
-    calls = []
+    calls: list[set[str] | None] = []
 
-    def classify(*args, active_paths=None, **kwargs):
+    def classify(
+        *args: Any, active_paths: set[str] | None = None, **kwargs: Any,
+    ) -> git_ops.WorktreeStateInfo:
         calls.append(active_paths)
         return git_ops.WorktreeStateInfo(
             state=git_ops.WorktreeState.ACTIVE if active_paths else git_ops.WorktreeState.DIRTY,
@@ -203,16 +218,19 @@ def test_finalized_attached_shell_cannot_hide_dirty_checkout(
     assert calls == [{record.worktree_path}, None]
     assert info.state == git_ops.WorktreeState.ACTIVE
     assert info.dirty == 1
-    descriptor = prune.assemble_closure_descriptor(
+    descriptor = assemble_closure_descriptor(
         record, info, prune.CleanupDisposition(False, "active", "live"),
         held_claims=0, open_follow_ups=0, evidence_mode="cached",
     )
+    assert descriptor.display is not None
     assert descriptor.display["finalized"] is False
     assert not info.fetch_requested
     assert not info.fetch_failed
 
 
-def test_batch_preserves_root_tracking_override_compatibility(monkeypatch, git_facts_context):
+def test_batch_preserves_root_tracking_override_compatibility(
+    monkeypatch: pytest.MonkeyPatch, git_facts_context: GitFactsContext,
+) -> None:
     _project, record, repo, _path = git_facts_context
     monkeypatch.setattr(
         git_ops, "classify_worktree",
@@ -228,7 +246,9 @@ def test_batch_preserves_root_tracking_override_compatibility(monkeypatch, git_f
 
 
 @pytest.mark.parametrize("missing", [False, True])
-def test_bundle_honors_finalized_tracking(monkeypatch, git_facts_context, missing):
+def test_bundle_honors_finalized_tracking(
+    monkeypatch: pytest.MonkeyPatch, git_facts_context: GitFactsContext, missing: bool,
+) -> None:
     project, record, _repo, record_path = git_facts_context
     record.status = "finalized"
     if missing:
@@ -246,13 +266,16 @@ def test_bundle_honors_finalized_tracking(monkeypatch, git_facts_context, missin
     assert fact["confirmed"] is True
 
 
-def test_bundle_uses_durable_turns_and_keeps_live_fact_separate(monkeypatch, git_facts_context):
+def test_bundle_uses_durable_turns_and_keeps_live_fact_separate(
+    monkeypatch: pytest.MonkeyPatch, git_facts_context: GitFactsContext,
+) -> None:
     project, record, _repo, record_path = git_facts_context
     record.session_turns = 4
     tracking.save_record(record, record_path)
-    calls = []
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(git_ops, "_observation_deadline", lambda: 123.0)
 
-    def leaf(path, branch, **kwargs):
+    def leaf(path: str, branch: str, **kwargs: Any) -> git_ops.WorktreeStateInfo:
         calls.append(kwargs)
         return git_ops.WorktreeStateInfo(
             state=git_ops.WorktreeState.UNUSED, fetch_requested=True
@@ -263,7 +286,10 @@ def test_bundle_uses_durable_turns_and_keeps_live_fact_separate(monkeypatch, git
     assert bundle["facts"]["git_state"]["value"]["state"] == "convo"
     assert bundle["facts"]["git_state"]["value"]["fetch_requested"] is True
     assert bundle["facts"]["liveness"]["value"]["active"] is True
-    assert calls == [{"fetch": True, "remote": "origin", "default_branch": "main", "active_paths": None}]
+    assert calls == [{
+        "fetch": True, "remote": "origin", "default_branch": "main", "active_paths": None,
+        **({"observation_deadline": 123.0} if git_ops._windows_observation() else {}),
+    }]
 
     ctx = sessions.SessionContext(turn_count={sessions._normalize_path(record.worktree_path): 0})
     batch = cli._classify_one_record(record, repo=_repo, active_paths=set(), session_ctx=ctx)
@@ -273,7 +299,9 @@ def test_bundle_uses_durable_turns_and_keeps_live_fact_separate(monkeypatch, git
     assert batch.state == git_ops.WorktreeState.CONVO
 
 
-def test_fetch_modes_legitimately_observe_different_remote_refs(monkeypatch, tmp_path, git_facts_context):
+def test_fetch_modes_legitimately_observe_different_remote_refs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, git_facts_context: GitFactsContext,
+) -> None:
     project, record, repo, record_path = git_facts_context
     seed = tmp_path / "seed"
     remote = tmp_path / "remote.git"
