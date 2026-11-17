@@ -8138,6 +8138,14 @@ status; it is not part of the actor-free promotion packet.
 The eleven separate packaging tests remain unqualified; this cohort does not
 prove native peer launch, vendor synchronization or the complete library census.
 
+`tools/promotion_unit_tests/test_bridge_contract_git.py` covers the source
+guard's complete multi-batch object inventory and late malformed-header,
+truncation and trailing-data refusals. Each native Git request retains its
+ten-second deadline and local-only environment, with at most 256 queries rather
+than an entire growing history. No provenance is dropped, and a later batch
+failure cannot publish a partial object cache. These four actor-free controls
+do not replace the real native full-history validation.
+
 The shared lazy-dispatch cohort re-exports the three original classes from
 `libs/lazy-cli-dispatch/tests/test_dispatch.py` through
 `tools/promotion_unit_tests/test_lazy_dispatch.py`. Its fourteen class/method
