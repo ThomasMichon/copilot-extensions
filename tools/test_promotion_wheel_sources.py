@@ -155,7 +155,8 @@ def test_declared_share_data_files_require_exact_installed_members(
 
 @pytest.mark.parametrize("case", [
     "source-escape", "destination-escape", "absolute-destination", "script-destination",
-    "glob", "collision", "case-collision", "symlink", "linked-parent", "pth",
+    "glob", "collision", "case-collision", "ancestor", "descendant",
+    "case-ancestor", "case-descendant", "symlink", "linked-parent", "pth",
 ])
 def test_unsafe_data_file_layouts_refuse_before_toolchain_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
@@ -187,6 +188,11 @@ def test_unsafe_data_file_layouts_refuse_before_toolchain_resolution(
         declarations["share/example"].append("other/policy.json")
     elif case == "case-collision":
         declarations["share/Example"] = ["config/policy.json"]
+    elif case in ("ancestor", "descendant", "case-ancestor", "case-descendant"):
+        nested = "POLICY.JSON" if case.startswith("case-") else resource.name
+        declarations["share/example/" + nested] = ["config/policy.json"]
+        if case.endswith("ancestor"):
+            declarations = dict(reversed(list(declarations.items())))
     elif case in ("symlink", "linked-parent"):
         link = source / ("linked.json" if case == "symlink" else "linked")
         try:

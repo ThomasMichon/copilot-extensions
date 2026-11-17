@@ -243,6 +243,7 @@ def data_file_sources(source_dir: Path, settings: dict[str, Any]) -> dict[str, P
 
     result: dict[str, Path] = {}
     destinations: set[str] = set()
+    directories: set[str] = set()
     root = source_dir.resolve()
     for destination, files in declarations.items():
         target = relative(destination)
@@ -262,10 +263,14 @@ def data_file_sources(source_dir: Path, settings: dict[str, Any]) -> dict[str, P
                 valid = False
             if not valid:
                 raise PromotionArtifactError("data-file source is missing, linked or outside its project")
-            name = (target / declared.name).as_posix()
-            if name.casefold() in destinations:
+            installed = target / declared.name
+            name = installed.as_posix()
+            folded = name.casefold()
+            parents = {parent.as_posix().casefold() for parent in installed.parents}
+            if folded in destinations or folded in directories or parents & destinations:
                 raise PromotionArtifactError("ambiguous static data-file destination")
-            destinations.add(name.casefold())
+            destinations.add(folded)
+            directories.update(parents)
             result[name] = source
     return result
 
