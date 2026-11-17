@@ -74,14 +74,15 @@ def test_malformed_later_page_never_returns_accumulated_reviews(
         read(monkeypatch, [[review(n) for n in range(1, 51)], invalid])
 
 
-def test_empty_review_history_is_complete_but_provider_failure_is_not(
+def test_empty_intermediate_review_page_cannot_certify_complete_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     provider = GiteaProvider()
 
     def request(method: str, url: str, token: str, *, payload: dict[str, Any] | None = None) -> tuple[int, str]:
         if "/reviews?" in url:
-            return 200, "[]"
+            page = int(parse_qs(urlsplit(url).query)["page"][0])
+            return 200, json.dumps([] if page == 1 else [review(1, state="REQUEST_CHANGES")])
         if "/commits/" in url:
             return 200, '{"state": "success", "statuses": []}'
         return 200, json.dumps({
@@ -94,10 +95,27 @@ def test_empty_review_history_is_complete_but_provider_failure_is_not(
         "example/repo", 7, api_base="https://forge.example.test", token="synthetic",
     )
     wire = snapshot_payload(snap, "example/repo", 7, "gitea", "https://forge.example.test")
-    assert wire["reviews"] == [] and wire["reviews_complete"] is True
+    assert wire["reviews"] == [] and wire["reviews_complete"] is None
     assert wire["updated_at"] == "2026-01-01T00:00:00Z"
     monkeypatch.setattr(provider, "_curl_with_retry", lambda *args: (403, "{}"))
     with pytest.raises(ProviderError, match="HTTP 403"):
         provider.get_snapshot(
             "example/repo", 7, api_base="https://forge.example.test", token="synthetic",
         )
+
+
+def test_team_request_does_not_invent_an_individual_reviewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = read(monkeypatch, [[review(
+        1, state="REQUEST_REVIEW", user=None, team={"id": 2, "name": "reviewers"},
+    )], []])
+    assert len(result) == 1 and result[0].state == "REQUEST_REVIEW" and result[0].user == ""
+
+
+@pytest.mark.parametrize("team", [None, {}, {"id": 0, "name": "reviewers"}, {"id": 2, "name": ""}])
+def test_team_request_requires_valid_team_identity(
+    monkeypatch: pytest.MonkeyPatch, team: object,
+) -> None:
+    with pytest.raises(ProviderError, match="malformed reviews"):
+        read(monkeypatch, [[review(1, state="REQUEST_REVIEW", user=None, team=team)]])

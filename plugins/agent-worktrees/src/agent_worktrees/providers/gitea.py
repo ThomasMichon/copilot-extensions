@@ -630,7 +630,7 @@ class GiteaProvider:
     def _all_review_objs(
         self, repo: str, number: int, api_base: str, token: str
     ) -> tuple[Review, ...]:
-        """Fetch complete review-page coverage through the existing transport."""
+        """Validate visible review pages without claiming authoritative exhaustion."""
         from .gitea_reviews import all_reviews
         return all_reviews(self, repo, number, api_base, token)
 

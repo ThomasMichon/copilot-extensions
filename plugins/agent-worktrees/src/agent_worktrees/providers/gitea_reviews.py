@@ -17,19 +17,28 @@ def _review(value: object) -> Review:
     if not isinstance(value, dict):
         raise ValueError("review is not an object")
     actor = value.get("user")
+    state = normalize_review_state(value.get("state")) if isinstance(value.get("state"), str) else ""
+    team = value.get("team")
+    team_request = (
+        state == "REQUEST_REVIEW" and actor is None and isinstance(team, dict)
+        and type(team.get("id")) is int and team["id"] > 0
+        and isinstance(team.get("name"), str) and bool(team["name"].strip())
+    )
     if (
         type(value.get("id")) is not int or value["id"] < 1
-        or not isinstance(actor, dict)
-        or not isinstance(actor.get("login"), str) or not actor["login"].strip()
+        or (not team_request and (
+            not isinstance(actor, dict)
+            or not isinstance(actor.get("login"), str) or not actor["login"].strip()
+        ))
         or not isinstance(value.get("state"), str) or not value["state"].strip()
-        or normalize_review_state(value["state"]) not in KNOWN_REVIEW_STATES | {"REQUEST_REVIEW"}
+        or state not in KNOWN_REVIEW_STATES | {"REQUEST_REVIEW"}
         or type(value.get("dismissed", False)) is not bool
         or any(value.get(name) is not None and not isinstance(value[name], str)
                for name in ("submitted_at", "commit_id"))
     ):
         raise ValueError("invalid review metadata")
     return Review(
-        id=value["id"], state=value["state"], user=actor["login"],
+        id=value["id"], state=value["state"], user=actor["login"] if isinstance(actor, dict) else "",
         submitted_at=value.get("submitted_at") or "",
         commit_id=value.get("commit_id") or "",
         dismissed=value.get("dismissed", False),
@@ -39,7 +48,7 @@ def _review(value: object) -> Review:
 def all_reviews(
     owner: GiteaProvider, repo: str, number: int, api_base: str, token: str,
 ) -> tuple[Review, ...]:
-    """Return all pages or fail; malformed/overlapping pages are not empty history."""
+    """Traverse visible pages; body-only exhaustion is not a completeness proof."""
     reviews: list[Review] = []
     seen: set[int] = set()
     page, page_size = 1, 50

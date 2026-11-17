@@ -52,7 +52,9 @@ def snapshot(
         base_ref=str(base.get("ref", "")), base_sha=str(base.get("sha") or ""),
         updated_at=str(pr.get("updated_at", "") or ""),
         reviews=owner._all_review_objs(repo, number, api_base, token),
-        reviews_complete=True,
+        # Gitea filters other users' drafts after pagination; an empty body
+        # may be an intermediate page, not authoritative exhaustion.
+        reviews_complete=None,
         author=str((pr.get("user") or {}).get("login", "")),
         mergeable=mergeable if isinstance(mergeable, bool) else None,
         checks_state=owner._combined_status_state(repo, str(head.get("sha", "")), api_base, token),
