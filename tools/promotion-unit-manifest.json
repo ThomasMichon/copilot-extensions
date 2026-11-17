@@ -5497,7 +5497,7 @@
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
         "tools/runtime_source_capture.py": "c545dab67530724e69de6137e0f63e7b0508fd139b95c486a4aba863a416717a",
         "plugins/agent-vault/src/agent_vault/attachment_import.py": "14f14d987d931b3a7f6d0de71358aeba6c9c292b956d45cb1bde8178ed68d19a",
-        "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ed2f5e8b61580cbb0729214e0fbba9856a6b45261f54a37198d5b7c2cb8b7590",
+        "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "9f90ed4f459d0c99cbd7b7b2f721a4614711eccd97812a9ea9a501dc59c5f246",
         "plugins/agent-vault/src/agent_vault/keepassxc.py": "8f451b9094447573c2ab5fb58ccff2461ecc109bf29dbd090bcc4e9e57ccc6d2",
         "plugins/agent-vault/src/agent_vault/service.py": "42852c75b40c4a8101405fb9bbfe5fddc74a66b819e0d109f03eefa1dcb19ab7",
         "tools/promotion_unit_tests/test_vault_attachment_import.py": "a0790b580dfdbaefbe4a6883f7ceb4cdf84a2e92723ba2aa473f77148b35f74e",

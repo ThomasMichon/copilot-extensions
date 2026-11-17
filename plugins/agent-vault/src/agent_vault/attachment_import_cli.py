@@ -58,7 +58,7 @@ def _read_file(path: Path, *, private: bool) -> bytes:
         or getattr(before, "st_file_attributes", 0) & _REPARSE_POINT
         or before.st_size > MAX_ATTACHMENT_BYTES
         or (
-            os.name != "nt"
+            sys.platform != "win32"
             and (
                 before.st_uid != os.getuid()
                 or (stat.S_IMODE(before.st_mode) != 0o600 if private else before.st_mode & 0o022)
