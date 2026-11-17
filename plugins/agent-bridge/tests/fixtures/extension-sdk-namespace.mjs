@@ -26,7 +26,6 @@ for (const plugin of readdirSync(join(root, "plugins"), { withFileTypes: true })
 entries.push(join(root, "libs/copilot-driver-core/src/agent_remote_driver/headed/extension.mjs"));
 assert.ok(entries.length >= 6, "discover all plugin extensions and the shared headed entrypoint");
 
-const sdkImports = new Set();
 const synthetic = (exports) => new vm.SyntheticModule(Object.keys(exports), function () {
   for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
 });
@@ -48,7 +47,6 @@ async function link(source, identifier) {
   const module = new vm.SourceTextModule(source, { identifier });
   await module.link(async (specifier, parent) => {
     if (Object.hasOwn(sdk, specifier)) {
-      sdkImports.add(specifier);
       return synthetic(sdk[specifier]);
     }
     if (builtinModules.includes(specifier) || specifier.startsWith("node:")) {
@@ -70,7 +68,54 @@ for (const specifier of ["@github/copilot-sdk", "@github/copilot-sdk/extension"]
   });
 }
 for (const entry of entries) {
-  await link(readFileSync(entry, "utf8"), pathToFileURL(entry).href);
+  const source = readFileSync(entry, "utf8");
+  await link(source, pathToFileURL(entry).href);
+  const start = source.indexOf("async function importExtensionSdk(");
+  assert.notEqual(start, -1, `${entry} must preserve mixed-loader compatibility`);
+  const end = source.indexOf("\n}", start) + 2;
+  assert.ok(end > start);
+  const helper = source.slice(start, end);
+  for (const available of ["microsoft", "github", "both", "dependency-failure"]) {
+    const calls = [];
+    const dependencyFailure = Object.assign(new Error(
+      "Cannot find package 'missing-sdk-dependency' imported from sdk/index.js",
+    ), { code: "ERR_MODULE_NOT_FOUND" });
+    const module = new vm.SourceTextModule(`${helper}\nexport { importExtensionSdk };`, {
+      identifier: pathToFileURL(entry).href,
+      importModuleDynamically: async (specifier) => {
+        calls.push(specifier);
+        const modern = specifier.startsWith("@microsoft/");
+        if (modern && available === "dependency-failure") throw dependencyFailure;
+        if ((modern && available === "github") || (!modern && available === "microsoft")) {
+          const namespace = modern ? "microsoft" : "github";
+          throw Object.assign(new Error(
+            `Cannot find package '@${namespace}/copilot-sdk' imported from fixture.mjs`,
+          ), { code: "ERR_MODULE_NOT_FOUND" });
+        }
+        const exports = specifier.endsWith("/extension")
+          ? { joinSession: forbidden } : { approveAll: forbidden };
+        const result = synthetic(exports);
+        await result.link(() => assert.fail("synthetic SDK must have no dependencies"));
+        await result.evaluate();
+        return result;
+      },
+    });
+    await module.link(() => assert.fail("isolated helper must have no static imports"));
+    await module.evaluate();
+    for (const subpath of ["", "/extension"]) {
+      calls.length = 0;
+      if (available === "dependency-failure") {
+        await assert.rejects(module.namespace.importExtensionSdk(subpath),
+          (error) => error === dependencyFailure);
+        assert.deepEqual(calls, [`@microsoft/copilot-sdk${subpath}`]);
+      } else {
+        const exports = await module.namespace.importExtensionSdk(subpath);
+        assert.equal(typeof exports[subpath ? "joinSession" : "approveAll"], "function");
+        assert.deepEqual(calls, available === "github"
+          ? [`@microsoft/copilot-sdk${subpath}`, `@github/copilot-sdk${subpath}`]
+          : [`@microsoft/copilot-sdk${subpath}`]);
+      }
+    }
+  }
 }
-assert.deepEqual([...sdkImports].sort(), Object.keys(sdk).sort());
-console.log(`Linked ${entries.length} extension entrypoints with Microsoft-only SDK resolution`);
+console.log(`Linked ${entries.length} extension entrypoints; verified Microsoft/GitHub SDK compatibility`);

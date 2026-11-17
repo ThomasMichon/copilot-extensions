@@ -28,6 +28,17 @@ const synthetic = values => new vm.SyntheticModule(Object.keys(values), function
 });
 const module = new vm.SourceTextModule(readFileSync(process.argv[1], "utf8"), {
   initializeImportMeta: meta => {meta.url = pathToFileURL(process.argv[1]).href;},
+  importModuleDynamically: async name => {
+    const exports = name === "@microsoft/copilot-sdk" ? {approveAll: () => true}
+      : name === "@microsoft/copilot-sdk/extension" ? {
+        joinSession: async () => ({sessionId: "fixture-session", on: (key, fn) => handlers.set(key, fn),
+          send: async message => {prompts.push(message);}}),
+      } : assert.fail(`unexpected dynamic import: ${name}`);
+    const dependency = synthetic(exports);
+    await dependency.link(() => assert.fail("synthetic SDK has no dependencies"));
+    await dependency.evaluate();
+    return dependency;
+  },
 });
 await module.link(async name => {
   if (name === "@microsoft/copilot-sdk") return synthetic({approveAll: () => true});

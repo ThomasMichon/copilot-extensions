@@ -31,7 +31,7 @@ def _materializer() -> ModuleType:
         sys.path.remove(str(tools))
 
 
-def test_all_extension_entrypoints_link_with_microsoft_only_sdk_resolution() -> None:
+def test_all_extension_entrypoints_preserve_mixed_sdk_loader_compatibility() -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     node = shutil.which("node")
@@ -43,7 +43,7 @@ def test_all_extension_entrypoints_link_with_microsoft_only_sdk_resolution() -> 
         timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
     )
     assert result.returncode == 0, result.stderr
-    assert "Microsoft-only SDK resolution" in result.stdout
+    assert "Microsoft/GitHub SDK compatibility" in result.stdout
 
 
 def test_selected_extensions_and_canonical_pane_shell_survive_materialization(
@@ -171,8 +171,9 @@ def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch:
             assert not any(name.startswith("agent_bridge/") for name in core.namelist())
 
 
-@pytest.mark.parametrize("layout", ["source", "payload", "copied-core", "wheel", "partial-payload"])
-def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path: Path, layout: str) -> None:
+def _assert_sdk_facade_loads(
+    tmp_path: Path, layout: str, sdk_namespace: str,
+) -> None:
     from agent_procutil.owned_process import run_caller_owned
     from agent_remote_driver.bridge_extension import extension_sources
     from agent_remote_driver.session_host.bundle import build_session_host_bundle
@@ -236,7 +237,7 @@ def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path: Path,
     resources.mkdir(parents=True, exist_ok=True)
     for name, contents in sources:
         (resources / name).write_bytes(contents)
-    sdk = selected / "node_modules/@microsoft/copilot-sdk"
+    sdk = selected / f"node_modules/{sdk_namespace}/copilot-sdk"
     sdk.mkdir(parents=True)
     (sdk / "package.json").write_text(json.dumps({
         "type": "module", "exports": {"./extension": "./extension.mjs"},
@@ -290,6 +291,15 @@ console.log("one Core registration/delivery activation; no suite service");
         "partial Core payload refused" if layout == "partial-payload"
         else "one Core registration/delivery activation"
     ) in result.stdout
+
+
+@pytest.mark.parametrize("layout", ["source", "payload", "copied-core", "wheel", "partial-payload"])
+def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path: Path, layout: str) -> None:
+    _assert_sdk_facade_loads(tmp_path, layout, "@microsoft")
+
+
+def test_actual_sdk_facade_loads_with_legacy_only_sdk_resolution(tmp_path: Path) -> None:
+    _assert_sdk_facade_loads(tmp_path, "source", "@github")
 
 
 def test_provider_cli_advertises_support_without_touching_a_daemon(

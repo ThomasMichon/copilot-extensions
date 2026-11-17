@@ -33,8 +33,20 @@ import {
 } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@microsoft/copilot-sdk";
-import { joinSession } from "@microsoft/copilot-sdk/extension";
+async function importExtensionSdk(subpath = "") {
+  try {
+    return await import(`@microsoft/copilot-sdk${subpath}`);
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND" ||
+        !error.message?.startsWith("Cannot find package '@microsoft/copilot-sdk' imported from ")) {
+      throw error;
+    }
+    return import(`@github/copilot-sdk${subpath}`);
+  }
+}
+
+const { approveAll } = await importExtensionSdk();
+const { joinSession } = await importExtensionSdk("/extension");
 import {
   agentDispatchAvailable,
   agentWorktreesGet,
