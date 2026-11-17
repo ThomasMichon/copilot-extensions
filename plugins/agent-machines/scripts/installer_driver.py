@@ -79,6 +79,7 @@ CONTEXT_KEYS = (
     "AGENT_DISPATCH_SUPERVISE_MACHINE", "AGENT_PULL_REQUESTS_INSTALL_DEADLINE_SEC",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_ALLOW_DOWNGRADE",
     "AGENT_VAULT_CONFIG", "AGENT_VAULT_INSTALL_PROFILE",
+    "_AGENT_VAULT_FIRST_USE_ROOT",
     "APPDATA", "XDG_CONFIG_HOME", "AGENT_CONFIGURATION_CONTEXT",
     "AGENT_MCP_HOME", "AGENT_MCP_INSTALL_DEADLINE_SEC",
     "AGENT_MCP_SERVE_SOCKET", "AGENT_MCP_NO_CUTOVER",
@@ -396,7 +397,9 @@ def execute(args: argparse.Namespace) -> int:
     with custody() as owner:
         if owner is None:
             raise RuntimeError("Native installer participant requires live driver custody")
-        request = cast(core.Request, core.status(owner.request_id, root=owner.root))
+        request = core.status(owner.request_id, root=owner.root)
+        if not isinstance(request, core.Request):
+            raise RuntimeError("Native installer did not resolve its exact execution request")
         arguments = native_arguments(args)
         environment = {**os.environ, **participant_environment()}
         selectors = selector_context(args, environment)

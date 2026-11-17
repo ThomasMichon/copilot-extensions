@@ -16,6 +16,7 @@ def parse_service_arguments() -> argparse.Namespace:
         "--configuration-root",
         help="Native configuration source captured by the launcher; independent of service state cwd",
     )
+    parser.add_argument("--native-default-owner", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--tcp-port", type=int, default=None,
                         help=f"TCP port (default: {config.DEFAULT_TCP_PORT})")
     parser.add_argument("--ping", action="store_true", help="Check if service is running")
@@ -45,8 +46,12 @@ def parse_service_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     args = parser.parse_args()
+    if args.native_default_owner and args.configuration_root is None:
+        parser.error("--native-default-owner requires --configuration-root")
     if args.configuration_root is not None:
-        config.bind_service_configuration(args.configuration_root)
+        config.bind_service_configuration(
+            args.configuration_root, native_default=args.native_default_owner,
+        )
         if not (args.ping or args.stop or args.export_handoff) and not runtime_enabled():
             parser.error('Agent Vault is inactive; runtime activation requires enabled=true')
     return args

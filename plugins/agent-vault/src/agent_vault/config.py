@@ -7,27 +7,66 @@ import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from configuration_layers import LayerOwner
 
 from .invocation import configuration_root as invocation_configuration_root
 from .invocation import CACHE_TARGET_FIELDS, cache_maintenance_owner
+from .invocation import uses_native_default as invocation_uses_native_default
 from .configuration_scope import (
     REPO_CONFIG_NAME,
     bind_service_configuration as bind_service_configuration,
     configuration_source as resident_configuration_source,
+    uses_native_default as resident_uses_native_default,
 )
 
 
-def configuration_source(cwd: str | None = None) -> str | None:
-    """Keep an absent extension hint unless a caller or resident selected one."""
+def configuration_selection(
+    cwd: str | None = None, *, strict: bool = False,
+) -> tuple[str | None, bool]:
+    """Retain why a root was selected, not just its filesystem identity."""
     selected = invocation_configuration_root(cwd)
     if selected is not None:
-        return selected
-    return resident_configuration_source()
+        if cwd is None and invocation_uses_native_default():
+            from .default_owner import configured_root
+
+            if Path(selected).resolve() != configured_root():
+                raise ValueError("invocation native default differs from its configured root")
+            return selected, True
+        if (
+            cwd is not None
+            and invocation_configuration_root() is None
+            and resident_configuration_source() is None
+        ):
+            from .default_owner import fallback_root
+
+            fallback = fallback_root(cwd, strict=strict)
+            return (fallback, True) if fallback is not None else (selected, False)
+        return selected, False
+    selected = resident_configuration_source()
+    if selected is not None:
+        native_default = resident_uses_native_default()
+        if native_default:
+            from .default_owner import configured_root
+
+            if Path(selected).resolve() != configured_root():
+                raise ValueError("service native default owner differs from its configured root")
+        return selected, native_default
+    from .default_owner import fallback_root
+
+    fallback = fallback_root(strict=strict)
+    return fallback, fallback is not None
 
 
-def configuration_root(cwd: str | None = None) -> str:
-    return configuration_source(cwd) or os.getcwd()
+def configuration_source(cwd: str | None = None, *, strict: bool = False) -> str | None:
+    """Keep an absent extension hint unless a caller or resident selected one."""
+    return configuration_selection(cwd, strict=strict)[0]
+
+
+def configuration_root(cwd: str | None = None, *, strict: bool = False) -> str:
+    return configuration_source(cwd, strict=strict) or os.getcwd()
 
 IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_TCP_PORT = 19999
@@ -115,6 +154,9 @@ class ResolvedVault:
     group: str | None
     port: int
     sources: dict[str, str]
+    if TYPE_CHECKING:
+        @property
+        def configuration_provenance(self) -> dict[str, LayerOwner]: ...
 
 
 def daemon_bind_port(context: ResolvedVault) -> int:
@@ -298,7 +340,12 @@ def _discover_repo_config(
     *,
     strict: bool = False,
 ) -> tuple[Path | None, dict[str, Any]]:
-    start = Path(configuration_root(cwd)).resolve()
+    selected, native_default = configuration_selection(cwd, strict=strict)
+    start = Path(selected or os.getcwd()).resolve()
+    if native_default:
+        from .default_owner import read_selection
+
+        return start / REPO_CONFIG_NAME, read_selection(start)
     if start.is_file():
         start = start.parent
     for directory in (start, *start.parents):
@@ -407,7 +454,7 @@ def resolve_context(
     from .configuration import compose_preferences
 
     ordinary = compose_preferences(
-        cwd, repo_data, global_data, ext_data, repository_directory=repo_base_dir,
+        cwd, repo_data, global_data, ext_data, repository_directory=repo_base_dir, strict=strict,
     )
     if ordinary is not None:
         repo_data = {**repo_data, **ordinary["values"]}
