@@ -4027,6 +4027,7 @@ resource report. This covers exit ordering, not native CPython 3.13 installation
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
+`tools/test_installer_census_refusals.py`,
 `tools/test_installer_engine_commands.py`,
 `tools/test_worktrees_uninstall_custody.py`,
 `tools/test_installer_engine_stop.py`,
