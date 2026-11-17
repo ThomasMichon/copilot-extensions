@@ -18,12 +18,11 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** publish the qualified custody/refspec correction to the same
-implementation PR, respond to its current findings and obtain genuine
-final-head review plus required CI before actual merge. The unchanged-runtime
-packet reproduced 12 behavior failures; the corrected complete consumer packet
-qualifies 177 passed with no failures/skips. No production authority or another
-contributor's seed-delivery files are changed.
+**Now:** reproduce the current unusable-ref fallback, overlapping namespace,
+scoped-credential and native short-source findings before correcting their
+owning paths. The published 177-case source resolves all eight preceding
+findings but is not accepted while these four new findings remain open. No
+production authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -120,6 +119,8 @@ custody remain independent.
   aliased-tracking-source and truthful caller-warning findings.
 - [x] Resolve current repository custody, pre-write policy conflicts, effective
   refspecs and cached-bootstrap findings while preserving existing fetch callers.
+- [ ] Resolve unusable-ref fallback, overlapping remote namespaces,
+  command-scoped credentials and native short-source resolution.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
 - [ ] Record the finite accepted result, settle #13013 and its original claim,
@@ -156,6 +157,10 @@ custody remain independent.
 - [x] **Effective refs:** normalize equivalent sources, apply exclusions before
   ambiguity, reuse a matching refreshed base, refresh a surviving cached-bootstrap
   hop, and preserve the public fetch/reload consumer.
+- [ ] **Native inputs and fallback:** an unusable tracking ref is never selected;
+  overlapping namespaces cannot overwrite either source; authorized scoped
+  credentials survive without repository selectors; HEAD/tag short sources
+  retain Git's actual resolution.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
 - [x] **Evidence tiers:** document why the local-Git consumer is the relevant
@@ -181,7 +186,17 @@ This remains a below-altitude correction under the accepted repository/worktree
 identity intent and right-sized, cross-platform, truthful-failure patterns. It
 adds no public API, schema, service, dependency, timeout knob or rollout.
 
+The current agent-derived refinement additionally excludes unusable tracking
+refs from selection, using a verified local default branch or refusing creation.
+Destination checks use actual ref names and remote/source identity, not a remote
+name equality shortcut. Preserve already-authorized credential configuration
+without restoring repository selectors. Git, rather than a blanket branch
+prefix, defines short source identity: narrowly resolve explicitly configured
+short names when needed within the same acquisition deadline. The ordinary
+committed reader remains offline; no default-branch discovery is introduced.
+
 ## Journal
 
+- [2026-11-17 - Native source resolution and safe fallback](journal/2026/11.17-native-source-and-fallback.md)
 - [2026-11-17 - Policy custody and effective-refspec controls](journal/2026/11.17-policy-custody-controls.md)
 - [2026-11-17 - Preparation and qualification history](journal/2026/11.17-preparation-qualification.md)
