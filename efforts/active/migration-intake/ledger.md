@@ -464,3 +464,18 @@ implementation/source/resource responsibilities remain unchanged.
 The campaign-origin extra receipt veto is prospectively corrected, not a
 waiver of actual owner custody. No keeper-body edit, implementation,
 activation, credential operation, native proof or resource transfer follows.
+
+## Complete attention-wait preservation intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Earlier conditional rows and their history remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Original-turn post-reattach settlement, per-wait deadline/result/continuation and represented support OR explicit unsupported-capability | Public #4681, including complete #7977/#9387 refinements and eligible discussion | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-bridge-delegation-convergence](../agent-bridge-delegation-convergence/README.md), direct AW4681-P1..3/LV1..3/global G | Keep #4681 until reviewed complete receiving, current whole ROOT/source/custody readback and separate source-specific judgment; completed Phase 1B and archived Done baseline retain credit |
+
+Terminal production, actual live-registry resolution and compatibility stay
+with their existing owners. No new ACK, implementation claimant, AHP or
+all-parent prerequisite, session operation or live wait is introduced.
+The seven direct technical rows remain unchecked. Ledger publication is
+neither domain acceptance, tracker retirement nor wait-channel completion.

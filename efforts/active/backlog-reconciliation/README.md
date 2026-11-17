@@ -3424,6 +3424,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)
   record reviewed complete #4229 receiving, its separate redundant-tracking
   retirement, ten retained outcomes and prospective #4477 cause reconciliation.
+  The [complete attention receiving and seven contracts](journal/2026/11.17-attention-receiving-and-seven-contracts.md)
+  directly proposes all three #4681 lanes in the existing delegation domain,
+  retains six whole outcomes and queues the #4756/#4959 domain amendments
+  without accepting them or reopening completed attention credit.
   The [hosted-session receiving and condition-provenance proposal](journal/2026/11.17-hosted-session-receiving-and-condition-provenance.md)
   maps every literal #4229 component into the existing Draft AHP receiver
   without duplicate rows. It corrects the campaign-origin receipt recommendation,
