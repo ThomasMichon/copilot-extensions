@@ -548,3 +548,18 @@ technical gate and actual owner retained. #8300's bounded claim stays
 complete, while independent #5731/#2570/catalog/consumer obligations and
 archived recipe/provider credit remain distinct. No implementation,
 script/provider/task/lease/native operation or resource release follows.
+
+## Proposed webhook and host-teardown receiving (2026-11-17 UTC)
+
+| Source contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Complete three-route shared-webhook graceful generation replacement | Public #5319 original and complete discussion | routed (proposed; effective after reviewed direct Plan acceptance) | [versioned-singleton-manager](../versioned-singleton-manager/README.md), P5319/V5319/actual G5319 and Coordination | Explicit additional adopter, not implied existing callback coverage; readiness, routing, admission closure, drain, owned retirement and accepted-request custody without assumed redelivery; actual owners/native bounds and source-specific conditions unchanged |
+| Successful-Windows-host-teardown Fleet Hygiene caveat and bounded mitigation/upstream assessment | Public #5427 original and both complete discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [cli-default-bridging](../cli-default-bridging/README.md), P5427/V5427/actual G5427 and Coordination | Same owner/per-phase review; direct-SIGTERM-only Linux witness; supported limitation may satisfy assessment; #5432 discovery and #5930 arbitration distinct; no new reaper/every-host qualification or native run |
+
+The [complete seven-source checkpoint](../backlog-reconciliation/journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+also retains #5293's same-canonical programme, #5353's different-domain gap,
+#5330's finite conformance follow-up, #5340's earlier coverage intake and
+current-ROOT qualification gap, and #5352's historical source exclusion.
+All six new technical rows remain unchecked. No source disposition,
+implementation appointment, execution, custody transfer or hold release
+follows from ledger publication.

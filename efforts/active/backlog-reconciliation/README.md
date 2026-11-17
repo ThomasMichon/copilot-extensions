@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [webhook and host-teardown receiving proposal](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+  directly retains whole #5319/#5427 contracts with six new unchecked
+  Plan/local/global rows and unchanged custodians. Five other outcomes
+  distinguish same-canonical coverage, different-domain fit and precise
+  current or historical source gaps. All sources remain open; the latest
+  complete census is 890 whole, 161 above fixed 729.
   The [composition receipt and client-only inflow](journal/2026/11.17-composition-receipt-and-client-only-inflow.md)
   records #13139's reviewed clarification, complete current whole receiving
   readback and #4959's separate tracking retirement. Its Active technical
