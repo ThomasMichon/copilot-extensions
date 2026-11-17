@@ -104,13 +104,16 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** reconcile #12013 with current Dev after preserving its successful
-exact-source HTTP-52 capture. Ubuntu run `44011929440` captures and independently
+**Now:** publish the reconciled #12013 source and earn current-source
+qualification after preserving its successful exact-source HTTP-52 capture.
+Ubuntu run `44011929440` captures and independently
 verifies all 638 controlled cases at `3e1ea0c08ba64cef81bab70a431e3a41fe742cb2`,
 within the unchanged aggregate. Its 218 exported outputs pass canonical
 materialization and validation. All 24 selected owners, the complete checker
-owner and 204 Windows prefix controls pass at that checkpoint. Changed inputs
-after reconciliation require current evidence; the retained Index cleanup
+owner and 204 Windows prefix controls pass at that checkpoint. After rebasing
+onto Dev `c2d5e84db4`, all 166 changed Python files pass strict analysis across
+24 owners and every declared target, with no removed unit-manifest members.
+The 33 changed capture inputs require current evidence; the retained Index cleanup
 hold, current required CI, native POSIX proof and hosted Windows acceptance
 remain open. No original hold changes.
 

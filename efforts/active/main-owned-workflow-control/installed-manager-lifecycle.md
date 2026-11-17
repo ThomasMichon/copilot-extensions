@@ -3614,3 +3614,29 @@ threads, retained Index cleanup hold or existing-owner hosted Windows gate.
 Any changed capture input after reconciliation still requires current-source
 evidence. The parent effort remains active, with baseline, frozen-candidate,
 Main, rollout and custody boundaries unchanged.
+
+The five owned commits are then rebased onto Dev
+`c2d5e84db4f1e2f17b2b0fdee5254735eb527313`, preserving the pre-rebase verified
+checkpoint in a local backup. Disjoint generated-registry changes retain both
+the upstream non-semantic declarations and the imported capture outputs.
+The canonical MCP producer refresh preserves contract revision 36. Documentation
+retains both the independent-program checker contract and Dev's Cryptography
+validation dependency.
+
+The rebased whole-file strict ratchet passes all 166 physical files in 24
+projects across every declared Python/platform target, including both Worktrees
+programs. Missing current-Dev checker environments are prepared only through
+the canonical locked preparation flow. Ruff, the 115-file scoped size guard,
+the 13-plugin installation contract and canonical contract validation pass.
+The merged actor-free manifest validates 5,110 nodes, 330 coverage targets and
+806 source inputs. Compared with the previous checkpoint it drops no member,
+adds 27 nodes, one coverage target and four inputs, and retains its original
+profile and 300-second deadline. This is manifest validation, not a replay or
+acceptance of the timed-out local Windows unit attempt.
+
+Canonical source-hash comparison identifies 33 genuinely changed capture
+inputs after the rebase; line-ending-only differences are not counted. The
+successful old-source capture is retained as historical proof, not relabelled
+as qualification of these new inputs. Current-source controlled capture,
+required CI, native POSIX proof and the existing larger acceptance gates remain
+open before publication can be treated as completion.
