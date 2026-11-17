@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [SDK, cache and transport delta](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+  credits new source deliveries while retaining actual release, adoption and
+  unclassified transport-observation boundaries.
   The [serving and typing checkpoint](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
   preserves #6389's complete canonical acceptance, credits delivered slices
   and separates #10931's canonical-source and consumer-fixture qualification.
