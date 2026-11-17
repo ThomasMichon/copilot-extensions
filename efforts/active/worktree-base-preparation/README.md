@@ -17,8 +17,8 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** publish the tested finite correction and complete exact-source
-supplementary Windows qualification, review and required CI.
+**Now:** complete the implementation PR's exact-source unit admission,
+review and required CI after successful hosted Windows qualification.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -142,6 +142,20 @@ correction does not revise a vision or create a new service/lifecycle owner.
 
 ### 2026-11-17 - Finite correction validated locally
 
+- Implementation #13033 is open, not merged. The managed publication rebased
+  the candidate onto current `dev`; all seven authored files survived
+  byte-for-byte unchanged.
+- Disposable hosted Windows qualification passed all selected cases at
+  `8b5d6154493783062a4a04cfd19812a7495964a5` in
+  [run 44027139733](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44027139733).
+  This includes the new preparation cases, safe-anchor controls, the actual
+  binary/text Git consumer and binary-observation refusals. The source,
+  canonical test and runtime-verification phases all passed.
+- Required CI then correctly refused the changed `git_ops.py` source against
+  its old actor-free packet digest. Rebound only that existing source entry:
+  the original verifier passes all 810 source bindings, with exact node
+  membership, coverage targets and budgets unchanged. No source or project
+  admission was widened. Required CI must execute the corrected packet.
 - The new local-Git controls failed first on unchanged production code:
   the excluded configured base remained stale, and an absent tracking base
   selected the local fallback. The actual caller's offline-warning control
@@ -163,11 +177,12 @@ correction does not revise a vision or create a new service/lifecycle owner.
 - Initial local preparation on Windows ARM64 could not build the optional
   authentication dependency without a Rust toolchain. The existing x64
   interpreter completed the contained packet without changing host setup.
-  A supplementary binary-consumer packet then stopped before collection on a
-  cached-build-file access error. Complete that source coverage through the
-  supported disposable hosted Windows lane; do not treat setup failure as a
-  test pass or relax containment.
-- Source publication, hosted qualification, review, required CI, actual merge
+  A supplementary local binary-consumer packet then stopped before collection
+  on a cached-build-file access error. The supported disposable hosted Windows
+  lane supplied that source coverage instead; setup failure is not counted as
+  a test pass and containment was not relaxed.
+- Source publication and hosted qualification are complete. Review, required
+  CI, actual merge
   and finite issue/claim settlement remain open.
 
 ### 2026-11-17 - Plan accepted
