@@ -22,6 +22,9 @@ is not implementation completion, and source acceptance is not rollout.
 tracking-alias and freshness-diagnostic findings locally while retaining the
 unchanged-runtime negative candidate. Both negative and positive consumer
 qualification, followed by exact-source review/CI, remain publication gates.
+The expanded positive packet also requires correcting its separate creation
+fixture inputs to the existing receiving-ledger contract; no production
+authority or another contributor's seed-delivery files are changed.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -359,6 +362,36 @@ typing exemption or pending-project admission.
   has passed all eight changed Python files on Linux and Windows/Python3.10;
   final exact-source gates and the expanded positive consumer packet remain
   pending. The implementation is not yet republished or accepted.
+
+### 2026-11-17 - Expanded caller qualification exposes fixture drift
+
+- Candidate `525298862a91ce4e8efd21acfa37eccced9221db` is not qualified:
+  [run 44077125552](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44077125552)
+  reports147 passed,15 failed and three existing opt-in native skips.
+  All19 preparation cases passed, including every reproduced boundary and
+  added mapping control. The creation files expose receiving-ledger mismatches
+  and consequent missing-seed assertions; their failures are not waived.
+- `test_worktree_creation_seed.py` and three core cases in
+  `test_creation_requests.py` selected an arbitrary tracking directory rather
+  than the named receiving project's ledger. The seed fixture also omitted
+  its declared worktree root/platform from saved configuration. Correct those
+  disposable inputs, retain the actual guards and all failing assertions, and
+  meet the complete touched-file strict ratchet.
+- Existing contributor #12880 owns the different resolver/native seed-delivery
+  fixture files under #12879. Its full body and file inventory were read.
+  Neither of those files, its shared imports, native acceptance nor its
+  expression is changed or superseded here. Exact creation-file ownership
+  searches found no competing correction for these two files.
+- The two creation fixture files now pass whole-file strict checks and fatal
+  lint; all ten changed Python files pass both Python3.10 target platforms.
+  Canonical same-object module imports, typed callbacks/documents and positive
+  optional-receipt assertions preserve the existing test contracts.
+- The three opt-in fresh-owner native cases require their independent
+  enrollment and were already skipped, not failed. They are outside the
+  intended non-native caller-preservation selection; qualify the explicit
+  non-native packet without dropping any of the15 failures or claiming those
+  native contracts ran. Source consumer proof, exact-head review/CI and actual
+  merge remain open.
 
 ### 2026-11-17 - Finite correction validated locally
 
