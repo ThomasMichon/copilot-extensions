@@ -58,7 +58,10 @@ def _windows_error(code: int | None = None) -> OSError:
     import ctypes
 
     winerror: Callable[..., OSError] = getattr(ctypes, "WinError")
-    return winerror() if code is None else winerror(code)
+    if code is None:
+        get_last_error: Callable[[], int] = getattr(ctypes, "get_last_error")
+        code = get_last_error()
+    return winerror(code)
 
 
 def _windows_private(fd: int, *, private: bool = True) -> None:

@@ -8,7 +8,7 @@ from typing import Any, Callable
 import pytest
 
 from agent_worktrees import artifact_output, tracking
-from agent_worktrees.artifact_root import admit_root
+from agent_worktrees.artifact_root import _windows_error, admit_root
 from test_artifact_output import Destination, destination as destination, produce
 from test_resource_producer import owner as owner
 
@@ -44,6 +44,26 @@ def _access(path: Path, entry: str) -> None:
             raise OSError("synthetic directory access-control installation failed")
     finally:
         kernel.LocalFree(descriptor)
+
+
+def test_native_api_failure_uses_saved_ctypes_error(tmp_path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    native = getattr(ctypes, "WinDLL")("kernel32", use_last_error=False)
+    saved = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    native.SetLastError.argtypes = [wintypes.DWORD]
+    native.SetLastError.restype = None
+    native.GetLastError.argtypes = []
+    native.GetLastError.restype = wintypes.DWORD
+    saved.GetFileAttributesW.argtypes = [wintypes.LPCWSTR]
+    saved.GetFileAttributesW.restype = wintypes.DWORD
+    native.SetLastError(0)
+    assert saved.GetFileAttributesW(str(tmp_path / "missing-file")) == 0xFFFFFFFF
+    get_last_error: Callable[[], int] = getattr(ctypes, "get_last_error")
+    assert get_last_error() == 2 and native.GetLastError() == 0
+    assert getattr(_windows_error(), "winerror") == 2
+    assert getattr(_windows_error(5), "winerror") == 5
 
 
 @pytest.mark.parametrize(("entry", "accepted"), [
