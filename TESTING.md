@@ -2719,6 +2719,18 @@ Focused `tests/test_owner_mux_settlement.py` and the existing owner tests cover
 that race, a still-present session, failed presence probing and identity
 mismatch. They do not start a headed client or replace native qualification.
 
+If that fixture fails before its control attachment, it emits one bounded
+`MCP_HEADED_STARTUP` observation before exact cleanup. The report whitelists
+startup phase, original identity states and local output-presence counts;
+it reads a pane only after the original mux incarnation matches, targeting
+that original pane ID rather than a reusable session name. Binding data,
+paths and credential-shaped output are redacted. Diagnostic failure cannot
+replace the original exception or skip cleanup. The existing 30-second state,
+5-second final-text and 15-second settlement waits retain their values through
+Python 3.10-compatible `wait_for` wrappers; the ten-second caller-context wait
+and native case/group/job limits are unchanged. This is observation only,
+not a causal timeout fix or acceptance of a failed run.
+
 The separate owner-only `mcp-caller-lifetime` hosted Windows packet selects
 `test_custody_native_lifetime.py::test_native_caller_jobs_and_session_owner_lifetime`.
 It prepares the canonical MCP test environment, then uses the existing native
