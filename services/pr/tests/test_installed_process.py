@@ -773,8 +773,6 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     assert workspace_calls.splitlines() == ["capabilities", "read", "read", "read"] + (
                         ["read"] if terminal_enabled else []
                     )
-                settled_reads = calls.read_text()
-                assert settled_reads.splitlines() and set(settled_reads.splitlines()) == {"read"}
                 persisted = (state / "watch-replay.json").read_bytes()
                 assert access.read_bytes() not in persisted
                 assert b"PRIVATE KEY" not in persisted
@@ -790,6 +788,10 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 assert await send("pending") == pending
             finally:
                 await close(owner)
+            # An admitted read can finish during reconnect/drain. Only the
+            # drained owner's final log is a baseline for later refusal.
+            settled_reads = calls.read_text()
+            assert settled_reads.splitlines() and set(settled_reads.splitlines()) == {"read"}
             if terminal_mapping_enabled:
                 _compact_terminal_mapping(path, {**scope, "number": 42}, cursor)
             # Remounting the same namespace does not rebind the retained volume.
