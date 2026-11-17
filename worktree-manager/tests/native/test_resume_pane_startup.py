@@ -699,3 +699,22 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
                 env=env, cwd=env["USERPROFILE"], capture_output=True, text=True,
                 timeout=10, check=False, creationflags=_NO_WINDOW,
             )
+
+
+def test_native_owner_preserves_observation_refusal(tmp_path: Path) -> None:
+    (tmp_path / "owner.py").write_text(OWNER, encoding="utf-8")
+    env = os.environ.copy()
+    executable = native_python_owner(tmp_path, env)
+    result = subprocess.run(
+        [str(executable), "-I", "-X", "utf8", "-m",
+         "agent_remote_driver.mux_observation", "--observe"],
+        input=json.dumps({"version": 1, "session": ""}),
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20,
+        check=False, creationflags=_NO_WINDOW,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "contract": "copilot-driver.mux-observation", "version": 1,
+        "status": "unsupported", "reason": "unsupported-target",
+        "incarnation": "", "clients": None, "panes": [],
+    }
