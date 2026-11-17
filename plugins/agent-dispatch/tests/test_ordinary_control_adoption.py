@@ -6,6 +6,7 @@ from typing import Any
 import copy
 import hashlib
 import json
+import sqlite3
 from dataclasses import asdict
 
 import httpx
@@ -200,6 +201,48 @@ def test_control_adoption_lost_reply_and_competing_epoch_preserve_the_committed_
         )
     winner = restarted.get_reservation(before["key"])
     assert winner is not None and winner.agent_info == stored.agent_info
+
+
+def test_control_adoption_rollback_recorder_cannot_erase_history(adopting: Any, monkeypatch: Any) -> None:
+    from agent_dispatch import ordinary_control_adoption
+
+    assigned, before, info = adopting
+    queue, _, _, _, _, _ = assigned
+    stored = _record(adopting)
+    restarted = TaskQueue(queue.db_path)
+    legacy = {key: value for key, value in info.items() if key != ADOPTION}
+    # The preceding recorder rewrites ordinary SessionInfo without retaining epoch fields.
+    monkeypatch.setattr(ordinary_control_adoption, "retain_control", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        ordinary_control_adoption, "protect_history",
+        lambda *_a: pytest.fail("the rollback recorder cannot install the new guard"),
+    )
+    with pytest.raises(sqlite3.IntegrityError, match="control history is immutable"):
+        record_resumed_agent(
+            restarted, before["key"], task_generation=stored.agent_info["task_generation"],
+            session_info=legacy, worktree_record=assigned[3],
+            startup_invocation=before["agent_info"]["startup_invocation"],
+        )
+    remaining = restarted.get_reservation(before["key"])
+    assert remaining is not None and remaining.agent_info == stored.agent_info
+
+
+@pytest.mark.parametrize("change", ["null", "history", "adoption", "invocation"])
+def test_control_adoption_durable_guard_refuses_legacy_json_replacement(adopting: Any, change: str) -> None:
+    assigned, before, _ = adopting
+    queue, _, _, _, _, _ = assigned
+    stored = _record(adopting)
+    replacement = copy.deepcopy(stored.agent_info)
+    if change == "null":
+        replacement = None
+    else:
+        replacement.pop({"history": HISTORY, "adoption": ADOPTION, "invocation": "startup_invocation"}[change])
+    with queue._connect() as conn, pytest.raises(sqlite3.IntegrityError, match="control history is immutable"):
+        conn.execute(
+            "UPDATE spawn_reservations SET agent_info=? WHERE key=?",
+            (json.dumps(replacement, sort_keys=True) if replacement is not None else None, before["key"]),
+        )
+    assert queue.get_reservation(before["key"]).agent_info == stored.agent_info
 
 
 def test_control_adoption_uses_existing_http_storage_contract(adopting: Any) -> None:

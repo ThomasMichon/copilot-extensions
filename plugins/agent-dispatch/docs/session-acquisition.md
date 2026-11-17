@@ -61,6 +61,10 @@ entire predecessor agent record and the explicit unavailable-history boundary.
 Original invocation, receipts, unknown outcomes and excluded operations remain
 historical; they are not successful sends in the adopted epoch. Refreshes cannot
 erase or replace that evidence, and a competing different adoption refuses.
+The first adoption installs a persistent SQLite update guard in that same
+transaction. It preserves the predecessor snapshot, adoption and original
+invocation even if an older coordinator refreshes ordinary SessionInfo after
+rollback; unsupported replacement fails rather than erasing the replay fence.
 Legacy startup receipt/send composition is explicitly refused after adoption:
 the original key and turn position must not be replayed into the new stream.
 Any later work-bearing prompt uses its current owner's separately admitted,

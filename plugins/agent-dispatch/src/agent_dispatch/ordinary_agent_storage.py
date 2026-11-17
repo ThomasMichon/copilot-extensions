@@ -244,11 +244,13 @@ def _record_agent(
         ).fetchone():
             raise TaskError("legacy acquisition has no proven current native/history facts")
         handle = f"local-body:{actual.bridge}"
-        from .ordinary_control_adoption import HISTORY, retain_control
+        from .ordinary_control_adoption import HISTORY, protect_history, retain_control
         retain_control(
             json.loads(row["agent_info"]) if row["agent_info"] else None,
             agent_info, dict(row), resumed=resumed,
         )
+        if HISTORY in agent_info:
+            protect_history(conn)
         if not row["agent_info"] and row["session_handle"] and row["session_handle"] != handle:
             if not resumed:
                 raise TaskError("ordinary agent does not match retained reservation identity")

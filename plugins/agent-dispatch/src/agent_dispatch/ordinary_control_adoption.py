@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import sqlite3
 from typing import Any
 
 from .ordinary_agent_facts import identity
@@ -14,6 +15,23 @@ from .queue_task_relationships import valid_record_writer
 
 HISTORY = "retained_control_history"
 ADOPTION = "retained_metadata_adoption"
+
+
+def protect_history(conn: sqlite3.Connection) -> None:
+    """Commit a rollback-safe write fence with the first adopted control record."""
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS spawn_control_history_retained"
+        " BEFORE UPDATE OF agent_info ON spawn_reservations"
+        " WHEN CASE WHEN json_valid(OLD.agent_info)"
+        f" THEN json_type(OLD.agent_info, '$.{HISTORY}') IS NOT NULL ELSE 0 END"
+        " AND CASE WHEN json_valid(NEW.agent_info) THEN ("
+        f" json_extract(NEW.agent_info, '$.{HISTORY}') IS NOT json_extract(OLD.agent_info, '$.{HISTORY}')"
+        f" OR json_extract(NEW.agent_info, '$.{ADOPTION}') IS NOT json_extract(OLD.agent_info, '$.{ADOPTION}')"
+        " OR json_extract(NEW.agent_info, '$.startup_invocation')"
+        " IS NOT json_extract(OLD.agent_info, '$.startup_invocation')"
+        ") ELSE 1 END"
+        " BEGIN SELECT RAISE(ABORT, 'retained ordinary control history is immutable'); END"
+    )
 
 
 def _require(condition: bool) -> None:

@@ -6432,7 +6432,7 @@
         "tools/typecheck_programs.py": "448f0dd5d0ed4a8596a6d44e1dd71d97efea8e12d73dbd0431e1ec769cc6d491",
         "tools/bridge_capture_progress.py": "70eb1d041b7594e81249f7233f208ebea634cb4eb64e3cc58225a06e4c30f6d3",
         "tools/promotion_unit_tests/test_capture_progress.py": "6b38d8cf02b468d07e29ee94382097d3fc54e5b895f0b447a0b801c22c501637",
-        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py": "2aaac4df3b81accdef8a28148e86ca4b886271e30f60fe1b771f97ebe35d9c3e",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py": "3daea0666f7d4a4bff3dcf8a060db841668c86d54034f084aa0f1f3b57554834",
         "tools/promotion_unit_tests/test_ordinary_control_adoption.py": "03492bbacca2e6be98395ce37dee932a3818ca92b983e2085bd3592e7853f2d7"
     }
 }
