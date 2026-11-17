@@ -1,0 +1,9 @@
+{
+  "comment": "Add a finite independent-reference reviewer-feed comparison example with explicit scope, freshness and causal-evidence limits",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}
