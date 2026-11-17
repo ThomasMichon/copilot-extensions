@@ -111,8 +111,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - packet: native-callers
+            selection: test_bootstrap_update_native.py and (coalesces_pending_work or latest_waiter_preserves_active_worker)
           - packet: native
-            selection: test_bootstrap_update_native.py
+            selection: test_bootstrap_update_native.py and not (coalesces_pending_work or latest_waiter_preserves_active_worker)
           - packet: adapters
             selection: not test_bootstrap_update_native.py
     env: *bootstrap-update-env

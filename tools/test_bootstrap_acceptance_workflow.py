@@ -88,3 +88,10 @@ def test_windows_behavioral_shards_preserve_every_selected_case_exactly_once() -
     assert expected and all(packets)
     assert set.union(*packets) == expected
     assert sum(map(len, packets)) == len(expected)
+    native = {case for case in expected if "test_bootstrap_update_native.py::" in case}
+    native_packets = [packet & native for packet in packets if packet & native]
+    caller_loss = {
+        case for case in native
+        if "coalesces_pending_work" in case or "latest_waiter_preserves_active_worker" in case
+    }
+    assert len(native_packets) == 2 and caller_loss in native_packets
