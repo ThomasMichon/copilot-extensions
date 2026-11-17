@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+  records #13153's actual delivery and separate #5452/#5518/#5549 tracking
+  retirements, with only the evidenced #5518 documentary routing row checked.
+  #5616 receives a finite selected-remedy proposal; #5559/#5579 receive
+  prospective administrative clarifications preserving actual ownership and
+  technical gates. The complete census is 884 whole, 155 above fixed 729.
   The [authentication, baseline and engine receiving checkpoint](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
   records #13150's actual receipt merge, #5512's separate same-canonical
   tracking retirement and six current contracts. Whole #5452 authentication/
