@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import importlib
+from collections.abc import Callable
 from pathlib import Path
 import shutil
 import sys
@@ -70,11 +71,17 @@ def candidate(tmp_path: Path) -> Path:
     return root
 
 
-def test_source_application_contains_embedded_code_resources_and_notices(candidate: Path) -> None:
+@pytest.mark.parametrize("relative", [False, True], ids=["absolute", "relative"])
+def test_source_application_contains_embedded_code_resources_and_notices(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch, relative: bool,
+) -> None:
     source = candidate / "worktree-manager"
     before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
     resources = injected_resources("worktree-manager", candidate)
-    assert all(line.startswith("OK") for line in applications.materialize(candidate))
+    if relative:
+        monkeypatch.chdir(candidate.parent)
+    selected = Path(candidate.name) if relative else candidate
+    assert all(line.startswith("OK") for line in applications.materialize(selected))
     emitted = candidate / "apps/worktree-manager"
     metadata = tomllib.loads((emitted / "pyproject.toml").read_text(encoding="utf-8"))
     assert metadata["project"]["version"] == "1.2.3"
@@ -125,6 +132,16 @@ def test_source_application_does_not_replace_an_existing_output(candidate: Path)
     _write(candidate, "apps/worktree-manager/keep.txt", "keep\n")
     assert any(line.startswith("SKIP") for line in applications.materialize(candidate))
     assert (candidate / "apps/worktree-manager/keep.txt").read_text() == "keep\n"
+
+
+def test_source_application_refuses_a_relative_linked_root(
+    candidate: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    native_file_symlink: Callable[..., None],
+) -> None:
+    native_file_symlink(tmp_path / "linked", candidate, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    assert any(line.startswith("SKIP") for line in applications.materialize(Path("linked")))
+    assert not (candidate / "apps").exists()
 
 
 def test_source_application_materialization_refuses_a_changed_file_pointer(

@@ -6053,7 +6053,7 @@
         "tools/materialize_installer_engine.py": "2dd0043f75be310bb3df175af3d30f6561a772975798140503b8ed3d1d6277c7",
         "tools/materialize_launch_wrapper_assets.py": "e7c1dcbb9ddf7095bfba8d11dc84ecac08b3e4883c5fd7967fbdb961e83559fc",
         "tools/materialize_main.py": "63eded060c9c05cb67ce62df0c02d4e7d6298a2d8a50529015724d332a2792ee",
-        "tools/materialize_source_applications.py": "80c54bf8546eaea7fff7e6f4b07cb96b0b73fe8c086853d46016186c6a7094a4",
+        "tools/materialize_source_applications.py": "f0aa06deeafd5717a7e106aa7e710a86d8ddd281ea58bbc37c1ea4d65b44f547",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
         "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
         "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",

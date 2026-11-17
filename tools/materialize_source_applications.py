@@ -82,6 +82,7 @@ def _project_manifest(source: Path) -> str:
 
 def materialize(root: Path) -> list[str]:
     """Produce the opted-in Manager source project without building or installing."""
+    root = root.absolute()
     source = root / "worktree-manager"
     declaration = source / _DECLARATION
     if not declaration.exists() and not declaration.is_symlink():
