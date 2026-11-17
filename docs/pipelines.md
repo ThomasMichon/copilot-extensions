@@ -209,7 +209,7 @@ It never dispatches candidate CI.
 `native-resume-windows` is a separate, mandatory fifteen-minute Windows job for
 every composed promotion candidate, not an impact-selected PR test or part of
 unit coverage. It imports the same frozen candidate and uses the existing
-hash-pinned PSMux 3.3.8 dependency. The contained native packet starts four
+hash-pinned PSMux 3.4.0 dependency. The contained native packet starts four
 concurrent admitted cold Resume plans with PSMux prewarming enabled and disabled. It
 requires the production launcher, copied pane/startup readers, exact child
 arguments, acknowledged consumption, terminal attachment, detach without

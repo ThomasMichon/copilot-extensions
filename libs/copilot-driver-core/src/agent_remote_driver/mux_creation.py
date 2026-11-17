@@ -1,6 +1,7 @@
 """Canonical mux creation without lending a Windows worktree to idle standbys."""
 
 from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Iterator
 import hashlib
 import argparse
 import json
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Literal, TextIO
 
 from agent_procutil import no_window_kwargs
 
@@ -43,7 +45,9 @@ def has_session(binary: str, session: str, *, timeout: float = 2) -> bool:
 
 
 @contextmanager
-def session_gate(session: str, *, exists, enabled: bool):
+def session_gate(
+    session: str, *, exists: Callable[[], bool], enabled: bool,
+) -> Iterator[Callable[[], None] | Literal[False]]:
     """Windows Picker and detached creators share one short kernel lease."""
     if not enabled:
         yield lambda: None
@@ -114,7 +118,9 @@ def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def run_or_join(argv: list[str], *, binary: str, session: str, prepare):
+def run_or_join(
+    argv: list[str], *, binary: str, session: str, prepare: Callable[[], Iterable[str]],
+) -> subprocess.CompletedProcess[str] | None:
     """Prepare a new pane only after the native creation gate admits it."""
     gated = platform.system() == "Windows" and is_psmux(binary)
     with session_gate(
@@ -124,8 +130,14 @@ def run_or_join(argv: list[str], *, binary: str, session: str, prepare):
             return None
         if platform.system() != "Windows" and Path(binary).name == "tmux" and has_session(binary, "=" + session):
             return None
+        selected = binary
+        if gated:
+            from agent_remote_driver.windows_mux_version import require_creation_binary
+
+            selected = require_creation_binary(binary)
         argv.extend(prepare())
         if gated:
+            argv[0] = selected
             return run_session(argv, session, release)
         result = run(argv)
         if result.returncode != 0:
@@ -133,13 +145,15 @@ def run_or_join(argv: list[str], *, binary: str, session: str, prepare):
         return result
 
 
-def run_session(argv: list[str], session: str, release) -> subprocess.CompletedProcess[str]:
+def run_session(
+    argv: list[str], session: str, release: Callable[[], None],
+) -> subprocess.CompletedProcess[str]:
     """Release check/create custody at discovery, not at client completion."""
     deadline = time.monotonic() + 15
     # A mux server can outlive the client and inherit its output handles.
     # Regular files cannot keep a pipe reader or its interpreter waiting.
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr, subprocess.Popen(
-        argv, stdout=stdout, stderr=stderr, cwd=str(Path.home()),
+        argv, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, cwd=str(Path.home()),
         env=_creation_env(argv), **no_window_kwargs(),
     ) as child:
         pending = True
@@ -151,8 +165,13 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
                 try:
                     child.wait(timeout=min(0.05, remaining))
                     if child.returncode != 0:
+                        stderr.seek(max(0, os.fstat(stderr.fileno()).st_size - 4096))
+                        diagnostic = stderr.read(4096).decode(
+                            locale.getpreferredencoding(False), errors="replace",
+                        ).strip()
                         raise CreationUncertain(
-                            f"PSMux creation client exited {child.returncode}; pane state is uncertain",
+                            f"PSMux creation client exited {child.returncode}; pane state is uncertain"
+                            + (f": {diagnostic}" if diagnostic else ""),
                         )
                     values = []
                     for stream in (stdout, stderr):
@@ -188,8 +207,8 @@ CONTRACT = "copilot-driver.mux-creation"
 PRIVATE_FORMAT = "#{session_id}:#{session_created}|#{pane_id}"
 
 
-def _unique_object(pairs):
-    value = {}
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
     for key, item in pairs:
         if key in value:
             raise ValueError("Duplicate mux request property")
@@ -252,7 +271,7 @@ def private_main() -> int:
     return code
 
 
-def _request(stream):
+def _request(stream: TextIO) -> tuple[str, str, list[str]]:
     raw = stream.read(1024 * 1024 + 1)
     if len(raw) > 1024 * 1024:
         raise ValueError("Mux request exceeds the input limit")
@@ -277,7 +296,7 @@ def _request(stream):
     return binary, session, argv
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     """Finite native creation boundary; no pane attachment or effectful fallback."""
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -297,7 +316,7 @@ def main(argv=None):
         return 0
     dispatched = False
 
-    def prepare():
+    def prepare() -> list[str]:
         nonlocal dispatched
         dispatched = True
         return []

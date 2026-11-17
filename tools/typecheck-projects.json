@@ -531,6 +531,10 @@
       "include": [
         "plugins/agent-worktrees"
       ],
+      "import_roots": [
+        "worktree-manager/tests",
+        "plugins/agent-worktrees/tests"
+      ],
       "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-yaml-requirements.txt"

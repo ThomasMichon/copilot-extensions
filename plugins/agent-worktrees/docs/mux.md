@@ -95,6 +95,35 @@ action-time native reader described below can establish stopped mux state.
 
 ### Preserve first when discovery is unavailable
 
+New installations and provider selection require PSMux 3.4.0 or newer; 3.4.0 is
+the preferred installer version. This does not revoke observation or attachment
+of existing 3.3.5 sessions. The native observation path below retains legacy
+registration support, and installation refuses provider replacement while any
+provider process is present or its absence is unconfirmed. Legacy binaries
+without version metadata are not executed merely to discover their version
+while provider activity may be live. Upgrade only through the normal owner
+after its live-session gate is satisfied; changing this source policy neither
+updates a running provider nor migrates its sessions.
+
+The canonical Windows creation owner checks the selected executable's native
+file-version resource before preparing a pane. An old or unknown version
+refuses new creation; a PATH fallback cannot bypass the 3.4.0 floor. This read
+starts no provider process. An existing-session join returns before that check,
+so legacy reattachment does not acquire a new creation-version requirement.
+Manager checks the same passive metadata after the join decision and before
+selecting a creation owner, preserving that floor even with an older Core or
+the legacy creation path. Existing joins bypass both checks.
+Native qualification pins and its exact-version validator must agree; the
+workflow/validator consistency control checks both prerequisite release URLs.
+
+For an existing worktree, the interactive resolver carries a fresh positive mux
+observation as the boolean `mux_join_existing` launch-plan hint. Manager consumes
+it only to join that exact worktree's session, without starting observation or
+creation helpers again. An attachment failure exits without falling through to
+creation. Missing, false or non-boolean hints retain normal native observation;
+unknown presence never authorizes creation. This hint is not an absence proof,
+a persisted liveness cache or permission to replay a cold-start prompt.
+
 A missing listing is not proof of process death or a safe replacement target.
 PSMux can run registration cleanup on startup even for nominal reads such as
 `has-session`, `list-sessions` and version queries. Public reports
