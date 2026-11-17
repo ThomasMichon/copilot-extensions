@@ -594,7 +594,11 @@ def test_preparation_excludes_overlapping_policy_destinations(
     old_policy = _commit(seed, ".agent-worktrees/config.yaml", "marker: policy\n")
     _git("push", "origin", "production", cwd=seed)
     origin_url = _git("remote", "get-url", "origin", cwd=anchor)
-    _git("remote", "add", "origin/team", origin_url, cwd=anchor)
+    _git("config", "remote.origin/team.url", origin_url, cwd=anchor)
+    _git(
+        "config", "remote.origin/team.fetch",
+        "+refs/heads/*:refs/remotes/origin/team/*", cwd=anchor,
+    )
     target = "refs/remotes/origin/team/trunk"
     _git(
         "config", "--replace-all", "remote.origin.fetch",
@@ -705,7 +709,7 @@ def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
     )
     assert fixture.returncode == 0
     assert fixture.stdout.rstrip("\n") == opaque
-    observed: list[bool] = []
+    observed: list[tuple[int, bool, int]] = []
 
     def checked_run(*args: Any, **kwargs: Any) -> Any:
         command = args[0]
@@ -718,16 +722,16 @@ def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
                 )
 
             credential = probe("http.extraHeader")
-            assert credential.returncode == 0
-            assert credential.stdout.rstrip("\n") == opaque
-            assert probe("core.worktree").returncode == 1
-            observed.append(True)
+            observed.append((
+                credential.returncode, credential.stdout.rstrip("\n") == opaque,
+                probe("core.worktree").returncode,
+            ))
         return original_run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", checked_run)
     prepared = git_ops.prepare_worktree_base(anchor, remote="origin", default_branch="trunk")
 
-    assert observed
+    assert observed and all(value == (0, True, 1) for value in observed), observed
     assert prepared.fetched is True
     assert prepared.fetch_error is None
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
