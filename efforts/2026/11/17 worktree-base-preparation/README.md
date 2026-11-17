@@ -18,21 +18,22 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** publish exact source `0bb9856127`, qualified by all 195 selected
-controls, then obtain final-head review and CI. The unchanged-runtime packet
-executes three meaningful failures and 46 passing controls. Source acceptance
-remains open until actual merge and finite closeout.
-No production authority or another contributor's seed-delivery files are changed.
+**Now:** the finite source correction is accepted. Implementation #13033 merged
+after the genuine final-head review reported no open issues and required CI
+passed. Exact-source qualification passes all 195 selected controls. Issue #13013
+is closed and its original author's discussion-only claim is completed.
+Normal release promotion and authorized installed adoption remain separate;
+independent workspace and contributor obligations are preserved.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
 - **Slug:** `worktree-base-preparation`
 - **Repo:** copilot-extensions
-- **Branch(es):** separate managed plan and implementation PRs against `dev`
+- **Branch(es):** managed plan, implementation and acceptance PRs against `dev`
 - **Created:** 2026-11-17
-- **Status:** Active
+- **Status:** Done
 - **Vision:** below-altitude correction consistent with
-  [repository/worktree identity](../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity)
+  [repository/worktree identity](../../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity)
 - **Umbrella issue:** #13013
 
 ## Guiding Intent
@@ -49,22 +50,21 @@ timeout knob, retry mechanism, service or second freshness policy.
 
 ## Coordination
 
-- **Topology:** one owner, one managed source worktree, sequential plan/code PRs.
+- **Topology:** one owner, one managed source worktree, sequential plan/code/acceptance PRs.
 - **Host (owns PRs):** `patient-knob`; original issue/claim publisher ThomasMichon.
 - **Delegates:** none.
 - **Handoff:** preserve this finite gate and claim through native continuation;
   no independent contributor's work transfers through this plan.
 - The [discussion-only reservation](https://github.com/ThomasMichon/copilot-extensions/issues/13013#issuecomment-6937621536)
-  remains active until its original publisher records completion or release.
+  is [completed by its original publisher](https://github.com/ThomasMichon/copilot-extensions/issues/13013#issuecomment-6954971616).
   No native queue reservation is claimed.
 
 ## Context
 
 `worktree_creation._prepare_worktree_source` delegates to
-`git_ops.prepare_worktree_base`. The latter currently calls `fetch` without
-the configured default branch, although `fetch(branch=...)` already supports
-an explicit remote-tracking refspec that overrides an excluding ordinary
-remote fetch configuration.
+`git_ops.prepare_worktree_base`. Its scoped preparation owner refreshes the
+configured default branch and related committed-policy inputs, while sharing
+the existing fetch transport and preserving ordinary callers' refspec mappings.
 
 #4093 accepted reporting failed-fetch/last-known freshness while retaining
 offline creation. Do not silently replace that minimum-warning alternative
@@ -123,9 +123,9 @@ custody remain independent.
   command-scoped credentials and native short-source resolution.
 - [x] Resolve authenticated-probe timeout redaction and configured-HEAD identity
   while retaining native exclusion matching and OS environment semantics.
-- [ ] Pass affected tests, lint, install contract, changefile/version/size and
+- [x] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
-- [ ] Record the finite accepted result, settle #13013 and its original claim,
+- [x] Record the finite accepted result, settle #13013 and its original claim,
   and preserve every independent workspace and deployment obligation.
 
 ## Validation Plan
@@ -167,7 +167,7 @@ custody remain independent.
   never exposes its injected value; an explicitly configured matching HEAD
   refreshes even without a local default, while a different HEAD remains a
   pre-write conflict.
-- [ ] **Publication:** whole-file typing and all applicable exact-source gates
+- [x] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
 - [x] **Evidence tiers:** document why the local-Git consumer is the relevant
   end-to-end/first-touch proof; use genuinely available supported lanes without
