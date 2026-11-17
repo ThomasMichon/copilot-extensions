@@ -372,6 +372,105 @@ receiving readback precede any separate source-specific disposition.
   docs-only record are not new execution or implemented fix;7157 plugin-preparation ACP/CLI proof is
   real but not this seed-file consumer. No every-venue/new whole-parent native matrix is added.
 
+### Finite both-provider auth-lifetime acceptance retained from #3442
+
+<!-- backlog-reconciliation:7556:transfer:3442:to:efforts/active/venue-parity/README.md -->
+
+_(Proposed documentary receiving; no implementation, auth operation or source
+disposition.)_
+
+Place this finite provider auth-source/lifetime extension in **WS-B**, through
+the existing migration-intake contract. P0/P2 sequencing and every incumbent
+first gate remain; references to shared relay, presentation and validation
+consumers do not create another canonical owner. The original durable-auth
+request remains explicit, not reduced to transport survival.
+
+- [ ] **P3442-1 - Both-provider modes:** Define the declared unattended-auth
+  capability for Containers AND Codespaces: venue-owned durable inference
+  identity, one-launch host-selected inference credential, borrowed/relayed
+  expiring credential, and unavailable/unknown authority. Retain the requested
+  explicit durable-auth mode; where unsupported or unresolved, say so rather
+  than relabel a task record, live controller or relayed credential as durable.
+- [ ] **P3442-2 - Independent identity:** Keep authenticated Copilot inference
+  identity separate from gh/Git, PR, package and other service identities.
+  Missing selected authority remains unavailable, without ambient repository
+  credential fallback. Username/config markers, SSH or Git success alone do
+  not prove current inference authentication or refresh.
+- [ ] **P3442-3 - Provider-policy decision:** Before implementing a new durable
+  mode, reconcile the requested capability with the actual provider policy,
+  owning vision and existing identity/authorization owners. Preserve CodeSpace
+  borrow-without-bottling, scoped expiring caches and approved back-channel
+  boundaries; restricted Containers receive no host credential, relay or
+  ambient identity. Do not copy host auth stores, bake credentials into images,
+  broaden grants or bypass approved identity flows. Keep any unresolved
+  durable-design conflict explicit with its existing owner; this decision
+  remains planned work, not a prerequisite to reviewing this intake.
+- [ ] **P3442-4 - Lifetime and guidance:** Provide the requested skill/guidance
+  contract distinguishing controller/supervision liveness from auth durability.
+  State consequences of caller-terminal disconnect, coordination loss,
+  relay/broker/Connection Owner shutdown, token expiration, session recreation
+  and refresh need. An independent Connection Owner may sustain relayed auth
+  after the initiating terminal exits without creating permanent venue login.
+  A sleep needs no auth until subsequent authenticated work; a durable login
+  does not supply unrelated expiring service credentials it cannot refresh.
+- [ ] **P3442-5 - Effective presentation:** On represented job/venue/Picker
+  rows for BOTH providers, expose effective credential source/mode and relevant
+  lifetime/readiness without token bytes or private account data. Keep
+  connection/supervision, resource-lease ownership and auth capability
+  separately queryable; do not make a supervisor status an auth oracle.
+- [ ] **P3442-6 - Original duration witness:** Retain authorized fresh/clean
+  long-duration validation for BOTH providers: start the unattended task,
+  disconnect its driver, cross the selected auth/lifetime boundary plus the
+  declared duration margin, then complete actual tiny authenticated/inference
+  work using the declared authority. Include a relayed/expired/missing-refresh
+  negative control with honest failure at the relevant boundary. Record the
+  chosen duration and boundary rather than invent a universal clock. Mere
+  sleep completion, synthetic credentials or a short launch is not this proof.
+- [ ] **P3442-7 - Narrow custody:** Preserve narrowly owned credential
+  projection, storage, refresh, redaction, cleanup and supported restart
+  behavior. Transport/token expiration must not silently expire logical
+  task/container claims. This lane authorizes no credential migration,
+  host-store copy, claim release or resource operation.
+- [ ] **P3442-8 - Credit and independent work:** Preserve the existing
+  implementation claim without inferring release from empty assignees or age.
+  Credit #6415's governed trusted-container admission/one-launch isolation and
+  #3352's scoped relay/Connection Owner lifetime only at their delivered tiers.
+  Synthetic shell credentials are not vendor storage/expiry/refresh or live
+  inference proof. Supervision/wake/lease/readiness #1451/#3002/#3003/#3422
+  and reconnection/adoption #3443 remain separately owned; introduce no
+  replacement watchdog, supervisor or automatic owner transfer.
+
+#### Local validation retained for #3442
+
+- [ ] **V3442-1:** For BOTH providers, verify each P3442-1 mode declaration and
+  its supported/unsupported/unknown outcome against the selected authority;
+  no task/controller or relay lifetime is silently promoted to durable auth.
+- [ ] **V3442-2:** Verify P3442-2 inference-versus-service identity separation,
+  missing selected authority and absence of ambient fallback; markers and
+  successful SSH/Git alone remain insufficient.
+- [ ] **V3442-3:** Verify the P3442-3 policy/vision decision at its actual
+  existing owner before dependent implementation. Retain unresolved conflict
+  honestly and preserve restricted denial, no secret-bottling, no image-baking,
+  no host-store copying and unchanged grants.
+- [ ] **V3442-4:** Verify guidance and effective behavior for every P3442-4
+  disconnect, shutdown, expiration, recreation and refresh distinction.
+  Separate an independent relay owner's survival from venue-owned login and
+  inference auth from other expiring service credentials.
+- [ ] **V3442-5:** Exercise BOTH providers' represented job/venue/Picker mode,
+  source, lifetime/readiness and independent supervision/lease/auth views,
+  including unavailable/unknown cases, without exposing secrets or accounts.
+- [ ] **V3442-6:** Retain each provider's actual P3442-6 long-duration,
+  driver-disconnected, subsequent authenticated/inference success and negative
+  control at the declared boundary and margin. Source, fixtures, synthetic
+  shell credentials, sleep or another provider's result cannot replace it.
+- [ ] **V3442-7:** Verify P3442-7 projection/storage/refresh, redaction,
+  cleanup and supported restart boundaries without treating transport/token
+  expiry as logical custody release.
+- [ ] **V3442-8:** Audit preserved partial credit, existing claim and independent
+  programmes under P3442-8. Distinguish source, release, installed and actual
+  authenticated/native results; no plan checkbox, launch receipt or unrelated
+  supervision/reconnection completion establishes whole #3442 fulfillment.
+
 ### Finite Containers-pivot evidence retained from #3507
 
 _(Agent-recommended finite receiving detail; not whole-#954 completion.)_
@@ -433,6 +532,17 @@ remains an explicit applicability gap, not silently reduced to a container case.
   daemon replacement grants arbitrary orphan reaping or resource release.
 
 ## Validation Plan
+
+- [ ] **G3442:** Resolve every
+  [P3442 Plan and paired local Validation clause](#finite-both-provider-auth-lifetime-acceptance-retained-from-3442)
+  for Containers AND Codespaces at its original evidence tier. Retain the
+  explicit durable-mode request and unresolved provider-policy decision,
+  independent inference/service identity, effective presentation, narrowly
+  owned custody, real long-duration disconnected authenticated work and
+  negative controls. Generic shared-core container evidence does not replace
+  this source's BOTH-provider auth acceptance. Preserve incumbent P0/P2,
+  no-regression/fail-loud and source-specific gates. Documentary receiving
+  is not implementation, native/installed acceptance or claim release.
 
 - [ ] **G3507:** Verify all three finite #3507 Plan clauses and their local
   validations, retaining the actual positive AND negative specimen and
@@ -762,6 +872,37 @@ requires its completion nor adds an every-host, all-parent or generic-ACK
 gate. No Docker start, specimen creation, native test, venue operation,
 host/service change or resource transfer is authorized by this plan.
 
+### Continuing finite #3442 custody
+
+The sole proposed canonical domain owner is this venue-parity effort, with
+WS-B receiving the finite provider auth-source/lifetime lane. Use the existing
+migration-intake deduplication, ownership, domain-plan acceptance and append-only
+record contract; do not claim a routed result before actual acceptance.
+The existing #3442 implementation claimant remains where explicitly taken;
+the inspected source does not identify that claimant, and this intake neither
+appoints a replacement nor releases its claim. A new generic claimant ACK is
+not introduced as a condition of documentary review.
+
+Shared Bridge/core, provider/relay, inference-identity, presentation and native
+custodians retain their responsibilities. Resolve genuinely new durable-auth
+policy or vision conflicts with the existing rightful owners before dependent
+implementation; no credential design is selected or authorized here.
+Supervision/wake/lease/readiness and #3443 reconnection remain independent,
+as do #109 credential-disconnect and #566/#4227's existing scope and conditions.
+
+Keep #3442 OPEN while this proposed intake is reviewed. The historical
+whole-OPEN keeper recommendation and warning against partial transfer are
+preserved as source history, not converted into a permanent veto or generic
+ACK condition. Normal review, actual accepted receiving and complete current
+ROOT/source readback precede any separate source-specific tracker judgment.
+This amendment itself makes no issue disposition.
+
+Keep #954 OPEN with every incumbent row, first gate and P3 reservation intact.
+Preserve #3507's positive AND negative native requirements and its literal
+native-outcomes OR complete accepted landed-transfer condition unchanged.
+No whole-#954 completion, all-parent native result, resource transfer,
+credential operation or implementation is required to review this plan.
+
 ## Journal
 
 ### 2026-10-29 - Finite process-owned failed-start contract proposed
@@ -930,3 +1071,22 @@ research. Normal review, actual merge and complete current readback remain
 separate publication gates; no future delivery or disposition is claimed.
 
 Preserved recorded SSH/relay/Host, P0/P1 and finite P2 source/live credit. The historical recreation failure at 15 minutes and success at a changed 40-minute ceiling remain distinct, not an unchanged-bound pass or a new universal timeout.
+
+### 2026-11-17 - Complete finite both-provider auth-lifetime receiving proposal
+
+Proposed direct #3442 Plan, paired local Validation, actual global Validation
+and continuing Coordination in this existing ROOT through migration-intake.
+The complete original and all four unchanged refinements retain BOTH providers,
+explicit durable/one-launch/relayed/unknown modes, independent inference/service
+identity, policy/vision reconciliation, guidance and presentation, narrow
+credential custody, real long-duration disconnected authenticated work and
+negative controls. The original illustrative bootstrap method grants no
+secret-bottling, image-baking, host-store copy or broader credential authority.
+
+All new technical rows remain unchecked. Existing P0/P2 order, every incumbent
+row/check state, #954's whole-programme/P3 conditions, #3507's native-OR-accepted-
+transfer gate, other programmes and the existing implementation claim remain.
+This proposal selects no credential design and performs no implementation,
+test, native/auth operation, source disposition or resource transfer.
+Actual reviewed domain acceptance, intake recording and complete current
+readback remain separate from any later tracker judgment.

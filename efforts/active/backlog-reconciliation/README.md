@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [auth-lifetime and twelve-contract checkpoint](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
+  proposes complete #3442 receiving through the existing venue-parity intake
+  and records finite source discriminators without new closure credit.
   The [cleanup and unchanged-source discriminator](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
   credits #3179's finite checkpoint/guard changes while retaining its whole
   incident and stops #1742/#3115 at unchanged decisive sources.
