@@ -5760,6 +5760,13 @@ Acquisition permits the selected public index itself, but still refuses
 substituting another selected feed with a public index, including redirects.
 Unreadable or malformed UV configuration is not an implicit public default,
 including when revalidating a completed application for reuse.
+Reuse retains the full current configuration through the same native compiler
+owner before accepting a prior profile. It uses the selected UV executable,
+the caller's configuration-discovery directory and the original deadline.
+One retained configuration serves the portfolio: two bounded settings probes
+and existing local credential inspection, with no resolution, download or build.
+Invalid index field types and supplemental environment or project indexes
+therefore refuse reuse as they do fresh preparation.
 
 An application may declare a first-party SDK association in its existing
 `pyproject.toml`, separately from its ordinary dependency/extra declaration:

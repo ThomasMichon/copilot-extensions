@@ -110,6 +110,60 @@ def test_actual_native_settings_keep_public_admission_explicit_and_seasoned(
             assert len(captured.policy_id) == len("sha256:") + 64
 
 
+@pytest.mark.parametrize("index,duplicate", [
+    (None, False), ("https://pypi.org/simple", False),
+    ("https://packages.example/simple", False), ("https://packages.example/simple", True),
+])
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
+def test_reuse_configuration_keeps_valid_public_and_internal_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index: str | None, duplicate: bool,
+) -> None:
+    import governed_feed_trust
+
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key.upper() in {
+            "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
+            "PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432",
+        }
+    }
+    config = tmp_path / "uv.toml"
+    config.write_text("" if index is None else (
+        '[[index]]\nname="selected"\ndefault=true\nauthenticate="never"\nurl="' + index + '"\n'
+    ))
+    environment.update(
+        HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+        UV_CONFIG_FILE=str(config), UV_CACHE_DIR=str(tmp_path / "cache"),
+        UV_CREDENTIALS_DIR=str(tmp_path / "credentials"),
+    )
+    if duplicate:
+        environment["UV_DEFAULT_INDEX"] = index or ""
+    monkeypatch.setattr(os, "environ", environment)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        governed_feed_trust, "_opaque_index_identity",
+        lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+    selected = cast(ProjectSource, SimpleNamespace(identity=SimpleNamespace(document=lambda: {})))
+    deadline = time.monotonic() + 30
+    with profiles._reuse_configuration("uv", deadline=deadline) as (transaction, projections):
+        def capture() -> tuple[dict[str, Any], native.NativeFeedInputs]:
+            return profiles._profile_feed(
+                selected, transaction, projections, uv="uv", download_origins=(),
+                wheels=None, deadline=deadline,
+            )
+        if duplicate:
+            # Named Never and anonymous Auto credentials are not one feed identity.
+            with pytest.raises(profiles.ProfileError, match="indexes differ"):
+                capture()
+        else:
+            _, feed = capture()
+            assert {item.index_url for item in feed.feeds} == {index or "https://pypi.org/simple"}
+        retained = Path(transaction.environment["UV_CONFIG_FILE"])
+        assert retained.is_file()
+    assert not retained.exists()
+
+
 @pytest.mark.parametrize("selected,accepted", [
     ("https://pypi.org/simple", True),
     ("https://packages.example/simple", False),

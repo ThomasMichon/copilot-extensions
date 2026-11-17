@@ -1402,9 +1402,11 @@ def test_local_prepared_wheel_reuse_retains_exact_inputs_without_another_build(r
 
 
 @pytest.mark.parametrize("reusable_install_source", [True], indirect=True)
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
 @pytest.mark.parametrize("fault", [
     None, "completion", "wheel", "application", "extras", "target", "policy",
     "toolchain", "selected-source", "malformed-config", "unreadable-config", "malformed-config-env",
+    "default-string", "url-integer", "supplemental-env", "supplemental-config", "supplemental-project",
 ])
 def test_complete_application_reuse_revalidates_outputs_without_constructing(
     reusable_install_source: tuple[Path, Path, dict[str, Any], dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: None | str,
@@ -1425,24 +1427,29 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     deadline = time.monotonic() + 60
     target: dict[str, Any] = {"environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
     monkeypatch.setattr(native, "_query_marker_environment", lambda *args, **kwargs: target["environment"])
-    real_policy = native._profile_policy
-    config = tmp_path / "current-uv.toml"
-    policy = {"policyId": "fixture-policy"}
-    if fault in {"malformed-config", "unreadable-config", "malformed-config-env"}:
-        import governed_feed_trust
+    import governed_feed_trust
 
-        config.write_text("")
-        monkeypatch.setenv("UV_CONFIG_FILE", str(config))
-        monkeypatch.delenv("UV_DEFAULT_INDEX", raising=False)
-        monkeypatch.delenv("UV_INDEX_URL", raising=False)
-        if fault == "malformed-config-env":
-            monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
-        monkeypatch.setattr(
-            governed_feed_trust, "_opaque_index_identity",
-            lambda value: hashlib.sha256(value.encode()).hexdigest(),
-        )
-        _, policy = real_policy(selected, dict(os.environ), ())
-    monkeypatch.setattr(native, "_profile_policy", lambda *args: (("fixture", None), policy))
+    for key in tuple(os.environ):
+        if key.startswith(("UV_", "PIP_")) or key.upper() in {
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        }:
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("UV_CREDENTIALS_DIR", str(tmp_path / "credentials"))
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "current-uv.toml"
+    config.write_text("")
+    monkeypatch.setenv("UV_CONFIG_FILE", str(config))
+    monkeypatch.setattr(
+        governed_feed_trust, "_opaque_index_identity",
+        lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+    trusted, policy = native._profile_policy(selected, dict(os.environ), ())
+    if fault == "policy":
+        monkeypatch.setattr(native, "_profile_policy", lambda *args: (trusted, policy))
     with native.retain_wheel_inputs(
         archives, expected, max_wheels=256, max_archive_bytes=128 << 20,
         max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
@@ -1500,27 +1507,56 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     monkeypatch.setattr(native, "prepare_registry_lock", lambda *a, **k: pytest.fail(
         "complete reuse must not resolve or prepare another native profile",
     ))
+    uv = _required_executable("uv")
+    run = subprocess.run
+    settings_probes: list[list[str]] = []
+    def settings_only(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if argv[0] == uv:
+            if argv[1:3] != ["auth", "token"]:
+                assert "--show-settings" in argv, "reuse must not execute a solver or download"
+                settings_probes.append(argv)
+        return run(argv, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "run", settings_only)
     options: dict[str, Any] = dict(
         extras={"demo": ["bootstrap"]} if fault == "extras" else {}, deadline=deadline,
-        source_record_sha256=digest, toolchain_record=toolchain_record,
+        source_record_sha256=digest, toolchain_record=toolchain_record, uv=uv,
     )
-    if fault in {"malformed-config", "unreadable-config", "malformed-config-env"}:
-        monkeypatch.setattr(native, "_profile_policy", real_policy)
+    configuration_faults = {
+        "malformed-config", "unreadable-config", "malformed-config-env", "default-string",
+        "url-integer", "supplemental-env", "supplemental-config", "supplemental-project",
+    }
+    if fault in configuration_faults:
         assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
+        if fault == "malformed-config-env":
+            monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
         if fault in {"malformed-config", "malformed-config-env"}:
             config.write_text("[index")
-        else:
-            read_text = Path.read_text
-            def unavailable(path: Path, *args: Any, **kwargs: Any) -> str:
+        elif fault == "unreadable-config":
+            open_file = Path.open
+            def unavailable(path: Path, *args: Any, **kwargs: Any) -> Any:
                 if path == config:
                     raise PermissionError("fixture configuration is unreadable")
-                return read_text(path, *args, **kwargs)
-            monkeypatch.setattr(Path, "read_text", unavailable)
+                return open_file(path, *args, **kwargs)
+            monkeypatch.setattr(Path, "open", unavailable)
+        elif fault == "default-string":
+            config.write_text('[[index]]\ndefault="true"\nurl="https://pypi.org/simple"\n')
+        elif fault == "url-integer":
+            config.write_text('[[index]]\nurl=42\n')
+        elif fault == "supplemental-env":
+            monkeypatch.setenv("UV_INDEX", "https://packages.example/simple")
+        elif fault == "supplemental-config":
+            config.write_text('[[index]]\nurl="https://packages.example/simple"\nauthenticate="never"\n')
+        else:
+            monkeypatch.delenv("UV_CONFIG_FILE")
+            (tmp_path / "uv.toml").write_text(
+                '[[index]]\nurl="https://packages.example/simple"\nauthenticate="never"\n',
+            )
     if fault:
         with pytest.raises(native.ProfileError if fault == "selected-source" else ProfileUnavailable):
             native.reuse_applications(output, completed, ["demo"], **options)
     else:
         assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
+        assert len(settings_probes) == 2
         assert json.loads((completed / "applications.json").read_text()) == completion
         assert native.source_inputs.select_project(snapshot, "demo").identity == selected.identity
     assert not (output / "wheels").exists()
@@ -3149,6 +3185,8 @@ def test_complete_reuse_cli_distinguishes_cache_misses_from_selected_input_failu
     else:
         assert captured.out == ""
     assert len(calls) == int(phase != "target")
+    if calls:
+        assert calls[0][3]["uv"] == "unused-uv"
     assert not (tmp_path / "unused").exists()
 
 
