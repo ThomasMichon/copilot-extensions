@@ -337,6 +337,18 @@ It is Linux/WSL-only and has no default entry.
 
 Extensions are discovered from Python entry points in the `agent_vault.extensions` group and from `AGENT_VAULT_EXTENSIONS` (`module` or `module:callable`, comma-separated). Loading is idempotent and fail-open.
 
+A separately packaged provider can be another explicit root in an admitted
+[complete native wheel profile](../../../docs/install-contract.md#native-closed-wheel-inputs).
+The [contained construction case](../tests/native/test_runtime_extension_package.py)
+builds and reuses an immutable candidate, then discovers its installed entry point
+without activating a service, invoking the provider or publishing commands.
+An independent negative-control child deliberately invokes the synthetic provider
+through the registry to verify that its nonzero exit cannot be swallowed.
+This qualifies construction and discovery, not feed/release approval, Source
+association, persistent adopter selection across updates, or live adoption.
+Those remain the existing installation and lifecycle owners' responsibilities;
+do not modify a completed slot or add an ambient import-path override.
+
 Hook categories implemented in `src/agent_vault/extensions.py`:
 
 | Hook | Register method | Consulted |
