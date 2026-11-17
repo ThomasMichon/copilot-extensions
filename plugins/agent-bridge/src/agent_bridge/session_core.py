@@ -265,6 +265,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         from .privileged_plugins import CONTEXT_KEY
         from .acquisition_worktree_writer import DELIVERY_KEY
         from .creation_worktree_writer import JOURNAL_KEY as CREATION_WRITER_KEY
+        from .retained_metadata_lineage import EPOCH_KEY
 
         return any(
             isinstance(value, dict) and bool(value)
@@ -272,7 +273,9 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         ) or (
             isinstance(target.venue, dict)
             and any(
-                key not in {_REQUEST_OVERRIDES_KEY, CONTEXT_KEY, DELIVERY_KEY, CREATION_WRITER_KEY}
+                key not in {
+                    _REQUEST_OVERRIDES_KEY, CONTEXT_KEY, DELIVERY_KEY, CREATION_WRITER_KEY, EPOCH_KEY,
+                }
                 for key in target.venue
             )
         )
@@ -298,8 +301,9 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         )
         from .acquisition_worktree_writer import DELIVERY_KEY
         from .creation_worktree_writer import JOURNAL_KEY as CREATION_WRITER_KEY
+        from .retained_metadata_lineage import EPOCH_KEY
 
-        writer_keys = {DELIVERY_KEY, CREATION_WRITER_KEY}
+        writer_keys = {DELIVERY_KEY, CREATION_WRITER_KEY, EPOCH_KEY}
 
         overrides = persisted_venue.get(_REQUEST_OVERRIDES_KEY)
         if not isinstance(overrides, dict):

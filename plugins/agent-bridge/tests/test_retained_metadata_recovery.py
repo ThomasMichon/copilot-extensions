@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 import sqlite3
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -236,6 +237,142 @@ async def test_adopted_record_uses_existing_retained_native_recovery_without_rep
     with pytest.raises(AcquisitionRefused, match="epoch remains excluded"):
         await metadata.prepare(manager, old.session_id, request, fixture.requirement, lambda: True)
     assert not manager.db.list_sessions()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+async def test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, mode: Literal["acp", "cli"],  # noqa: F811
+) -> None:
+    from fastapi import HTTPException, Request
+    from agent_bridge import worktree_native_resume
+    from agent_bridge.routes import worktrees
+    from agent_bridge.routes.worktree_entry import WorktreeEntry
+
+    fixture, manager = writer_creation, writer_creation.rig.manager
+    old, request = await missing_record(fixture, monkeypatch)
+    adopted, _boundary = await metadata.prepare(
+        manager, old.session_id, request, fixture.requirement, lambda: True,
+    )
+    target = adopted.target
+    entry = WorktreeEntry(
+        id=target.worktree_id, path=target.cwd, agent_name="fixture", machine="fixture",
+        branch="worktree/fixture", status="active",
+    )
+    monkeypatch.setattr(worktrees, "_find_cached_worktree_entry", AsyncMock(
+        return_value=("fixture", entry),
+    ))
+
+    async def owner(_owner: Any, _config: Any, _resolver: Any, args: Any) -> str:
+        if args[0] == "head-session":
+            return json.dumps({
+                "tracked": True, "worktree_id": target.worktree_id,
+                "head_session": request.native_session_id, "head_revision": request.head_revision,
+                "state": "active", "pending_handoffs": [],
+            })
+        if args[0] == "record":
+            return json.dumps({"ok": True, "worktree": {
+                **fixture.rig.row, "last_session_id": request.native_session_id,
+                "execution_leg_opaque": False, "session_backend_opaque": False, "bound_agent": None,
+            }})
+        if args[0] == "list-sessions":
+            return json.dumps({"sessions": []})
+        raise AssertionError("generic resume reached native preparation before its metadata hold")
+
+    monkeypatch.setattr(worktrees, "_run_for_agent", owner)
+    launch = AsyncMock(side_effect=AssertionError("generic CLI launch bypassed metadata custody"))
+    monkeypatch.setattr(worktree_native_resume, "run_owner_operation", launch)
+    resolver = SimpleNamespace(agents={"fixture": SimpleNamespace(project=target.project, host=None)})
+    http = Request({"type": "http", "app": SimpleNamespace(state=SimpleNamespace(
+        db=manager.db, session_manager=manager, resolver=resolver,
+    ))})
+    with pytest.raises(HTTPException) as held:
+        await worktree_native_resume.resume_native_worktree(target.worktree_id, http, mode)
+    assert held.value.status_code == 409 and "owner-qualified" in str(held.value.detail)
+    assert not manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert not manager.db.get_cli_mode_reservation(target.worktree_id)
+    launch.assert_not_awaited()
+    manager._connect_via_session_host.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from agent_bridge import retained_session_recovery as recovery
+    from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
+
+    fixture, manager = writer_creation, writer_creation.rig.manager
+    connect = manager._connect_via_session_host
+    old, request = await missing_record(fixture, monkeypatch)
+    adopted, _boundary = await metadata.prepare(
+        manager, old.session_id, request, fixture.requirement, lambda: True,
+    )
+    monkeypatch.setattr(manager, "_connect_via_session_host", connect)
+    await recovery.resume(manager, adopted.session_id, request, fixture.requirement, lambda: True)
+    await manager.stop_session(adopted.session_id, force=True)
+    adopted.agent_name = "fixture"
+    resolve = AsyncMock(side_effect=AssertionError("internal epoch was classified as a provider"))
+    manager._resolver = SimpleNamespace(resolve_async=resolve)
+    resumed = await manager.resume_session(adopted.session_id, drain=False)
+    assert resumed is adopted
+    resolve.assert_not_awaited()
+    await manager.stop_session(adopted.session_id, force=True)
+    adopted.target = replace(adopted.target, venue={
+        **adopted.target.venue, "provider": "fixture",
+        REQUEST_OVERRIDES_KEY: {"env": {}, "copilot_args": []},
+    })
+    manager.db.update_session_target(adopted.session_id, adopted.target.to_json())
+    resolve.side_effect = None
+    resolve.return_value = replace(adopted.target, venue={"provider": "refreshed"})
+    assert await manager.resume_session(adopted.session_id, drain=False) is adopted
+    resolve.assert_awaited_once_with("fixture")
+    assert adopted.target.venue[metadata.EPOCH_KEY] == adopted.session_id
+    assert adopted.target.venue[creation.JOURNAL_KEY] == request.journal_key
+    assert adopted.target.venue["provider"] == "refreshed"
+    assert json.loads(manager.db.get_session(adopted.session_id)["target_json"])["venue"] == adopted.target.venue
+
+
+@pytest.mark.asyncio
+async def test_completed_metadata_recovery_admits_its_journaled_handoff_successor(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from agent_bridge import retained_session_recovery as recovery, worktree_lineage
+
+    fixture, manager = writer_creation, writer_creation.rig.manager
+    connect = manager._connect_via_session_host
+    old, request = await missing_record(fixture, monkeypatch)
+    adopted, boundary = await metadata.prepare(
+        manager, old.session_id, request, fixture.requirement, lambda: True,
+    )
+    monkeypatch.setattr(manager, "_connect_via_session_host", connect)
+    await recovery.resume(manager, adopted.session_id, request, fixture.requirement, lambda: True)
+    fixture.rig.client.acp_session_id = "native-successor"
+
+    def link(_worktree: Any, _predecessor: Any, successor: Any, **_kwargs: Any) -> None:
+        fixture.rig.head["id"] = successor
+
+    monkeypatch.setattr(worktree_lineage, "link_succession", link)
+    for name in ("note_handoff", "session_role", "history_digest"):
+        monkeypatch.setattr(worktree_lineage, name, lambda *_a, **_kw: None)
+    seed = AsyncMock(return_value=0)
+    monkeypatch.setattr(manager, "submit_prompt", seed)
+    successor = await manager.handoff_session(
+        adopted.session_id, reason="fixture", seed_text="Continue the retained work",
+    )
+    assert successor.session_id != adopted.session_id
+    assert successor.acp_session_id == "native-successor"
+    assert successor.target.venue[creation.JOURNAL_KEY] == request.journal_key
+    seed.assert_awaited_once()
+    row = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    assert json.loads(row[metadata.COLUMN]) == boundary
+    handoff = json.loads(row["creation_handoffs_json"])[adopted.session_id]
+    assert handoff["successor_id"] == successor.session_id and handoff["stage"] == "completed"
+    with pytest.raises(sqlite3.IntegrityError, match="metadata"):
+        manager.db.create_session(
+            "unassociated-import", "unassociated", None, adopted.target.cwd,
+            "local", "stopped", 1, target_json=adopted.target.to_json(),
+        )
 
 
 @pytest.mark.asyncio

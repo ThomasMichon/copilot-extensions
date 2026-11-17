@@ -75,21 +75,24 @@ RETAINED_RECOVERY_HELD = LEGACY_RETAINED_RECOVERY_HELD.replace(
     f"WHEN ({_valid_recovery_request()}) IS NOT 1 THEN 1 "
     "ELSE COALESCE(json_extract(recovery.value,'$.state'),'unknown')",
 )
-METADATA_RECOVERY_HELD = """
+_METADATA_RECOVERY_COMPLETE = """
 EXISTS (
-    SELECT 1 FROM workspace_embodiments AS embodiment
-    WHERE embodiment.creation_adoption_json IS NOT NULL AND embodiment.state!='terminal'
-    AND json_extract(embodiment.creation_adoption_json,'$.session_id')=sessions.id
-    AND NOT EXISTS (
         SELECT 1 FROM json_each(embodiment.creation_recoveries_json) AS recovery
         WHERE recovery.type='object' AND (%s)
         AND json_extract(recovery.value,'$.state')='complete'
         AND recovery.key NOT IN (
             SELECT value FROM json_each(embodiment.creation_adoption_json,'$.prior_operations')
         )
-    )
 )
 """ % _valid_recovery_request()
+METADATA_RECOVERY_HELD = f"""
+EXISTS (
+    SELECT 1 FROM workspace_embodiments AS embodiment
+    WHERE embodiment.creation_adoption_json IS NOT NULL AND embodiment.state!='terminal'
+    AND json_extract(embodiment.creation_adoption_json,'$.session_id')=sessions.id
+    AND NOT ({_METADATA_RECOVERY_COMPLETE})
+)
+"""
 TRIGGERS = {
     "metadata_adoption_retained": (
         "BEFORE UPDATE OF creation_adoption_json ON workspace_embodiments "
@@ -98,12 +101,20 @@ TRIGGERS = {
     ),
     "metadata_session_namespace_retained": (
         "BEFORE INSERT ON sessions WHEN EXISTS ("
-        "SELECT 1 FROM workspace_embodiments WHERE creation_adoption_json IS NOT NULL "
-        "AND (session_id=NEW.id "
-        "OR json_extract(creation_adoption_json,'$.session_id')=NEW.id "
-        "OR (state!='terminal' AND json_valid(NEW.target_json) "
-        "AND json_extract(worktree_json,'$.id')=json_extract(NEW.target_json,'$.worktree_id') "
-        "AND json_extract(worktree_json,'$.repo')=json_extract(NEW.target_json,'$.project'))))"
+        "SELECT 1 FROM workspace_embodiments AS embodiment "
+        "WHERE embodiment.creation_adoption_json IS NOT NULL "
+        "AND (embodiment.session_id=NEW.id "
+        "OR json_extract(embodiment.creation_adoption_json,'$.session_id')=NEW.id "
+        "OR (embodiment.state!='terminal' AND json_valid(NEW.target_json) "
+        "AND json_extract(embodiment.worktree_json,'$.id')=json_extract(NEW.target_json,'$.worktree_id') "
+        "AND json_extract(embodiment.worktree_json,'$.repo')=json_extract(NEW.target_json,'$.project') "
+        f"AND NOT ({_METADATA_RECOVERY_COMPLETE} AND EXISTS ("
+        "SELECT 1 FROM json_each(embodiment.creation_handoffs_json) AS handoff "
+        "WHERE handoff.type='object' AND json_extract(handoff.value,'$.successor_id')=NEW.id "
+        "AND json_extract(handoff.value,'$.stage')='spawning' "
+        "AND json_extract(NEW.target_json,'$.venue._agent_bridge_creation_writer')=embodiment.key_digest "
+        "AND json_extract(NEW.target_json,'$.venue._agent_bridge_metadata_epoch')"
+        "=json_extract(embodiment.creation_adoption_json,'$.session_id'))))))"
     ),
     "metadata_session_control_retained": (
         "BEFORE DELETE ON sessions WHEN " + METADATA_RECOVERY_HELD.replace("sessions.", "OLD.")

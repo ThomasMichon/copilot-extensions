@@ -51,4 +51,10 @@ from test_retained_metadata_recovery import (
     as test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed,
     test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover
     as test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover,
+    test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery
+    as test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery,
+    test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh
+    as test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh,
+    test_completed_metadata_recovery_admits_its_journaled_handoff_successor
+    as test_completed_metadata_recovery_admits_its_journaled_handoff_successor,
 )

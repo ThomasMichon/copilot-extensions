@@ -167,7 +167,11 @@ async def _resume(
         session for session in manager.list_sessions()
         if session.target.worktree_id == worktree_id
     ]
+    from .retained_session_recovery import require_resume
+
     for session in owned:
+        if session.acp_session_id == native:
+            require_resume(manager, session)
         if session.status not in {SessionStatus.STOPPED, SessionStatus.ENDED, SessionStatus.FAILED}:
             already_live = await getattr(wt, "_resolve_already_live")(manager, worktree_id, session)
             if (

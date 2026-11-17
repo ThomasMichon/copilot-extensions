@@ -358,6 +358,12 @@ with a new operation ID and current head evidence. Generic resume/import cannot
 drop this custody; permission requests remain held for explicit resolution.
 After a new qualified native recovery completes, ordinary lifecycle closeout
 can proceed. Historical completed operations alone do not release retention.
+Ordinary worktree resume checks that recovery hold before either ACP or CLI
+launch can claim a gate. After qualification, normal handoff admits its exact
+journaled successor without allowing an unrelated import or reusing an excluded
+control ID. The epoch marker remains internal ownership metadata during
+provider classification and refresh; genuine provider targets still require
+their original override provenance.
 This preparation does not prove a new turn, native acceptance, original-task
 attachment or installed-provider qualification.
 

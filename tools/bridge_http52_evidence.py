@@ -425,6 +425,9 @@ PROBES = {
     "test_missing_metadata_adopts_distinct_control_epoch_once": 1,
     "test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed": 1,
     "test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover": 1,
+    "test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recovery": 2,
+    "test_adopted_record_keeps_epoch_through_later_stop_resume_and_provider_refresh": 1,
+    "test_completed_metadata_recovery_admits_its_journaled_handoff_successor": 1,
 }
 TEST = "plugins/agent-bridge/tests/test_http52_capture_probes.py"
 CAPABILITY_VERSIONS = {
