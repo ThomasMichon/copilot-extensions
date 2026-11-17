@@ -134,6 +134,10 @@ is not treated as corruption. Conflict classification uses the constructor's
 Source/profile metadata checks without reading old construction artifacts or
 requiring the installed source/profile to match the incoming selection.
 Incomplete or inconsistent construction metadata is a repair gap, not a conflict.
+Matching metadata also requires every incoming copied path to remain present
+with its file/directory kind before reusing a snapshot. Missing setup, project,
+lock, Source-sidecar or payload inputs require a distinct repair; the existing
+tree walks supply this presence check without hashing or rewriting old inputs.
 Missing metadata alone does not redirect an
 application installation or its configuration to the legacy installer/root.
 

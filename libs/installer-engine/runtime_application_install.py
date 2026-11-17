@@ -260,7 +260,8 @@ def _construction_inputs(
 ) -> SimpleNamespace:
     association = _construction_metadata(record, runtime, engine, deadline)
     inputs, source = association.inputs, association.source
-    wheels, receipt = association.wheels, association.receipt
+    wheels = replace(association.wheels, generation=slot.name)
+    receipt = association.receipt
     source_bytes = _read(slot / "runtime-source.json")
     declaration = _read(slot / "application.json", limit=4 << 20)
     if (

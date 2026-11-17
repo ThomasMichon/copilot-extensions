@@ -236,6 +236,7 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
     "construction-field", "source-field", "receipt-field", "package-list", "payload-hash",
     "incoming-construction-field", "incoming-source-field", "incoming-receipt-field",
     "incoming-package-list", "incoming-payload-hash", "source-conflict", "profile-conflict",
+    "setup-file", "project-file", "lock-file", "source-file", "payload-file",
 ])
 def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
@@ -258,6 +259,11 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     (app / "application.json").write_text(json.dumps(declaration), encoding="utf-8")
     for name in ("pyproject.toml", "uv.lock"):
         (app / name).write_text("# fixture\n", encoding="utf-8")
+    (app / "runtime-source.json").write_text(json.dumps(
+        declaration["construction"]["identity"]["runtime_source"],
+    ), encoding="utf-8")
+    (app / "resources").mkdir()
+    (app / "resources" / "payload.bin").write_bytes(b"fixture payload")
     (app / "bin" / "setup.ps1").write_text(
         "$ErrorActionPreference = 'Stop'\n"
         "$slot = Split-Path -Parent $PSScriptRoot\n"
@@ -306,6 +312,13 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         metadata.write_bytes(b"x" * 65537)
     elif damage == "conflict":
         metadata.write_text(json.dumps({**declaration, "module": "other_owner"}), encoding="utf-8")
+    elif damage in {"setup-file", "project-file", "lock-file", "source-file", "payload-file"}:
+        missing = {
+            "setup-file": "bin/setup.ps1" if os.name == "nt" else "bin/setup.sh",
+            "project-file": "pyproject.toml", "lock-file": "uv.lock",
+            "source-file": "runtime-source.json", "payload-file": "resources/payload.bin",
+        }[damage]
+        (old / missing).unlink()
     elif damage in {"source-conflict", "profile-conflict"}:
         metadata.write_text(json.dumps(_application_declaration(
             "f" * 40 if damage == "source-conflict" else commit, tree,
@@ -555,11 +568,12 @@ def test_packaged_footprint_producer_composes_without_checkout_tool_imports(tmp_
         "assert Path(owner.__file__).is_relative_to(Path(sys.argv[1]).parent.parent); "
         "application=json.loads(sys.argv[5]); "
         "facts=owner._construction_metadata(application,runtime,engine,time.monotonic()+30); "
-        "slot=output/'versions'/facts.inputs['runtime_version']; slot.mkdir(parents=True); "
+        "slot=output/'versions'/(facts.inputs['runtime_version']+'.repair.'+'0'*32); "
+        "slot.mkdir(parents=True); "
         "(slot/'application.json').write_text(json.dumps(application)); "
         "(slot/'runtime-source.json').write_text(json.dumps(facts.source)); "
-        "assert owner._construction_inputs(slot,application,runtime,engine,"
-        "time.monotonic()+30).receipt==facts.receipt; "
+        "associated=owner._construction_inputs(slot,application,runtime,engine,time.monotonic()+30); "
+        "assert associated.receipt==facts.receipt and associated.wheels.generation==slot.name; "
         "print(json.dumps({'composed':True}))"
     )
     result = subprocess.run(

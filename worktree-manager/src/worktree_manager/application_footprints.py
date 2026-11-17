@@ -104,6 +104,13 @@ def _validate_declaration(app: Any) -> None:
         raise ValueError("invalid application footprint declaration")
 
 
+def _verify_setup(directory: Path) -> None:
+    for required in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
+        path = _ordinary(directory / required)
+        if not path.is_file():
+            raise ValueError(f"application setup input is unavailable: {path}")
+
+
 def plan(
     footprint: Path, apps_root: Path, *, selected: tuple[str, ...] = (),
 ) -> tuple[Application, ...]:
@@ -156,10 +163,7 @@ def plan(
             if command in commands:
                 raise ValueError(f"application command has multiple owners: {command}")
             commands[command] = name
-        for required in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
-            path = _ordinary(source / required)
-            if not path.is_file():
-                raise ValueError(f"application setup input is unavailable: {path}")
+        _verify_setup(source)
         applications[name] = Application(
             name, version, source, root, app["root_environment"],
             declaration, tuple(row["dependencies"]),
@@ -180,23 +184,27 @@ def plan(
     return tuple(applications[name] for name in ordered if name in wanted)
 
 
-def _verify_copy(path: Path, application: Application) -> None:
+def _verify_copy(path: Path, application: Application) -> set[tuple[Path, bool]]:
     if _read(path / "application.json") != application.declaration:
         raise ValueError(f"application declaration changed before setup: {application.name}")
-    _verify_tree(path, application)
+    _verify_setup(path)
+    return _verify_tree(path, application)
 
 
-def _verify_tree(path: Path, application: Application) -> None:
+def _verify_tree(path: Path, application: Application) -> set[tuple[Path, bool]]:
     def unreadable(error: OSError) -> None:
         raise error
+    inputs: set[tuple[Path, bool]] = set()
     for directory, children, files in os.walk(path, followlinks=False, onerror=unreadable):
         for name in (*children, *files):
             member = _ordinary(Path(directory) / name)
             mode = member.lstat().st_mode
             if not (stat.S_ISDIR(mode) if name in children else stat.S_ISREG(mode)):
                 raise ValueError(f"application input is not an ordinary file or directory: {member}")
+            inputs.add((member.relative_to(path), name in children))
         if Path(directory) == path and path == application.slot:
             children[:] = [name for name in children if name not in {".venv", "state"}]
+    return inputs
 
 
 def select_generation(
@@ -208,7 +216,7 @@ def select_generation(
     from .self_install import _runtime_installer
     from .runtime_application_inputs import provider_root
 
-    _verify_copy(application.source, application)
+    incoming_inputs = _verify_copy(application.source, application)
     installer = _runtime_installer()
     owner = importlib.import_module("runtime_application_install")._load(
         provider_root() / "libs" / "installer-engine" / "runtime_application_install.py",
@@ -233,13 +241,16 @@ def select_generation(
     _ordinary(application.slot)
     if not os.path.lexists(application.slot):
         return application
-    _verify_tree(application.slot, application)
+    installed_inputs = _verify_tree(application.slot, application)
     try:
         installed = _read(application.slot / "application.json")
     except (OSError, ValueError):
         installed = None
     if installed == application.declaration:
         try:
+            if not incoming_inputs <= installed_inputs:
+                raise ValueError("selected application snapshot is incomplete")
+            _verify_setup(application.slot)
             if qualify is not None:
                 qualify(application.slot)
         except (OSError, ValueError, TypeError, SyntaxError, ImportError, RuntimeError, AttributeError):
