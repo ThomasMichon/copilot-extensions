@@ -18,9 +18,10 @@ from unittest.mock import patch
 import pytest
 
 from . import test_installer_engine_adoption as installer
+from .installer_test_support import installer_functional_timeout
 
 PS5 = shutil.which("powershell.exe") if os.name == "nt" else None
-pytestmark = [pytest.mark.timeout(60), pytest.mark.installer_only]
+pytestmark = [pytest.mark.timeout(installer_functional_timeout(60)), pytest.mark.installer_only]
 
 
 @pytest.fixture(params=[
@@ -55,6 +56,28 @@ def _call(script: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
         "ps1", script, tmp_path, _environment(tmp_path),
     )
     return result
+
+
+def test_item_timeout_outlives_the_native_subprocess_guard(
+    tmp_path: Path, native_shell: str, request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native_timeouts: list[int | float] = []
+
+    def invoke(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, (int, float))
+        native_timeouts.append(timeout)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(installer, "run_caller_owned", invoke)
+    assert _call("exit 0\n", tmp_path).returncode == 0
+    assert len(native_timeouts) == 1
+    marker = request.node.get_closest_marker("timeout")
+    assert marker is not None
+    item_timeout = marker.args[0]
+    assert isinstance(item_timeout, (int, float))
+    assert item_timeout > native_timeouts[0]
 
 
 def _admission_entry(tmp_path: Path, continuation: str, *, lose_guard: bool = False) -> Path:
