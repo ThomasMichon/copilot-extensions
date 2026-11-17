@@ -153,3 +153,9 @@ turn or closeout. The validation checkboxes intentionally retain their broader
 runtime and mixed-owner acceptance gates. Actual installation, provider
 cutover, native continuation, task attachment and production activation remain
 unqualified and separately owned.
+
+The final frozen implementation also passes all 638 current HTTP-52 controlled
+probes and their independent execution. Canonical source/preimage validation
+admits the generated outputs without refreshing historical generations. The
+contract guard accepts both contracts and all 1,141 registered fixtures. This
+adds controlled source qualification, not native or installed acceptance.
