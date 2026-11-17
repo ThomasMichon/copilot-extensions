@@ -1,0 +1,9 @@
+{
+  "comment": "Confirm exact fixture-session absence after a natural headed teardown race, preserving live and unknown-owner refusals.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

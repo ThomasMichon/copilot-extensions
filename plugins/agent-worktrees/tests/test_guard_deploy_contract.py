@@ -116,6 +116,60 @@ def test_all_installers_deploy_every_py_hook() -> None:
         "installer (they would silently no-op):\n  " + "\n  ".join(missing))
 
 
+@pytest.mark.portfolio_tier("T2")
+def test_deployed_anchor_registry_and_bytecode_are_removed_by_native_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.util
+    import os
+    import py_compile
+    import shutil
+    import sys
+
+    from agent_worktrees import installer
+
+    root = tmp_path / "runtime"
+    bindir = root / "bin"
+    monkeypatch.setattr(installer, "install_dir", lambda: root)
+    monkeypatch.setattr(installer, "bin_dir", lambda: bindir)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    assert installer.deploy_wrappers(_PLUGIN.parents[1])
+    helper = bindir / "anchor_registry.py"
+    assert helper.read_bytes() == (_SCRIPTS / helper.name).read_bytes()
+    cache = bindir / "__pycache__"
+    bytecode = cache / f"anchor_registry.{sys.implementation.cache_tag}.pyc"
+    py_compile.compile(str(helper), cfile=str(bytecode), doraise=True)
+    foreign = bindir / "unrelated.py"
+    foreign.write_text("retained = True\n", encoding="utf-8")
+    foreign_bytecode = cache / f"unrelated.{sys.implementation.cache_tag}.pyc"
+    py_compile.compile(str(foreign), cfile=str(foreign_bytecode), doraise=True)
+    source = _PLUGIN.parents[1] / "libs" / "installer-engine" / "installer_engine_uninstall.py"
+    spec = importlib.util.spec_from_file_location("guard_deploy_uninstall", source)
+    assert spec is not None and spec.loader is not None
+    remover = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, remover)
+    spec.loader.exec_module(remover)
+    profile = remover.profile_for(_PLUGIN, "agent-worktrees", _SCRIPTS / "uninstall-profile.json")
+    operations: list[tuple[Path, tuple[str, ...]]] = remover._plan(
+        _PLUGIN, root, profile, (remover.Target(root, (), ()),),
+    )
+    selected = {directory / name for directory, names in operations for name in names}
+    owned = {helper, bytecode}
+    assert owned <= selected
+    assert not {foreign, foreign_bytecode} & selected
+    shell = shutil.which("pwsh" if os.name == "nt" else "bash")
+    assert shell is not None
+    for directory, names in operations:
+        removal = tuple(name for name in names if directory / name in owned)
+        if removal:
+            assert directory.is_relative_to(root)
+            remover._native_remove(_PLUGIN, shell, directory, removal)
+    assert not any(path.exists() for path in owned)
+    assert foreign.read_text(encoding="utf-8") == "retained = True\n"
+    assert foreign_bytecode.is_file()
+
+
 def test_wrappers_deploy_before_monitor_activation() -> None:
     ps1 = _INSTALL_PS1.read_text("utf-8")
     sh = _INSTALL_SH.read_text("utf-8")

@@ -69,6 +69,13 @@ child deadline. Use the contained runner with `--allow-explicit-tiers
 These observations do not explain an earlier timeout, waive a failed run or
 replace the complete prepared-membership acceptance portfolio.
 
+The T2 `test_deployed_anchor_registry_and_bytecode_are_removed_by_native_profile`
+case in Worktrees `tests/test_guard_deploy_contract.py` uses the existing
+`--allow-explicit-tiers` runner selection. It deploys the actual helper into
+a temporary runtime, compiles adjacent bytecode and exercises the finite
+uninstall planner and native selective remover, retaining unrelated files.
+It never uninstalls an existing runtime or changes the runner's cache policy.
+
 The opt-in native receiving relocation case
 `tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
 uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit
@@ -2699,10 +2706,18 @@ Backend identity comes from its actual physical interpreter, not a Windows
 venv launcher's PID. Client exit, upstream EOF, exact process settlement and
 lease cleanup remain required, including natural wait-owner exit after its
 actual client settles. Each case retains its 180-second execution limit; the
-aggregate boundary allows both independent Windows cases. The path-gated
+aggregate boundary remains unchanged for the selected Windows cases. The path-gated
 workflow downloads digest-pinned
 clients on disposable Linux and Windows runners and retains separate source
 results. These are not installed-client or productive caller acceptance.
+
+The existing `COPILOT_DRIVER_HEADED_MUX_E2E` opt-in adds the retained headed
+receiver case on its disposable Windows owner. Its exact mux cleanup can
+observe natural exit after a matching identity observation: a failed kill
+requires a subsequent confirmed-absence result, not generic error suppression.
+Focused `tests/test_owner_mux_settlement.py` and the existing owner tests cover
+that race, a still-present session, failed presence probing and identity
+mismatch. They do not start a headed client or replace native qualification.
 
 The separate owner-only `mcp-caller-lifetime` hosted Windows packet selects
 `test_custody_native_lifetime.py::test_native_caller_jobs_and_session_owner_lifetime`.
