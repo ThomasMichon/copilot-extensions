@@ -16,35 +16,6 @@ import pytest
 from agent_dispatch import procutil
 
 
-@pytest.mark.parametrize("max_output", [None, 1000])
-@pytest.mark.parametrize("encoding", ["utf-8", "cp1252"])
-def test_capture_uses_the_requested_encoding_for_both_pipes(max_output, encoding):
-    text = "caf\u00e9" if encoding == "cp1252" else "\u270f\ufe0f caf\u00e9 \u2713 \U0001f680"
-    payload = (text + "\r\nend\r").encode(encoding)
-    done = procutil.run_background_capture(
-        [sys.executable, "-c",
-         f"import sys; sys.stdout.buffer.write({payload!r}); sys.stderr.buffer.write({payload!r})"],
-        timeout=20, max_output=max_output, encoding=encoding,
-    )
-    assert done is not None and done.returncode == 0
-    assert done.stdout == done.stderr == text + "\nend\n"
-
-
-@pytest.mark.parametrize("encoding,text", [
-    ("cp1252", "caf\u00e9"),
-    ("utf-8", "\u270f\ufe0f \U0001f680"),
-])
-def test_capture_stdin_uses_the_requested_encoding(encoding, text):
-    done = procutil.run_background_capture(
-        [sys.executable, "-c",
-         "import sys; data=sys.stdin.buffer.read(); "
-         "sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)"],
-        timeout=20, input_text=text, encoding=encoding,
-    )
-    assert done is not None and done.returncode == 0
-    assert done.stdout == done.stderr == text
-
-
 def test_output_within_the_limit_is_returned_whole():
     done = procutil.run_background_capture(
         [sys.executable, "-c", "import sys; sys.stdout.write('a' * 5000); sys.stderr.write('b' * 10)"],

@@ -5705,7 +5705,7 @@
         "worktree-manager/src/worktree_manager/maintenance_policy.py": "956786f3f5a8006b468deca8e3f1e9c86ca5e87c0e284d6f9995508bbb7a0c56",
         "worktree-manager/src/worktree_manager/bootstrap_policy.py": "883749bc1a13e318506f2063cb912fc38f55837d498b0fa9e9e59529484388f3",
         "tools/promotion_unit_tests/test_daemon_instance_creation.py": "40472a864d01d1aa379cceb83b60e872e6b8db66ef442011cb3fcfc4c2c42156",
-        "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "62eb1c8e321ab56e888dc155d9c4ecf9d175bc83ba633b4fc03ea7e0c6416150",
+        "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "7bf8d14ca18b367a76e559b22145c5067ec9d7e90ce23beed25c33a1d2d31984",
         "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py": "cd20ca0f3b49aff562300673ee6d6ef5352f6fb9630eebd17658ef78049accea",
         "plugins/agent-vault/src/agent_vault/config.py": "1432329b4a7725464b15618064fecc644983ae1e5a2f75559f5b1a6538dc461e",
         "plugins/agent-vault/src/agent_vault/invocation.py": "5264be071d9fd1c70c088aed1a33d5c1c7f3f7a60f3aa185aa6e4fe4ae561afb",

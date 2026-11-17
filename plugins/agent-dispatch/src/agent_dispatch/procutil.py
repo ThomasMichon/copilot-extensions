@@ -56,6 +56,10 @@ class _ProcessTreeOptions(TypedDict, total=False):
     start_new_session: bool
 
 
+class _TextEncodingOptions(TypedDict, total=False):
+    encoding: str
+
+
 class _DispatchDaemonOptions(TypedDict):
     instance: DaemonInstanceSpec
     cwd: Path
@@ -501,13 +505,16 @@ def run_background_capture(
             return None
     try:
         spawn_time = time.monotonic()
+        text_options: _TextEncodingOptions = {}
+        if encoding is not None:
+            text_options["encoding"] = encoding
         proc = subprocess.Popen(  # noqa: S603 -- fixed module argv
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             text=True,
-            **({"encoding": encoding} if encoding is not None else {}),
+            **text_options,
             env=dict(env) if env is not None else None,
             cwd=cwd,
             **_process_tree_kwargs(),
