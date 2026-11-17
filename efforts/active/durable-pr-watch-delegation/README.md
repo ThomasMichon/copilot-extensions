@@ -27,6 +27,14 @@ and production writer/merge cutover; it does not replace the broader Guiding
 Intent or any original, refined or inherited Plan/Validation outcome.
 This effort remains Active under its existing integration and domain owners.
 
+The requested read-only extension is a reviewer-perspective status/current-PR/
+priority-next-action feed backed by PR activity, subscribable through SSE or
+WebSockets. The [reviewer-action feed contract](reviewer-action-feeds.md),
+coordinated by #12947, preserves existing observation/attention owners and
+defines inert round-robin/Dispatch consumers plus observational comparison.
+It adds no consumer activation or production-write authority, and does not
+replace M1 or the full retained parent acceptance.
+
 The [M1 source evidence map](repository-cache-events-m1.md#source-evidence-map)
 separates the standalone synthetic vertical from still-open release,
 installed/running and authorized real-target qualification. Completing that
@@ -301,6 +309,13 @@ discovery pollers. The selection grammar and admission mechanics are design
 details, not additional operator quotations or live deployment authority.
 
 ## Plan
+
+### Reviewer-perspective status and action feeds
+
+- [ ] Review and deliver the [activity-backed action-feed extension](reviewer-action-feeds.md)
+  under #12947, beginning with the actual cache-backed reviewer read, then
+  streaming transport, inert consumer contract and independent comparison.
+  Preserve every original M1/Author/Reviewer/provider and operational gate.
 
 ### Driver-aware filter definitions and owned population demand
 
@@ -1139,6 +1154,10 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Resolve the [reviewer-action feed validation](reviewer-action-feeds.md#validation-plan)
+  under #12947, keeping actual cache/client/stream behavior, inert consumer
+  controls and separately authorized provider/operational proof distinct.
 
 - [x] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
   after reviewed contract #11754. All five finite source-control rows pass

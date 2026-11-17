@@ -3892,8 +3892,9 @@ The [finite-controller target](../visions/installer/README.md#finite-installatio
 separates three stages. The native shell seed establishes tooling and stages
 sources; the prepared managed interpreter runs finite installation management;
 installed applications then use their own runtime/service owners. On Windows,
-PowerShell reaches the existing package-manager uv prerequisite owner, performs
-core Git checkout/copies and invokes the real per-app setup entrypoints.
+PowerShell reaches the existing uv prerequisite owner (a supported package
+manager or Astral's official standalone installer), performs core Git
+checkout/copies and invokes the real per-app setup entrypoints.
 Do not require a Python-backed SDK to acquire that first Python, or require
 an installed/running Manager/application daemon to run the controller.
 The normal Manager entry establishes Manager first and then composes the

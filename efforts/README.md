@@ -32,6 +32,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |
 | [Bridge Queued Steering](active/bridge-queued-steering/README.md) | Draft; notification, exact submission receipt and nonduplicating timed fallback before implementation | Bounded #6394 follow-up; preserves #12487/#11448/#11445 and #10765 owners; no rollout or container-auth takeover |
 | [Compatible Agent Messaging](active/compatible-agent-messaging/README.md) | Draft; compatibility-first ordinary send contract before implementation | #12487; existing Bridge/Driver, receipt and discovery owners retained; no implicit resume or rollout |
 | [Task Relevance Reconciliation](active/task-relevance-reconciliation/README.md) | Active; source retirement and observation fences accepted; owner/cohort closeout, compatibility and adoption remain | #12274; existing queue, wake, session and workspace owners; no runtime activation |

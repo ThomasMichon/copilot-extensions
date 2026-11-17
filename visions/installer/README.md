@@ -285,8 +285,9 @@ Main ancestors retain their own release identity.
 ### finite-installation-controller
 
 Bootstrap has a minimal native seed followed by a finite installation
-controller. On Windows, PowerShell uses the supported package-manager owners
-to establish or update uv, performs core Git acquisition and file staging,
+controller. On Windows, PowerShell uses a supported package manager or
+Astral's official standalone installer to establish or update uv, performs core
+Git acquisition and file staging,
 and invokes the real per-application setup entrypoints. Other platforms use
 their native shell equivalents. The seed can obtain the declared managed
 Python before loading Python-backed installer, context or process helpers;
