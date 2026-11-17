@@ -32,7 +32,9 @@ regression evidence remain independently required by the parent effort.
   Context, Payload Invocation and Harness programs; never check a fragment
   alone or omit its required full-body target. A required expansion that
   cannot be qualified remains a visible failure.
-- Full strict projects retain complete checking. A successful recorded subset
+- Full strict projects retain complete checking. Basic projects retain their
+  complete basic check in addition to strict checking of recorded subsets;
+  adding a record cannot remove existing enforcement. A successful recorded subset
   may pass its scoped enforced check while its owner remains pending; an
   all-project diagnostic probe still cannot certify that owner's admission.
   Checks never install dependencies implicitly or substitute an unprepared
@@ -104,6 +106,7 @@ is a blocker to resolve, not permission to omit records or raise a deadline.
   real deletion, correctly enforced rename and genuine full strict admission.
 - [ ] Reconcile effective file coverage and unchanged project admission counts,
   without double ownership or crediting proposed declarations as merged.
+  Prove that mixed basic/strict coverage retains the complete basic check.
 - [ ] Exercise the required source and exact-candidate contracts at the actual
   accepted source, with real negative controls and no Main-controller bypass.
 
