@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 import importlib.util
 import json
 import os
@@ -13,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, NoReturn
+from typing import NoReturn, TypedDict
 
 import pytest
 import yaml
@@ -23,6 +24,17 @@ from _pytest.mark.expression import Expression
 _CREATION_FLAGS = 0
 if sys.platform == "win32":
     _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
+
+class FoundationObservation(TypedDict, total=False):
+    admitted: bool
+    released: bool
+    arguments: list[str]
+    cwd: Path
+    env: Mapping[str, str]
+    sandbox: Path
+    limits: Limits
+    native_application: bool
+
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
@@ -59,7 +71,7 @@ def test_runtime_only_portfolio_refuses_incomplete_native_evidence(
             "test_real_cold_driver_and_native_reentry_use_the_same_owner[" + case + "]"
             for case in ("False-False", "False-True", "True-False")
         )
-    calls = []
+    calls: list[list[str]] = []
 
     def run(
         arguments: list[str], *, timeout: float, max_stdout_bytes: int,
@@ -898,7 +910,9 @@ def test_derived_native_diagnostics_are_not_a_required_smoke_fallback() -> None:
 @pytest.mark.parametrize("platform,runner", [
     ("linux", "ubuntu-latest"), ("windows", "windows-latest"),
 ])
-def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform: str, runner: str) -> None:
+def test_candidate_profiles_remain_focused_opt_in_native_acceptance(
+    platform: str, runner: str,
+) -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
@@ -1475,7 +1489,7 @@ def test_manager_native_step_loads_first_party_helpers_without_site_packages(
         if step.get("name") == "Persisted Manager admission and fresh-process offline reuse"
     )
     original_run = containment.run_contained
-    calls = []
+    calls: list[list[str]] = []
     script = """
 import pathlib, sys
 import agent_procutil
@@ -1502,11 +1516,15 @@ assert pathlib.Path(single_instance_lease.__file__).resolve() == (
 print("manager-source-helpers-without-site-packages-ok")
 """
 
-    def run(command: list[str], **kwargs: Any) -> int:
+    def run(
+        command: list[str], *, cwd: Path, env: Mapping[str, str],
+        sandbox: Path, limits: Limits,
+    ) -> int:
         calls.append(command)
         probe = script if len(calls) == 2 else "print('original-admission-path-retained')"
         return original_run(
-            [sys.executable, "-S", "-c", probe, str(repo)], **kwargs,
+            [sys.executable, "-S", "-c", probe, str(repo)],
+            cwd=cwd, env=env, sandbox=sandbox, limits=limits,
         )
 
     monkeypatch.chdir(repo)
@@ -1564,6 +1582,27 @@ def test_real_broker_consumers_retain_native_removal_failures_without_expanding_
         for node in ast.walk(tree)
     )
     assert "report_fixture_logs(sandbox)" in packet and "raise SystemExit(result)" in packet
+    wmi_tree = ast.parse(wmi_steps[1]["run"])
+    wmi_limits = [
+        node for node in ast.walk(wmi_tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "Limits"
+    ]
+    assert len(wmi_limits) == 1
+    assert {keyword.arg: ast.literal_eval(keyword.value) for keyword in wmi_limits[0].keywords} == {
+        "wall_seconds": 120,
+    }
+    wmi_calls = [
+        node for node in ast.walk(wmi_tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "run_contained"
+    ]
+    assert len(wmi_calls) == 1
+    assert next(
+        ast.literal_eval(keyword.value) for keyword in wmi_calls[0].keywords
+        if keyword.arg == "native_application"
+    ) is True
+    wmi_constants = {node.value for node in ast.walk(wmi_calls[0].args[0]) if isinstance(node, ast.Constant)}
+    assert {"libs/agent-procutil/tests/test_durable_wmi_job_survival.py", "--timeout=60"} <= wmi_constants
+    assert wmi_steps[1]["run"].rstrip().endswith("finally:\n    lease.release()")
     assert jobs["windows-broker-probe"]["timeout-minutes"] == 4
     assert jobs["windows-broker-portable"]["timeout-minutes"] == 6
     consumer = jobs["windows-broker-consumers"]
@@ -1776,13 +1815,19 @@ def test_explicit_foundation_lifetime_retains_negative_controls_and_failure(
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
     (sandbox / "fixture.log").write_text("exact fixture failure", encoding="utf-8")
-    observed: dict[str, Any] = {}
+    observed: FoundationObservation = {}
     clock = [0.0]
     failure = UnreapedProcessError("unconfirmed fixture cleanup")
 
-    def run(arguments: list[str], **options: Any) -> int:
+    def run(
+        arguments: list[str], *, cwd: Path, env: Mapping[str, str], sandbox: Path,
+        limits: Limits, native_application: bool,
+    ) -> int:
         assert observed.get("admitted") is True
-        observed.update(arguments=arguments, **options)
+        observed.update({
+            "arguments": arguments, "cwd": cwd, "env": env, "sandbox": sandbox,
+            "limits": limits, "native_application": native_application,
+        })
         clock[0] = 899
         if cleanup_raises:
             raise failure

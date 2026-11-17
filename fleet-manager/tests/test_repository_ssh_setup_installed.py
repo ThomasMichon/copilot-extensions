@@ -1,27 +1,39 @@
 """Normal Manager/engine handoff into the real Source application lifecycle."""
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Awaitable, Callable, Iterator
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
 import shlex
 import shutil
 import sqlite3
+import subprocess
 import sys
 import time
+from typing import cast
 
 from aiohttp import web
 import pytest
 
 from fleet_manager import gateway_host as host
-from fleet_manager.planning import canonical
+from fleet_manager.planning import canonical as legacy_canonical
+from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 from fleet_manager.private_state import create_private_file
 from gateway_service_transport_fixtures import Rig
-from test_client_distribution import PROJECT, run
+from test_client_distribution import PROJECT
+from test_gateway_host_distribution import DirectoryUpdater, Document, Progress, run
 from test_gateway_enrollment import EnrollmentHarness, GRANT
 from test_runtime_identity import AUDIENCE
-from test_ssh_machine import configured, update
+from test_ssh_machine import configured as legacy_configured, update as legacy_update
+
+canonical = cast(Callable[[object], bytes], legacy_canonical)
+configured = cast(Callable[[Path], tuple[Document, GatewaySSHPolicy, Document]], legacy_configured)
+update = cast(DirectoryUpdater, legacy_update)
 
 pytestmark = [
     pytest.mark.client_distribution_full,
@@ -31,26 +43,31 @@ pytestmark = [
     ),
 ]
 
-def private_json(path, value):
+def private_json(path: Path, value: Document) -> None:
     with os.fdopen(create_private_file(path), "wb") as stream:
         stream.write(canonical(value))
 
 
-def prepared_cohort(tmp_path, monkeypatch, progress):
-    from repository_ssh_cohort_fixture import prepare_cohort
+def prepared_cohort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, progress: Progress,
+) -> dict[str, Path]:
+    from repository_ssh_cohort_fixture import FeedFactory, prepare_cohort
 
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     from test_installer_wheel_acquisition import feeds
 
-    servers = feeds.__wrapped__()
+    servers = cast(Callable[[], Iterator[FeedFactory]], inspect.unwrap(feeds))()
     try:
         return prepare_cohort(tmp_path, monkeypatch, next(servers), progress)
     finally:
         next(servers, None)
 
 
-def test_normal_source_cohort_preparation(tmp_path_factory, monkeypatch, capfd):
-    def progress(message):
+def test_normal_source_cohort_preparation(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    def progress(message: str) -> None:
         with capfd.disabled():
             print(message, flush=True)
 
@@ -61,12 +78,13 @@ def test_normal_source_cohort_preparation(tmp_path_factory, monkeypatch, capfd):
 
 
 def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
-    tmp_path_factory, monkeypatch, capfd,
-):
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1", (
         "normal SSH application lifetime requires the explicit ephemeral native owner"
     )
-    def progress(message):
+    def progress(message: str) -> None:
         with capfd.disabled():
             print(message, flush=True)
 
@@ -82,23 +100,29 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     tmp_path = tmp_path_factory.mktemp("n")
     locator = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT")
     assert locator, "prepare the complete Source cohort before the indivisible native lifecycle"
-    cohort = {key: Path(value) for key, value in json.loads(Path(locator).read_text()).items()}
+    cohort: dict[str, Path] = {
+        key: Path(value) for key, value in json.loads(Path(locator).read_text()).items()
+    }
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
-    import local_install_profile as profiles
+    import local_install_profile  # noqa: F401 - establishes the normal source-owner import roots
+    import install_source as source_inputs
+    from installer_dependency_policy import _native_retained_path
 
-    def application_path(component):
+    def application_path(component: str) -> Path:
         snapshot = cohort[component]
-        selected = profiles.source_inputs.select_project(
+        selected = source_inputs.select_project(
             snapshot, {"updated": "fleet-manager", "engine-base": "agent-worktrees"}.get(
                 component, component,
             ),
         )
-        return snapshot / selected.project["application"]
+        application = selected.project["application"]
+        assert isinstance(application, str)
+        return snapshot / application
 
     application, updated = application_path("fleet-manager"), application_path("updated")
     root, home, inputs, harness = (tmp_path / name for name in ("i", "home", "inputs", "harness"))
-    for directory in (home, inputs, harness):
-        directory.mkdir(mode=0o700)
+    for folder in (home, inputs, harness):
+        folder.mkdir(mode=0o700)
     value, policy, directory = configured(inputs)
     Path(value.pop("proof_key_file")).unlink()
     Path(value.pop("access_token_file")).unlink()
@@ -125,8 +149,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
-    def install_engine(component):
-        source = profiles.source_inputs.select_project(cohort[component], "agent-worktrees")
+    def install_engine(component: str) -> None:
+        source = source_inputs.select_project(cohort[component], "agent-worktrees")
         construction = json.loads(
             (application_path(component) / "application.json").read_text(),
         )["construction"]
@@ -135,9 +159,11 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
                 installation.delenv(name)
             for name, item in clean.items():
                 installation.setenv(name, item)
-            profiles.source_inputs.install_application(
+            uv = shutil.which("uv")
+            assert uv is not None
+            source_inputs.install_application(
                 cohort[component], "agent-worktrees", source.payload,
-                home / ".agent-worktrees", uv=Path(shutil.which("uv")),
+                home / ".agent-worktrees", uv=Path(uv),
                 base_python=Path(sys.executable), health_module="agent_worktrees",
                 expected_version=construction["runtime_version"],
                 expected_hash=construction["payload_hash"],
@@ -146,7 +172,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         slot = engine_root / "versions" / (engine_root / "current-version").read_text().strip()
         python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         observed = run([
-            profiles.source_inputs.engine._native_retained_path(python), "-I", "-B", "-c",
+            _native_retained_path(python), "-I", "-B", "-c",
             "import importlib.util,json,sys;from pathlib import Path;import agent_worktrees;"
             "sdk=importlib.util.find_spec('fleet_manager');"
             "print(json.dumps({'prefix':sys.prefix,'engine':agent_worktrees.__file__,"
@@ -166,7 +192,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
 
     install_engine("engine-base")
     manager_snapshot = cohort["worktree-manager"]
-    manager_source = profiles.source_inputs.select_project(manager_snapshot, "worktree-manager")
+    manager_source = source_inputs.select_project(manager_snapshot, "worktree-manager")
     installed = run(
         [sys.executable, "-I", "-B", str(manager_source.payload / "scripts" / "runtime_install.py"),
          "--root", str(home / ".worktree-manager"), "--install-source", str(manager_snapshot),
@@ -178,15 +204,17 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         "worktree-manager.ps1" if os.name == "nt" else "worktree-manager"
     )
     assert launcher.is_file()
-    front_door = (
-        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)]
-        if os.name == "nt" else [str(launcher)]
-    )
+    if os.name == "nt":
+        shell = shutil.which("pwsh")
+        assert shell is not None
+        front_door = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)]
+    else:
+        front_door = [str(launcher)]
     inert = run([*front_door, "setup", "--apply"], cwd=home, env=clean, timeout=30)
     assert inert.returncode == 0, inert.stdout + inert.stderr
     assert not state.exists() and not root.exists()
 
-    def git(*arguments):
+    def git(*arguments: str) -> None:
         result = run(["git", "-C", str(harness), *arguments], env=clean)
         assert result.returncode == 0, result.stderr
 
@@ -221,7 +249,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
         "-c", "commit.gpgsign=false", "commit", "-qm", "Synthetic setup", "--no-verify")
 
-    def selected_request(application):
+    def selected_request(application: Path) -> Document:
         current_snapshot = next(
             parent for parent in application.parents if (parent / "install-source.json").is_file()
         )
@@ -236,7 +264,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             "authority": "authority-a", "installation": "installation-a", "ssh": value,
         }
 
-    async def manager():
+    async def manager() -> subprocess.CompletedProcess[str]:
         started = time.monotonic()
         result = await asyncio.to_thread(
             run, [*front_door, "setup", "--apply", "--repository", url,
@@ -247,7 +275,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         progress(f"normal Manager/engine setup: {time.monotonic() - started:.2f}s")
         return result
 
-    async def control(action):
+    async def control(action: str) -> Document:
         version = (root / "current-version").read_text().strip()
         python = root / "versions" / version / ".venv" / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -257,7 +285,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             cwd=home, env=clean, timeout=15,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
     gateway = tmp_path / "gateway"
     gateway.mkdir()
@@ -265,28 +293,29 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     now = int(time.time())
     enrollment.scope.update(machine=value["machine"], expires_at=now + 1800)
     enrollment.delegation["grant_expires_at"] = now + 900
-    enrollment.document["policy"]["manifest"]["revision"] += 1
+    enrollment_policy = cast(Document, enrollment.document["policy"])
+    enrollment_policy["manifest"]["revision"] += 1
     rig.h.document = enrollment.document
-    rig.h.clock = lambda: int(time.time())
+    monkeypatch.setattr(rig.h, "clock", lambda: int(time.time()))
 
-    async def handle(incoming):
+    async def handle(incoming: web.Request) -> web.Response:
         assert incoming.method == "GET" and incoming.path == "/directory"
         if incoming.query["after"] == "0":
             return web.Response(body=update(policy, directory).encoded)
         await asyncio.sleep(int(incoming.query["wait"]))
         return web.Response(status=204)
 
-    rig.backends[0].handle = handle
+    monkeypatch.setattr(rig.backends[0], "handle", handle)
 
-    async def exercise():
+    async def exercise() -> None:
         from fleet_manager.gateway_service_connector import ServiceConnector
 
         stopped = asyncio.Event()
         try:
-            await rig.start(enrollment_journal=enrollment.ledger)
+            await cast(Callable[..., Awaitable[Rig]], rig.start)(enrollment_journal=enrollment.ledger)
             enrollment.scope["destination"] = rig.origin
-            enrollment.document["policy"]["manifest"]["revision"] += 1
-            rig.save()
+            enrollment_policy["manifest"]["revision"] += 1
+            cast(Callable[[], None], rig.save)()
             await rig.state.reload()
             value.update(gateway_origin=rig.origin, gateway_ca=rig.ca)
             private_json(source, {
@@ -376,6 +405,6 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
                     await control("stop")
             finally:
                 stopped.set()
-                await rig.close()
+                await cast(Callable[[], Awaitable[None]], rig.close)()
 
     asyncio.run(exercise())

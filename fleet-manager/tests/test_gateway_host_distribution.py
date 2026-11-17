@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import asyncio
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 import csv
 import hashlib
 import importlib.metadata
@@ -13,9 +14,11 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import zipfile
+from typing import Any, Protocol, cast
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
@@ -24,12 +27,45 @@ from packaging.utils import canonicalize_name
 import pytest
 
 from fleet_manager import gateway_host as host
-from fleet_manager.private_state import create_private_file
-from test_client_distribution import PROJECT, build, project_at, run
-from test_gateway_host import selected as select_host
+from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
+from fleet_manager.private_state import create_private_file, private_directory
+from fleet_manager.ssh_directory import DirectoryUpdate
+from test_client_distribution import PROJECT, build as legacy_build, project_at as legacy_project_at, run as legacy_run
+from test_gateway_host import selected as legacy_select_host
 
 
-def _installed_wheel(distribution, output):
+Progress = Callable[[str], None]
+Wheel = tuple[Path, Path]
+Document = dict[str, Any]
+SSHSelection = tuple[Document, Document, GatewaySSHPolicy, Document]
+DirectoryUpdater = Callable[[GatewaySSHPolicy, Document], DirectoryUpdate]
+
+
+class ContinuityConfig(Protocol):
+    def __call__(
+        self, root: Path, *, gateway_origin: str, gateway_ca: str, audience: str,
+    ) -> tuple[Document, GatewaySSHPolicy, Document, Document]: ...
+
+
+class ProcessRunner(Protocol):
+    def __call__(
+        self, argv: Sequence[str], *, cwd: str | Path | None = None,
+        env: Mapping[str, str] | None = None, timeout: float = 30,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+class InstalledFile(Protocol):
+    def read_bytes(self) -> bytes: ...
+
+
+# The shared legacy artifact helpers expose these narrower fixture contracts.
+run = cast(ProcessRunner, legacy_run)
+build = cast(Callable[[Path, Path], subprocess.CompletedProcess[str]], legacy_build)
+project_at = cast(Callable[[Path], tuple[Path, Path]], legacy_project_at)
+select_host = cast(Callable[[Path], Document], legacy_select_host)
+
+
+def _installed_wheel(distribution: importlib.metadata.Distribution, output: Path) -> Path:
     """Keep actual installed public dependency bytes; replace only wheel RECORD."""
     wheel_metadata = distribution.read_text("WHEEL")
     assert wheel_metadata
@@ -42,8 +78,10 @@ def _installed_wheel(distribution, output):
         "interpreter", "abi", "platform",
     ))
     assert parse_tag(tag) == tags, "installed wheel tags are not a compressed filename product"
+    members = distribution.files
+    assert members is not None
     prefixes = {
-        member.parent.name for member in distribution.files
+        member.parent.name for member in members
         if len(member.parts) == 2 and member.name == "WHEEL" and member.parent.name.endswith(".dist-info")
     }
     assert len(prefixes) == 1
@@ -51,14 +89,14 @@ def _installed_wheel(distribution, output):
     path = output / f"{prefix.removesuffix('.dist-info')}-{tag}.whl"
     records = []
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for member in distribution.files:
+        for member in members:
             relative = member.as_posix()
             if (
                 ".." in member.parts or member.is_absolute() or relative.endswith(".pyc")
                 or member.name in {"RECORD", "INSTALLER", "REQUESTED", "direct_url.json"}
             ):
                 continue
-            data = distribution.locate_file(member).read_bytes()
+            data = cast(InstalledFile, distribution.locate_file(member)).read_bytes()
             archive.writestr(relative, data)
             records.append((
                 relative,
@@ -73,7 +111,9 @@ def _installed_wheel(distribution, output):
 
 
 @pytest.mark.parametrize("name", ["PyYAML", "cryptography"])
-def test_installed_dependency_archive_preserves_native_wheel_identity(tmp_path, monkeypatch, name):
+def test_installed_dependency_archive_preserves_native_wheel_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     from runtime_wheel_inspection import inspect_wheel_facts
 
@@ -85,7 +125,7 @@ def test_installed_dependency_archive_preserves_native_wheel_identity(tmp_path, 
     assert facts.version == distribution.version
 
 
-def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure():
+def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure() -> None:
     from types import SimpleNamespace
 
     from repository_ssh_cohort_fixture import _registry_distributions
@@ -120,7 +160,7 @@ def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure():
     assert all(selected[key] is distributions[key] for key in selected)
 
 
-def test_cohort_registry_refuses_missing_prepared_dependency():
+def test_cohort_registry_refuses_missing_prepared_dependency() -> None:
     from types import SimpleNamespace
 
     from repository_ssh_cohort_fixture import _registry_distributions
@@ -132,7 +172,9 @@ def test_cohort_registry_refuses_missing_prepared_dependency():
 
 
 @pytest.mark.parametrize("selected", ["dev", "--help", "A" * 40, "a" * 39, "a" * 41])
-def test_cohort_source_commit_refuses_nonimmutable_inputs_before_git(monkeypatch, tmp_path, selected):
+def test_cohort_source_commit_refuses_nonimmutable_inputs_before_git(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selected: str,
+) -> None:
     import repository_ssh_cohort_fixture as fixture
 
     monkeypatch.setattr(fixture, "run", lambda *_args: pytest.fail("Invalid source reached Git"))
@@ -141,14 +183,16 @@ def test_cohort_source_commit_refuses_nonimmutable_inputs_before_git(monkeypatch
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_cohort_source_commit_preserves_head_default_and_explicit_selection(monkeypatch, tmp_path, explicit):
+def test_cohort_source_commit_preserves_head_default_and_explicit_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, explicit: bool,
+) -> None:
     from types import SimpleNamespace
     import repository_ssh_cohort_fixture as fixture
 
     selected = "a" * 40
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(command):
+    def run(command: list[str]) -> SimpleNamespace:
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout=selected + "\n")
 
@@ -160,13 +204,15 @@ def test_cohort_source_commit_preserves_head_default_and_explicit_selection(monk
     ]
 
 
-def test_cohort_source_commit_does_not_fallback_when_selected_object_is_missing(monkeypatch, tmp_path):
+def test_cohort_source_commit_does_not_fallback_when_selected_object_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from types import SimpleNamespace
     import repository_ssh_cohort_fixture as fixture
 
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(command):
+    def run(command: list[str]) -> SimpleNamespace:
         calls.append(command)
         return SimpleNamespace(returncode=128, stdout="")
 
@@ -177,7 +223,9 @@ def test_cohort_source_commit_does_not_fallback_when_selected_object_is_missing(
 
 
 @pytest.mark.parametrize(("selected", "missing"), [("a" * 40, False), ("a" * 40, True), ("dev", False)])
-def test_cohort_native_workflow_retains_only_valid_selected_source(monkeypatch, selected, missing):
+def test_cohort_native_workflow_retains_only_valid_selected_source(
+    monkeypatch: pytest.MonkeyPatch, selected: str, missing: bool,
+) -> None:
     from types import SimpleNamespace
     import subprocess
     import yaml
@@ -189,11 +237,13 @@ def test_cohort_native_workflow_retains_only_valid_selected_source(monkeypatch, 
         step["run"] for step in workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
         if step.get("name") == "Retain the selected immutable application Source"
     )
-    calls = []
+    calls: list[tuple[list[str], bool, int]] = []
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> SimpleNamespace:
         calls.append((command, options["check"], options["timeout"]))
-        assert options["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        assert options["creationflags"] == (
+            int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
+        )
         return SimpleNamespace(returncode=128 if missing and len(calls) == 1 else 0)
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", selected)
@@ -215,8 +265,8 @@ def test_cohort_native_workflow_retains_only_valid_selected_source(monkeypatch, 
     (False, 0), (True, 0), (True, 124),
 ])
 def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
-    tmp_path, monkeypatch, preparation_only, prebuild_code,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preparation_only: bool, prebuild_code: int,
+) -> None:
     from types import SimpleNamespace
     import runpy
     import subprocess
@@ -227,13 +277,13 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
     )
     steps = workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
     code = next(step["run"] for step in steps if step.get("name") == "Normal Manager and engine SSH setup")
-    calls = []
+    calls: list[str | tuple[str, list[str], dict[str, int]]] = []
     lease = SimpleNamespace(release=lambda: calls.append("release"))
     temporary = SimpleNamespace(
         name=str(tmp_path / "sandbox"), retained=False,
         retain=lambda: calls.append("retain"),
     )
-    runner = {
+    runner: dict[str, object] = {
         "default_python": lambda _component: tmp_path / "venv" / "Scripts" / "python.exe",
         "ordinary_cache_root": lambda path: path,
         "acquire": lambda *_args: lease,
@@ -243,13 +293,17 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
         "prepare": lambda *_args: calls.append("prepare"),
         "isolated_environment": lambda environment, _sandbox: dict(environment),
         "venv_root": lambda _root: tmp_path / "venvs",
-        "run_contained": lambda command, **options: (
-            calls.append(("source", command[-2:], options["limits"])), prebuild_code
-        )[1],
+        "run_contained": None,
         "Limits": lambda **options: options,
         "UnreapedProcessError": type("UnreapedProcessError", (RuntimeError,), {}),
         "cleanup_sandbox": lambda _temporary: calls.append("cleanup"),
     }
+
+    def run_contained(command: list[str], **options: Any) -> int:
+        calls.append(("source", command[-2:], options["limits"]))
+        return prebuild_code
+
+    runner["run_contained"] = run_contained
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", "a" * 40)
     monkeypatch.delenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", raising=False)
@@ -257,7 +311,7 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
         monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", "1")
     monkeypatch.setattr(runpy, "run_path", lambda _path: runner)
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> SimpleNamespace:
         assert "--ephemeral-native-ssh-setup" in command
         assert options["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"].endswith("cohort.json")
         calls.append("lifecycle")
@@ -274,7 +328,7 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
     ), "cleanup"]
 
 
-def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
+def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path: Path) -> None:
     from threading import Barrier, Lock
     from types import SimpleNamespace
 
@@ -282,9 +336,9 @@ def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
 
     barrier, lock = Barrier(2), Lock()
     active = peak = 0
-    observed = []
+    observed: list[tuple[Path, str, tuple[str, ...]]] = []
 
-    def prepare(snapshot, output, **options):
+    def prepare(snapshot: Path, output: Path, **options: Any) -> dict[str, str]:
         nonlocal active, peak
         assert snapshot == tmp_path / "source"
         assert options["uv"] == "selected-uv" and options["prepare_profile"] is True
@@ -301,7 +355,7 @@ def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
             with lock:
                 active -= 1
 
-    messages = []
+    messages: list[str] = []
     result = _prepare_profiles(
         tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
         "selected-uv", messages.append, time.monotonic(),
@@ -312,7 +366,7 @@ def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
     assert len(messages) == 4 and all(path.is_dir() for path in result.values())
 
 
-def test_cohort_profile_failure_waits_for_running_sibling(tmp_path):
+def test_cohort_profile_failure_waits_for_running_sibling(tmp_path: Path) -> None:
     from threading import Event
     from types import SimpleNamespace
 
@@ -320,7 +374,7 @@ def test_cohort_profile_failure_waits_for_running_sibling(tmp_path):
 
     started, released, settled = Event(), Event(), Event()
 
-    def prepare(_snapshot, output, **_options):
+    def prepare(_snapshot: Path, output: Path, **_options: object) -> dict[str, str]:
         if output.name == "profile-worktree-manager":
             assert started.wait(timeout=2)
             released.set()
@@ -342,18 +396,20 @@ def test_cohort_profile_failure_waits_for_running_sibling(tmp_path):
     assert settled.is_set()
 
 
-def _closure(first_party, output, *, extras="gateway-host"):
-    environment = default_environment()
+def _closure(
+    first_party: Mapping[str, Path], output: Path, *, extras: str = "gateway-host",
+) -> dict[str, Path]:
+    environment = cast(Mapping[str, str], default_environment())
     archives = dict(first_party)
-    selected = {}
+    selected: dict[str, set[str]] = {}
     pending = [Requirement(f"fleet-manager[{extras}]")]
     while pending:
         requirement = pending.pop()
         name = canonicalize_name(requirement.name)
-        extras = {"", *requirement.extras}
-        if name in selected and extras <= selected[name]:
+        requirement_extras = {"", *requirement.extras}
+        if name in selected and requirement_extras <= selected[name]:
             continue
-        selected.setdefault(name, set()).update(extras)
+        selected.setdefault(name, set()).update(requirement_extras)
         if name in first_party:
             with zipfile.ZipFile(first_party[name]) as archive:
                 member = next(path for path in archive.namelist() if path.endswith(".dist-info/METADATA"))
@@ -376,32 +432,38 @@ def _closure(first_party, output, *, extras="gateway-host"):
 
 
 @pytest.fixture
-def progress(capfd):
-    def report(message):
+def progress(capfd: pytest.CaptureFixture[str]) -> Progress:
+    def report(message: str) -> None:
         with capfd.disabled():
             print(message, flush=True)
     return report
 
 
-def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gateway-host"):
+def prepared_application(
+    tmp_path: Path, wheel: Wheel, monkeypatch: pytest.MonkeyPatch, progress: Progress,
+    *, extras: str = "gateway-host",
+) -> tuple[Path, Path, Path]:
     started = time.monotonic()
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     import local_install_profile as native
+    import install_source as source_inputs
+    import installer_engine as engine
+    import versioned_runtime_source as runtime_source
+    from installer_wheel_snapshot import retain_wheel_inputs
 
     uv = shutil.which("uv")
     assert uv
     original = tmp_path / "source-snapshot"
     original.mkdir()
     source, _ = project_at(original / "source")
-    engine = native.source_inputs.engine
-    packages = set(engine._package_roots(PROJECT))
+    package_roots = set(engine._package_roots(PROJECT))
     if "ssh-client" in extras.split(","):
         for component in (
             PROJECT.parent / "plugins" / "agent-ssh",
             PROJECT.parent / "libs" / "single-instance-lease",
         ):
-            packages.update(engine._package_roots(component))
-    packages = sorted(packages)
+            package_roots.update(engine._package_roots(component))
+    packages = sorted(package_roots)
     for package in packages:
         if package != PROJECT:
             shutil.copytree(
@@ -420,11 +482,11 @@ def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gate
             first_party[engine._package_name(package)] = next(package_output.glob("*.whl"))
     progress(f"fixture source wheels: {time.monotonic() - started:.2f}s")
     archives = _closure(first_party, output, extras=extras)
-    version = engine.runtime_source.payload_package_version(source, "fleet-manager")
-    source_hash = engine.runtime_source.assembly_hash(source)
-    identity = engine.runtime_source.SourceIdentity(
+    version = runtime_source.payload_package_version(source, "fleet-manager")
+    source_hash = runtime_source.assembly_hash(source)
+    identity = runtime_source.SourceIdentity(
         "fleet-manager", version, "a" * 40, "b" * 40, source_hash,
-        engine.runtime_source.runtime_version(version, "a" * 40, source_hash),
+        runtime_source.runtime_version(version, "a" * 40, source_hash),
     )
     (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
     expected = {
@@ -437,13 +499,13 @@ def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gate
             "name": name, "filename": archive.name, "sha256": expected[archive.name],
         } for name, archive in first_party.items()]},
     }
-    selected = native.source_inputs.ProjectSource(source, identity, {
-        "schema": native.source_inputs.SCHEMA, "version": 1, "kind": "source",
+    selected = source_inputs.ProjectSource(source, identity, {
+        "schema": source_inputs.SCHEMA, "version": 1, "kind": "source",
         "source_commit": identity.source_commit, "source_tree": identity.source_tree,
         "projects": {"fleet-manager": project},
     }, "fleet-manager")
     deadline = time.monotonic() + 120
-    with native.retain_wheel_inputs(
+    with retain_wheel_inputs(
         {archive.name: archive for archive in archives.values()}, expected,
         max_wheels=64, max_archive_bytes=64 << 20, max_total_bytes=256 << 20,
         max_snapshot_bytes=512 << 20, deadline=deadline,
@@ -470,19 +532,20 @@ def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gate
         updated_snapshot = native._write_snapshot(
             selected, updated, updated_profile, retained, deadline=deadline, uv=uv,
         )
-    initial = native.source_inputs.select_project(snapshot, "fleet-manager")
-    updated = native.source_inputs.select_project(updated_snapshot, "fleet-manager")
+    initial = source_inputs.select_project(snapshot, "fleet-manager")
+    updated_selection = source_inputs.select_project(updated_snapshot, "fleet-manager")
     progress(f"fixture applications prepared: {time.monotonic() - started:.2f}s")
     return (
         snapshot, snapshot / initial.project["application"],
-        updated_snapshot / updated.project["application"],
+        updated_snapshot / updated_selection.project["application"],
     )
 
 
 @pytest.mark.client_distribution_full
 def test_selected_gateway_application_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, progress,
-):
+    tmp_path_factory: pytest.TempPathFactory, wheel: Wheel,
+    monkeypatch: pytest.MonkeyPatch, progress: Progress,
+) -> None:
     tmp_path = tmp_path_factory.mktemp("g")
     snapshot, application, updated_application = prepared_application(tmp_path, wheel, monkeypatch, progress)
     root = tmp_path / "i"
@@ -509,22 +572,23 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
     extension = ".ps1" if os.name == "nt" else ".sh"
 
-    def invoke(slot, command, *arguments):
+    def invoke(slot: Path, command: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         executable = slot / (command + extension)
-        launcher = (
-            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
-             "-File", str(executable)]
-            if os.name == "nt" else [str(executable)]
-        )
+        if os.name == "nt":
+            shell = shutil.which("powershell.exe")
+            assert shell is not None
+            launcher = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(executable)]
+        else:
+            launcher = [str(executable)]
         started = time.monotonic()
         result = run([*launcher, *arguments], cwd=home, env=clean, timeout=90)
         progress(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
-    def status(slot):
+    def status(slot: Path) -> Document:
         result = invoke(slot, "fleet-manager", "gateway-host", "status")
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
     selected_slot = first
     try:
@@ -532,7 +596,7 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
         assert staged.returncode == 0, staged.stdout + staged.stderr
         assert not (root / "current-version").exists()
         assert not (root / host.STATE).exists()
-        host.private_directory(root / host.STATE)
+        private_directory(root / host.STATE)
         refused_log = root / host.STATE / "host.log"
         refused_log.mkdir()
         refused = invoke(first, "install")
@@ -597,16 +661,21 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
 
 @pytest.mark.client_distribution_full
 def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, progress,
-):
+    tmp_path_factory: pytest.TempPathFactory, wheel: Wheel,
+    monkeypatch: pytest.MonkeyPatch, progress: Progress,
+) -> None:
     from aiohttp import web
     from fleet_manager.gateway_service_connector import ServiceConnector
     from fleet_manager.machine_identity import PROFILE
     from gateway_service_transport_fixtures import Rig
-    from test_gateway_host import ssh_selected
-    from test_gateway_ssh_provider import key
+    from test_gateway_host import ssh_selected as legacy_ssh_selected
+    from test_gateway_ssh_provider import key as legacy_key
     from test_runtime_identity import AUDIENCE
-    from test_ssh_machine import continuity_config, update
+    from test_ssh_machine import continuity_config, update as legacy_update
+
+    ssh_selected = cast(Callable[[Path], SSHSelection], legacy_ssh_selected)
+    key = cast(Callable[[int], str], legacy_key)
+    update = cast(DirectoryUpdater, legacy_update)
 
     tmp_path = tmp_path_factory.mktemp("c")
     snapshot, application, updated = prepared_application(
@@ -627,7 +696,7 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
          "key_source": principal, "expires_at": rig.h.clock.value + 1800}
         for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
     ]}
-    rig.h.clock = lambda: int(time.time())
+    monkeypatch.setattr(rig.h, "clock", lambda: int(time.time()))
     slots = [
         root / "versions" / json.loads((path / "application.json").read_text())["construction"]["runtime_version"]
         for path in (application, updated)
@@ -649,37 +718,38 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
     if os.name == "nt":
         environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
 
-    async def invoke(slot, command, *arguments):
+    async def invoke(slot: Path, command: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         executable = slot / (command + (".ps1" if os.name == "nt" else ".sh"))
-        argv = (
-            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
-             "-File", str(executable), *arguments]
-            if os.name == "nt" else [str(executable), *arguments]
-        )
+        if os.name == "nt":
+            shell = shutil.which("powershell.exe")
+            assert shell is not None
+            argv = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(executable), *arguments]
+        else:
+            argv = [str(executable), *arguments]
         started = time.monotonic()
         result = await asyncio.to_thread(run, argv, cwd=home, env=environment, timeout=90)
         progress(f"continuity fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
-    async def status(slot):
+    async def status(slot: Path) -> Document:
         result = await invoke(slot, "fleet-manager", "gateway-host", "status")
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
-    async def handle(request):
+    async def handle(request: web.Request) -> web.Response:
         assert request.method == "GET" and request.path == "/directory"
         if request.query["after"] == "0":
             return web.Response(body=update(policy, directory).encoded)
         await asyncio.sleep(int(request.query["wait"]))
         return web.Response(status=204)
 
-    rig.backends[0].handle = handle
+    monkeypatch.setattr(rig.backends[0], "handle", handle)
 
-    async def exercise():
+    async def exercise() -> None:
         selected_slot, connector_stop = slots[0], asyncio.Event()
         try:
-            await rig.start()
-            value, _, _, public = continuity_config(
+            await cast(Callable[[], Awaitable[Rig]], rig.start)()
+            value, _, _, public = cast(ContinuityConfig, continuity_config)(
                 root, gateway_origin=rig.origin, gateway_ca=rig.ca, audience=AUDIENCE,
             )
             for name in ("state_dir", "config_d", "ssh_config", "authorization_dir"):
@@ -688,7 +758,7 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
             binding = next(item for item in rig.h.document["bindings"] if item["reference"] == "keys/caller-a")
             binding["jwk"] = public
             rig.h.document["manifest"]["revision"] += 1
-            rig.save()
+            cast(Callable[[], None], rig.save)()
             await rig.state.reload()
             connector = ServiceConnector(
                 slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
@@ -739,26 +809,32 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
                     assert result.returncode == 0, result.stdout + result.stderr
             finally:
                 connector_stop.set()
-                await rig.close()
+                await cast(Callable[[], Awaitable[None]], rig.close)()
 
     asyncio.run(exercise())
 
 
 @pytest.mark.client_distribution_full
 def test_selected_ssh_application_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, progress,
-):
+    tmp_path_factory: pytest.TempPathFactory, wheel: Wheel,
+    monkeypatch: pytest.MonkeyPatch, progress: Progress,
+) -> None:
     from aiohttp import web
     from cryptography.hazmat.primitives import serialization
     from fleet_manager.gateway_service_connector import ServiceConnector
     from fleet_manager import gateway_host_start
     from fleet_manager.machine_identity import PROFILE
     from gateway_service_transport_fixtures import Rig
-    from test_gateway_host import ssh_selected
-    from test_gateway_ssh_provider import key
+    from test_gateway_host import ssh_selected as legacy_ssh_selected
+    from test_gateway_ssh_provider import key as legacy_key
     from test_runtime_identity import AUDIENCE
-    from test_ssh_machine import update
+    from test_ssh_machine import update as legacy_update
     from agent_ssh import gateway_authorization, gateway_provider
+    from dropin_registry import atomic_write_text
+
+    ssh_selected = cast(Callable[[Path], SSHSelection], legacy_ssh_selected)
+    key = cast(Callable[[int], str], legacy_key)
+    update = cast(DirectoryUpdater, legacy_update)
 
     tmp_path = tmp_path_factory.mktemp("s")
     snapshot, application, updated_application = prepared_application(
@@ -780,7 +856,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
         for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
     ]}
     # Native installation can outlast the proof-skew window of the frozen unit clock.
-    rig.h.clock = lambda: int(time.time())
+    monkeypatch.setattr(rig.h, "clock", lambda: int(time.time()))
     value["authentication"]["audience"] = AUDIENCE
     value["namespace"] = "/api"
     value["gateway_ca"] = rig.ca
@@ -807,28 +883,29 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
     extension = ".ps1" if os.name == "nt" else ".sh"
 
-    async def invoke(slot, command, *arguments):
+    async def invoke(slot: Path, command: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         executable = slot / (command + extension)
-        launcher = (
-            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
-             "-File", str(executable)]
-            if os.name == "nt" else [str(executable)]
-        )
+        if os.name == "nt":
+            shell = shutil.which("powershell.exe")
+            assert shell is not None
+            launcher = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(executable)]
+        else:
+            launcher = [str(executable)]
         started = time.monotonic()
         result = await asyncio.to_thread(run, [*launcher, *arguments], cwd=home, env=clean, timeout=90)
         progress(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
-    async def status(slot):
+    async def status(slot: Path) -> Document:
         result = await invoke(slot, "fleet-manager", "gateway-host", "status")
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
-    async def preserved_owner(pid):
+    async def preserved_owner(pid: int) -> None:
         observed = await asyncio.to_thread(gateway_host_start.inspect, root, selection)
         assert observed["pid"] == pid and observed["ready"] and observed["selected"]
 
-    async def handle(request):
+    async def handle(request: web.Request) -> web.Response:
         assert request.method == "GET" and request.path == "/directory"
         assert await request.read() == b""
         if request.query["after"] == "0":
@@ -836,13 +913,13 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
         await asyncio.sleep(int(request.query["wait"]))
         return web.Response(status=204)
 
-    rig.backends[0].handle = handle
+    monkeypatch.setattr(rig.backends[0], "handle", handle)
 
-    async def exercise():
+    async def exercise() -> None:
         selected_slot = first
         connector_stop = asyncio.Event()
         try:
-            await rig.start()
+            await cast(Callable[[], Awaitable[Rig]], rig.start)()
             connector = ServiceConnector(
                 slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
                 proof_key=rig.h.keys[1], gateway_ca=rig.ca,
@@ -941,7 +1018,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             await preserved_owner(initial["pid"])
             foreign_owner = gateway_authorization._root(tmp_path / "foreign-owner")
             binding = foreign_owner / "owner.json"
-            gateway_authorization.atomic_write_text(binding, json.dumps({
+            atomic_write_text(binding, json.dumps({
                 "target": {"machine": "other-machine", "environment": value["environment"]},
                 "controller": value["controller"], "user": "fixture",
             }))
@@ -961,11 +1038,11 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             local = next(row for row in directory["machines"] if {
                 "machine": row["machine"], "environment": row["environment"],
             } == target)
-            gateway_authorization.atomic_write_text(invalid_revision / "owner.json", json.dumps({
+            atomic_write_text(invalid_revision / "owner.json", json.dumps({
                 "target": target, "controller": value["controller"], "user": local["user"],
             }))
             floor, _ = gateway_provider._directory_state(target, value["controller"], invalid_revision)
-            gateway_authorization.atomic_write_text(floor, json.dumps({
+            atomic_write_text(floor, json.dumps({
                 "version": 1, "target": target, "controller": value["controller"],
                 "directory_revision": 0, "directory_digest": "a" * 64,
             }))
@@ -1049,6 +1126,6 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
                     assert result.returncode == 0, result.stdout + result.stderr
             finally:
                 connector_stop.set()
-                await rig.close()
+                await cast(Callable[[], Awaitable[None]], rig.close)()
 
     asyncio.run(exercise())

@@ -56,6 +56,12 @@
       "include": [
         "fleet-manager"
       ],
+      "import_roots": [
+        "tools",
+        "worktree-manager/scripts",
+        "libs/installer-engine",
+        "libs/versioned-runtime"
+      ],
       "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-service-ssh-requirements.txt"

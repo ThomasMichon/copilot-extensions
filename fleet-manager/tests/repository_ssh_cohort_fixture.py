@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable, Iterator, Mapping, Sequence
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,9 @@ import re
 import shutil
 import sys
 import time
+from typing import Any, Protocol, TypeVar, TypedDict, cast
+
+import pytest
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -19,17 +24,45 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from test_client_distribution import PROJECT, run
-from test_gateway_host_distribution import _installed_wheel
+from test_client_distribution import PROJECT
+from test_gateway_host_distribution import Progress, _installed_wheel, run
 
 
-def _registry_distributions(projects, distributions, requirements):
-    candidates = {}
+class RequiredDistribution(Protocol):
+    @property
+    def requires(self) -> list[str] | None: ...
+
+
+DistributionT = TypeVar("DistributionT", bound=RequiredDistribution)
+
+
+class ProfileBuilder(Protocol):
+    def prepare_registry_lock(
+        self, snapshot: Path, output: Path, *, uv: str, deadline: float,
+        prepare_profile: bool, component: str, extras: tuple[str, ...],
+    ) -> Mapping[str, Any]: ...
+
+
+class FeedState(TypedDict):
+    origin: str
+    routes: dict[str, tuple[int, dict[str, str], bytes]]
+
+
+class FeedFactory(Protocol):
+    def __call__(self, *, certificate: Path) -> FeedState: ...
+
+
+def _registry_distributions(
+    projects: Mapping[str, Any],
+    distributions: Mapping[tuple[str, str], DistributionT],
+    requirements: Sequence[str],
+) -> dict[tuple[str, str], DistributionT]:
+    candidates: dict[str, list[DistributionT]] = {}
     for (name, _version), distribution in distributions.items():
         candidates.setdefault(name, []).append(distribution)
     pending = [(Requirement(text), {""}) for text in requirements]
-    selected = {}
-    environment = default_environment()
+    selected: dict[str, set[str]] = {}
+    environment = cast(Mapping[str, str], default_environment())
     while pending:
         requirement, parent_extras = pending.pop()
         if requirement.marker and not any(
@@ -60,10 +93,13 @@ def _registry_distributions(projects, distributions, requirements):
     }
 
 
-def _prepare_profiles(snapshot, output, profiles, uv, progress, started):
+def _prepare_profiles(
+    snapshot: Path, output: Path, profiles: ProfileBuilder, uv: str,
+    progress: Progress, started: float,
+) -> dict[str, Path]:
     deadline = time.monotonic() + 120
 
-    def prepare(selection):
+    def prepare(selection: tuple[str, str, tuple[str, ...]]) -> tuple[str, Path, float]:
         key, component, extras = selection
         result = profiles.prepare_registry_lock(
             snapshot, output / ("profile-" + key), uv=uv,
@@ -72,13 +108,13 @@ def _prepare_profiles(snapshot, output, profiles, uv, progress, started):
         )
         return key, Path(result["snapshot"]), time.monotonic() - started
 
-    selections = (
+    selections: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ("worktree-manager", "worktree-manager", ()),
         ("engine-base", "agent-worktrees", ()),
         ("agent-worktrees", "agent-worktrees", ("fleet-ssh",)),
         ("fleet-manager", "fleet-manager", ("gateway-host", "ssh-client")),
     )
-    outputs = {}
+    outputs: dict[str, Path] = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(prepare, selection) for selection in selections]
         try:
@@ -93,7 +129,7 @@ def _prepare_profiles(snapshot, output, profiles, uv, progress, started):
     return outputs
 
 
-def _selected_source_commit(root, selected):
+def _selected_source_commit(root: Path, selected: str | None) -> str:
     if selected is None:
         result = run(["git", "-C", str(root), "rev-parse", "HEAD"])
         assert result.returncode == 0, "Fixture source HEAD is unavailable"
@@ -105,20 +141,26 @@ def _selected_source_commit(root, selected):
     return selected
 
 
-def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None):
+def prepare_cohort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, feeds: FeedFactory, progress: Progress,
+    *, source_commit: str | None = None,
+) -> dict[str, Path]:
     progress("normal Source cohort: inspect prepared dependency inputs")
     root = PROJECT.parent
     monkeypatch.syspath_prepend(str(root / "tools"))
     from test_installer_wheel_acquisition import CERTIFICATE
     import local_install_profile as profiles
     import local_install_source as sources
+    import installer_engine as engine
+    import installer_dependency_policy as dependencies
+    import install_source as source_inputs
     from build_toolchain_lock import _LOCKED_TOOLCHAIN_PACKAGES
 
     progress("normal Source cohort: source owners imported")
     uv = shutil.which("uv")
     assert uv
     prepared = Path(os.environ["COPILOT_EXTENSIONS_TEST_VENV_ROOT"])
-    sites = set()
+    sites: set[str] = set()
     for component in ("agent-worktrees", "worktree-manager", "fleet-manager"):
         python = prepared / component / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -143,18 +185,18 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None
         "standalone:worktree-manager", "agent-worktrees",
         "standalone:fleet-manager", "agent-ssh",
     )
-    first_party = {}
+    first_party: dict[str, Any] = {}
     for relative in (
         "worktree-manager", "plugins/agent-worktrees", "fleet-manager", "plugins/agent-ssh",
     ):
-        for package in profiles.source_inputs.engine._package_roots(snapshot / "source" / relative):
-            metadata = profiles.dependencies._toml(package / "pyproject.toml")
+        for package in engine._package_roots(snapshot / "source" / relative):
+            metadata = dependencies._toml(package / "pyproject.toml")
             first_party[canonicalize_name(metadata["project"]["name"])] = metadata
     archives = tmp_path / "registry"
     archives.mkdir()
-    distributions = {}
+    distributions: dict[tuple[str, str], importlib.metadata.Distribution] = {}
     for distribution in importlib.metadata.distributions(path=sorted(sites)):
-        name = canonicalize_name(distribution.metadata["Name"])
+        name: str = canonicalize_name(distribution.metadata["Name"])
         if name not in first_party:
             distributions.setdefault((name, distribution.version), distribution)
     distributions = _registry_distributions(first_party, distributions, [
@@ -166,14 +208,17 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None
         ),
     ])
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
-    files = {}
+    files: dict[str, list[dict[str, object]]] = {}
     for (name, _version), distribution in sorted(distributions.items()):
         archive = _installed_wheel(distribution, archives)
         content = archive.read_bytes()
         files.setdefault(name, []).append({
             "filename": archive.name, "url": "/files/" + archive.name,
             "hashes": {"sha256": hashlib.sha256(content).hexdigest()},
-            "requires-python": distribution.metadata.get("Requires-Python", ""),
+            "requires-python": (
+                distribution.metadata["Requires-Python"]
+                if "Requires-Python" in distribution.metadata else ""
+            ),
             "upload-time": "2000-01-01T00:00:00Z", "yanked": False,
         })
         state["routes"]["/files/" + archive.name] = 200, {}, content
@@ -188,21 +233,21 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None
     home = tmp_path / "build-home"
     home.mkdir()
     configuration = tmp_path / "uv.toml"
-    for name in tuple(os.environ):
-        if name.startswith(("UV_", "COPILOT_PLUGIN_")) or name in {
+    for variable in tuple(os.environ):
+        if variable.startswith(("UV_", "COPILOT_PLUGIN_")) or variable in {
             "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "SSL_CERT_DIR",
         }:
-            monkeypatch.delenv(name)
-    for name, value in {
+            monkeypatch.delenv(variable)
+    for variable, value in {
         "HOME": str(home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
         "LOCALAPPDATA": str(home / "local"), "XDG_STATE_HOME": str(home / "state"),
         "UV_CONFIG_FILE": str(configuration), "UV_CACHE_DIR": str(tmp_path / "cache"),
         "UV_PYTHON": sys.executable, "UV_PYTHON_DOWNLOADS": "never",
         "SSL_CERT_FILE": str(CERTIFICATE),
     }.items():
-        monkeypatch.setenv(name, value)
+        monkeypatch.setenv(variable, value)
 
-    def select_feed(prefix):
+    def select_feed(prefix: str) -> None:
         configuration.write_text(
             'system-certs=true\nexclude-newer="7 days"\n[[index]]\n'
             'name="cohort"\ndefault=true\nauthenticate="never"\nurl='
@@ -215,14 +260,14 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None
     progress(f"normal Source cohort built: {time.monotonic() - started:.2f}s")
     outputs = _prepare_profiles(snapshot, tmp_path, profiles, uv, progress, started)
     select_feed("updated/simple")
-    result = profiles.prepare_registry_lock(
+    updated_profile = profiles.prepare_registry_lock(
         snapshot, tmp_path / "profile-updated", uv=uv,
         deadline=time.monotonic() + 120, prepare_profile=True,
         component="fleet-manager", extras=("gateway-host", "ssh-client"),
     )
-    outputs["updated"] = Path(result["snapshot"])
+    outputs["updated"] = Path(updated_profile["snapshot"])
     for component, output in outputs.items():
-        selected = profiles.source_inputs.select_project(
+        selected = source_inputs.select_project(
             output, {"updated": "fleet-manager", "engine-base": "agent-worktrees"}.get(
                 component, component,
             ),
@@ -232,7 +277,7 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None
     return outputs
 
 
-def main():
+def main() -> None:
     import argparse
     import pytest
 
@@ -243,7 +288,7 @@ def main():
     sys.path.insert(0, str(PROJECT.parent / "tools"))
     from test_installer_wheel_acquisition import feeds
 
-    servers = feeds.__wrapped__()
+    servers = cast(Callable[[], Iterator[FeedFactory]], inspect.unwrap(feeds))()
     try:
         with pytest.MonkeyPatch.context() as environment:
             outputs = prepare_cohort(
