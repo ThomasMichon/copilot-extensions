@@ -104,9 +104,13 @@ resource into that contract; legacy receivers refuse opted-in state on rollback.
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
 configured remote default branch explicitly, even when the remote's ordinary
-fetch refspec excludes it, without refreshing unrelated branch refs for this
-preparation. It chooses the fetched remote default branch as the start point
-when available. A clean anchor checked out on its default branch is also
+fetch refspec excludes it. The recorded remote-HEAD policy bootstrap branch,
+when distinct, is refreshed in the same fetch so offline committed-policy
+discovery can observe later default-branch declarations. These explicit
+tracking destinations ignore configured refmaps; unrelated tracking refs and
+unchecked-out local branches are not refreshed for this preparation.
+It chooses the fetched configured default branch as the start point when
+available. A clean anchor checked out on its default branch is also
 fast-forwarded opportunistically. Dirty, detached, non-default, ahead, and
 diverged anchors are never rewritten; creation still uses the fetched remote
 ref, or a last-known local fallback when the fetch is unavailable.

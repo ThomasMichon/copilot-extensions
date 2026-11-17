@@ -4,6 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TypedDict
+
+
+class _GitProbeOptions(TypedDict, total=False):
+    timeout: float
+    kill_tree: bool
+    observation_deadline: float
+
+
+class _GitHookOptions(TypedDict, total=False):
+    no_hooks: bool
+
+
+class _GitStateFields(TypedDict):
+    current_branch: str | None
+    branch_drift: bool
+    fetch_requested: bool
+    fetch_failed: bool
 
 
 class WorktreeState(str, Enum):

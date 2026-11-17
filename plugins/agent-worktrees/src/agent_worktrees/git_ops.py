@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, cast, overload
+from typing import cast, overload
 
 
 from . import env_scrub, git_tree_diff, push_timeout
@@ -33,6 +33,9 @@ from .git_repository_environment import (
 )
 from .git_errors import GitError, _redact_args as _redact_args
 from .git_state_types import (
+    _GitHookOptions,
+    _GitProbeOptions,
+    _GitStateFields,
     FastForwardResult as FastForwardResult,
     WorktreeBaseResult as WorktreeBaseResult,
     WorktreeState as WorktreeState,
@@ -289,23 +292,6 @@ def can_fast_forward(info: WorktreeStateInfo) -> bool:
     depends on whether the classification fetched first.
     """
     return info.dirty == 0 and info.ahead == 0 and info.behind > 0
-
-
-class _GitProbeOptions(TypedDict, total=False):
-    timeout: float
-    kill_tree: bool
-    observation_deadline: float
-
-
-class _GitHookOptions(TypedDict, total=False):
-    no_hooks: bool
-
-
-class _GitStateFields(TypedDict):
-    current_branch: str | None
-    branch_drift: bool
-    fetch_requested: bool
-    fetch_failed: bool
 
 
 def _get_current_branch_safe(
@@ -662,19 +648,31 @@ def fetch(
     Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
     :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
     ``timeout=None`` is unbounded. ``branch`` explicitly refreshes that tracking
-    ref even when the remote's configured fetch refspec excludes it.
+    ref independently of the remote's configured fetch mappings.
     """
-    refspec = [f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"] if branch else []
+    _fetch_branches(
+        remote, cwd=cwd, branches=(branch,) if branch else (), timeout=timeout,
+        isolated_repository=isolated_repository, no_hooks=no_hooks,
+    )
+
+
+def _fetch_branches(
+    remote: str, *, cwd: str | Path, branches: tuple[str, ...],
+    timeout: float | None = DEFAULT_FETCH_TIMEOUT,
+    isolated_repository: bool = False, no_hooks: bool = False,
+) -> None:
+    refspec = [f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}" for branch in branches]
+    refmap = ["--refmap="] if branches else []
     hook_options: _GitHookOptions = {"no_hooks": True} if no_hooks else {}
     try:
         git(
-            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", *refspec,
+            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", *refmap, *refspec,
             cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
             auth_acquisition=True, **hook_options,
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(
-            ["git", "fetch", remote, "--quiet", *refspec], 124,
+            ["git", "fetch", remote, "--quiet", *refmap, *refspec], 124,
             f"fetch from '{remote}' timed out after {timeout}s "
             "(remote unreachable?)",
         ) from exc
@@ -1452,7 +1450,15 @@ def prepare_worktree_base(
     fetch_error: str | None = None
     if has_remote(remote, cwd=anchor_path):
         try:
-            fetch(remote, cwd=anchor_path, branch=default_branch)
+            from .inrepo_config_source import _offline_remote_head_branch
+
+            policy_branch = _offline_remote_head_branch(
+                anchor_path, remote, time.monotonic() + DEFAULT_FETCH_TIMEOUT, strict=True,
+            )
+            branches: tuple[str, ...] = (default_branch,)
+            if policy_branch and policy_branch != default_branch:
+                branches += (policy_branch,)
+            _fetch_branches(remote, cwd=anchor_path, branches=branches)
             fetched = True
         except Exception as exc:
             fetch_error = str(exc)
