@@ -80,7 +80,7 @@ async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -
             try:
                 await relay_server.start(reclaim=False)
                 from .relay_state import set_live_relay_port
-                set_live_relay_port(relay_server.port)
+                set_live_relay_port(relay_server.port, strict=True)
                 app.state.credential_relay = relay_server
             except BaseException:
                 await relay_server.stop()

@@ -113,6 +113,10 @@ def test_selected_source_creates_separate_configuration_before_real_ensure_lock(
 
     root, state, core, source_start = runtime
     configuration = Path(core._INSTALL_DIR)
+    monkeypatch.setattr(source_start, "time", SimpleNamespace(
+        monotonic=lambda: 0.0,
+        sleep=lambda _: pytest.fail("the already-ready fixture must not wait"),
+    ))
     lock = configuration / "ensure.lock"
     monkeypatch.setattr(main, "_ENSURE_LOCK", str(lock))
     core._acquire_ensure_lock = _acquire_ensure_lock

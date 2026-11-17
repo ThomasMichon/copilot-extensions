@@ -69,7 +69,11 @@ async def test_relay_preparation_cannot_activate_a_demoted_frontend(
 
     monkeypatch.setattr(credential_relay, "RelayBuilder", Builder)
     monkeypatch.setattr(app_module, "_run_in_daemon_thread", prepare)
-    monkeypatch.setattr(relay_state, "set_live_relay_port", lambda _: calls.append("publish"))
+    def publish(_port: int, *, strict: bool = False) -> None:
+        assert strict
+        calls.append("publish")
+
+    monkeypatch.setattr(relay_state, "set_live_relay_port", publish)
     result = await start_credential_relay(app)
     if change == "none":
         assert result is not None and calls == ["prepare", "build", "bind", "publish"]
@@ -126,7 +130,8 @@ async def test_relay_binding_and_publication_hold_one_native_routing_lease(
     async def prepare(*_args: Any) -> None:
         calls.append("prepare")
 
-    def publish(_port: int) -> None:
+    def publish(_port: int, *, strict: bool = False) -> None:
+        assert strict
         assert not mutated.is_set()
         calls.append("publish")
         if publish_error:
@@ -146,6 +151,69 @@ async def test_relay_binding_and_publication_hold_one_native_routing_lease(
             await asyncio.to_thread(thread.join, 5)
             assert not thread.is_alive()
     assert mutated.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous", [None, 41004])
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+async def test_real_publisher_write_failure_stops_listener_and_keeps_old_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, previous: int | None,
+) -> None:
+    import credential_relay
+    from credential_relay.server import CredentialRelayServer
+    from agent_bridge import app as app_module, relay_state
+    from agent_bridge.app_lifecycle import start_credential_relay
+
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=41002, pid=os.getpid(), version="current",
+    )
+    app = FastAPI()
+    app.state.publish_on_ready = True
+    app.state.bound_port = 41002
+    app.state.shutting_down = False
+    calls: list[str] = []
+
+    server = CredentialRelayServer(port=0)
+    start, stop = server.start, server.stop
+    sockets: list[Any] = []
+
+    async def observe_start(*, reclaim: bool = True) -> None:
+        assert reclaim is False
+        await start(reclaim=reclaim)
+        assert server._server is not None
+        sockets.extend(server._server.sockets)
+        calls.append("bind")
+
+    async def observe_stop() -> None:
+        calls.append("stop")
+        await stop()
+
+    monkeypatch.setattr(server, "start", observe_start)
+    monkeypatch.setattr(server, "stop", observe_stop)
+    builder = SimpleNamespace(empty=False, sources={"fixture": object()}, build=lambda: server)
+    port_file = tmp_path / "relay-port"
+    original_write = Path.write_text
+
+    def blocked_write(path: Path, data: str, *args: Any, **kwargs: Any) -> int:
+        if path == port_file:
+            raise OSError("actual relay rendezvous write denied")
+        return original_write(path, data, *args, **kwargs)
+
+    async def prepare(*_args: Any) -> None:
+        pass
+
+    monkeypatch.setattr(credential_relay, "RelayBuilder", lambda: builder)
+    monkeypatch.setattr(app_module, "_run_in_daemon_thread", prepare)
+    monkeypatch.setattr(relay_state, "_live_relay_port", previous)
+    monkeypatch.setattr(Path, "write_text", blocked_write)
+    assert await start_credential_relay(app) is None
+    assert calls == ["bind", "stop"] and not server.running
+    assert sockets and all(sock.fileno() == -1 for sock in sockets)
+    assert relay_state.get_live_relay_port() == previous
+    assert not hasattr(app.state, "credential_relay")
 
 
 @pytest.mark.asyncio

@@ -944,6 +944,10 @@ Reselection or shutdown discards the prepared activation; failed publication
 closes the newly started listener before releasing the lease. Source discovery
 does not hold the routing lease.
 
+Activation uses strict relay-port publication: file-write failure propagates
+without installing the new in-process port, so the new listener is stopped and
+adoption stays unconfirmed. Legacy publication callers retain best-effort mode.
+
 Bridge starts this listener with port reclamation disabled. An occupied fixed
 port remains unavailable; relay startup cannot evict an unconfirmed predecessor
 or its descendants as a side effect of binding. Before promotion, passive
