@@ -28,6 +28,16 @@ before declaring the capability delivered.
 
 ## Coordination
 
+The agent-recommended finite #5319 webhook-adopter proposal below retains
+the existing webhook-producer, shared-cutover and applicable validation
+custodians. It explicitly adds the shared webhook listener to this ROOT's
+planned consumer scope; the incumbent coordinator/Bridge callbacks do not
+already imply that integration. It appoints no executor and transfers no
+resources. Preserve incumbent Plan, completed credit, actual holds and
+native-manager obligations without making unrelated whole-programme or
+every-host completion a new #5319 prerequisite. This is planned receiving,
+not implementation acceptance, source disposition or a new generic ACK gate.
+
 The finite #3938 Worktrees/status-monitor Phase 2 intake below retains #5453's
 existing sole phase owner and resource custody. Phase 1/#5512 remains
 sequential and independently reviewed; #6600 recovery/update/diagnostic work
@@ -167,6 +177,31 @@ are complete, rather than stopping after the design PR.
   contradictory trust or cleanup claims without weakening the vision.
 - [ ] Resolve #5574 or explicitly transfer its separate validation obligation
   to a named tracked objective before closing this effort.
+
+#### Proposed finite webhook-adopter intake from #5319
+
+_(Agent-recommended additive planned receiving; all acceptance remains
+unchecked. This names an additional adopter, not an already-integrated
+callback or an expansion of the native platform programme.)_
+
+- [ ] **P5319:** Integrate the webhook emitter's shared `/webhook/pr`,
+  `/webhook/telemetry` and `/webhook/issue` listener with the established full
+  graceful-generation-cutover protocol for version-staleness-triggered
+  replacement. Preserve passive successor preparation, actual readiness,
+  routing promotion, predecessor admission closure, drain, identity-owned
+  retirement and accepted/in-flight request custody. Do not assume automatic
+  forge redelivery. Ordinary uvicorn shutdown, endpoint-free master singleton
+  behavior, route additions and HMAC protection do not satisfy this contract.
+
+##### Local Validation - #5319
+
+- [ ] **V5319:** Validate the P5319 transition through all three actual routes,
+  accounting for requests admitted across the transition and their continuing
+  custody through drain/retirement. Qualify readiness, routing and predecessor
+  admission boundaries under the established protocol without relying on
+  manual or automatic redelivery. Distinguish shared-library progress from
+  actual webhook integration; retain original supported-platform bounds
+  without adding an every-host programme.
 
 #### Finite Worktrees/status-monitor Phase 2 intake from #3938
 
@@ -470,6 +505,12 @@ _(Agent-recommended direct tracking under existing Phase C; all rows unchecked.)
 
 ## Validation Plan
 
+- [ ] **G5319:** Resolve the complete P5319/V5319 webhook contract and
+  continuing Coordination at its original scope. General manager
+  implementation or another adopter's proof is not webhook acceptance.
+  Keep unrelated native-manager and adopter obligations separate;
+  documentary receiving is not technical completion.
+
 - [ ] **G3938-WT:** Resolve P3938-WT-1 through P3938-WT-4 and
   V3938-WT-1 through V3938-WT-3 at their finite source/platform tiers.
   Keep this lane distinct from incumbent Linux/systemd, Windows manager and
@@ -606,6 +647,14 @@ above are **agent-recommended implementation hardening**, not new operator
 requirements or permission to weaken the existing vision.
 
 ## Journal
+
+### 2026-11-17 - Proposed finite webhook-adopter receiving
+
+Added agent-recommended unchecked P5319/V5319/G5319 and same-custodian
+Coordination for the complete three-route listener/custody contract. This
+explicit additive adopter proposal preserves all incumbent obligations and
+credit; it claims no reviewed receiving delivery, implementation, native
+proof, source disposition or resource transfer.
 
 ### 2026-11-14 - Finite Worktrees Phase 2 receiving proposal
 
