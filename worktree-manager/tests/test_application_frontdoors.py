@@ -118,6 +118,23 @@ def test_non_utf8_frontdoor_requires_replacement_and_valid_publication_repairs_i
     assert not install.needs_install(slot.name, root)
 
 
+@pytest.mark.parametrize("helper", [
+    "def unfinished(",
+    "import fixture_unavailable_selected_frontdoor_dependency\n",
+])
+def test_damaged_selected_helper_requires_replacement_but_cannot_be_published(
+    selected_application: tuple[Path, Path], helper: str,
+) -> None:
+    slot, _ = selected_application
+    root = slot.parent.parent
+    before = {path: path.read_bytes() for path in install._expected_frontdoor_contents(slot)}
+    (slot / "runtime_application_binstubs.py").write_text(helper, encoding="utf-8")
+    assert install.needs_install(slot.name, root)
+    with pytest.raises((SyntaxError, ImportError)):
+        install._deploy_binstubs(application_slot=slot)
+    assert {path: path.read_bytes() for path in before} == before
+
+
 def test_uncommitted_publication_recovers_neutral_and_global_outputs(
     application: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
