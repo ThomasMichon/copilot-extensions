@@ -8235,6 +8235,14 @@ limits also remain unchanged.
 The default item guard includes fixture setup and multiple separately bounded native
 calls, so it is larger than the individual native-call guard.
 
+The runtime-only participant re-entry fixture runs its real driver transaction
+and native PowerShell child inside the existing caller-owned subprocess runner,
+with the same 45/135-second native-call guard and output caps. This keeps pytest
+interruption out of the production driver's custody-preserving wait path; it does
+not change production cancellation or TTY behavior. A deliberately stalled native
+fixture checks that both the participant worker and its original native child
+have exited after the subprocess guard fires.
+
 This profile accepts only the three named test files, without keyword/portfolio
 filters, host-state opt-ins or limit overrides. It preserves the complete
 selected inventory, assertions, admission/refusal and immutable-input checks,

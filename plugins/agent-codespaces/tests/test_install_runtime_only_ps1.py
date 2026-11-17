@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
+
+from agent_procutil._daemon_instance_identity import identity_state
+from agent_procutil.owned_process import run_caller_owned
 
 from . import test_installer_engine_adoption as installer
 from .installer_test_support import installer_functional_timeout
@@ -248,9 +245,103 @@ def test_declared_runtime_only_capability_reaches_the_native_parser(
     assert not (tmp_path / "runtime").exists()
 
 
+def _run_participant(
+    tmp_path: Path, environment: dict[str, str], *, payload: Path, runtime: Path,
+    shell: str, action: str, wheels: list[str], requested: bool, lose_hold: bool,
+) -> subprocess.CompletedProcess[str]:
+    worker = tmp_path / "participant.py"
+    worker.write_text(r"""
+import importlib.util
+import json
+import os
+import sys
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from agent_procutil._daemon_instance_identity import birth_identity, created_process_identity
+
+settings = json.loads(sys.argv[1])
+work = Path(settings["work"])
+scripts = Path(settings["scripts"])
+sys.path.insert(0, str(scripts))
+spec = importlib.util.spec_from_file_location("_codespaces_reentry_driver", scripts / "installer_driver.py")
+assert spec is not None and spec.loader is not None
+driver = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(driver)
+from update_driver import core as owner
+witness = importlib.import_module("update_driver.participant")
+import install_source as inputs
+
+@contextmanager
+def closed_inputs(*_args):
+    yield object()
+
+wheels = settings["wheels"]
+args = SimpleNamespace(
+    payload=Path(settings["payload"]), root=Path(settings["runtime"]),
+    plugin="agent-codespaces", shell=Path(settings["shell"]),
+    action=settings["action"], options=["NoService"] if settings["requested"] else [],
+    check_native=False, remove_broker=False,
+    wheel_profile=Path(wheels[0]), wheel_directory=Path(wheels[1]),
+    wheel_python=Path(wheels[2]), wheel_uv=Path(wheels[3]),
+)
+if settings["lose_hold"]:
+    native_arguments = driver.native_arguments
+    driver.native_arguments = lambda value: [
+        argument for argument in native_arguments(value) if argument != "-NoService"
+    ]
+
+native_popen = driver.subprocess.Popen
+worker_identity = [os.getpid(), birth_identity(os.getpid())]
+def native_child(*arguments, **kwargs):
+    process = native_popen(*arguments, **kwargs)
+    identity = created_process_identity(process)
+    assert identity is not None
+    (work / "participant-identities.json").write_text(
+        json.dumps([worker_identity, identity]), encoding="utf-8",
+    )
+    return process
+
+driver.subprocess = SimpleNamespace(
+    Popen=native_child, CREATE_NO_WINDOW=getattr(driver.subprocess, "CREATE_NO_WINDOW", 0),
+)
+with (
+    patch.object(inputs, "wheel_inputs", closed_inputs),
+    patch.object(inputs, "wheel_selection", lambda *_args: {"fixture": True}),
+    patch.object(owner, "default_root", lambda: work / "execution"),
+):
+    request = owner.enqueue(
+        owner.RequestSpec("engine"),
+        runner=owner.TrustedRunner((sys.executable, "-c", "pass"), str(work)),
+    )
+    def execute(transaction):
+        with patch.dict(os.environ, transaction.participant_env()):
+            return driver.execute(args)
+
+    assert owner.drain(executor=execute) == 0
+    status = owner.status(request.id)
+    assert status.state == "completed" and isinstance(status.exit_code, int)
+    assert witness.ENVIRONMENT_KEY not in os.environ
+    raise SystemExit(status.exit_code)
+""", encoding="utf-8")
+    settings = {
+        "work": str(tmp_path), "scripts": str(installer.PLUGIN / "scripts"),
+        "payload": str(payload), "runtime": str(runtime), "shell": shell,
+        "action": action, "wheels": wheels, "requested": requested, "lose_hold": lose_hold,
+    }
+    result: subprocess.CompletedProcess[str] = run_caller_owned(
+        [sys.executable, "-I", "-B", str(worker), json.dumps(settings)],
+        env=environment, cwd=tmp_path, timeout=installer_functional_timeout(45),
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+    )
+    return result
+
+
 def _reentry(
     tmp_path: Path, shell: str, boundary: str, action: str,
-    monkeypatch: pytest.MonkeyPatch, *, requested: bool = True, lose_hold: bool = False,
+    *, requested: bool = True, lose_hold: bool = False, stall_native: bool = False,
 ) -> tuple[int, dict[str, object]]:
     if os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
         pytest.skip("Runtime-only re-entry requires containment from tools/run-plugin-tests.py")
@@ -286,7 +377,8 @@ def _reentry(
         + "\n$ErrorActionPreference='Stop'\nSet-StrictMode -Version Latest\n"
         + installer._function("ps1", "Copy-InstallerStageDirectory")
         + staging + "\n" + functions
-        + f"\n$fixtureAllowDefault=${str(not requested).lower()}\n" + r"""
+        + f"\n$fixtureAllowDefault=${str(not requested).lower()}\n"
+        + f"$fixtureStall=${str(stall_native).lower()}\n" + r"""
 $script:events=[Collections.Generic.List[string]]::new()
 $ServiceName='fixture'
 $LocalBin=Join-Path $InstallDir 'commands'
@@ -297,7 +389,11 @@ function Write-ServiceOk {}
 function Write-ServiceWarn {}
 function Write-ServiceErr { throw $args[0] }
 function Select-InstallRuntimeGeneration { $script:events.Add('select') }
-function Deploy-Venv { $script:events.Add('venv'); return $true }
+function Deploy-Venv {
+    $script:events.Add('venv')
+    if ($fixtureStall) { Start-Sleep -Seconds 600 }
+    return $true
+}
 function Deploy-Package { $script:events.Add('package'); return $true }
 function Invoke-VersionedActivate { $script:events.Add('activate'); return $true }
 function Deploy-VersionedRuntimeHelper { $script:events.Add('helpers') }
@@ -352,59 +448,18 @@ try {
             "-WheelProfile $WheelProfile -WheelDirectory $WheelDirectory " \
             "-WheelPython $WheelPython -WheelUv $WheelUv\nexit $LASTEXITCODE\n"
         result = installer._run("ps1", invocation, tmp_path, environment)
-        code = result.returncode
     else:
-        monkeypatch.syspath_prepend(str(installer.PLUGIN / "scripts"))
-        spec = importlib.util.spec_from_file_location(
-            "_codespaces_reentry_driver", installer.PLUGIN / "scripts" / "installer_driver.py",
+        result = _run_participant(
+            tmp_path, environment, payload=payload, runtime=runtime, shell=shell,
+            action=action, wheels=wheels, requested=requested, lose_hold=lose_hold,
         )
-        assert spec is not None and spec.loader is not None
-        driver = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(driver)
-        owner = importlib.import_module("update_driver.core")
-        witness = importlib.import_module("update_driver.participant")
-        inputs = importlib.import_module("install_source")
-
-        @contextmanager
-        def closed_inputs(*_args: object) -> Iterator[object]:
-            yield object()
-
-        monkeypatch.setattr(inputs, "wheel_inputs", closed_inputs)
-        monkeypatch.setattr(inputs, "wheel_selection", lambda *_args: {"fixture": True})
-        execution = tmp_path / "execution"
-        monkeypatch.setattr(owner, "default_root", lambda: execution)
-        args = SimpleNamespace(
-            payload=payload, root=runtime, plugin="agent-codespaces", shell=Path(shell),
-            action=action, options=["NoService"] if requested else [],
-            check_native=False, remove_broker=False,
-            wheel_profile=Path(wheels[0]), wheel_directory=Path(wheels[1]),
-            wheel_python=Path(wheels[2]), wheel_uv=Path(wheels[3]),
-        )
-        if lose_hold:
-            native_arguments = driver.native_arguments
-            monkeypatch.setattr(
-                driver, "native_arguments",
-                lambda value: [arg for arg in native_arguments(value) if arg != "-NoService"],
-            )
-        with patch.dict(os.environ, environment, clear=True):
-            request = owner.enqueue(
-                owner.RequestSpec("engine"),
-                runner=owner.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
-            )
-
-            def execute(transaction: object) -> int:
-                context = getattr(transaction, "participant_env")()
-                with patch.dict(os.environ, context):
-                    outcome: int = driver.execute(args)
-                    return outcome
-
-            assert owner.drain(executor=execute) == 0
-            status = owner.status(request.id)
-            assert status.state == "completed" and isinstance(status.exit_code, int)
-            code = status.exit_code
-            assert witness.ENVIRONMENT_KEY not in os.environ
+    if result.returncode:
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
+    report_path = home / "reentry.json"
+    assert report_path.is_file(), result.stdout + result.stderr
     report: dict[str, object] = json.loads(
-        (home / "reentry.json").read_text(encoding="utf-8-sig"),
+        report_path.read_text(encoding="utf-8-sig"),
     )
     assert report["action"] == action and report["wheels"] == wheels
     staged_from = report["staged_from"]
@@ -413,7 +468,7 @@ try {
         assert report["script_root"] != str(scripts)
     else:
         assert not staged_from
-    return code, report
+    return result.returncode, report
 
 
 @pytest.mark.parametrize("boundary", ["participant", "self-stage"])
@@ -421,10 +476,10 @@ try {
 @pytest.mark.parametrize("requested", [False, True])
 def test_runtime_only_reentry(
     tmp_path: Path, native_shell: str, boundary: str, action: str,
-    requested: bool, monkeypatch: pytest.MonkeyPatch,
+    requested: bool,
 ) -> None:
     code, report = _reentry(
-        tmp_path, native_shell, boundary, action, monkeypatch, requested=requested,
+        tmp_path, native_shell, boundary, action, requested=requested,
     )
     assert code == 0, report
     assert report["no_service"] is requested
@@ -434,12 +489,48 @@ def test_runtime_only_reentry(
     assert report["events"] == expected
 
 
+def test_participant_reentry_uses_the_bounded_native_runner(
+    tmp_path: Path, native_shell: str, request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ObservedParticipant(RuntimeError):
+        pass
+
+    def invoke(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command[0] == sys.executable
+        timeout = kwargs["timeout"]
+        marker = request.node.get_closest_marker("timeout")
+        assert marker is not None
+        assert isinstance(timeout, (int, float))
+        assert marker.args[0] > timeout
+        assert kwargs["max_stdout_bytes"] == kwargs["max_stderr_bytes"] == 1024 * 1024
+        raise ObservedParticipant
+
+    monkeypatch.setattr(sys.modules[__name__], "run_caller_owned", invoke)
+    with pytest.raises(ObservedParticipant):
+        _reentry(tmp_path, native_shell, "participant", "update")
+
+
+def test_participant_timeout_reaps_the_worker_and_native_child(
+    tmp_path: Path, native_shell: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys.modules[__name__], "installer_functional_timeout", lambda _seconds: 10,
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        _reentry(tmp_path, native_shell, "participant", "update", stall_native=True)
+    identities = json.loads((tmp_path / "participant-identities.json").read_text(encoding="utf-8"))
+    assert len(identities) == 2
+    for pid, birth in identities:
+        assert identity_state(pid, birth) in {"dead", "reused"}
+
+
 @pytest.mark.parametrize("boundary", ["participant", "self-stage"])
 def test_reentry_detects_a_lost_runtime_only_flag(
-    tmp_path: Path, native_shell: str, boundary: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, native_shell: str, boundary: str,
 ) -> None:
     code, report = _reentry(
-        tmp_path, native_shell, boundary, "update", monkeypatch, lose_hold=True,
+        tmp_path, native_shell, boundary, "update", lose_hold=True,
     )
     assert code != 0
     assert report["no_service"] is False
