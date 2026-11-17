@@ -24,6 +24,13 @@ class Segments:
         return self.value
 
 
+@pytest.fixture(autouse=True)
+def native_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(presentation, "observe_psmux", lambda session, **k: Observation(
+        "present", incarnation="$8:100" if session == "wt-two" else "$7:100", clients=1,
+    ))
+
+
 def test_successive_native_sweeps_publish_full_payload_and_changed_segment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -86,13 +93,15 @@ def test_unknown_native_observation_does_not_publish(
 
 
 @pytest.mark.parametrize("native_present", [True, False])
+@pytest.mark.parametrize("original_incarnation", ["legacy-launch", "$6:99"])
 def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_present: bool,
+    original_incarnation: str,
 ) -> None:
     cache = mux_link.ManagedMuxCache()
     original: dict[str, Any] = {
         "project": "project", "worktree_id": "one", "worktree_path": str(tmp_path),
-        "mux_session": "wt-one", "session_incarnation": "legacy-launch",
+        "mux_session": "wt-one", "session_incarnation": original_incarnation,
         "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -123,11 +132,11 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     monkeypatch.setattr(mux_status_link, "push_discovery_via_daemon", discover)
     monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
     ctx_done = {"wt-one"}
+    published = {("wt-one", "@aw_ctx"): "new-context", ("wt-one", "@aw_seg"): "first"}
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done,
         managed_mux_cache=cache, segment_cache=Segments(),
-        incarnations={"wt-one": "legacy-launch"},
-        published={("wt-one", "@aw_ctx"): "old-context", ("wt-one", "@aw_seg"): "first"},
+        incarnations={"wt-one": original_incarnation}, published=published,
     ) == 1
     if native_present:
         assert discoveries[0]["session_incarnation"] == "$7:100"
@@ -137,7 +146,9 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     else:
         assert discoveries == [] and requests == []
         retained = cache.get("project", "one")
-        assert retained is not None and retained["session_incarnation"] == "legacy-launch"
+        assert retained is not None and retained["session_incarnation"] == original_incarnation
+        assert ctx_done == {"wt-one"}
+        assert published == {("wt-one", "@aw_ctx"): "new-context", ("wt-one", "@aw_seg"): "first"}
 
 
 @pytest.mark.parametrize("failure", ["context", "segment"])

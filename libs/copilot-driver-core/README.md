@@ -246,6 +246,15 @@ delta requires no native write. Other unknown fields remain refused. Context
 publication initializes the canonical status formats, including for older
 mapping records, while ordinary segment refreshes retain existing coalescing.
 
+The presentation pass compares every cached incarnation with a fresh native
+observation, including a replacement under the same session name. Context and
+delta caches are cleared only after Manager admits the new mapping. A live
+legacy opaque mapping can be reconciled by Manager's existing CAS registration
+owner after matching its session name, executable and worktree path and
+reconfirming the connected native target. Tombstones, foreign mappings, unknown
+observations and concurrent registry changes remain refusals. Ordinary discovery
+retains its incumbent guard; reconciliation does not retire any process or pane.
+
 Expand the Manager writer before updating Worktrees' monitor. The unchanged
 request contract permits either older peer to remain installed during that
 sequence: an older monitor retains its observation-only PSMux behavior, and an

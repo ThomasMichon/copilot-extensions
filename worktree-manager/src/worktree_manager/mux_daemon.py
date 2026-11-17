@@ -427,7 +427,9 @@ def build_compute(
             return runtime.picker_sessions.acquire(payload)
         if kind != KIND:
             if kind == mux_discovery.KIND:
-                return mux_discovery.handle_discovery(registry, payload, runtime, handler_tracker)
+                from .mux_mapping_recovery import handle_discovery
+
+                return handle_discovery(registry, payload, runtime, handler_tracker)
             raise ValueError(f"mux_daemon does not serve kind={kind!r}")
         if runtime is not None and not runtime.accepting_requests():
             return {"applied": False, "reason": "draining"}

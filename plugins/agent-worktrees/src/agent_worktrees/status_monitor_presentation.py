@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import nullcontext
-import re
 from typing import Any
 
 from agent_remote_driver.mux_observation import observe_psmux
@@ -22,10 +21,12 @@ def _native_entry(
         for field in ("project", "worktree_id", "worktree_path", "mux_session")
     ):
         return None
-    if re.fullmatch(r"\$[0-9]+:[0-9]+", str(entry.get("session_incarnation", ""))):
-        return entry
     observed = observe_psmux(entry["mux_session"], timeout=1.0)
-    if observed.status != "present" or not observed.clients:
+    if observed.status != "present":
+        return None
+    if observed.incarnation == entry.get("session_incarnation"):
+        return entry
+    if not observed.clients:
         return None
     result = mux_status_link.push_discovery_via_daemon({
         "project": entry["project"], "worktree_id": entry["worktree_id"],
@@ -85,6 +86,11 @@ def run_monitor_sweep(
         entry = _native_entry(original, mux_bin, cache)
         if entry is None:
             return
+        if entry.get("session_incarnation") != original.get("session_incarnation"):
+            ctx_done.discard(session)
+            if published is not None:
+                for key in [key for key in published if key[0] == session]:
+                    published.pop(key, None)
         project, worktree_id, path = (
             entry.get("project"), entry.get("worktree_id"), entry.get("worktree_path"),
         )
