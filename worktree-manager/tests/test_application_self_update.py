@@ -237,6 +237,7 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
     "incoming-construction-field", "incoming-source-field", "incoming-receipt-field",
     "incoming-package-list", "incoming-payload-hash", "source-conflict", "profile-conflict",
     "setup-file", "project-file", "lock-file", "source-file", "payload-file",
+    "helper-name", "helper-lookup", "incoming-helper-name", "incoming-helper-lookup",
 ])
 def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
@@ -346,17 +347,23 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         (app / "application.json").write_text(json.dumps({
             **declaration, "module": "not a module",
         }), encoding="utf-8")
-    elif damage.startswith("helper-") or damage == "incoming-helper":
+    elif damage.startswith("helper-") or damage.startswith("incoming-helper"):
         helpers = {
             "helper-syntax": "def unfinished(",
             "helper-import": "import fixture_unavailable_launcher_dependency\n",
             "helper-api": "unavailable_renderer = True\n",
             "helper-runtime": "raise RuntimeError('unavailable selected renderer')\n",
-            "incoming-helper": "def unfinished(",
+            "helper-name": "unavailable_renderer_name\n",
+            "helper-lookup": (
+                "def global_binstubs(*args, **kwargs):\n"
+                "    raise KeyError('fixture renderer input')\n"
+            ),
         }
-        damaged = app if damage == "incoming-helper" else old
+        key = damage.removeprefix("incoming-")
+        key = "helper-syntax" if key == "helper" else key
+        damaged = app if damage.startswith("incoming-") else old
         (damaged / "runtime_application_binstubs.py").write_text(
-            helpers[damage], encoding="utf-8",
+            helpers[key], encoding="utf-8",
         )
     elif damage in {"unreadable", "incoming-unreadable"}:
         read = footprints._read
@@ -398,13 +405,7 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *args, **options: {})
     monkeypatch.setattr(self_install, "self_install", lambda **options: pytest.fail("legacy constructor"))
     result = self_install.self_update(root=root)
-    if damage in {
-        "conflict", "incoming", "incoming-module", "incoming-helper", "incoming-unreadable", "indirect",
-        "incoming-command-name", "incoming-environment-name", "incoming-runtime-version",
-        "incoming-default-directory", "incoming-construction-field", "incoming-source-field",
-        "incoming-receipt-field", "incoming-package-list", "incoming-payload-hash",
-        "source-conflict", "profile-conflict",
-    }:
+    if damage.startswith("incoming") or damage in {"conflict", "source-conflict", "profile-conflict", "indirect"}:
         assert result.action == "error"
         assert (root / "current-version").read_text(encoding="utf-8").strip() == version
         assert list((root / "versions").iterdir()) == [old]

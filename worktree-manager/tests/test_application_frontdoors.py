@@ -118,23 +118,43 @@ def test_non_utf8_frontdoor_requires_replacement_and_valid_publication_repairs_i
     assert not install.needs_install(slot.name, root)
 
 
-@pytest.mark.parametrize("helper", [
-    "def unfinished(",
-    "import fixture_unavailable_selected_frontdoor_dependency\n",
-    "unavailable_renderer = True\n",
-    "raise RuntimeError('unavailable selected renderer')\n",
+@pytest.mark.parametrize(("helper", "error"), [
+    ("def unfinished(", SyntaxError),
+    ("import fixture_unavailable_selected_frontdoor_dependency\n", ImportError),
+    ("unavailable_renderer = True\n", AttributeError),
+    ("raise RuntimeError('unavailable selected renderer')\n", RuntimeError),
+    ("unavailable_renderer_name\n", NameError),
+    (
+        "def global_binstubs(*args, **kwargs):\n"
+        "    raise KeyError('fixture renderer input')\n",
+        KeyError,
+    ),
+    ("raise Exception('unavailable selected renderer')\n", Exception),
 ])
 def test_damaged_selected_helper_requires_replacement_but_cannot_be_published(
-    selected_application: tuple[Path, Path], helper: str,
+    selected_application: tuple[Path, Path], helper: str, error: type[Exception],
 ) -> None:
     slot, _ = selected_application
     root = slot.parent.parent
     before = {path: path.read_bytes() for path in install._expected_frontdoor_contents(slot)}
     (slot / "runtime_application_binstubs.py").write_text(helper, encoding="utf-8")
     assert install.needs_install(slot.name, root)
-    with pytest.raises((SyntaxError, ImportError, AttributeError, RuntimeError)):
+    with pytest.raises(error):
         install._deploy_binstubs(application_slot=slot)
     assert {path: path.read_bytes() for path in before} == before
+
+
+def test_renderer_status_does_not_consume_user_interrupts(
+    selected_application: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slot, _ = selected_application
+
+    def interrupted(_slot: Path) -> dict[Path, str]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(install, "_expected_frontdoor_contents", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        install._binstubs_are_stale(application_slot=slot)
 
 
 def test_uncommitted_publication_recovers_neutral_and_global_outputs(

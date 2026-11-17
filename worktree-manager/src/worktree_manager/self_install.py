@@ -402,7 +402,7 @@ def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
     """
     try:
         contents = _expected_frontdoor_contents(application_slot)
-    except (OSError, ValueError, TypeError, SyntaxError, ImportError, RuntimeError, AttributeError):
+    except Exception:
         # Unreadable selected inputs and older rendering APIs are replacement gaps.
         return True
     for p, expected in contents.items():

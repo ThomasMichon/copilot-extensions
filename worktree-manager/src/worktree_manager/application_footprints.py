@@ -233,7 +233,7 @@ def select_generation(
     if qualify is not None:
         try:
             qualify(application.source)
-        except (OSError, ValueError, TypeError, SyntaxError, ImportError, RuntimeError, AttributeError) as error:
+        except Exception as error:
             raise ValueError("incoming application launchers are unavailable") from error
     base = application.version
     if current and re.fullmatch(re.escape(base) + r"\.repair\.[0-9a-f]{32}", current):
@@ -253,7 +253,7 @@ def select_generation(
             _verify_setup(application.slot)
             if qualify is not None:
                 qualify(application.slot)
-        except (OSError, ValueError, TypeError, SyntaxError, ImportError, RuntimeError, AttributeError):
+        except Exception:
             pass
         else:
             return application

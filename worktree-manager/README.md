@@ -138,6 +138,8 @@ Matching metadata also requires every incoming copied path to remain present
 with its file/directory kind before reusing a snapshot. Missing setup, project,
 lock, Source-sidecar or payload inputs require a distinct repair; the existing
 tree walks supply this presence check without hashing or rewriting old inputs.
+Ordinary renderer exceptions require selected replacement or a structured
+incoming error; process-control exceptions such as user interrupts propagate.
 Missing metadata alone does not redirect an
 application installation or its configuration to the legacy installer/root.
 
