@@ -125,8 +125,10 @@ are installation gaps, not an already-current result.
 An older selected launcher helper without neutral-setup rendering is likewise
 a replacement gap, not a status exception that blocks the incoming version.
 An application-root self-update repairs missing or invalid installed application
-metadata in a distinct `.repair.<id>` generation, leaving the damaged slot
-untouched. An unchanged repeat reuses the selected repair generation. Incoming
+metadata or an unusable slot-local launcher renderer in a distinct
+`.repair.<id>` generation, leaving the damaged slot untouched. An unchanged
+repeat reuses the selected repair generation; missing/edited global or neutral
+commands alone do not allocate another generation. Incoming
 declarations remain strict, and a valid but conflicting installed declaration
 is not treated as corruption. Missing metadata alone does not redirect an
 application installation or its configuration to the legacy installer/root.

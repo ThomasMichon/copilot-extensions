@@ -121,6 +121,8 @@ def test_non_utf8_frontdoor_requires_replacement_and_valid_publication_repairs_i
 @pytest.mark.parametrize("helper", [
     "def unfinished(",
     "import fixture_unavailable_selected_frontdoor_dependency\n",
+    "unavailable_renderer = True\n",
+    "raise RuntimeError('unavailable selected renderer')\n",
 ])
 def test_damaged_selected_helper_requires_replacement_but_cannot_be_published(
     selected_application: tuple[Path, Path], helper: str,
@@ -130,7 +132,7 @@ def test_damaged_selected_helper_requires_replacement_but_cannot_be_published(
     before = {path: path.read_bytes() for path in install._expected_frontdoor_contents(slot)}
     (slot / "runtime_application_binstubs.py").write_text(helper, encoding="utf-8")
     assert install.needs_install(slot.name, root)
-    with pytest.raises((SyntaxError, ImportError)):
+    with pytest.raises((SyntaxError, ImportError, AttributeError, RuntimeError)):
         install._deploy_binstubs(application_slot=slot)
     assert {path: path.read_bytes() for path in before} == before
 

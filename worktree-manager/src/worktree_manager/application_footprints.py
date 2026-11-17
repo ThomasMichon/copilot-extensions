@@ -181,14 +181,22 @@ def _verify_tree(path: Path, application: Application) -> None:
             children[:] = [name for name in children if name not in {".venv", "state"}]
 
 
-def select_generation(application: Application, current: str | None) -> Application:
-    """Reuse the selected repair or allocate a distinct slot for damaged metadata."""
+def select_generation(
+    application: Application, current: str | None, *,
+    qualify: Callable[[Path], object] | None = None,
+) -> Application:
+    """Reuse a qualified selection or allocate a distinct slot for damaged inputs."""
     from .self_install import _runtime_installer
 
     _verify_copy(application.source, application)
     _runtime_installer()
     validate = importlib.import_module("runtime_application_install")._validate_application
     validate(json.loads(application.declaration, object_pairs_hook=_unique))
+    if qualify is not None:
+        try:
+            qualify(application.source)
+        except (OSError, ValueError, TypeError, SyntaxError, ImportError, RuntimeError, AttributeError) as error:
+            raise ValueError("incoming application launchers are unavailable") from error
     base = application.version
     if current and re.fullmatch(re.escape(base) + r"\.repair\.[0-9a-f]{32}", current):
         application = replace(application, version=current)
@@ -198,11 +206,17 @@ def select_generation(application: Application, current: str | None) -> Applicat
     _verify_tree(application.slot, application)
     try:
         installed = _read(application.slot / "application.json")
-    except (FileNotFoundError, ValueError):
+    except (OSError, ValueError):
         installed = None
     if installed == application.declaration:
-        return application
-    if installed is not None:
+        try:
+            if qualify is not None:
+                qualify(application.slot)
+        except (OSError, ValueError, TypeError, SyntaxError, ImportError, RuntimeError, AttributeError):
+            pass
+        else:
+            return application
+    elif installed is not None:
         try:
             validate(json.loads(installed, object_pairs_hook=_unique))
         except (ValueError, UnicodeError):

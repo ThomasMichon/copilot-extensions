@@ -615,9 +615,20 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
             assert Path(update_repository).is_absolute() and Path(update_repository).is_dir()
             source_config.set_source(repo=update_repository, ref="dev", root=application.root)
             installed_environment["WORKTREE_MANAGER_ROOT"] = str(application.root)
+            repair_slot = None
+            repair_code = None
+            repair_base = None
             if mode == "same-source-repair":
-                (application.slot / "application.json").unlink()
-                immutable = _code_snapshot(application.slot)
+                established = invoke(command, ["update", "--target", "worktree-manager"])
+                assert established.returncode == 0, (established.stdout, established.stderr)
+                established_endpoint = mux_daemon_cutover.routed_endpoint(application.root)
+                assert established_endpoint is not None and established_endpoint.version is not None
+                repair_base = established_endpoint.version
+                repair_slot = application.root / "versions" / repair_base
+                (repair_slot / "application.json").unlink()
+                repair_code = _code_snapshot(repair_slot)
+                if repair_slot == application.slot:
+                    immutable = repair_code
             previous_pid = None
             default_code = None
             for attempt in range(2):
@@ -627,7 +638,10 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
                 assert selected is not None and selected.version is not None
                 assert selected.version != application.version
                 if mode == "same-source-repair":
-                    assert selected.version.startswith(application.version + ".repair.")
+                    assert repair_base is not None
+                    assert selected.version.startswith(repair_base + ".repair.")
+                    assert repair_slot is not None and repair_code is not None
+                    _assert_code_unchanged(repair_slot, repair_code)
                 assert selected.pid is not None
                 slot = application.root / "versions" / selected.version
                 if attempt:

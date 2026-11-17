@@ -7063,9 +7063,9 @@ The fixture's selected Dev ref is isolated test input,
 not publication or qualification of unmerged source as the real merged branch.
 An omitted repository skips this case, not a default-update pass.
 
-The `same-source-repair` case uses a baseline prepared from the fixture's exact
-Dev source/profile, removes only its installed `application.json`, then runs
-the same installed update twice. It requires a distinct `.repair.<id>` slot,
+The `same-source-repair` case first establishes the fixture's source/profile
+through its installed producer, removes only that slot's `application.json`,
+then runs the same installed update twice. It requires a distinct `.repair.<id>` slot,
 unchanged damaged-slot bytes/mtimes, preserved state, ready incoming service
 and same-PID reuse under renewed consumer demand. The missing declaration must
 not select the legacy installation path. It uses the same private lifecycle

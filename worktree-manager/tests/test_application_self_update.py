@@ -99,7 +99,7 @@ def test_application_update_reuses_complete_setup_without_legacy_fallback(
     monkeypatch.setattr(update, "acquire", acquire)
     monkeypatch.setattr(update, "prepare_footprint", prepare)
     monkeypatch.setattr(footprints, "plan", plan)
-    monkeypatch.setattr(footprints, "select_generation", lambda application, current: application)
+    monkeypatch.setattr(footprints, "select_generation", lambda application, current, **options: application)
     monkeypatch.setattr(footprints, "install", install)
     result = self_install.self_update(root=root, dry_run=phase == "dry-run")
     assert result.previous == previous
@@ -157,6 +157,10 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
         }))
         for name in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
             (app / name).write_text("# fixture\n")
+        shutil.copyfile(
+            Path(__file__).resolve().parents[2] / "libs" / "installer-engine"
+            / "runtime_application_binstubs.py", app / "runtime_application_binstubs.py",
+        )
         prepared_inputs.append(app)
         return footprint
 
@@ -180,7 +184,9 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
 
 @pytest.mark.parametrize("damage", [
     "missing", "truncated", "utf8", "shape", "commands", "oversized",
-    "conflict", "incoming", "incoming-module", "indirect",
+    "unreadable", "helper-syntax", "helper-import", "helper-api", "helper-runtime",
+    "frontdoors", "conflict", "incoming", "incoming-module", "incoming-helper",
+    "incoming-unreadable", "indirect",
 ])
 def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
@@ -218,6 +224,10 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         '  basename "$(dirname "$(dirname "$0")")" > "$WORKTREE_MANAGER_ROOT/current-version"\n'
         "fi\n", encoding="utf-8",
     )
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "installer-engine"
+        / "runtime_application_binstubs.py", app / "runtime_application_binstubs.py",
+    )
     old = root / "versions" / "2"
     shutil.copytree(app, old)
     (root / "current-version").write_text("2\n", encoding="utf-8")
@@ -241,6 +251,28 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         (app / "application.json").write_text(json.dumps({
             **declaration, "module": "not a module",
         }), encoding="utf-8")
+    elif damage.startswith("helper-") or damage == "incoming-helper":
+        helpers = {
+            "helper-syntax": "def unfinished(",
+            "helper-import": "import fixture_unavailable_launcher_dependency\n",
+            "helper-api": "unavailable_renderer = True\n",
+            "helper-runtime": "raise RuntimeError('unavailable selected renderer')\n",
+            "incoming-helper": "def unfinished(",
+        }
+        damaged = app if damage == "incoming-helper" else old
+        (damaged / "runtime_application_binstubs.py").write_text(
+            helpers[damage], encoding="utf-8",
+        )
+    elif damage in {"unreadable", "incoming-unreadable"}:
+        read = footprints._read
+        unreadable = (app if damage == "incoming-unreadable" else old) / "application.json"
+
+        def guarded_read(path: Path) -> bytes:
+            if path == unreadable:
+                raise PermissionError("fixture declaration read denied")
+            return read(path)
+
+        monkeypatch.setattr(footprints, "_read", guarded_read)
     elif damage == "indirect":
         original = Path.lstat
 
@@ -254,7 +286,7 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
             return info
 
         monkeypatch.setattr(Path, "lstat", indirect)
-    else:
+    elif damage != "frontdoors":
         (app / "application.json").write_bytes(b'{"commands": [')
     before = {path.relative_to(old): (path.read_bytes(), path.stat().st_mtime_ns)
               for path in old.rglob("*") if path.is_file()}
@@ -271,10 +303,16 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *args, **options: {})
     monkeypatch.setattr(self_install, "self_install", lambda **options: pytest.fail("legacy constructor"))
     result = self_install.self_update(root=root)
-    if damage in {"conflict", "incoming", "incoming-module", "indirect"}:
+    if damage in {
+        "conflict", "incoming", "incoming-module", "incoming-helper", "incoming-unreadable", "indirect",
+    }:
         assert result.action == "error"
         assert (root / "current-version").read_text(encoding="utf-8").strip() == "2"
         assert list((root / "versions").iterdir()) == [old]
+    elif damage == "frontdoors":
+        assert result.action == "already-current", result.reason
+        assert result.version == "2"
+        assert {path for path in (root / "versions").iterdir() if not path.name.startswith(".")} == {old}
     else:
         assert result.action == "updated", result.reason
         assert result.version is not None and result.version.startswith("2.repair.")
