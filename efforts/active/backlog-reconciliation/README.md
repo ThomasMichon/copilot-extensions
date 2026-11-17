@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [cadence and idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+  distinguishes #2908's conditional cadence from existing merge guidance and
+  stops #2879 research at unchanged decisive entrypoints without closure credit.
   The [build-isolation and native-acceptance checkpoint](journal/2026/11.17-build-isolation-and-native-acceptance.md)
   establishes the retained #1838 case's actual current installer/policy wiring
   and credits #13074/#13096 source delivery without claiming native acceptance.
