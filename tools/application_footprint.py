@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 from contextlib import ExitStack, redirect_stdout
 import json
 import math
@@ -12,7 +13,9 @@ import shutil
 import stat
 import sys
 import time
+from types import ModuleType
 from typing import Any
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -55,6 +58,7 @@ def prepare_frozen(
     permissions = processes.procutil_module("python_cache_permissions")
     permissions.check(output.parent, ancestor=True)
     permissions.check_ancestors(output.parent)
+    output = output.resolve()
     processes.procutil_module("_daemon_instance_owner").mkdir_private(output)
     built = output / "inputs"
     projects = ("standalone:worktree-manager",)
@@ -117,6 +121,69 @@ def _setup_frontdoors(application: Path) -> None:
             path.chmod(0o700)
 
 
+def _manager_setup(application: Path, inputs: Any, *, deadline: float) -> None:
+    """Use the verified Manager wheel's frozen resources, not tooling-checkout bytes."""
+    import prepare_runtime_source as preparation
+
+    distribution = inputs.receipt()["distributions"]["copilot-extensions-worktree-manager"]
+    wheel = application / "wheels" / distribution["filename"]
+    resources = "worktree_manager/_runtime_assets/scripts/"
+    provider = resources + "runtime-input-provider/libs/"
+    with zipfile.ZipFile(wheel) as archive:
+        def read(name: str) -> bytes:
+            preparation._remaining(deadline)
+            info = archive.getinfo(name)
+            if info.is_dir() or info.file_size > 16 << 20:
+                raise ValueError("Manager setup resource exceeds its ordinary-file bound")
+            return archive.read(info)
+        helper = read(provider + "installer-engine/runtime_application_binstubs.py")
+        runtime = {}
+        for source_directory in ("installer-engine/", "versioned-runtime/"):
+            prefix = provider + source_directory
+            for name in archive.namelist():
+                relative = name.removeprefix(prefix)
+                if name.startswith(prefix) and "/" not in relative and relative.endswith(".py"):
+                    runtime[relative] = read(name)
+        if not {"installer_engine.py", "versioned_runtime.py"} <= runtime.keys():
+            raise ValueError("Manager wheel is missing its frozen setup runtime")
+        install = read(provider + "installer-engine/runtime_application_install.py")
+        lifecycle = read(resources + "daemon_instance_runtime.pyz")
+        entries = [name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt")]
+        if len(entries) != 1:
+            raise ValueError("Manager wheel has no unambiguous command declaration")
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read_string(read(entries[0]).decode("utf-8"))
+        commands = dict(parser["console_scripts"])
+    declaration = json.loads((application / "application.json").read_text(encoding="utf-8"))
+    if set(commands) != set(declaration["commands"]):
+        raise ValueError("Manager wheel commands differ from the prepared application")
+    (application / "install.py").write_bytes(install)
+    (application / "runtime_application_binstubs.py").write_bytes(helper)
+    directory = application / "runtime"
+    shutil.rmtree(directory)
+    directory.mkdir()
+    for name, content in runtime.items():
+        (directory / name).write_bytes(content)
+    (directory / "daemon_instance_runtime.pyz").write_bytes(lifecycle)
+    launchers = ModuleType("_frozen_manager_binstubs")
+    launchers.__file__ = str(application / "runtime_application_binstubs.py")
+    exec(compile(helper, launchers.__file__, "exec"), vars(launchers))
+    python = (application / ".python-version").read_text(encoding="utf-8").strip()
+    python_request = python if python.startswith("cpython-") and "-windows-" in python else None
+    for command, entry in commands.items():
+        generated = launchers.slot_binstubs(command, entry, python_request=python_request)
+        for name, text in generated.items():
+            if name in {"install", "install.cmd", "install.ps1", "install.sh"} and command != declaration["name"]:
+                continue
+            if Path(name).name != name or name in {".", ".."}:
+                raise ValueError("Manager setup generated a nonlocal launcher")
+            path = application / name
+            with path.open("w", encoding="utf-8", newline="") as stream:
+                stream.write(text)
+            if path.suffix == ".sh" or not path.suffix:
+                path.chmod(0o700)
+
+
 def export(
     snapshots: dict[str, Path], destination: Path, *,
     dependencies: dict[str, tuple[str, ...]] | None = None, deadline: float,
@@ -174,6 +241,7 @@ def export(
             _ordinary_tree(application, deadline=deadline)
             applications[component] = (application, declaration, inputs)
         preparation._private_output_directory(destination)
+        destination = destination.resolve()
         app_root = destination / "apps"
         app_root.mkdir()
         rows = []
@@ -185,6 +253,8 @@ def export(
             if source_inputs._read(application / "application.json") != declaration:
                 raise ValueError("application declaration changed during footprint export")
             engine.verify_application_wheels(inputs, application)
+            if declaration["name"] == "worktree-manager":
+                _manager_setup(application, inputs, deadline=deadline)
             _setup_frontdoors(application)
             inputs.verify()
             rows.append({

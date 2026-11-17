@@ -56,6 +56,10 @@ consumable by `worktree-manager-install`. The output contains relative wheel
 inputs, declared Python and generated `bin/setup.{ps1,cmd,sh}` forwards to the
 canonical slot-local install entries; it contains no copied environment or state.
 The exported footprint can move independently of the preparation tree.
+Manager's setup/runtime resources, lifecycle archive and launcher generator
+come from its verified first-party wheel, not mutable tooling-checkout helpers
+or helper bytes in a reused profile. Output paths are normalized before
+preparation/export receipts are returned.
 
 Run the entry with the repository's prepared tooling Python and PATH `uv`,
 supplying `--source-checkout`, `--source-commit`, `--main-head`, `--branch`,

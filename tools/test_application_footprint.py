@@ -12,6 +12,7 @@ import sys
 import time
 from types import SimpleNamespace
 from typing import Any
+import zipfile
 
 import pytest
 
@@ -66,6 +67,7 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pat
     monkeypatch.setattr(source_inputs, "project_inputs", retain)
     monkeypatch.setattr(profiles, "_verify_application", lambda *_args: events.append("canonical-profile"))
     monkeypatch.setattr(engine, "verify_application_wheels", lambda *_args: events.append("copied-wheels"))
+    monkeypatch.setattr(footprint, "_manager_setup", lambda *_args, **_kw: None)
     return snapshot, application, events
 
 
@@ -234,8 +236,10 @@ def frozen_repo(tmp_path: Path) -> tuple[Path, str, str]:
     return repository, dev, commit
 
 
+@pytest.mark.parametrize("parent_components", [False, True])
 def test_frozen_wip_uses_only_exact_commit_and_shared_preparation_owners(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frozen_repo: tuple[Path, str, str],
+    parent_components: bool,
 ) -> None:
     import local_install_source as preparation
     import prepare_runtime_source as source
@@ -275,13 +279,82 @@ def test_frozen_wip_uses_only_exact_commit_and_shared_preparation_owners(
     monkeypatch.setattr(preparation, "_built_projects", build)
     monkeypatch.setattr(preparation, "_prepare_profiles", profiles)
     monkeypatch.setattr(preparation, "_application_completion", lambda *_args, **_kw: {"fixture": True})
+    selected_output = output
+    if parent_components:
+        (tmp_path / "intermediate").mkdir()
+        selected_output = tmp_path / "intermediate" / ".." / output.name
     result = footprint.prepare_frozen(
-        repository, commit, dev, dev, output, uv="fixture-uv", deadline=deadline,
+        repository, commit, dev, dev, selected_output, uv="fixture-uv", deadline=deadline,
     )
     assert result == {"worktree-manager": str(output / "snapshot")}
     assert seen == ["compose", "build", "profile", "settled"]
     assert json.loads((output / "applications.json").read_text()) == {"fixture": True}
     assert (repository / "input.txt").read_text() == "unselected dirty bytes\n"
+
+
+def test_export_returns_normalized_directly_consumable_path(
+    tmp_path: Path, prepared: tuple[Path, Path, list[str]],
+) -> None:
+    snapshot, _application, _events = prepared
+    (tmp_path / "intermediate").mkdir()
+    result = footprint.export(
+        {"worktree-manager": snapshot}, tmp_path / "intermediate" / ".." / "footprint",
+        deadline=time.monotonic() + 30,
+    )
+    assert result == tmp_path / "footprint" and ".." not in result.parts
+
+
+def test_setup_assets_and_launchers_come_from_frozen_wheel_not_dirty_source(
+    tmp_path: Path, frozen_repo: tuple[Path, str, str],
+) -> None:
+    import prepare_runtime_source as source
+
+    repository, _dev, _commit = frozen_repo
+    helper = repository / "setup-helper.py"
+    helper.write_bytes((TOOLS.parent / "libs" / "installer-engine" / "runtime_application_binstubs.py").read_bytes())
+    deadline = time.monotonic() + 30
+    source._git(repository, "add", "setup-helper.py", deadline=deadline)
+    source._git(
+        repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-m", "Frozen helper", deadline=deadline,
+    )
+    commit = source._git(repository, "rev-parse", "HEAD", deadline=deadline)
+    frozen = source._git(repository, "show", commit + ":setup-helper.py", deadline=deadline).encode() + b"\n"
+    helper.write_bytes(b'raise AssertionError("unselected dirty helper")\n')
+    application = tmp_path / "application"
+    (application / "wheels").mkdir(parents=True)
+    (application / "runtime").mkdir()
+    (application / "runtime" / "uncommitted.py").write_bytes(b"not in frozen wheel")
+    (application / ".python-version").write_text("3.14.10\n")
+    (application / "application.json").write_text(json.dumps({
+        "name": "worktree-manager", "commands": ["worktree-manager", "worktree-manager-install"],
+    }))
+    resources = "worktree_manager/_runtime_assets/scripts/"
+    provider = resources + "runtime-input-provider/libs/"
+    with zipfile.ZipFile(application / "wheels" / "manager.whl", "w") as archive:
+        for name, content in {
+            provider + "installer-engine/runtime_application_binstubs.py": frozen,
+            provider + "installer-engine/runtime_application_install.py": b"# selected installer\n",
+            provider + "installer-engine/installer_engine.py": b"# selected engine\n",
+            provider + "versioned-runtime/versioned_runtime.py": b"# selected runtime\n",
+            resources + "daemon_instance_runtime.pyz": b"selected lifecycle",
+            "manager.dist-info/entry_points.txt": (
+                b"[console_scripts]\nworktree-manager = worktree_manager.__main__:console_entry\n"
+                b"worktree-manager-install = worktree_manager.application_footprints:main\n"
+            ),
+        }.items():
+            archive.writestr(name, content)
+    inputs = SimpleNamespace(receipt=lambda: {"distributions": {
+        "copilot-extensions-worktree-manager": {"filename": "manager.whl"},
+    }})
+    footprint._manager_setup(application, inputs, deadline=deadline)
+    assert (application / "runtime_application_binstubs.py").read_bytes() == frozen
+    assert (application / "install.py").read_bytes() == b"# selected installer\n"
+    assert (application / "runtime" / "installer_engine.py").read_bytes() == b"# selected engine\n"
+    assert (application / "runtime" / "daemon_instance_runtime.pyz").read_bytes() == b"selected lifecycle"
+    assert not (application / "runtime" / "uncommitted.py").exists()
+    assert (application / "worktree-manager-install.py").is_file()
+    assert helper.read_bytes() == b'raise AssertionError("unselected dirty helper")\n'
 
 
 @pytest.mark.parametrize("damage", ["not-dev-ancestor", "not-fetched-dev", "abbreviated"])
