@@ -30,6 +30,7 @@ from .git_repository_environment import (
     _REPOSITORY_CONTEXT_ENV as _REPOSITORY_CONTEXT_ENV,
     repository_identity_env as repository_identity_env,
     identity_scoped,
+    repository_identity_scope,
 )
 from .git_errors import GitError, _redact_args as _redact_args
 from .git_fetch import _fetch_refspecs as _fetch_refspecs
@@ -1442,41 +1443,45 @@ def prepare_worktree_base(
     :func:`fast_forward_worktree` and is attempted only when the anchor is
     checked out on its configured default branch.
     """
-    anchor_path = Path(anchor)
-    fetched = False
-    fetch_error: str | None = None
-    try:
-        from .worktree_base_preparation import _fetch_worktree_base
+    with repository_identity_scope():
+        anchor_path = Path(anchor)
+        fetched = False
+        fetch_error: str | None = None
+        try:
+            from .worktree_base_preparation import _fetch_worktree_base
 
-        fetched, fetch_error = _fetch_worktree_base(anchor_path, remote, default_branch)
-    except Exception as exc:
-        fetch_error = str(exc)
+            prepared = _fetch_worktree_base(anchor_path, remote, default_branch)
+            fetched, fetch_error = prepared.fetched, prepared.error
+            fast_forward_anchor = fast_forward_anchor and prepared.usable_base
+        except Exception as exc:
+            fetch_error = str(exc)
+            fast_forward_anchor = False
 
-    start_point = resolve_start_point(
-        remote,
-        default_branch,
-        cwd=anchor_path,
-    )
-    branch = current_branch(anchor_path)
-    if not fast_forward_anchor:
-        anchor_result = FastForwardResult(False, "disabled")
-    elif branch is None:
-        anchor_result = FastForwardResult(False, "detached")
-    elif branch != default_branch:
-        anchor_result = FastForwardResult(False, "non-default-branch")
-    else:
-        anchor_result = fast_forward_worktree(
-            anchor_path,
-            remote=remote,
-            default_branch=default_branch,
-            do_fetch=False,
+        start_point = resolve_start_point(
+            remote,
+            default_branch,
+            cwd=anchor_path,
         )
-    return WorktreeBaseResult(
-        start_point=start_point,
-        fetched=fetched,
-        fetch_error=fetch_error,
-        anchor=anchor_result,
-    )
+        branch = current_branch(anchor_path)
+        if not fast_forward_anchor:
+            anchor_result = FastForwardResult(False, "disabled")
+        elif branch is None:
+            anchor_result = FastForwardResult(False, "detached")
+        elif branch != default_branch:
+            anchor_result = FastForwardResult(False, "non-default-branch")
+        else:
+            anchor_result = fast_forward_worktree(
+                anchor_path,
+                remote=remote,
+                default_branch=default_branch,
+                do_fetch=False,
+            )
+        return WorktreeBaseResult(
+            start_point=start_point,
+            fetched=fetched,
+            fetch_error=fetch_error,
+            anchor=anchor_result,
+        )
 
 
 def create_worktree(

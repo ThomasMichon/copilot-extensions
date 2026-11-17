@@ -13,10 +13,11 @@ def _fetch_refspecs(
     remote: str, *, cwd: str | Path, refspec: tuple[str, ...],
     timeout: float | None = 30.0,
     isolated_repository: bool = False, no_hooks: bool = False,
+    ignore_refmaps: bool = False,
 ) -> None:
     from . import git_ops
 
-    refmap = ["--refmap="] if refspec else []
+    refmap = ["--refmap="] if refspec and ignore_refmaps else []
     hook_options: _GitHookOptions = {"no_hooks": True} if no_hooks else {}
     try:
         git_ops.git(
