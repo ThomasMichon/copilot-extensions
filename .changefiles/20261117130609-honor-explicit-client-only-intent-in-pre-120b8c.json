@@ -1,0 +1,9 @@
+{
+  "comment": "Honor explicit client-only intent in prepared Vault application startup",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
