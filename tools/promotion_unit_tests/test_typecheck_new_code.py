@@ -12,6 +12,49 @@ from tools.typecheck_source_views import SourceViewError
 from tools.typecheck_programs import ProgramError, independent_programs
 
 
+def test_candidate_manager_application_has_an_owner_without_waiving_the_strict_ratchet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects = typecheck.load_projects()
+    files = (
+        "apps/worktree-manager/_standalone_runtime_build.py",
+        "apps/worktree-manager/setup.py",
+        "apps/worktree-manager/src/worktree_manager/cli.py",
+        "apps/worktree-manager/src/agent_procutil/owned_process.py",
+        "apps/worktree-manager/src/worktree_manager/_runtime_assets/scripts/install.py",
+    )
+    for relative in files:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("value: int = 1\n", encoding="utf-8")
+    owners = typecheck.inventory(files, projects)
+    owner = owners[files[0]]
+    assert owner.name == "worktree-manager-application"
+    assert owner.level == "pending"
+    assert all(project is owner for project in owners.values())
+    with pytest.raises(typecheck.TypecheckError, match="unclassified"):
+        typecheck.inventory(("apps/unregistered/program.py",), projects)
+    with pytest.raises(typecheck.TypecheckError, match="unclassified"):
+        typecheck.inventory(("apps/worktree-manager-other/program.py",), projects)
+    calls: list[tuple[str, tuple[str, ...], bool]] = []
+
+    def check(
+        root: Path, project: typecheck.Project, selected: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool,
+    ) -> int:
+        assert root == tmp_path and all_paths == files
+        calls.append((project.name, selected, strict))
+        return 1
+
+    monkeypatch.setattr(typecheck, "ROOT", tmp_path)
+    monkeypatch.setattr(typecheck, "load_projects", lambda: projects)
+    monkeypatch.setattr(typecheck, "python_paths", lambda: files)
+    monkeypatch.setattr(typecheck, "new_code_changes", lambda *_args: files)
+    monkeypatch.setattr(typecheck, "check_project", check)
+    assert typecheck.main(["--new-code", "--base", "unchanged-base"]) == 1
+    assert calls == [(owner.name, files, True)]
+
+
 def test_independent_programs_preserve_complete_owner_selection() -> None:
     project = typecheck.Project(
         "sample", ("ordinary", "retained"), (), "pending", "3.10",
