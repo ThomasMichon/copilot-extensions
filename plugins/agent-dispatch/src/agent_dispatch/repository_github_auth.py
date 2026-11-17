@@ -16,7 +16,8 @@ _TIMEOUT_SECONDS = 30
 def run_repository_command(
     argv: list[str], *, timeout: float = _TIMEOUT_SECONDS,
     env: Mapping[str, str] | None = None,
-    cwd: str | os.PathLike[str] | None = None, **kwargs: Any,
+    cwd: str | os.PathLike[str] | None = None,
+    encoding: str | None = None, **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     """Forward execution context; the capture runner owns pipes and tree flags."""
     fixed_options = {
@@ -27,7 +28,9 @@ def run_repository_command(
            for key, value in kwargs.items()):
         raise ValueError("Repository GitHub command received unsupported process options")
     try:
-        result = procutil.run_background_capture(argv, timeout=timeout, env=env, cwd=cwd)
+        result = procutil.run_background_capture(
+            argv, timeout=timeout, env=env, cwd=cwd, encoding=encoding,
+        )
     except (OSError, subprocess.SubprocessError, RuntimeError):
         raise RuntimeError("Repository GitHub command failed") from None
     if result is None:

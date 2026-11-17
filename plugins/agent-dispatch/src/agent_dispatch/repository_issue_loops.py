@@ -563,6 +563,8 @@ class GitHubProvider:
 
     def _gh(self, *args: str, env: Mapping[str, str] | None = None) -> Any:
         options = {}
+        if args[:2] == ("api", "graphql"):
+            options["encoding"] = "utf-8"
         if self.auth == "repository":
             options["env"] = env if env is not None else repository_environment(
                 self.repository, self.expected_login, runner=self.runner,

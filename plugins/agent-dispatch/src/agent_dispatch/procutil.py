@@ -431,6 +431,7 @@ def run_background_capture(
     cwd: str | os.PathLike[str] | None = None,
     max_output: int | None = None,
     input_text: str | None = None,
+    encoding: str | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a short-lived captured process tree without a headed Windows console.
 
@@ -457,6 +458,9 @@ def run_background_capture(
     prior behavior) -- a caller spawning a specific sibling plugin (e.g.
     :func:`run_agent_worktrees_capture`) should instead pass an explicitly
     scrubbed environment (:func:`agent_worktrees_environment`).
+
+    ``encoding`` selects the text codec for both captured streams and stdin.
+    Omitted/``None`` preserves each existing capture path's encoding default.
     """
     if input_text is not None and max_output is not None:
         raise ValueError("bounded streaming capture does not support stdin")
@@ -473,11 +477,22 @@ def run_background_capture(
             timeout, cleanup_reserve=min(2.0, timeout / 2),
         )
         try:
-            return _run_owned(
-                args, timeout=timeout, input_text=input_text,
+            result = _run_owned(
+                args, timeout=timeout,
+                input_text=input_text.encode(encoding) if encoding is not None else input_text,
+                binary=encoding is not None,
                 capture_limits=(sys.maxsize, sys.maxsize), budget=budget,
                 env=dict(env) if env is not None else None, cwd=cwd,
             )
+            if encoding is None:
+                return result
+            # The owned binary path settles its Job and pipe workers before
+            # strict decoding, so codec errors cannot strand a live child.
+            stdout, stderr = (
+                data.decode(encoding).replace("\r\n", "\n").replace("\r", "\n")
+                for data in (result.stdout, result.stderr)
+            )
+            return subprocess.CompletedProcess(args, result.returncode, stdout, stderr)
         except OwnedCleanupError:
             # Unconfirmed cleanup retains exact Job/process custody; never
             # disguise it as an ordinary unavailable/timeout result.
@@ -492,6 +507,7 @@ def run_background_capture(
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             text=True,
+            **({"encoding": encoding} if encoding is not None else {}),
             env=dict(env) if env is not None else None,
             cwd=cwd,
             **_process_tree_kwargs(),

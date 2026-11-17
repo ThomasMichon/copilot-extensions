@@ -2432,7 +2432,8 @@ def test_agent_worktrees_environment_scrubs_unsafe_vars(monkeypatch):
     assert environment["PATH"] == os.environ["PATH"]
 
 
-def test_run_background_capture_passes_explicit_env(monkeypatch):
+@pytest.mark.parametrize("encoding", [None, "utf-8", "cp1252"])
+def test_run_background_capture_passes_explicit_env_and_encoding(monkeypatch, encoding):
     captured = {}
 
     class _FakeProc:
@@ -2443,15 +2444,17 @@ def test_run_background_capture_passes_explicit_env(monkeypatch):
 
     def fake_popen(args, **kwargs):
         captured["env"] = kwargs.get("env")
+        captured["encoding"] = kwargs.get("encoding")
         return _FakeProc()
 
     monkeypatch.setattr(procutil.subprocess, "Popen", fake_popen)
 
     procutil.run_background_capture(
-        ["agent-worktrees", "status"], timeout=5, env={"ONLY": "this"}
+        ["agent-worktrees", "status"], timeout=5, env={"ONLY": "this"}, encoding=encoding,
     )
 
     assert captured["env"] == {"ONLY": "this"}
+    assert captured["encoding"] == encoding
 
 
 def test_run_background_capture_inherits_ambient_env_by_default(monkeypatch):

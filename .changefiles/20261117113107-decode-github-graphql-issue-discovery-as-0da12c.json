@@ -1,0 +1,9 @@
+{
+  "comment": "Decode GitHub GraphQL issue discovery as UTF-8 through optional captured-process encoding.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
