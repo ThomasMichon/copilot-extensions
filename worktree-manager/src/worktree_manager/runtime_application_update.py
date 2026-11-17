@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def _acquisition_root(root: Path) -> Iterator[Path]:
-    if os.name != "nt":
+def _acquisition_root(root: Path, *, disposable: bool = False) -> Iterator[Path]:
+    if os.name != "nt" and not disposable:
         yield root
         return
     from agent_procutil import _daemon_instance_owner, python_cache_permissions, scratch
@@ -88,9 +88,9 @@ def update(root: Path, *, repo: str, ref: str, dry_run: bool) -> SelfUpdateResul
         selection = _selection(source_config.absolute_local_source(repo), ref)
         base.mkdir(parents=True, exist_ok=True)
         environment = update_auth.environment(selection.repo, cwd=base)
-        output = base / "footprints" / uuid.uuid4().hex
-        output.parent.mkdir(exist_ok=True)
-        with _acquisition_root(base) as acquisition_root:
+        with _acquisition_root(base, disposable=True) as acquisition_root:
+            output = acquisition_root / "footprints" / uuid.uuid4().hex
+            output.parent.mkdir()
             with acquire(
                 selection, root=acquisition_root, environment=environment,
                 deadline=deadline, compact=True,
@@ -98,37 +98,37 @@ def update(root: Path, *, repo: str, ref: str, dry_run: bool) -> SelfUpdateResul
                 footprint = prepare_footprint(
                     preparer(), resolved, output, deadline=deadline, environment=environment,
                 )
-        applications = application_footprints.plan(
-            footprint, root.parent, selected=("worktree-manager",),
-        )
-        if len(applications) != 1 or applications[0].name != "worktree-manager":
-            raise ValueError("Manager footprint requires an unsupported IPC dependency")
-        application = replace(applications[0], root=root)
-        declaration = json.loads(application.declaration)
-        construction_identity = declaration["construction"].get("identity")
-        identity = (
-            construction_identity.get("runtime_source")
-            if isinstance(construction_identity, dict) else None
-        )
-        if (
-            not isinstance(identity, dict)
-            or identity.get("source_commit") != resolved.commit
-            or identity.get("source_tree") != resolved.tree
-        ):
-            raise ValueError("Manager footprint differs from its independent source selection")
-        version = application.version
-        if dry_run:
-            return self_install.SelfUpdateResult(
-                action="updated", previous=previous, version=version,
-                reason="planned complete application setup; no selection changed",
+            applications = application_footprints.plan(
+                footprint, root.parent, selected=("worktree-manager",),
             )
-        application_footprints.install((application,), stage=False, deadline=deadline)
-        if self_install.current_version(root) != version:
-            raise ValueError("Manager application setup did not select the incoming generation")
-        return self_install.SelfUpdateResult(
-            action="already-current" if previous == version else "updated",
-            previous=previous, version=version,
-        )
+            if len(applications) != 1 or applications[0].name != "worktree-manager":
+                raise ValueError("Manager footprint requires an unsupported IPC dependency")
+            application = replace(applications[0], root=root)
+            declaration = json.loads(application.declaration)
+            construction_identity = declaration["construction"].get("identity")
+            identity = (
+                construction_identity.get("runtime_source")
+                if isinstance(construction_identity, dict) else None
+            )
+            if (
+                not isinstance(identity, dict)
+                or identity.get("source_commit") != resolved.commit
+                or identity.get("source_tree") != resolved.tree
+            ):
+                raise ValueError("Manager footprint differs from its independent source selection")
+            version = application.version
+            if dry_run:
+                return self_install.SelfUpdateResult(
+                    action="updated", previous=previous, version=version,
+                    reason="planned complete application setup; no selection changed",
+                )
+            application_footprints.install((application,), stage=False, deadline=deadline)
+            if self_install.current_version(root) != version:
+                raise ValueError("Manager application setup did not select the incoming generation")
+            return self_install.SelfUpdateResult(
+                action="already-current" if previous == version else "updated",
+                previous=previous, version=version,
+            )
     except update_auth.AuthRequired as error:
         return self_install.SelfUpdateResult(
             action="auth_required", previous=previous, reason=str(error),

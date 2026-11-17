@@ -2758,11 +2758,12 @@ Git is required and acquisition/preparation failures do not fall back to a
 legacy tarball. Source preparation and setup share one finite deadline.
 App-root acquisition uses `s/<compact-repository-key>` beneath
 its preparation root; the full repository owner record remains authoritative
-and rejects key collisions. On Windows that root is a private, caller-owned
-temporary directory, removed after preparation, so Git's worktree metadata
-has ordinary-path headroom independently of application and version-slot
-names. Other platforms retain the app's `state/` preparation root. Prepared
-footprints remain under app state; legacy source caches keep their existing
+and rejects key collisions. That root is a private, caller-owned temporary
+directory, held through complete setup and removed on success or failure.
+Both acquired source and produced footprint stay outside the installation
+root, preserving the consumer's no-overlap contract. On Windows this also
+gives Git's worktree metadata ordinary-path headroom independently of
+application and version-slot names. Legacy source caches keep their existing
 layout.
 The Manager-only `update --target worktree-manager` entry does not load or
 repair the Worktrees installer. Service source policy remains independent.

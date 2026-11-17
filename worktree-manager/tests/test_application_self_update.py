@@ -54,10 +54,7 @@ def test_application_update_reuses_complete_setup_without_legacy_fallback(
     def acquire(selection: RuntimeSource, **options: Any) -> Iterator[ResolvedSource]:
         assert selection == RuntimeSource("dev", str(tmp_path / "upstream"), allow_dev=True)
         acquisition_roots.append(options["root"])
-        if os.name == "nt":
-            assert options["root"] != root / "state" and options["root"].is_dir()
-        else:
-            assert options["root"] == root / "state"
+        assert not options["root"].is_relative_to(root) and options["root"].is_dir()
         assert options["compact"] is True
         assert options["environment"] == {"SOURCE": "fixture"}
         budget.append(options["deadline"])
@@ -70,7 +67,7 @@ def test_application_update_reuses_complete_setup_without_legacy_fallback(
     def prepare(tool: Path, resolved: ResolvedSource, output: Path, **options: Any) -> Path:
         assert tool == tmp_path / "trusted-tool" and resolved.commit == commit
         assert options == {"deadline": budget[0], "environment": {"SOURCE": "fixture"}}
-        assert output.parent == root / "state" / "footprints"
+        assert output.parent == acquisition_roots[0] / "footprints"
         assert output.parent.is_dir()
         if phase == "provider":
             raise subprocess.CalledProcessError(1, ["fixture-provider"], stderr="fixture provider unavailable")
@@ -115,8 +112,66 @@ def test_application_update_reuses_complete_setup_without_legacy_fallback(
         assert result.version == "2"
         assert (root / "current-version").read_text() == (previous if phase == "dry-run" else "2")
     assert ("setup" in calls) is (phase not in {"acquire", "provider", "identity", "dry-run"})
-    if os.name == "nt":
-        assert acquisition_roots and not acquisition_roots[0].exists()
+    assert acquisition_roots and not acquisition_roots[0].exists()
+
+
+@pytest.mark.parametrize("fail_setup", [False, True])
+def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_through_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_setup: bool,
+) -> None:
+    root = tmp_path / "worktree-manager"
+    root.mkdir()
+    (root / "current-version").write_text("1")
+    monkeypatch.setattr("worktree_manager.runtime_application_update.shutil.which", lambda _: "git")
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *args, **kwargs: {})
+    monkeypatch.setattr(update, "preparer", lambda: tmp_path / "trusted-tool")
+    monkeypatch.setattr("worktree_manager.runtime_application_update.tempfile.gettempdir", lambda: str(tmp_path))
+    source = RuntimeSource("dev", str(tmp_path / "upstream"), allow_dev=True)
+    commit, tree = "a" * 40, "b" * 40
+    workspace: list[Path] = []
+    prepared_inputs: list[Path] = []
+
+    @contextmanager
+    def acquire(selection: RuntimeSource, **options: Any) -> Iterator[ResolvedSource]:
+        workspace.append(options["root"])
+        yield ResolvedSource(source, tmp_path / "checkout", commit, tree, commit, "c" * 40)
+
+    def prepare(tool: Path, resolved: ResolvedSource, output: Path, **options: Any) -> Path:
+        footprint = output / "footprint"
+        app = footprint / "apps" / "worktree-manager"
+        (app / "bin").mkdir(parents=True)
+        (footprint / "footprint.json").write_text(json.dumps({
+            "schema": "copilot-extensions.application-footprint", "version": 1,
+            "apps": [{"name": "worktree-manager", "version": "2", "dependencies": []}],
+        }))
+        (app / "application.json").write_text(json.dumps({
+            "name": "worktree-manager", "commands": ["worktree-manager"],
+            "root_environment": "WORKTREE_MANAGER_ROOT",
+            "construction": {"runtime_version": "2", "identity": {"runtime_source": {
+                "source_commit": commit, "source_tree": tree,
+            }}},
+        }))
+        for name in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
+            (app / name).write_text("# fixture\n")
+        prepared_inputs.append(app)
+        return footprint
+
+    def install(apps: tuple[footprints.Application, ...], **options: Any) -> None:
+        assert apps[0].source == prepared_inputs[0] and apps[0].source.is_dir()
+        assert workspace[0].is_dir() and not apps[0].source.is_relative_to(root)
+        assert apps[0].root == root
+        if fail_setup:
+            raise subprocess.CalledProcessError(7, ["fixture-setup"])
+        (root / "current-version").write_text("2")
+
+    monkeypatch.setattr(update, "acquire", acquire)
+    monkeypatch.setattr(update, "prepare_footprint", prepare)
+    monkeypatch.setattr(footprints, "install", install)
+    result = update.update(root, repo=source.repo, ref="dev", dry_run=False)
+    assert result.action == ("error" if fail_setup else "updated")
+    assert (root / "current-version").read_text() == ("1" if fail_setup else "2")
+    assert workspace and not workspace[0].exists()
+    assert prepared_inputs and not prepared_inputs[0].exists()
 
 
 @pytest.mark.parametrize("case", ["missing-git", "auth"])
