@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Conditional cadence guidance and the idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+
 - [2026-11-17 - Build-isolation wiring and retained native acceptance](journal/2026/11.17-build-isolation-and-native-acceptance.md)
 
 - [2026-11-17 - Hygiene engine and Index custody](journal/2026/11.17-hygiene-engine-and-index-custody.md)
