@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+
 - [2026-11-17 - Ten source deltas and gate provenance](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
 
 - [2026-11-17 - Ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
