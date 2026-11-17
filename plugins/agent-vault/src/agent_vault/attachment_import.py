@@ -154,7 +154,7 @@ def handle_request(
         ):
             raise AttachmentImportError("invalid_import")
         entry, key_name = validate_names(
-            normalize_entry(raw_entry, group),
+            normalize_entry(raw_entry, group or ""),
             request.get("key_name"),
         )
         private = decode_attachment(request.get("key_data"))

@@ -78,8 +78,29 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     package.__dict__["__path__"] = []
     monkeypatch.setitem(sys.modules, name, package)
     config = ModuleType(name + ".config")
+    config_tree = ast.parse((SOURCE / "config.py").read_bytes())
+    config_nodes: list[ast.stmt] = [
+        node for node in config_tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in ("_nonempty", "_clean_group", "normalize_entry")
+    ]
+    assert len(config_nodes) == 3
+    ambient_group_reads: list[str] = []
+
+    def daemon_config() -> SimpleNamespace:
+        ambient_group_reads.append("load")
+        return SimpleNamespace(group="DaemonGroup")
+
+    config_namespace: dict[str, Any] = {"Any": Any, "load_config": daemon_config}
+    exec(
+        compile(
+            ast.Module(body=config_nodes, type_ignores=[]),
+            str(SOURCE / "config.py"), "exec",
+        ),
+        config_namespace,
+    )
     config.__dict__.update(
-        normalize_entry=lambda entry, group: f"{group}/{entry}" if group else entry,
+        normalize_entry=config_namespace["normalize_entry"],
         resolve_context=lambda **_kwargs: SimpleNamespace(
             kpdb="synthetic-db", group="Example", vault_name=None,
         ),
@@ -160,6 +181,7 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         lock_calls=lock_calls,
         package=name,
         binding=loaded["transport_binding"],
+        ambient_group_reads=ambient_group_reads,
     )
 
 
@@ -874,3 +896,65 @@ def test_bound_mutation_cannot_override_health_context(
     with pytest.raises(ValueError, match="cannot override"):
         binding.send_once({"action": "import-key-create-only", field: "other"}, 1.0)
     assert route.events == [("native", "ping")]
+
+
+@pytest.mark.parametrize("group,entry,expected", [
+    (None, "new-key", "new-key"),
+    ("", "new-key", "new-key"),
+    ("CallerGroup", "new-key", "CallerGroup/new-key"),
+    ("CallerGroup", "/new-key", "new-key"),
+    ("CallerGroup", "Fixed/new-key", "Fixed/new-key"),
+])
+def test_actual_command_dispatch_and_normalizer_preserve_selected_group(
+    routed_owner: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+    group: str | None, entry: str, expected: str,
+) -> None:
+    route = routed_owner
+    route.context.group = group
+    backend = Backend(paths={"CallerGroup/", "DaemonGroup/", "Fixed/"})
+    tree = ast.parse((SOURCE / "service.py").read_bytes())
+    node = next(
+        function
+        for parent in tree.body if isinstance(parent, ast.ClassDef)
+        for function in parent.body if isinstance(function, ast.FunctionDef)
+        and function.name == "_dispatch_request"
+    )
+    namespace: dict[str, Any] = {
+        "__name__": route.owner.package + ".service",
+        "__package__": route.owner.package,
+        "Any": Any,
+    }
+    exec(
+        compile(ast.Module(body=[node], type_ignores=[]), str(SOURCE / "service.py"), "exec"),
+        namespace,
+    )
+    service = SimpleNamespace(
+        cli=backend, _attachment_import_owner="synthetic-owner",
+        keepalive=lambda: None, _check_password_ttl=lambda: None,
+    )
+
+    def selected(request: dict[str, Any], *_args: object) -> dict[str, Any]:
+        if request["action"] == "ping":
+            return {
+                "ok": True, "accepting_work": True,
+                "key_attachment_import_versions": [1],
+                "key_attachment_import_owner": "synthetic-owner",
+            }
+        assert request["group"] == group
+        result: dict[str, Any] = namespace["_dispatch_request"](
+            service, request, "synthetic-peer", "synthetic-transport",
+        )
+        return result
+
+    route.namespace["_send_tcp"] = selected
+    assert route.owner.client.command(SimpleNamespace(
+        require_running=True, entry=entry, key_file="/synthetic/example.key",
+    )) == 0
+    assert backend.calls == [
+        "list",
+        ["add", "-q", "synthetic-db", expected],
+        ("example.key", b"private"),
+        ("example.key.pub", b"public"),
+    ]
+    assert route.owner.ambient_group_reads == []
+    assert '"status": "created"' in capsys.readouterr().out

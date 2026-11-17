@@ -98,7 +98,7 @@ def command(args: Any) -> int:
         if not context.kpdb:
             raise AttachmentImportError("database_unconfigured")
         _, key_name = validate_names(
-            config.normalize_entry(args.entry, context.group),
+            config.normalize_entry(args.entry, context.group or ""),
             private_path.name,
         )
         private = _read_file(private_path, private=True)
