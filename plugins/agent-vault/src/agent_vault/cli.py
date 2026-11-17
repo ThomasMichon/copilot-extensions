@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,6 +28,7 @@ from .terminal_input import (
     _has_controlling_tty as _has_controlling_tty,
     _read_password_from_tty as _read_password_from_tty,
 )
+from .transport_binding import MutationBinding, Sender
 from .winpipe import pipe_send
 
 _read_cache_manifest = read_cache_manifest
@@ -244,14 +246,27 @@ def send_command(
     *,
     strict_endpoint: bool = False,
     require_endpoint: bool = False,
+    binding: MutationBinding | None = None,
 ) -> dict[str, Any] | None:
     """Send a JSON command to the vault service."""
+    if binding is not None:
+        binding.require_unselected()
+        if request.get("action") != "ping" or request.get("health_only") is not True:
+            raise ValueError("Transport binding requires a read-only health request")
     context = config.resolve_context()
     request = dict(request)
 
-    def _tag(result: dict[str, Any] | None, transport: str) -> dict[str, Any] | None:
+    def _tag(result: dict[str, Any] | None, transport: str, sender: Sender) -> dict[str, Any] | None:
         if result is not None:
             result["_transport"] = transport
+            if binding is not None:
+                binding.select(
+                    sender, single_attempt=True,
+                    defaults={
+                        key: request[key] for key in ("kpdb", "group", "vault")
+                        if key in request
+                    },
+                )
         return result
 
     from .extensions import TransportContext, get_registry
@@ -321,7 +336,12 @@ def send_command(
 
     # Extension transports registered before_builtin take precedence over the
     # local daemon (e.g. an SSH-tunnel that should reach the caller's own vault).
-    result = get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
+    result = (
+        get_registry().try_transports(request, timeout, ext_ctx, before_builtin=True)
+        if binding is None else get_registry().try_transports(
+            request, timeout, ext_ctx, before_builtin=True, binding=binding,
+        )
+    )
     if result is not None:
         return result
 
@@ -337,32 +357,42 @@ def send_command(
 
     # Strict selection never falls back to another daemon after a failed dial.
     if discovered_pipe is not None and IS_WINDOWS:
-        result = pipe_send(discovered_pipe, request, timeout)
+        pipe_sender = partial(pipe_send, discovered_pipe)
+        result = pipe_sender(request, timeout)
         if result is not None or strict_endpoint:
-            return _tag(result, "discovered-pipe")
+            return _tag(result, "discovered-pipe", pipe_sender)
 
     # A discovered Unix socket (native, possibly non-default path) is dialed
     # ahead of the legacy fixed socket.
     if discovered_unix is not None and not IS_WINDOWS:
-        result = _send_socket(request, timeout, path=discovered_unix)
+        unix_sender = partial(_send_socket, path=discovered_unix)
+        result = unix_sender(request, timeout)
         if result is not None or strict_endpoint:
-            return _tag(result, "discovered-unix")
+            return _tag(result, "discovered-unix", unix_sender)
 
     if (
         discovered_unix is None and not IS_WINDOWS
         and context.sources.get("port") == "default"
         and not (strict_endpoint and discovered is not None)
     ):
-        result = _send_socket(request, timeout)
+        socket_sender = _send_socket
+        result = socket_sender(request, timeout)
         if result is not None:
-            return _tag(result, "unix-socket")
+            return _tag(result, "unix-socket", socket_sender)
 
-    result = _send_tcp(request, host, port, timeout)
+    tcp_connector = _send_tcp
+
+    def tcp_sender(payload: dict[str, Any], limit: float | None) -> dict[str, Any] | None:
+        return tcp_connector(payload, host, port, limit)
+
+    result = tcp_sender(request, timeout)
     if result is not None or strict_endpoint and discovered is not None:
         is_disc_tcp = discovered is not None and discovered.transport == "tcp"
-        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
+        return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp", tcp_sender)
 
-    return get_registry().try_transports(request, timeout, ext_ctx)
+    if binding is None:
+        return get_registry().try_transports(request, timeout, ext_ctx)
+    return get_registry().try_transports(request, timeout, ext_ctx, binding=binding)
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1158,14 @@ def cmd_git_credential(args: Any) -> int:
 
 
 def cmd_import_key(args: Any) -> int:
+    if getattr(args, "create_only", False):
+        from .attachment_import_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
+        return 1
+
     import base64
 
     key_file = Path(args.key_file)
@@ -1697,6 +1735,10 @@ def _main(argv: list[str] | None = None) -> int | None:
     p = sub.add_parser("import-key", help="Import key pair into entry")
     p.add_argument("entry", help="Entry path")
     p.add_argument("key_file", help="Path to private key file (.pub must exist alongside)")
+    p.add_argument("--create-only", action="store_true",
+                   help="Refuse an existing entry and retain partial/unknown creation without retry")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --create-only, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_import_key)
 
     p = sub.add_parser("export-key", help="Export key pair from entry")
