@@ -3421,6 +3421,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [hosted-session receiving and condition-provenance proposal](journal/2026/11.17-hosted-session-receiving-and-condition-provenance.md)
+  maps every literal #4229 component into the existing Draft AHP receiver
+  without duplicate rows. It corrects the campaign-origin receipt recommendation,
+  not actual assignee custody, and retains review/readback/separate judgment.
   The [shared-core receipt and retained runtime contracts](journal/2026/11.17-shared-core-receipt-and-runtime-contracts.md)
   record reviewed complete #4227 receiving, its separate redundant-tracking
   retirement, nine remaining contracts and the prospective #4195 cause recovery.

@@ -429,3 +429,20 @@ tracking. Its original and three earlier discussions remain unchanged;
 reconciliation before dependent implementation remain unfinished.
 The original reservation, inherited acceptance and every source/resource
 owner remain; no new issue, executor, implementation or operational effect.
+
+## Complete hosted-session preservation intake (2026-11-17 UTC)
+
+This appends a proposed route, effective only after normal reviewed direct
+domain Plan acceptance. Earlier conditional rows and their history remain.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Standard hosted-session protocol behind the public orchestration layer, preserving lifecycle, credentials, policy and rollback compatibility | Public #4229, complete original and both eligible discussions; current #1266 original and all five discussions | routed (proposed; effective after reviewed direct Plan acceptance) | [agent-bridge-ahp-convergence](../agent-bridge-ahp-convergence/README.md), existing ROOT-R4229-P1..4/V1..4/G4229 and six-component crosswalk | Keep #4229 until reviewed complete receiving, current whole ROOT/source/custody readback and separate source-specific judgment; #1266 remains the same assigned held lane |
+
+The additional assignee-receipt veto was a campaign research recommendation,
+not a literal original requirement or independent #1266 owner condition.
+The domain amendment corrects that provenance prospectively without waiving
+actual custody. This Draft receiver retains all technical checks, inherited
+#989 and distinct #1460/#1138/#1454 ownership. No new issue, implementation
+owner, activation, credential operation, native proof or resource transfer
+is created. Ledger publication is not domain acceptance or tracker retirement.
