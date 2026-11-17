@@ -1,5 +1,5 @@
 {
-  "comment": "Cover structured refusal forwarding through the native Resume fixture owner",
+  "comment": "Preserve backend file-version metadata and observation refusals in native Resume fixtures",
   "changes": [
     {
       "plugin": "worktree-manager",

@@ -228,3 +228,12 @@ separate real-executable refusal control that does not require the global
 absence census, plus these source/release records; it does not reapply or
 replace the already merged correction. Fresh native release qualification
 remains open.
+
+The next fresh producing run, 44052200417, passed observation forwarding and
+then reached the unchanged 3.4 creation-version gate. Its generated private
+adapter did not carry its selected backend's file-version resource. The bounded
+follow-up now projects that actual complete resource and refuses unreadable
+metadata, rather than advertising a guessed minimum. Four native controls pass,
+including real compiled below/above-floor versions with nonzero revisions,
+the original production guard and structured observation refusal. Full fresh
+native Resume qualification and release remain required.

@@ -718,3 +718,58 @@ def test_native_owner_preserves_observation_refusal(tmp_path: Path) -> None:
         "status": "unsupported", "reason": "unsupported-target",
         "incarnation": "", "clients": None, "panes": [],
     }
+
+
+def _native_compiler() -> Path:
+    compiler = next((
+        Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework / "v4.0.30319/csc.exe"
+        for framework in ("Framework64", "Framework")
+        if (Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework
+            / "v4.0.30319/csc.exe").is_file()
+    ), None)
+    assert compiler, "The Windows .NET Framework compiler is required for the native version fixture"
+    return compiler
+
+
+@pytest.mark.parametrize("version", [(3, 3, 5, 7), (3, 4, 0, 17)])
+def test_private_mux_preserves_selected_backend_version(
+    tmp_path: Path, version: tuple[int, int, int, int],
+) -> None:
+    from agent_remote_driver.windows_mux_version import (
+        MINIMUM_VERSION, file_version, require_creation_binary,
+    )
+
+    env = _test_env(tmp_path)
+    source = tmp_path / "backend.cs"
+    source.write_text(
+        'using System.Reflection;\n'
+        '[assembly: AssemblyFileVersion("' + ".".join(map(str, version)) + '")]\n'
+        'class Backend { static int Main() { return 0; } }\n',
+        encoding="utf-8",
+    )
+    backend = tmp_path / "backend.exe"
+    built = subprocess.run(
+        [str(_native_compiler()), "/nologo", "/target:exe", "/out:" + str(backend), str(source)],
+        env=env, capture_output=True, text=True, timeout=20, check=False,
+        creationflags=_NO_WINDOW,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    _private_psmux(tmp_path / "mux-bin", str(backend), "version-fixture", env)
+    shim = str(tmp_path / "mux-bin" / "psmux.exe")
+    assert file_version(shim) == file_version(str(backend)) == version
+    if version < MINIMUM_VERSION:
+        with pytest.raises(RuntimeError, match="require version 3.4"):
+            require_creation_binary(shim)
+    else:
+        assert require_creation_binary(shim) == shim
+
+
+def test_private_mux_preserves_creation_refusal_without_version_metadata(tmp_path: Path) -> None:
+    from agent_remote_driver.windows_mux_version import require_creation_binary
+
+    backend = tmp_path / "backend.exe"
+    backend.write_bytes(b"fixture without a version resource")
+    assert file_version(str(backend)) is None
+    _private_psmux(tmp_path / "mux-bin", str(backend), "version-fixture", _test_env(tmp_path))
+    with pytest.raises(RuntimeError, match="require version 3.4"):
+        require_creation_binary(str(tmp_path / "mux-bin" / "psmux.exe"))
