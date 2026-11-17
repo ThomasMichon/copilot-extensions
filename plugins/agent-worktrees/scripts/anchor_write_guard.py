@@ -78,6 +78,12 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from registry_root import resolve_registry_root
 from tool_call_forms import write_targets
+from anchor_registry import (
+    _inventory_observation,
+    _load_worktree_class_anchors,
+    _repos_yaml,
+    load_base_repo_names,
+)
 from anchor_shell_parser import (
     GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
@@ -559,142 +565,51 @@ def active_break_glass(repo_name: str, home: Path, *, registry_root: Path | None
 
 # --- Worktree-class anchor discovery (repos.yaml, stdlib parse) ---------------
 
-def _repos_yaml(registry_root: Path) -> Path:
-    return registry_root / "repos.yaml"
-
-
-def _yaml_unquote(val: str) -> str:
-    val = val.strip()
-    if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
-        quote = val[0]
-        val = val[1:-1]
-        if quote == '"':
-            # Double-quoted YAML: an escaped backslash ``\\`` is a single one
-            # (Windows paths are stored this way, e.g. "C:\\Data\\Src\\repo").
-            val = val.replace("\\\\", "\\")
-    return val
-
-
-def load_base_repo_names(registry_root: Path) -> set[str]:
-    """Names adopted in **base-repo (no-worktree)** mode in ``projects.yaml``.
-
-    A base-repo anchor is edited in place by design (the anchor *is* the working
-    checkout -- e.g. a CodeSpace dedicated to one task), so it is never guarded
-    even when ``repos.yaml`` lists it ``class: worktree``. Stdlib-only like
-    :func:`load_worktree_anchors`; never raises.
-    """
-    try:
-        text = (registry_root / "projects.yaml").read_text("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return set()
-    try:
-        import yaml  # type: ignore
-        projects = (yaml.safe_load(text) or {}).get("projects") or {}
-        return {
-            str(name) for name, meta in projects.items()
-            if isinstance(meta, dict) and meta.get("base_repo") is True
-        } if isinstance(projects, dict) else set()
-    except Exception:
-        pass
-    names: set[str] = set()
-    in_projects = False
-    cur_name: str | None = None
-    for raw in text.splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        stripped = raw.strip()
-        if indent == 0:
-            in_projects = stripped == "projects:"
-            cur_name = None
-        elif in_projects and indent == 2 and stripped.endswith(":"):
-            cur_name = _yaml_unquote(stripped[:-1])
-        elif in_projects and indent >= 4 and cur_name:
-            key, sep, val = stripped.partition(":")
-            if sep and key.strip() == "base_repo" and _yaml_unquote(val).lower() == "true":
-                names.add(cur_name)
-    return names
-
-
-def load_worktree_anchors(registry_root: Path) -> list[dict]:
+def load_worktree_anchors(registry_root: Path, *, _observations=None) -> list[dict]:
     """The guarded anchors: every ``class: worktree`` repo in ``repos.yaml``
     that is not adopted in base-repo mode (:func:`load_base_repo_names`)."""
-    base_repos = load_base_repo_names(registry_root)
-    return [a for a in _load_worktree_class_anchors(registry_root) if a["name"] not in base_repos]
+    if _observations is None:
+        base_repos = load_base_repo_names(registry_root)
+        anchors = _load_worktree_class_anchors(registry_root)
+    else:
+        if load_base_repo_names is _ORIGINAL_BASE_REPO_LOADER:
+            base_repos = load_base_repo_names(registry_root, _observations=_observations)
+        else:
+            base_repos = load_base_repo_names(registry_root)
+            _inventory_observation(_observations, registry_root / "projects.yaml", "opaque",
+                                   reason="owner-coverage-unavailable")
+        if _load_worktree_class_anchors is _ORIGINAL_CLASS_ANCHOR_LOADER:
+            anchors = _load_worktree_class_anchors(registry_root, _observations=_observations)
+        else:
+            anchors = _load_worktree_class_anchors(registry_root)
+            _inventory_observation(_observations, _repos_yaml(registry_root), "opaque",
+                                   reason="owner-coverage-unavailable")
+    return [a for a in anchors if a["name"] not in base_repos]
 
 
-def _load_worktree_class_anchors(registry_root: Path) -> list[dict]:
-    """Parse ``repos.yaml`` -> ``[{name, path}]`` for every ``class: worktree``
-    repo, across all platform path keys (windows/wsl/linux).
+_ORIGINAL_BASE_REPO_LOADER = load_base_repo_names
+_ORIGINAL_CLASS_ANCHOR_LOADER = _load_worktree_class_anchors
+_ORIGINAL_ANCHOR_LOADER = load_worktree_anchors
 
-    Stdlib-only (this hook runs under whatever ``python`` is on PATH, so PyYAML
-    may be unavailable); a tiny indentation-aware parser tailored to the known,
-    regular ``repos:`` shape. Prefers PyYAML when importable. Never raises.
-    """
-    try:
-        text = _repos_yaml(registry_root).read_text("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []
 
-    # Fast path: real YAML when the runtime happens to have it.
-    try:
-        import yaml  # type: ignore
-        data = yaml.safe_load(text)
-        anchors: list[dict] = []
-        repos = (data or {}).get("repos") or {}
-        if isinstance(repos, dict):
-            for name, meta in repos.items():
-                if not isinstance(meta, dict) or meta.get("class") != "worktree":
-                    continue
-                for plat in ("windows", "wsl", "linux"):
-                    p = meta.get(plat)
-                    if isinstance(p, str) and p.strip():
-                        anchors.append({"name": str(name), "path": p.strip()})
-        return anchors
-    except Exception:
-        pass  # fall through to the stdlib mini-parser
-
-    anchors = []
-    in_repos = False
-    cur_name: str | None = None
-    cur_class: str | None = None
-    cur_paths: list[str] = []
-
-    def flush() -> None:
-        if cur_name and cur_class == "worktree":
-            for p in cur_paths:
-                anchors.append({"name": cur_name, "path": p})
-
-    for raw in text.splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        stripped = raw.strip()
-        if indent == 0:
-            flush()
-            cur_name, cur_class, cur_paths = None, None, []
-            in_repos = stripped.rstrip() == "repos:"
-            continue
-        if not in_repos:
-            continue
-        if indent == 2 and stripped.endswith(":"):
-            flush()
-            cur_name = _yaml_unquote(stripped[:-1])
-            cur_class, cur_paths = None, []
-            continue
-        if indent >= 4 and cur_name:
-            key, sep, val = stripped.partition(":")
-            if not sep:
-                continue
-            key = key.strip()
-            if key == "class":
-                cur_class = _yaml_unquote(val)
-            elif key in ("windows", "wsl", "linux"):
-                v = _yaml_unquote(val)
-                if v:
-                    cur_paths.append(v)
-    flush()
-    return anchors
+def anchor_inventory_report(registry_root: Path) -> dict:
+    """Observe the original acquisition once; this is not a reusable input proof."""
+    observations: list[dict] = []
+    if load_worktree_anchors is _ORIGINAL_ANCHOR_LOADER:
+        rows = load_worktree_anchors(registry_root, _observations=observations)
+    else:
+        rows = load_worktree_anchors(registry_root)
+        _inventory_observation(observations, registry_root, "opaque",
+                               reason="owner-coverage-unavailable")
+    return {
+        "version": 1,
+        "status": "observed" if len(observations) == 2 and all(
+            item["status"] == "observed" for item in observations
+        ) else "unavailable",
+        "qualification": "managed-observation",
+        "rows": rows,
+        "observations": observations,
+    }
 
 
 # --- Delegation nudge ---------------------------------------------------------

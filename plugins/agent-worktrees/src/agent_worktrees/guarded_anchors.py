@@ -33,20 +33,20 @@ class CallerRegistrationUnavailable(GuardPublicationError):
     """Caller registration cannot be established from current observations."""
 
 
-def _reader():
+def _script(name):
     package = Path(__file__).resolve().parent
     # An installed runtime reads the copy it ships, so the guard map never depends on
     # which bin/ publication scope (wrappers vs resolvers) last ran, or on a stale bin/.
     candidates = (
-        package / "_runtime_assets" / "scripts" / "guarded_anchor_map.py",
-        package.parents[1] / "scripts" / "guarded_anchor_map.py",
+        package / "_runtime_assets" / "scripts" / name,
+        package.parents[1] / "scripts" / name,
     )
     source = next((path for path in candidates if path.is_file()), None)
     if source is None:
         from . import config as cfg
 
-        source = cfg.install_dir() / "bin" / "guarded_anchor_map.py"
-    spec = importlib.util.spec_from_file_location("_guarded_anchor_reader", source)
+        source = cfg.install_dir() / "bin" / name
+    spec = importlib.util.spec_from_file_location("_guarded_anchor_" + source.stem, source)
     if spec is None or spec.loader is None:
         raise GuardPublicationError("guard-map reader is unavailable")
     module = importlib.util.module_from_spec(spec)
@@ -55,6 +55,23 @@ def _reader():
     except (ImportError, OSError, SyntaxError) as exc:
         raise GuardPublicationError("guard-map reader is unusable") from exc
     return module
+
+
+def _reader():
+    return _script("guarded_anchor_map.py")
+
+
+def _anchor_inventory(root, reader, row_limit):
+    if not callable(getattr(reader, "read_anchor_inventory", None)):
+        return None
+    try:
+        owner = _script("anchor_write_guard.py")
+        report = getattr(owner, "anchor_inventory_report", None)
+        if not callable(report):
+            return reader.unavailable_anchor_inventory("owner-coverage-unavailable")
+        return reader.read_anchor_inventory(report(root), row_limit=row_limit)
+    except (OSError, ImportError, ValueError, TypeError, RuntimeError):
+        return reader.unavailable_anchor_inventory("anchor-acquisition-unavailable")
 
 
 def _require_configuration_observations(observations) -> None:
@@ -216,6 +233,7 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         "roots": rows, "postures": postures,
         "posture_authority": "partial" if posture_errors else "complete",
         "posture_errors": posture_errors,
+        "anchor_inventory": _anchor_inventory(root, reader, reader.MAX_ROOTS - len(rows) - len(postures)),
     }
 
 
@@ -377,6 +395,10 @@ def _refresh_locked(
             if budget is not None:
                 remaining_timeout(budget, float("inf"))
             encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
+            if len(encoded.encode("utf-8")) > reader.MAX_BYTES and "anchor_inventory" in snapshot:
+                # Supplemental facts must not withdraw independently usable roots.
+                del snapshot["anchor_inventory"]
+                encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > reader.MAX_BYTES:
                 raise GuardPublicationError("guard map exceeds its byte bound")
             _atomic_write(reader.map_path(caller, root), encoded)

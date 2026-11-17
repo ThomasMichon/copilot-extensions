@@ -17,17 +17,29 @@ from artifact_source_build import validate_static_build
 from standalone_python_artifacts import artifact_label, injected_resources, project_key
 
 
-def _fixture_storage(monkeypatch, local, root):
+def _fixture_storage(monkeypatch, local, root, calls=None):
     """Substitute native ownership actors, retaining real fixture-file behavior."""
-    def check(path, **_options):
+    def check(path, **options):
         assert Path(path).is_dir() and Path(path).resolve().is_relative_to(root.resolve())
+        if calls is not None:
+            calls.append(("check", path, options))
+
+    def ancestors(path):
+        assert Path(path).is_dir() and Path(path).resolve().is_relative_to(root.resolve())
+        if calls is not None:
+            calls.append(("ancestors", path, {}))
+
+    def bytecode(path, **options):
+        assert Path(path).is_dir() and Path(path).resolve().is_relative_to(root.resolve())
+        if calls is not None:
+            calls.append(("bytecode", path, options))
 
     def mkdir(path):
         Path(path).mkdir(mode=0o700)
 
     permissions = SimpleNamespace(
-        check=check, check_ancestors=check, mkdir=mkdir,
-        check_bytecode=check,
+        check=check, check_ancestors=ancestors, mkdir=mkdir,
+        check_bytecode=bytecode,
     )
     owner = SimpleNamespace(
         mkdir_private=mkdir,
@@ -70,7 +82,8 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
     import local_install_source as local
     import installer_engine_health as health
 
-    _fixture_storage(monkeypatch, local, tmp_path.parent)
+    preparation_permissions = []
+    _fixture_storage(monkeypatch, local, tmp_path.parent, preparation_permissions)
     deadline = time.monotonic() + 30
     clock = time.monotonic
     expired = [False]
@@ -205,6 +218,11 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
             assert calls[-1] == "readback:worktree-manager"
         else:
             assert not any(call.startswith("readback:") for call in calls)
+    assert preparation_permissions[:3] == [
+        ("check", output.parent, {"ancestor": True}),
+        ("ancestors", output.parent, {}),
+        ("check", Path(local.native_retained_path(output)), {"private": True}),
+    ]
 
 
 @pytest.mark.parametrize("absolute_deadline", [False, True])
@@ -341,7 +359,9 @@ def test_shared_artifact_owner_preserves_selected_uv_and_deadline(
 
 
 @pytest.mark.parametrize("phase", ["reused", "miss", "worker-failed"])
-def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeypatch, phase):
+def test_complete_output_reuse_does_not_replay_worker_failures(
+    tmp_path, monkeypatch, phase,
+):
     import local_install_source as local
     import build_toolchain_lock as locks
 
@@ -350,7 +370,8 @@ def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeyp
         "source_commit": "a" * 40, "source_tree": "b" * 40,
         "projects": {"agent-worktrees": {"artifact": {"build_toolchain": {"fixture": True}}}},
     }
-    permissions, owner = _fixture_storage(monkeypatch, local, tmp_path)
+    preparation_permissions = []
+    permissions, owner = _fixture_storage(monkeypatch, local, tmp_path, preparation_permissions)
     tmp_path = tmp_path / "private"
     permissions.mkdir(tmp_path)
     permissions.check(tmp_path, private=True)
@@ -392,6 +413,8 @@ def test_complete_output_reuse_does_not_replay_worker_failures(tmp_path, monkeyp
             None if phase == "miss" else {"agent-worktrees": "retained"}
         )
     assert calls == [previous]
+    assert any(operation == "bytecode" and path == previous
+               for operation, path, _options in preparation_permissions)
 
 
 def test_missing_retained_toolchain_cannot_start_construction(tmp_path, monkeypatch):
