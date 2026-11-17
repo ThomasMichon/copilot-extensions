@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete acceptance and interrupted-control judgments](journal/2026/11.16-complete-acceptance-and-interrupted-control.md)
+  record actual #13016 delivery, both reviewed documentary corrections and
+  thirty-seven whole-original decisions without repeated implementation
+  studies or custody transfer. The complete post-merge census is 871 whole
+  open, 142 above fixed 729 after one external departure; no new campaign
+  credit or parent checkbox state changes.
   The [complete fleet and resource judgments](journal/2026/11.16-complete-fleet-and-resource-boundaries.md)
   record actual #13006 delivery and nine whole-original decisions without
   repeating unchanged implementation studies or transferring live custody.
