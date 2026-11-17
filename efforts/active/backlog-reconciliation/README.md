@@ -3421,6 +3421,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [fork receipt and composition gate clarification](journal/2026/11.17-fork-receipt-and-composition-gate-clarification.md)
+  records reviewed whole-domain receiving and #4756's separate retirement,
+  retains newly claimed #13135 and keeps #4959 open through an explicit
+  prospective umbrella-versus-effort completion clarification.
   The [attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
   record reviewed complete #4681 receiving and separate redundant-tracking
   retirement, reconcile the omitted-five receipt, and propose whole #4756
