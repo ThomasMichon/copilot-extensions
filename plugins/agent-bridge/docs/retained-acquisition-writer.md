@@ -234,12 +234,19 @@ or an automatic admission that never entered native launch records
 `not-started`; a preparing request or uncertain native entry remains unknown.
 Inspection can settle that exact no-effect outcome without reusing its ID.
 Recovery now durably tags its startup event span with the original operation
-before entering native preparation. Status reconciliation requires a stopped,
-transport-free original owner, unchanged compatible writer/workspace/head,
+before entering native preparation. Status reconciliation requires a stopped
+original owner, unchanged compatible writer/workspace/head,
 and the retained local Host record with both birth-matched processes
 confirmed exited. It commits `not-started` and removes that operation's
 launch gate atomically; it does not remove the Host record, change the
 request/history, clear a stop token, drain prompts or start native work.
+An in-memory failed initialization transport can be detached only through its
+inactive original recovery owner, before any native RPC and without pending
+permission or elicitation state, after the same process-exit proof. Only that
+owner's retained streams and socket are closed; no process is signaled and no
+generic client shutdown runs. Startup pruning and ordinary dead-client
+settlement preserve Host evidence while the original recovery is unresolved,
+so inspection also works after frontend restart.
 For older writers without the explicit operation tag, only a complete fresh
 metadata-adoption epoch containing its sole recovery operation and the
 affirmative initialization/child-exit/terminal-resume failure sequence is

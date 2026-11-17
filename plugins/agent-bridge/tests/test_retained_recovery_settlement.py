@@ -16,7 +16,9 @@ from agent_bridge import retained_recovery_settlement as settlement
 from agent_bridge import retained_session_recovery as recovery
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.acquisition_executor import executor
+from agent_bridge.acp_client import AcpClient
 from agent_bridge.session_host.host_index import HostIndex, HostRecord
+from agent_bridge.session_host_connection import _SessionHostConnectionMixin
 from test_creation_worktree_writer import writer_creation  # noqa: F401
 from test_retained_metadata_recovery import missing_record
 from test_workspace_creation import creation_rig, rig as _rig  # noqa: F401
@@ -219,3 +221,110 @@ async def test_unconfirmed_or_live_custody_stays_held(
         manager._connect_via_session_host.assert_not_awaited()
     finally:
         session.client = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart", [False, True])
+async def test_real_connector_failure_settles_before_and_after_startup_pruning(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, restart: bool,  # noqa: F811
+) -> None:
+    fixture, manager = writer_creation, writer_creation.rig.manager
+    old, request = await missing_record(fixture, monkeypatch)
+    session, _boundary = await metadata.prepare(
+        manager, old.session_id, request, fixture.requirement, lambda: True,
+    )
+    index = HostIndex(tmp_path / "hosts" / "index.json")
+    with index._locked_reload():
+        pass
+    manager._host_index = index
+    monkeypatch.setattr(manager, "_connect_via_session_host",
+                        _SessionHostConnectionMixin._connect_via_session_host.__get__(manager))
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", AsyncMock(
+        return_value=(["copilot", "--acp", "--stdio"], session.target.cwd, session.target.env),
+    ))
+    monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock())
+    spawned = SimpleNamespace(
+        port=12345, host_pid=90000001, child_pid=90000002, protocol_version=1,
+        state_file="fixture-state", nonce="fixture-nonce", boundary="local", endpoint={},
+        proc=SimpleNamespace(pid=90000001, poll=lambda: 0),
+    )
+    monkeypatch.setattr("zdd.diagnostics.process_start_time",
+                        lambda pid: "original-host" if pid == spawned.host_pid else "original-child")
+
+    def launch(_args: Any, *, acquisition_launch: Any, **_kwargs: Any) -> Any:
+        acquisition_launch.begin_host()
+        acquisition_launch.retain_process(spawned.proc, spawned.state_file, spawned.nonce)
+        return spawned
+
+    monkeypatch.setattr("agent_bridge.session_host.launcher._core.launch_session_host", launch)
+    sock = SimpleNamespace(
+        attach=AsyncMock(return_value=SimpleNamespace(preference_receipt=None)),
+        close=AsyncMock(), terminate=AsyncMock(),
+    )
+    streams = SimpleNamespace(
+        reader=object(), writer=object(), child_exit_code=None, aclose=AsyncMock(),
+    )
+    monkeypatch.setattr("agent_bridge.session_host.client.SessionHostClient.connect",
+                        AsyncMock(return_value=sock))
+    monkeypatch.setattr("agent_bridge.session_host.acp_adapter.open_acp_streams",
+                        AsyncMock(return_value=streams))
+    clients: list[Any] = []
+
+    def client_factory(**kwargs: Any) -> Any:
+        client: Any = AcpClient(**kwargs)
+        client._host_mode = True
+
+        async def initialize(*_args: Any, **_kwargs: Any) -> None:
+            client.mark_host_child_exited(3)
+            raise ConnectionError("controlled initialization failure before native load")
+
+        client.start_streams = AsyncMock(side_effect=initialize)
+        client.load_session = AsyncMock(side_effect=AssertionError("native load must not run"))
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr("agent_bridge.session_manager.AcpClient", client_factory)
+    with pytest.raises(Exception, match="controlled initialization failure"):
+        await recovery.resume(manager, session.session_id, request, fixture.requirement, lambda: True)
+    assert session.client is clients[0] and not clients[0].is_running
+    host = index.get(session.session_id)
+    assert host is not None
+    clients[0].load_session.assert_not_awaited()
+    before_events = manager.db.get_events(session.session_id)
+    original = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    assert settlement._failure_proven(original, session.session_id, request, before_events)
+    monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda _pid, _birth: True)
+    monkeypatch.setattr(manager, "_rec_host_alive", lambda _host: False)
+    if restart:
+        from agent_bridge.session_manager import SessionManager
+
+        manager = SessionManager(manager.db, read_only_rehydrate=True)
+        manager._host_index = index
+        monkeypatch.setattr(manager, "_rec_host_alive", lambda _host: False)
+        session = manager.get_session(session.session_id)
+        assert session is not None
+        assert session.client is None
+    manager._prune_dead_hosts()
+    assert index.get(session.session_id) == host
+    command = fixture.command
+
+    async def owner(args: Any, project: Any, **kwargs: Any) -> Any:
+        if args[0] == "head-session":
+            return {
+                "tracked": True, "state": "active", "head_session": request.native_session_id,
+                "head_revision": request.head_revision, "pending_handoffs": [],
+            }
+        return await command(args, project, **kwargs)
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", owner)
+    assert (await settlement.inspect(
+        manager, session.session_id, request.operation_id, lambda: True,
+    ))["state"] == "not-started"
+    assert session.client is None
+    assert manager.db.get_events(session.session_id) == before_events
+    assert index.get(session.session_id) == host
+    if not restart:
+        streams.aclose.assert_awaited_once()
+        sock.close.assert_awaited_once()
+    sock.terminate.assert_not_awaited()
+    clients[0].load_session.assert_not_awaited()

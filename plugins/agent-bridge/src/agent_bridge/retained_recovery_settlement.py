@@ -126,6 +126,15 @@ async def inspect(
         from zdd.process_exit import observe_original_exit
 
         target = session.target.to_json()
+        client = session.client
+        owner: Any = getattr(session, "_retained_recovery_owner", None)
+        if client is not None and (
+            not isinstance(owner, recovery.RetainedRecovery) or owner.session is not session
+            or owner.request != request or owner.active or owner.native_rpc_started
+            or client.is_running or getattr(client, "_pending_permission_future", None) is not None
+            or getattr(client, "_pending_elicitations", {})
+        ):
+            raise recovery._refuse("Pre-native settlement retains an unqualified transport")
 
         def require_stopped() -> None:
             saved = manager.db.get_session(session_id)
@@ -135,7 +144,7 @@ async def inspect(
                 or session.target.to_json() != target
                 or session.acp_session_id != request.native_session_id
                 or session.status != SessionStatus.STOPPED or saved["status"] != "stopped"
-                or session.client is not None or session._native_turn_transport is not None
+                or session.client is not client or session._native_turn_transport is not None
                 or session._handoff_in_progress or saved["cold_recovery_stop_token"] is not None
                 or latest(manager.db, session_id) is not None
                 or session_association(manager, session) is not None
@@ -175,6 +184,27 @@ async def inspect(
             ) for name in ("host", "child")
         ):
             raise recovery._refuse("Pre-native settlement retains live or unknown Host custody")
+        expected_gate = {
+            "worktree_id": scope.worktree_id, "delivery_id": f"retained-recovery:{operation_id}",
+            "mode": "cli", "session_id": session_id,
+            "native_session_id": request.native_session_id, "driver": "retained-recovery",
+        }
+        gates = manager.db.execute_read(
+            "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (scope.worktree_id,),
+        )
+        if len(gates) != 1 or dict(gates[0]) != expected_gate:
+            raise recovery._refuse("Pre-native settlement changed its original launch gate")
+        if client is not None:
+            if owner.host_record != host or owner.streams is None or owner.socket is None:
+                raise recovery._refuse("Pre-native settlement lost its original transport evidence")
+            await owner.streams.aclose()
+            await owner.socket.close()
+            require_stopped()
+            if (
+                client.is_running or getattr(client, "_pending_permission_future", None) is not None
+                or getattr(client, "_pending_elicitations", {})
+            ):
+                raise recovery._refuse("Pre-native transport changed during detach")
         index.assert_inventory_current(inventory)
         if _events(manager, session_id) != events:
             raise recovery._refuse("Pre-native failure history changed during settlement")
@@ -185,11 +215,6 @@ async def inspect(
             gate = conn.execute(
                 "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (scope.worktree_id,),
             ).fetchone()
-            expected_gate = {
-                "worktree_id": scope.worktree_id, "delivery_id": f"retained-recovery:{operation_id}",
-                "mode": "cli", "session_id": session_id,
-                "native_session_id": request.native_session_id, "driver": "retained-recovery",
-            }
             if saved is None or dict(saved) != row or gate is None or dict(gate) != expected_gate or conn.execute(
                 "SELECT 1 FROM sessions WHERE id<>? AND "
                 "(acp_session_id=? OR json_extract(target_json,'$.worktree_id')=?) UNION ALL "
@@ -207,4 +232,6 @@ async def inspect(
                 "DELETE FROM acquisition_launch_gates WHERE worktree_id=? AND delivery_id=?",
                 (scope.worktree_id, expected_gate["delivery_id"]),
             )
+        if client is not None:
+            session.client = None
     return recovery.inspect(manager, session_id, operation_id)
