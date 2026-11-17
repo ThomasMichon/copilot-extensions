@@ -219,6 +219,7 @@ def install(
         return value
 
     with ExitStack() as retained:
+        descriptors = {}
         for application in applications:
             remaining()
             _verify_copy(application.source, application)
@@ -230,7 +231,7 @@ def install(
                     runtime=runtime, verify=lambda path, app=application: _verify_copy(path, app),
                     on_progress=remaining,
                 )
-                retained.enter_context(runtime.retention_lease(
+                _slot, descriptors[application.name] = retained.enter_context(runtime.retention_custody(
                     application.root, application.version,
                     require_installed=False, timeout=remaining(),
                 ))
@@ -255,7 +256,10 @@ def install(
                 environment.update(roots)
                 result = process.run_owned(
                     command, cwd=application.slot, env=environment, timeout=remaining(),
-                    deadline=deadline, procutil=agent_procutil, construction_fd=None,
+                    deadline=deadline, procutil=agent_procutil,
+                    construction_fd=descriptors[application.name],
+                    runtime_root=application.root, runtime_version=application.version,
+                    runtime_path=Path(runtime.__file__),
                     allow_breakaway=not staging,
                 )
                 if result.stdout:

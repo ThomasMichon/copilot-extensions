@@ -221,10 +221,18 @@ def test_candidates_remain_retained_through_setup_and_release_on_settlement(
     prepared = footprints._preflight(applications)
     installer, _shell = prepared
     calls = []
-    def setup(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def setup(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         for application in applications:
             with installer.runtime._cleanup_lease(application.root, application.version) as removable:
                 assert not removable
+        current = next(app for app in applications if app.slot == options["cwd"])
+        assert options["runtime_root"] == current.root
+        assert options["runtime_version"] == current.version
+        assert options["runtime_path"] == Path(installer.runtime.__file__)
+        if os.name != "nt":
+            descriptor = options["construction_fd"]
+            assert isinstance(descriptor, int)
+            os.fstat(descriptor)
         calls.append(command)
         if fail_setup:
             raise subprocess.CalledProcessError(7, command)
