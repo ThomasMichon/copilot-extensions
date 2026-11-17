@@ -3421,6 +3421,33 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [authentication, baseline and engine receiving checkpoint](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+  records #13150's actual receipt merge, #5512's separate same-canonical
+  tracking retirement and six current contracts. Whole #5452 authentication/
+  transport and finite #5518 baseline amendments add twelve unchecked rows;
+  #5549's parent-OPEN condition receives a prospective clarification, not
+  silent waiver. The complete census is 887 whole, 158 above fixed 729.
+  The [webhook receipt and receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
+  records #13148's reviewed delivery and separate #5319/#5427 tracking
+  retirements, retaining all unfinished acceptance and custodians. #5340's
+  current whole receiving is now qualified without inventing a source hold;
+  its explicit OPEN condition remains. New #13147 retains its bounded
+  claimant. The complete census is 888 whole, 159 above fixed 729.
+  The [webhook and host-teardown receiving proposal](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+  directly retains whole #5319/#5427 contracts with six new unchecked
+  Plan/local/global rows and unchanged custodians. Five other outcomes
+  distinguish same-canonical coverage, different-domain fit and precise
+  current or historical source gaps. All sources remain open; the latest
+  complete census is 890 whole, 161 above fixed 729.
+  The [composition receipt and client-only inflow](journal/2026/11.17-composition-receipt-and-client-only-inflow.md)
+  records #13139's reviewed clarification, complete current whole receiving
+  readback and #4959's separate tracking retirement. Its Active technical
+  effort, all acceptance and actual custodians remain; #13140 retains its
+  bounded claimant. The complete census is 890 whole, 161 above fixed 729.
+  The [fork receipt and composition gate clarification](journal/2026/11.17-fork-receipt-and-composition-gate-clarification.md)
+  records reviewed whole-domain receiving and #4756's separate retirement,
+  retains newly claimed #13135 and keeps #4959 open through an explicit
+  prospective umbrella-versus-effort completion clarification.
   The [attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
   record reviewed complete #4681 receiving and separate redundant-tracking
   retirement, reconcile the omitted-five receipt, and propose whole #4756

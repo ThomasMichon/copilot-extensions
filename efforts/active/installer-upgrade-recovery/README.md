@@ -204,6 +204,9 @@ authorize production updates, recovery mutations or new access.
   the incoming inspection entry. The existing composition control is not real
   prepared-application consumer evidence. Preserve cold/historical-seed
   performance, caller adoption and installed recovery as separate outcomes.
+  Actual Windows qualification fails in the existing installed-content verifier;
+  [the contributor-owned #10570 boundary](https://github.com/ThomasMichon/copilot-extensions/pull/10570#issuecomment-6961180893)
+  retains correction/coordination. Do not patch or supersede that open contribution.
 
 ### Whole installer and resident-companion lifecycle - #5820
 
@@ -438,6 +441,35 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### 2026-11-17 - Prepared incoming inspection exposes wheel-data verification failure
+
+The existing canonical preparer successfully produces a complete Worktrees
+Source/profile/application from Dev
+`565e41e5a89a9f12250f0866bb1bab2a01660460` and Main seed
+`3d925e38178b01d23a3c38074c2306c254e631ee`. The actual prepared inspection entry
+then completes source selection, retention and staging of all 25 distributions
+on Windows/Python 3.11, but fails before the reader runs. Installed-content
+verification searches a wheel's `.data/data/share/...` member beneath
+`site-packages` instead of its spread installation location. This is a failed
+consumer qualification, not an incoming readiness or repeat pass.
+
+The [reproduction and bounded correction request](https://github.com/ThomasMichon/copilot-extensions/pull/10570#issuecomment-6961180893)
+are on the existing contributor-owned PR changing this exact verifier; the
+overlapping source-project extension request remains there too. No shared helper,
+synchronized consumer or contributor branch is patched or superseded here.
+Retain complete installed-set, origin, content and containment checks.
+
+Post-failure checks verify the six known prior installation/binding files byte
+for byte, canonical Source/profile integrity and removal of the temporary
+inspection control directory. PowerShell creates its own module-analysis cache
+inside the isolated profile; no exact whole-profile or inode/mtime preservation
+result is claimed. The first attempt's metadata preimage was not persisted.
+The 600-second preparation and 180-second consumer bounds remain unchanged.
+Local-clone provenance and checkout-path fixture failures remain distinct from
+the later real verifier failure. There is no installed-host runtime change,
+service operation or rollout. Resume this consumer after its existing shared-source owner
+provides a qualified correction.
 
 ### 2026-11-17 - Incoming inspection source disposition reconciled
 

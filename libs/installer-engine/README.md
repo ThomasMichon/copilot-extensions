@@ -97,3 +97,28 @@ the production materializer, then executes its copied remover and command
 recognizer without candidate-side canonical libraries. It preserves the original
 foreign-comment refusal assertions and checks exact owned-template recognition.
 This does not rerun or relabel the historical raw-Dev copied-consumer failure.
+
+Prepared applications may select their command publication directory with
+`install.py --global-bin <absolute-directory> -- <application-arguments>`.
+The Source adapter exposes the same optional `global_bin` keyword and
+`--install-application --global-bin` CLI option. Absence preserves the ordinary
+per-user destination. This selects command publication, not runtime ownership,
+privilege, service behavior or a persistent update policy.
+
+Both entrypoints retain the existing publication/target leases, all declared
+commands, current-publication checks, rollback and unknown-startup custody.
+Explicit selections require ordinary directory ancestry and cannot accompany
+`--stage` or overlap the addressed runtime's `versions` subtree: those paths
+contain current and retained slot-local launchers, not global command targets.
+Manager retains its existing owned command directory. Callback
+arguments remain after `--` and are not installer options.
+
+The additive `global-bin/v1` capability is a literal
+`APPLICATION_INSTALL_CAPABILITIES` declaration in the slot's actual `install.py`
+and in the Source adapter; the strict base install-contract dictionary is
+unchanged. Before construction, a selecting Source adapter reads the admitted
+application helper's bounded metadata without executing it, then checks the
+actual candidate helper before dispatch or reuse. Older helpers remain usable
+with absent selection. Required unsupported selection refuses without trying
+an effectful invocation or falling back to default publication. No existing
+form is retired; source support alone does not qualify installed adoption.

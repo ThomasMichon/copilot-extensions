@@ -246,6 +246,96 @@ def test_install_callback_budgets_reach_actual_subprocess_boundary(
     assert (fixture.slot / "install-success.json").is_file()
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_install_cli_selects_publication_without_changing_callbacks_or_default_commands(
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, explicit: bool,
+) -> None:
+    fixture = install_transaction
+    home = fixture.root / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(runtime_application_install, "__file__", str(fixture.slot / "install.py"))
+    fixture.record["commands"].append("fixture-alias")
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
+    default = home / ".local" / "bin"
+    default.mkdir(parents=True)
+    sentinel = default / "fixture-app"
+    sentinel.write_bytes(b"incumbent default command\n")
+    selected = fixture.global_bin if explicit else default
+    calls: list[list[str]] = []
+
+    def run(_record: dict[str, Any], arguments: list[str], *_args: Any, **_kw: Any) -> None:
+        if arguments:
+            calls.append(arguments)
+
+    monkeypatch.setattr(runtime_application_install, "_run", run)
+    argv = [
+        *(["--global-bin", str(selected)] if explicit else []),
+        "--", "--global-bin", "application-owned-value",
+    ]
+    assert runtime_application_install.main(argv) == 0
+    assert runtime_application_install.main(argv) == 0
+    assert calls == [["--start", "--global-bin", "application-owned-value"]] * 2
+    for command in fixture.record["commands"]:
+        for name, text in global_binstubs(
+            command, fixture.record["root_environment"], fixture.record["default_directory"],
+            root=fixture.root,
+        ).items():
+            assert (selected / name).read_bytes() == text.encode()
+    if explicit:
+        assert sentinel.read_bytes() == b"incumbent default command\n"
+    assert (fixture.slot / "install-success.json").is_file()
+
+
+@pytest.mark.parametrize("invalid", [
+    "relative", "control", "file", "stage", "manager", "current-slot", "retained-slot",
+])
+def test_explicit_publication_refuses_before_materialization_or_callbacks(
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
+    fixture = install_transaction
+    selected = fixture.global_bin
+    if invalid == "relative":
+        selected = Path("relative")
+    elif invalid == "control":
+        selected = fixture.root / "bad\nname"
+    elif invalid == "file":
+        selected.write_text("not a directory")
+        selected /= "commands"
+    elif invalid in {"current-slot", "retained-slot"}:
+        selected = fixture.slot if invalid == "current-slot" else fixture.root / "versions" / "1.0"
+        selected.mkdir(exist_ok=True)
+        (selected / "fixture-app.sh").write_bytes(b"owned slot-local launcher\n")
+    if invalid == "manager":
+        fixture.record["name"] = "worktree-manager"
+        fixture.record["commands"] = ["worktree-manager"]
+        (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
+        monkeypatch.setattr(runtime_application_install, "_run", lambda *_a, **_kw: pytest.fail(
+            "Manager must retain its owned publication directory",
+        ))
+    else:
+        monkeypatch.setattr(
+            runtime_application_install, "_materialize_interpreter",
+            lambda *_: pytest.fail("invalid publication selection reached interpreter preparation"),
+        )
+    with pytest.raises(ValueError, match="command directory"):
+        runtime_application_install.install(
+            fixture.slot, stage=invalid == "stage", global_bin=selected,
+        )
+    assert not (fixture.slot / "install-success.json").exists()
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    if invalid in {"current-slot", "retained-slot"}:
+        assert (selected / "fixture-app.sh").read_bytes() == b"owned slot-local launcher\n"
+
+
+def test_stage_cli_rejects_publication_selection_before_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime_application_install, "install", lambda *_a, **_kw: pytest.fail(
+        "invalid stage selection reached install",
+    ))
+    with pytest.raises(SystemExit) as error:
+        runtime_application_install.main(["--stage", "--global-bin", "/commands"])
+    assert error.value.code == 2
+
+
 def test_emitted_application_retains_callback_budget_contract(tmp_path: Path) -> None:
     wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
     wheel.write_bytes(b"fixture")

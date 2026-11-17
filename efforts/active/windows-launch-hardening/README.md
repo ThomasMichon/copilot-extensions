@@ -94,6 +94,73 @@ kind:
   extending this plan before implementation when necessary.
 - [ ] Use synthetic process trees and paths in all published evidence.
 
+## Context
+
+The existing Progress and Deferred Backlog Intake sections retain prior
+Windows-launch credit and the owning-domain intake route. The finite family
+below receives #5518's original baseline cohort, not a fresh inventory or
+proof that every reported entry is a windowless-parent risk.
+
+## Request
+
+A verbatim founding request was not recovered in this amendment. Preserve
+the legacy Guiding Intent and recorded progress rather than inventing that
+history. This finite intake derives from the existing #5518 original and
+both discussions, with its alternatives, prior credit and bounded claim
+retained. A source issue or planned row grants no new execution or resource
+authority.
+
+## Plan
+
+### Proposed finite #5518 baseline backfill
+
+Agent-recommended documentary intake, not implementation or completed receiving.
+The scope is the original 70-site baseline cohort, not every future subprocess.
+Historical inventory totals are not fresh measurements.
+
+- [ ] **P5518-1:** Preserve the original baseline provenance and adjudicate each
+  original entry through its existing source and launch-context owners. Retain
+  documented prior fixes, moves and specifically reviewed exceptions as credit;
+  line shifts and generic baseline reasons are not context adjudication.
+- [ ] **P5518-2:** For each genuinely windowless-parent risk, apply the existing
+  shared suppression primitive and remove the baseline entry, OR retain a
+  specifically reviewed exception for a genuinely interactive-only path.
+  Preserve Python Rule 3's supported inline exception handling versus
+  JSON/YAML Rule 4's reviewed file-based exception handling. An argv-shaped
+  declaration alone does not verify suppression; review its actual launcher
+  and calling context rather than treating every reported site as proven risk.
+- [ ] **P5518-3:** Preserve the bounded agent-vault claimant's backend operations,
+  password-prompt PowerShell host, CLI helper subprocesses and GCM/git delegation.
+  Preserve intended GUI dialogs and POSIX behavior. This claim does not receive
+  the remaining cross-plugin cohort or establish its completion.
+
+### Local Validation - Proposed #5518 acceptance
+
+- [ ] **V5518-1:** Run `python tools/check-headless-launch.py` after each
+  implementation batch and record its result with the affected original-cohort
+  decisions. Do not execute it as part of documentary intake.
+- [ ] **V5518-2:** Verify each retained exception states its specifically reviewed
+  launch-context reason in the supported Python or declaration format. Separate
+  static guard evidence from applicable Windows behavioral evidence; neither
+  a declaration nor an unrelated launch migration proves the original cohort
+  was adjudicated. Do not invent an every-host or durable-lifetime prerequisite.
+
+## Coordination
+
+### Proposed #5518 documentary route
+
+- [ ] **C5518-1:** Record the #5518-specific dated, append-only migration-intake
+  ledger route in the SAME reviewed PR as this complete domain intake. Preserve
+  deduplication, the existing tracker, explicit disposition and single canonical
+  Windows-launch domain route. Acceptance is represented by the reviewed owning
+  Plan, local and actual global Validation, Coordination and Journal, not a new
+  generic personal ACK. Do not create another umbrella owner or duplicate tracker.
+- [ ] **C5518-2:** Preserve existing per-plugin source owners and the bounded
+  Vault claim, GUI/POSIX constraints and all resource custody. Administrative
+  retirement of redundant tracking would not complete this product work or
+  the broader Windows launch programme, and authorizes no implementation,
+  installation, process action, rollout or resource appointment.
+
 ## Not in scope
 - **SAC signed-python** handling is already uniform across all 11 plugins.
 - **Uniform interpreter resolution** (its Windows `resolve-runtime.ps1` facet) is
@@ -101,6 +168,14 @@ kind:
   Windows.
 
 ## Validation Plan
+
+- [ ] **G5518:** Resolve the complete original 70-site cohort through P5518,
+  local V5518 and C5518: the baseline is empty OR contains only genuinely
+  reviewed, specific exceptions. Preserve prior specific-exception credit
+  without presenting historical counts as current evidence. This finite
+  acceptance is not completion of every future spawn, durable-lifetime work
+  or the broader Windows/native rollout programme. Documentary receiving
+  may precede technical acceptance; all unresolved product rows stay unchecked.
 
 **Windows-behavior-specific — validated on a Windows host.** Deploy, start
 sessions repeatedly (forcing version-drift reconciles), start the agent-index
@@ -110,6 +185,16 @@ Terminal / DefTerm. The `CREATE_NO_WINDOW`-vs-`DETACHED_PROCESS`-vs-`conhost
 against real behavior.
 
 ## Journal
+
+### 2026-11-17 - Finite #5518 baseline intake proposed
+
+Proposed direct original-cohort acceptance within the canonical Plan and
+Coordination sections and actual global Validation Plan, with the matching
+#5518 migration-intake ledger route to accompany the same reviewed PR.
+Preserve suppression/removal OR specifically reviewed exceptions, Rule 3/Rule 4
+context distinctions, existing credit and the bounded Vault claim. This records
+no implementation, guard run, native proof, accepted routing, tracker disposition
+or custody transfer.
 
 ### 2026-08-19 - Kickoff + Phases 1-2
 - Diagnosed the continuous windows: `bootstrap-check.ps1` (every session start,

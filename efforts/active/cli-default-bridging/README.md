@@ -82,6 +82,13 @@ before any sibling vision's opt-in-only language changes.
 - **Handoff:** a completed phase lands as its own reviewed PR before the next
   phase starts, per this repo's normal effort flow.
 
+The agent-recommended finite #5427 follow-up below remains with ThomasMichon
+through this existing per-phase reviewed flow. Host-runtime/upstream
+responsibility is an assessment outcome, not a transfer already made. Keep
+#5930 arbitration and outstanding cross-venue/version-floor validation
+distinct. This planned receiving appoints nobody, releases no resource and
+grants no execution or new generic ACK authority.
+
 ## Context
 
 Direct source inspection in the research session that produced the
@@ -325,6 +332,33 @@ and ordering before Phase 0 work begins.)_
       prompt delivery on an untested SDK/native pair. **Merged to `dev` in
       #6669**; release/rollout and native-version-floor proof are not claimed.
 
+#### Proposed finite Fleet Hygiene follow-up from #5427
+
+_(Agent-recommended direct planned receiving; all new acceptance remains
+unchecked. Historical discovery and launch-time presence are credited,
+not treated as delivery of this follow-up.)_
+
+- [ ] **P5427:** Complete the specific Fleet Hygiene follow-up for normal,
+  successful Windows host-session teardown bypassing extension cleanup.
+  Explain physical descriptor persistence until the next authoritative
+  startup/list sweep and retain the recorded bounded exposure. Preserve the
+  Linux correction: direct SIGTERM cleanup is established by the cited
+  witness; normal CLI-driven Linux exit remains unverified. Assess feasible
+  bounded mitigation and whether host-runtime behavior merits an upstream
+  report, recording the rationale and outcome. A documented supported
+  limitation may satisfy the assessment; do not require interception of
+  uncatchable termination or a new reaper daemon.
+
+##### Local Validation - #5427
+
+- [ ] **V5427:** Check the resulting Fleet Hygiene wording and recorded
+  mitigation/upstream assessment against the complete original and both
+  discussions. Preserve the successful-Windows-exit distinction, sweep
+  behavior and Linux witness limitation. Do not count #5432's discovery
+  milestone or #5930's generation-fenced mutation work as delivery. Any new
+  empirical claim requires separately authorized evidence; this documentary
+  intake requires no new native run.
+
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
 - Source-reconciliation tracker: `ThomasMichon/copilot-extensions#5930`.
@@ -433,6 +467,11 @@ without unacceptable regression before Phase 5 can promote anything:
       both this mechanism and an equivalent ACP+Session-Host flow, compared
       directly (Phase 4).
 
+- [ ] **G5427:** Resolve P5427/V5427 and continuing Coordination as a finite
+  documentation/investigation obligation. Preserve already-credited
+  launch-time-presence evidence and the existing four-track promotion
+  decision; this row adds no every-host native qualification requirement.
+
 ## Proposal
 
 The Phase 0-1 implementation and Phase 6 investigation follow the reviewed
@@ -442,6 +481,15 @@ cross-venue/version-floor proofs remain open. An SDK transport migration is
 outside this effort's execution scope.
 
 ## Journal
+
+### 2026-11-17 - Proposed finite Fleet Hygiene receiving
+
+Added agent-recommended unchecked P5427/V5427/G5427 and continuing same-owner
+Coordination for the successful-Windows-teardown caveat and bounded
+mitigation/upstream assessment, preserving the Linux direct-SIGTERM
+correction. Historical discovery remains credited without claiming the
+follow-up delivered. No reviewed receiving delivery, technical completion,
+native execution, source disposition or custody transfer is claimed.
 
 ### 2026-10-02 — Kickoff
 

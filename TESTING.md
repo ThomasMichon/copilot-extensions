@@ -119,6 +119,16 @@ affected owners' agreement.
 
 ### Selected read-only readiness execution
 
+Worktrees' Manager admission packet selects `tests/test_manager_recovery.py`
+and `tests/test_manager_application_identity.py`. It covers legacy and canonical
+application layouts, actual wheel/package/version and source associations,
+configured source precedence and unchanged admission evidence. The separately
+selected `tests/native/test_manager_application_reader.py` with
+`--allow-explicit-tiers` reads a fresh synthetic application through the real
+controller-selection reader in an isolated, no-bytecode Python child. It never
+installs, repairs or starts Manager or a service. That first-touch reader proof
+is not a successful ordinary suite update or a live installation qualification.
+
 Machines' `tests/test_installation_repair.py -k readonly_environment` runs the
 actual platform-native Index gate from a Git checkout with marker-writing local
 Git commands and relative PATH entries. It also checks an all-relative PATH

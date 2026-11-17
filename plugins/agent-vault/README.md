@@ -158,6 +158,23 @@ and the [configuration reference](docs/configuration.md#dependency-selection).
 
 ## Source-qualified runtimes
 
+Prepared applications support explicit client-only installation by forwarding
+`--no-service` to their existing startup callback (`install.py -- --no-service`
+through the application's normal installer entry). Require
+`prepared-application-no-service-v1` from that selected application's
+`invocation-contract --json` before requesting this option. Older receivers
+strictly reject it; do not retry without required client-only intent.
+The callback still checks the physical selected, completed application, but
+does not check activation configuration, ensure a daemon or access credentials.
+Without the option, ordinary selected-service startup is unchanged.
+
+This option controls that installation invocation; it does not persist a
+client-only desired mode for later updates. Ordinary construction, selector and
+command publication still belong to the application installer. It does not
+isolate global command publication, adopt or preserve another serving
+installation, supply external provider roots or establish privileged execution
+custody. Those boundaries need independent qualification.
+
 Both native installers accept canonically prepared `runtime-source.json`
 payloads, pinning the complete identity across the install lock, construction,
 completion and activation. These non-editable generations include the package
