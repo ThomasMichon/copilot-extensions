@@ -46,7 +46,7 @@ class KekError(RuntimeError):
 # DPAPI (Windows) wrap / unwrap primitive -- ctypes, no third-party dependency
 # ---------------------------------------------------------------------------
 
-def _dpapi(protect: bool, data: bytes) -> bytes:
+def _dpapi(protect: bool, data: bytes, *, machine: bool = False) -> bytes:
     import ctypes
     from ctypes import wintypes
 
@@ -65,7 +65,7 @@ def _dpapi(protect: bool, data: bytes) -> bytes:
     fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
     ok = fn(
         ctypes.byref(in_blob), None, None, None, None,
-        CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out_blob),
+        CRYPTPROTECT_UI_FORBIDDEN | (0x4 if protect and machine else 0), ctypes.byref(out_blob),
     )
     if not ok:
         err = ctypes.GetLastError()

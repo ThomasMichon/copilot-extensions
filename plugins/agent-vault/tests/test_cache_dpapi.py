@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent_vault import cache, kek
-from agent_vault.cache_dpapi import MAGIC, CacheProtectionError
+from agent_vault.cache_dpapi import MAGIC, CacheDecryptionUnavailable, CacheProtectionError
 
 
 @pytest.fixture
@@ -80,3 +80,45 @@ def test_wrong_user_or_corrupt_native_cache_is_not_overwritten(native_cache, mon
     assert path.read_bytes() == MAGIC + b"unreadable"
     assert not cache.PersistentCache().put("Identity/shared", "password", "new-key")
     assert path.read_bytes() == MAGIC + b"unreadable"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real Windows machine-DPAPI and creation DACL")
+def test_native_machine_copy_and_forced_read_leave_user_cache_intact(native_cache, monkeypatch):
+    from agent_vault import cache_machine
+    from agent_vault.cache_dpapi import DpapiCacheCipher
+    from agent_vault.ssh_key_files import WindowsSecurity
+
+    persistent = cache.PersistentCache()
+    assert persistent.put("Allowed/token", "password", "synthetic-native-value")
+    primary = (native_cache / "credential-cache.enc").read_bytes()
+    assert cache_machine.prepare(persistent)["populated"]
+    machine = native_cache / cache_machine.DIRECTORY / cache_machine.FILENAME
+    security = WindowsSecurity()
+    security.require(machine.parent, directory=True)
+    security.require(machine, directory=False)
+    assert b"synthetic-native-value" not in machine.read_bytes()
+    with monkeypatch.context() as guarded:
+        calls = []
+
+        def unavailable(*_args):
+            calls.append(True)
+            raise CacheDecryptionUnavailable("synthetic user decryption unavailable")
+
+        guarded.setattr(
+            DpapiCacheCipher, "decrypt", unavailable,
+        )
+        assert cache.PersistentCache().get(
+            "Allowed/token", readonly=True, machine_only=True,
+        ) == "synthetic-native-value"
+        assert calls == []
+        assert cache.PersistentCache().get(
+            "Allowed/token", readonly=True,
+        ) == "synthetic-native-value"
+        assert calls == [True]
+    assert (native_cache / "credential-cache.enc").read_bytes() == primary
+    reopened = cache.PersistentCache()
+    assert reopened.put("Allowed/token", "password", "synthetic-updated-value")
+    security.require(machine, directory=False)
+    assert cache.PersistentCache().get(
+        "Allowed/token", readonly=True, machine_only=True,
+    ) == "synthetic-updated-value"

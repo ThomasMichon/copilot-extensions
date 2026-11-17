@@ -1,14 +1,9 @@
 """Persistent, encrypted on-disk credential cache for agent-vault.
 
-The daemon caches unlocked credentials in memory with a TTL; that cache dies when
-the daemon restarts and cannot serve reads while the vault is locked. The
-*persistent* cache is a separate, **opt-in** tier: a Fernet-encrypted file on disk
-that survives restarts and answers reads without unlocking the vault -- so a
-consumer can fetch a previously-cached secret even when the master password is not
-loaded (e.g. an unattended job on a locked box). On Windows without PyCryptodome,
-new caches use native user-bound DPAPI directly, including on ARM64. Existing
-Fernet caches use the same format through PyCryptodome; they are never discarded
-to create a replacement. DPAPI caches remain readable if that package is installed.
+The persistent cache is an opt-in tier independent of daemon/password lifetime.
+Windows supports native user-bound DPAPI, including ARM64, and existing Fernet
+caches retain their format. Explicitly prepared machine-DPAPI copies can serve
+read-only fallback when the selected user cache cannot be decrypted.
 
 It is inert unless enabled. Storing secrets on disk -- even encrypted with a
 local key -- is a deliberate tradeoff, so the cache does nothing until switched on
@@ -254,8 +249,16 @@ class PersistentCache:
     # -- atomic file I/O ---------------------------------------------------
 
     def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
+        from .cache_dpapi import CacheDecryptionUnavailable
+        from .cache_machine import enabled, read_store
+
         with self._selection_guard():
-            return self._read_selected_store(readonly=readonly, strict=strict)
+            try:
+                return self._read_selected_store(readonly=readonly, strict=strict)
+            except CacheDecryptionUnavailable:
+                if not enabled(self):
+                    raise
+                return read_store(self)
 
     def _read_selected_store(self, *, readonly: bool, strict: bool) -> dict:
         self._refresh_selection()
@@ -375,6 +378,10 @@ class PersistentCache:
             self._replacement_mutex.release()
 
     def _write_store_unlocked(self, store: dict) -> bool:
+        from .cache_machine import MachineReadStore, write_copy
+
+        if isinstance(store, MachineReadStore):
+            return False
         f = self._get_fernet()
         if f is None:
             return False
@@ -403,6 +410,7 @@ class PersistentCache:
                 os.close(fd)
                 if not IS_WINDOWS:
                     os.chmod(tmp_path, 0o600)
+                write_copy(self, store, ciphertext)
                 os.replace(tmp_path, str(self._cache_file))
                 if not IS_WINDOWS:
                     directory_fd = os.open(self._base_dir, os.O_RDONLY)
@@ -513,6 +521,7 @@ class PersistentCache:
         legacy_entry: str | None = None,
         legacy_field: str | None = None,
         readonly: bool = False,
+        machine_only: bool = False,
     ) -> str | None:
         """Read a cached value; readonly mode refuses migration and corrupt data."""
         if not self.enabled:
@@ -529,15 +538,20 @@ class PersistentCache:
                 return self._get_value(
                     entry, field, max_age_seconds, legacy_entry=legacy_entry,
                     legacy_field=legacy_field, readonly=readonly,
+                    machine_only=machine_only,
                 )
 
     def _get_value(
         self, entry, field, max_age_seconds, *, legacy_entry, legacy_field, readonly,
+        machine_only=False,
     ) -> str | None:
-        store = (
+        from .cache_machine import MachineReadStore, read_store
+
+        store = read_store(self) if machine_only else (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
+        readonly = readonly or isinstance(store, MachineReadStore)
         if self._pending_alias(store, entry, field, strict=readonly):
             return None
         if not readonly and _path_exists(self._key_file):
@@ -915,6 +929,8 @@ class PersistentCache:
                 service_cache_epochs.revoke(self._root_dir, None, reset=True)
                 if self._cache_file.exists():
                     self._cache_file.unlink()
+                from .cache_machine import clear_copy
+                clear_copy(self)
             return True
         except (OSError, RuntimeError, ValueError):
             return False
