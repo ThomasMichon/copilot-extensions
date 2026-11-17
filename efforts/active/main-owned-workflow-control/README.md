@@ -104,14 +104,15 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** finish the approved in-PR capture-blocker repair for installed-suite
-qualification (#12013). All 24 selected owners pass the whole-file strict
-ratchet; the complete checker owner and 204 Windows prefix controls pass too.
-The retained Index cleanup hold, current required CI, native POSIX proof and
-bounded controlled capture still block current-head acceptance. The old
-Ubuntu capture lost second-group progress when its caller-owned aggregate
-expired; repair observability and redundant work without changing probes or
-limits. No original hold changes.
+**Now:** reconcile #12013 with current Dev after preserving its successful
+exact-source HTTP-52 capture. Ubuntu run `44011929440` captures and independently
+verifies all 638 controlled cases at `3e1ea0c08ba64cef81bab70a431e3a41fe742cb2`,
+within the unchanged aggregate. Its 218 exported outputs pass canonical
+materialization and validation. All 24 selected owners, the complete checker
+owner and 204 Windows prefix controls pass at that checkpoint. Changed inputs
+after reconciliation require current evidence; the retained Index cleanup
+hold, current required CI, native POSIX proof and hosted Windows acceptance
+remain open. No original hold changes.
 
 **Return:** after the refresh, re-read this Goal and the linked scope approvals,
 reconcile retained implementation/checker custody, and finish that slice under

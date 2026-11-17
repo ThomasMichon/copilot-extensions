@@ -3589,3 +3589,28 @@ budget or the separate Windows profile. The existing Linux PR unit lane still
 owes exact-current-source evidence. Capture diagnostics are implemented;
 identifying and eliminating the slow redundant work, fresh controlled capture,
 current-head review/CI and all larger acceptance gates remain open.
+
+### November 17: exact-source Ubuntu capture and controlled import
+
+The one admitted Ubuntu run `44011929440`, job `133800737914`, completes
+successfully at `3e1ea0c08ba64cef81bab70a431e3a41fe742cb2`. Both the write
+capture and independent no-write verification execute all 229 declared
+functions and 638 parameter cases within the unchanged 240-second aggregate.
+The historical publication guards and canonical contract checker also pass.
+The earlier timed-out capture remains a failure; this result neither identifies
+its slow case nor justifies an unchanged retry or a larger budget.
+
+The canonical exporter produces 218 outputs with manifest SHA-256
+`8f4a93e7cad27671294e969203d4389a7c97637954125bf533d0885a0926b0f8`.
+The downloaded artifact independently matches that provider-log receipt.
+Native materialization at the exact source checkpoint validates its complete
+inventory, hashes and source preimages before publication. The local canonical
+checker then passes both contracts and all 1,141 fixtures. Skipped workflow
+jobs supply no qualification.
+
+This settles the frozen capture before source reconciliation, not the current
+Dev conflict, native POSIX route request, required CI, seven open review
+threads, retained Index cleanup hold or existing-owner hosted Windows gate.
+Any changed capture input after reconciliation still requires current-source
+evidence. The parent effort remains active, with baseline, frozen-candidate,
+Main, rollout and custody boundaries unchanged.
