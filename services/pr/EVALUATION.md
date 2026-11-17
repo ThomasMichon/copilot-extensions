@@ -1,14 +1,55 @@
 # Finite reviewer-feed comparison
 
-The source-only [comparison example](examples/evaluate_feed.py) compares one
-selected cached PR and its reviewer action with an independently supplied
-native observation. It performs no provider read, service query, task effect,
-ACK or persistent write. It is not a new polling loop or an activated evaluator.
+The [packaged comparator](src/agent_pull_requests_service/evaluation.py) compares
+one selected cached PR and its reviewer action with an independently supplied
+native observation. The [example imports](examples/evaluate_feed.py) remain
+compatible. The pure comparator performs no acquisition or effects; the finite
+local CLI below adds cache queries, not a polling loop or activated evaluator.
+
+## Compare through the local client
+
+```text
+agent-pull-requests-service compare --socket /data/pr-cache/local.sock --namespace installation-a --target example-gitea --consumer comparison-reader --reviewer reviewer-a --number 7 --reference /data/reference.json --timeout 60
+```
+
+The reference is an ordinary JSON file of at most 1 MiB with exactly these
+fields:
+
+| Field | Value |
+|---|---|
+| `schema` | `agent-pull-requests.comparison-reference` |
+| `version` | `1` |
+| `identity` | Full `namespace`, `provider`, `endpoint`, `account` and `repo` selection |
+| `observed_at` | Acquisition owner's integer Unix timestamp |
+| `snapshot` | Original `agent-worktrees.pr-snapshot` version-1 native envelope for the selected PR |
+
+The acquisition owner supplies that file through the admitted path below.
+Reference metadata is not authenticated acquisition evidence or permission to
+fetch a provider. The CLI validates its bounded input and selected identity,
+discovers the running local reviewer capability, and requests the selected PR
+and first 16 actions once. Capability discovery and both requests share one
+finite deadline of 1..60 seconds; an existing earlier client deadline is retained.
+There is no automatic retry, pagination, subscription, ACK, native/provider read,
+service startup or persistent write.
+
+A missing action on a nonterminal first page remains unavailable, not proof
+that the PR has no action. Concurrent cache movement also remains unavailable;
+the command does not keep querying until it obtains agreement. Use another
+separately bounded comparison when appropriate, preserving actual acquisition
+times and original evidence.
+
+The JSON report retains full selection, acquisition/comparison times and both
+cache event cursors alongside the per-field and action outcomes. Exit zero
+means a report was produced, including a `different`, `stale` or `unavailable`
+result; it is not an all-clear. Exit two means input or local transport/support
+was unavailable. Unsupported core/client combinations refuse this operation
+without changing the existing query commands or falling back to forge reads.
 
 ## Acquire through the existing owners
 
-Read the selected PR through the [local query](LOCAL.md) and its action through
-the [reviewer view](REVIEWER.md). Retain the full configured namespace/provider/
+The CLI uses the [local query](LOCAL.md) and
+[reviewer view](REVIEWER.md); callers can also supply those views directly to
+the pure comparator. Retain the full configured namespace/provider/
 endpoint/account/repository, consumer and reviewer. The query `cursor` and
 action view `event_cursor` must agree; otherwise the example reports unavailable
 and the caller can perform another bounded coherent read. A current SSE sample
@@ -61,12 +102,16 @@ candidate transition; causal follow-up ordering therefore remains unavailable
 without independent historical evidence. Current-head agreement is not proof
 of a reviewed base, handled feedback or publication authority.
 
-The [source controls](tests/test_feed_evaluation_example.py) exercise actual
+The [pure source controls](tests/test_feed_evaluation_example.py) exercise actual
 cache projection/query pages with separately constructed native envelopes:
 initial/conflict agreement, changed/unknown candidates, terminal differences,
 partial review coverage, causal-order unavailability, stale or future evidence,
 mixed cache views and full scope refusal. These are comparison mechanics,
 not actual acquisition, provider agreement or an installed evaluator.
+The [client controls](tests/test_evaluation_client.py) additionally exercise the
+real Unix HTTP/CLI with the actual cache, no query-triggered provider or delivery
+effects, bounded reference parsing, original deadlines and mixed/partial-view
+refusals. They do not qualify an installed or live-provider comparison.
 
 ## Remaining operational acceptance
 
