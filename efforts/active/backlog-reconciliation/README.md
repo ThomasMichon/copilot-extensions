@@ -3421,6 +3421,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [generic-review intake receipt](journal/2026/11.17-generic-review-intake-receipt.md)
+  records #2887's already-reviewed Phase 11 route without resuming its parked
+  owner, closing the canonical issue or repeating #2899's historical retirement.
   The [cadence and idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
   distinguishes #2908's conditional cadence from existing merge guidance and
   stops #2879 research at unchanged decisive entrypoints without closure credit.
