@@ -29,8 +29,9 @@ pytestmark = pytest.mark.contract("agent_bridge.retained_metadata_recovery")
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("loss", ["none", "resume-reply", "uncommitted-storage"])
 async def test_real_resume_frontdoor_records_dispatch_control_before_worker_acceptance(
-    writer_creation: Any, monkeypatch: Any, tmp_path: Path,
+    writer_creation: Any, monkeypatch: Any, tmp_path: Path, loss: str,
 ) -> None:
     source = Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"
     monkeypatch.syspath_prepend(str(source))
@@ -38,6 +39,8 @@ async def test_real_resume_frontdoor_records_dispatch_control_before_worker_acce
     facts = importlib.import_module("agent_dispatch.ordinary_agent_storage")
     invocation = importlib.import_module("agent_dispatch.ordinary_invocation")
     assignment = importlib.import_module("agent_dispatch.ordinary_assignment")
+    agent_facts = importlib.import_module("agent_dispatch.ordinary_agent_facts")
+    client_errors = importlib.import_module("agent_dispatch.client_errors")
     support = importlib.import_module("agent_dispatch.queue_pool_placement")
     queue = importlib.import_module("agent_dispatch.queue").TaskQueue(tmp_path / "dispatch.db")
     task = queue.create("review", repo="source", exclusive_key="source-review")
@@ -85,6 +88,8 @@ async def test_real_resume_frontdoor_records_dispatch_control_before_worker_acce
     bridge_client = BridgeClient("http://fixture.invalid", "synthetic")
     sends: list[str] = []
     resumes: list[str] = []
+    lost: list[str] = []
+    launches = len(fixture.starts)
 
     def wait(coroutine: Any) -> Any:
         return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=15)
@@ -140,6 +145,9 @@ async def test_real_resume_frontdoor_records_dispatch_control_before_worker_acce
             return asdict(queue.record_spawn_allocation(key, project, **kwargs))
 
         def record_resumed_agent(self, key: str, **kwargs: Any) -> Any:
+            if loss == "uncommitted-storage" and not lost:
+                lost.append(loss)
+                raise client_errors.DispatchError(503, "storage unavailable before commit")
             return asdict(dispatch.record_resumed_agent(queue, key, **kwargs))
 
     def run(argv: list[str], **kwargs: Any) -> Any:
@@ -153,6 +161,9 @@ async def test_real_resume_frontdoor_records_dispatch_control_before_worker_acce
                 except SystemExit as exc:
                     assert isinstance(exc.code, int)
                     code = exc.code
+            if argv[2] == "resume" and loss == "resume-reply" and not lost:
+                lost.append(loss)
+                raise subprocess.TimeoutExpired(argv, 1)
             return subprocess.CompletedProcess(argv, code, output.getvalue(), "")
         payload = native_keyed_admission.KeyedNativePrompt.model_validate(json.loads(kwargs["input"]))
         session_id = argv[3]
@@ -179,18 +190,40 @@ async def test_real_resume_frontdoor_records_dispatch_control_before_worker_acce
     monkeypatch.setattr(dispatch, "subprocess", SimpleNamespace(
         run=run, TimeoutExpired=subprocess.TimeoutExpired, SubprocessError=subprocess.SubprocessError,
     ))
-    monkeypatch.setattr(assignment, "read_owner", lambda *args, **kwargs: dict(row))
+    monkeypatch.setattr(assignment, "read_owner", lambda reservation, task_id, **kwargs: agent_facts.owner_record(
+        dict(row), reservation, task_id, allow_native=kwargs.get("allow_native"),
+    ))
     bridge = importlib.import_module("agent_dispatch.bridge")
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *args, **kwargs: row["repo"])
+    if loss != "none":
+        with pytest.raises(dispatch.CreatedAgentUnrecorded):
+            await asyncio.to_thread(
+                dispatch.start, snapshot, client=Client(), agent="local", project=row["repo"],
+                prompt="Review the assigned source",
+            )
+        assert queue.get_reservation(reservation.key).agent_info == before["agent_info"]
+        assert not sends
     result = await asyncio.to_thread(
         dispatch.start, snapshot, client=Client(), agent="local", project=row["repo"],
         prompt="Review the assigned source",
     )
-    assert len(resumes) == len(sends) == 1
+    assert len(resumes) == (1 if loss == "none" else 2) and len(sends) == 1
+    assert len(fixture.starts) == launches + 1
     assert queue.get(task.id).status == "queued"
     stored = queue.get_reservation(reservation.key)
     assert stored.agent_info["startup_invocation"] == before["agent_info"]["startup_invocation"]
     assert stored.agent_info["durable_session_id"] == bound.old.acp_session_id
+    selections = fixture.selected.call_count
+    control = stored.agent_info["current_control_invocation"]["invocation"]
+    receipt = await native_keyed_admission.submit(
+        bound.manager, stored.agent_info["session_id"],
+        native_keyed_admission.KeyedNativePrompt.model_validate({
+            key: value for key, value in control.items() if key != "selection"
+        }),
+        read_only=True,
+    )
+    assert receipt is not None
+    assert fixture.selected.call_count == selections
     dispatch.record_session_info(queue, reservation.key, result["session_info"])
     assert queue.claim_one("worker", task_id=task.id) is not None
     assert queue.start(task.id, "worker", owner_session_id=bound.old.acp_session_id).status == "started"

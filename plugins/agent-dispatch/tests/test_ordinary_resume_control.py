@@ -39,11 +39,12 @@ def _restoring(assigned: Any, before: Any, info: Any, monkeypatch: Any) -> Any:
     original_status = queue.get(task["id"]).status
     effects: list[str] = []
     receipts: dict[str, dict[str, Any]] = {}
-    state: dict[str, Any] = {"absent": True, "loss": False, "unknown": False}
+    state: dict[str, Any] = {"absent": True, "loss": False, "unknown": False, "commands": []}
 
     def run(argv: Any, **kwargs: Any) -> Any:
         if argv[0] != "bridge":
             return original(argv, **kwargs)
+        state["commands"].append(list(argv))
         command = argv[2]
         if command == "version":
             result = original(argv, **kwargs)
@@ -77,6 +78,8 @@ def _restoring(assigned: Any, before: Any, info: Any, monkeypatch: Any) -> Any:
             assert queue.get(task["id"]).status == original_status
             effects.append("resume")
             record.update(session_live=True, native_liveness="active")
+            if state.pop("resume_loss", False):
+                raise subprocess.TimeoutExpired(argv, 1)
             value = copy.deepcopy(info)
         elif command == "send":
             invocation = json.loads(kwargs["input"])
@@ -187,11 +190,12 @@ def test_placed_resume_records_startup_but_worker_explicitly_accepts_over_http(
 
 
 def test_ordinary_start_restores_and_records_before_new_send_but_worker_alone_starts(restoring: Any) -> None:
-    assigned, before, _, effects, _, _ = restoring
+    assigned, before, _, effects, state, _ = restoring
     queue, task, _, _, _, _ = assigned
     original_task = asdict(queue.get(task["id"]))
     result = _qualified_start(assigned)
     assert effects == ["resume", "send"]
+    assert len(state["commands"]) == 9
     stored = queue.get_reservation(before["key"])
     assert stored.session_handle == "local-body:adopted-bridge"
     assert stored.startup_complete is False and stored.state == "reserving"
@@ -215,10 +219,49 @@ def test_lost_current_control_reply_recovers_receipt_without_resume_or_second_se
     with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="recovery retained"):
         _qualified_start(assigned)
     saved = copy.deepcopy(assigned[0].get_reservation(before["key"]).agent_info)
+    state["commands"].clear()
     result = _qualified_start(assigned)
     assert result["session"] == "local-body:adopted-bridge"
     assert effects == ["resume", "send"]
+    assert len(state["commands"]) == 1 and "--receipt-only" in state["commands"][0]
     assert assigned[0].get_reservation(before["key"]).agent_info == saved
+
+
+@pytest.mark.parametrize("lost", ["resume-reply", "uncommitted-storage"])
+def test_retry_before_control_storage_reconciles_only_the_original_live_native(
+    restoring: Any, monkeypatch: Any, lost: str,
+) -> None:
+    assigned, before, _, effects, state, _ = restoring
+    queue, _, client, _, _, _ = assigned
+    if lost == "resume-reply":
+        state["resume_loss"] = True
+    else:
+        record = client.record_resumed_agent
+
+        def unavailable(*args: Any, **kwargs: Any) -> Any:
+            monkeypatch.setattr(client, "record_resumed_agent", record)
+            raise DispatchError(503, "storage unavailable before commit")
+
+        monkeypatch.setattr(client, "record_resumed_agent", unavailable)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        _qualified_start(assigned)
+    assert queue.get_reservation(before["key"]).agent_info == before["agent_info"]
+    result = _qualified_start(assigned)
+    assert result["native_session_id"] == before["agent_info"]["connection"]["native_session_id"]
+    assert effects == ["resume", "resume", "send"]
+
+
+def test_lost_resume_reply_never_admits_a_foreign_live_head(restoring: Any) -> None:
+    assigned, before, _, effects, state, _ = restoring
+    queue, _, _, record, _, _ = assigned
+    state["resume_loss"] = True
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        _qualified_start(assigned)
+    record["last_session_id"] = "foreign-native"
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        _qualified_start(assigned)
+    assert effects == ["resume"]
+    assert queue.get_reservation(before["key"]).agent_info == before["agent_info"]
 
 
 def test_unknown_current_control_receipt_never_sends_or_rekeys(restoring: Any) -> None:

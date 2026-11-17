@@ -392,12 +392,14 @@ def start(
         return {**response, "fact_kind": "resumed"}
 
     from .ordinary_assignment import current_task, read_owner
-    def assignment_record() -> dict[str, Any]:
+    def assignment_record(*, allow_native: str | None = None) -> dict[str, Any]:
         current_task(client, task)
         from .ordinary_control_invocation import CONTROL
+        if allow_native is None and info and CONTROL in info:
+            allow_native = identity(info).native
         record = read_owner(
             reservation, task["id"], timeout=timeout,
-            **({"allow_native": identity(info).native} if info and CONTROL in info else {}),
+            **({"allow_native": allow_native} if allow_native is not None else {}),
         )
         if writer_admission is not None:
             writer_admission.check_record(record)
@@ -481,7 +483,7 @@ def start(
             current_task(client, task)
             current = resume(
                 run, client, reservation, original_info, writer_admission,
-                read_record=assignment_record,
+                read_record=lambda: assignment_record(allow_native=identity(original_info).native),
             )
             current["startup_invocation"] = original_info["startup_invocation"]
             if CONTROL in original_info:

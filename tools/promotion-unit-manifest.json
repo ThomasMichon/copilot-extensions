@@ -5276,7 +5276,12 @@
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_full_json_status_distinguishes_absence_from_other_failures[404]",
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_full_json_status_distinguishes_absence_from_other_failures[409]",
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_full_json_status_distinguishes_absence_from_other_failures[503]",
-        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[null]"
+        "tools/promotion_unit_tests/test_ordinary_control_invocation.py::test_current_control_refuses_changed_operation_without_rewriting_history[null]",
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[created-fresh]",
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[resumed-fresh]",
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[receipt-miss]",
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[receipt-present]",
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[cached-admission]"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/config.py",
@@ -5622,7 +5627,8 @@
         "tools/bridge_capture_progress.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py",
-        "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py"
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py",
+        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -6450,6 +6456,8 @@
         "tools/promotion_unit_tests/test_ordinary_control_adoption.py": "03492bbacca2e6be98395ce37dee932a3818ca92b983e2085bd3592e7853f2d7",
         "tools/promotion_unit_tests/test_ordinary_control_invocation.py": "3961660093fbbc40de69cad35f6ca9b7be8d5db0b1e6bfcb481020bf1c5b38e7",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py": "18bf1ff704db6aefb593947f1b46c669f564d002669a2df4e816524df2ad57d9",
-        "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py": "f8180ab97c95b608991360ad33dc5a1d0678ba713bcbbc2cd80ab222b526f13e"
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py": "f8180ab97c95b608991360ad33dc5a1d0678ba713bcbbc2cd80ab222b526f13e",
+        "tools/promotion_unit_tests/test_retained_admission_work.py": "bdde7bac4e96079165d6b1bdf94735a8e7ddc9c43e2566fe51e9420d9bc9515e",
+        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba"
     }
 }

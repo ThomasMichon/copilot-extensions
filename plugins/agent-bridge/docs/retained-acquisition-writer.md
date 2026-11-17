@@ -438,6 +438,33 @@ Receipt-only observation and an already-retained receipt remain non-mutating
 and do not need to reconstruct the writer. This capability admits no old key
 into an adopted epoch and does not replace the caller's current task admission.
 
+The additional continuation scope applies to fresh **resumed** keyed admissions,
+not initial created-session admissions. Each such send selects/qualifies its
+compatible writer once and verifies the exact workspace/head; it adds one
+capability read and one workspace record/head pair to the existing resumed
+admission checks. These are bounded owner commands, not repository/history
+scans or per-token callbacks. A completed receipt and receipt-only observation
+perform no writer selection or native load. Writer evidence is requalified for
+each new mutation rather than cached across possible owner replacement.
+
+Required actor-free work-count controls cover created versus resumed admission,
+receipt misses, retained receipts and accepted-send replay. The selected
+`tests/test_dispatch_retained_resume.py` composition additionally checks that
+lost resume replies and failed pre-commit storage reuse the same native load,
+and that receipt observation does not select a writer again. For reproducible
+model-free cold/retry comparisons, run that file through the repository's
+container runner with `--junit-dir <owned-output-directory>` and compare its
+three named cases on the same source and runner configuration. Those case
+durations include fixture setup and are not native-launch measurements.
+
+Native cold/warm latency is unqualified here. In an authorized retained-native
+pilot, time the ordinary exact-workspace resume command once from stopped state,
+then repeat against the resulting ready control; compare wall time and the
+existing startup diagnostic stages under the same runtime/workspace. Observe
+the persisted current invocation's receipt separately, without resending or
+stopping a live worker to manufacture a cold case. Preserve the pilot's original
+deadline and cleanup owner; a pending/unknown operation is not another sample.
+
 ### Target inventory and metadata-only lookup
 
 `agent-bridge targets --json` consumes `target_inventory: 1` and returns the

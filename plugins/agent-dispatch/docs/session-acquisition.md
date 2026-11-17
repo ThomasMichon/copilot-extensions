@@ -90,6 +90,10 @@ the persisted operation, never its predecessor key or a replacement key.
 A persistent update guard prevents older recorders from erasing these bytes.
 An observed live workspace is admissible only for this same retained native,
 with the existing writer, incarnation and adoption evidence.
+If the resume reply is lost before controller storage commits, the recovery
+read may reconcile that original live head without a stored current operation.
+It still proves predecessor absence and the actual writer/adoption through
+Bridge before recording or sending; a foreign live head remains inadmissible.
 
 This migration covers an otherwise admitted initial `reserving` attempt at its
 original task generation. It does not attach failed or released historical

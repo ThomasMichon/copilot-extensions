@@ -170,12 +170,17 @@ async def submit(
         if manager.is_draining:
             from .session_manager import DaemonDrainingError
             raise DaemonDrainingError("turn")
-        from .creation_worktree_writer import continue_session
+        if binding["origin_kind"] == "resumed":
+            from .creation_worktree_writer import continue_session
 
-        handled, result = await continue_session(
-            manager, session, _submit_qualified, session_id, (request,), {},
-        )
-        return result if handled else await _submit_qualified(manager, session_id, request)
+            handled, result = await continue_session(
+                manager, session, _submit_qualified, session_id, (request,), {},
+            )
+            if handled:
+                if not isinstance(result, dict):
+                    raise ValueError("native_admission_history_unproven")
+                return result
+        return await _submit_qualified(manager, session_id, request)
 
 
 async def _submit_qualified(manager: Any, session_id: str, request: KeyedNativePrompt) -> dict[str, Any]:
