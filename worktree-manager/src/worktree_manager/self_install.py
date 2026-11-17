@@ -413,7 +413,7 @@ def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
             # to \n on read, making an up-to-date file look "stale".
             with p.open(encoding="utf-8", newline="") as f:
                 actual = f.read()
-        except OSError:
+        except (OSError, UnicodeError):
             return True
         if actual != expected:
             return True

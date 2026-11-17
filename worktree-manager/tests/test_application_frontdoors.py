@@ -64,15 +64,10 @@ def test_selected_older_launcher_api_is_a_replacement_gap_not_a_status_error(
     assert install._binstubs_are_stale(application_slot=slot)
 
 
-@pytest.mark.parametrize("corrupt", [
-    b'{"commands": [', b"\xff", b"[]",
-    b'{"commands":[]}', b'{"commands":"worktree-manager"}',
-    b'{"commands":[null]}', b'{"commands":["other"]}',
-    b'{"commands":["worktree-manager","worktree-manager"]}',
-])
-def test_corrupt_selected_declaration_needs_replacement_but_cannot_be_published(
-    application: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, corrupt: bytes,
-) -> None:
+@pytest.fixture
+def selected_application(
+    application: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
     slot, _ = application
     root = slot.parent.parent
     install._deploy_binstubs(application_slot=slot)
@@ -83,6 +78,20 @@ def test_corrupt_selected_declaration_needs_replacement_but_cannot_be_published(
         install, "_control_plane_provider_manifest_is_stale", lambda **_options: False,
     )
     assert not install.needs_install(slot.name, root)
+    return application
+
+
+@pytest.mark.parametrize("corrupt", [
+    b'{"commands": [', b"\xff", b"[]",
+    b'{"commands":[]}', b'{"commands":"worktree-manager"}',
+    b'{"commands":[null]}', b'{"commands":["other"]}',
+    b'{"commands":["worktree-manager","worktree-manager"]}',
+])
+def test_corrupt_selected_declaration_needs_replacement_but_cannot_be_published(
+    selected_application: tuple[Path, Path], corrupt: bytes,
+) -> None:
+    slot, _ = selected_application
+    root = slot.parent.parent
     outputs = install._expected_frontdoor_contents(slot)
     before = {path: path.read_bytes() for path in outputs}
     (slot / "application.json").write_bytes(corrupt)
@@ -90,6 +99,23 @@ def test_corrupt_selected_declaration_needs_replacement_but_cannot_be_published(
     with pytest.raises(ValueError):
         install._deploy_binstubs(application_slot=slot)
     assert {path: path.read_bytes() for path in outputs} == before
+
+
+@pytest.mark.parametrize("frontdoor", ["global", "command", "setup"])
+def test_non_utf8_frontdoor_requires_replacement_and_valid_publication_repairs_it(
+    selected_application: tuple[Path, Path], frontdoor: str,
+) -> None:
+    slot, global_bin = selected_application
+    root = slot.parent.parent
+    targets = {
+        "global": global_bin / "worktree-manager.cmd",
+        "command": root / "bin" / "worktree-manager-install.sh",
+        "setup": root / "bin" / "setup.ps1",
+    }
+    targets[frontdoor].write_bytes(b"\xff")
+    assert install.needs_install(slot.name, root)
+    install._deploy_binstubs(application_slot=slot)
+    assert not install.needs_install(slot.name, root)
 
 
 def test_uncommitted_publication_recovers_neutral_and_global_outputs(
