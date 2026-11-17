@@ -872,9 +872,7 @@ def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path: Path, c
     })
     suffix = "ps1" if os.name == "nt" else "sh"
     if entry == "bootstrap":
-        argv = cast(Callable[[Path, Path, Path], list[str]], native_bootstrap)(
-            payload, project, project,
-        )
+        argv = native_bootstrap(payload, project, project)
     else:
         filename = ("installer-readiness." if entry == "readiness" else "install.") + suffix
         shutil.copyfile(PLUGIN / "scripts" / filename, payload / "scripts" / filename)
