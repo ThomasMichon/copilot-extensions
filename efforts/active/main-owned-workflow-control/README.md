@@ -116,7 +116,9 @@ onto Dev `c2d5e84db4`, all 166 changed Python files pass strict analysis across
 The reconciled `b76950980f` capture fails three receiving probes, and its
 Windows publication packet identifies the same missing daemon I/O module in
 the compact archive. The narrow archive repair passes the original Windows
-packet (116 passed, four platform skips); current-source capture is still owed.
+packet (116 passed, four platform skips). After reconciliation onto exact Dev
+`a0893301f1`, all 167 changed Python files pass strict analysis across 25 owners
+and every declared target; current-source capture is still owed.
 The retained Index cleanup
 hold, current required CI, native POSIX proof and hosted Windows acceptance
 remain open. No original hold changes.

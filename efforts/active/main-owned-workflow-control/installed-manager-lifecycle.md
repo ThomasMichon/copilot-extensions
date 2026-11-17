@@ -3678,3 +3678,21 @@ selects newer Vault files absent from this branch. That 172-file attempt
 reports 29 errors and remains failed. Preserve the repair, reconcile the new
 Dev changes and validate the resulting exact-base diff; neither drop selected
 files nor treat that failed moving-base invocation as a pass.
+
+The seven owned commits are reconciled onto exact Dev
+`a0893301f1310d5f329553b88e956aea8f0cb9cf`. Their sole manifest conflict
+preserves both upstream Vault inputs and this PR's readiness/checker inputs.
+The repaired core, process utilities, policy archive and four test files are
+byte-unchanged across that rebase, retaining the packet's actual consumer proof.
+The exact-base whole-file ratchet passes all 167 physical files in 25 projects
+on every declared target. The committed 116-file size guard and the complete
+5,174-node, 337-target, 814-input unit manifest pass, with no dropped members
+and the original profile and deadline.
+
+Canonical declaration preparation changes only the compact bundle's semantic
+source hash. It does not update fixtures or create execution evidence. The
+existing packet supplies lightweight fresh-receiver end-to-end coverage by
+executing relocated archives with isolated imports; no whole-host clean-room
+or installed Manager run is claimed for this packaging-only repair. Fresh
+external controlled capture and current provider CI/review remain required
+before acceptance.
