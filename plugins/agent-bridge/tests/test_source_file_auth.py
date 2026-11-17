@@ -9,8 +9,14 @@ import asyncio
 import datetime
 import ssl
 import stat
+import sys
 import time
+import secrets
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
+from typing import TextIO, cast
 
 import httpx
 import pytest
@@ -21,19 +27,33 @@ from agent_bridge.copilot_file_auth import CopilotAccountFile, CopilotFileAuthEr
 
 
 class Source:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
 
-    def supports(self, action, fields):
+    def supports(self, action: str, fields: dict[str, str]) -> bool:
         return action == "get"
 
-    async def resolve(self, action, fields, *, timeout):
+    async def resolve(
+        self, action: str, fields: dict[str, str], *, timeout: float,
+    ) -> str:
         self.calls.append(dict(fields))
         return "username=synthetic\npassword=synthetic-http-credential\n"
 
 
-def fixture_client(tmp_path, monkeypatch, handler):
-    clock = SimpleNamespace(wall=1000.0, monotonic=200.0)
+@dataclass
+class Clock:
+    wall: float = 1000.0
+    monotonic: float = 200.0
+
+
+def fixture_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    handler: (
+        Callable[[httpx.Request], httpx.Response]
+        | Callable[[httpx.Request], Coroutine[None, None, httpx.Response]]
+    ),
+) -> tuple[wire.HttpSourceLeaseClient, Clock, Source, Path]:
+    clock = Clock()
     monkeypatch.setattr(wire, "time", SimpleNamespace(
         time=lambda: clock.wall, monotonic=lambda: clock.monotonic,
     ))
@@ -55,7 +75,7 @@ def fixture_client(tmp_path, monkeypatch, handler):
     return client, clock, source, capability
 
 
-def response(**changes):
+def response(**changes: object) -> dict[str, object]:
     return {
         "account": "synthetic", "host": "github.com", "token": "synthetic-native-token",
         "lease_contract": wire.LEASE_CONTRACT, "lease_id": "b" * 32,
@@ -64,7 +84,7 @@ def response(**changes):
     }
 
 
-def discovery(**changes):
+def discovery(**changes: object) -> dict[str, object]:
     return {
         "status": "ok", "plugin": "agent-index", "version": "fixture",
         "source_credentials_contract": wire.HTTP_SUPPORT, "installationId": "synthetic-index",
@@ -73,9 +93,11 @@ def discovery(**changes):
 
 
 @pytest.mark.asyncio
-async def test_real_injector_and_caller_capability_rotate_without_token_fallback(tmp_path, monkeypatch):
-    requests = []
-    def handler(request):
+async def test_real_injector_and_caller_capability_rotate_without_token_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+    def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
@@ -106,9 +128,11 @@ async def test_real_injector_and_caller_capability_rotate_without_token_fallback
     (discovery(source_credentials_contract={**wire.HTTP_SUPPORT, "exchange": "other"}), 200),
     (discovery(installationId="different-index"), 200), (discovery(), 302),
 ])
-async def test_unsupported_peer_never_reads_capability_or_posts(tmp_path, monkeypatch, support, status):
-    methods = []
-    def handler(request):
+async def test_unsupported_peer_never_reads_capability_or_posts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, support: dict[str, object], status: int,
+) -> None:
+    methods: list[str] = []
+    def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         return httpx.Response(status, json=support, headers={"Location": "https://other.example.com/"})
     client, _, _, capability = fixture_client(tmp_path, monkeypatch, handler)
@@ -125,9 +149,11 @@ async def test_unsupported_peer_never_reads_capability_or_posts(tmp_path, monkey
     {"lease_remaining_seconds": float("nan")}, {"lease_remaining_seconds": 61},
     {"lease_issued_at": 1001}, {"lease_contract": "other"}, {"installationId": "other"},
 ])
-async def test_malformed_lease_is_refused_without_retry(tmp_path, monkeypatch, changes):
-    methods = []
-    def handler(request):
+async def test_malformed_lease_is_refused_without_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, object],
+) -> None:
+    methods: list[str] = []
+    def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
@@ -143,9 +169,11 @@ async def test_malformed_lease_is_refused_without_retry(tmp_path, monkeypatch, c
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["encoding", "media-type"])
-async def test_unexpected_discovery_representation_refuses_before_capability_post(tmp_path, monkeypatch, kind):
-    methods = []
-    def handler(request):
+async def test_unexpected_discovery_representation_refuses_before_capability_post(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    methods: list[str] = []
+    def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         if request.method == "POST":
             return httpx.Response(200, json=response())
@@ -164,8 +192,10 @@ async def test_unexpected_discovery_representation_refuses_before_capability_pos
 
 
 @pytest.mark.asyncio
-async def test_entire_exchange_latency_and_clock_regression_consume_lease(tmp_path, monkeypatch):
-    def handler(request):
+async def test_entire_exchange_latency_and_clock_regression_consume_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         clock.wall += 2
         clock.monotonic += 2
         return httpx.Response(200, json=discovery() if request.method == "GET" else response())
@@ -182,8 +212,10 @@ async def test_entire_exchange_latency_and_clock_regression_consume_lease(tmp_pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["acquisition", "retention"])
-async def test_wall_only_suspension_exhausts_the_conservative_budget(tmp_path, monkeypatch, stage):
-    def handler(request):
+async def test_wall_only_suspension_exhausts_the_conservative_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         if stage == "acquisition":
             clock.wall += 28
             clock.monotonic += 0.5
@@ -200,9 +232,11 @@ async def test_wall_only_suspension_exhausts_the_conservative_budget(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_post_transport_failure_is_not_replayed_or_exposed(tmp_path, monkeypatch):
-    methods = []
-    def handler(request):
+async def test_post_transport_failure_is_not_replayed_or_exposed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    methods: list[str] = []
+    def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
@@ -215,10 +249,13 @@ async def test_post_transport_failure_is_not_replayed_or_exposed(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_source_loss_and_recovery_never_extend_the_retained_lease(tmp_path, monkeypatch):
-    available, methods = True, []
+async def test_source_loss_and_recovery_never_extend_the_retained_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    available = True
+    methods: list[str] = []
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
@@ -248,13 +285,16 @@ async def test_source_loss_and_recovery_never_extend_the_retained_lease(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_caller_deadline_cancels_an_unfinished_exchange_without_retry(tmp_path, monkeypatch):
-    methods = []
-    async def handler(request):
+async def test_caller_deadline_cancels_an_unfinished_exchange_without_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    methods: list[str] = []
+    async def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
         await asyncio.Event().wait()
+        raise AssertionError("Unfinished exchange unexpectedly resumed")
     client, _, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     with pytest.raises(wire.SourceLeaseError, match="unavailable"):
         await client.acquire(timeout=0.05)
@@ -264,8 +304,10 @@ async def test_caller_deadline_cancels_an_unfinished_exchange_without_retry(tmp_
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("header", ["", "// Native config header\r\n\n", "\ufeff// Native header\n"])
-async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(tmp_path, monkeypatch, header):
-    def handler(request):
+async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, header: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=discovery() if request.method == "GET" else response())
     client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     root = tmp_path / ".copilot"
@@ -279,10 +321,10 @@ async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(t
     }
     config.write_bytes(header.encode("utf-8") + json.dumps(original).encode("utf-8"))
     config.chmod(0o600)
-    def document():
+    def document() -> object:
         raw = config.read_bytes()
         assert raw.startswith(header.encode("utf-8"))
-        return json.loads(raw[len(header.encode("utf-8")):])
+        return cast(object, json.loads(raw[len(header.encode("utf-8")):]))
     store = CopilotAccountFile(config, account="synthetic")
     lease = await store.renew(client)
     expected = json.loads(json.dumps(original))
@@ -305,10 +347,13 @@ async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(t
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
 @pytest.mark.asyncio
-async def test_source_outage_preserves_file_and_fresh_renewal_uses_the_same_owner(tmp_path, monkeypatch):
-    available, generation, posts = True, 1, []
+async def test_source_outage_preserves_file_and_fresh_renewal_uses_the_same_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    available, generation = True, 1
+    posts: list[object] = []
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
         posts.append(json.loads(request.content))
@@ -362,7 +407,9 @@ async def test_source_outage_preserves_file_and_fresh_renewal_uses_the_same_owne
     "symlink", "public", "malformed", "header-duplicate", "nonfinite", "overflow",
     "negative-overflow", "missing-account", "hardlink",
 ])
-def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
+def test_unsafe_native_file_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
     config = root / "config.json"
@@ -403,8 +450,8 @@ def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file staging")
 @pytest.mark.parametrize("characters,oversized", [(100000, False), (180000, True)])
 def test_serialized_size_cannot_lock_the_owner_out_of_renewal_or_withdrawal(
-    tmp_path, monkeypatch, characters, oversized,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, characters: int, oversized: bool,
+) -> None:
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
     config = root / "config.json"
@@ -436,9 +483,9 @@ def test_serialized_size_cannot_lock_the_owner_out_of_renewal_or_withdrawal(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file staging")
-def test_exclusive_stage_collision_preserves_the_existing_file(tmp_path, monkeypatch):
-    from agent_bridge import copilot_file_auth as storage
-
+def test_exclusive_stage_collision_preserves_the_existing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
     config = root / "config.json"
@@ -447,7 +494,7 @@ def test_exclusive_stage_collision_preserves_the_existing_file(tmp_path, monkeyp
     collision = root / ".bridge-account-auth-collision"
     collision.write_bytes(b"existing-other-writer-stage")
     before = config.read_bytes()
-    monkeypatch.setattr(storage.secrets, "token_hex", lambda _: "collision")
+    monkeypatch.setattr(secrets, "token_hex", lambda _: "collision")
     monkeypatch.setattr(wire, "time", SimpleNamespace(time=lambda: 1000, monotonic=lambda: 200))
     lease = wire.HttpSourceLease(
         "new-token", "synthetic", "github.com", "b" * 32, 999, 1060, 1000, 200, 60,
@@ -459,22 +506,29 @@ def test_exclusive_stage_collision_preserves_the_existing_file(tmp_path, monkeyp
 
 
 @pytest.mark.skipif(os.name == "posix", reason="Other platforms must refuse before acquisition")
-def test_native_file_adapter_refuses_unsupported_platform(tmp_path):
+def test_native_file_adapter_refuses_unsupported_platform(tmp_path: Path) -> None:
     with pytest.raises(CopilotFileAuthError, match="platform-unsupported"):
         CopilotAccountFile(tmp_path / "config.json", account="synthetic")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO refusal")
-def test_native_fifo_is_opened_nonblocking_then_refused(tmp_path, monkeypatch):
+def test_native_fifo_is_opened_nonblocking_then_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO refusal")
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
     config = root / "config.json"
     os.mkfifo(config, 0o600)
     original_open = os.open
-    def guarded_open(path, flags, *args, **kwargs):
+    def guarded_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+    ) -> int:
         if path == "config.json":
             assert flags & os.O_NONBLOCK, "A FIFO must never reach a blocking open"
-        return original_open(path, flags, *args, **kwargs)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
     monkeypatch.setattr(os, "open", guarded_open)
     monkeypatch.setattr(wire, "time", SimpleNamespace(time=lambda: 1000, monotonic=lambda: 200))
     lease = wire.HttpSourceLease(
@@ -487,9 +541,13 @@ def test_native_fifo_is_opened_nonblocking_then_refused(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO refusal")
 @pytest.mark.asyncio
-async def test_capability_fifo_refuses_without_post(tmp_path, monkeypatch):
-    methods = []
-    def handler(request):
+async def test_capability_fifo_refuses_without_post(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO refusal")
+    methods: list[str] = []
+    def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         return httpx.Response(200, json=discovery())
     client, _, _, capability = fixture_client(tmp_path, monkeypatch, handler)
@@ -502,17 +560,19 @@ async def test_capability_fifo_refuses_without_post(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
 @pytest.mark.parametrize("change", ["foreign-token", "wrong-account", "expires-during-write"])
-def test_native_renewal_refuses_changed_custody_and_last_moment_expiry(tmp_path, monkeypatch, change):
+def test_native_renewal_refuses_changed_custody_and_last_moment_expiry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
     config = root / "config.json"
     config.write_text('{"authTokens":{"https://github.com:synthetic":{"token":"old-token"}}}')
     config.chmod(0o600)
-    clock = SimpleNamespace(wall=1000, monotonic=200)
+    clock = Clock()
     monkeypatch.setattr(wire, "time", SimpleNamespace(
         time=lambda: clock.wall, monotonic=lambda: clock.monotonic,
     ))
-    def lease(account="synthetic"):
+    def lease(account: str = "synthetic") -> wire.HttpSourceLease:
         return wire.HttpSourceLease(
             "new-token", account, "github.com", "b" * 32, 999, 1060, 1000, 200, 60,
         )
@@ -522,8 +582,10 @@ def test_native_renewal_refuses_changed_custody_and_last_moment_expiry(tmp_path,
         config.write_text('{"authTokens":{"https://github.com:synthetic":{"token":"foreign-token"}}}')
     elif change == "expires-during-write":
         original_dump = json.dump
-        def delayed_dump(*args, **kwargs):
-            original_dump(*args, **kwargs)
+        def delayed_dump(
+            value: object, stream: TextIO, *, ensure_ascii: bool, allow_nan: bool,
+        ) -> None:
+            original_dump(value, stream, ensure_ascii=ensure_ascii, allow_nan=allow_nan)
             clock.monotonic += 61
         monkeypatch.setattr(json, "dump", delayed_dump)
     before = config.read_bytes()
@@ -539,7 +601,9 @@ def test_native_renewal_refuses_changed_custody_and_last_moment_expiry(tmp_path,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_delay", [0, 5.2])
-async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tmp_path, provider_delay):
+async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(
+    tmp_path: Path, provider_delay: float,
+) -> None:
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -563,9 +627,10 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
     ))
     serving = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     serving.load_cert_chain(cert, private)
-    requests, tasks = [], set()
+    requests: list[tuple[str, str, dict[str, str], bytes]] = []
+    tasks: set[asyncio.Task[None]] = set()
 
-    async def handle(reader, writer):
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             raw = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 3)
             lines = raw.decode("ascii").split("\r\n")
@@ -594,7 +659,7 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
             writer.close()
             await writer.wait_closed()
 
-    def accept(reader, writer):
+    def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         tasks.add(asyncio.create_task(handle(reader, writer)))
 
     server = await asyncio.start_server(accept, "127.0.0.1", 0, ssl=serving)
@@ -604,18 +669,20 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
         context = HttpAuthContext(f"https://localhost:{port}", "synthetic", "generation")
         capability = tmp_path / "capability"
         capability.write_text("a" * 64)
-        kwargs = dict(
-            auth=SourceHttpAuth(Source(), context, endpoint), context=context, source="example",
-            account="synthetic", recipient="worker", host="github.com", capability_file=capability,
-            discovery_endpoint=f"https://localhost:{port}/health",
-            discovery_auth=SourceHttpAuth(Source(), context, f"https://localhost:{port}/health"),
-            discovery_context=context, installation_id="synthetic-index",
-        )
+        def https_client(tls_context: ssl.SSLContext | None = None) -> wire.HttpSourceLeaseClient:
+            return wire.HttpSourceLeaseClient(
+                endpoint, tls_context=tls_context,
+                auth=SourceHttpAuth(Source(), context, endpoint), context=context, source="example",
+                account="synthetic", recipient="worker", host="github.com", capability_file=capability,
+                discovery_endpoint=f"https://localhost:{port}/health",
+                discovery_auth=SourceHttpAuth(Source(), context, f"https://localhost:{port}/health"),
+                discovery_context=context, installation_id="synthetic-index",
+            )
         with pytest.raises(wire.SourceLeaseError):
-            await wire.HttpSourceLeaseClient(endpoint, **kwargs).acquire(timeout=5)
+            await https_client().acquire(timeout=5)
         assert requests == []
         trust = ssl.create_default_context(cafile=str(cert))
-        lease = await wire.HttpSourceLeaseClient(endpoint, tls_context=trust, **kwargs).acquire(timeout=8)
+        lease = await https_client(trust).acquire(timeout=8)
         assert 0 < lease.remaining_seconds() < 60
         assert [item[0] for item in requests] == ["GET", "POST"]
         assert [item[1] for item in requests] == ["/health", "/api/v1/source-credentials"]
