@@ -68,7 +68,7 @@ def test_unsafe_attachment_input_refuses_without_changing_original(
         selected.symlink_to(original)
     elif kind == "hardlink":
         os.link(original, tmp_path / "alias")
-    elif kind == "fifo":
+    elif kind == "fifo" and sys.platform != "win32":
         selected = tmp_path / "fifo"
         os.mkfifo(selected, 0o600)
     elif kind == "parent-link":
