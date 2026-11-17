@@ -69,6 +69,20 @@ Every native mutating lifecycle action shares the install transaction inode;
 Bash uses an attached standard-library owner rather than depending on `flock`.
 Existing native dry runs perform read-only admission and remove nothing.
 
+## Windows closed-wheel lifecycle hold
+
+The Windows `scripts/install.ps1` accepts `-NoService` for `install` and
+`update` only, with all four `-WheelProfile`, `-WheelDirectory`, `-WheelPython`
+and `-WheelUv` inputs. It cannot be combined with `-DryRun`.
+Runtime construction, health, selection and command publication still run.
+This mode does not start/stop the Connection Owner or reconcile scheduled tasks.
+The caller owns stopping, restoring and verifying any previously running Owner.
+Success in this mode proves runtime preparation, not serving or whole-update readiness.
+
+Omitting the flag preserves normal startup and disabled-task/configuration holds.
+Callers must establish support on the actual incoming installer before using
+the option; older installers without it do not provide an equivalent lifecycle hold.
+
 ## Overview
 
 A copilot-extensions plugin that provides:

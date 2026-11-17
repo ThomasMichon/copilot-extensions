@@ -1,0 +1,9 @@
+{
+  "comment": "Allow closed-wheel Windows installation without starting the Connection Owner or reconciling scheduled tasks.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

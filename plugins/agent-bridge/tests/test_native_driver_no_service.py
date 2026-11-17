@@ -61,8 +61,16 @@ def test_runtime_only_is_admitted_only_for_complete_closed_wheel_construction(
         driver.native_arguments(_arguments(tmp_path, **values))
 
 
+@pytest.mark.parametrize(
+    ("component", "options"),
+    [
+        ("agent-bridge", ["NoService", "ZeroDowntime"]),
+        ("agent-codespaces", ["NoService", "Force"]),
+    ],
+)
 def test_runtime_only_reaches_journal_and_participant_unchanged(
     driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    component: str, options: list[str],
 ) -> None:
     source = importlib.import_module("install_source")
 
@@ -79,7 +87,9 @@ def test_runtime_only_reaches_journal_and_participant_unchanged(
         enqueue=request, drain=Mock(),
         wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
     )
-    args = _arguments(tmp_path, options=["NoService", "ZeroDowntime"])
+    args = _arguments(
+        tmp_path, plugin=component, payload=SCRIPTS.parent.with_name(component), options=options,
+    )
     assert driver.foreground(args, owner) == 0
     spec = request.call_args.args[0]
     runner = request.call_args.kwargs["runner"]
@@ -87,6 +97,25 @@ def test_runtime_only_reaches_journal_and_participant_unchanged(
     assert runner.argv[runner.argv.index("--option") + 1] == "NoService"
     assert dict(spec.context)[driver.WHEEL_SELECTION_ENV] == '{"selected":true}'
     assert runner.argv[runner.argv.index("--wheel-profile") + 1] == str(args.wheel_profile)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"action": "provision"}, {"action": "uninstall"},
+        {"wheel_profile": None}, {"wheel_directory": None},
+        {"wheel_python": None}, {"wheel_uv": None},
+        {"options": ["NoService", "DryRun"]},
+        {"options": ["NoService", "Repair"], "install_source": Path("source")},
+    ],
+)
+def test_codespaces_runtime_only_requires_closed_wheels_without_service_options(
+    driver: ModuleType, tmp_path: Path, values: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="NoService requires"):
+        driver.native_arguments(_arguments(
+            tmp_path, plugin="agent-codespaces", **values,
+        ))
 
 
 @pytest.mark.parametrize(
