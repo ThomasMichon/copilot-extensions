@@ -143,6 +143,7 @@ def test_preparation_preserves_committed_policy_branch_discovery(
         _git("push", "origin", "--delete", "dev", cwd=seed)
     remote = "origin"
     if transition == "non-origin":
+        remote = "upstream"
         origin_url = _git("remote", "get-url", "origin", cwd=anchor)
         _git("remote", "remove", "origin", cwd=anchor)
         _git("update-ref", "refs/remotes/origin/side", old_side, cwd=anchor)
