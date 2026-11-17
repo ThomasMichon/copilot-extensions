@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 
 from agent_worktrees import git_ops, inrepo_config_source, worktree_creation
-from agent_worktrees.git_repository_environment import repository_identity_scope
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -41,24 +40,23 @@ def local_repositories(
     templates = tmp_path / "empty-templates"
     templates.mkdir()
     monkeypatch.setenv("GIT_TEMPLATE_DIR", str(templates))
-    with repository_identity_scope():
-        origin = tmp_path / "origin.git"
-        _git("init", "--bare", "-b", "trunk", str(origin), cwd=tmp_path)
-        seed = tmp_path / "seed"
-        _git("clone", str(origin), str(seed), cwd=tmp_path)
-        _git("config", "user.email", "test@example.com", cwd=seed)
-        _git("config", "user.name", "Test", cwd=seed)
-        _git("config", "commit.gpgsign", "false", cwd=seed)
-        _commit(seed, "base.txt")
-        _git("branch", "side", cwd=seed)
-        _git("push", "origin", "trunk", "side", cwd=seed)
-        anchor = tmp_path / "anchor"
-        _git("clone", str(origin), str(anchor), cwd=tmp_path)
-        _git(
-            "config", "--replace-all", "remote.origin.fetch",
-            "+refs/heads/side:refs/remotes/origin/side", cwd=anchor,
-        )
-        yield seed, anchor
+    origin = tmp_path / "origin.git"
+    _git("init", "--bare", "-b", "trunk", str(origin), cwd=tmp_path)
+    seed = tmp_path / "seed"
+    _git("clone", str(origin), str(seed), cwd=tmp_path)
+    _git("config", "user.email", "test@example.com", cwd=seed)
+    _git("config", "user.name", "Test", cwd=seed)
+    _git("config", "commit.gpgsign", "false", cwd=seed)
+    _commit(seed, "base.txt")
+    _git("branch", "side", cwd=seed)
+    _git("push", "origin", "trunk", "side", cwd=seed)
+    anchor = tmp_path / "anchor"
+    _git("clone", str(origin), str(anchor), cwd=tmp_path)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        "+refs/heads/side:refs/remotes/origin/side", cwd=anchor,
+    )
+    yield seed, anchor
 
 
 @pytest.mark.parametrize(
@@ -228,7 +226,10 @@ def test_preparation_refreshes_base_despite_unavailable_policy_head(
 
 
 @pytest.mark.parametrize(
-    "mapping", ["exact", "wildcard", "short-source", "source-only", "ambiguous", "base-collision"],
+    "mapping", [
+        "exact", "wildcard", "short-source", "source-only", "ambiguous",
+        "excluded-overlap", "base-collision",
+    ],
 )
 def test_preparation_preserves_policy_head_alias_mapping(
     local_repositories: tuple[Path, Path], mapping: str,
@@ -249,7 +250,7 @@ def test_preparation_preserves_policy_head_alias_mapping(
         "+refs/heads/production:refs/remotes/origin/stable", cwd=anchor,
     )
     _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stable", cwd=anchor)
-    old_policy = _git("rev-parse", "origin/stable", cwd=anchor)
+    policy_ref = "origin/stable"
     if mapping == "wildcard":
         _git(
             "config", "--replace-all", "remote.origin.fetch",
@@ -267,12 +268,25 @@ def test_preparation_preserves_policy_head_alias_mapping(
             "config", "--add", "remote.origin.fetch",
             "+refs/heads/stable:refs/remotes/origin/stable", cwd=anchor,
         )
+    elif mapping == "excluded-overlap":
+        _git(
+            "config", "--add", "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*", cwd=anchor,
+        )
+        _git("config", "--add", "remote.origin.fetch", "^refs/heads/stable", cwd=anchor)
     elif mapping == "base-collision":
         _git(
             "config", "--replace-all", "remote.origin.fetch",
             "+refs/heads/production:refs/remotes/origin/trunk", cwd=anchor,
         )
+        _git(
+            "fetch", "origin", "--refmap=",
+            "+refs/heads/production:refs/remotes/origin/trunk", cwd=anchor,
+        )
         _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk", cwd=anchor)
+        policy_ref = "origin/trunk"
+    old_policy = _git("rev-parse", policy_ref, cwd=anchor)
+    old_anchor = _git("rev-parse", "HEAD", cwd=anchor)
     _git("checkout", "production", cwd=seed)
     new_policy = _commit(seed, policy_path, "default_branch: trunk\nmarker: refreshed\n")
     _git("push", "origin", "production", cwd=seed)
@@ -281,12 +295,23 @@ def test_preparation_preserves_policy_head_alias_mapping(
     _git("push", "origin", "trunk", cwd=seed)
 
     prepared = git_ops.prepare_worktree_base(
-        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+        anchor, remote="origin", default_branch="trunk",
+        fast_forward_anchor=mapping == "base-collision",
     )
 
+    if mapping == "base-collision":
+        assert _git("rev-parse", policy_ref, cwd=anchor) == old_policy
+        assert _git("rev-parse", "HEAD", cwd=anchor) == old_anchor
+        assert prepared.fetched is False
+        assert prepared.fetch_error is not None
+        discovered = inrepo_config_source.load_inrepo_config_from_committed_ref(
+            anchor, (Path(policy_path),),
+        )
+        assert discovered["marker"] == "old"
+        return
     assert prepared.fetched is True
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
-    if mapping in {"ambiguous", "base-collision"}:
+    if mapping == "ambiguous":
         assert prepared.fetch_error is not None
         assert _git("rev-parse", "origin/stable", cwd=anchor) == old_policy
         return
@@ -296,6 +321,173 @@ def test_preparation_preserves_policy_head_alias_mapping(
         anchor, (Path(policy_path),),
     )
     assert discovered["marker"] == "refreshed"
+
+
+@pytest.mark.parametrize("source_ref", ["trunk", "heads/trunk", "refs/heads/trunk"])
+@pytest.mark.parametrize("excluded", [False, True])
+def test_preparation_reuses_the_matching_base_for_policy(
+    local_repositories: tuple[Path, Path], source_ref: str, excluded: bool,
+) -> None:
+    seed, anchor = local_repositories
+    path = ".agent-worktrees/config.yaml"
+    _commit(seed, path, "default_branch: dev\nmarker: old\n")
+    _git("branch", "dev", cwd=seed)
+    _git("push", "origin", "trunk", "dev", cwd=seed)
+    _git(
+        "fetch", "origin", "--refmap=",
+        "+refs/heads/trunk:refs/remotes/origin/trunk",
+        "+refs/heads/dev:refs/remotes/origin/dev", cwd=anchor,
+    )
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        f"+{source_ref}:refs/remotes/origin/trunk", cwd=anchor,
+    )
+    if excluded:
+        _git("config", "--add", "remote.origin.fetch", "^refs/heads/trunk", cwd=anchor)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    _git("checkout", "dev", cwd=seed)
+    new_policy = _commit(seed, path, "default_branch: dev\nmarker: refreshed\n")
+    _git("push", "origin", "dev", cwd=seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert _git("rev-parse", "origin/dev", cwd=anchor) == new_policy
+    assert prepared.fetched is True
+    assert prepared.fetch_error is None
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+
+
+@pytest.mark.parametrize("source_ref", ["production", "heads/production", "refs/heads/production"])
+def test_preparation_respects_a_different_excluded_policy_source(
+    local_repositories: tuple[Path, Path], source_ref: str,
+) -> None:
+    seed, anchor = local_repositories
+    path = ".agent-worktrees/config.yaml"
+    _git("checkout", "-b", "production", cwd=seed)
+    old_policy = _commit(seed, path, "default_branch: trunk\nmarker: old\n")
+    _git("push", "origin", "production", cwd=seed)
+    _git(
+        "fetch", "origin", "--refmap=",
+        "+refs/heads/production:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stable", cwd=anchor)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        f"+{source_ref}:refs/remotes/origin/stable", cwd=anchor,
+    )
+    _git("config", "--add", "remote.origin.fetch", "^refs/heads/production", cwd=anchor)
+    _commit(seed, path, "default_branch: trunk\nmarker: excluded\n")
+    _git("push", "origin", "production", cwd=seed)
+    _git("checkout", "trunk", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert _git("rev-parse", "origin/stable", cwd=anchor) == old_policy
+    assert prepared.fetched is True
+    assert prepared.fetch_error is not None
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+
+
+def test_preparation_refreshes_the_cached_bootstrap_hop_after_head_fetch_failure(
+    local_repositories: tuple[Path, Path],
+) -> None:
+    seed, anchor = local_repositories
+    path = ".agent-worktrees/config.yaml"
+    _git("checkout", "-b", "retired", cwd=seed)
+    _commit(seed, path, "default_branch: dev\nmarker: old\n")
+    _git("branch", "dev", cwd=seed)
+    _git("push", "origin", "retired", "dev", cwd=seed)
+    _git(
+        "fetch", "origin", "--refmap=",
+        "+refs/heads/retired:refs/remotes/origin/retired",
+        "+refs/heads/dev:refs/remotes/origin/dev", cwd=anchor,
+    )
+    _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/retired", cwd=anchor)
+    _git("push", "origin", "--delete", "retired", cwd=seed)
+    _git("checkout", "dev", cwd=seed)
+    new_policy = _commit(seed, path, "default_branch: dev\nmarker: refreshed\n")
+    _git("push", "origin", "dev", cwd=seed)
+    _git("checkout", "trunk", cwd=seed)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+    )
+
+    assert _git("rev-parse", "origin/dev", cwd=anchor) == new_policy
+    assert prepared.fetched is True
+    assert prepared.fetch_error is not None
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
+    assert inrepo_config_source.load_inrepo_config_from_committed_ref(
+        anchor, (Path(path),),
+    )["marker"] == "refreshed"
+
+
+@pytest.mark.parametrize("selector", ["directory", "configuration"])
+def test_preparation_scopes_the_entire_operation_to_its_anchor(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, selector: str,
+) -> None:
+    seed, anchor = local_repositories
+    foreign = anchor.parent / "foreign"
+    _git("clone", _git("remote", "get-url", "origin", cwd=anchor), str(foreign), cwd=anchor.parent)
+    old_foreign = _git("rev-parse", "origin/trunk", cwd=foreign)
+    new_base = _commit(seed, "new-base.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    if selector == "directory":
+        monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(foreign))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / ".git" / "index"))
+    else:
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.worktree")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(foreign))
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor, remote="origin", default_branch="trunk",
+    )
+
+    assert _git("rev-parse", "origin/trunk", cwd=anchor) == new_base
+    assert (anchor / "new-base.txt").is_file()
+    assert _git("rev-parse", "origin/trunk", cwd=foreign) == old_foreign
+    assert _git("rev-parse", "HEAD", cwd=foreign) == old_foreign
+    assert not (foreign / "new-base.txt").exists()
+    assert prepared.fetched is True
+    assert prepared.anchor.updated is True
+
+
+def test_preparation_preserves_the_public_fetch_policy_reload_mapping(
+    local_repositories: tuple[Path, Path],
+) -> None:
+    seed, anchor = local_repositories
+    path = ".agent-worktrees/config.yaml"
+    _commit(seed, path, "default_branch: trunk\nmarker: old\n")
+    _git("push", "origin", "trunk", cwd=seed)
+    _git(
+        "fetch", "origin", "--refmap=",
+        "+refs/heads/trunk:refs/remotes/origin/policy", cwd=anchor,
+    )
+    _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/policy", cwd=anchor)
+    _git(
+        "config", "--replace-all", "remote.origin.fetch",
+        "+refs/heads/trunk:refs/remotes/origin/policy", cwd=anchor,
+    )
+    new_policy = _commit(seed, path, "default_branch: trunk\nmarker: refreshed\n")
+    _git("push", "origin", "trunk", cwd=seed)
+
+    git_ops.fetch("origin", cwd=anchor, branch="trunk")
+
+    assert _git("rev-parse", "origin/policy", cwd=anchor) == new_policy
+    assert inrepo_config_source.load_inrepo_config_from_committed_ref(
+        anchor, (Path(path),),
+    )["marker"] == "refreshed"
 
 
 @pytest.mark.parametrize("probe", ["head", "bootstrap"])
