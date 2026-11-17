@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import http.server
 import asyncio
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 import contextlib
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -70,6 +70,18 @@ class _OfflineCli:
     pause_response: threading.Event
     response_started: threading.Event
     release_response: threading.Event
+
+
+def _native_sdk_import() -> str:
+    """Keep generated native fixtures on the production SDK resolution contract."""
+    entrypoint = (
+        Path(__file__).resolve().parents[2]
+        / "extensions" / "agent-remote-driver" / "extension.mjs"
+    )
+    source = entrypoint.read_text(encoding="utf-8")
+    start = source.index("async function importExtensionSdk(")
+    end = source.index("\n}", start) + 2
+    return source[start:end] + '\nconst { joinSession } = await importExtensionSdk("/extension");\n'
 
 
 @pytest.fixture
@@ -224,7 +236,7 @@ def test_native_private_mux_executes_the_requested_pane(
     if os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated Windows PSMux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     assert binary
     pane_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
@@ -318,7 +330,7 @@ def test_native_launch_scoped_observer_needs_no_privileged_permission(
     )
     (plugin / "extensions" / "driver-fixture" / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     sessionId: session.sessionId,
@@ -368,7 +380,7 @@ def test_native_joined_session_reports_pending_read_support_without_permission_g
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 const observations = {};
 for (const [name, field] of [["tasks", "tasks"], ["schedule", "entries"]]) {
@@ -430,7 +442,7 @@ def test_native_joined_observer_close_returns_no_attributed_outcome(
     )
     (extension / "extension.mjs").write_text("""
 import { writeFileSync } from "node:fs";
-import { joinSession } from "@github/copilot-sdk/extension";
+""" + _native_sdk_import() + """
 const session = await joinSession();
 const unsubscribe = session.on(() => {});
 const unsubscribeResult = unsubscribe();
@@ -483,7 +495,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     if os.name != "nt" or not binary:
         pytest.skip("This native headed fixture selects an existing Windows PSMux")
@@ -634,7 +646,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 "params": {"sessionId": native, "prompt": [{"type": "text", "text": prompts[2]}]},
             }) + "\n").encode())
             while True:
-                frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                frames = client.frames
                 cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                 message = json.loads(frame)
                 await client.ack(cursor)
@@ -772,7 +784,7 @@ async def _native_coordinator_flow(
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     if os.name != "nt" or not binary:
         pytest.skip("The native coordinator fixture requires existing Windows PSMux")
@@ -1074,7 +1086,7 @@ async def _native_coordinator_flow(
                         "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
                     }) + "\n").encode())
                     while True:
-                        frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                        frames = client.frames
                         cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                         response = json.loads(frame)
                         await client.ack(cursor)
