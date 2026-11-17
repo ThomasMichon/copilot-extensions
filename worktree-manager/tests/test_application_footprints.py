@@ -210,6 +210,37 @@ def test_repeated_staging_preserves_active_selection_and_disposable_slot_state(
     assert log.read_text(encoding="utf-8").splitlines() == ["example:stage", "example:stage"]
 
 
+@pytest.mark.parametrize("fail_setup", [False, True])
+def test_candidates_remain_retained_through_setup_and_release_on_settlement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_setup: bool,
+) -> None:
+    source = application_set(tmp_path, [
+        ("consumer", "2.0", ["provider"]), ("provider", "1.0", []),
+    ])
+    applications = footprints.plan(source, tmp_path / "installed")
+    prepared = footprints._preflight(applications)
+    installer, _shell = prepared
+    calls = []
+    def setup(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        for application in applications:
+            with installer.runtime._cleanup_lease(application.root, application.version) as removable:
+                assert not removable
+        calls.append(command)
+        if fail_setup:
+            raise subprocess.CalledProcessError(7, command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    monkeypatch.setattr(installer.engine, "run_owned", setup)
+    if fail_setup:
+        with pytest.raises(subprocess.CalledProcessError):
+            footprints.install(applications, stage=False, deadline=time.monotonic() + 30, prepared=prepared)
+    else:
+        footprints.install(applications, stage=False, deadline=time.monotonic() + 30, prepared=prepared)
+    assert len(calls) == (1 if fail_setup else 4)
+    for application in applications:
+        with installer.runtime._cleanup_lease(application.root, application.version) as removable:
+            assert removable
+
+
 def test_cli_plan_never_submits_or_loads_worktrees(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

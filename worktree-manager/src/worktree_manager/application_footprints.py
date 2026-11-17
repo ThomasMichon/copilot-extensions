@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 import hashlib
@@ -217,45 +218,50 @@ def install(
             raise TimeoutError("application installation deadline expired")
         return value
 
-    for application in applications:
-        remaining()
-        _verify_copy(application.source, application)
-        _ordinary(application.slot)
-        application.slot.parent.mkdir(parents=True, exist_ok=True)
-        with runtime.construction_lease(application.root, application.version):
-            construction.publish_source_snapshot(
-                application.source, application.slot.parent, application.version,
-                runtime=runtime, verify=lambda path, app=application: _verify_copy(path, app),
-                on_progress=remaining,
-            )
-    for staging in ((True,) if stage else (True, False)):
+    with ExitStack() as retained:
         for application in applications:
             remaining()
-            _verify_copy(application.slot, application)
-            entry = application.slot / "bin" / ("setup.ps1" if os.name == "nt" else "setup.sh")
-            command = (
-                [shell, "-NoProfile", "-File", str(entry)] if os.name == "nt"
-                else [shell, str(entry)]
-            )
-            if staging:
-                command.append("--stage")
-            environment = {
-                key: value for key, value in os.environ.items()
-                if key.upper() not in {
-                    *roots, "PYTHONPATH", "PYTHONHOME",
-                    "VIRTUAL_ENV", "__PYVENV_LAUNCHER__",
+            _verify_copy(application.source, application)
+            _ordinary(application.slot)
+            application.slot.parent.mkdir(parents=True, exist_ok=True)
+            with runtime.construction_lease(application.root, application.version, timeout=remaining()):
+                construction.publish_source_snapshot(
+                    application.source, application.slot.parent, application.version,
+                    runtime=runtime, verify=lambda path, app=application: _verify_copy(path, app),
+                    on_progress=remaining,
+                )
+                retained.enter_context(runtime.retention_lease(
+                    application.root, application.version,
+                    require_installed=False, timeout=remaining(),
+                ))
+        for staging in ((True,) if stage else (True, False)):
+            for application in applications:
+                remaining()
+                _verify_copy(application.slot, application)
+                entry = application.slot / "bin" / ("setup.ps1" if os.name == "nt" else "setup.sh")
+                command = (
+                    [shell, "-NoProfile", "-File", str(entry)] if os.name == "nt"
+                    else [shell, str(entry)]
+                )
+                if staging:
+                    command.append("--stage")
+                environment = {
+                    key: value for key, value in os.environ.items()
+                    if key.upper() not in {
+                        *roots, "PYTHONPATH", "PYTHONHOME",
+                        "VIRTUAL_ENV", "__PYVENV_LAUNCHER__",
+                    }
                 }
-            }
-            environment.update(roots)
-            result = process.run_owned(
-                command, cwd=application.slot, env=environment, timeout=remaining(),
-                deadline=deadline, procutil=agent_procutil, construction_fd=None,
-                allow_breakaway=not staging,
-            )
-            if result.stdout:
-                print(result.stdout, end="")
-            if result.stderr:
-                print(result.stderr, end="", file=sys.stderr)
+                environment.update(roots)
+                result = process.run_owned(
+                    command, cwd=application.slot, env=environment, timeout=remaining(),
+                    deadline=deadline, procutil=agent_procutil, construction_fd=None,
+                    allow_breakaway=not staging,
+                )
+                if result.stdout:
+                    print(result.stdout, end="")
+                if result.stderr:
+                    print(result.stderr, end="", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
