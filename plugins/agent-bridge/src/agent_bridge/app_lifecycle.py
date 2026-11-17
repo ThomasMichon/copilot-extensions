@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 import contextvars
 import functools
 import logging
@@ -44,6 +44,7 @@ async def settled_thread_call(
 async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -> Any:
     """Register credential sources and idempotently start the shared listener."""
     from .app import _run_in_daemon_thread
+    from .relay_activation import RelayOwnershipLost, observe_owner
     run_in_daemon_thread: Callable[..., Awaitable[object]] = _run_in_daemon_thread
 
     existing = getattr(app.state, "credential_relay", None)
@@ -56,6 +57,7 @@ async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -
         from .agent_registry import register_credential_sources
         from .http_provider_sources import register_http_credential_sources
 
+        ownership = observe_owner(app) if start_listener else None
         builder = RelayBuilder()
         register_sources = register_credential_sources if start_listener else register_http_credential_sources
         await run_in_daemon_thread(register_sources, builder)
@@ -67,16 +69,23 @@ async def start_credential_relay(app: FastAPI, *, start_listener: bool = True) -
         if builder.empty:
             log.debug("No credential-relay sources registered -- relay disabled")
             return None
-        relay_server = builder.build()
-        await relay_server.start()
-        app.state.credential_relay = relay_server
-        from .relay_state import set_live_relay_port
-        set_live_relay_port(relay_server.port)
+        with ownership.activation(app) if ownership is not None else nullcontext():
+            relay_server = builder.build()
+            try:
+                await relay_server.start()
+                from .relay_state import set_live_relay_port
+                set_live_relay_port(relay_server.port)
+                app.state.credential_relay = relay_server
+            except BaseException:
+                await relay_server.stop()
+                raise
         log.info(
             "Credential relay started on port %d (%d sources)",
             relay_server.port, len(builder.sources),
         )
         return relay_server
+    except RelayOwnershipLost:
+        log.info("Prepared credential relay discarded after frontend reselection")
     except ImportError:
         log.debug("credential-relay lib not installed -- credential relay disabled")
     except OSError as exc:
