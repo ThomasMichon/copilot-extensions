@@ -1502,13 +1502,35 @@ function Invoke-Start {
     } else { (Get-Location).ProviderPath }
     $previousDirectory = [IO.Directory]::GetCurrentDirectory()
     $previousPreference = $ErrorActionPreference
+    $startEnvironment = @{
+        AGENT_VAULT_HOME = $InstallDir
+        AGENT_VAULT_RUN_DIR = $RunDir
+        AGENT_VAULT_CORE_RUN_DIR = (Join-Path $InstallDir 'core')
+        AGENT_VAULT_CACHE_DIR = (Join-Path $InstallDir 'cache')
+        AGENT_VAULT_SOCKET = $SocketPath
+        AGENT_VAULT_PIPE = $PipePath
+        AGENT_VAULT_PID = $PidFile
+        AGENT_VAULT_LOG = $LogFile
+        AGENT_VAULT_TASK_NAME = $TaskName
+        AGENT_VAULT_INSTALLATION_ID = $(if ($installationId) { $installationId } else { $null })
+    }
+    $previousEnvironment = @{}
+    foreach ($name in $startEnvironment.Keys) {
+        $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
     Push-Location -LiteralPath $project
     try {
+        foreach ($name in $startEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $startEnvironment[$name], 'Process')
+        }
         [IO.Directory]::SetCurrentDirectory($project)
         $ErrorActionPreference = 'Continue'
         & $startPython -m agent_vault start
         $code = $LASTEXITCODE
     } finally {
+        foreach ($name in $previousEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
+        }
         $ErrorActionPreference = $previousPreference
         Pop-Location
         [IO.Directory]::SetCurrentDirectory($previousDirectory)

@@ -4064,8 +4064,10 @@ root resolver modules, and explicit pre-mutation consumer/custody admission.
 Vault's optional `tests/test_native_start_readiness.py` extracts its actual
 native start and active-runtime resolver into a private PowerShell fixture.
 PowerShell 5/7 controls cover enabled/running task registrations, the no-task
-path, disabled-task refusal, selected-profile execution, project context and
-unchanged CLI success/failure exits. Task APIs are synthetic and the fixture
+path, disabled-task refusal, selected-profile execution, project context,
+installation state/IPC selection and caller-environment restoration with and
+without an installation identity, and unchanged CLI success/failure exits.
+Task APIs are synthetic and the fixture
 CLI starts no service or credential operation. Its discovery packet separately
 settles private named-pipe handlers, transports and the event-loop thread before
 cleanup; neither packet expands required unit-only CI or proves installed

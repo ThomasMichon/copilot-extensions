@@ -74,6 +74,8 @@ Native start/status resolve the active interpreter read-only, not desired policy
 Windows native start uses that interpreter's CLI readiness path even when an
 enabled Scheduled Task exists; task activation alone is not success. A disabled
 task still refuses startup, and the CLI's exit code and project context survive.
+The invocation binds the requested installation's state and IPC paths, task
+name and installation identity, then restores the caller's environment.
 Common PATH/pruning finalization also runs after retained profile construction.
 Bootstrap currentness binds the marker and full original source receipt to the
 incoming payload's exact generation, including unselected prepared-source base.
