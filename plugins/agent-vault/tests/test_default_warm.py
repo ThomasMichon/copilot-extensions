@@ -5,25 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
 from agent_vault import configuration, configuration_scope, extensions
 from agent_vault.invocation import use_configuration_root
 
-if TYPE_CHECKING:
-    from test_cache_warm import CacheFixture, drain
-    from test_cache_warm import warming_service as warming_service
-    from test_default_owner import Owners
-    from test_default_owner import owners as owners
-    from test_service_cache import cached_service as cached_service
-else:
-    from .test_cache_warm import CacheFixture, drain
-    from .test_cache_warm import warming_service as warming_service
-    from .test_default_owner import Owners
-    from .test_default_owner import owners as owners
-    from .test_service_cache import cached_service as cached_service
+from .test_cache_warm import CacheFixture, drain
+from .test_cache_warm import warming_service as warming_service
+from .test_default_owner import Owners
+from .test_default_owner import owners as owners
+from .test_service_cache import cached_service as cached_service
 
 
 @pytest.mark.parametrize("selection", ["native-default", "explicit-root"])
