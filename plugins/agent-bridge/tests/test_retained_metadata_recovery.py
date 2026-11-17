@@ -39,12 +39,26 @@ async def ordinary_resume_fixture(fixture: Any, monkeypatch: pytest.MonkeyPatch)
         id=row["id"], agent_name="task-worker", machine="local",
         path=row["path"], branch="worktree/test", status="active",
     )
+
+    def unknown_ssh_environment(host: str, _environment: str | None) -> Any:
+        raise KeyError(host)
+
     resolver = SimpleNamespace(
-        agents={"task-worker": SimpleNamespace(project=old.target.project, host=None)},
+        agents={"task-worker": SimpleNamespace(
+            project=old.target.project, host=None, managed=False, spawn_command=None,
+            ssh_environment=None,
+        )},
         resolve=lambda _owner: old.target,
+        _is_local_loopback_agent=lambda config: config.host == "loopback",
+        resolve_ssh_environment=unknown_ssh_environment,
     )
+    cache = worktrees.WorktreeDiscoveryCache()
+    cache._cache = {"task-worker": [entry]}
+    cache._refresh.bind(("fixture",), ["task-worker"], available=True)
+    cache._refresh.published(cache._refresh.epoch, {"task-worker": None})
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
         db=manager.db, session_manager=manager, resolver=resolver, ready=True,
+        worktree_discovery_cache=cache,
     )))
     monkeypatch.setattr(worktrees, "_find_cached_worktree_entry", AsyncMock(
         return_value=("task-worker", entry),
@@ -80,12 +94,21 @@ async def ordinary_resume_fixture(fixture: Any, monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("loopback", [False, True])
 async def test_worktree_head_hydration_adopts_metadata_without_native_execution(
-    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, loopback: bool,  # noqa: F811
 ) -> None:
     from agent_bridge import worktree_native_resume
 
     bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    resolver = bound.request.app.state.resolver
+    if loopback:
+        resolver.agents["task-worker"].host = "loopback"
+
+    def refuse_launch_discovery(_owner: str) -> Any:
+        raise AssertionError("Metadata hydration must not resolve launch plugins")
+
+    monkeypatch.setattr(resolver, "resolve", refuse_launch_discovery)
     launches = len(bound.fixture.starts)
     results = await asyncio.gather(*(
         worktree_native_resume.hydrate_worktree(bound.row["id"], bound.request)
@@ -172,6 +195,9 @@ async def test_ordinary_retained_resume_preserves_held_custody(
         bound.request.app.state.ready = False
     elif fault == "foreign-transport":
         bound.request.app.state.resolver.agents["task-worker"].host = "different-host"
+        bound.request.app.state.resolver.resolve = lambda _owner: replace(
+            old.target, type="ssh", host="different-host",
+        )
     mode: Literal["acp", "cli"] = "cli" if fault == "cli" else "acp"
     before = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
     launches = len(bound.fixture.starts)
@@ -283,6 +309,7 @@ async def test_later_stopped_activation_does_not_reuse_a_historical_native_compl
 
 
 async def missing_record(fixture: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any]:
+    monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR", raising=False)
     session, request, _command = await recovery_fixture(fixture, monkeypatch)
     fixture.rig.manager._sessions.pop(session.session_id)
     fixture.rig.db.delete_session(session.session_id)
@@ -542,7 +569,12 @@ async def test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recov
     monkeypatch.setattr(worktrees, "_run_for_agent", owner)
     launch = AsyncMock(side_effect=AssertionError("generic CLI launch bypassed metadata custody"))
     monkeypatch.setattr(worktree_native_resume, "run_owner_operation", launch)
-    resolver = SimpleNamespace(agents={"fixture": SimpleNamespace(project=target.project, host=None)})
+    resolver = SimpleNamespace(
+        agents={"fixture": SimpleNamespace(
+            project=target.project, host=None, managed=False, spawn_command=None,
+        )},
+        resolve=lambda _owner: target,
+    )
     http = Request({"type": "http", "app": SimpleNamespace(state=SimpleNamespace(
         db=manager.db, session_manager=manager, resolver=resolver,
     ))})

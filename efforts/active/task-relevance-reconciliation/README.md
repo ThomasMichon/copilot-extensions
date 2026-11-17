@@ -249,6 +249,10 @@ merged plan does not establish running adoption.
       running acceptance, and no production activation is implied.
 - [ ] Publish receiver support before enabling new callers; document baseline,
       upgrade and rollback behavior against the executing runtime.
+      The target-inventory, metadata-hydration and ordinary retained-worktree
+      resume provider merged in #13007. CLI/Dispatch caller migration and
+      installed qualification remain open in the
+      [consumer continuation](retained-metadata-recovery.md#next-consumer-slice-ordinary-supervised-resume).
 
 ## Validation Plan
 

@@ -2,6 +2,12 @@
 
 [Configuration reference](docs/configuration.md)
 
+`targets --json` lists the union of registered sessions and discovered
+workspaces without launching a conversation. Workspace-handle operations can
+hydrate missing Bridge metadata from the authoritative head; dormant raw sends
+require explicit resume. See
+[target discovery and hydration](docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup).
+
 Exact-session `status/inspect --json` provides
 [layered read-only inspection](docs/transport-diagnostics.md#exact-session-inspection)
 through the standalone Core without attaching another controller or adding a

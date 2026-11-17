@@ -4,8 +4,9 @@ Part of [Task Relevance Reconciliation](README.md), continuing
 [#9532](https://github.com/ThomasMichon/copilot-extensions/issues/9532)
 at the retained-task boundary of
 [#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
-**Status: plan reviewed in #12929; provider source implementation accepted in
-#12953; runtime qualification and ordinary caller integration remain open.**
+**Status: plan reviewed in #12929; metadata owner accepted in #12953;
+ordinary worktree-resume and target-inventory provider accepted in #13007.
+CLI/Dispatch consumer integration and runtime qualification remain open.**
 Source acceptance is not runtime recovery authority.
 
 ## Existing boundary
