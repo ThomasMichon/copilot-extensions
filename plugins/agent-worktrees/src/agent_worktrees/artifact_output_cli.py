@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from . import artifact_output as artifacts, config as cfg, output
-from .tracking_claims import parse_claim_ref
+from .tracking_claims import format_claim_ref, parse_claim_ref
 from .resource_producer import canonical_json
 from .resource_producer_cli import read_input
 
@@ -23,6 +23,9 @@ def _owner(args: Namespace) -> tuple[Path, str, cfg.Config]:
 
     owner = args.owner_ref or worktree_ops_cli._resolve_owner_ref()
     parsed = parse_claim_ref(owner) if owner else None
+    if not args.owner_ref and parsed is not None and parsed.is_qualified and parsed.project is not None:
+        owner = format_claim_ref(parsed.machine, parsed.project, parsed.worktree_id)
+        parsed = parse_claim_ref(owner)
     if (
         parsed is None or parsed.project is None or not parsed.is_qualified
         or parsed.session or parsed.canonical() != owner
