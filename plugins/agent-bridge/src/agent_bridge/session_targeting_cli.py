@@ -527,11 +527,13 @@ def _resolve_known_session(
         ready()
         return session_id
     if status == "stopped":
-        print(f"[>] Resuming stopped session {session_id}...")
-        client.resume_session(session_id, request_timeout=core._startup_request_timeout(resume=True))
-        from .startup_observation import ready
-        ready()
-        return session_id
+        from .send_outcome import SendRefused
+
+        raise SendRefused(
+            "refused_unavailable", reason="resume_required", retryable=False,
+            target=session_id,
+            error=f"Session {session_id} is dormant; explicitly resume it before sending",
+        )
     agent = session.get("agent_name") or ""
     if not force:
         print(
