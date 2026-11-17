@@ -22,7 +22,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import hmac
-import importlib
 import io
 import os
 import re
@@ -44,21 +43,25 @@ from installer_feed_policy import (  # noqa: F401 -- shared public-feed rejectio
 
 fcntl: ModuleType | None
 try:
-    fcntl = importlib.import_module("fcntl")
+    import fcntl as _fcntl
 except ImportError:  # pragma: no cover - exercised only on Windows
     fcntl = None
+else:
+    fcntl = _fcntl
 
 msvcrt: ModuleType | None
 try:
-    msvcrt = importlib.import_module("msvcrt")
+    import msvcrt as _msvcrt
 except ImportError:  # pragma: no cover - exercised only on POSIX
     msvcrt = None
+else:
+    msvcrt = _msvcrt
 
-try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
+if sys.version_info >= (3, 11):  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
-    tomllib = importlib.import_module("tomllib")
-except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
-    tomllib = importlib.import_module("tomli")
+    import tomllib
+else:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
 
 
 class ArtifactBuildError(Exception):
@@ -911,13 +914,14 @@ def _effective_default_index_url(
             return None
         if is_pyproject:
             tool = data.get("tool")
-            data = tool.get("uv") if isinstance(tool, dict) else None
-            if not isinstance(data, dict):
+            settings = tool.get("uv") if isinstance(tool, dict) else None
+            if not isinstance(settings, dict):
                 # Not malformed -- a `pyproject.toml` simply carrying no
                 # `[tool.uv]` table at all is a valid file; it just has
                 # no uv config in it, so lower-precedence tiers are still
                 # consulted normally.
                 continue
+            data = settings
         index_url = data.get("index-url")
         if isinstance(index_url, str) and index_url:
             if selected is None:
