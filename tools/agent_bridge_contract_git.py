@@ -34,14 +34,16 @@ _SOURCE_CONTENTS: dict[tuple[str, str], bytes | None] = {}
 _MANIFEST = "plugins/agent-bridge/plugin.json"
 
 
-def _batch(queries: list[str]) -> Iterable[tuple[str, str | None, str | None, bytes]]:
+def _batch(
+    queries: list[str], *, root: Path | None = None,
+) -> Iterable[tuple[str, str | None, str | None, bytes]]:
     require_local_object_reads()
     result = subprocess.run(
-        ["git", "-C", str(REPO), "cat-file", "--batch"],
+        ["git", "-C", str(REPO if root is None else root), "cat-file", "--batch"],
         input=("\n".join(queries) + "\n").encode("utf-8"),
         capture_output=True, check=True, env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     stream = io.BytesIO(result.stdout)
     for query in queries:
@@ -63,6 +65,31 @@ def _batch(queries: list[str]) -> Iterable[tuple[str, str | None, str | None, by
         yield query, header[0].decode("ascii"), header[1].decode("ascii"), body
     if stream.read(1):
         raise RuntimeError("Unexpected trailing local Git object batch data")
+
+
+def read_files(root: Path, commit: str, paths: list[str]) -> dict[str, bytes]:
+    """Read exact committed blobs in one bounded, local-only Git process."""
+    from agent_bridge_contract_paths import safe
+
+    if not _GIT_OBJECT_RE.fullmatch(commit):
+        raise ValueError("Committed file batch requires an exact commit")
+    queries = {}
+    for path in paths:
+        if not path or any(char in path for char in "\r\n\0"):
+            raise ValueError("Invalid path in committed file batch")
+        safe(root, path)
+        queries[f"{commit}:{path}"] = path
+    result = {}
+    if queries:
+        for query, identity, kind, body in _batch([commit, *queries], root=root):
+            if query == commit:
+                if identity != commit or kind != "commit":
+                    raise ValueError("Committed file batch requires an actual commit")
+                continue
+            if kind != "blob":
+                raise ValueError(f"Committed file batch lacks a plain blob: {queries[query]}")
+            result[queries[query]] = body
+    return result
 
 
 def prefetch_objects(objects: Iterable[str]) -> None:
@@ -93,7 +120,7 @@ def prefetch_sources(sources: Iterable[tuple[str, str, str]]) -> None:
     _SOURCE_BLOBS.clear()
     _SOURCE_CONTENTS.clear()
     grouped: dict[str, set[str]] = {}
-    objects = set()
+    objects: set[str] = set()
     for commit, path, blob in sources:
         if not _GIT_OBJECT_RE.fullmatch(commit) or not _GIT_OBJECT_RE.fullmatch(blob):
             raise ValueError("Invalid provenance id in local evidence batch")
@@ -102,7 +129,7 @@ def prefetch_sources(sources: Iterable[tuple[str, str, str]]) -> None:
         grouped.setdefault(commit, set()).add(path)
         objects.update((commit, blob))
     prefetch_objects(objects)
-    queries = {}
+    queries: dict[str, tuple[str, str]] = {}
     for commit, selected in sorted(grouped.items()):
         paths = sorted(selected | {_MANIFEST})
         _SOURCE_BLOBS.update(((commit, path), None) for path in paths)
@@ -114,13 +141,13 @@ def prefetch_sources(sources: Iterable[tuple[str, str, str]]) -> None:
             continue
         queries.update((f"{commit}:{path}", (commit, path)) for path in paths)
     if queries:
-        for query, blob, kind, body in _batch(list(queries)):
+        for query, resolved_blob, kind, body in _batch(list(queries)):
             key = queries[query]
             if kind == "blob":
-                assert blob is not None
-                _SOURCE_BLOBS[key] = blob
-                _OBJECT_TYPES[blob] = kind
-                _BLOB_HASHES[blob] = sha256_bytes(body)
+                assert resolved_blob is not None
+                _SOURCE_BLOBS[key] = resolved_blob
+                _OBJECT_TYPES[resolved_blob] = kind
+                _BLOB_HASHES[resolved_blob] = sha256_bytes(body)
                 if key in _SOURCE_CONTENTS:
                     _SOURCE_CONTENTS[key] = body
 
@@ -130,7 +157,7 @@ def require_local_object_reads() -> None:
     result = subprocess.run(
         ["git", "--version"], capture_output=True, text=True, check=True,
         env=clean_git_environment(), timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     match = re.search(r"\b(\d+)\.(\d+)(?:\.(\d+))?", result.stdout)
     if match is None or tuple(map(int, match.groups(default="0"))) < (2, 45, 0):
@@ -178,7 +205,7 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
 
 
@@ -214,7 +241,7 @@ def git_file_sha256(commit: str, path: str) -> str | None:
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     if result.returncode != 0:
         return None
@@ -235,7 +262,7 @@ def blob_sha256(blob: str) -> str | None:
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     if result.returncode != 0:
         return None

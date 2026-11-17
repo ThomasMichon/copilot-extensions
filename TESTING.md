@@ -4808,8 +4808,11 @@ each publication case still creates a fresh consumer fixture.
 It retains the ordinary runner's containment and test deadlines. This is
 source/publication evidence, not SDK, native Windows or installed qualification.
 Historical seed preparation indexes each immutable packet's source identity
-once, instead of rereading every packet for every source. Named progress and
-slow-case timings identify unfinished work; JUnit outcomes are retained on
+once, instead of rereading every packet for every source. Source-output
+construction likewise indexes historical candidates once.
+Committed registry chunks use one local-only Git batch per contract while
+retaining exact commit/blob, chunk inventory, hash and canonical-byte checks.
+Named progress and slow-case timings identify unfinished work; JUnit outcomes are retained on
 failure without changing the 30/300/900-second item/group/plugin limits or test
 selection. The controlled HTTP-52 capture uses the same guard step.
 Historical guards precede canonical validation and export, so stale current

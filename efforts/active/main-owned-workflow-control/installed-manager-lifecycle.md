@@ -3696,3 +3696,48 @@ executing relocated archives with isolated imports; no whole-host clean-room
 or installed Manager run is claimed for this packaging-only repair. Fresh
 external controlled capture and current provider CI/review remain required
 before acceptance.
+
+### November 17: historical-publication guard after receiving repair
+
+The managed update publishes `00831b44a4a02138be420e593be0351de29f4e6e`.
+Ubuntu run `44021527212` completes the complete controlled capture and its
+independent no-write verification. The subsequent historical-publication
+packet fails its original 30-second item limit in the initial HTTP-47
+history-preservation case, while waiting for the canonical checker.
+Canonical validation and export are skipped, so no current artifact is
+accepted. The sole watcher is consumed before the source freeze is released;
+no unchanged capture is replayed.
+
+Read-only profiling identifies repeated committed-registry children and
+historical packet scans. The bounded repair batches exact committed blobs
+through the existing local-only Git boundary and reads each historical
+candidate packet once per output construction. Every packet's original
+commit/blob comparison remains present. Chunk identity, inventory, offsets,
+counts, canonical encoding, immutable prefixes and byte/hash validation remain
+unchanged. Windows fixture Git uses a per-command long-path option, not a host
+configuration change. Source Git failures now retain bounded diagnostics.
+
+The branch is reconciled onto exact Dev
+`59077d83c93c750a8ad4af5cbb1bd83b11199ac4`, preserving all upstream and
+owned manifest members. All 56 contract-checker controls pass under the
+existing contained runner, including exact binary bytes, requested repository
+selection, non-commit/unsafe/missing paths and corrupt or incomplete chunk
+batches. Existing lossless-registry and read-once controls also pass locally.
+Windows diagnostics of the full historical packet still fail its unchanged
+30-second limit during capture persistence, before the original Ubuntu
+failure boundary; they are not passing publication or native evidence.
+Current Ubuntu qualification remains owed.
+
+The same published head's Windows publication job `133831544009` in run
+`44021419567` reports 116 passed and four skips, then fails daemon settlement:
+instance `50895fce9c984ff1ae2c1bcb35e251b4` is finished but its PID has been
+reused. The sandbox remains held. The exact boundary is reported on #6237
+for the existing process-lifecycle owner; this is not accepted transfer or a
+green job. Neither this repair nor a future source-capture pass permits
+deleting that record, weakening the reuse gate, replaying unchanged native
+inputs or treating the larger lifecycle objective as complete.
+
+The original capture inventory, 240-second aggregate, runner limits and
+qualification profiles are unchanged. Documentation impact is confined to
+the existing testing reference and this effort's current evidence; no public
+command, installed-runtime contract, rollout or release policy changes.

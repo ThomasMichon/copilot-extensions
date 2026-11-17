@@ -145,10 +145,11 @@ def git(root: Path, *args: str) -> bytes:
         check=False,
         timeout=15,
         env=git_evidence.clean_git_environment(),
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     if result.returncode:
-        raise ValueError(f"local capture Git evidence unavailable: {args[0]}")
+        detail = result.stderr.decode("utf-8", errors="replace").strip()[-2000:]
+        raise ValueError(f"local capture Git evidence unavailable: {args[0]}: {detail}")
     return result.stdout
 
 
@@ -167,7 +168,7 @@ def constant(data: bytes, name: str) -> int:
 
 
 def proof_paths(
-    root: Path, registry: dict, *, metadata_paths: set[str] | None = None,
+    root: Path, registry: dict[str, Any], *, metadata_paths: set[str] | None = None,
 ) -> set[str]:
     """Pin execution dependencies broadly; only AFFECTED owns new semantic vectors."""
     paths = (
@@ -227,17 +228,17 @@ def proof_paths(
 
 
 def source_snapshot(
-    root: Path, commit: str, registry: dict, *,
+    root: Path, commit: str, registry: dict[str, Any], *,
     generation: int = 47, extra_paths: tuple[str, ...] = (),
 ) -> dict[str, dict[str, str]]:
     tree = {}
     for raw in git(root, "ls-tree", "-rz", commit).split(b"\0"):
         if not raw:
             continue
-        metadata, path = raw.split(b"\t", 1)
-        mode, kind, blob = metadata.decode().split()
-        tree[path.decode("utf-8")] = (mode, kind, blob)
-    result = {}
+        raw_metadata, raw_path = raw.split(b"\t", 1)
+        mode, kind, blob = raw_metadata.decode().split()
+        tree[raw_path.decode("utf-8")] = (mode, kind, blob)
+    result: dict[str, dict[str, str]] = {}
     metadata = baseline_snapshot(root, commit, generation=generation)
     for path in sorted(proof_paths(
         root, registry, metadata_paths=set(metadata.inputs) - {REGISTRY},
@@ -268,33 +269,22 @@ def baseline_snapshot(
 ) -> registry_codec.Snapshot:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("HTTP-47 capture requires a full real source commit")
-    if (
-        git(root, "rev-parse", "--verify", commit + "^{commit}").decode().strip()
-        != commit
-    ):
-        raise ValueError("capture source is not the selected commit")
-    if (
-        constant(
-            git(root, "show", commit + ":" + PREFIX + "protocol.py"),
-            "HTTP_PROTOCOL_VERSION",
-        )
-        != generation
-    ):
+    committed = git_evidence.read_files(root, commit, [PREFIX + "protocol.py", REGISTRY])
+    protocol = committed[PREFIX + "protocol.py"]
+    if constant(protocol, "HTTP_PROTOCOL_VERSION") != generation:
         raise ValueError(
             f"capture source commit must genuinely speak HTTP generation {generation}"
         )
     if (
-        constant(
-            git(root, "show", commit + ":" + PREFIX + "protocol.py"),
-            "NEGOTIATED_DRAIN_PROTOCOL_VERSION",
-        )
+        constant(protocol, "NEGOTIATED_DRAIN_PROTOCOL_VERSION")
         != 47
     ):
         raise ValueError(
             "HTTP-47 capture cannot move the negotiated-drain capability floor"
         )
     snapshot = registry_codec.load(
-        root, read=lambda path: git(root, "show", commit + ":" + path),
+        root, read=committed.__getitem__,
+        read_many=lambda paths: git_evidence.read_files(root, commit, paths),
     )
     result = snapshot.materialized
     http = next(c for c in result["contracts"] if c["id"] == "agent-bridge.http-wire")
@@ -303,7 +293,7 @@ def baseline_snapshot(
     return snapshot
 
 
-def baseline(root: Path, commit: str) -> dict:
+def baseline(root: Path, commit: str) -> dict[str, Any]:
     return baseline_snapshot(root, commit).materialized
 
 
@@ -314,7 +304,7 @@ def source_fixture_path(source: str) -> str:
     )
 
 
-def output_paths(registry: dict) -> set[str]:
+def output_paths(registry: dict[str, Any]) -> set[str]:
     http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
     semantic = {s["path"] for s in http["source_paths"] if s["semantic"]} | set(
         AFFECTED
@@ -323,7 +313,7 @@ def output_paths(registry: dict) -> set[str]:
 
 
 def check_history(
-    root: Path, registry: dict, outputs: dict[str, bytes] | None = None
+    root: Path, registry: dict[str, Any], outputs: dict[str, bytes] | None = None
 ) -> dict[str, str | None]:
     owned = output_paths(registry) - {REGISTRY} if outputs is not None else set()
     if outputs is not None:
@@ -360,7 +350,8 @@ def check_history(
 
 
 def build_outputs(
-    root: Path, commit: str, original: dict, proof: dict, observed: dict
+    root: Path, commit: str, original: dict[str, Any],
+    proof: dict[str, dict[str, str]], observed: dict[str, Any],
 ) -> dict[str, bytes]:
     registry = copy.deepcopy(original)
     http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
@@ -372,6 +363,7 @@ def build_outputs(
     if version not in http["evidence_window"]["runtimes"]:
         http["evidence_window"]["runtimes"].append(version)
     sources = {item["path"]: item for item in http["source_paths"]}
+    historical_candidates: dict[tuple[str, str], list[dict[str, Any]]] | None = None
     for source in AFFECTED:
         if source not in sources:
             sources[source] = {"path": source}
@@ -381,7 +373,7 @@ def build_outputs(
         )
     outputs = {}
 
-    def register(path: str, value: dict, source: str, method: str) -> None:
+    def register(path: str, value: dict[str, Any], source: str, method: str) -> None:
         if path in outputs:
             raise ValueError(f"capture output collision: {path}")
         value = copy.deepcopy(value)
@@ -454,17 +446,18 @@ def build_outputs(
                 f"unclassified source drift outside HTTP-47 closure: {source}"
             )
         elif row["semantic"]:
-            candidates = []
-            for fixture in http["fixtures"]:
-                if fixture["generation"] >= 47:
-                    continue
-                value = json.loads(safe(root, fixture["path"]).read_bytes())
-                captured = value.get("captured_from", {})
-                if (
-                    captured.get("source_path") == source
-                    and captured.get("source_sha256") == row["sha256"]
-                ):
-                    candidates.append(fixture)
+            if historical_candidates is None:
+                historical_candidates = {}
+                for fixture in http["fixtures"]:
+                    if fixture["generation"] >= 47:
+                        continue
+                    value = json.loads(safe(root, fixture["path"]).read_bytes())
+                    captured = value.get("captured_from", {})
+                    prior_source = captured.get("source_path")
+                    prior_sha = captured.get("source_sha256")
+                    if isinstance(prior_source, str) and isinstance(prior_sha, str):
+                        historical_candidates.setdefault((prior_source, prior_sha), []).append(fixture)
+            candidates = historical_candidates.get((source, row["sha256"]), [])
             if not candidates:
                 raise ValueError(
                     f"unchanged semantic source has no matching historical vector: {source}"
@@ -493,7 +486,7 @@ def build_outputs(
     return outputs
 
 
-def validate_outputs(root: Path, original: dict, outputs: dict[str, bytes]) -> None:
+def validate_outputs(root: Path, original: dict[str, Any], outputs: dict[str, bytes]) -> None:
     plan = output_paths(original)
     proposed = registry_codec.load(
         root, read=lambda path: outputs[path] if path in outputs

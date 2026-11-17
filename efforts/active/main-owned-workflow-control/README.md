@@ -104,24 +104,28 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** finish the compact receiving-archive dependency repair in #12013,
-then earn current-source qualification without relabelling earlier evidence.
-Ubuntu run `44011929440` captures and independently
-verifies all 638 controlled cases at `3e1ea0c08ba64cef81bab70a431e3a41fe742cb2`,
-within the unchanged aggregate. Its 218 exported outputs pass canonical
-materialization and validation. All 24 selected owners, the complete checker
-owner and 204 Windows prefix controls pass at that checkpoint. After rebasing
-onto Dev `c2d5e84db4`, all 166 changed Python files pass strict analysis across
-24 owners and every declared target, with no removed unit-manifest members.
-The reconciled `b76950980f` capture fails three receiving probes, and its
-Windows publication packet identifies the same missing daemon I/O module in
-the compact archive. The narrow archive repair passes the original Windows
-packet (116 passed, four platform skips). After reconciliation onto exact Dev
-`a0893301f1`, all 167 changed Python files pass strict analysis across 25 owners
-and every declared target; current-source capture is still owed.
-The retained Index cleanup
-hold, current required CI, native POSIX proof and hosted Windows acceptance
-remain open. No original hold changes.
+**Now:** qualify the bounded historical-publication guard repair in #12013.
+The compact receiving archive repair clears the missing daemon I/O module:
+current Ubuntu run `44021527212` completes its write and independent no-write
+capture steps at `00831b44a4`, but the following historical guard exceeds its
+unchanged 30-second item limit. Canonical validation and export are skipped;
+no current artifact is qualified. The older `3e1ea0c08b` capture remains
+historical proof, not coverage of changed inputs.
+
+The owned branch is reconciled onto exact Dev `59077d83c9`. The source repair
+batches local-only committed metadata reads and indexes historical candidate
+packets without dropping comparisons or increasing any limit. All 56
+contract-checker controls pass. The newly touched legacy tool bodies are
+included in whole-file strict migration. The optional publication-proof lane
+is Ubuntu; local Windows diagnostics retain their original-limit failures
+and supply no native or installed acceptance.
+
+The published Windows packet reports 116 passed and four skips, then correctly
+fails cleanup because a finished daemon instance's PID is reused. Its exact
+hold is reported on #6237 for the existing process-lifecycle owner; no
+transfer, record deletion, forced cleanup or failure waiver is claimed.
+The retained Index cleanup hold, current required CI, native POSIX proof and
+hosted Windows acceptance remain open. No original hold changes.
 
 **Return:** after the refresh, re-read this Goal and the linked scope approvals,
 reconcile retained implementation/checker custody, and finish that slice under

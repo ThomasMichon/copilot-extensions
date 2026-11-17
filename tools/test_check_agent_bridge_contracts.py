@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable
 
 import pytest
@@ -69,7 +70,7 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _load_checker() -> Any:
+def _load_checker() -> ModuleType:
     spec = importlib.util.spec_from_file_location("check_agent_bridge_contracts", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -294,7 +295,7 @@ def repo(tmp_path: Path) -> Path:
 
 def _mutate_registry(
     repo: Path,
-    mutation: Callable[[dict[str, Any]], None],
+    mutation: Callable[[dict[str, Any]], object],
 ) -> None:
     path = repo / "plugins/agent-bridge/contract/registry.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -367,6 +368,57 @@ def test_provenance_batch_refuses_delimiters_before_any_object_read(
         evidence.prefetch_sources([("1" * 40, path, "2" * 40)])
 
 
+def test_committed_file_batch_uses_requested_repository_and_exact_bytes(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent_bridge_contract_git as evidence
+
+    relative = "source directory/binary file"
+    data = b"\x00first\r\nsecond\xff\n"
+    target = repo / relative
+    target.parent.mkdir()
+    target.write_bytes(data)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "add binary source")
+    commit = _git(repo, "rev-parse", "HEAD")
+    blob = _git(repo, "rev-parse", f"{commit}:{SOURCE}")
+    calls = []
+    run = subprocess.run
+
+    def recorded(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+        calls.append(argv)
+        assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    evidence.require_local_object_reads()
+    calls.clear()
+    assert evidence.read_files(repo, commit, [SOURCE, relative]) == {
+        SOURCE: (repo / SOURCE).read_bytes(), relative: data,
+    }
+    assert len(calls) == 1 and "--batch" in calls[0]
+    with pytest.raises(ValueError, match="non-file capture path"):
+        evidence.read_files(repo, commit, ["source directory"])
+    with pytest.raises(ValueError, match="lacks a plain blob"):
+        evidence.read_files(repo, commit, ["missing source"])
+    with pytest.raises(ValueError, match="requires an actual commit"):
+        evidence.read_files(repo, blob, [SOURCE])
+
+
+@pytest.mark.parametrize("path", ["source\ninjected", "source\rinjected", "source\0injected", "../escape"])
+def test_committed_file_batch_rejects_unsafe_paths_before_git(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, path: str,
+) -> None:
+    import agent_bridge_contract_git as evidence
+
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("unsafe paths must not start Git"),
+    )
+    with pytest.raises(ValueError):
+        evidence.read_files(repo, "1" * 40, [path])
+
+
 def test_checker_validates_complete_chunked_history_without_rewriting(repo: Path) -> None:
     import agent_bridge_contract_registry as codec
 
@@ -380,7 +432,18 @@ def test_checker_validates_complete_chunked_history_without_rewriting(repo: Path
         target = repo / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    assert codec.load(repo).materialized == updated
+    batches = []
+
+    def read_many(paths: list[str]) -> dict[str, bytes]:
+        batches.append(paths)
+        return {path: (repo / path).read_bytes() for path in paths}
+
+    assert codec.load(repo, read_many=read_many).materialized == updated
+    assert {path for batch in batches for path in batch} == set(outputs) - {codec.REGISTRY}
+    with pytest.raises(ValueError, match="batch inventory mismatch"):
+        codec.load(repo, read_many=lambda _paths: {})
+    with pytest.raises(ValueError, match="chunk hash mismatch"):
+        codec.load(repo, read_many=lambda paths: {path: b"{}" for path in paths})
     result = _run(repo)
     assert result.returncode == 0, result.stderr
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
@@ -597,7 +660,7 @@ def test_local_git_probe_is_bounded_headless_and_fail_closed(
     monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
     observed: dict[str, Any] = {}
 
-    def timed_out(args: list[str], **kwargs: Any) -> None:
+    def timed_out(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         observed.update(kwargs)
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
@@ -619,7 +682,7 @@ def test_repeated_local_evidence_is_read_once_per_validation(
     monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
     calls: list[list[str]] = []
 
-    def read(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def read(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -639,7 +702,7 @@ def test_local_only_guard_refuses_unsupported_git_before_object_reads(
     checker._eg.git.cache_clear()
     calls: list[list[str]] = []
 
-    def read(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def read(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, f"git version {version}\n", "")
 
