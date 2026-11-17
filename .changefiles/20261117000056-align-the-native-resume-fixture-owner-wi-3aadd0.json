@@ -2,7 +2,7 @@
   "comment": "Align the native Resume fixture owner with the finite mux observation protocol",
   "changes": [
     {
-      "plugin": "agent-worktrees",
+      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]
