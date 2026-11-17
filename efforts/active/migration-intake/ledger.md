@@ -322,3 +322,28 @@ eligibility, require default hosts to activate cells or complete every unrelated
 all incumbent acceptance, actual assignments, native/diagnostic/release and
 source/resource custody remain. Planned intake is neither technical completion
 nor permission to resume capability execution.
+
+## Finite generic-review convergence receipt (2026-11-17 UTC)
+
+This records the complete direct domain Plan amendment already reviewed and
+merged in #12667. Current receiving readback confirms that the domain ROOT
+still matches that reviewed amendment. This append-only receipt does not
+repropose the plan, alter earlier entries or resume the parked effort.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Optional action/revision-bound review steering, knowledge/persona references and existing lifecycle composition, including the complete located-finding postback family | Public #2887 and its existing #2899 incorporation; generic requirements only | routed | [review-automation-reliability](../review-automation-reliability/README.md), existing Phase 11 C2887/P2887/P2899/V/G family | Keep #2887 OPEN as the canonical long-term objective; #2899 receiving was already satisfied historically, with no repeated disposition or new closure credit |
+
+Normal review of the direct domain Plan addition is the intake's acceptance
+route, not permission to execute it. All 24 added technical Plan/local
+Validation/global Validation rows remain unchecked. The ROOT remains
+Blocked/parked; execution requires its existing explicit maintainer resumption.
+Incumbent phases, acceptance, assignments and source/resource custody remain.
+
+Preserve optional rather than universal steering, consumer-owned referenced
+content, provenance/access/unavailable outcomes, one existing reviewer
+lifecycle and applicator, valid located findings with classified fallback,
+provider/acting-identity/landing authority, idempotency and separate
+fixture/contract/native evidence tiers. Finite #2899 repair need not await
+independent #2887 capabilities or whole-parent completion. This receipt creates
+no issue, executor, live post, source change or claim transfer.
