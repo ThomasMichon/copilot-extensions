@@ -122,3 +122,14 @@ actual candidate helper before dispatch or reuse. Older helpers remain usable
 with absent selection. Required unsupported selection refuses without trying
 an effectful invocation or falling back to default publication. No existing
 form is retired; source support alone does not qualify installed adoption.
+
+Closed-wheel application health resolves first-party `.data/data`,
+`.data/purelib` and `.data/platlib` members through the installed interpreter's
+scheme instead of treating archive paths as site-package paths. Every relocated
+file still requires the retained wheel's size and content hash and must resolve
+inside the candidate slot. Other relocation schemes remain unsupported; script
+rewriting and header installation are not qualified by this check.
+`tools/test_runtime_application_binstubs.py -k relocated_wheel_data` exercises
+the generated installer with real UV, fresh/reused content checks and refusals
+before completion for modified, missing or escaping data. These are isolated
+application controls, not additions to the required actor-free unit packet.
