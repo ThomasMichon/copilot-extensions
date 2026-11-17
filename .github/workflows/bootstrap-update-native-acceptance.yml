@@ -101,11 +101,20 @@ jobs:
           (not test_application_input_provider.py or child_receives_no_mixed_case) and
           (not test_update_bootstrap.py or prepared_repair_uses_declared_installer_entry) and
           (not test_recovery_source.py or unattributable_engine_uses_native_fresh_installation) and
-          (not test_bootstrap_update.py or observer_modes_share)"
+          (not test_bootstrap_update.py or observer_modes_share) and
+          (${{ matrix.selection || 'test or not test' }})"
   bootstrap-update-windows:
-    name: Whole bootstrap update (Windows)
+    name: Whole bootstrap update (Windows, ${{ matrix.packet }})
     runs-on: windows-latest
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - packet: native
+            selection: test_bootstrap_update_native.py
+          - packet: adapters
+            selection: not test_bootstrap_update_native.py
     env: *bootstrap-update-env
     steps: *bootstrap-update-steps
 

@@ -2039,6 +2039,9 @@ not the behavioral packet's remaining cold-preparation budget. All jobs use the
 same exact-source checkout and tool setup. The
 behavioral jobs also run `tests/test_update_python_path.py` with fake registry
 state to check waited completion, excluded observer modes and publication failures.
+Windows partitions the behavioral selection into complementary native and
+adapter jobs so cold environment preparation and cleanup fit inside each
+existing job ceiling. Their union retains every selected case exactly once.
 They select the source-anchor-loss dispatch controls and standalone prepared-source
 acquisition controls from `test_bootstrap_dispatch.py` and `test_install_source.py`
 without adding those files' unrelated cases to this acceptance packet.
