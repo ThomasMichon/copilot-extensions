@@ -6,24 +6,31 @@ import base64
 import json
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from email.message import Message
 from io import BytesIO
 from types import SimpleNamespace
+from typing import Any, cast
 from urllib.error import HTTPError
+from urllib.request import Request
 
 import pytest
 
 from agent_worktrees import config, pr_watch
 from agent_worktrees.pr_observation import configured_snapshot
 from agent_worktrees.pr_observation_config import ObservationConfig
+from agent_worktrees.pr_contract import PRSnapshot
 from agent_worktrees.providers import github
 from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
 from agent_worktrees.providers.azure_observation_reads import AdoReader
 from agent_worktrees.providers import azure_observation_reads
 from agent_worktrees.providers.base import ProviderError
 from agent_worktrees.providers.observation_credentials import (
-    ObservationCredentialError, ObservationCredentials,
+    CredentialSource, ObservationCredentialError, ObservationCredentials,
 )
+
+github_provider = cast(Callable[[], github.GitHubProvider], github.GitHubProvider)
 
 
 @dataclass(frozen=True)
@@ -43,19 +50,19 @@ class Material:
 
 
 class Source:
-    def __init__(self, binding=None, *, fail_at=None):
+    def __init__(self, binding: Binding | None = None, *, fail_at: int | None = None) -> None:
         self.binding = binding or Binding()
         self.fail_at = fail_at
         self.calls = 0
 
-    def __call__(self):
+    def __call__(self) -> Material:
         self.calls += 1
         if self.calls == self.fail_at:
             raise ConnectionError("private-provider-detail")
         return Material("synthetic-" + str(self.calls), int(time.time()) + 60, self.binding)
 
 
-def credentials(source):
+def credentials(source: CredentialSource) -> ObservationCredentials:
     return ObservationCredentials(
         source, provider="github", api_base="https://api.github.com",
         repository="owner/repository",
@@ -67,7 +74,7 @@ def credentials(source):
     ("repository", "other/repository"), ("permission", "write"),
     ("authentication", "basic"), ("authentication", "unknown"),
 ])
-def test_wrong_binding_is_refused(field, value):
+def test_wrong_binding_is_refused(field: str, value: str) -> None:
     source = Source(replace(Binding(), **{field: value}))
     with pytest.raises(ObservationCredentialError, match="binding mismatch"):
         credentials(source).acquire()
@@ -78,13 +85,13 @@ def test_wrong_binding_is_refused(field, value):
     {"token": "has space"}, {"token": "\u00e9"}, {"token": "x" * 16385},
     {"expires_at": True}, {"expires_at": float("inf")}, {"expires_at": 0},
 ])
-def test_invalid_or_expired_material_is_refused(changes):
+def test_invalid_or_expired_material_is_refused(changes: dict[str, Any]) -> None:
     material = replace(Source()(), **changes)
     with pytest.raises(ObservationCredentialError):
         credentials(lambda: material).acquire()
 
 
-def test_source_disconnect_is_sanitized_and_retryable_without_caching():
+def test_source_disconnect_is_sanitized_and_retryable_without_caching() -> None:
     source = Source(fail_at=2)
     consumer = credentials(source)
     assert consumer.acquire().token == "synthetic-1"
@@ -96,20 +103,25 @@ def test_source_disconnect_is_sanitized_and_retryable_without_caching():
     assert consumer.acquire().token == "synthetic-3"
 
 
-def review(number):
+def review(number: int) -> dict[str, Any]:
     return {
         "id": number, "state": "APPROVED", "user": {"login": "reviewer"},
         "submitted_at": "2026-01-01T00:00:00Z", "commit_id": "head",
     }
 
 
-def github_transport(monkeypatch):
-    calls = []
+def github_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[list[str], dict[str, str]]]:
+    calls: list[tuple[list[str], dict[str, str]]] = []
 
-    def run(argv, *, env, max_stdout_bytes):
+    def run(
+        argv: list[str], *, env: dict[str, str], max_stdout_bytes: int,
+    ) -> subprocess.CompletedProcess[str]:
         assert max_stdout_bytes == 1_048_576
         calls.append((argv, env))
         endpoint = argv[-1]
+        body: Any
         if endpoint.endswith("/pulls/7"):
             body = {
                 "head": {"sha": "head"}, "state": "open", "title": "Example",
@@ -134,14 +146,16 @@ def github_transport(monkeypatch):
     return calls
 
 
-def test_github_renews_metadata_checks_and_each_review_and_check_page(monkeypatch):
+def test_github_renews_metadata_checks_and_each_review_and_check_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = github_transport(monkeypatch)
     source = Source()
     # Selected mode must not consult these otherwise-valid CLI credentials.
     monkeypatch.setenv("GH_TOKEN", "ambient-secret")
     monkeypatch.setenv("GITHUB_TOKEN", "ambient-secret")
     monkeypatch.setenv("GH_HOST", "unrelated.example")
-    result = github.GitHubProvider().get_snapshot(
+    result = github_provider().get_snapshot(
         "owner/repository", 7, credential_source=source,
     )
     assert result.checks_complete and len(result.reviews) == 100
@@ -155,11 +169,13 @@ def test_github_renews_metadata_checks_and_each_review_and_check_page(monkeypatc
 
 
 @pytest.mark.parametrize("failure", range(1, 7))
-def test_github_source_loss_stops_before_the_next_cli_call(monkeypatch, failure):
+def test_github_source_loss_stops_before_the_next_cli_call(
+    monkeypatch: pytest.MonkeyPatch, failure: int,
+) -> None:
     calls = github_transport(monkeypatch)
     source = Source(fail_at=failure)
     with pytest.raises(ObservationCredentialError):
-        github.GitHubProvider().get_snapshot("owner/repository", 7, credential_source=source)
+        github_provider().get_snapshot("owner/repository", 7, credential_source=source)
     assert source.calls == failure
     assert len(calls) == failure - 1
 
@@ -174,10 +190,12 @@ def test_github_source_loss_stops_before_the_next_cli_call(monkeypatch, failure)
     ("forge.example:8443", "https://forge.example:8443/api/v3"),
     ("garage.github.com", "https://garage.github.com/api/v3"),
 ])
-def test_github_uses_supported_https_api_endpoint(monkeypatch, host, api_base):
+def test_github_uses_supported_https_api_endpoint(
+    monkeypatch: pytest.MonkeyPatch, host: str, api_base: str,
+) -> None:
     calls = github_transport(monkeypatch)
     source = Source(replace(Binding(), api_base=api_base))
-    github.GitHubProvider().get_snapshot(
+    github_provider().get_snapshot(
         "owner/repository", 7, api_base="https://" + host, credential_source=source,
     )
     assert all(argv[argv.index("--hostname") + 1] == host.split(":")[0] for argv, _ in calls)
@@ -187,33 +205,39 @@ def test_github_uses_supported_https_api_endpoint(monkeypatch, host, api_base):
 @pytest.mark.parametrize("api_base", [
     "github.localhost", "https://github.localhost", "https://github.localhost:443",
 ])
-def test_github_http_only_host_is_refused_before_acquiring_or_emitting(monkeypatch, api_base):
+def test_github_http_only_host_is_refused_before_acquiring_or_emitting(
+    monkeypatch: pytest.MonkeyPatch, api_base: str,
+) -> None:
     calls = github_transport(monkeypatch)
     source = Source()
     with pytest.raises(ObservationCredentialError, match="HTTPS API endpoint"):
-        github.GitHubProvider().get_snapshot(
+        github_provider().get_snapshot(
             "owner/repository", 7, api_base=api_base, credential_source=source,
         )
     assert source.calls == 0 and not calls
 
 
-def test_selected_github_auth_loss_is_retryable_and_never_echoes_provider_secret(monkeypatch):
+def test_selected_github_auth_loss_is_retryable_and_never_echoes_provider_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         github, "run_cli",
         lambda argv, **_: subprocess.CompletedProcess(argv, 1, "", "HTTP 401 synthetic-1"),
     )
     with pytest.raises(ProviderError) as error:
-        github.GitHubProvider().get_snapshot("owner/repository", 7, credential_source=Source())
+        github_provider().get_snapshot("owner/repository", 7, credential_source=Source())
     assert error.value.transient
     assert "synthetic-1" not in str(error.value)
 
 
 @pytest.mark.parametrize("failure", [2, 3, 4])
-def test_github_check_authorization_loss_aborts_later_reads(monkeypatch, failure):
+def test_github_check_authorization_loss_aborts_later_reads(
+    monkeypatch: pytest.MonkeyPatch, failure: int,
+) -> None:
     calls = github_transport(monkeypatch)
-    run = github.run_cli
+    run = cast(Callable[..., subprocess.CompletedProcess[str]], getattr(github, "run_cli"))
 
-    def fail(argv, **options):
+    def fail(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         if len(calls) == failure - 1:
             return subprocess.CompletedProcess(argv, 1, "", "HTTP 403 synthetic-secret")
         return run(argv, **options)
@@ -221,12 +245,12 @@ def test_github_check_authorization_loss_aborts_later_reads(monkeypatch, failure
     monkeypatch.setattr(github, "run_cli", fail)
     source = Source()
     with pytest.raises(ObservationCredentialError) as error:
-        github.GitHubProvider().get_snapshot("owner/repository", 7, credential_source=source)
+        github_provider().get_snapshot("owner/repository", 7, credential_source=source)
     assert error.value.transient and "synthetic-secret" not in str(error.value)
     assert source.calls == failure and len(calls) == failure - 1
 
 
-def ado_binding(authentication="bearer"):
+def ado_binding(authentication: str = "bearer") -> Binding:
     return Binding("azure-devops", "https://dev.azure.test/example",
                    "project/repository", "observe", authentication)
 
@@ -234,22 +258,24 @@ def ado_binding(authentication="bearer"):
 class Response(BytesIO):
     status = 200
 
-    def __init__(self, body, continuation=""):
+    def __init__(self, body: object, continuation: str = "") -> None:
         super().__init__(json.dumps(body).encode())
         self.headers = {"x-ms-continuationtoken": continuation}
 
 
 class Opener:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[Request] = []
 
-    def open(self, request, *, timeout):
+    def open(self, request: Request, *, timeout: float) -> Response:
         self.calls.append(request)
         page = len(self.calls)
         return Response({"value": [{"id": page}], "count": 1}, "next" if page == 1 else "")
 
 
-def ado_reader(source, monkeypatch):
+def ado_reader(
+    source: CredentialSource, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AdoReader, Opener]:
     provider = AzureDevOpsProvider()
     monkeypatch.setattr(provider, "_auth_header", lambda *_: pytest.fail("ambient ADO auth"))
     opener = Opener()
@@ -260,7 +286,9 @@ def ado_reader(source, monkeypatch):
 
 
 @pytest.mark.parametrize("authentication", ["basic", "bearer"])
-def test_ado_renews_each_continuation_page_and_preserves_authentication(monkeypatch, authentication):
+def test_ado_renews_each_continuation_page_and_preserves_authentication(
+    monkeypatch: pytest.MonkeyPatch, authentication: str,
+) -> None:
     source = Source(ado_binding(authentication))
     reader, opener = ado_reader(source, monkeypatch)
     assert source.calls == 0
@@ -268,7 +296,9 @@ def test_ado_renews_each_continuation_page_and_preserves_authentication(monkeypa
     assert result.complete and len(result.records) == 2
     assert source.calls == len(opener.calls) == 2
     for index, request in enumerate(opener.calls, 1):
-        scheme, value = request.get_header("Authorization").split(" ", 1)
+        authorization = request.get_header("Authorization")
+        assert authorization is not None
+        scheme, value = authorization.split(" ", 1)
         if authentication == "basic":
             assert scheme == "Bas" + "ic"
             assert base64.b64decode(value).decode() == ":synthetic-" + str(index)
@@ -277,7 +307,7 @@ def test_ado_renews_each_continuation_page_and_preserves_authentication(monkeypa
             assert value == "synthetic-" + str(index)
 
 
-def test_ado_source_loss_aborts_best_effort_collection(monkeypatch):
+def test_ado_source_loss_aborts_best_effort_collection(monkeypatch: pytest.MonkeyPatch) -> None:
     source = Source(ado_binding(), fail_at=2)
     reader, opener = ado_reader(source, monkeypatch)
     with pytest.raises(ObservationCredentialError):
@@ -285,14 +315,18 @@ def test_ado_source_loss_aborts_best_effort_collection(monkeypatch):
     assert len(opener.calls) == 1 and source.calls == 2
 
 
-def test_ado_refuses_noncanonical_authentication_before_emitting(monkeypatch):
+def test_ado_refuses_noncanonical_authentication_before_emitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     reader, opener = ado_reader(Source(ado_binding("basic-pat")), monkeypatch)
     with pytest.raises(ObservationCredentialError, match="binding mismatch"):
         reader.pr()
     assert not opener.calls
 
 
-def test_ado_refuses_other_endpoint_before_acquiring_or_emitting(monkeypatch):
+def test_ado_refuses_other_endpoint_before_acquiring_or_emitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source = Source(ado_binding())
     reader, opener = ado_reader(source, monkeypatch)
     with pytest.raises(ObservationCredentialError):
@@ -300,11 +334,11 @@ def test_ado_refuses_other_endpoint_before_acquiring_or_emitting(monkeypatch):
     assert source.calls == 0 and not opener.calls
 
 
-def test_selected_ado_auth_loss_is_retryable_and_sanitized(monkeypatch):
+def test_selected_ado_auth_loss_is_retryable_and_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
     reader, opener = ado_reader(Source(ado_binding()), monkeypatch)
 
-    def refused(request, **_):
-        raise HTTPError(request.full_url, 401, "synthetic-1", {}, None)
+    def refused(request: Request, **_: Any) -> Response:
+        raise HTTPError(request.full_url, 401, "synthetic-1", Message(), None)
 
     monkeypatch.setattr(opener, "open", refused)
     with pytest.raises(ObservationCredentialError) as error:
@@ -315,9 +349,11 @@ def test_selected_ado_auth_loss_is_retryable_and_sanitized(monkeypatch):
 
 
 @pytest.mark.parametrize("provider", ["github", "gitea", "azure-devops"])
-def test_selected_fetch_never_resolves_configured_or_ambient_account(monkeypatch, provider):
+def test_selected_fetch_never_resolves_configured_or_ambient_account(
+    monkeypatch: pytest.MonkeyPatch, provider: str,
+) -> None:
     source = Source()
-    captured = []
+    captured: list[dict[str, Any]] = []
     monkeypatch.setattr(pr_watch, "account_token_for_slug", lambda *_: pytest.fail("account fallback"))
     monkeypatch.setattr(
         pr_watch, "configured_snapshot",
@@ -332,7 +368,7 @@ def test_selected_fetch_never_resolves_configured_or_ambient_account(monkeypatch
     assert source.calls == 0
 
 
-def test_unsupported_provider_and_explicit_token_conflicts_refuse_before_effects():
+def test_unsupported_provider_and_explicit_token_conflicts_refuse_before_effects() -> None:
     with pytest.raises(ProviderError):
         pr_watch.build_fetch(config.PRConfig(provider="unsupported"), "owner/repository", 7,
                              credential_source=Source())
@@ -345,18 +381,23 @@ def test_unsupported_provider_and_explicit_token_conflicts_refuse_before_effects
 
 
 @pytest.mark.parametrize("kind,page_size", [("github", 100), ("gitea", 50)])
-def test_typed_snapshot_request_budget_bounds_nonterminating_review_pages(monkeypatch, kind, page_size):
+def test_typed_snapshot_request_budget_bounds_nonterminating_review_pages(
+    monkeypatch: pytest.MonkeyPatch, kind: str, page_size: int,
+) -> None:
     from agent_worktrees.providers import gitea
     from agent_worktrees.providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
     endpoint = "https://api.github.com" if kind == "github" else "https://forge.example"
     source = Source(Binding(provider=kind, api_base=endpoint))
-    calls = []
-    def run(argv, **kwargs):
+    calls: list[list[str]] = []
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         assert kwargs["max_stdout_bytes"] <= 1_048_584
         url = next(part for part in argv if part.startswith("https://"))
+        body: Any
         if "/reviews?" in url:
-            body = [review(number) for number in range(1, page_size + 1)]
+            from urllib.parse import parse_qs, urlsplit
+            page = int(parse_qs(urlsplit(url).query)["page"][0])
+            body = [review(number) for number in range((page - 1) * page_size + 1, page * page_size + 1)]
         elif "/check-runs?" in url:
             body = {"total_count": 0, "check_runs": []}
         elif url.endswith("/status"):
@@ -369,7 +410,7 @@ def test_typed_snapshot_request_budget_bounds_nonterminating_review_pages(monkey
         )
     module = github if kind == "github" else gitea
     monkeypatch.setattr(module, "run_cli", run)
-    provider = github.GitHubProvider() if kind == "github" else gitea.GiteaProvider()
+    provider = github_provider() if kind == "github" else gitea.GiteaProvider()
     with pytest.raises(ObservationCredentialError, match="request budget"):
         provider.get_snapshot(
             "owner/repository", 7,
@@ -379,17 +420,19 @@ def test_typed_snapshot_request_budget_bounds_nonterminating_review_pages(monkey
     assert len(calls) == source.calls == MAX_SNAPSHOT_REQUESTS
 
 
-def test_disabled_native_ado_cannot_fall_back_to_ambient_az(monkeypatch):
+def test_disabled_native_ado_cannot_fall_back_to_ambient_az(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     provider = AzureDevOpsProvider()
     monkeypatch.setattr(provider, "get_snapshot", lambda *_a, **_kw: pytest.fail("ambient az"))
     with pytest.raises(ProviderError, match="native ADO observation"):
-        provider.get_configured_snapshot(
+        cast(Callable[..., PRSnapshot], provider.get_configured_snapshot)(
             "project/repository", 7, api_base="https://dev.azure.test/example",
             observation=ObservationConfig(enabled=False), credential_source=Source(ado_binding()),
         )
 
 
-def test_gitea_observation_requires_the_credential_owners_bearer_profile():
+def test_gitea_observation_requires_the_credential_owners_bearer_profile() -> None:
     source = Source(Binding(
         provider="gitea", api_base="https://gitea.example.test", authentication="basic",
     ))
@@ -401,13 +444,15 @@ def test_gitea_observation_requires_the_credential_owners_bearer_profile():
         selected.acquire()
 
 
-def test_configured_native_ado_carries_the_source_to_the_actual_request(monkeypatch):
+def test_configured_native_ado_carries_the_source_to_the_actual_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source = Source(ado_binding())
     provider = AzureDevOpsProvider()
-    calls = []
+    calls: list[Request] = []
     monkeypatch.setattr(provider, "_auth_header", lambda *_: pytest.fail("ambient ADO auth"))
 
-    def open_request(request, **_):
+    def open_request(request: Request, **_: Any) -> Response:
         calls.append(request)
         return Response({
             "status": "completed", "lastMergeSourceCommit": {"commitId": "head"},
@@ -424,23 +469,27 @@ def test_configured_native_ado_carries_the_source_to_the_actual_request(monkeypa
     )
     assert snapshot.merged and snapshot.head_sha == "head"
     assert source.calls == len(calls) == 1
-    scheme, material = calls[0].get_header("Authorization").split(" ", 1)
+    authorization = calls[0].get_header("Authorization")
+    assert authorization is not None
+    scheme, material = authorization.split(" ", 1)
     assert scheme == "Bear" + "er" and material == "synthetic-1"
 
 
-def test_ado_build_diagnostic_catch_cannot_swallow_credential_loss(monkeypatch):
+def test_ado_build_diagnostic_catch_cannot_swallow_credential_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from test_azure_pr_observation import Reader, policy, read
     from agent_worktrees.providers.azure_observation_reads import Collection
 
-    reader = Reader()
-    failed = policy(state="rejected")
+    reader = cast(Callable[[], Any], Reader)()
+    failed = cast(Callable[..., dict[str, Any]], policy)(state="rejected")
     failed["context"]["buildId"] = 42
     reader.policy_rows = Collection((failed,))
 
-    def lost(_):
+    def lost(_: object) -> None:
         raise ObservationCredentialError("source disconnected", transient=True)
 
     monkeypatch.setattr(reader, "build", lost)
     with pytest.raises(ObservationCredentialError):
-        read(reader)
+        cast(Callable[[Any], Any], read)(reader)
     assert reader.calls.count("pr") == 1
