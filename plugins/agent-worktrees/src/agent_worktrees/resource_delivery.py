@@ -6,7 +6,6 @@ from datetime import datetime
 import re
 from typing import Any
 
-LIFETIME = "user-deliverable"
 MAX_FILES = 16
 MAX_BYTES = 64 * 1024 * 1024
 _HASH = re.compile(r"^[0-9a-f]{64}\Z")

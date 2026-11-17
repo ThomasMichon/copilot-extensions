@@ -11,17 +11,14 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator, TYPE_CHECKING, TypeGuard
 
-from .resource_delivery import LIFETIME
-from .resource_delivery import verified_delivery as verified_delivery
-from .tracking_claims import ResourceClaim, parse_claim_ref
-
 if TYPE_CHECKING:
     from .tracking import WorktreeRecord
+    from .tracking_claims import ResourceClaim
 
 SCHEMA = "copilot-extensions.resource-producer"
 VERSION = 1
 ARTIFACT_LIFETIME = "artifact-owned"
-USER_OUTPUT_LIFETIME = LIFETIME
+USER_OUTPUT_LIFETIME = "user-deliverable"
 MAX_REF_BYTES = 4096
 MAX_INPUT_BYTES = 16384
 FROZEN_OWNER_STATUSES = frozenset({
@@ -122,6 +119,8 @@ def valid_metadata(value: object) -> TypeGuard[dict[str, Any]]:
     if value.get("lifetime") == "retained-relationship":
         from .resource_relationship import valid_metadata as valid_relationship
         return valid_relationship(value)
+    from .tracking_claims import parse_claim_ref
+
     required = {"version", "lifetime", "token", "namespace", "phase", "creator", "recovery"}
     if not required.issubset(value) or set(value) - (
         required | {"identity", "closeout", "transfer", "allocation_epoch", "allocation_completion"}
@@ -225,6 +224,13 @@ def verified_retention(result: object, ref: str, identity: dict[str, Any]) -> bo
             "class": "disposable-scratch", "cleanup": "explicit-owner-pass",
         }
     )
+
+
+def verified_delivery(result: object, ref: str, identity: dict[str, Any]) -> bool:
+    """Load optional delivery validation only for its selected lifetime."""
+    from .resource_delivery import verified_delivery as verify
+
+    return verify(result, ref, identity)
 
 
 def wire_metadata(value: object) -> dict[str, Any]:
