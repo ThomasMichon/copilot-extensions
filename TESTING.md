@@ -8399,6 +8399,12 @@ The devcontainer wrapper accepts the same profile and file selectors. It strips
 both only from dependency preparation and preserves both for the offline test
 pass; preparation still runs without importing tests.
 
+Run repository-wide documentation scans after preparation and cleanup finish
+in the same checkout. UV can stage short-lived first-party inputs beneath the
+source tree; scanning during their removal can report missing Markdown files.
+Keep the guard's scope unchanged and rerun it on the quiescent checkout rather
+than excluding temporary-looking paths.
+
 Run the first command against both canonical and normally materialized
 source for complete installer qualification. Keep the combined sequence,
 including materializer integration, preparation and cleanup, within a finite
