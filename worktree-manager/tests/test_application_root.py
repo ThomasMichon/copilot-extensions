@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import subprocess
 import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 import worktree_manager
 from worktree_manager import source_config
 
@@ -55,3 +58,20 @@ def test_legacy_version_slot_without_application_keeps_legacy_default(
 ) -> None:
     (application / "application.json").unlink()
     assert source_config.default_root() == tmp_path / "home" / ".worktree-manager"
+
+
+def test_standalone_configuration_keeps_prepackage_bootstrap(tmp_path: Path) -> None:
+    source_config.set_source(repo="https://example.invalid/bootstrap.git", root=tmp_path / ".worktree-manager")
+    environment = {key: value for key, value in os.environ.items() if key != "WORKTREE_MANAGER_ROOT"}
+    environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-B", "-c",
+            "import runpy,sys; config=runpy.run_path(sys.argv[1]); print(config['resolved_repo']())",
+            str(source_config.__file__),
+        ],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "https://example.invalid/bootstrap.git"

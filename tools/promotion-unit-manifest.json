@@ -5632,7 +5632,7 @@
         "libs/update-driver/src/update_driver/_invocation.py": "6349eb9a949313b239461fe5f3fd053afc354983dca8f3b653441cb08ba98f28",
         "worktree-manager/src/worktree_manager/__init__.py": "1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",
         "worktree-manager/src/worktree_manager/manager_config.py": "c14c0da49474c721397be47bb0dc1c7760d18cf33082232e4f46746139640ec4",
-        "worktree-manager/src/worktree_manager/source_config.py": "f9642727e5b953cf5be88d9c4f925956bbf8c77f6039c7266f7bbea497e74575",
+        "worktree-manager/src/worktree_manager/source_config.py": "e7a1822b35e05cefd9488c461b33433f1768fc733e162681afbe1c8efa170f80",
         "worktree-manager/src/worktree_manager/maintenance_policy.py": "956786f3f5a8006b468deca8e3f1e9c86ca5e87c0e284d6f9995508bbb7a0c56",
         "worktree-manager/src/worktree_manager/bootstrap_policy.py": "883749bc1a13e318506f2063cb912fc38f55837d498b0fa9e9e59529484388f3",
         "tools/promotion_unit_tests/test_daemon_instance_creation.py": "ddaea149e0f95383bdc4e8af15ee8e6609da3096a8df2d8d1fa03d02eb2635cb",

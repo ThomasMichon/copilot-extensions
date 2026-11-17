@@ -30,8 +30,6 @@ import importlib
 from pathlib import Path
 from typing import Any, cast
 
-import worktree_manager
-
 try:  # tomllib is stdlib on 3.11+; tomli backports it for 3.10.
     tomllib = importlib.import_module("tomllib")
 except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
@@ -49,13 +47,15 @@ def default_root() -> Path:
     env = os.environ.get("WORKTREE_MANAGER_ROOT")
     if env:
         return Path(env).expanduser()
-    from .runtime_identity import running_application_slot
+    if __package__:
+        import worktree_manager
+        from .runtime_identity import running_application_slot
 
-    slot = running_application_slot()
-    if slot is not None and Path(worktree_manager.__file__).resolve().is_relative_to(
-        Path(sys.prefix).resolve(),
-    ):
-        return slot.parent.parent
+        slot = running_application_slot()
+        if slot is not None and Path(worktree_manager.__file__).resolve().is_relative_to(
+            Path(sys.prefix).resolve(),
+        ):
+            return slot.parent.parent
     home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
     return home / ".worktree-manager"
 
