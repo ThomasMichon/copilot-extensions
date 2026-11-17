@@ -3421,6 +3421,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [complete typing, guidance and observation contracts](journal/2026/11.17-complete-typing-guidance-and-observation-contracts.md)
+  record actual #13053 delivery and fourteen complete-original judgments,
+  preserving nonexpiring claims, stopped failed-version retries, separately
+  tracked timeout observations and passive per-project freshness acceptance.
+  The publication-time complete census is 877 whole open, 148 above fixed 729:
+  an excluded metadata-only arrival and no departures since the previous
+  876-open observation yield no new campaign closure credit.
+  All incumbent checkbox states, explicit holds and custody remain unchanged.
   The [complete qualification and recovery boundaries](journal/2026/11.16-complete-qualification-and-recovery-boundaries.md)
   record actual #13049 delivery and twenty complete-original judgments,
   retaining original native/recovery acceptance, actual OPEN delivery PRs,
