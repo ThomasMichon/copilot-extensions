@@ -154,6 +154,10 @@ no-drain adopter may explicitly set `writer_reconciliation=False`; this is
 refused if predecessor drain or pre-publication drain is enabled. Its breadcrumb
 records `predecessor_drain_requested: false`, so ordinary recovery preserves the
 original witness without reopening a predecessor admission gate it never closed.
+It also leaves the legacy `old` control target null, retaining the exact
+observation separately as `observed_predecessor`. Prior readers that do not know
+the new marker therefore take their existing no-old-peer recovery branch and
+cannot send undrain to an untouched predecessor.
 Existing stateful, conditional and resident recovery defaults are unchanged.
 An adopter selecting its predecessor outside `run()` can hold `CutoverLock`
 through stale-route reconciliation, selection and `run(held_lock=...)`, which

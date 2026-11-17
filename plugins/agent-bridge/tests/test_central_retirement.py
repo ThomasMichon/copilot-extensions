@@ -9,7 +9,7 @@ from pathlib import Path
 import os
 import sys
 import textwrap
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, Protocol
 import urllib.request
 
@@ -254,6 +254,7 @@ def test_successor_health_lost_during_exit_wait_preserves_predecessor(
     "normal",
     "stale-active",
     "slow-reattach",
+    "unknown-previous",
     pytest.param(
         "interrupted",
         marks=[pytest.mark.portfolio_tier("T2"), pytest.mark.effect("filesystem"), pytest.mark.effect("process")],
@@ -275,6 +276,13 @@ def test_ordinary_deploy_bounds_retirement_before_relay_and_host_adoption(
             process_start_time="404", demote_existing=True,
         )
         monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, _birth: pid == 404)
+    if case == "unknown-previous":
+        table = routing.read_table(root)
+        assert table is not None
+        active = routing.Endpoint.from_dict(table["active"])
+        assert active is not None
+        previous = replace(active, pid=None, process_start_time=None)
+        routing._atomic_write(routing.routing_table_path(root), {"previous": previous.to_dict()})
     monkeypatch.setattr(config, "config_dir", lambda: root)
     monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(bind="127.0.0.1"))
     monkeypatch.setattr(config, "load_or_create_auth_token", lambda: "fixture-token")
@@ -327,6 +335,9 @@ def test_ordinary_deploy_bounds_retirement_before_relay_and_host_adoption(
             pytest.fail("an interrupted no-drain deploy cannot release another drain gate")
 
         def adopt_relay(self) -> dict[str, bool]:
+            if case == "unknown-previous":
+                calls.append("relay-unconfirmed")
+                return {"adopted": False}
             assert ("terminate-central", 5.0) in calls
             calls.append("relay")
             return {"adopted": True}
@@ -386,6 +397,19 @@ def test_ordinary_deploy_bounds_retirement_before_relay_and_host_adoption(
         record = breadcrumb.read_breadcrumb(root)
         assert record is not None and record["state"] == "started"
         assert record.get("requires_writer_reconciliation") is not True
+        assert record.get("old") is None
+        assert record["observed_predecessor"]["port"] == 41002
+        prior_path = (
+            Path(__file__).parent / "fixtures" / "zdd-prior-independent-recovery" / "breadcrumb.py.txt"
+        )
+        prior = ModuleType("prior_zdd_breadcrumb")
+        prior.__package__ = "zdd"
+        exec(compile(prior_path.read_bytes(), str(prior_path), "exec"), prior.__dict__)
+        recovered_by_prior = prior.recover_stale_cutover(
+            root, lambda _: Client(), health_check=lambda *_: True,
+        )
+        assert not recovered_by_prior.get("refused")
+        assert recovered_by_prior["recovered"] is False
         with pytest.raises(SystemExit) as recovered:
             venue_cli._cmd_deploy(core.build_parser().parse_args(["--json", "deploy", "--recover"]))
         assert recovered.value.code == 0
@@ -395,6 +419,12 @@ def test_ordinary_deploy_bounds_retirement_before_relay_and_host_adoption(
     assert result.value.code == 0
     outcome = json.loads(capsys.readouterr().out)
     assert outcome["ok"]
+    if case == "unknown-previous":
+        assert outcome["retirement_pending"]
+        assert outcome["predecessor_cleanup"]["exit_confirmed"] is False
+        assert calls == ["relay-unconfirmed"]
+        assert outcome["old_port"] is None
+        return
     assert outcome["old_port"] == 41002
     assert outcome["predecessor_cleanup"] == {"exit_confirmed": True, "forced": True}
     assert calls[-2:] == ["relay", "reattach"]

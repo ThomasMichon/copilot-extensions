@@ -201,6 +201,7 @@ def write_breadcrumb(
     new_process_start_time: str | None = None,
     requires_writer_reconciliation: bool = False,
     predecessor_drain_requested: bool | None = None,
+    observed_predecessor: dict[str, Any] | None = None,
     self_retirement: bool = False,
     _routing_locked: bool = False,
     _routing_deadline: float | None = None,
@@ -275,6 +276,8 @@ def write_breadcrumb(
             record["requires_writer_reconciliation"] = True
         if predecessor_drain_requested is not None:
             record["predecessor_drain_requested"] = predecessor_drain_requested
+        if observed_predecessor is not None:
+            record["observed_predecessor"] = observed_predecessor
         if self_retirement:
             record["self_retirement"] = True
         _atomic_write(breadcrumb_path(config_dir), record)

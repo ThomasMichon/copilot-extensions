@@ -389,6 +389,7 @@ def _cmd_deploy(
     successor_published = False
     ordinary_predecessor: routing.Endpoint | None = None
     ordinary_successor: routing.Endpoint | None = None
+    unconfirmed_previous: dict[str, Any] | None = None
 
     def refuse_ordinary(active: dict[str, Any] | None) -> str | None:
         if active_route_is_forward(active):
@@ -447,7 +448,7 @@ def _cmd_deploy(
         successor_published = True
 
     def run_cutover(held_lock: CutoverLock | None = None) -> CutoverResult:
-        nonlocal ordinary_predecessor
+        nonlocal ordinary_predecessor, unconfirmed_previous
         if serving is None:
             healing = routing.reap_stale_active(config_dir(), service="agent-bridge")
             if str(healing.get("reason", "")).startswith("error:"):
@@ -456,6 +457,8 @@ def _cmd_deploy(
             routing._validate_endpoint_rows(table)
             raw = table.get("active")
             ordinary_predecessor = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            if ordinary_predecessor is None and isinstance(table.get("previous"), dict):
+                unconfirmed_previous = table["previous"]
         orch = CutoverOrchestrator(
             config_dir(),
             bind=cfg.bind,
@@ -473,6 +476,7 @@ def _cmd_deploy(
             retire_failed_predecessor=retire_ordinary if ordinary_predecessor is not None else None,
             drain_predecessor=ordinary_predecessor is None,
             writer_reconciliation=False if ordinary_predecessor is not None else None,
+            preserve_raw_active=serving is None,
         )
         if held_lock is not None:
             return orch.run(
@@ -505,6 +509,12 @@ def _cmd_deploy(
     # output, since it lands on stdout ahead of the single JSON payload
     # `core._json_out(res.to_dict())` emits below.
     res.steps = prelude_steps + res.steps
+    if unconfirmed_previous is not None:
+        res.predecessor_cleanup = {
+            "exit_confirmed": False, "reason": "previous endpoint has no active native owner",
+            "endpoint": unconfirmed_previous,
+        }
+        res.retirement_pending = True
     if res.error == forwarded_skip:
         if args.json:
             data = res.to_dict()
@@ -528,7 +538,7 @@ def _cmd_deploy(
         # reattach retry below run while a legacy/partial routing record's
         # old frontend is still actually attached).
         if old is None:
-            old_confirmed_gone = True  # cold start -- no predecessor to wait for
+            old_confirmed_gone = unconfirmed_previous is None
         elif not old.pid:
             old_confirmed_gone = False  # pid unknown -- cannot confirm either way
         elif active is not None and old.pid == active.pid:

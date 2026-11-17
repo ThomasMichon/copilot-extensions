@@ -31,3 +31,10 @@ def writer_reconciliation(
         owner.drain_before_publish or owner.expected_old is not None
         if requested is None else requested
     )
+
+
+def independent_breadcrumb(values: dict[str, object]) -> None:
+    """Leave legacy undrain readers no control target; retain identity separately."""
+    values["predecessor_drain_requested"] = False
+    values["observed_predecessor"] = values.get("old")
+    values["old"] = None

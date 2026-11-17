@@ -883,6 +883,9 @@ Ordinary deployment first takes native cutover authority, reconciles a dead
 active row to its live serving fallback, and only then captures the exact
 predecessor. That authority is borrowed by the orchestrator through publication
 and retirement; a dead advertised endpoint cannot hide the actual serving peer.
+A previous row without an active native owner never falls back to legacy drain
+or shutdown. Its original endpoint is reported as unconfirmed cleanup, and
+post-cutover Host reattachment is withheld without native predecessor-exit proof.
 
 1. pick a free port and spawn the new daemon `--passive` (no self-route, no
    relay);
@@ -920,7 +923,9 @@ Ordinary no-drain deployment explicitly disables writer-owned reconciliation
 without weakening exact-predecessor fencing. Its recovery witness records that
 no predecessor drain was requested, so an interrupted deploy can use normal
 `--recover`/retry without an unavailable writer-recovery handler or an unfenced
-undrain request. Stateful and conditional recovery defaults remain unchanged.
+undrain request. The legacy `old` control target is null and exact observation
+is retained separately, so a prior recovery reader also cannot undrain the
+untouched peer. Stateful and conditional recovery defaults remain unchanged.
 
 The selected installed-generation startup uses the same exact-central fallback
 after a one-second self-retirement observation instead of waiting indefinitely.

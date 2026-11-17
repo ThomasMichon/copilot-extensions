@@ -40,7 +40,7 @@ from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
 from . import routing_persistence
 from .cutover_result import CutoverResult as CutoverResult
-from .cutover_options import writer_reconciliation as validate_options
+from .cutover_options import independent_breadcrumb, writer_reconciliation as validate_options
 from .cutover_selection import (
     candidate_port, raw_active, refuse_current_old, routing_deadline,
     routing_lock_kwargs, validate_routing_lock_timeout,
@@ -374,7 +374,7 @@ class CutoverOrchestrator:
             kwargs["new_process_start_time"] = new_process_start_time
             kwargs["requires_writer_reconciliation"] = self.writer_reconciliation
             if not self.drain_predecessor and not self.writer_reconciliation:
-                kwargs["predecessor_drain_requested"] = False
+                independent_breadcrumb(kwargs)
             if self.self_retirement:
                 kwargs["self_retirement"] = True
             try:
