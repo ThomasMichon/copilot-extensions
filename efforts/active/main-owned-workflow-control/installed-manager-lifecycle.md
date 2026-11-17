@@ -3888,3 +3888,20 @@ FastAPI ASGI health/admission consumers pass as well. Both packets retain the
 original 180-second aggregate and 30-second item limits, including preparation
 and cleanup. Initial setup failures remain failures; no installer, backend or
 larger Manager qualification is inferred from these source controls.
+
+The completed rebase onto exact Dev
+`72a718ca5ac8a6e64acc6b97ea918045a00858e3` preserves both upstream ordinary
+Worktrees import roots and the retained independent-program roots. Whole-file
+strict checking again passes all 172 physical files in 24 owners across every
+declared target, including both Worktrees programs. Canonical unit-manifest
+admission and all source hashes pass for 5,255 nodes, 341 coverage targets and
+821 sources; neither upstream nor the pre-rebase PR loses a member, and the
+300-second packet budget is unchanged. This is not a full unit-packet replay.
+
+The exact CI-required Bridge source-contract command fails because the rebased
+`_peer_launch.py` lacks matching current semantic fixtures. This is the specific
+CI condition requiring another capture under the completion order, not a
+renewed dependency on the unavailable Bash route or whole Manager acceptance.
+The existing hosted capture route must supply current evidence before that
+gate can pass; previous captures remain qualified only for their original
+inputs. Current provider review and CI remain separate pre-merge gates.
