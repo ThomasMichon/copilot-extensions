@@ -18,8 +18,8 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** qualify the scoped-fetch revision after three expanded negatives
-failed as intended; complete exact-source review and required CI afterward.
+**Now:** publish the qualified scoped-fetch revision and complete exact-source
+review and required CI.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -120,10 +120,10 @@ custody remain independent.
 - [x] **Exact base, fail first:** use a nonstandard configured default branch
   omitted by the ordinary fetch refspec; advance it remotely and prove the real
   helper refreshes/selects its exact head.
-- [ ] **Ref scope:** advance an unrelated branch too and prove this operation
+- [x] **Ref scope:** advance an unrelated branch too and prove this operation
   does not refresh its remote-tracking ref, including alternate and mirror
   configured mappings.
-- [ ] **Policy discovery:** the actual offline committed-config reader sees a
+- [x] **Policy discovery:** the actual offline committed-config reader sees a
   changed bootstrap declaration and the following preparation selects that
   declared branch, without refreshing unrelated refs.
 - [x] **Preservation:** retain eligible-anchor fast-forward and existing
@@ -135,7 +135,7 @@ custody remain independent.
   state, installed runtimes or product checkouts.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
-- [ ] **Evidence tiers:** document why the local-Git consumer is the relevant
+- [x] **Evidence tiers:** document why the local-Git consumer is the relevant
   end-to-end/first-touch proof; use genuinely available supported lanes without
   treating source/CI evidence as installed or live-venue qualification.
 
@@ -201,6 +201,14 @@ does not claim these newly exposed cases already passed.
   and refreshed the changed original digest, without adding unit nodes or
   coverage targets or changing budgets. Positive qualification and genuine
   final-head review/CI remain required.
+- The complete selected six-file packet then qualified source
+  `134f7afcdaa7dfce76a7532d2a61f1e6bcccbe21` in disposable Windows
+  [run 44037449068](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44037449068):
+  **96 passed, zero failed or skipped**, including all six preparation cases,
+  binary/text consumers and prior preservation controls. Source/selection,
+  canonical test and runtime-verification phases all passed. Subsequent
+  journal-only updates do not change those tested runtime/test bytes.
+  Final-head review, required CI, actual merge and finite acceptance remain open.
 
 ### 2026-11-17 - Finite correction validated locally
 
