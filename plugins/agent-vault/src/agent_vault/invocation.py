@@ -67,6 +67,7 @@ def invocation_contract() -> dict[str, Any]:
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
             CACHE_TARGET_CAPABILITY,
+            *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
         ],
     }
 
