@@ -27,7 +27,7 @@ from .repository_projection import RepositoryProjection
 from .filtered_projection import FilteredProjection
 from .filtered_state import Checkpoint, Document
 
-PATH = re.compile(r"/v1/(repositories|populations)/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
+PATH = re.compile(r"/v1/(repositories|populations)/([a-z0-9][a-z0-9-]{0,63})/([a-z]+(?:-[a-z]+)*)")
 _Projection = RepositoryProjection | FilteredProjection
 _Response = ServiceResponse | BoundedServiceResponse
 _T = TypeVar("_T")
@@ -63,7 +63,9 @@ def profile(owner: RepositoryGatewayOwner) -> tuple[
         return "populations", filtered_subscriptions.OPERATIONS, (
             cast(_SubscriptionFactory, filtered_subscriptions.FilteredSubscriptions)
         ), filtered_subscriptions.contract
-    return "repositories", OPERATIONS, cast(_SubscriptionFactory, RepositorySubscriptions), contract
+    return "repositories", OPERATIONS, cast(_SubscriptionFactory, RepositorySubscriptions), (
+        lambda: contract(reviewer_actions=owner.store.repository_activity)
+    )
 
 
 def response(status: int, value: Document) -> BoundedServiceResponse:

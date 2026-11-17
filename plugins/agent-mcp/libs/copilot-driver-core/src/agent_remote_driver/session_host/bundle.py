@@ -54,7 +54,7 @@ _PROCUTIL_MODULES = (
     "_suspended_handoff.py",
     "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
     "_daemon_instance_owner.py", "_daemon_instance_clock.py", "_daemon_instance_reconcile.py",
-    "_daemon_instance_records.py",
+    "_daemon_instance_records.py", "_daemon_instance_io.py",
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_output_relay.py",
     "_windows_caller_owned.py", "_windows_job_types.py", "python_cache.py",
     "python_cache_store.py", "python_cache_permissions.py", "python_cache_catalog.py",

@@ -214,21 +214,35 @@ def test_cache_policy_uses_ordinary_precedence_and_each_declaring_directory(
     registry = extensions.ExtensionRegistry()
     registry._loaded = True
     monkeypatch.setattr(extensions, "_REGISTRY", registry)
-    write(base, {"cache_entries": ["base"], "cache_manifests": ["base.conf"]})
-    write(knowledge, {"cache_entries": ["knowledge"], "cache_manifests": ["knowledge.conf"]})
+    write(base, {
+        "cache_entries": ["base"], "cache_manifests": ["base.conf"],
+        "cache_maintenance": "selected-service",
+    })
+    write(knowledge, {
+        "cache_entries": ["knowledge"], "cache_manifests": ["knowledge.conf"],
+        "cache_maintenance": "local",
+    })
     policy = cache_targets.configured(str(base))
     assert policy == {
         "cache_entries": ["knowledge"], "cache_manifests": [str(knowledge / "knowledge.conf")],
+        "cache_maintenance": "local",
     }
     data = json.loads(global_path.read_text())
-    data.update(cache_entries=["machine"], cache_manifests=["machine.conf"])
+    data.update(
+        cache_entries=["machine"], cache_manifests=["machine.conf"],
+        cache_maintenance="selected-service",
+    )
     global_path.write_text(json.dumps(data))
     assert cache_targets.configured(str(base)) == {
         "cache_entries": ["machine"], "cache_manifests": [str(global_path.parent / "machine.conf")],
+        "cache_maintenance": "selected-service",
     }
-    write(local, {"cache_entries": [], "cache_manifests": ["local.conf"]})
+    write(local, {
+        "cache_entries": [], "cache_manifests": ["local.conf"], "cache_maintenance": "local",
+    })
     assert cache_targets.configured(str(base)) == {
         "cache_entries": [], "cache_manifests": [str(local / "local.conf")],
+        "cache_maintenance": "local",
     }
 
 
@@ -351,6 +365,8 @@ def test_native_invocation_contract_is_read_only(monkeypatch: pytest.MonkeyPatch
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
             "repository-cache-targets-v1",
+            *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            "service-cache-maintenance-v1",
         ],
     }
 

@@ -18,7 +18,11 @@ from agent_bridge.app import create_app
 from agent_bridge.agent_registry import AgentConfig, AgentResolver
 from agent_bridge.agent_registry_cache import AgentRosterCache
 from agent_bridge.events import EventLog
-from agent_bridge.models import ServiceConfig, SessionStatus
+from agent_bridge.models import ServiceConfig
+from agent_bridge.session_status import SessionStatus
+from agent_bridge.agent_registry_namespace import NamespaceResolver
+from agent_bridge.routes.worktree_entry import WorktreeEntry
+from agent_bridge.routes.worktree_probe import probe_archived_owner
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.topology import MachineConfig
@@ -26,7 +30,7 @@ from agent_bridge.transport import SpawnTarget
 
 
 @pytest.fixture(autouse=True)
-def _isolate_local_discovery(tmp_path, monkeypatch):
+def _isolate_local_discovery(tmp_path: Any, monkeypatch: Any) -> Any:
     """Prevent auto-discovery from picking up real projects.yaml."""
     monkeypatch.setenv(
         "AGENT_WORKTREES_PROJECTS_YAML",
@@ -36,7 +40,7 @@ def _isolate_local_discovery(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _route_local_start_via_classic(monkeypatch):
+def _route_local_start_via_classic(monkeypatch: Any) -> Any:
     """Session Hosts are always on (dotfiles#1478), so a local ``start_session``
     now connects through ``_connect_via_session_host`` (a survivable host over a
     loopback socket) rather than the classic ``spawn`` + ``AcpClient`` path that
@@ -52,7 +56,7 @@ def _route_local_start_via_classic(monkeypatch):
     from agent_bridge import hosting_policy, local_launch_preparation
     import agent_bridge.session_manager as sm
 
-    async def resolve(target, *, session_id=""):
+    async def resolve(target: Any, *, session_id: Any = "") -> Any:
         return ["copilot", *target.copilot_args], target.cwd, dict(target.env)
 
     monkeypatch.setattr(hosting_policy, "require_target_hosting", AsyncMock())
@@ -60,11 +64,11 @@ def _route_local_start_via_classic(monkeypatch):
     monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
 
     async def _fake_connect(
-        self, target, *, tracker, session_id, on_acp_event,
-        permission_callback=None, mcp_servers=None, spawner=None,
-        remote_child_argv=None, remote_cwd=None, model=None, effort=None,
-        prepared_local_launch=None,
-    ):
+        self: Any, target: Any, *, tracker: Any, session_id: Any, on_acp_event: Any,
+        permission_callback: Any = None, mcp_servers: Any = None, spawner: Any = None,
+        remote_child_argv: Any = None, remote_cwd: Any = None, model: Any = None, effort: Any = None,
+        prepared_local_launch: Any = None,
+    ) -> Any:
         proc = await sm.spawn(
             target, tracker=tracker, connect_timeout=0, session_id=session_id,
         )
@@ -84,7 +88,7 @@ def _route_local_start_via_classic(monkeypatch):
 
 
 @pytest.fixture
-def app(tmp_path):
+def app(tmp_path: Any) -> Any:
     """Create a FastAPI test app with real DB but mocked session starts."""
     cfg = ServiceConfig(
         port=0,
@@ -96,14 +100,14 @@ def app(tmp_path):
 
 
 @pytest.fixture
-def client(app):
+def client(app: Any) -> Any:
     """TestClient with auth header."""
     with TestClient(app) as c:
         c.headers["Authorization"] = "Bearer test-token"
         yield c
 
 
-def test_failed_handshake_fault_requires_harness_caller(client) -> None:
+def test_failed_handshake_fault_requires_harness_caller(client: Any) -> None:
     response = client.post(
         "/api/v1/sessions",
         json={
@@ -116,7 +120,7 @@ def test_failed_handshake_fault_requires_harness_caller(client) -> None:
     assert response.status_code == 403
 
 
-def test_failed_handshake_fault_refuses_active_session(client, app) -> None:
+def test_failed_handshake_fault_refuses_active_session(client: Any, app: Any) -> None:
     manager = app.state.session_manager
     incumbent = Session(
         "incumbent",
@@ -143,7 +147,7 @@ def test_failed_handshake_fault_refuses_active_session(client, app) -> None:
 class TestHealthEndpoint:
     """Health check route."""
 
-    def test_health(self, app) -> None:
+    def test_health(self, app: Any) -> None:
         with TestClient(app) as c:
             resp = c.get("/health")
             assert resp.status_code == 200
@@ -167,12 +171,12 @@ class TestHealthEndpoint:
 class TestAuthMiddleware:
     """Bearer token authentication."""
 
-    def test_missing_auth(self, app) -> None:
+    def test_missing_auth(self, app: Any) -> None:
         with TestClient(app) as c:
             resp = c.get("/api/v1/sessions")
             assert resp.status_code == 401
 
-    def test_wrong_token(self, app) -> None:
+    def test_wrong_token(self, app: Any) -> None:
         with TestClient(app) as c:
             resp = c.get(
                 "/api/v1/sessions",
@@ -180,12 +184,12 @@ class TestAuthMiddleware:
             )
             assert resp.status_code == 403
 
-    def test_valid_token(self, client) -> None:
+    def test_valid_token(self, client: Any) -> None:
         resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
 
     def test_list_includes_offline_persisted_elevated_sessions(
-        self, client, monkeypatch
+        self, client: Any, monkeypatch: Any
     ) -> None:
         from agent_bridge import elevated
 
@@ -279,7 +283,7 @@ class TestAuthMiddleware:
         assert sessions["primary-session"]["read_only"] is False
 
     def test_list_status_filter_keeps_normalized_elevated_session(
-        self, client, monkeypatch
+        self, client: Any, monkeypatch: Any
     ) -> None:
         from agent_bridge import elevated
 
@@ -332,13 +336,13 @@ class TestAuthMiddleware:
 class TestSessionRoutes:
     """Session CRUD routes."""
 
-    def test_list_sessions_empty(self, client) -> None:
+    def test_list_sessions_empty(self, client: Any) -> None:
         resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
         assert resp.json()["sessions"] == []
         assert client.get("/api/v1/sessions?status=").json()["sessions"] == []
 
-    def test_at_rest_session_projects_idle_on_read_surfaces(self, client) -> None:
+    def test_at_rest_session_projects_idle_on_read_surfaces(self, client: Any) -> None:
         manager = client.app.state.session_manager
         session = Session(
             "at-rest-session",
@@ -369,12 +373,12 @@ class TestSessionRoutes:
         assert status["status"] == "idle"
         assert status["at_rest"] is True
 
-    def test_get_nonexistent_session(self, client) -> None:
+    def test_get_nonexistent_session(self, client: Any) -> None:
         resp = client.get("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
 
     def test_create_session_maps_namespace_provider_runtimeerror_to_409(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         """A namespace provider (e.g. agent-containers) refusing readiness --
         "not ready", a stale image, a missing fleet config, etc. -- raises a
@@ -401,7 +405,7 @@ class TestSessionRoutes:
         assert "no matching fleet configuration" in resp.json()["detail"]
 
     def test_get_session_falls_through_to_cold_store_provider(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         """A session absent from the live ledger is answered by a registered
         cold-store provider instead of an immediate 404 (Phase 2b)."""
@@ -428,7 +432,7 @@ class TestSessionRoutes:
         assert body["at_rest"] is True
 
     def test_get_session_404s_when_no_cold_store_answer(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         mgr = app.state.session_manager
         with patch.object(
@@ -438,7 +442,7 @@ class TestSessionRoutes:
         assert resp.status_code == 404
 
     def test_get_session_transcript_returns_cold_store_events(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         """A bare (non-worktree-scoped, `worktree_id=None`) session's
         transcript is answered by the registered cold-store provider --
@@ -466,7 +470,7 @@ class TestSessionRoutes:
         assert body["meta"]["at_rest"] is True
 
     def test_get_session_transcript_404s_when_no_cold_store_answer(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         mgr = app.state.session_manager
         with patch.object(
@@ -476,7 +480,7 @@ class TestSessionRoutes:
         assert resp.status_code == 404
 
     def test_get_session_transcript_prefers_a_live_session(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         """A solo session can be LIVE (no owning agent to shell into), so
         the live ledger must be checked before ever falling through to
@@ -509,7 +513,7 @@ class TestSessionRoutes:
 
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
-    def test_start_session(self, mock_acp_cls, mock_spawn, client) -> None:
+    def test_start_session(self, mock_acp_cls: Any, mock_spawn: Any, client: Any) -> None:
         # Set up mocks
         mock_proc = MagicMock()
         mock_proc.proc = MagicMock()
@@ -551,18 +555,18 @@ class TestSessionRoutes:
         resp2 = client.get("/api/v1/sessions")
         assert len(resp2.json()["sessions"]) == 1
 
-    def test_stop_nonexistent(self, client) -> None:
+    def test_stop_nonexistent(self, client: Any) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/stop")
         assert resp.status_code == 404
 
-    def test_interrupt_nonexistent(self, client) -> None:
+    def test_interrupt_nonexistent(self, client: Any) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/interrupt")
         assert resp.status_code == 404
 
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_interrupt_idle_session_returns_state(
-        self, mock_acp_cls, mock_spawn, client
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any
     ) -> None:
         """Interrupting a session with no live turn is a no-op that returns the
         (idle) session state -- never a 404/500, never a teardown."""
@@ -594,14 +598,14 @@ class TestSessionRoutes:
         assert resp.json()["status"] == "idle"
         mock_client.cancel_prompt.assert_not_called()
 
-    def test_ask_user_nonexistent(self, client) -> None:
+    def test_ask_user_nonexistent(self, client: Any) -> None:
         resp = client.post(
             "/api/v1/sessions/nonexistent/ask-user",
             json={"tool_call_id": "tc", "content": {}},
         )
         assert resp.status_code == 404
 
-    def test_ask_user_answers_pending(self, client, app) -> None:
+    def test_ask_user_answers_pending(self, client: Any, app: Any) -> None:
         mgr = app.state.session_manager
         with patch.object(
             mgr, "answer_ask_user", AsyncMock(return_value=True)
@@ -616,7 +620,7 @@ class TestSessionRoutes:
             "s1", "tc-1", {"choice": "a"}, action="accept"
         )
 
-    def test_ask_user_none_pending_returns_409(self, client, app) -> None:
+    def test_ask_user_none_pending_returns_409(self, client: Any, app: Any) -> None:
         mgr = app.state.session_manager
         with patch.object(mgr, "answer_ask_user", AsyncMock(return_value=False)):
             resp = client.post(
@@ -625,7 +629,7 @@ class TestSessionRoutes:
             )
         assert resp.status_code == 409
 
-    def test_ask_user_no_live_client_returns_409(self, client, app) -> None:
+    def test_ask_user_no_live_client_returns_409(self, client: Any, app: Any) -> None:
         mgr = app.state.session_manager
         with patch.object(
             mgr, "answer_ask_user", AsyncMock(side_effect=ValueError("no client"))
@@ -636,14 +640,14 @@ class TestSessionRoutes:
             )
         assert resp.status_code == 409
 
-    def test_delete_nonexistent(self, client) -> None:
+    def test_delete_nonexistent(self, client: Any) -> None:
         resp = client.delete("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
 
     def test_delete_cleanup_pending_returns_conflict(
         self,
-        client,
-        app,
+        client: Any,
+        app: Any,
     ) -> None:
         with patch.object(
             app.state.session_manager,
@@ -655,12 +659,12 @@ class TestSessionRoutes:
         assert resp.status_code == 409
         assert "retained target ownership" in resp.json()["detail"]
 
-    def test_resume_nonexistent(self, client) -> None:
+    def test_resume_nonexistent(self, client: Any) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404
 
     def test_resume_provider_refresh_failure_returns_safe_502(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from agent_bridge.session_manager import ProviderTargetRefreshError
 
@@ -677,11 +681,11 @@ class TestSessionRoutes:
         assert resp.status_code == 502
         assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
 
-    def test_resync_nonexistent(self, client) -> None:
+    def test_resync_nonexistent(self, client: Any) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/resync")
         assert resp.status_code == 404
 
-    def test_resync_success(self, client, app) -> None:
+    def test_resync_success(self, client: Any, app: Any) -> None:
         """Resync route returns the rebuilt event count and latest id."""
         mgr = app.state.session_manager
         fake = MagicMock()
@@ -698,7 +702,7 @@ class TestSessionRoutes:
         assert body["latest_id"] == 5
         assert body["status"] == SessionStatus.IDLE.value
 
-    def test_resync_running_returns_409(self, client, app) -> None:
+    def test_resync_running_returns_409(self, client: Any, app: Any) -> None:
         """Resyncing a session mid-turn is rejected with 409."""
         mgr = app.state.session_manager
         with patch.object(
@@ -708,7 +712,7 @@ class TestSessionRoutes:
             resp = client.post("/api/v1/sessions/s1/resync")
         assert resp.status_code == 409
 
-    def test_start_session_conflict_returns_409(self, client, app) -> None:
+    def test_start_session_conflict_returns_409(self, client: Any, app: Any) -> None:
         """Concurrency guard surfaces as 409 with the existing session id."""
         from agent_bridge.session_manager import SessionConflictError
         from agent_bridge.transport import SpawnTarget
@@ -742,7 +746,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_with_agent_and_worktree_id(
-        self, mock_acp_cls, mock_spawn, client, app,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any, app: Any,
     ) -> None:
         """Session roll: start session with agent + worktree_id."""
         # Register a test agent via resolver
@@ -793,7 +797,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_with_agent_and_target_dir(
-        self, mock_acp_cls, mock_spawn, client, app,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any, app: Any,
     ) -> None:
         """Session roll: start session with agent + target_dir."""
         from agent_bridge.transport import SpawnTarget
@@ -842,7 +846,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_appends_per_session_copilot_args(
-        self, mock_acp_cls, mock_spawn, client, app,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any, app: Any,
     ) -> None:
         """Per-session copilot_args are appended to the agent's own args on the
         spawned target (e.g. a run-bound --additional-mcp-config)."""
@@ -900,7 +904,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_without_copilot_args_unchanged(
-        self, mock_acp_cls, mock_spawn, client, app,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any, app: Any,
     ) -> None:
         """Omitting copilot_args leaves the agent's args untouched (back-compat)."""
         from agent_bridge.transport import SpawnTarget
@@ -940,7 +944,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_uses_agent_declared_mcp_servers(
-        self, mock_acp_cls, mock_spawn, client, app,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any, app: Any,
     ) -> None:
         """A resolved agent's own declared MCP servers (AgentConfig.mcp_servers
         -> SpawnTarget.mcp_servers) are used when the request doesn't supply
@@ -987,7 +991,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_request_mcp_servers_override_agent_default(
-        self, mock_acp_cls, mock_spawn, client, app,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any, app: Any,
     ) -> None:
         """An explicit per-request mcp_servers wins over the agent's own
         declared default."""
@@ -1034,7 +1038,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_reuses_by_caller_id(
-        self, mock_acp_cls, mock_spawn, client,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any,
     ) -> None:
         """A second start with the same caller_id reuses the alive session."""
         mock_proc = MagicMock()
@@ -1081,7 +1085,7 @@ class TestSessionRoutes:
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
     def test_start_session_force_new_bypasses_reuse(
-        self, mock_acp_cls, mock_spawn, client,
+        self, mock_acp_cls: Any, mock_spawn: Any, client: Any,
     ) -> None:
         """force_new creates a fresh session even when caller_id matches."""
         mock_proc = MagicMock()
@@ -1128,14 +1132,14 @@ class TestSessionRoutes:
 class TestAgentRoutes:
     """Agent registry routes."""
 
-    def test_list_agents_empty(self, client) -> None:
+    def test_list_agents_empty(self, client: Any) -> None:
         resp = client.get("/api/v1/agents")
         assert resp.status_code == 200
         assert resp.json()["agents"] == []
         assert resp.json()["topology_errors"] == []
         assert resp.json()["topology_warnings"] == []
 
-    def test_list_agents_no_resolver_returns_pre_3b_bare_shape(self, client, app) -> None:
+    def test_list_agents_no_resolver_returns_pre_3b_bare_shape(self, client: Any, app: Any) -> None:
         """A resolver-absent daemon must return the exact pre-3b
         ``{"agents": []}`` payload -- never the 4-key shape (that one is
         reserved for a resolver that *exists* but whose topology/cache
@@ -1146,27 +1150,27 @@ class TestAgentRoutes:
         assert resp.status_code == 200
         assert resp.json() == {"agents": []}
 
-    def test_list_agents_no_resolver_require_complete_503s(self, client, app) -> None:
+    def test_list_agents_no_resolver_require_complete_503s(self, client: Any, app: Any) -> None:
         app.state.resolver = None
         resp = client.get("/api/v1/agents?require_complete=true")
         assert resp.status_code == 503
 
-    def test_list_agents_reports_incomplete_namespaces(self, client, app) -> None:
+    def test_list_agents_reports_incomplete_namespaces(self, client: Any, app: Any) -> None:
         """The route must actually serialize `incomplete_namespaces` through
         to the wire -- a resolver-level unit test alone can't catch a typo'd
         or accidentally-dropped field name in the route handler itself."""
-        class _FailingResolver:
+        class _FailingResolver(NamespaceResolver):
             @property
             def prefix(self) -> str:
                 return "broken"
 
-            async def list(self):
+            async def list(self) -> Any:
                 raise RuntimeError("boom")
 
-            async def resolve(self, name):  # pragma: no cover - unused here
+            async def resolve(self, name: Any, **kwargs: Any) -> Any:  # pragma: no cover - unused here
                 raise NotImplementedError
 
-            async def ensure_ready(self, name):  # pragma: no cover - unused
+            async def ensure_ready(self, name: Any) -> Any:  # pragma: no cover - unused
                 raise NotImplementedError
 
         resolver = AgentResolver({}, {})
@@ -1177,7 +1181,7 @@ class TestAgentRoutes:
         assert resp.status_code == 200
         assert resp.json()["incomplete_namespaces"] == ["broken"]
 
-    def test_list_agents_uses_roster_cache_when_present(self, client, app) -> None:
+    def test_list_agents_uses_roster_cache_when_present(self, client: Any, app: Any) -> None:
         """When ``app.state.agent_roster_cache`` is wired up, the route must
         read through it (an O(1) cache hit) rather than re-scanning the
         resolver directly on every request."""
@@ -1187,11 +1191,11 @@ class TestAgentRoutes:
         app.state.resolver = resolver
 
         class _FakeCache(AgentRosterCache):
-            def __init__(self, resolver):
+            def __init__(self, resolver: Any) -> None:
                 super().__init__(resolver)
-                self.calls = []
+                self.calls: list[bool] = []
 
-            async def get_snapshot(self, *, force_refresh=False):
+            async def get_snapshot(self, *, force_refresh: bool = False, project: str | None = None) -> Any:
                 self.calls.append(force_refresh)
                 return AgentRosterSnapshot(
                     rows=[{"name": "codespace:cs-1"}],
@@ -1199,7 +1203,7 @@ class TestAgentRoutes:
                     complete=False,
                 )
 
-            async def stop(self):
+            async def stop(self) -> Any:
                 pass
 
         fake_cache = _FakeCache(resolver)
@@ -1213,7 +1217,7 @@ class TestAgentRoutes:
         assert fake_cache.calls == [False]
 
     def test_list_agents_force_refresh_param_passed_through_to_cache(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from agent_bridge.agent_registry_cache import AgentRosterSnapshot
 
@@ -1221,15 +1225,15 @@ class TestAgentRoutes:
         app.state.resolver = resolver
 
         class _FakeCache(AgentRosterCache):
-            def __init__(self, resolver):
+            def __init__(self, resolver: Any) -> None:
                 super().__init__(resolver)
-                self.calls = []
+                self.calls: list[bool] = []
 
-            async def get_snapshot(self, *, force_refresh=False):
+            async def get_snapshot(self, *, force_refresh: bool = False, project: str | None = None) -> Any:
                 self.calls.append(force_refresh)
                 return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
 
-            async def stop(self):
+            async def stop(self) -> Any:
                 pass
 
         fake_cache = _FakeCache(resolver)
@@ -1240,7 +1244,7 @@ class TestAgentRoutes:
         assert fake_cache.calls == [True]
 
     def test_list_agents_require_complete_raises_503_when_cache_incomplete(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from agent_bridge.agent_registry_cache import AgentRosterSnapshot
 
@@ -1248,15 +1252,15 @@ class TestAgentRoutes:
         app.state.resolver = resolver
 
         class _IncompleteCache(AgentRosterCache):
-            def __init__(self, resolver):
+            def __init__(self, resolver: Any) -> None:
                 super().__init__(resolver)
 
-            async def get_snapshot(self, *, force_refresh=False):
+            async def get_snapshot(self, *, force_refresh: bool = False, project: str | None = None) -> Any:
                 return AgentRosterSnapshot(
                     rows=[], incomplete_namespaces=["codespace"], complete=False,
                 )
 
-            async def stop(self):
+            async def stop(self) -> Any:
                 pass
 
         app.state.agent_roster_cache = _IncompleteCache(resolver)
@@ -1272,7 +1276,7 @@ class TestAgentRoutes:
         assert resp.json()["incomplete_namespaces"] == ["codespace"]
 
     def test_list_agents_require_complete_200_when_cache_complete(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from agent_bridge.agent_registry_cache import AgentRosterSnapshot
 
@@ -1280,13 +1284,13 @@ class TestAgentRoutes:
         app.state.resolver = resolver
 
         class _CompleteCache(AgentRosterCache):
-            def __init__(self, resolver):
+            def __init__(self, resolver: Any) -> None:
                 super().__init__(resolver)
 
-            async def get_snapshot(self, *, force_refresh=False):
+            async def get_snapshot(self, *, force_refresh: bool = False, project: str | None = None) -> Any:
                 return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
 
-            async def stop(self):
+            async def stop(self) -> Any:
                 pass
 
         app.state.agent_roster_cache = _CompleteCache(resolver)
@@ -1295,7 +1299,7 @@ class TestAgentRoutes:
         assert resp.status_code == 200
 
     def test_list_agents_require_complete_503_before_topology_ready(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """Daemon startup before any discovery has ever completed: a
         `require_complete` caller gets `503`, never a `200` with an empty
@@ -1312,7 +1316,7 @@ class TestAgentRoutes:
         assert resp.json()["agents"] == []
 
     def test_list_agents_require_complete_503_when_cache_missing_or_mismatched(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """A `require_complete` caller against a topology-ready daemon with
         no usable cache (e.g. a transient resolver/cache mismatch mid
@@ -1333,7 +1337,7 @@ class TestAgentRoutes:
         assert resp.status_code == 200
 
     def test_list_agents_stale_cache_bound_to_different_resolver_falls_back(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """A cache left bound to a resolver this request's
         ``app.state.resolver`` no longer is (e.g. a resolver hot-swap the
@@ -1348,15 +1352,15 @@ class TestAgentRoutes:
         app.state.resolver = new_resolver
 
         class _StaleCache(AgentRosterCache):
-            def __init__(self, resolver):
+            def __init__(self, resolver: Any) -> None:
                 super().__init__(resolver)
                 self.called = False
 
-            async def get_snapshot(self, *, force_refresh=False):
+            async def get_snapshot(self, *, force_refresh: bool = False, project: str | None = None) -> Any:
                 self.called = True  # pragma: no cover - must never be called
                 return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
 
-            async def stop(self):
+            async def stop(self) -> Any:
                 pass
 
         stale_cache = _StaleCache(old_resolver)
@@ -1370,7 +1374,7 @@ class TestAgentRoutes:
         assert resp.status_code == 200
         assert stale_cache.called is False
 
-    def test_machine_routes_include_static_metadata(self, client, app) -> None:
+    def test_machine_routes_include_static_metadata(self, client: Any, app: Any) -> None:
         machine = MachineConfig(
             key="host-a",
             display_name="Host A",
@@ -1392,7 +1396,7 @@ class TestAgentRoutes:
         assert detail.json()["description"] == "General-purpose worker."
         assert detail.json()["capabilities"] == ["builds", "tests"]
 
-    def test_get_agent_hides_unaddressable_profile_by_default(self, client, app) -> None:
+    def test_get_agent_hides_unaddressable_profile_by_default(self, client: Any, app: Any) -> None:
         app.state.resolver = AgentResolver(
             {
                 "task-worker": AgentConfig(
@@ -1415,7 +1419,7 @@ class TestAgentRoutes:
         assert visible.json()["spawnable_as_target"] is False
         assert visible.json()["spawnable"] is False
 
-    def test_machine_routes_include_metadata_defaults(self, client, app) -> None:
+    def test_machine_routes_include_metadata_defaults(self, client: Any, app: Any) -> None:
         machine = MachineConfig(key="host-a", display_name="Host A")
         app.state.resolver = AgentResolver({}, {"host-a": machine})
 
@@ -1426,7 +1430,7 @@ class TestAgentRoutes:
         assert detail.json()["capabilities"] == []
 
     def test_session_alias_reuses_canonical_identity(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         app.state.resolver = AgentResolver(
             {
@@ -1459,11 +1463,11 @@ class TestAgentRoutes:
 class TestWorktreeRoutes:
     """Worktree discovery + session linkage."""
 
-    def _seed_worktree(self, agent_name: str, wt_id: str) -> None:
+    def _seed_worktree(self, agent_name: str, wt_id: str, app: Any = None) -> None:
         """Seed the discovery cache singleton with one worktree entry."""
         from agent_bridge.routes import worktrees as wt_routes
 
-        entry = wt_routes._WorktreeEntry(
+        entry = WorktreeEntry(
             id=wt_id,
             agent_name=agent_name,
             machine=agent_name,
@@ -1472,6 +1476,8 @@ class TestWorktreeRoutes:
             status="active",
         )
         wt_routes.get_cache()._cache = {agent_name: [entry]}
+        if app is not None:
+            app.state.resolver.agents[agent_name] = AgentConfig(name=agent_name, project="fixture-project")
 
     def teardown_method(self) -> None:
         """Reset the module-singleton cache between tests."""
@@ -1479,12 +1485,12 @@ class TestWorktreeRoutes:
 
         wt_routes.get_cache()._cache = {}
 
-    def test_worktree_links_to_latest_session(self, client, app) -> None:
+    def test_worktree_links_to_latest_session(self, client: Any, app: Any) -> None:
         wt_id = "anomalous-potato-wsl-20250101-120000-link"
-        self._seed_worktree("test-agent", wt_id)
+        self._seed_worktree("test-agent", wt_id, app)
 
         mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id, project="fixture-project")
         session = Session("sess-link-1", "calm-river", target, "test-agent")
         session.status = SessionStatus.IDLE
         session.turn_count = 3
@@ -1498,7 +1504,7 @@ class TestWorktreeRoutes:
         assert entry["session_turn_count"] == 3
         assert entry["session_live"] is True
 
-    def test_worktree_without_session_has_null_linkage(self, client) -> None:
+    def test_worktree_without_session_has_null_linkage(self, client: Any) -> None:
         wt_id = "anomalous-potato-wsl-20250101-130000-nolink"
         self._seed_worktree("test-agent", wt_id)
 
@@ -1510,12 +1516,12 @@ class TestWorktreeRoutes:
         assert entry["session_turn_count"] == 0
         assert entry["session_live"] is False
 
-    def test_stopped_session_is_not_live(self, client, app) -> None:
+    def test_stopped_session_is_not_live(self, client: Any, app: Any) -> None:
         wt_id = "anomalous-potato-wsl-20250101-140000-stopped"
-        self._seed_worktree("test-agent", wt_id)
+        self._seed_worktree("test-agent", wt_id, app)
 
         mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id, project="fixture-project")
         session = Session("sess-stopped-1", "old-pine", target, "test-agent")
         session.status = SessionStatus.STOPPED
         session.turn_count = 5
@@ -1527,12 +1533,12 @@ class TestWorktreeRoutes:
         assert entry["session_status"] == "stopped"
         assert entry["session_live"] is False
 
-    def test_worktree_linkage_includes_acp_session_id(self, client, app) -> None:
+    def test_worktree_linkage_includes_acp_session_id(self, client: Any, app: Any) -> None:
         wt_id = "anomalous-potato-wsl-20250101-150000-acp"
-        self._seed_worktree("test-agent", wt_id)
+        self._seed_worktree("test-agent", wt_id, app)
 
         mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id, project="fixture-project")
         session = Session("sess-acp-1", "lone-mesa", target, "test-agent")
         session.status = SessionStatus.IDLE
         session.acp_session_id = "acp-uuid-abcdef"
@@ -1545,16 +1551,16 @@ class TestWorktreeRoutes:
         assert entry["durable_session_id"] == "acp-uuid-abcdef"
 
     def test_worktree_linkage_durable_session_id_falls_back_when_acp_unknown(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """A brand-new session with no ACP id captured yet -- durable_session_id
         degrades to the bridge's own (non-durable) session_id rather than
         going unresolvable."""
         wt_id = "anomalous-potato-wsl-20250101-150000-noacp"
-        self._seed_worktree("test-agent", wt_id)
+        self._seed_worktree("test-agent", wt_id, app)
 
         mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
+        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id, project="fixture-project")
         session = Session("sess-no-acp-1", "lone-mesa", target, "test-agent")
         session.status = SessionStatus.IDLE
         mgr._sessions[session.session_id] = session
@@ -1564,7 +1570,7 @@ class TestWorktreeRoutes:
         assert entry["acp_session_id"] is None
         assert entry["durable_session_id"] == "sess-no-acp-1"
 
-    def test_worktree_without_mux_reports_no_interactive_cli(self, client) -> None:
+    def test_worktree_without_mux_reports_no_interactive_cli(self, client: Any) -> None:
         """Default (no mux session) decorates as interactive_cli=none (#1883)."""
         wt_id = "anomalous-potato-wsl-20250101-150500-nomux"
         self._seed_worktree("test-agent", wt_id)
@@ -1574,12 +1580,12 @@ class TestWorktreeRoutes:
         assert entry["mux_session"] is False
         assert entry["interactive_cli"] == "none"
 
-    def test_mux_held_worktree_decorates_interactive_cli(self, client) -> None:
+    def test_mux_held_worktree_decorates_interactive_cli(self, client: Any) -> None:
         """An attached wt-<id> mux session -> interactive_cli=held (#1883)."""
         from agent_bridge.routes import worktrees as wt_routes
 
         wt_id = "anomalous-potato-wsl-20250101-150600-held"
-        entry = wt_routes._WorktreeEntry(
+        entry = WorktreeEntry(
             id=wt_id, agent_name="test-agent", machine="test-agent",
             path=f"/wt/{wt_id}", branch=f"worktree/{wt_id}", status="active",
             mux_session=True, mux_clients=1, mux_attached=True,
@@ -1594,9 +1600,8 @@ class TestWorktreeRoutes:
 
     def test_mux_detached_worktree_is_at_rest(self) -> None:
         """A detached mux session -> interactive_cli=at-rest (running, unwatched)."""
-        from agent_bridge.routes import worktrees as wt_routes
 
-        entry = wt_routes._WorktreeEntry(
+        entry = WorktreeEntry(
             id="wt", agent_name="a", machine="a", path="/wt", branch="b",
             status="active", mux_session=True, mux_clients=0, mux_attached=False,
         )
@@ -1605,9 +1610,8 @@ class TestWorktreeRoutes:
 
     def test_mux_unknown_attachment_defaults_to_held(self) -> None:
         """Unknown attachment (psmux fallback) is treated as held (safest)."""
-        from agent_bridge.routes import worktrees as wt_routes
 
-        entry = wt_routes._WorktreeEntry(
+        entry = WorktreeEntry(
             id="wt", agent_name="a", machine="a", path="/wt", branch="b",
             status="active", mux_session=True, mux_clients=None, mux_attached=None,
         )
@@ -1750,7 +1754,7 @@ class TestWorktreeRoutes:
 
     # -- Worktree-scoped session reading (proxied to agent-worktrees) ------
 
-    def _register_agent(self, app, agent_name: str) -> None:
+    def _register_agent(self, app: Any, agent_name: str) -> None:
         """Give the resolver a config for the seeded agent."""
         from unittest.mock import MagicMock
 
@@ -1762,7 +1766,7 @@ class TestWorktreeRoutes:
             name=agent_name, project="test-chamber",
         )
 
-    def test_list_worktree_sessions_proxies_to_agent(self, client, app) -> None:
+    def test_list_worktree_sessions_proxies_to_agent(self, client: Any, app: Any) -> None:
         from unittest.mock import AsyncMock, patch
 
         wt_id = "anomalous-potato-wsl-20250101-190000-sess"
@@ -1785,7 +1789,7 @@ class TestWorktreeRoutes:
         args = mock_run.call_args.args[-1]
         assert args == ["list-sessions", "--worktree", wt_id, "--json"]
 
-    def test_list_worktree_sessions_forwards_head_session(self, client, app) -> None:
+    def test_list_worktree_sessions_forwards_head_session(self, client: Any, app: Any) -> None:
         # session-lifecycle Phase 4: the ground-layer envelope's asserted head is
         # forwarded so Neuron Forge resolves the current session head-first and
         # badges the rest "no longer current" (derive-dont-duplicate -- the bridge
@@ -1814,7 +1818,7 @@ class TestWorktreeRoutes:
         assert by_id["s2"]["is_head"] is True
         assert by_id["s1"]["state"] == "handed-off"
 
-    def test_get_worktree_lineage_proxies(self, client, app) -> None:
+    def test_get_worktree_lineage_proxies(self, client: Any, app: Any) -> None:
         """The bridge shells to ``worktree-lineage`` (the already-bounded,
         fork-aware ground-layer surface) and forwards its graph verbatim,
         not the plain session list -- fork detection stays owned by
@@ -1876,12 +1880,12 @@ class TestWorktreeRoutes:
         args = mock_run.call_args.args[-1]
         assert args == ["worktree-lineage", "--worktree", wt_id, "--json"]
 
-    def test_get_worktree_lineage_unknown_worktree_404s(self, client) -> None:
+    def test_get_worktree_lineage_unknown_worktree_404s(self, client: Any) -> None:
         resp = client.get("/api/v1/worktrees/does-not-exist/lineage")
         assert resp.status_code == 404
 
     def test_get_worktree_lineage_502_on_command_failure(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -1896,7 +1900,7 @@ class TestWorktreeRoutes:
             resp = client.get(f"/api/v1/worktrees/{wt_id}/lineage")
         assert resp.status_code == 502
 
-    def test_list_worktree_sessions_head_absent_is_none(self, client, app) -> None:
+    def test_list_worktree_sessions_head_absent_is_none(self, client: Any, app: Any) -> None:
         # A legacy ground-layer envelope without head_session -> null, not a KeyError.
         from unittest.mock import AsyncMock, patch
 
@@ -1916,7 +1920,7 @@ class TestWorktreeRoutes:
         assert resp.status_code == 404
 
     def test_list_worktree_sessions_502_on_command_failure(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -1932,7 +1936,7 @@ class TestWorktreeRoutes:
         assert resp.status_code == 502
 
     def test_list_worktree_sessions_resolves_archived_worktree(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         # session-worktree-archive-linkout: a worktree agent-worktrees has
         # tombstoned as "archived" (retire_record, #3015) never appears in
@@ -1950,7 +1954,7 @@ class TestWorktreeRoutes:
         )
         sessions_payload = '{"sessions": [{"id": "s1"}]}'
 
-        async def _fake_run_for_agent(agent_name, config, resolver, args):
+        async def _fake_run_for_agent(agent_name: Any, config: Any, resolver: Any, args: Any) -> Any:
             if "--tracking-status" in args:
                 assert args == [
                     "list", "--json", "--tracking-status", "archived",
@@ -1991,7 +1995,7 @@ class TestWorktreeRoutes:
         )
         call_count = 0
 
-        async def _slow_run_for_agent(agent_name, config, resolver, args):
+        async def _slow_run_for_agent(agent_name: Any, config: Any, resolver: Any, args: Any) -> Any:
             nonlocal call_count
             call_count += 1
             await _asyncio.sleep(0.05)
@@ -2034,7 +2038,7 @@ class TestWorktreeRoutes:
             machines={},
         )
 
-        async def _slow_run_for_agent(agent_name, config, resolver, args):
+        async def _slow_run_for_agent(agent_name: Any, config: Any, resolver: Any, args: Any) -> Any:
             await _asyncio.sleep(0.1)
             return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
 
@@ -2060,7 +2064,6 @@ class TestWorktreeRoutes:
         import asyncio as _asyncio
 
         from agent_bridge.agent_registry import AgentConfig, AgentResolver
-        from agent_bridge.routes import worktrees as wt_routes
 
         wt_id = "anomalous-potato-wsl-20250101-194700-early-exit"
         resolver = AgentResolver(
@@ -2072,7 +2075,7 @@ class TestWorktreeRoutes:
         )
         slow_agent_awaited = _asyncio.Event()
 
-        async def _fake_run_for_agent(agent_name, config, resolver, args):
+        async def _fake_run_for_agent(agent_name: Any, config: Any, resolver: Any, args: Any) -> Any:
             if agent_name == "fast-agent":
                 return '{"worktrees": [{"id": "%s", "status": "archived"}]}' % wt_id
             try:
@@ -2087,7 +2090,7 @@ class TestWorktreeRoutes:
             new=_fake_run_for_agent,
         ):
             result = await _asyncio.wait_for(
-                wt_routes._probe_archived_owner(wt_id, resolver), timeout=1,
+                probe_archived_owner(wt_id, resolver), timeout=1,
             )
             # The slow agent's task should have been cancelled, not awaited
             # to completion, once the fast match returned.
@@ -2095,7 +2098,7 @@ class TestWorktreeRoutes:
 
         assert result == ("fast-agent", resolver.agents["fast-agent"])
 
-    def test_get_worktree_session_transcript_proxies(self, client, app) -> None:
+    def test_get_worktree_session_transcript_proxies(self, client: Any, app: Any) -> None:
         from unittest.mock import AsyncMock, patch
 
         wt_id = "anomalous-potato-wsl-20250101-192000-tx"
@@ -2121,14 +2124,14 @@ class TestWorktreeRoutes:
         args = mock_run.call_args.args[-1]
         assert args == ["session-transcript", "s9", "--json"]
 
-    def test_get_transcript_unknown_worktree_404s(self, client) -> None:
+    def test_get_transcript_unknown_worktree_404s(self, client: Any) -> None:
         resp = client.get(
             "/api/v1/worktrees/does-not-exist/sessions/s1/transcript",
         )
         assert resp.status_code == 404
 
     def test_get_transcript_falls_through_to_cold_store_when_worktree_unknown(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """No owning agent at all for this worktree_id -- a registered
         cold-store provider still answers instead of an immediate 404
@@ -2158,7 +2161,7 @@ class TestWorktreeRoutes:
         assert data["meta"]["worktree_id"] == "some-other-worktree"
 
     def test_get_transcript_cold_store_empty_archive_is_not_a_404(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """A cold-store hit with zero events is a legitimate found-but-empty
         archive, not a miss -- ``cold is not None`` is the identity match,
@@ -2187,7 +2190,7 @@ class TestWorktreeRoutes:
         assert data["meta"]["at_rest"] is True
 
     def test_get_transcript_cold_store_worktree_mismatch_is_rejected(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """The cold-store contract is session-ID-keyed, not worktree-keyed --
         a provider answer for a *different* worktree_id than the URL asked
@@ -2212,7 +2215,7 @@ class TestWorktreeRoutes:
         assert resp.status_code == 404
 
     def test_get_transcript_falls_through_to_cold_store_when_local_events_empty(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """The owning agent is known and reachable, but its local
         session-state has nothing for this session (``session-transcript``
@@ -2251,7 +2254,7 @@ class TestWorktreeRoutes:
         assert data["meta"]["at_rest"] is True
 
     def test_get_transcript_404s_when_no_cold_store_answer_either(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         mgr = app.state.session_manager
         with patch.object(
@@ -2262,7 +2265,7 @@ class TestWorktreeRoutes:
             )
         assert resp.status_code == 404
 
-    def test_restart_worktree_copilot_proxies(self, client, app) -> None:
+    def test_restart_worktree_copilot_proxies(self, client: Any, app: Any) -> None:
         from unittest.mock import AsyncMock, patch
 
         wt_id = "anomalous-potato-wsl-20250101-193000-restart"
@@ -2291,7 +2294,7 @@ class TestWorktreeRoutes:
         assert args == ["restart", wt_id, "--json"]
 
     def test_restart_worktree_copilot_force_passes_no_graceful(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -2314,12 +2317,12 @@ class TestWorktreeRoutes:
         args = mock_run.call_args.args[-1]
         assert args == ["restart", wt_id, "--json", "--no-graceful"]
 
-    def test_restart_worktree_unknown_worktree_404s(self, client) -> None:
+    def test_restart_worktree_unknown_worktree_404s(self, client: Any) -> None:
         resp = client.post("/api/v1/worktrees/does-not-exist/restart")
         assert resp.status_code == 404
 
     def test_restart_worktree_502_on_command_failure(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -2335,7 +2338,7 @@ class TestWorktreeRoutes:
         assert resp.status_code == 502
 
     def test_restart_invalidates_live_session_registration(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """A successful take-over demotes any live registration for the worktree
         and drops its queued inbox messages (#2906 invalidate-on-take-over)."""
@@ -2372,7 +2375,7 @@ class TestWorktreeRoutes:
         assert db.list_fresh_live_sessions(wt_id, now=now) == []
 
     def test_restart_reports_failure_when_invalidation_raises(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """The CLI was actually stopped (ok:true, had_session:true), but if
         the server-side live-session invalidation itself raises, the
@@ -2410,7 +2413,7 @@ class TestWorktreeRoutes:
         assert resp.json()["ok"] is False
 
     def test_restart_failure_keeps_live_session(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """A restart that reports ``ok:false`` did NOT terminate the CLI, so the
         live registration must be left intact (no premature invalidation)."""
@@ -2442,7 +2445,7 @@ class TestWorktreeRoutes:
         assert db.get_live_session("cli-live")["status"] == "live"
 
     def test_restart_ok_no_session_keeps_live_registration(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """``ok:true, had_session:false`` is a no-op (no mux session existed
         to stop) -- it is NOT proof that whatever registered
@@ -2476,7 +2479,7 @@ class TestWorktreeRoutes:
         assert db.get_live_session("cli-bare")["status"] == "live"
 
     def test_restart_expected_holder_fences_invalidation(
-        self, client, app,
+        self, client: Any, app: Any,
     ) -> None:
         """``?expected_holder=`` scopes the invalidate-on-take-over to only
         that session id -- a different, genuinely live registration for the
@@ -2576,11 +2579,11 @@ class _HttpNativeResume:
 
 
 @pytest.fixture
-def http_native_resume(app, tmp_path, monkeypatch):
+def http_native_resume(app: Any, tmp_path: Any, monkeypatch: Any) -> Any:
     """Exercise the adapter, native import, strict Manager load and SQLite fences."""
     from agent_bridge.routes import worktrees as wt
 
-    entry = wt._WorktreeEntry(
+    entry = WorktreeEntry(
         id="wt-http-native", agent_name="test-agent", machine="test-agent",
         path=str(tmp_path / "workspace"), branch="worktree/http-native", status="active",
     )
@@ -2646,7 +2649,7 @@ def http_native_resume(app, tmp_path, monkeypatch):
 
 
 @pytest.fixture(params=["", "?strict=true", "/acp"])
-def native_resume_url(request, http_native_resume) -> str:
+def native_resume_url(request: Any, http_native_resume: Any) -> str:
     return f"/api/v1/worktrees/{http_native_resume.entry.id}/resume{request.param}"
 
 
@@ -2655,7 +2658,7 @@ class TestHttpNativeResume:
 
     @pytest.mark.parametrize("known", [False, True])
     def test_cold_import_or_known_session_keeps_exact_native(
-        self, client, http_native_resume, native_resume_url, known: bool,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, known: bool,
     ) -> None:
         b = http_native_resume
         previous = b.imported() if known else None
@@ -2684,7 +2687,7 @@ class TestHttpNativeResume:
 
     @pytest.mark.parametrize("host", ["unindexed", "alive", "dead"])
     def test_warm_same_head_reused_or_dead_host_reloads_same_native(
-        self, client, http_native_resume, native_resume_url, host: str,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, host: str,
     ) -> None:
         import os
 
@@ -2721,7 +2724,7 @@ class TestHttpNativeResume:
         ({"pending_handoffs": [{"ordinal": 1}]}, "head_unavailable"),
     ])
     def test_missing_or_retired_native_refuses_without_fresh(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
         change: dict[str, Any], reason: str,
     ) -> None:
         b = http_native_resume
@@ -2737,7 +2740,7 @@ class TestHttpNativeResume:
         {"execution_leg_opaque": True}, {"session_backend_opaque": True},
     ])
     def test_workspace_identity_change_refuses_before_import(
-        self, client, http_native_resume, native_resume_url, change: dict[str, Any],
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, change: dict[str, Any],
     ) -> None:
         b = http_native_resume
         b.workspace.update(change)
@@ -2752,7 +2755,7 @@ class TestHttpNativeResume:
         {"ok": False}, {"dry_run": False},
     ])
     def test_unproven_native_never_imports_or_creates(
-        self, client, http_native_resume, native_resume_url, change: dict[str, Any],
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, change: dict[str, Any],
     ) -> None:
         b = http_native_resume
         b.preflight.update(change)
@@ -2763,7 +2766,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_old_owner_without_native_admission_capability_refuses_without_fresh(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         b = http_native_resume
         b.preflight.pop("native_admission_version")
@@ -2776,7 +2779,7 @@ class TestHttpNativeResume:
 
     @pytest.mark.parametrize("after_load", [False, True])
     def test_head_change_is_not_a_successful_resume(
-        self, client, http_native_resume, native_resume_url, monkeypatch, after_load: bool,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, monkeypatch: Any, after_load: bool,
     ) -> None:
         from agent_bridge.routes import worktrees as wt
 
@@ -2786,7 +2789,9 @@ class TestHttpNativeResume:
             if args[-1][0] == "head-session" and b.head_reads == (2 if after_load else 1):
                 b.head["head_session"] = "new-authoritative-head"
                 b.head["head_revision"] += 1
-            return await b.owner(*args)
+            result = await b.owner(*args)
+            assert isinstance(result, str)
+            return result
 
         monkeypatch.setattr(wt, "_run_for_agent", changing)
         response = client.post(native_resume_url)
@@ -2801,7 +2806,7 @@ class TestHttpNativeResume:
 
     @pytest.mark.parametrize("failure", ["load", "provider"])
     def test_load_or_provider_failure_preserves_native_and_retry_fence(
-        self, client, http_native_resume, native_resume_url, failure: str,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, failure: str,
     ) -> None:
         from agent_bridge.session_manager import ProviderTargetRefreshError
 
@@ -2827,10 +2832,10 @@ class TestHttpNativeResume:
         assert b.manager._db.execute_read("SELECT * FROM acquisition_launch_gates")
 
     def test_concurrent_removal_refuses_without_replacement(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         b = http_native_resume
-        session = b.imported()
+        session: Session = b.imported()
         b.manager.resume_session.side_effect = KeyError(session.session_id)
         response = client.post(native_resume_url)
         assert response.status_code == 409, response.text
@@ -2840,10 +2845,11 @@ class TestHttpNativeResume:
 
     @pytest.mark.parametrize("failed_status", [False, True])
     def test_manager_cannot_return_failed_or_different_native_as_success(
-        self, client, http_native_resume, native_resume_url, failed_status: bool,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, failed_status: bool,
     ) -> None:
         b = http_native_resume
         session = b.imported()
+        assert isinstance(session, Session)
 
         async def invalid_result(*args: Any, **kwargs: Any) -> Session:
             session.status = SessionStatus.FAILED if failed_status else SessionStatus.IDLE
@@ -2860,7 +2866,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_uncertain_load_retry_retains_same_bridge_and_native_identity(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         b = http_native_resume
         loader = b.load.side_effect
@@ -2879,7 +2885,7 @@ class TestHttpNativeResume:
     @pytest.mark.parametrize("reclaim", [False, True])
     @pytest.mark.parametrize("holder", ["owner-cli", "registered-cli", "owned-acp"])
     def test_live_holder_refuses_even_reclaim(
-        self, client, http_native_resume, native_resume_url, reclaim: bool, holder: str,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, reclaim: bool, holder: str,
     ) -> None:
         b = http_native_resume
         if holder == "owner-cli":
@@ -2900,14 +2906,14 @@ class TestHttpNativeResume:
             assert b.manager._db.get_live_session("cli-incumbent")["status"] == "live"
 
     def test_dormant_reclaim_preserves_native(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         response = client.post(native_resume_url, params={"reclaim": True})
         assert response.status_code == 200, response.text
         assert response.json()["acp_session_id"] == "native-original"
 
     def test_cli_racing_preflight_loses_no_fence(
-        self, client, http_native_resume, native_resume_url, monkeypatch,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, monkeypatch: Any,
     ) -> None:
         from agent_bridge.routes import worktrees as wt
 
@@ -2916,7 +2922,9 @@ class TestHttpNativeResume:
         async def racing(*args: Any) -> str:
             if args[-1][0] == "embody":
                 b.register_live("cli-raced-in")
-            return await b.owner(*args)
+            result = await b.owner(*args)
+            assert isinstance(result, str)
+            return result
 
         monkeypatch.setattr(wt, "_run_for_agent", racing)
         response = client.post(native_resume_url)
@@ -2926,7 +2934,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_other_persisted_acp_reservation_cannot_be_overwritten(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         b = http_native_resume
         db = b.manager._db
@@ -2942,7 +2950,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_kernel_executor_refuses_concurrent_resume(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         from agent_bridge.acquisition_executor import executor
 
@@ -2955,7 +2963,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_existing_sqlite_launch_gate_is_not_overwritten(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         from agent_bridge.acquisition_store import AcquisitionStore
 
@@ -2972,7 +2980,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_cache_blind_owner_lookup_still_loads_exact_native(
-        self, client, http_native_resume, native_resume_url,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any,
     ) -> None:
         from agent_bridge.routes import worktrees as wt
 
@@ -2988,7 +2996,7 @@ class TestHttpNativeResume:
 
     @pytest.mark.parametrize("missing_path", [False, True])
     def test_unknown_or_pathless_workspace_is_404_without_fresh(
-        self, client, http_native_resume, native_resume_url, missing_path: bool,
+        self, client: Any, http_native_resume: Any, native_resume_url: Any, missing_path: bool,
     ) -> None:
         from agent_bridge.routes import worktrees as wt
 
@@ -3005,7 +3013,7 @@ class TestHttpNativeResume:
         b.load.assert_not_called()
 
     def test_strict_singleton_without_native_history_never_starts_fresh(
-        self, client, http_native_resume, monkeypatch,
+        self, client: Any, http_native_resume: Any, monkeypatch: Any,
     ) -> None:
         from agent_bridge.singleton_anchor import SingletonRepo
 
@@ -3026,7 +3034,7 @@ class TestHttpNativeResume:
 class TestAcpAliasResolution:
     """Session routes accept the ACP session id as an alias key."""
 
-    def test_get_session_by_acp_id(self, client, app) -> None:
+    def test_get_session_by_acp_id(self, client: Any, app: Any) -> None:
         mgr: SessionManager = app.state.session_manager
         target = SpawnTarget(type="local", cwd="/wt")
         session = Session("bridge-uuid-1", "swift-pine", target, "test-agent")
@@ -3041,7 +3049,7 @@ class TestAcpAliasResolution:
         assert data["session_id"] == "bridge-uuid-1"
         assert data["acp_session_id"] == "acp-alias-xyz"
 
-    def test_get_session_by_bridge_uuid_still_works(self, client, app) -> None:
+    def test_get_session_by_bridge_uuid_still_works(self, client: Any, app: Any) -> None:
         mgr: SessionManager = app.state.session_manager
         target = SpawnTarget(type="local", cwd="/wt")
         session = Session("bridge-uuid-2", "tall-oak", target, "test-agent")
@@ -3053,12 +3061,12 @@ class TestAcpAliasResolution:
         assert resp.status_code == 200
         assert resp.json()["session_id"] == "bridge-uuid-2"
 
-    def test_unknown_ref_404s(self, client) -> None:
+    def test_unknown_ref_404s(self, client: Any) -> None:
         resp = client.get("/api/v1/sessions/no-such-ref")
         assert resp.status_code == 404
 
     def test_transcript_by_acp_id_reads_the_resolved_bridge_session(
-        self, client, app
+        self, client: Any, app: Any
     ) -> None:
         """Addressing the transcript route by the durable ACP id must read
         events keyed under the resolved bridge session_id, not the raw ACP
@@ -3090,7 +3098,7 @@ class TestBackgroundTaskTeardownGate:
     unless force=true; status surfaces active_background_tasks."""
 
     @staticmethod
-    def _inject_busy_session(app, *, sid: str = "bg-sess-1"):
+    def _inject_busy_session(app: Any, *, sid: str = "bg-sess-1") -> Any:
         mgr: SessionManager = app.state.session_manager
         target = SpawnTarget(type="local", cwd="/wt")
         session = Session(sid, "busy-bee", target, "test-agent")
@@ -3106,62 +3114,54 @@ class TestBackgroundTaskTeardownGate:
         mgr.db.create_session(sid, "busy-bee", "test-agent", "/wt", "local", "idle", 0)
         return session
 
-    def test_stop_returns_409_when_busy(self, client, app) -> None:
+    def test_stop_returns_409_when_busy(self, client: Any, app: Any) -> None:
         self._inject_busy_session(app)
         resp = client.post("/api/v1/sessions/bg-sess-1/stop")
         assert resp.status_code == 409
         assert "background" in resp.json()["detail"].lower()
 
-    def test_delete_returns_409_when_busy(self, client, app) -> None:
+    def test_delete_returns_409_when_busy(self, client: Any, app: Any) -> None:
         self._inject_busy_session(app)
         resp = client.delete("/api/v1/sessions/bg-sess-1")
         assert resp.status_code == 409
 
-    def test_force_stop_succeeds_when_busy(self, client, app) -> None:
+    def test_force_stop_succeeds_when_busy(self, client: Any, app: Any) -> None:
         session = self._inject_busy_session(app)
         resp = client.post("/api/v1/sessions/bg-sess-1/stop?force=true")
         assert resp.status_code == 204
         assert session.status == SessionStatus.STOPPED
 
-    def test_stop_reap_host_param_plumbs_through(self, client, app) -> None:
+    def test_stop_reap_host_param_plumbs_through(self, client: Any, app: Any) -> None:
         # #2960: ?reap_host=true must reach mgr.stop_session(reap_host=True) so
         # a non-reattaching caller (the AI reviewer) frees the child on the spot
         # rather than after the idle-reaper TTL. Default stays reap_host=False.
         mgr: SessionManager = app.state.session_manager
-        mgr.stop_session = AsyncMock()
-        resp = client.post("/api/v1/sessions/whatever/stop?reap_host=true")
-        assert resp.status_code == 204
-        mgr.stop_session.assert_awaited_once_with(
-            "whatever", force=False, reap_host=True
-        )
+        with patch.object(mgr, "stop_session", new_callable=AsyncMock) as stop:
+            resp = client.post("/api/v1/sessions/whatever/stop?reap_host=true")
+            assert resp.status_code == 204
+            stop.assert_awaited_once_with("whatever", force=False, reap_host=True)
 
-    def test_stop_reap_host_defaults_false(self, client, app) -> None:
+    def test_stop_reap_host_defaults_false(self, client: Any, app: Any) -> None:
         mgr: SessionManager = app.state.session_manager
-        mgr.stop_session = AsyncMock()
-        resp = client.post("/api/v1/sessions/whatever/stop")
-        assert resp.status_code == 204
-        mgr.stop_session.assert_awaited_once_with(
-            "whatever", force=False, reap_host=False
-        )
+        with patch.object(mgr, "stop_session", new_callable=AsyncMock) as stop:
+            resp = client.post("/api/v1/sessions/whatever/stop")
+            assert resp.status_code == 204
+            stop.assert_awaited_once_with("whatever", force=False, reap_host=False)
 
-    def test_stop_reap_host_composes_with_force(self, client, app) -> None:
+    def test_stop_reap_host_composes_with_force(self, client: Any, app: Any) -> None:
         mgr: SessionManager = app.state.session_manager
-        mgr.stop_session = AsyncMock()
-        resp = client.post(
-            "/api/v1/sessions/whatever/stop?force=true&reap_host=true"
-        )
-        assert resp.status_code == 204
-        mgr.stop_session.assert_awaited_once_with(
-            "whatever", force=True, reap_host=True
-        )
+        with patch.object(mgr, "stop_session", new_callable=AsyncMock) as stop:
+            resp = client.post("/api/v1/sessions/whatever/stop?force=true&reap_host=true")
+            assert resp.status_code == 204
+            stop.assert_awaited_once_with("whatever", force=True, reap_host=True)
 
-    def test_force_delete_succeeds_when_busy(self, client, app) -> None:
+    def test_force_delete_succeeds_when_busy(self, client: Any, app: Any) -> None:
         self._inject_busy_session(app)
         resp = client.delete("/api/v1/sessions/bg-sess-1?force=true")
         assert resp.status_code == 204
         assert app.state.session_manager.get_session("bg-sess-1") is None
 
-    def test_status_surfaces_active_background_tasks(self, client, app) -> None:
+    def test_status_surfaces_active_background_tasks(self, client: Any, app: Any) -> None:
         self._inject_busy_session(app)
         resp = client.get("/api/v1/sessions/bg-sess-1/status")
         assert resp.status_code == 200
@@ -3171,7 +3171,7 @@ class TestBackgroundTaskTeardownGate:
 class TestPendingQueue:
     """Durable send-or-queue routes (POST turns queue=true + queue CRUD, #4114)."""
 
-    def _seed_running(self, app, session_id: str = "s1") -> SessionManager:
+    def _seed_running(self, app: Any, session_id: str = "s1") -> SessionManager:
         import time as _t
         mgr: SessionManager = app.state.session_manager
         now = _t.time()
@@ -3184,7 +3184,7 @@ class TestPendingQueue:
         mgr._sessions[session_id] = session
         return mgr
 
-    def test_queue_true_on_busy_returns_202_and_persists(self, client, app) -> None:
+    def test_queue_true_on_busy_returns_202_and_persists(self, client: Any, app: Any) -> None:
         mgr = self._seed_running(app)
         resp = client.post(
             "/api/v1/sessions/s1/turns",
@@ -3199,7 +3199,7 @@ class TestPendingQueue:
         # durably persisted
         assert mgr.db.count_pending_prompts("s1") == 1
 
-    def test_default_busy_still_409(self, client, app) -> None:
+    def test_default_busy_still_409(self, client: Any, app: Any) -> None:
         """Without queue=true the legacy 409-on-busy contract is preserved."""
         self._seed_running(app)
         resp = client.post(
@@ -3207,7 +3207,7 @@ class TestPendingQueue:
         )
         assert resp.status_code == 409
 
-    def test_get_queue_snapshot(self, client, app) -> None:
+    def test_get_queue_snapshot(self, client: Any, app: Any) -> None:
         self._seed_running(app)
         client.post(
             "/api/v1/sessions/s1/turns",
@@ -3222,7 +3222,7 @@ class TestPendingQueue:
         pending = resp.json()["pending"]
         assert [p["prompt"] for p in pending] == ["one", "two"]
 
-    def test_delete_one_queued_prompt(self, client, app) -> None:
+    def test_delete_one_queued_prompt(self, client: Any, app: Any) -> None:
         mgr = self._seed_running(app)
         r = client.post(
             "/api/v1/sessions/s1/turns",
@@ -3235,7 +3235,7 @@ class TestPendingQueue:
         # deleting again is a 404 miss
         assert client.delete(f"/api/v1/sessions/s1/queue/{qid}").status_code == 404
 
-    def test_clear_whole_queue(self, client, app) -> None:
+    def test_clear_whole_queue(self, client: Any, app: Any) -> None:
         mgr = self._seed_running(app)
         client.post(
             "/api/v1/sessions/s1/turns", json={"prompt": "a", "queue": True},
@@ -3247,7 +3247,7 @@ class TestPendingQueue:
         assert resp.status_code == 204
         assert mgr.db.count_pending_prompts("s1") == 0
 
-    def test_queue_routes_on_unknown_session_404(self, client) -> None:
+    def test_queue_routes_on_unknown_session_404(self, client: Any) -> None:
         assert client.get("/api/v1/sessions/nope/queue").status_code == 404
         assert client.delete("/api/v1/sessions/nope/queue").status_code == 404
         assert client.delete("/api/v1/sessions/nope/queue/1").status_code == 404
@@ -3277,7 +3277,7 @@ def test_worktree_discovery_crawl_is_single_flight() -> None:
 
     calls = {"n": 0}
 
-    async def _slow_crawl_agent(name, config, res, *, epoch=None, classify=True):
+    async def _slow_crawl_agent(name: Any, config: Any, res: Any, *, epoch: Any = None, classify: Any = True) -> Any:
         calls["n"] += 1
         await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
         return []
@@ -3314,7 +3314,7 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
     resolver.agents = {"local": agent_cfg}
     cache._resolver = resolver
 
-    async def _crawl_agent(name, config, res, *, epoch=None, classify=True):
+    async def _crawl_agent(name: Any, config: Any, res: Any, *, epoch: Any = None, classify: Any = True) -> Any:
         return []
 
     async def _run() -> None:
@@ -3347,7 +3347,7 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
 
     seen_classify: list[bool] = []
 
-    async def _fake_crawl_agent(name, config, res, *, epoch=None, classify=True):
+    async def _fake_crawl_agent(name: Any, config: Any, res: Any, *, epoch: Any = None, classify: Any = True) -> Any:
         seen_classify.append(classify)
         return []
 
@@ -3380,7 +3380,7 @@ def test_stop_cancels_classify_wrapper_but_retains_its_refresh_holder() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def _hanging_crawl_agent(name, config, res, *, epoch=None, classify=True):
+    async def _hanging_crawl_agent(name: Any, config: Any, res: Any, *, epoch: Any = None, classify: Any = True) -> Any:
         if classify:
             started.set()
             await release.wait()
@@ -3397,6 +3397,7 @@ def test_stop_cancels_classify_wrapper_but_retains_its_refresh_holder() -> None:
             assert cache._refresh.task is holder
             assert cache._refresh.pending
             release.set()
+            assert holder is not None
             await holder
             assert not cache._refresh.pending
 
@@ -3420,7 +3421,7 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
 
     calls: list[list[str]] = []
 
-    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+    async def _fake_run_local_ex(project: Any, args: Any = None, *, timeout: Any = None) -> Any:
         calls.append(args)
         if args and "--classify" in args:
             return None, "aw: error: unrecognized arguments: --classify"
@@ -3430,7 +3431,7 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
             "",
         )
 
-    async def _run() -> None:
+    async def _run() -> list[WorktreeEntry]:
         with patch(
             "agent_bridge.routes.worktrees._run_local_ex",
             side_effect=_fake_run_local_ex,
@@ -3454,7 +3455,7 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
     "POSIX the real shim is the bare, executable filename, already covered "
     "by test_resolve_local_binstub_falls_back_to_path_when_no_local_shim.",
 )
-def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypatch) -> None:
+def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path: Any, monkeypatch: Any) -> None:
     """Regression: ``asyncio.create_subprocess_exec`` never consults
     Windows' PATHEXT the way
     a shell does, so an extensionless ``Path(...).exists()`` check silently
@@ -3468,7 +3469,7 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     import os
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
@@ -3487,7 +3488,7 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     "a bare shutil.which call -- only POSIX still delegates to it.",
 )
 def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
-    tmp_path, monkeypatch,
+    tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """No ``~/.local/bin/<project>`` shim -> fall back to whatever ``PATH``
     resolves via :func:`shutil.which` (POSIX's own ``os.access(X_OK)`` check
@@ -3496,7 +3497,7 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     import shutil
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
     monkeypatch.setattr(shutil, "which", lambda name: f"/resolved/{name}" if name == "private-downstream-repo" else None)
@@ -3510,7 +3511,7 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     "directly (see test_resolve_local_binstub_falls_back_to_path_when_no_local_shim).",
 )
 def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
-    tmp_path, monkeypatch,
+    tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """Regression: the **PATH** fallback (no local
     ``~/.local/bin/<project>`` shim at all) must apply the identical
@@ -3521,7 +3522,7 @@ def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
     """
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     path_dir = tmp_path / "on-path"
     path_dir.mkdir(parents=True)
@@ -3542,7 +3543,7 @@ def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
     reason="PATHEXT normalization is a Windows-only concern.",
 )
 def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
-    tmp_path, monkeypatch,
+    tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """Regression: ``PATHEXT`` entries can carry stray
     whitespace or (rarely) omit the leading dot -- both must still match a
@@ -3550,7 +3551,7 @@ def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
     than silently never matching or constructing an unseparated name."""
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
@@ -3570,7 +3571,7 @@ def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
 )
 @pytest.mark.parametrize("pathext_value", [None, ""])
 def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty(
-    pathext_value, tmp_path, monkeypatch,
+    pathext_value: Any, tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """Regression: an unset OR empty ``PATHEXT`` must not
     silently zero every suffix candidate -- fall back to the same built-in
@@ -3579,7 +3580,7 @@ def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty
     unresolved name."""
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
@@ -3602,7 +3603,7 @@ def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty
     "for a plain file and always takes the PATHEXT branch instead.",
 )
 def test_resolve_local_binstub_skips_non_executable_explicit_path(
-    tmp_path, monkeypatch,
+    tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """Regression: a non-executable file sitting at the exact
     ``~/.local/bin/<project>`` path must not be selected -- ``shutil.which``
@@ -3612,7 +3613,7 @@ def test_resolve_local_binstub_skips_non_executable_explicit_path(
     import shutil
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
@@ -3634,7 +3635,7 @@ def test_resolve_local_binstub_skips_non_executable_explicit_path(
     reason="PATHEXT-based extension recognition is a Windows-only concern.",
 )
 def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
-    tmp_path, monkeypatch,
+    tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """Regression: an extensionless file at the exact
     ``~/.local/bin/<project>`` path (a stray text file, a POSIX-style
@@ -3645,7 +3646,7 @@ def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
     import os
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
@@ -3663,7 +3664,7 @@ def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
     reason="PATHEXT-based extension recognition is a Windows-only concern.",
 )
 def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
-    tmp_path, monkeypatch,
+    tmp_path: Any, monkeypatch: Any,
 ) -> None:
     """Regression: ``PATHEXT`` commonly lists interpreter-
     dependent extensions (``.PS1``, ``.PY``, ``.JS``, ...) alongside directly
@@ -3676,7 +3677,7 @@ def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
     import os
     from pathlib import Path
 
-    from agent_bridge.routes.worktrees import _resolve_local_binstub
+    from agent_bridge.routes.worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
@@ -3691,13 +3692,13 @@ def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
 
 
 @pytest.mark.parametrize("binding", ["board-sweep-worker", " board-sweep-worker \n"])
-def test_apply_bound_charter_layers_charter_spawn_shape(binding) -> None:
+def test_apply_bound_charter_layers_charter_spawn_shape(binding: Any) -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
     charter borrows its own launch shape (copilot_path/mcp_servers/env, and
     its own copilot_args APPENDED after the venue's) onto the
     venue-resolved target -- host/cwd/project stay the venue's, and the
     venue's own args (e.g. --plugin-dir staging, --allow-all) survive."""
-    from agent_bridge.routes.worktrees import _WorktreeEntry
+    from agent_bridge.routes.worktree_entry import WorktreeEntry as _WorktreeEntry
     from agent_bridge.transport import SpawnTarget
     from agent_bridge.worktree_charter import _apply_bound_charter
 
@@ -3736,10 +3737,10 @@ def test_apply_bound_charter_layers_charter_spawn_shape(binding) -> None:
 
 
 @pytest.mark.parametrize("binding", [None, "", " \t\r\n"])
-def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default(binding) -> None:
+def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default(binding: Any) -> None:
     """An unbound worktree, or a bound_agent that no longer resolves in the
     registry, must never fail the spawn -- it just uses the venue default."""
-    from agent_bridge.routes.worktrees import _WorktreeEntry
+    from agent_bridge.routes.worktree_entry import WorktreeEntry as _WorktreeEntry
     from agent_bridge.transport import SpawnTarget
     from agent_bridge.worktree_charter import _apply_bound_charter
 
@@ -3766,7 +3767,7 @@ def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default(bind
 
 
 def test_apply_bound_charter_managed_charter_degrades_to_venue_default(
-    caplog,
+    caplog: Any,
 ) -> None:
     """A managed=true charter is explicitly non-spawnable (mirrors
     AgentResolver._resolve_static's own guard) -- binding a worktree to one
@@ -3774,7 +3775,7 @@ def test_apply_bound_charter_managed_charter_degrades_to_venue_default(
     accurate warning is logged, not a second misleading "not found" one."""
     import logging
 
-    from agent_bridge.routes.worktrees import _WorktreeEntry
+    from agent_bridge.routes.worktree_entry import WorktreeEntry as _WorktreeEntry
     from agent_bridge.transport import SpawnTarget
     from agent_bridge.worktree_charter import _apply_bound_charter
 
@@ -3817,7 +3818,7 @@ def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:
 
     calls: list[list[str]] = []
 
-    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+    async def _fake_run_local_ex(project: Any, args: Any = None, *, timeout: Any = None) -> Any:
         calls.append(args)
         return (
             '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
@@ -3825,7 +3826,7 @@ def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:
             "",
         )
 
-    async def _run() -> None:
+    async def _run() -> list[WorktreeEntry]:
         with patch(
             "agent_bridge.routes.worktrees._run_local_ex",
             side_effect=_fake_run_local_ex,
@@ -3855,7 +3856,7 @@ def test_crawl_agent_falls_back_when_classify_times_out() -> None:
 
     calls: list[list[str]] = []
 
-    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+    async def _fake_run_local_ex(project: Any, args: Any = None, *, timeout: Any = None) -> Any:
         calls.append(args)
         if args and "--classify" in args:
             return None, ""  # timeout: no stderr, just None
@@ -3865,7 +3866,7 @@ def test_crawl_agent_falls_back_when_classify_times_out() -> None:
             "",
         )
 
-    async def _run() -> None:
+    async def _run() -> list[WorktreeEntry]:
         with patch(
             "agent_bridge.routes.worktrees._run_local_ex",
             side_effect=_fake_run_local_ex,
@@ -3894,7 +3895,7 @@ def test_crawl_agent_uses_classify_budget_and_keeps_closure() -> None:
 
     seen_timeouts: list[float | None] = []
 
-    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+    async def _fake_run_local_ex(project: Any, args: Any = None, *, timeout: Any = None) -> Any:
         seen_timeouts.append(timeout)
         return (
             '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
@@ -3903,7 +3904,7 @@ def test_crawl_agent_uses_classify_budget_and_keeps_closure() -> None:
             "",
         )
 
-    async def _run() -> None:
+    async def _run() -> list[WorktreeEntry]:
         with patch(
             "agent_bridge.routes.worktrees._run_local_ex",
             side_effect=_fake_run_local_ex,

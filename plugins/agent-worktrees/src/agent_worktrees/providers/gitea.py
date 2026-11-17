@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import time
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, TypedDict
 from urllib.parse import quote
 
 from ..pr_bar import Snapshot as BarSnapshot
@@ -24,6 +24,7 @@ from .pr_source import gitea_source, pull_payload, source_object, source_text
 from .observation_credentials import (
     CredentialSource, ObservationCredentialError, ObservationCredentials,
 )
+from .gitea_pagination import COUNT_WRITE_OUT, counted_response, review_page
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
 # resolving/attaching labels.  A label apply is a small, idempotent call against
@@ -39,6 +40,11 @@ _LABEL_BACKOFF = 0.5
 # we re-read the issue's labels and re-POST until the required ones are actually
 # present -- "applied" means *verified present*, not "the POST returned 200".
 _LABEL_ATTACH_ATTEMPTS = 3
+
+
+class _CurlOptions(TypedDict, total=False):
+    preserve_line_endings: bool
+    max_stdout_bytes: int
 
 
 def _is_transient(status: int) -> bool:
@@ -111,18 +117,21 @@ class GiteaProvider:
             return read(method, url, token, invoke=run_cli, payload=payload, deadline=read_deadline)
         scheme = "to" + "ken "
         authorization = scheme + token
+        counted = review_page(method, url)
         args = [
             "curl", "-sS", "-X", method, url,
             "-H", "Authorization: " + authorization,
             "-H", "Accept: application/json",
-            "-w", "\n%{http_code}",
+            "-w", COUNT_WRITE_OUT if counted else "\n%{http_code}",
         ]
         if payload is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-        proc = (
-            run_cli(args, preserve_line_endings=True)
-            if preserve_line_endings else run_cli(args)
-        )
+        options: _CurlOptions = {}
+        if preserve_line_endings:
+            options["preserve_line_endings"] = True
+        if counted:
+            options["max_stdout_bytes"] = 1_048_584
+        proc = run_cli(args, **options)
         if proc.returncode != 0:
             raise ProviderError(
                 f"curl failed talking to Gitea ({url}): "
@@ -135,7 +144,7 @@ class GiteaProvider:
             status = int(status_str.strip())
         except ValueError:
             status = 0
-        return status, body
+        return counted_response(status, body) if counted else (status, body)
 
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         if not token:
@@ -183,7 +192,7 @@ class GiteaProvider:
         self,
         method: str,
         url: str,
-        token: str,
+        token: str | ObservationCredentials,
         *,
         payload: dict[str, Any] | None = None,
     ) -> tuple[int, str]:
@@ -197,19 +206,20 @@ class GiteaProvider:
         page used to silently drop them (see ``_all_labels``).
         """
         delay = _LABEL_BACKOFF
-        status, body = 0, ""
+        response: tuple[int, str] = (0, "")
         for attempt in range(1, _LABEL_RETRIES + 1):
             try:
-                status, body = self._curl(method, url, token, payload=payload)
+                response = self._curl(method, url, token, payload=payload)
             except ObservationCredentialError:
                 raise
             except ProviderError:
-                status, body = 0, ""
+                response = (0, "")
+            status, _body = response
             if status not in _TRANSIENT_LABEL_HTTP or attempt == _LABEL_RETRIES:
-                return status, body
+                return response
             time.sleep(delay)
             delay *= 2
-        return status, body
+        return response
 
     def _all_labels(self, scope: PRScope, token: str) -> dict[str, int]:
         """Resolve ``label-name (lowercased) -> id`` for the repo, **paginated**.
@@ -628,7 +638,7 @@ class GiteaProvider:
         return ""
 
     def _all_review_objs(
-        self, repo: str, number: int, api_base: str, token: str
+        self, repo: str, number: int, api_base: str, token: str | ObservationCredentials
     ) -> tuple[Review, ...]:
         """Validate visible review pages without claiming authoritative exhaustion."""
         from .gitea_reviews import all_reviews
