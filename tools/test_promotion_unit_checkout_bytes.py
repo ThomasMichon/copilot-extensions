@@ -36,8 +36,22 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     manifest = json.loads((ROOT / "tools/promotion-unit-manifest.json").read_bytes())
     payloads: list[str] = [name for name in manifest["sources"] if name.endswith(".ps1")]
     assert payloads
+    admitted_payloads = tuple(payloads)
+    names = {Path(name).name for name in payloads}
+    ignored = {
+        "tests", "fixtures", "__pycache__", "node_modules", ".venv",
+        ".test-venvs", ".test-runs", "build", "dist", "obj",
+    }
+    for owner in ("libs", "plugins", "worktree-manager", "fleet-manager", "services"):
+        for directory, children, files in os.walk(ROOT / owner):
+            children[:] = [name for name in children if name not in ignored]
+            payloads.extend(
+                (Path(directory) / name).relative_to(ROOT).as_posix()
+                for name in files if name in names
+            )
+    payloads = sorted(set(payloads))
     content = b"Write-Output 'literal promotion fixture'\n"
-    sources = dict.fromkeys(payloads, hashlib.sha256(content).hexdigest())
+    sources = dict.fromkeys(admitted_payloads, hashlib.sha256(content).hexdigest())
     attributes = root / ".gitattributes"
     attributes.write_bytes(b"*.ps1 text eol=crlf\n")
     for name in payloads:
@@ -46,6 +60,7 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
         path.write_bytes(content)
     git("init", "--quiet")
     git("config", "core.autocrlf", autocrlf)
+    git("config", "core.longpaths", "true")
     git("add", "--", ".gitattributes", *payloads)
 
     def materialize() -> None:
@@ -60,3 +75,5 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     git("add", "--", ".gitattributes")
     materialize()
     verify_sources(root, sources)
+    for name in payloads:
+        assert (root / name).read_bytes() == content, name
