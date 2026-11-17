@@ -296,7 +296,9 @@ def test_ado_renews_each_continuation_page_and_preserves_authentication(
     assert result.complete and len(result.records) == 2
     assert source.calls == len(opener.calls) == 2
     for index, request in enumerate(opener.calls, 1):
-        scheme, value = request.get_header("Authorization").split(" ", 1)
+        authorization = request.get_header("Authorization")
+        assert authorization is not None
+        scheme, value = authorization.split(" ", 1)
         if authentication == "basic":
             assert scheme == "Bas" + "ic"
             assert base64.b64decode(value).decode() == ":synthetic-" + str(index)
@@ -467,7 +469,9 @@ def test_configured_native_ado_carries_the_source_to_the_actual_request(
     )
     assert snapshot.merged and snapshot.head_sha == "head"
     assert source.calls == len(calls) == 1
-    scheme, material = calls[0].get_header("Authorization").split(" ", 1)
+    authorization = calls[0].get_header("Authorization")
+    assert authorization is not None
+    scheme, material = authorization.split(" ", 1)
     assert scheme == "Bear" + "er" and material == "synthetic-1"
 
 
