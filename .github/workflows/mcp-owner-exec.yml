@@ -50,6 +50,7 @@ on:
       - "plugins/agent-mcp/src/agent_mcp/custody_launch.py"
       - "plugins/agent-mcp/tests/test_owner_exec.py"
       - "plugins/agent-mcp/tests/test_owner_headed.py"
+      - "plugins/agent-mcp/tests/test_owner_mux_settlement.py"
       - "plugins/agent-mcp/tests/native/test_owner_headed_windows.py"
       - "plugins/agent-mcp/tests/test_owner_entry.py"
       - "plugins/agent-mcp/tests/test_owner_bootstrap_windows.py"
@@ -111,6 +112,7 @@ jobs:
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_owner_exec.py
           --test-file tests/test_owner_headed.py
+          --test-file tests/test_owner_mux_settlement.py
           --test-file tests/test_owner_handoff.py
           --test-file tests/test_owner_entry.py
           --test-file tests/test_owner_section.py
