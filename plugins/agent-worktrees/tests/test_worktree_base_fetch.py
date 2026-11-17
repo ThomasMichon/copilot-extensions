@@ -172,7 +172,9 @@ def test_preparation_preserves_committed_policy_branch_discovery(
     discovered = inrepo_config_source.load_inrepo_config_from_committed_ref(anchor, candidates)
     assert discovered["default_branch"] == "stable"
     if transition == "non-origin":
-        assert discovered.get("marker") == "refreshed"
+        assert "marker: refreshed" in _git(
+            "show", f"origin/trunk:{policy_path}", cwd=anchor,
+        )
     following = git_ops.prepare_worktree_base(
         anchor, remote=remote, default_branch=discovered["default_branch"],
         fast_forward_anchor=False,

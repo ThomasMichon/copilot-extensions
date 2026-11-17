@@ -107,9 +107,11 @@ custody remain independent.
 - [x] Satisfy whole-file strict changed-code checks without suppressions or
   pending-project admission. Limit necessary typing corrections to unchanged
   behavior; reconcile any material contributor overlap before proceeding.
-- [ ] Resolve the initial review's actual refmap, policy-discovery,
+- [x] Resolve the initial review's actual refmap, policy-discovery,
   fixture-isolation and moved-source-closure findings. Prove the new behavioral
   negatives before revising the fetch, then repeat impacted validation.
+- [ ] Resolve the subsequent policy-head, source-namespace, independent-ref
+  failure and stale-declared-hop findings with real-Git regressions.
 - [ ] Pass affected tests, lint, install contract, changefile/version/size and
   exact-head required review/CI, then actually merge the source correction.
 - [ ] Record the finite accepted result, settle #13013 and its original claim,
@@ -133,6 +135,10 @@ custody remain independent.
 - [x] **Fresh consumer:** local bare repositories and isolated Git configuration
   exercise actual subprocess/ref behavior without network credentials, operator
   state, installed runtimes or product checkouts.
+- [ ] **Policy edge cases:** refresh the configured base with a non-symbolic
+  optional HEAD; refresh surviving refs in either deletion direction; align a
+  non-origin creation remote with the reader's policy namespace; refresh a
+  newly declared but already tracked policy source before consuming it.
 - [ ] **Publication:** whole-file typing and all applicable exact-source gates
   pass; genuine final-head review and actual merge precede acceptance.
 - [x] **Evidence tiers:** document why the local-Git consumer is the relevant
@@ -219,7 +225,12 @@ does not claim these newly exposed cases already passed.
   HEAD, deleted bootstrap, deleted configured base, a non-origin creation
   remote whose policy tracking namespace remains `origin`, and an already
   tracked but stale newly declared policy source. Runtime is still unchanged;
-  no new fail-first result is claimed yet.
+  [run 44045519307](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44045519307)
+  executed all11 cases: the original six passed and four new cases failed
+  at their intended behavior assertions. The non-origin case instead selected
+  its removed remote because of a fixture mistake; that is not behavioral
+  proof. Corrected its selector and submitted only that case again before
+  changing the runtime.
 - Refine the previous one-fetch assumption: related refs must be independently
   refreshable when one has disappeared. Attempt each required source/destination
   ref once within one shared existing fetch deadline, preserve the first
