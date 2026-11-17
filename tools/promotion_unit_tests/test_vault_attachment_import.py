@@ -905,6 +905,22 @@ def test_bound_mutation_cannot_override_health_context(
     assert route.events == [("native", "ping")]
 
 
+def test_mutation_binding_refuses_a_maintenance_route_before_selection(
+    routed_owner: SimpleNamespace,
+) -> None:
+    route = routed_owner
+    binding = route.owner.binding.MutationBinding()
+    component = sys.modules[route.owner.package + ".command_transport"]
+    with pytest.raises(ValueError, match="cannot share a maintenance route"):
+        route.owner.cli.send_command(
+            {"action": "ping", "health_only": True},
+            binding=binding, _route=component.CommandRoute(),
+        )
+    assert route.events == []
+    assert route.state.discovery_calls == 0
+    binding.require_unselected()
+
+
 @pytest.mark.parametrize("group,entry,expected", [
     (None, "new-key", "new-key"),
     ("", "new-key", "new-key"),
