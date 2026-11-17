@@ -93,27 +93,32 @@ Collection receipts remain v1/v2 with `remote_archive_acknowledged: false` and
   on Windows and POSIX, retaining default-off and policy/compatibility behavior.
   Isolated source qualification only; installed adoption and remote archival
   acknowledgment remain independent.
-- [ ] W3. Land the tested source, update actual platform-support documentation
+- [x] W3. Land the tested source, update actual platform-support documentation
   and reconcile the existing lifetime plan without closing unrelated gates.
+  #12935 merged as `927123b80089b8bad99c6e98267fe22e81c3071c` after
+  current-head native qualification, resolved findings and green required CI.
 
 ## Validation Plan
 
-- [ ] Native private file/directory creation prevents broader inherited access;
+- [x] Native private file/directory creation prevents broader inherited access;
   existing foreign/unsafe objects, redirects and replacement fail without ACL
   repair. Faulted durability/publication never produces a successful receipt.
-- [ ] Interrupted, conflicting and exact-repeat collection retain identity and
+- [x] Interrupted, conflicting and exact-repeat collection retain identity and
   evidence; complete member, schema, revision and contributor corruption fail
   fresh readback. Existing POSIX protection and namespace coexistence still pass.
-- [ ] Real owner processes preserve all accepted operations and contributor
+- [x] Real owner processes preserve all accepted operations and contributor
   provenance under concurrent mutation, then freshly read back the retained
   revision after actual synthetic checkout retirement.
-- [ ] Observe/default-off, dry-run, privacy refusal, wrong repository/target/
+  The unchanged domain-owned complete-export concurrency contract retains its
+  #10238 qualification; this slice joins selected real owner processes and
+  retained-history readback without becoming another live writer.
+- [x] Observe/default-off, dry-run, privacy refusal, wrong repository/target/
   installation, unsupported target/provider and provider rollback remain explicit
   and effect-free before their existing admission boundaries.
-- [ ] Exercise the first-touch synthetic Windows path without prior staging or
+- [x] Exercise the first-touch synthetic Windows path without prior staging or
   collection state, plus Linux regression integration. Keep heavy/native work
   in an existing explicitly selected lane; required PR CI remains scoped.
-- [ ] Record focused units, real-process integration, fresh-environment/native
+- [x] Record focused units, real-process integration, fresh-environment/native
   and unavailable external/macOS tiers separately. No hardware power-loss,
   remote acknowledgment, installed collection or migration pass is inferred.
 
@@ -201,3 +206,25 @@ receipt decision. Native restore-attempt controls cover source export, collected
 copy and retained readback. The Windows correction packet passes 49 cases with
 two unselected tick variants; fresh full native qualification, strict checks
 and current-head CI/review remain required before delivery.
+
+### 2026-11-17 - Bounded source delivery
+
+#12935 merged at `927123b80089b8bad99c6e98267fe22e81c3071c` against
+`dev`. The exact published head
+`22c4109d6eadd191529c141bdb86ff05362e06c7` passed all 51 selected native
+Windows cases in run `44000829060` (Windows Server 2025, AMD64, Python 3.12.10).
+All eight changed Python files pass strict checking for both declared platforms;
+199 affected Linux consumer cases pass with one platform skip.
+
+All three concrete review findings are corrected and their threads resolved.
+The current owner-authored Comment has no open issues; its stated missing
+native qualification was completed against that same head before merge.
+Required CI run `44000375158` and the independent source/metadata guards passed.
+The normal Maintainer review-rule exception omitted only the extra CODEOWNER
+vote; no failing check was bypassed.
+
+This completes W0-W3 at source/isolated-fixture tier, not the parent program.
+Installed collection, actual archive acknowledgment, relocation, restoration,
+reclamation and the remaining Companion/Relay/global acceptance retain their
+existing owners and gates. No installation, collection enablement, migration,
+retrospective data operation, cache eviction or live cleanup occurred.
