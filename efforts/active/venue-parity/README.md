@@ -372,6 +372,84 @@ receiving readback precede any separate source-specific disposition.
   docs-only record are not new execution or implemented fix;7157 plugin-preparation ACP/CLI proof is
   real but not this seed-file consumer. No every-venue/new whole-parent native matrix is added.
 
+### Complete shared-core and thin-adapter acceptance from #4227
+
+<!-- backlog-reconciliation:7556:transfer:4227:to:efforts/active/venue-parity/README.md -->
+
+_(Agent-recommended documentary receiving through migration-intake; no
+implementation, resource operation or source disposition.)_
+
+Receive the complete six-category wrapper, not another helper extraction.
+The existing Bridge-owned programme remains the sole canonical domain owner;
+cohesive responsibility-owned shared packages may compose its reusable core.
+Neither one giant module nor one helper alone defines completion. Retain
+P0/P1/P2 before dependent P3/P4 changes and P5 after proven abstraction.
+
+- [ ] **P4227-1 - Dispatch:** Put venue-agnostic dispatch and admission
+  composition in the existing Bridge core, used by actual CodeSpace AND
+  trusted-container consumers. Keep shared policy out of duplicated provider
+  wrappers; unsupported paths remain explicit, not silently called equivalent.
+- [ ] **P4227-2 - Session/process ownership:** Use the existing shared
+  Session Host/process, status, coordination and target-ownership authorities.
+  Preserve process-owned failed-start settlement versus survivable Host
+  detach, exact attempt/generation identity, live/foreign/unknown custody and
+  no duplicate child. Do not introduce a competing lifetime owner.
+- [ ] **P4227-3 - Launch policy:** Share launch inputs, concrete cwd,
+  repo-local plugin preparation, model/effort/context and pre-creation policy.
+  Preserve #5837's contract, now tracked in #2709: owner-supported
+  no-create/rejoin-only before authorized fallback OR authorization before
+  every creation-capable operation, including uncertain retries. Retain BOTH
+  worker death after a live observation AND lost creation response followed
+  by `created=false`; harmless reattachment and ordinary checks still work.
+  Post-start termination is not pre-launch authorization.
+- [ ] **P4227-4 - Credentials:** Compose the existing shared credential/
+  relay owners and provider bootstrap seam, preserving exact worker Git-helper
+  pre-turn, inference-versus-service identity and declared lifetime contracts.
+  Keep missing authority explicit; no ambient fallback, secret copying or
+  restricted-profile projection. P3442 remains independently scored.
+- [ ] **P4227-5 - Recovery:** Share reconnect, authority reconstruction,
+  resume/recreate, failure and confirmed-death settlement through existing
+  owners. Preserve inconclusive outcomes, no ambiguous command replay,
+  retained member/partial-initialization state and same-member recovery;
+  transport loss or age is not claim expiry or permission to replace a worker.
+- [ ] **P4227-6 - Parity tests:** Exercise the actual shared consumers through
+  the existing P2 container fault/recovery harness and scoped CodeSpace
+  controls. Preserve equivalent work quality, fail-loud behavior and
+  restricted-profile negatives. Keep each inherited source's original
+  finite native/installed tier and bounds, not a new every-host matrix.
+- [ ] **P4227-7 - Thin adapters:** Leave only genuine substrate lifecycle,
+  endpoint/token bootstrap and cold-boot/idle differences in providers.
+  Shared policy consumes declared capabilities rather than venue-name
+  branches for behavior both substrates support. Preserve provider-owned
+  readiness and restricted denial; do not broaden supported generic SSH,
+  command or restricted paths by analogy.
+- [ ] **P4227-8 - Affected-scope mapping:** Through the existing
+  migration-intake domain-acceptance contract, reconcile the six categories
+  with WS1/WS-D/WS-B/WS-E and the ordered P0-P5 plan. Identify actual affected
+  P3 lifecycle/resource reservations and preserve their current owners,
+  boundaries and acceptance before dependent implementation. Retain all
+  #954/#2042/#2094/#1082/#5926/#2476, P3442 and #3507 obligations.
+  This planned reconciliation does not appoint an executor, release a claim
+  or make implementation/native completion a prerequisite to plan review.
+
+#### Local validation retained for #4227
+
+- [ ] **V4227-1:** Crosswalk the complete original and all three refinements
+  to P4227-1..8, explicitly accounting for all SIX responsibilities, actual
+  consumer paths and every retained alternative or unmatched gap. A link,
+  single extraction or renamed module is not complete receiving or delivery.
+- [ ] **V4227-2:** For P4227-1..7, verify actual common-core consumers and
+  genuine adapter differences, ownership/Host-versus-process boundaries,
+  both P4227-3 policy races and its OR remedies, credential separation,
+  partial-state recovery, unsupported paths and restricted negatives.
+  Use the original P0/P2 and source-specific tiers; source, fixture,
+  release, installed and native results remain distinct.
+- [ ] **V4227-3:** Verify P4227-8's actual affected-P3 reconciliation before
+  dependent implementation. Preserve every incumbent row/check state,
+  inherited condition and reservation. After normal reviewed delivery,
+  read back the complete current ROOT and source/custody before a separate
+  tracker judgment; documentary acceptance is not technical completion.
+
 ### Finite both-provider auth-lifetime acceptance retained from #3442
 
 <!-- backlog-reconciliation:7556:transfer:3442:to:efforts/active/venue-parity/README.md -->
@@ -532,6 +610,17 @@ remains an explicit applicability gap, not silently reduced to a container case.
   daemon replacement grants arbitrary orphan reaping or resource release.
 
 ## Validation Plan
+
+- [ ] **G4227:** Resolve the complete
+  [P4227 Plan and paired local Validation](#complete-shared-core-and-thin-adapter-acceptance-from-4227):
+  dispatch, session/process ownership, launch policy, credentials, recovery
+  AND parity tests in the existing reusable core, with only genuine thin
+  substrate adapters. Verify actual CodeSpace/trusted-container consumers,
+  original P0/P2/source-specific evidence tiers and affected-P3 reconciliation.
+  Preserve all incumbent gates, #5837's two races and OR remedies at #2709,
+  P3442's independent BOTH-provider auth acceptance and #3507's literal
+  native-outcomes OR complete accepted landed-transfer condition.
+  Administrative receiving cannot check off implementation or release custody.
 
 - [ ] **G3442:** Resolve every
   [P3442 Plan and paired local Validation clause](#finite-both-provider-auth-lifetime-acceptance-retained-from-3442)
@@ -903,6 +992,32 @@ native-outcomes OR complete accepted landed-transfer condition unchanged.
 No whole-#954 completion, all-parent native result, resource transfer,
 credential operation or implementation is required to review this plan.
 
+### Continuing complete #4227 custody
+
+This effort receives the complete wrapper once, through its existing
+migration-intake domain Plan acceptance, not by opening another programme.
+WS1/WS-D/WS-B/WS-E identify existing responsibilities, not new claimants.
+The actual #954 P3 provider-capability/idle-restart reservation and all
+source, credential, permission/session-rescue, native and resource holders
+remain. P4227-8/V4227-3 require the actual affected-scope reconciliation
+before dependent implementation; no generic owner ACK is invented for
+documentary review.
+
+Keep #4227 OPEN while this proposed complete intake is reviewed. Its three
+historical whole-OPEN/mapping recommendations are campaign receiving
+judgments, not an operator veto on a complete future planned receiver.
+Earlier exclusions of #4227 from narrower intake remain accurate history.
+Only normal reviewed acceptance, complete current ROOT/source readback
+and a separate source-specific judgment may supersede that tracker; no
+closure follows from this proposal itself.
+
+Keep #954 OPEN with every incumbent gate and reservation. #5837's
+administrative supersession into #2709 is not a delivered pre-creation
+policy fix. Shared Session Host/launch and supplied-pin progress remains
+partial credit, not all-six completion. #109/#566 remain independent.
+No implementation, credential request, native test, venue operation,
+owner appointment or claim/resource transfer is authorized.
+
 ## Journal
 
 ### 2026-10-29 - Finite process-owned failed-start contract proposed
@@ -1101,3 +1216,20 @@ original and discussions intact. All seventeen technical rows remain
 unchecked; #954 stays OPEN and every incumbent acceptance, actual claimant
 and provider/relay/resource responsibility remains. This is neither
 authentication/native completion nor permission for an operational effect.
+
+### 2026-11-17 - Complete six-category shared-core receiving proposal
+
+Added direct P4227-1..8, paired V4227-1..3 and actual G4227 to receive
+the whole shared dispatch, session/process ownership, launch policy,
+credentials, recovery and parity-test wrapper through migration-intake.
+Thin substrate adapters and cohesive shared packages retain the original
+architecture; no helper-sized subset or giant-module requirement substitutes.
+
+Current original/discussion and complete ROOT research preserve the actual
+P3 reservation and P0-P5 ordering. Affected-scope reconciliation remains
+planned work before dependent implementation, not an unestablished veto
+on plan review. #5837's two races and OR remedies remain at #2709, with all
+other inherited and independent acceptance intact. Every new technical
+row is unchecked; this proposal makes no source disposition or operational
+effect. Reviewed domain acceptance and complete current readback remain
+separate gates.
