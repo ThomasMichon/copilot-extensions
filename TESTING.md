@@ -10606,6 +10606,12 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+Each group's own pytest directory, `t/g<index>` beneath that parent, is also
+created with mode `0700` before launch; the short names keep Windows fixture
+paths within path limits. Outside qualification runs the monitor checks the
+sub-suite wall clock before observing exit, so an exited command cannot hide an
+already-exceeded deadline. On POSIX the test command inherits neither the
+controller's status/owner descriptors nor their environment variables.
 The runner resolves its temporary parent before allocating that owned sandbox,
 so Windows short TEMP aliases do not look like redirected daemon registries.
 Daemon-registry redirection and ownership refusals remain unchanged.
@@ -11200,6 +11206,17 @@ moving tests between files didn't silently drop or duplicate a contract's
 coverage. When splitting an existing oversized test module, assign one
 contract per resulting file as you go; retrofitting the marker onto
 already-small, single-contract files is not required.
+
+Agent-worktrees' Git PR fixtures build immutable topologies once per contained
+run in the sandbox's `s/` seed cache, published behind a lock and readiness
+record that other groups reuse but never rebuild after a failed build.
+Uncontained runs fall back to per-session directories. Each case copies the
+seed into its own directory and repairs the relocated worktree links, so
+mutations never reach the seed; `tests/test_pr_seed_cache.py` and
+`tests/test_pr_repo_fixture.py` check those guarantees. Published, refspec,
+rebased, recovered and legacy fork-rerun cases use derived seeds; the fork seed
+keeps an independent fork store, a pruned origin feature ref and an unpushed
+feedback commit.
 
 ## Optional devcontainer-based isolation (Linux)
 
