@@ -85,6 +85,11 @@ preserves every selected physical file, owner, strict flag, Python/platform
 target and fail-closed aggregate. It does not release the Index cleanup hold or
 authorize a new qualification profile.
 
+The November 17 `fix-capture-in-current-pr` decision permits bounded HTTP-52
+observability/performance repair within the same PR. Its
+[scope approval](installed-manager-lifecycle.md#november-17-bounded-http-52-capture-repair-approval)
+preserves every probe, the original 240-second aggregate and all prior holds.
+
 **Acceptance:** the Plan and Validation Plan below establish fewer redundant
 executions while preserving validation assurance and contribution gates.
 Installed-suite qualification must prove the real Manager Create/Open/Resume
@@ -99,12 +104,14 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** finish the approved in-PR strict migration and independent-program
-checker correction for installed-suite qualification (#12013). Twenty-two
-selected owners pass locally; Worktrees' generated-module identity collision,
-the retained Index cleanup hold, current required CI and bounded controlled
-capture still block current-head acceptance. No validation limit or original
-hold changes.
+**Now:** finish the approved in-PR capture-blocker repair for installed-suite
+qualification (#12013). All 24 selected owners pass the whole-file strict
+ratchet; the complete checker owner and 204 Windows prefix controls pass too.
+The retained Index cleanup hold, current required CI, native POSIX proof and
+bounded controlled capture still block current-head acceptance. The old
+Ubuntu capture lost second-group progress when its caller-owned aggregate
+expired; repair observability and redundant work without changing probes or
+limits. No original hold changes.
 
 **Return:** after the refresh, re-read this Goal and the linked scope approvals,
 reconcile retained implementation/checker custody, and finish that slice under

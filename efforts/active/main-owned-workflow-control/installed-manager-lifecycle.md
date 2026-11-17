@@ -174,6 +174,25 @@ The operator's exact response was `current-dev`, selecting:
 This confirms contribution-base reconciliation only. It adds no release-Main
 transaction, CI bypass, baseline admission, rollout or custody-release authority.
 
+### November 17 bounded HTTP-52 capture repair approval
+
+The decision prompt was:
+
+> The readiness and typing fixes are committed and verified locally, but ThomasMichon/copilot-extensions#12013 still cannot pass its contract gate without fresh HTTP-52 capture evidence. The prior Ubuntu capture exhausted its unchanged 240-second aggregate; inspection confirms the caller-owned timeout discarded the second group's progress, so its slow case remains unidentified. Fixing capture observability/performance is outside the narrow strict-checker grouping approval. How should I proceed?
+
+The selected option was:
+
+> Diagnose and fix capture in this PR; preserve every probe, the 240-second budget, and all existing holds
+
+The operator's exact response was `fix-capture-in-current-pr`.
+
+This authorizes bounded capture observability/performance repair in the
+existing PR. Every declared probe and the original Ubuntu 240-second aggregate
+remain intact. It grants no new qualification profile, replay of unchanged
+failed inputs, deadline growth, baseline admission, Main activation, rollout,
+shared-runtime repair or custody release. Failed runs remain failures and
+current-source evidence must be earned through the existing owner.
+
 ## Plan
 
 The following implementation decomposition is **agent-recommended**.
@@ -3541,3 +3560,32 @@ native POSIX proof, existing-owner hosted Windows qualification, the capture
 failure diagnosis and all parent baseline/frozen-candidate/Main obligations
 remain open. This source progress neither completes the effort nor authorizes
 rollout, broader retries or finalization.
+
+The verified implementation is committed as `de95dcfea5`. Its declaration-only
+preparation succeeds, but contract validation correctly requires a matching
+current fixture for the changed peer-launch behavior. It does not accept a
+digest update as fresh execution evidence. The 112-file committed size guard
+and changefile-presence check pass.
+
+The operator then selects `fix-capture-in-current-pr` under the separate scope
+approval above. Inspection identifies a specific diagnostic-loss boundary:
+the caller-owned completion frame does not return before the outer deadline,
+and the capture's temporary directory is removed on failure. A source-bound
+pytest observer now writes bounded, separate start/phase journals outside that
+ephemeral directory. Failure reports and retains diagnostics without treating
+them as evidence; success cleans only its own journal directory. Source
+binding, interrupted-write and alias-refusal controls pass with actual pytest
+children, including a real bounded timeout. A separate refusal control proves
+that timeout neither replays the portfolio nor enlarges the existing budget.
+The current declared portfolio remains all 229 functions and 638 parameter
+cases from Dev. Existing group isolation, required interpreter roles and the
+Ubuntu 240-second aggregate are unchanged. Strict analysis passes all fourteen
+selected Tools files on both targets.
+
+The local Windows actor-free unit attempt at `de95dcfea5` reaches its original
+300-second limit after reporting Windows skips and partial progress. It remains
+failed, supplies no accepted unit artifact, and is not retried with a larger
+budget or the separate Windows profile. The existing Linux PR unit lane still
+owes exact-current-source evidence. Capture diagnostics are implemented;
+identifying and eliminating the slow redundant work, fresh controlled capture,
+current-head review/CI and all larger acceptance gates remain open.

@@ -5254,7 +5254,9 @@
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_explicit_root_group_uses_selected_context_without_daemon_defaults",
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_actual_export_parser_dispatches_exclusive_and_rejects_unknown_arguments",
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_require_running_without_exclusive_refuses_before_ordinary_activation",
-        "tools/promotion_unit_tests/test_vault_export_consumer.py::test_ordinary_export_keeps_existing_activation_write_and_mode_behavior"
+        "tools/promotion_unit_tests/test_vault_export_consumer.py::test_ordinary_export_keeps_existing_activation_write_and_mode_behavior",
+        "tools/promotion_unit_tests/test_capture_progress.py::test_progress_summary_retains_last_complete_record_after_interrupted_write",
+        "tools/promotion_unit_tests/test_capture_progress.py::test_progress_summary_keeps_slow_phase_separate_from_completion"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/config.py",
@@ -5596,7 +5598,8 @@
         "plugins/agent-vault/src/agent_vault/attachment_export.py",
         "plugins/agent-vault/src/agent_vault/attachment_export_files.py",
         "plugins/agent-vault/src/agent_vault/attachment_export_cli.py",
-        "tools/typecheck_programs.py"
+        "tools/typecheck_programs.py",
+        "tools/bridge_capture_progress.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -6417,6 +6420,8 @@
         "tools/promotion_unit_tests/test_vault_export_consumer.py": "434f4b5e553b03a1723db32256a5021b3d25e42f4f5525872a696d5df476bcce",
         "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2",
         "libs/configuration-layers/src/configuration_context/readiness.py": "320ba0529c016c5a2733c55ced1ff3d4a575a2273adb89f615f42742411771bc",
-        "tools/typecheck_programs.py": "448f0dd5d0ed4a8596a6d44e1dd71d97efea8e12d73dbd0431e1ec769cc6d491"
+        "tools/typecheck_programs.py": "448f0dd5d0ed4a8596a6d44e1dd71d97efea8e12d73dbd0431e1ec769cc6d491",
+        "tools/bridge_capture_progress.py": "70eb1d041b7594e81249f7233f208ebea634cb4eb64e3cc58225a06e4c30f6d3",
+        "tools/promotion_unit_tests/test_capture_progress.py": "6b38d8cf02b468d07e29ee94382097d3fc54e5b895f0b447a0b801c22c501637"
     }
 }

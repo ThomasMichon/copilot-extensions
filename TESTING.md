@@ -8208,6 +8208,14 @@ Other platforms retain their existing runner defaults and 240-second process
 bound. Source, interpreter and observation checks remain mandatory; these bounds
 do not permit synthesizing observations or rewriting historical authority.
 
+HTTP-52 additionally records source-bound pytest probe starts and phase
+durations in a separate private diagnostic directory. A failed or timed-out
+caller prints its last-started probes and slow phases and retains that exact
+directory; a successful caller removes only its own journals. Interrupted
+final records do not hide the preceding complete progress. These journals
+never satisfy probe, interpreter, observation or artifact acceptance checks.
+They add no retry, probe filtering, deadline or qualification profile.
+
 Protocol correctness and startup speed have separate on-demand flows. Run the
 native transfer and import-boundary contracts normally:
 
