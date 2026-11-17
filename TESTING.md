@@ -7024,6 +7024,23 @@ do not report its installation cases as passing preparation evidence.
 
 ## Unit-only promotion packet
 
+The exclusive attachment-export consumer packet executes the real export
+entrypoint, health-selected command transport, extension registry, provider
+dispatch and descriptor-pinned writer with an in-memory filesystem and
+substituted credential/IPC edges. It covers unchanged ordinary export,
+capability loss, context/incarnation binding, post-read response loss without
+fallback, initial private custody, collision/substitution, short/failed writes,
+sync/close failure and interruption. It starts no service or child and reads no
+real credential or key.
+
+`plugins/agent-vault/tests/test_attachment_export_files.py` separately exercises
+the actual POSIX filesystem owner using synthetic bytes in pytest-owned
+temporary directories: exclusive pair creation, pre-existing files/links,
+unsafe ancestry, a racing second collision, namespace replacement and
+descriptor settlement after failures. These filesystem controls are outside
+the required actor-free unit admission; they do not qualify Windows ACLs,
+privileged execution, an installed Vault owner or real key material.
+
 The actor-free health composition packet also admits installed Windows
 enrollment preview/installation binding, native default normalization,
 GUI-environment binding, collection support loss, finite-root result/timeout/

@@ -364,8 +364,10 @@ def test_native_invocation_contract_is_read_only(monkeypatch: pytest.MonkeyPatch
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
             "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
             "credential-read-require-running-v1",
+            "windows-machine-cache-v1",
             "repository-cache-targets-v1",
             *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            *(["key-attachment-exclusive-export-v1"] if os.name == "posix" else []),
             "service-cache-maintenance-v1",
         ],
     }
