@@ -563,3 +563,25 @@ current-ROOT qualification gap, and #5352's historical source exclusion.
 All six new technical rows remain unchecked. No source disposition,
 implementation appointment, execution, custody transfer or hold release
 follows from ledger publication.
+
+## Webhook and host-teardown reviewed receipt (2026-11-17 UTC)
+
+#13148 merged the complete direct #5319/#5427 Plan, local Validation,
+actual global gates and continuing Coordination after current-head Copilot
+approval and required CI. Entire current receiving ROOT/source/custody
+readback and independent metadata/roster/ordered-retention checks preserve
+all 90 singleton-manager and 25 CLI-default incumbent checkbox lines.
+The six new technical rows remain unchecked.
+
+Separate audited explanations retired #5319 and #5427 `NOT_PLANNED` as
+redundant tracking, not implemented work. Originals and prior discussions
+remain exact; actual owners, native bounds, completed credit and independent
+conditions remain. No request replay, new executor, source/resource release,
+native test or rollout follows.
+
+The earlier #5340 current-ROOT research gap is now resolved: complete
+qualified readback confirms #12727's existing finite direct Plan and actual
+global Validation receiving survived #13001's historical-journal restoration.
+That missing research was not a nonmember finding or a new source hold.
+Its Draft coverage effort, three unchecked technical rows and explicit
+source-OPEN condition remain; no duplicate amendment or retirement follows.

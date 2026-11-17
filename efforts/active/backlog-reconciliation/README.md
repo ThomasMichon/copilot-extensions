@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [webhook receipt and receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
+  records #13148's reviewed delivery and separate #5319/#5427 tracking
+  retirements, retaining all unfinished acceptance and custodians. #5340's
+  current whole receiving is now qualified without inventing a source hold;
+  its explicit OPEN condition remains. New #13147 retains its bounded
+  claimant. The complete census is 888 whole, 159 above fixed 729.
   The [webhook and host-teardown receiving proposal](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
   directly retains whole #5319/#5427 contracts with six new unchecked
   Plan/local/global rows and unchanged custodians. Five other outcomes
