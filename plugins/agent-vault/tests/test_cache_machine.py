@@ -11,7 +11,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from agent_vault import cache, cache_machine, cache_machine_cli, config, kek
+from agent_vault import cache, cache_machine, cache_machine_cli, cli, config, credential_reads, kek
 from agent_vault.cache_dpapi import MAGIC, CacheDecryptionUnavailable, CacheProtectionError
 
 
@@ -287,3 +287,64 @@ def test_empty_store_can_opt_in_before_population(
     assert persistent.put("Allowed/token", "password", "first-value")
     protected.state.user_unavailable = True
     assert protected.open().get("Allowed/token", readonly=True) == "first-value"
+
+
+@pytest.mark.parametrize("kind", ["entry-miss", "older-writer"])
+@pytest.mark.parametrize("operation", ["ordinary", "cache-only", "refresh"])
+def test_missing_machine_value_preserves_selected_service_read_policy(
+    protected: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    kind: str, operation: str,
+) -> None:
+    prepare(protected)
+    if kind == "older-writer":
+        protected.machine.unlink()
+    protected.state.user_unavailable = True
+    before = protected.primary.read_bytes()
+    monkeypatch.setattr(cache, "get_cache", protected.open)
+    monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(group="Allowed"))
+    monkeypatch.setattr(
+        cache.PersistentCache, "put", lambda *_a, **_kw: pytest.fail("degraded read wrote the cache"),
+    )
+    monkeypatch.setattr(
+        cache.PersistentCache, "reconcile_authoritative",
+        lambda *_a, **_kw: pytest.fail("degraded read reconciled the cache"),
+    )
+    calls: list[dict[str, object]] = []
+
+    def service(request: dict[str, object], timeout: object = None) -> dict[str, object]:
+        calls.append(request)
+        return {"ok": True, "value": "live-fixture"}
+
+    def ensure() -> bool:
+        assert operation != "cache-only"
+        return True
+
+    monkeypatch.setattr(cli, "ensure_service", ensure)
+    monkeypatch.setattr(cli, "send_command", service)
+    result = credential_reads.read_credential(SimpleNamespace(
+        entry="missing", field="password", strict_cache=True,
+        cache_only=operation == "cache-only", refresh=operation == "refresh",
+    ))
+    assert result.code == {"ordinary": 0, "cache-only": 1, "refresh": 2}[operation]
+    assert result.value == ("live-fixture" if operation == "ordinary" else None)
+    assert len(calls) == (0 if operation == "cache-only" else 1)
+    if calls:
+        assert calls[0] == {
+            "action": "get", "entry": "missing", "field": "password",
+            "refresh": operation == "refresh",
+        }
+    assert protected.primary.read_bytes() == before
+
+
+def test_legacy_key_migration_refreshes_the_matching_machine_copy(protected: SimpleNamespace) -> None:
+    key = protected.root / "credential-cache.key"
+    key.write_bytes(b"key")
+    prepare(protected)
+    primary = protected.primary.read_bytes()
+    machine = protected.machine.read_bytes()
+    assert protected.open().get("Allowed/token") == "fixture-value"
+    assert kek.is_wrapped(key.read_bytes())
+    assert protected.machine.read_bytes() != machine
+    assert protected.primary.read_bytes() == primary
+    protected.state.user_unavailable = True
+    assert protected.open().get("Allowed/token", readonly=True) == "fixture-value"

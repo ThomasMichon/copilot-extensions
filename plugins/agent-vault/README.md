@@ -824,6 +824,10 @@ writer, including explicit population, unlock warming, service records,
 rotation journals and invalidation. Readers prefer the primary; only a
 user-DPAPI decryption-unavailable failure permits ordinary fallback. Machine
 reads never migrate keys or write through to the unreadable primary.
+If a valid machine copy has no usable value, or its file has not yet been
+populated, ordinary reads retain the user-decryption-unavailable state for the
+existing selected-service fallback. They do not attempt cache writeback;
+cache-only refusal and explicit-refresh reconciliation requirements remain.
 `cache-verify --machine-fallback` deliberately exercises the machine read path
 without changing the primary, exposing only verification counts/missing subjects.
 

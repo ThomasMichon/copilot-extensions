@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from . import kek
-from .cache_dpapi import CacheProtectionError
+from .cache_dpapi import CacheDecryptionUnavailable, CacheProtectionError
 from .ssh_key_files import WindowsSecurity, _ordinary, _require
 
 CAPABILITY = "windows-machine-cache-v1"
@@ -127,7 +127,10 @@ def read_store(cache: PersistentCache) -> MachineReadStore:
         security = _security()
         directory = _directory(cache, security)
         source = _source(cache)
-        ciphertext = _read(directory / FILENAME, security)
+        try:
+            ciphertext = _read(directory / FILENAME, security)
+        except FileNotFoundError as exc:
+            raise CacheDecryptionUnavailable("Machine cache has not been populated") from exc
         if not ciphertext.startswith(MAGIC):
             raise CacheProtectionError("Unsupported machine cache format")
         envelope = json.loads(kek._dpapi(False, ciphertext[len(MAGIC):]))

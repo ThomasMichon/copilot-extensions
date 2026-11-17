@@ -541,15 +541,20 @@ class PersistentCache:
         legacy_entry: str | None, legacy_field: str | None, readonly: bool,
         machine_only: bool = False,
     ) -> str | None:
-        from .cache_machine import MachineReadStore, read_store
+        from .cache_dpapi import CacheDecryptionUnavailable
+        from .cache_machine import MachineReadStore, read_store, write_copy
 
         store = read_store(self) if machine_only else (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
         readonly = readonly or isinstance(store, MachineReadStore)
-        if self._pending_alias(store, entry, field, strict=readonly):
+        def missing() -> str | None:
+            if isinstance(store, MachineReadStore) and not machine_only:
+                raise CacheDecryptionUnavailable("User cache unavailable and machine cache has no usable value")
             return None
+        if self._pending_alias(store, entry, field, strict=readonly):
+            return missing()
         if not readonly and _path_exists(self._key_file):
             from . import kek
 
@@ -557,15 +562,16 @@ class PersistentCache:
                 # Only a successfully decoded, still-locked store may migrate its key.
                 with contextlib.suppress(OSError):
                     with self._store_lock():
-                        self._read_store(readonly=True, strict=True)
+                        current_store = self._read_store(readonly=True, strict=True)
                         blob = self._key_file.read_bytes()
                         if not kek.is_wrapped(blob):
                             with contextlib.suppress(OSError, RuntimeError, ValueError):
                                 self._write_key(blob.strip())
+                                write_copy(self, current_store, self._cache_file.read_bytes())
         rec = self._field_record(store, entry, field, strict=readonly)
         if rec is None and legacy_entry and legacy_entry != entry:
             if self._pending_alias(store, legacy_entry, field, strict=readonly):
-                return None
+                return missing()
             rec = self._field_record(store, legacy_entry, field, strict=readonly)
             if rec is not None and not readonly:
                 self.migrate_entry(legacy_entry, entry, field)
@@ -581,15 +587,15 @@ class PersistentCache:
             if rec is None and legacy_entry and legacy_entry != entry:
                 rec = self._field_record(store, legacy_entry, legacy_field, strict=readonly)
         if not isinstance(rec, dict) or "rotation" in rec:
-            return None
+            return missing()
         if max_age_seconds is not None:
             cached_epoch = rec.get("cached_at_epoch")
             if not isinstance(cached_epoch, (int, float)):
-                return None
+                return missing()
             if time.time() - cached_epoch > max_age_seconds:
-                return None
+                return missing()
         value = rec.get("value")
-        return value if isinstance(value, str) else None
+        return value if isinstance(value, str) else missing()
 
     def put(
         self,

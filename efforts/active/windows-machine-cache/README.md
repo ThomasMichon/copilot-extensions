@@ -154,3 +154,18 @@ Some combined-process native first writes also returned false intermittently;
 isolated native controls and the final module-isolated packet passed. The
 underlying native first-write discrepancy is not claimed resolved by that
 observation. Source delivery, release and adopter qualification remain open.
+
+### 2026-11-16 - Degraded-read and migration corrections
+
+A machine-copy miss must retain the user's decryption-unavailable state so
+ordinary selected-service reads skip impossible writeback, while cache-only and
+authoritative refresh preserve their refusals/reconciliation requirements.
+An absent redundant file has that same degraded state only after source, private
+directory and recovery checks pass. Other protection errors still refuse.
+Legacy plaintext-key migration refreshes the copy from the store reread under
+the migration lock, keeping its new wrapped-key digest current.
+
+The expanded bounded cache packet passed 303 tests, including 14 focused
+regressions for these cases. The owned PR's mechanical rebase also preserved
+the concurrent attachment-import capability and its admitted source inventory;
+77 affected actor-free units and 259 population/recovery/service cases passed.
