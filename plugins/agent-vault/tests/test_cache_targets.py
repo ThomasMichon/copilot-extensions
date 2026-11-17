@@ -274,6 +274,54 @@ def test_unlocks_coalesce_before_policy_discovery_and_resolve_outside_credential
     asyncio.run(exercise())
 
 
+def test_confirmed_explicit_unlock_invalidates_the_cached_default_group(
+    selected: SelectedFixture, target_service: CacheFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _caller, _registry = selected
+    vault, _persistent, kpdb, _clock = target_service
+    write(repository, {"cache_entries": ["entry"]})
+    default_group = ["Allowed"]
+    calls: list[str] = []
+    monkeypatch.setattr(
+        config, "load_config", lambda: config.VaultConfig(group=default_group[0]),
+    )
+
+    def read(_database: str, entry: str, _field: str) -> str:
+        calls.append(entry)
+        return "synthetic:" + entry
+
+    monkeypatch.setattr(vault.cli, "get_entry", read)
+
+    async def exercise() -> None:
+        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, None)
+
+        async def settle() -> None:
+            runtime.tick()
+            future = runtime.future
+            assert future is not None
+            await settle_owned(future)
+
+        try:
+            with use_configuration_root(str(repository)):
+                assert vault._cache_warm.enqueue(kpdb, None).state == "queued"
+                await settle()
+                assert vault._cache_warm.status(kpdb, None)["state"] == "complete"
+                default_group[0] = "Changed"
+                assert vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True).state == "queued"
+                await settle()
+                assert vault._cache_warm.status(kpdb, None)["reason"] == "context-unavailable"
+                assert vault._cache_warm.enqueue(kpdb, None).state == "queued"
+                await settle()
+                assert vault._cache_warm.status(kpdb, None)["state"] == "complete"
+                assert vault._cache_warm.enqueue(kpdb, "Changed").state == "complete"
+                assert calls == ["Allowed/entry", "Allowed/entry", "Changed/entry"]
+        finally:
+            await runtime.close()
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("operation", ["manual", "warming"])
 def test_empty_manifest_entry_refuses_before_extensions_or_credential_reads(
     selected: SelectedFixture, target_service: CacheFixture,

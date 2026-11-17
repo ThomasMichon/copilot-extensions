@@ -89,7 +89,7 @@ class CacheWarmQueue:
                 return WarmState("not-queued", "service-closing")
             if confirmed and kpdb in self._epochs:
                 self._epochs[kpdb] = object()
-            if confirmed and group is None:
+            if confirmed:
                 self._default_groups.pop(kpdb, None)
         if not cache_enabled():
             return WarmState("disabled")
