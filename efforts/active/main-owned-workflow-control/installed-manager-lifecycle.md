@@ -193,6 +193,28 @@ failed inputs, deadline growth, baseline admission, Main activation, rollout,
 shared-runtime repair or custody release. Failed runs remain failures and
 current-source evidence must be earned through the existing owner.
 
+### November 17: review-and-CI-first PR completion order
+
+At 07:56 UTC the operator directed:
+
+> Defer another full capture; do not block on the #1303 Bash-gate route.
+
+The accompanying completion order was:
+
+> drive your open copilot-extensions PR #12013 through review/CI to merge now
+> (request Copilot review, fix CI, resolve threads); recapture only if review/CI
+> specifically requires it. Then resume your charter.
+
+This makes unavailable native Bash execution a tracked follow-up rather than
+a prerequisite for this source PR. It does not claim that Bash or the installed
+Manager lifecycle is qualified. Resolve implemented findings on their actual
+code and regression evidence, obtain the applicable review verdict, reconcile
+conflicts and pass required CI before the role-authorized merge. An explicit
+CI or review evidence requirement remains enforceable; the direction does not
+permit merging red CI or weakening a contract to avoid qualification.
+After the merge, resume this parent charter and its uncompleted acceptance
+work. Baseline, Main, rollout, shared-runtime and custody holds are unchanged.
+
 ## Plan
 
 The following implementation decomposition is **agent-recommended**.
@@ -3840,3 +3862,29 @@ reference; production commands, qualification floors, profiles, deadlines,
 rollout and release authority are unchanged. Fresh source capture, current CI,
 native Bash and installed Manager acceptance, review and retained custody
 remain open.
+
+### November 17: execute the completion order and repair governed preparation
+
+Current-head Copilot re-review is requested for `80d6c4cc92`. The resulting
+comment review repeats the seven carried-over findings. Their actual code
+fixes and regression anchors are posted on the individual threads, and all
+seven are resolved. The five prefix-routing threads explicitly retain Bash
+execution as unperformed under #1303, nonblocking for this source PR per the
+operator's completion order. This does not resolve that parent qualification
+item or assert an installed-suite pass.
+
+The exact Dispatch nested-slot regression initially stops before tests during
+canonical dependency preparation. Captured resolver diagnostics show that
+the new Dev minimum `fastapi>=0.162.2` cannot satisfy the enforced seven-day
+cutoff: that patch was published on November 14, whereas 0.162.0 is admitted.
+The minimum is corrected to `>=0.162.0`, retaining the update's intent to allow
+newer patches without an exclusion override or seasoning exception. The
+supported Python floor and all runtime qualification contracts are unchanged.
+
+Canonical preparation then succeeds with actual FastAPI 0.162.0. All ten
+flat/nested/incomplete/stale/fallback bootstrap controls pass in both native
+PowerShell hosts, with no healthy-case reconciliation. Nine focused real
+FastAPI ASGI health/admission consumers pass as well. Both packets retain the
+original 180-second aggregate and 30-second item limits, including preparation
+and cleanup. Initial setup failures remain failures; no installer, backend or
+larger Manager qualification is inferred from these source controls.

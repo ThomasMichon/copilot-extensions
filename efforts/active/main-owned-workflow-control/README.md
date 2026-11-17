@@ -104,8 +104,11 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** requalify #12013 after reconciliation onto exact Dev `376675dea4`,
-then drive its remaining CI, review and native acceptance gates. Ubuntu run
+**Now:** drive #12013 through review and required CI to an actual authorized
+merge, following the operator's 07:56 UTC completion order. Do not wait on the
+unavailable #1303 Bash route; perform another full capture only when review
+or CI specifically requires it. Then resume this charter's remaining
+qualification work without treating the PR as parent completion. Ubuntu run
 `44028815333` at the prior checkpoint `7ab79f8cfb` passes all
 638 controlled cases in both write and independent no-write modes, then all
 122 historical-publication controls under the original limits. Its 218
