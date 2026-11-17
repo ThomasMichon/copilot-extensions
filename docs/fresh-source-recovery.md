@@ -392,6 +392,53 @@ explicit source-override precedence and independent policies. This contract
 does not wire ordinary callers, enable repository installation, select Copilot
 content or claim that any domain consumed the declaration.
 
+### Associated declaration observation
+
+The separate `worktree_manager.repository_suite_declaration` module connects
+that explicit association to the existing repository-declaration reader. It
+observes desired data only: it does not resolve a ref, acquire source, install
+anything or change the association or independent source policies.
+
+```text
+<selected-manager-python> -I -B -X utf8 -m worktree_manager.repository_suite_declaration --describe
+<selected-manager-python> -I -B -X utf8 -m worktree_manager.repository_suite_declaration --root <absolute-manager-config-root> inspect
+```
+
+`--describe` is effect-free and returns
+`worktree-manager.repository-suite-declaration.capabilities`, version 1. It
+advertises association schema `worktree-manager.repository-suite-association`,
+versions `[1]`, the `inspect` operation, explicit-root/read-only support and
+`resolves_source: false`. Missing module or incompatible capability is
+unsupported, not permission to retry through an older application entry or
+install a parser/runtime.
+
+`read_declaration(root)` and the module return
+`worktree-manager.repository-suite-declaration`, version 1, the addressed
+`configuration_root` and the existing reader's `repository_policy`. That policy
+retains the associated repository identity, declaration path, requested source
+and reference, effective desired reference and explicit fallback reason.
+It is not an immutable source, acquisition admission or installation receipt.
+Symbolic intent can therefore be observed even when a native consumer does
+not yet support resolving it. No qualified history is created or advanced.
+
+An unassociated configuration reports the existing `repository-unavailable`
+Main-foundation fallback without reading cwd or creating a root/lock. An
+associated but unavailable adopter retains its stored identity and reports
+that same explicit availability fallback. An available adopter without a
+selection reports `selection-absent`. Invalid association or declaration data,
+linked paths and missing trusted parser support fail, not fall back to Main.
+The existing native source-locator validator also refuses credential-bearing
+or invalid remote intent before it can enter the returned policy; diagnostics
+do not echo the rejected locator.
+
+The selected Manager/tooling dependency closure supplies the existing PyYAML
+parser. This observer never prepares dependencies or changes Python import
+paths. A cold source caller supplies its trusted source/parser closure through
+the existing tooling owner; optional API `parser_root` retains the reader's
+origin check. A configuration or YAML read grants no source-change authority.
+Ordinary update/setup wiring, independent-policy reconciliation, immutable
+selection and actual per-domain consumption remain separate caller gates.
+
 ### Compatibility and acceptance
 
 Use passive bootstrap discovery before choosing the distinct supported request
