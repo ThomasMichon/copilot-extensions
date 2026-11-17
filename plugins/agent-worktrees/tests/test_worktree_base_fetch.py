@@ -286,6 +286,7 @@ def test_preparation_preserves_policy_head_alias_mapping(
         _git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk", cwd=anchor)
         policy_ref = "origin/trunk"
     old_policy = _git("rev-parse", policy_ref, cwd=anchor)
+    old_anchor = _git("rev-parse", "HEAD", cwd=anchor)
     _git("checkout", "production", cwd=seed)
     new_policy = _commit(seed, policy_path, "default_branch: trunk\nmarker: refreshed\n")
     _git("push", "origin", "production", cwd=seed)
@@ -294,11 +295,13 @@ def test_preparation_preserves_policy_head_alias_mapping(
     _git("push", "origin", "trunk", cwd=seed)
 
     prepared = git_ops.prepare_worktree_base(
-        anchor, remote="origin", default_branch="trunk", fast_forward_anchor=False,
+        anchor, remote="origin", default_branch="trunk",
+        fast_forward_anchor=mapping == "base-collision",
     )
 
     if mapping == "base-collision":
         assert _git("rev-parse", policy_ref, cwd=anchor) == old_policy
+        assert _git("rev-parse", "HEAD", cwd=anchor) == old_anchor
         assert prepared.fetched is False
         assert prepared.fetch_error is not None
         discovered = inrepo_config_source.load_inrepo_config_from_committed_ref(
@@ -454,6 +457,7 @@ def test_preparation_scopes_the_entire_operation_to_its_anchor(
     assert _git("rev-parse", "origin/trunk", cwd=anchor) == new_base
     assert (anchor / "new-base.txt").is_file()
     assert _git("rev-parse", "origin/trunk", cwd=foreign) == old_foreign
+    assert _git("rev-parse", "HEAD", cwd=foreign) == old_foreign
     assert not (foreign / "new-base.txt").exists()
     assert prepared.fetched is True
     assert prepared.anchor.updated is True
