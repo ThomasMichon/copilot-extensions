@@ -5755,7 +5755,7 @@
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",
         "libs/agent-procutil/src/agent_procutil/owned_process.py": "ef71356dc633d17a88c025f69fde3559cf5297fef60ea84ab126e809de5b74dd",
         "libs/agent-procutil/src/agent_procutil/startup.py": "986b9973485ea50e00c52e8292316bd811062e59b652f514d9829d4a8d66bee0",
-        "libs/agent-procutil/src/agent_procutil/streaming.py": "0bb766ae7b8d298ab61bbfaaa0f85f66adf2fa522071ca74d882ff3b95d89b06",
+        "libs/agent-procutil/src/agent_procutil/streaming.py": "3f2e2fc8aa039729df92c68d8982d033265ca404db7e99f9c1c2a6794a0023bd",
         "libs/agent-procutil/src/agent_procutil/job_activity.py": "26fa7e77370d06e3775eefb8a530ab8d8d7a7ba866e33bed5af0b41515951f69",
         "libs/agent-procutil/tests/test_stream_activity.py": "bb8c615507d6567f596e1453a2a5f5ee85aa8c4de568ec08e6aa9bbcc12aa592",
         "tools/promotion_unit_tests/test_write_activity.py": "dd3a0f76b99e221ce20d74f6d87b7f9cfd0b25814bd159d67fbfe46860aae319",

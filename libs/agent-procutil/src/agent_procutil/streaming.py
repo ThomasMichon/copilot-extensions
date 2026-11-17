@@ -164,12 +164,14 @@ class SyncProcessOutput:
                 while True:
                     size = 4096
                     if available is not None:
+                        retiring = self._stop_at_idle.is_set()
                         count = available()
                         if count is None:
                             return
                         if not count:
-                            if self._stop_at_idle.wait(.01):
+                            if retiring:
                                 return
+                            self._stop_at_idle.wait(.01)
                             continue
                         size = min(size, count)
                     if poller is not None and not poller.select(
