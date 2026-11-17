@@ -79,6 +79,11 @@
         "tools/promotion_unit_tests/test_vault_attachment_import.py::test_bound_mutation_cannot_override_health_context[kpdb]",
         "tools/promotion_unit_tests/test_vault_attachment_import.py::test_bound_mutation_cannot_override_health_context[group]",
         "tools/promotion_unit_tests/test_vault_attachment_import.py::test_bound_mutation_cannot_override_health_context[vault]",
+        "tools/promotion_unit_tests/test_vault_attachment_import.py::test_actual_command_dispatch_and_normalizer_preserve_selected_group[None-new-key-new-key]",
+        "tools/promotion_unit_tests/test_vault_attachment_import.py::test_actual_command_dispatch_and_normalizer_preserve_selected_group[-new-key-new-key]",
+        "tools/promotion_unit_tests/test_vault_attachment_import.py::test_actual_command_dispatch_and_normalizer_preserve_selected_group[CallerGroup-new-key-CallerGroup/new-key]",
+        "tools/promotion_unit_tests/test_vault_attachment_import.py::test_actual_command_dispatch_and_normalizer_preserve_selected_group[CallerGroup-/new-key-new-key]",
+        "tools/promotion_unit_tests/test_vault_attachment_import.py::test_actual_command_dispatch_and_normalizer_preserve_selected_group[CallerGroup-Fixed/new-key-Fixed/new-key]",
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_unavailable_discovery_preserves_preferred_authority_without_native_fallback[preferred]",
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_unavailable_discovery_preserves_preferred_authority_without_native_fallback[declined]",
         "tools/promotion_unit_tests/test_vault_transport_order.py::test_unavailable_discovery_preserves_preferred_authority_without_native_fallback[absent]",
@@ -5164,6 +5169,7 @@
         "tools/promotion_unit_tests/test_retained_metadata_epoch.py::test_atomic_import_keeps_qualified_owner_inputs[agent]"
     ],
     "coverage_targets": [
+        "plugins/agent-vault/src/agent_vault/config.py",
         "plugins/agent-vault/src/agent_vault/extensions.py",
         "plugins/agent-vault/src/agent_vault/transport_binding.py",
         "plugins/agent-vault/src/agent_vault/attachment_import.py",
@@ -5502,11 +5508,11 @@
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
         "tools/runtime_source_capture.py": "c545dab67530724e69de6137e0f63e7b0508fd139b95c486a4aba863a416717a",
-        "plugins/agent-vault/src/agent_vault/attachment_import.py": "14f14d987d931b3a7f6d0de71358aeba6c9c292b956d45cb1bde8178ed68d19a",
-        "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "f2e49804bf0a75eb5062617edb0f3e69f0bb5e43bcf77b25ae4ac01c0fcba495",
+        "plugins/agent-vault/src/agent_vault/attachment_import.py": "0343d59d5f46b7ee3ab8085bf01d6d553ce89886a14f406144af39f048f0b0c6",
+        "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
         "plugins/agent-vault/src/agent_vault/keepassxc.py": "8f451b9094447573c2ab5fb58ccff2461ecc109bf29dbd090bcc4e9e57ccc6d2",
         "plugins/agent-vault/src/agent_vault/service.py": "dc1f73cca49adacac730cf58a3e047f193ee2edabe0f1f609fd3942886407a98",
-        "tools/promotion_unit_tests/test_vault_attachment_import.py": "bb7349ed448a9a5796667c74ecac6bced2b413a993528c62d6c8a030d3351a99",
+        "tools/promotion_unit_tests/test_vault_attachment_import.py": "63c4cf243815f67d495fe1ae1e1a8d185bc0fc9b7f168e7508f7901dd8869e88",
         "plugins/agent-vault/src/agent_vault/cli.py": "00242f1c605701d0a8ee5186865f00459f9e9843efaf5fb9113b43585f65fa12",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
         "tools/promotion_unit_tests/test_vault_transport_order.py": "303bf33bcd030779bc24bbf5340783e76a5198646d062f0276f951db2c89fc7a",
@@ -6308,6 +6314,7 @@
         "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
         "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970",
         "plugins/agent-vault/src/agent_vault/transport_binding.py": "b6585c5d3b9396470439d15247c222cb7647b1952d9033c9cb524072d57440a7",
-        "plugins/agent-vault/src/agent_vault/extensions.py": "fbaa39623d1157d8e6a6a16693f16973bac538e188c36b6d34039a423760e734"
+        "plugins/agent-vault/src/agent_vault/extensions.py": "fbaa39623d1157d8e6a6a16693f16973bac538e188c36b6d34039a423760e734",
+        "plugins/agent-vault/src/agent_vault/config.py": "951bad7f99e47666c7de7290b32966686b60dbf8d5e1c729745783d8106f4e25"
     }
 }
